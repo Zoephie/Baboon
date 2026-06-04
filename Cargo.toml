@@ -2,6 +2,8 @@
 # parent workspace. The blam-tags engine is referenced through the Git submodule
 # at ./blam-tags.
 [workspace]
+members = [".", "blam-tags/blam-tag-shell"]
+default-members = [".", "blam-tags/blam-tag-shell"]
 
 [package]
 name = "genesis"

@@ -458,9 +458,7 @@ pub(super) fn shell_binary_path() -> anyhow::Result<PathBuf> {
     if fallback.exists() {
         return Ok(fallback);
     }
-    anyhow::bail!(
-        "could not find {file_name}; build the shell with `cargo build -p blam-tag-shell`"
-    )
+    anyhow::bail!("could not find {file_name}; build the workspace with `cargo build --release`")
 }
 
 pub(super) fn shell_entry_arg(entry: &TagEntry) -> anyhow::Result<PathBuf> {

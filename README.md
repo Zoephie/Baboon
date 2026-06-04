@@ -241,15 +241,15 @@ git submodule update --init --recursive
 Then build:
 
 ```sh
-cargo run --release
+cargo build --release
 ```
 
 The per-game definition tables under `definitions/` are embedded at compile
 time, so the binary resolves group names and references no matter where it is
 launched from. Geometry/animation/import-info extraction additionally relies on
-the companion `blam-tag-shell` binary (build it with
-`cargo build -p blam-tag-shell`); Genesis looks for it next to its own
-executable.
+the companion `blam-tag-shell` binary. The root workspace builds Genesis and
+`blam-tag-shell` together, placing them side by side in `target/debug/` or
+`target/release/`. Ship both `Genesis.exe` and `blam-tag-shell.exe` in releases.
 
 ## Usage
 
