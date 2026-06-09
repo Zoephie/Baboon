@@ -1,6 +1,6 @@
-# Genesis
+# Baboon
 
-**Genesis** is a native desktop viewer and editor for Halo tag files, built in
+**Baboon** is a native desktop viewer and editor for Halo tag files, built in
 Rust with [`eframe`/`egui`]. It links the [`blam-tags`] engine directly for
 byte-exact tag reading, editing, and asset extraction, and presents a
 Guerilla-style editing surface for working with the loose tag files shipped in
@@ -12,14 +12,14 @@ cache; browse and search the tag tree; edit fields, blocks, shaders, and
 functions inline; preview bitmaps; and extract geometry, textures, and
 animations — all from one application.
 
-> Genesis is the GUI front end for the `blam-tags` project. The library does the
-> binary tag parsing; Genesis is the interactive editor built on top of it.
+> Baboon is the GUI front end for the `blam-tags` project. The library does the
+> binary tag parsing; Baboon is the interactive editor built on top of it.
 
 ---
 
 ## Supported games
 
-Genesis recognises and auto-configures itself for the following MCC editing
+Baboon recognises and auto-configures itself for the following MCC editing
 kits, detected from the kit's root folder name:
 
 | Editing kit | Folder | Game identifier |
@@ -41,12 +41,12 @@ executable is launched from.
 
 ### Loading tag sources
 
-Genesis can open three kinds of source, each on a background thread so the UI
+Baboon can open three kinds of source, each on a background thread so the UI
 never blocks:
 
 - **Single tag** — open any individual loose tag file.
 - **Loose tags folder** — point at an MCC editing-kit `tags/` directory (or the
-  kit root, e.g. `H3EK`; Genesis locates the `tags` folder and identifies the
+  kit root, e.g. `H3EK`; Baboon locates the `tags` folder and identifies the
   game automatically). The folder tree is loaded **lazily**, expanding
   directories only as you open them, so even a full kit opens instantly.
 - **Monolithic cache** — open a Halo 4 `blob_index.dat` monolithic tag cache and
@@ -67,7 +67,7 @@ silently skipped.
   responsive across 100k+ entry kits.
 - **Background indexing** — a full recursive scan runs in the background to power
   Groups view and global search without expanding every node first. The
-  completed index is **persisted** (per game, to `%APPDATA%\Genesis`) so
+  completed index is **persisted** (per game, to `%APPDATA%\Baboon`) so
   subsequent launches skip the scan entirely.
 - **Context actions** — per-tag and per-folder right-click actions for JSON dump,
   raw extraction, bitmap/geometry/animation extraction, and *Open in File
@@ -112,7 +112,7 @@ pass:
 
 ### Shader & material editor
 
-For `shader`, `material`, and `material_shader` tags, Genesis builds a
+For `shader`, `material`, and `material_shader` tags, Baboon builds a
 **Guerilla-style shader grid** instead of a raw field dump:
 
 - Resolves the tag's render-method definition (`rmdf`) and options (`rmop`),
@@ -185,7 +185,7 @@ Launchers are disabled until the relevant executable is found in the kit.
 ### Preferences
 
 Browser mode, prefix display, expert mode, dark/light theme, the Blender path,
-and per-kit terminal state are persisted to `%APPDATA%\Genesis` and restored on
+and per-kit terminal state are persisted to `%APPDATA%\Baboon` and restored on
 launch.
 
 ---
@@ -219,7 +219,7 @@ This crate depends on the `blam-tags` engine crate through a Git submodule
 pinned to the `back` branch of `https://github.com/Zoephie/blam-tags.git`.
 
 ```
-genesis/
+Baboon/
 ├── blam-tags/         <- Git submodule
 │   └── blam-tags/     <- the library crate
 └── src/
@@ -228,8 +228,8 @@ genesis/
 Clone with submodules:
 
 ```sh
-git clone --recurse-submodules <genesis-repo-url>
-cd genesis
+git clone --recurse-submodules <Baboon-repo-url>
+cd Baboon
 ```
 
 Or, after a normal clone:
@@ -248,8 +248,8 @@ The per-game definition tables under `blam-tags/definitions/` are embedded at
 compile time, so the binary resolves group names and references no matter where
 it is launched from. Geometry/animation/import-info extraction additionally
 relies on the companion `blam-tag-shell` binary. The root workspace builds
-Genesis and `blam-tag-shell` together, placing them side by side in
-`target/debug/` or `target/release/`. Ship both `Genesis.exe` and
+Baboon and `blam-tag-shell` together, placing them side by side in
+`target/debug/` or `target/release/`. Ship both `Baboon.exe` and
 `blam-tag-shell.exe` in releases.
 
 ## Usage
