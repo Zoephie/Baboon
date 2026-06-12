@@ -854,7 +854,7 @@ impl FunctionView {
             function,
             input_name: animated.input_name.clone(),
             range_name: animated.range_name.clone(),
-            output_index: animated.parameter_type.map(|kind| kind as i32),
+            output_index: animated.parameter_type.map(|kind| kind.raw()),
             time_period_in_seconds: animated.time_period_in_seconds,
             edit: None,
         }

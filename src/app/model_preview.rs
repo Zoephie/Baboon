@@ -516,9 +516,9 @@ fn draw_model_viewport(
         };
         for marker in &data.preview.markers {
             let projected = camera.project(marker.position);
-            let marker_color = Color32::BLACK;
-            painter.circle_filled(projected.pos, 4.0, marker_color);
-            if hover_pos.is_some_and(|pos| screen_edge_length(pos, projected.pos) <= 8.0) {
+            let axis_deltas = marker_axis_screen_deltas(&camera, marker.axes);
+            draw_marker_axes(&painter, projected.pos, axis_deltas);
+            if hover_pos.is_some_and(|pos| marker_axes_hovered(pos, projected.pos, axis_deltas)) {
                 let text_pos = projected.pos + Vec2::new(7.0, -7.0);
                 let label_rect = egui::Rect::from_min_size(
                     text_pos,
@@ -539,6 +539,55 @@ fn draw_model_viewport(
             }
         }
     }
+}
+
+const MARKER_AXIS_SCREEN_LENGTH: f32 = 15.0;
+
+fn marker_axis_screen_deltas(camera: &PreviewCamera, axes: [[f32; 3]; 3]) -> [Vec2; 3] {
+    axes.map(|axis| {
+        let view_axis = camera.rotate_vector(axis);
+        let screen = Vec2::new(view_axis[0], -view_axis[2]);
+        let len = screen.length();
+        if len <= 0.001 {
+            Vec2::new(0.0, -MARKER_AXIS_SCREEN_LENGTH * 0.45)
+        } else {
+            screen / len * MARKER_AXIS_SCREEN_LENGTH
+        }
+    })
+}
+
+fn draw_marker_axes(painter: &egui::Painter, origin: egui::Pos2, axis_deltas: [Vec2; 3]) {
+    let colors = [
+        Color32::from_rgb(220, 35, 28),
+        Color32::from_rgb(20, 180, 45),
+        Color32::from_rgb(40, 85, 235),
+    ];
+    for (delta, color) in axis_deltas.into_iter().zip(colors) {
+        let end = origin + delta;
+        painter.line_segment(
+            [origin, end],
+            Stroke::new(2.5, Color32::from_rgba_unmultiplied(0, 0, 0, 150)),
+        );
+        painter.line_segment([origin, end], Stroke::new(1.35, color));
+    }
+}
+
+fn marker_axes_hovered(pos: egui::Pos2, origin: egui::Pos2, axis_deltas: [Vec2; 3]) -> bool {
+    screen_edge_length(pos, origin) <= 7.0
+        || axis_deltas
+            .into_iter()
+            .any(|delta| point_segment_distance(pos, origin, origin + delta) <= 5.0)
+}
+
+fn point_segment_distance(point: egui::Pos2, a: egui::Pos2, b: egui::Pos2) -> f32 {
+    let ab = b - a;
+    let ap = point - a;
+    let denom = ab.dot(ab);
+    if denom <= f32::EPSILON {
+        return screen_edge_length(point, a);
+    }
+    let t = (ap.dot(ab) / denom).clamp(0.0, 1.0);
+    screen_edge_length(point, a + ab * t)
 }
 
 fn collect_visible_triangles_into(

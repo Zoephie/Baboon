@@ -186,6 +186,36 @@ pub(super) fn draw_tree_node_lazy(
             clicked = Some(BrowserAction::ExtractBitmapFolder(bitmap_keys));
             ui.close_menu();
         }
+        let material_shader_keys = collect_material_shader_keys(node, entries);
+        if material_shader_keys.is_empty() {
+            ui.label(
+                RichText::new("No loaded material shaders in this folder").color(subtle_dark()),
+            );
+        } else if ui
+            .button(format!(
+                "Extract loaded material shader sources... ({})",
+                material_shader_keys.len()
+            ))
+            .clicked()
+        {
+            clicked = Some(BrowserAction::ExtractMaterialShaderSourceFolder(
+                material_shader_keys,
+            ));
+            ui.close_menu();
+        }
+        let hlsl_include_keys = collect_hlsl_include_keys(node, entries);
+        if hlsl_include_keys.is_empty() {
+            ui.label(RichText::new("No loaded HLSL includes in this folder").color(subtle_dark()));
+        } else if ui
+            .button(format!(
+                "Extract loaded HLSL includes... ({})",
+                hlsl_include_keys.len()
+            ))
+            .clicked()
+        {
+            clicked = Some(BrowserAction::ExtractHlslIncludeFolder(hlsl_include_keys));
+            ui.close_menu();
+        }
     });
     clicked
 }
@@ -273,6 +303,36 @@ pub(super) fn draw_tree_node(
             clicked = Some(BrowserAction::ExtractBitmapFolder(bitmap_keys));
             ui.close_menu();
         }
+
+        let material_shader_keys = collect_material_shader_keys(node, entries);
+        if material_shader_keys.is_empty() {
+            ui.label(RichText::new("No material shaders in this folder").color(subtle_dark()));
+        } else if ui
+            .button(format!(
+                "Extract material shader sources... ({})",
+                material_shader_keys.len()
+            ))
+            .clicked()
+        {
+            clicked = Some(BrowserAction::ExtractMaterialShaderSourceFolder(
+                material_shader_keys,
+            ));
+            ui.close_menu();
+        }
+
+        let hlsl_include_keys = collect_hlsl_include_keys(node, entries);
+        if hlsl_include_keys.is_empty() {
+            ui.label(RichText::new("No HLSL includes in this folder").color(subtle_dark()));
+        } else if ui
+            .button(format!(
+                "Extract HLSL includes... ({})",
+                hlsl_include_keys.len()
+            ))
+            .clicked()
+        {
+            clicked = Some(BrowserAction::ExtractHlslIncludeFolder(hlsl_include_keys));
+            ui.close_menu();
+        }
     });
     clicked
 }
@@ -318,6 +378,55 @@ pub(super) fn collect_bitmap_keys_into(
     }
     for child in &node.children {
         collect_bitmap_keys_into(child, entries, keys);
+    }
+}
+
+pub(super) fn collect_hlsl_include_keys(node: &TagTreeNode, entries: &[TagEntry]) -> Vec<String> {
+    let mut keys = Vec::new();
+    collect_hlsl_include_keys_into(node, entries, &mut keys);
+    keys
+}
+
+pub(super) fn collect_material_shader_keys(
+    node: &TagTreeNode,
+    entries: &[TagEntry],
+) -> Vec<String> {
+    let mut keys = Vec::new();
+    collect_material_shader_keys_into(node, entries, &mut keys);
+    keys
+}
+
+pub(super) fn collect_material_shader_keys_into(
+    node: &TagTreeNode,
+    entries: &[TagEntry],
+    keys: &mut Vec<String>,
+) {
+    for &entry_index in &node.entries {
+        if let Some(entry) = entries.get(entry_index) {
+            if is_material_shader_browser_tag(entry) {
+                keys.push(entry.key.clone());
+            }
+        }
+    }
+    for child in &node.children {
+        collect_material_shader_keys_into(child, entries, keys);
+    }
+}
+
+pub(super) fn collect_hlsl_include_keys_into(
+    node: &TagTreeNode,
+    entries: &[TagEntry],
+    keys: &mut Vec<String>,
+) {
+    for &entry_index in &node.entries {
+        if let Some(entry) = entries.get(entry_index) {
+            if is_hlsl_include_tag(entry) {
+                keys.push(entry.key.clone());
+            }
+        }
+    }
+    for child in &node.children {
+        collect_hlsl_include_keys_into(child, entries, keys);
     }
 }
 
@@ -473,6 +582,19 @@ pub(super) fn draw_entry(
             action = Some(BrowserAction::ExtractAnimation(entry.key.clone()));
             ui.close_menu();
         }
+        if is_material_shader_group(entry.group_tag)
+            && ui.button("Extract source shaders...").clicked()
+        {
+            action = Some(BrowserAction::ExtractMaterialShaderSources(
+                entry.key.clone(),
+            ));
+            ui.close_menu();
+        }
+        if is_hlsl_include_group(entry.group_tag) && ui.button("Extract HLSL include...").clicked()
+        {
+            action = Some(BrowserAction::ExtractHlslIncludeSource(entry.key.clone()));
+            ui.close_menu();
+        }
     });
     action
 }
@@ -557,6 +679,32 @@ pub(super) fn is_bitmap_tag(entry: &TagEntry) -> bool {
     is_bitmap_group(entry.group_tag)
         || entry.group_name.as_deref() == Some("bitmap")
         || entry.display_path.to_ascii_lowercase().ends_with(".bitmap")
+}
+
+pub(super) fn is_material_shader_group(group_tag: u32) -> bool {
+    group_tag == u32::from_be_bytes(*b"mats")
+}
+
+pub(super) fn is_material_shader_browser_tag(entry: &TagEntry) -> bool {
+    is_material_shader_group(entry.group_tag)
+        || entry.group_name.as_deref() == Some("material_shader")
+        || entry
+            .display_path
+            .to_ascii_lowercase()
+            .ends_with(".material_shader")
+}
+
+pub(super) fn is_hlsl_include_group(group_tag: u32) -> bool {
+    group_tag == u32::from_be_bytes(*b"hlsl")
+}
+
+pub(super) fn is_hlsl_include_tag(entry: &TagEntry) -> bool {
+    is_hlsl_include_group(entry.group_tag)
+        || entry.group_name.as_deref() == Some("hlsl_include")
+        || entry
+            .display_path
+            .to_ascii_lowercase()
+            .ends_with(".hlsl_include")
 }
 
 pub(super) fn supports_geometry_extraction(group_tag: u32) -> bool {
@@ -689,5 +837,57 @@ mod tests {
         ];
         // Group four-CC match, regardless of query case.
         assert_eq!(compute_filter_matches(&entries, "WEAP"), vec![1]);
+    }
+
+    #[test]
+    fn folder_hlsl_include_collector_finds_nested_include_entries() {
+        let entries = vec![
+            entry("rasterizer/hlsl/ssao.hlsl_include", b"hlsl"),
+            entry("rasterizer/hlsl/post/tonemap.hlsl_include", b"hlsl"),
+            entry("rasterizer/bitmaps/noise.bitmap", b"bitm"),
+        ];
+        let tree = crate::source::build_tree(&entries);
+        let rasterizer = tree
+            .children
+            .iter()
+            .find(|node| node.label == "rasterizer")
+            .expect("rasterizer folder");
+
+        assert_eq!(
+            collect_hlsl_include_keys(rasterizer, &entries),
+            vec![
+                "rasterizer/hlsl/ssao.hlsl_include".to_owned(),
+                "rasterizer/hlsl/post/tonemap.hlsl_include".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn folder_material_shader_collector_finds_nested_material_shader_entries() {
+        let entries = vec![
+            entry(
+                "shaders/material_shaders/decals/base.material_shader",
+                b"mats",
+            ),
+            entry(
+                "shaders/material_shaders/decals/palette/palette.material_shader",
+                b"mats",
+            ),
+            entry("shaders/material_shaders/decals/noise.bitmap", b"bitm"),
+        ];
+        let tree = crate::source::build_tree(&entries);
+        let shaders = tree
+            .children
+            .iter()
+            .find(|node| node.label == "shaders")
+            .expect("shaders folder");
+
+        assert_eq!(
+            collect_material_shader_keys(shaders, &entries),
+            vec![
+                "shaders/material_shaders/decals/base.material_shader".to_owned(),
+                "shaders/material_shaders/decals/palette/palette.material_shader".to_owned(),
+            ]
+        );
     }
 }

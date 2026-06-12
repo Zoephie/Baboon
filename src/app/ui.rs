@@ -104,6 +104,21 @@ impl Baboon {
                 ui.add_space(4.0);
                 ui.checkbox(&mut self.dark_mode, "Dark mode");
                 ui.horizontal(|ui| {
+                    ui.label(RichText::new("UI scale").color(subtle_dark()));
+                    ui.add(
+                        egui::Slider::new(&mut self.ui_scale, MIN_UI_SCALE..=MAX_UI_SCALE)
+                            .show_value(false)
+                            .clamping(egui::SliderClamping::Always),
+                    );
+                    ui.label(
+                        RichText::new(format!("{:.0}%", self.ui_scale * 100.0))
+                            .color(subtle_dark()),
+                    );
+                    if ui.button("Reset").clicked() {
+                        self.ui_scale = DEFAULT_UI_SCALE;
+                    }
+                });
+                ui.horizontal(|ui| {
                     ui.label(RichText::new("Model viewport").color(subtle_dark()));
                     ui.add(
                         egui::Slider::new(
@@ -260,8 +275,8 @@ fn draw_doc_tab(ui: &mut Ui) {
                 ui,
                 "Appearance Settings",
                 &[
-                    "Use File > Settings > Appearance to switch Dark mode on or off.",
-                    "Dark mode is saved in Baboon's preferences, so it stays set the next time you launch the app.",
+                    "Use File > Settings > Appearance to switch Dark mode on or off and adjust UI scale.",
+                    "Appearance settings are saved in Baboon's preferences, so they stay set the next time you launch the app.",
                     "The same Appearance section also has the default Model viewport size used by .model render previews.",
                 ],
             );
@@ -319,6 +334,7 @@ fn doc_section(ui: &mut Ui, title: &str, lines: &[&str]) {
 impl eframe::App for Baboon {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.process_worker_messages();
+        ctx.set_zoom_factor(self.ui_scale);
         set_dark_mode(self.dark_mode);
         ctx.set_visuals(foundation_visuals());
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::S)) {

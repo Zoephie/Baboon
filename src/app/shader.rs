@@ -328,6 +328,7 @@ pub(super) fn push_shader_parameter_rows(
 ) {
     match parameter
         .parameter_type
+        .map(|kind| kind.get())
         .unwrap_or(RenderMethodParameterType::Real)
     {
         RenderMethodParameterType::Bitmap => {
@@ -514,7 +515,7 @@ pub(super) fn shader_bitmap_row(
         let existing_types: std::collections::HashSet<i32> = instance
             .iter()
             .flat_map(|inst| &inst.animated_parameters)
-            .filter_map(|ap| ap.parameter_type.map(|t| t as i32))
+            .filter_map(|ap| ap.parameter_type.map(|t| t.raw()))
             .collect();
         let items: Vec<ShaderContextItem> = BITMAP_TRANSFORM_TYPES
             .iter()
@@ -579,10 +580,10 @@ pub(super) fn shader_bitmap_expansion_rows(
     // filter_mode — sampler filter enum dropdown.
     rows.push(shader_sampler_enum_row(
         format!("{name}_filter_mode"),
-        parameter.default_filter_mode as i16,
+        parameter.default_filter_mode.raw(),
         instance
-            .map(|p| p.bitmap_filter_mode)
-            .unwrap_or(parameter.default_filter_mode as i16),
+            .map(|p| p.bitmap_filter_mode as i16)
+            .unwrap_or(parameter.default_filter_mode.raw()),
         filter_opts,
         edit_prefix,
         param_index,
@@ -594,27 +595,27 @@ pub(super) fn shader_bitmap_expansion_rows(
             "wrap_mode",
             "bitmap address mode",
             instance
-                .map(|p| p.bitmap_address_mode)
-                .unwrap_or(parameter.default_address_mode as i16),
+                .map(|p| p.bitmap_address_mode as i16)
+                .unwrap_or(parameter.default_address_mode.raw()),
         ),
         (
             "wrap_mode_x",
             "bitmap address mode x",
             instance
-                .map(|p| p.bitmap_address_mode_x)
-                .unwrap_or(parameter.default_address_mode as i16),
+                .map(|p| p.bitmap_address_mode_x as i16)
+                .unwrap_or(parameter.default_address_mode.raw()),
         ),
         (
             "wrap_mode_y",
             "bitmap address mode y",
             instance
-                .map(|p| p.bitmap_address_mode_y)
-                .unwrap_or(parameter.default_address_mode as i16),
+                .map(|p| p.bitmap_address_mode_y as i16)
+                .unwrap_or(parameter.default_address_mode.raw()),
         ),
     ] {
         rows.push(shader_sampler_enum_row(
             format!("{name}_{suffix}"),
-            parameter.default_address_mode as i16,
+            parameter.default_address_mode.raw(),
             current,
             addr_opts.clone(),
             edit_prefix,
@@ -626,10 +627,10 @@ pub(super) fn shader_bitmap_expansion_rows(
     // table, so edit as plain integers.
     rows.push(shader_sampler_int_row(
         format!("{name}_comparison_function"),
-        parameter.default_comparison_function,
+        parameter.default_comparison_function.raw(),
         instance
-            .map(|p| p.bitmap_comparison_function)
-            .unwrap_or(parameter.default_comparison_function),
+            .map(|p| p.bitmap_comparison_function as i16)
+            .unwrap_or(parameter.default_comparison_function.raw()),
         edit_prefix,
         param_index,
         "bitmap comparison function",
@@ -637,7 +638,9 @@ pub(super) fn shader_bitmap_expansion_rows(
     rows.push(shader_sampler_int_row(
         format!("{name}_extern_texture"),
         0,
-        instance.map(|p| p.bitmap_extern_mode).unwrap_or(0),
+        instance
+            .and_then(|p| p.bitmap_extern_mode.map(|mode| mode as i16))
+            .unwrap_or(0),
         edit_prefix,
         param_index,
         "bitmap extern RTT mode",
@@ -648,7 +651,7 @@ pub(super) fn shader_bitmap_expansion_rows(
             let Some(function) = animated.function.clone() else {
                 continue;
             };
-            let suffix = match animated.parameter_type {
+            let suffix = match animated.parameter_type.map(|kind| kind.get()) {
                 Some(RenderMethodAnimatedParameterType::ScaleUniform) => "scale_uniform",
                 Some(RenderMethodAnimatedParameterType::ScaleX) => "scale_x",
                 Some(RenderMethodAnimatedParameterType::ScaleY) => "scale_y",
@@ -741,7 +744,7 @@ pub(super) fn shader_scalar_row(
     if let Some(inst) = instance {
         for (j, animated) in inst.animated_parameters.iter().enumerate() {
             if !matches!(
-                animated.parameter_type,
+                animated.parameter_type.map(|kind| kind.get()),
                 Some(RenderMethodAnimatedParameterType::Value)
             ) {
                 continue;
@@ -927,7 +930,7 @@ pub(super) fn shader_color_row(
     if let Some(inst) = instance {
         for (j, animated) in inst.animated_parameters.iter().enumerate() {
             if !matches!(
-                animated.parameter_type,
+                animated.parameter_type.map(|kind| kind.get()),
                 Some(RenderMethodAnimatedParameterType::Color)
             ) {
                 continue;
@@ -1099,7 +1102,7 @@ pub(super) fn first_render_method_function_indexed(
             .iter()
             .enumerate()
             .find_map(|(j, animated)| {
-                let kind = animated.parameter_type?;
+                let kind = animated.parameter_type?.get();
                 if matches_kind(kind) {
                     animated
                         .function

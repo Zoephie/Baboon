@@ -48,6 +48,10 @@ pub(super) enum BrowserAction {
     ExtractGeometry(String),
     ExtractImportInfo(String),
     ExtractAnimation(String),
+    ExtractMaterialShaderSources(String),
+    ExtractMaterialShaderSourceFolder(Vec<String>),
+    ExtractHlslIncludeSource(String),
+    ExtractHlslIncludeFolder(Vec<String>),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -133,6 +137,7 @@ pub(super) struct GuiPrefs {
     pub(super) double_click_to_open_tags: bool,
     pub(super) expert_mode: bool,
     pub(super) dark_mode: bool,
+    pub(super) ui_scale: f32,
     pub(super) model_preview_size: f32,
     pub(super) blender_path: Option<PathBuf>,
 }
@@ -393,11 +398,16 @@ impl Default for GuiPrefs {
             double_click_to_open_tags: false,
             expert_mode: false,
             dark_mode: false,
+            ui_scale: DEFAULT_UI_SCALE,
             model_preview_size: DEFAULT_MODEL_PREVIEW_SIZE,
             blender_path: None,
         }
     }
 }
+
+pub(super) const DEFAULT_UI_SCALE: f32 = 1.0;
+pub(super) const MIN_UI_SCALE: f32 = 0.6;
+pub(super) const MAX_UI_SCALE: f32 = 1.5;
 
 pub(super) const DEFAULT_MODEL_PREVIEW_SIZE: f32 = 1.0;
 pub(super) const MIN_MODEL_PREVIEW_SIZE: f32 = 0.8;

@@ -555,6 +555,18 @@ impl Baboon {
             BrowserAction::ExtractGeometry(key) => self.begin_extract_geometry(key, ctx),
             BrowserAction::ExtractImportInfo(key) => self.begin_extract_import_info(key, ctx),
             BrowserAction::ExtractAnimation(key) => self.begin_extract_animation(key, ctx),
+            BrowserAction::ExtractMaterialShaderSources(key) => {
+                self.begin_extract_material_shader_sources(key, ctx)
+            }
+            BrowserAction::ExtractMaterialShaderSourceFolder(keys) => {
+                self.begin_extract_material_shader_source_folder(keys, ctx)
+            }
+            BrowserAction::ExtractHlslIncludeSource(key) => {
+                self.begin_extract_hlsl_include_source(key, ctx)
+            }
+            BrowserAction::ExtractHlslIncludeFolder(keys) => {
+                self.begin_extract_hlsl_include_folder(keys, ctx)
+            }
         }
     }
 
@@ -807,6 +819,113 @@ impl Baboon {
         });
     }
 
+    pub(super) fn begin_extract_material_shader_sources(
+        &mut self,
+        key: String,
+        ctx: egui::Context,
+    ) {
+        let Some((source, entry)) = self.export_context(&key) else {
+            return;
+        };
+        let Some(output) = rfd::FileDialog::new()
+            .set_title("Extract Source Shaders")
+            .pick_folder()
+        else {
+            return;
+        };
+        self.status = format!("Extracting source shaders from {}", entry.display_path);
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let result = extract_material_shader_sources(&source, &entry, &output)
+                .map_err(|e| e.to_string());
+            let _ = tx.send(WorkerMessage::ExportFinished(result));
+            ctx.request_repaint();
+        });
+    }
+
+    pub(super) fn begin_extract_material_shader_source_folder(
+        &mut self,
+        keys: Vec<String>,
+        ctx: egui::Context,
+    ) {
+        let Some(source_data) = self.source.as_ref() else {
+            return;
+        };
+        let entries = entries_for_keys(source_data, &keys);
+        if entries.is_empty() {
+            self.status = "No material shaders found in folder".to_owned();
+            return;
+        }
+        let source = source_data.source.clone();
+        let Some(output) = rfd::FileDialog::new()
+            .set_title("Extract Material Shader Sources")
+            .pick_folder()
+        else {
+            return;
+        };
+        self.status = format!(
+            "Extracting source shaders from {} material shader(s)",
+            entries.len()
+        );
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let result = extract_material_shader_source_entries(&source, &entries, &output)
+                .map_err(|e| e.to_string());
+            let _ = tx.send(WorkerMessage::ExportFinished(result));
+            ctx.request_repaint();
+        });
+    }
+
+    pub(super) fn begin_extract_hlsl_include_source(&mut self, key: String, ctx: egui::Context) {
+        let Some((source, entry)) = self.export_context(&key) else {
+            return;
+        };
+        let Some(output) = rfd::FileDialog::new()
+            .set_title("Extract HLSL Include")
+            .pick_folder()
+        else {
+            return;
+        };
+        self.status = format!("Extracting HLSL include from {}", entry.display_path);
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let result =
+                extract_hlsl_include_source(&source, &entry, &output).map_err(|e| e.to_string());
+            let _ = tx.send(WorkerMessage::ExportFinished(result));
+            ctx.request_repaint();
+        });
+    }
+
+    pub(super) fn begin_extract_hlsl_include_folder(
+        &mut self,
+        keys: Vec<String>,
+        ctx: egui::Context,
+    ) {
+        let Some(source_data) = self.source.as_ref() else {
+            return;
+        };
+        let entries = entries_for_keys(source_data, &keys);
+        if entries.is_empty() {
+            self.status = "No HLSL includes found in folder".to_owned();
+            return;
+        }
+        let source = source_data.source.clone();
+        let Some(output) = rfd::FileDialog::new()
+            .set_title("Extract HLSL Includes")
+            .pick_folder()
+        else {
+            return;
+        };
+        self.status = format!("Extracting {} HLSL include(s)", entries.len());
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let result =
+                extract_hlsl_include_entries(&source, &entries, &output).map_err(|e| e.to_string());
+            let _ = tx.send(WorkerMessage::ExportFinished(result));
+            ctx.request_repaint();
+        });
+    }
+
     pub(super) fn export_context(&self, key: &str) -> Option<(TagSource, TagEntry)> {
         let source = self.source.as_ref()?.source.clone();
         let entry = self.entry_for_key(key)?.clone();
@@ -897,6 +1016,7 @@ impl Baboon {
             double_click_to_open_tags: self.double_click_to_open_tags,
             expert_mode: self.expert_mode,
             dark_mode: self.dark_mode,
+            ui_scale: self.ui_scale,
             model_preview_size: self.model_preview_size,
             blender_path: self.blender_path.clone(),
         }
@@ -1438,6 +1558,19 @@ fn save_as_start_dir(entry: &TagEntry) -> Option<PathBuf> {
         TagEntryLocation::LooseFile(path) => path.parent().map(Path::to_path_buf),
         TagEntryLocation::Monolithic { .. } => None,
     }
+}
+
+fn entries_for_keys(source: &LoadedSourceData, keys: &[String]) -> Vec<TagEntry> {
+    let key_set = keys.iter().map(String::as_str).collect::<HashSet<_>>();
+    let mut seen = HashSet::new();
+    source
+        .entries
+        .iter()
+        .chain(source.all_entries.iter())
+        .filter(|entry| key_set.contains(entry.key.as_str()))
+        .filter(|entry| seen.insert(entry.key.as_str()))
+        .cloned()
+        .collect()
 }
 
 fn clean_file_name(value: &str) -> String {

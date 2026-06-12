@@ -109,11 +109,12 @@ fn draw_tag_fields_scroll(
         // separate field tab. The grid's bitmap/scalar/int/function/category
         // cells are editable inline; when the grid can't be built it falls
         // back to the standard editable field tree (inside draw_material_tag).
-        ScrollArea::vertical()
+        ScrollArea::both()
             .id_salt(("tag_scroll", edit.view_scope, edit.tag_key))
             .max_height(scroll_height)
             .auto_shrink([false, false])
             .show(ui, |ui| {
+                ui.set_min_width(TAG_FIELD_SCROLL_MIN_WIDTH);
                 draw_material_tag(
                     ui,
                     tag,
@@ -131,11 +132,12 @@ fn draw_tag_fields_scroll(
         return;
     }
 
-    ScrollArea::vertical()
+    ScrollArea::both()
         .id_salt(("tag_scroll", edit.view_scope, edit.tag_key))
         .max_height(scroll_height)
         .auto_shrink([false, false])
         .show(ui, |ui| {
+            ui.set_min_width(TAG_FIELD_SCROLL_MIN_WIDTH);
             if is_object_family {
                 draw_inherited_object_fields(ui, tag.root(), names, expert_mode, edit);
             } else {
@@ -143,6 +145,8 @@ fn draw_tag_fields_scroll(
             }
         });
 }
+
+const TAG_FIELD_SCROLL_MIN_WIDTH: f32 = 980.0;
 
 /// Object-family tag groups (each derives from `obje` and carries a `.model`
 /// reference). For these we surface the connected model at the very top.
@@ -1170,10 +1174,11 @@ pub(super) fn draw_bitmap_tag(
 
     match preview.active_tab {
         BitmapPanelTab::Fields => {
-            ScrollArea::vertical()
+            ScrollArea::both()
                 .id_salt(("bitmap_fields_scroll", edit.view_scope, edit.tag_key))
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
+                    ui.set_min_width(TAG_FIELD_SCROLL_MIN_WIDTH);
                     draw_struct_fields(ui, tag.root(), names, 0, expert_mode, "", edit);
                 });
         }
