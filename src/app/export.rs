@@ -184,7 +184,7 @@ pub(super) fn extract_geometry_for_entry(
             let jms = JmsFile::from_render_model(&tag)?;
             let path = output.join(format!("{stem}.render.jms"));
             let mut file = fs::File::create(&path)?;
-            jms.write(&mut file)?;
+            jms.write(&mut file, blam_tags::game::Game::of(&tag).jms_version())?;
             Ok(format!(
                 "Extracted render_model geometry {}",
                 path.display()
@@ -197,7 +197,7 @@ pub(super) fn extract_geometry_for_entry(
             let jms = JmsFile::from_collision_model(&tag)?;
             let path = output.join(format!("{stem}.collision.jms"));
             let mut file = fs::File::create(&path)?;
-            jms.write(&mut file)?;
+            jms.write(&mut file, blam_tags::game::Game::of(&tag).jms_version())?;
             Ok(format!(
                 "Extracted collision_model geometry {}",
                 path.display()
@@ -210,7 +210,7 @@ pub(super) fn extract_geometry_for_entry(
             let jms = JmsFile::from_physics_model(&tag)?;
             let path = output.join(format!("{stem}.physics.jms"));
             let mut file = fs::File::create(&path)?;
-            jms.write(&mut file)?;
+            jms.write(&mut file, blam_tags::game::Game::of(&tag).jms_version())?;
             Ok(format!(
                 "Extracted physics_model geometry {}",
                 path.display()
@@ -596,6 +596,10 @@ pub(super) fn extract_model_geometry(
         },
         None => None,
     };
+    let render_jms_version = render_tag
+        .as_ref()
+        .map(|tag| blam_tags::game::Game::of(tag).jms_version())
+        .unwrap_or(8213);
     let skeleton = render_jms_for_skeleton
         .as_ref()
         .map(|jms| jms.nodes.as_slice());
@@ -612,7 +616,7 @@ pub(super) fn extract_model_geometry(
         } else if let Some(jms) = render_jms_for_skeleton.as_ref() {
             let path = render_dir.join(format!("{stem}.render.jms"));
             let mut file = fs::File::create(&path)?;
-            jms.write(&mut file)?;
+            jms.write(&mut file, render_jms_version)?;
             emitted.push(format!("render {}", path.display()));
         }
     }
@@ -630,7 +634,7 @@ pub(super) fn extract_model_geometry(
                     };
                     let path = collision_dir.join(format!("{stem}.collision.jms"));
                     let mut file = fs::File::create(&path)?;
-                    jms.write(&mut file)?;
+                    jms.write(&mut file, blam_tags::game::Game::of(&tag).jms_version())?;
                     emitted.push(format!("collision {}", path.display()));
                 }
                 Err(error) => skipped.push(format!("collision: {error}")),
@@ -652,7 +656,7 @@ pub(super) fn extract_model_geometry(
                     };
                     let path = physics_dir.join(format!("{stem}.physics.jms"));
                     let mut file = fs::File::create(&path)?;
-                    jms.write(&mut file)?;
+                    jms.write(&mut file, blam_tags::game::Game::of(&tag).jms_version())?;
                     emitted.push(format!("physics {}", path.display()));
                 }
                 Err(error) => skipped.push(format!("physics: {error}")),
