@@ -442,6 +442,9 @@ pub(super) struct MaterialColorPopup {
     write_color_field: Option<ColorFieldWrite>,
     /// When Some, clicking OK creates a constant-color animated parameter.
     create_shader_op: Option<ShaderOp>,
+    /// When Some, clicking OK creates a shader parameter with a constant-color
+    /// animated child.
+    create_shader_param_op: Option<ShaderParamOp>,
     /// Tag key that owns the write_path. Used by draw_color_popup to route the edit.
     tag_key: String,
 }
@@ -476,6 +479,7 @@ impl MaterialColorPopup {
             write_path: None,
             write_color_field: None,
             create_shader_op: None,
+            create_shader_param_op: None,
             tag_key: String::new(),
         }
     }
@@ -509,6 +513,16 @@ impl MaterialColorPopup {
     pub(super) fn with_shader_op(mut self, tag_key: impl Into<String>, op: ShaderOp) -> Self {
         self.tag_key = tag_key.into();
         self.create_shader_op = Some(op);
+        self
+    }
+
+    pub(super) fn with_shader_param_op(
+        mut self,
+        tag_key: impl Into<String>,
+        op: ShaderParamOp,
+    ) -> Self {
+        self.tag_key = tag_key.into();
+        self.create_shader_param_op = Some(op);
         self
     }
 
@@ -599,6 +613,10 @@ pub(super) enum ColorPopupResult {
         tag_key: String,
         op: ShaderOp,
     },
+    ShaderParamOp {
+        tag_key: String,
+        op: ShaderParamOp,
+    },
 }
 
 /// Draw the color inspector / editor popup.
@@ -613,7 +631,8 @@ pub(super) fn draw_color_popup(
     let mut close = false;
     let editable = color.write_path.is_some()
         || color.write_color_field.is_some()
-        || color.create_shader_op.is_some();
+        || color.create_shader_op.is_some()
+        || color.create_shader_param_op.is_some();
     let mut result: Option<ColorPopupResult> = None;
     egui::Window::new(color.title.clone())
         .collapsible(false)
@@ -691,6 +710,19 @@ pub(super) fn draw_color_popup(
                             color.alpha,
                         );
                         result = Some(ColorPopupResult::ShaderOp {
+                            tag_key: color.tag_key.clone(),
+                            op,
+                        });
+                    } else if let Some(mut op) = color.create_shader_param_op.clone() {
+                        if let Some(animated) = op.animated_parameters.first_mut() {
+                            animated.initial_function_hex = constant_color_function_hex(
+                                color.red,
+                                color.green,
+                                color.blue,
+                                color.alpha,
+                            );
+                        }
+                        result = Some(ColorPopupResult::ShaderParamOp {
                             tag_key: color.tag_key.clone(),
                             op,
                         });

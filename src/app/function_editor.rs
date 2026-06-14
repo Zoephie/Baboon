@@ -196,13 +196,33 @@ pub(super) fn draw_function_editor_contents(
     let mut changed = false;
     let ftype = view.function.function_type();
     let type_editable = editable && is_editable_function_type(ftype);
+    let input_editable = editable
+        && view
+            .edit
+            .as_ref()
+            .is_some_and(|paths| !paths.input_name.is_empty());
+    let range_editable = editable
+        && view
+            .edit
+            .as_ref()
+            .is_some_and(|paths| !paths.range_name.is_empty());
+    let output_editable = editable
+        && view
+            .edit
+            .as_ref()
+            .is_some_and(|paths| !paths.parameter_type.is_empty());
+    let time_editable = editable
+        && view
+            .edit
+            .as_ref()
+            .is_some_and(|paths| !paths.time_period.is_empty());
 
     ui.horizontal(|ui| {
         ui.label(RichText::new("Function type:").color(text_dark()).small());
         changed |= function_type_combo(ui, &mut view.function, editable);
         ui.add_space(8.0);
         ui.label(RichText::new("Input:").color(text_dark()).small());
-        changed |= seeded_name_combo(ui, "fn_input", &mut view.input_name, editable);
+        changed |= seeded_name_combo(ui, "fn_input", &mut view.input_name, input_editable);
 
         let mut ranged = view.function.flags().is_ranged();
         if ui
@@ -214,13 +234,13 @@ pub(super) fn draw_function_editor_contents(
         }
         ui.label(RichText::new("Range:").color(text_dark()).small());
         if ranged {
-            changed |= seeded_name_combo(ui, "fn_range", &mut view.range_name, editable);
+            changed |= seeded_name_combo(ui, "fn_range", &mut view.range_name, range_editable);
         } else {
             foundation_input_cell(ui, "NONE", 120.0);
         }
 
         ui.label(RichText::new("Output:").color(text_dark()).small());
-        changed |= output_type_combo(ui, &mut view.output_index, editable);
+        changed |= output_type_combo(ui, &mut view.output_index, output_editable);
         ui.label(RichText::new("Color:").color(text_dark()).small());
         changed |= color_graph_combo(ui, &mut view.function, type_editable);
     });
@@ -361,7 +381,7 @@ pub(super) fn draw_function_editor_contents(
         ui.label(RichText::new("time period").color(text_dark()).small());
         if ui
             .add_enabled(
-                editable,
+                time_editable,
                 egui::DragValue::new(&mut view.time_period_in_seconds)
                     .speed(0.1)
                     .range(0.0..=f32::MAX),
@@ -937,13 +957,13 @@ pub(super) fn push_function_edit(
 ) -> Vec<PendingFieldEdit> {
     let mut edits = Vec::new();
     let data = view.function.to_bytes();
-    if data != prev.data {
+    if data != prev.data && !paths.data.is_empty() {
         edits.push(PendingFieldEdit {
             path: paths.data.clone(),
             input: encode_hex(&data),
         });
     }
-    if view.output_index != prev.output_index {
+    if view.output_index != prev.output_index && !paths.parameter_type.is_empty() {
         if let Some(index) = view.output_index {
             edits.push(PendingFieldEdit {
                 path: paths.parameter_type.clone(),
@@ -951,7 +971,7 @@ pub(super) fn push_function_edit(
             });
         }
     }
-    if view.input_name != prev.input_name {
+    if view.input_name != prev.input_name && !paths.input_name.is_empty() {
         edits.push(PendingFieldEdit {
             path: paths.input_name.clone(),
             input: if view.input_name.is_empty() {
@@ -961,7 +981,7 @@ pub(super) fn push_function_edit(
             },
         });
     }
-    if view.range_name != prev.range_name {
+    if view.range_name != prev.range_name && !paths.range_name.is_empty() {
         edits.push(PendingFieldEdit {
             path: paths.range_name.clone(),
             input: if view.range_name.is_empty() {
@@ -971,7 +991,7 @@ pub(super) fn push_function_edit(
             },
         });
     }
-    if view.time_period_in_seconds != prev.time_period {
+    if view.time_period_in_seconds != prev.time_period && !paths.time_period.is_empty() {
         edits.push(PendingFieldEdit {
             path: paths.time_period.clone(),
             input: view.time_period_in_seconds.to_string(),

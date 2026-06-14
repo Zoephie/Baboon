@@ -240,7 +240,7 @@ pub(super) fn draw_field(
         return;
     }
     if let Some(function) = field.as_function() {
-        draw_foundation_function_row(ui, &meta, &function, depth, &field_path);
+        draw_foundation_function_row(ui, &meta, &function, depth, &field_path, edit);
         return;
     }
     if let Some(value) = field.value() {
@@ -391,10 +391,7 @@ pub(super) fn draw_foundation_block(
     let selected_label = if count == 0 {
         "NONE".to_owned()
     } else {
-        format!(
-            "{sel}. {}",
-            block.element(sel).map(|e| e.name()).unwrap_or("element"),
-        )
+        block_element_dropdown_label(block.element(sel), names, sel)
     };
 
     let block_default_open = depth == 0 || is_priority_section(name);
@@ -406,6 +403,9 @@ pub(super) fn draw_foundation_block(
             edit.editable && clip.group_tag == edit.group_tag && clip.block_path == path_prefix
         })
         .map(|clip| clip.elements.len());
+    let block_size_label = edit
+        .show_block_sizes
+        .then(|| format_block_size_label(count, block.element_size()));
     let actions = draw_foundation_block_control(
         ui,
         name,
@@ -421,12 +421,8 @@ pub(super) fn draw_foundation_block(
         block_default_open,
         open_override,
         clipboard_len,
-        |i| {
-            block
-                .element(i)
-                .map(|e| format!("{i}. {}", e.name()))
-                .unwrap_or_else(|| format!("{i}."))
-        },
+        block_size_label.as_deref(),
+        |i| block_element_dropdown_label(block.element(i), names, i),
         |ui| {
             if count == 0 {
                 ui.label(
@@ -516,6 +512,26 @@ pub(super) fn draw_foundation_block(
     }
 }
 
+pub(super) fn format_block_size_label(count: usize, element_size: usize) -> String {
+    let total = count.saturating_mul(element_size);
+    format!(
+        "{} x {} B = {}",
+        count,
+        element_size,
+        format_byte_count(total)
+    )
+}
+
+pub(super) fn format_byte_count(bytes: usize) -> String {
+    if bytes < 1024 {
+        format!("{bytes} B")
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1} KiB", bytes as f32 / 1024.0)
+    } else {
+        format!("{:.1} MiB", bytes as f32 / (1024.0 * 1024.0))
+    }
+}
+
 /// Translate header button clicks into block selection changes / deferred ops.
 pub(super) fn handle_block_actions(
     ui: &Ui,
@@ -579,6 +595,157 @@ pub(super) fn handle_block_actions(
     }
 }
 
+pub(super) fn block_element_dropdown_label(
+    element: Option<TagStruct<'_>>,
+    names: &TagNameIndex,
+    index: usize,
+) -> String {
+    let Some(element) = element else {
+        return format!("{index}.");
+    };
+    block_element_content_label(element, names)
+        .map(|label| format!("{index}. {label}"))
+        .unwrap_or_else(|| format!("{index}. {}", element.name()))
+}
+
+pub(super) fn block_element_content_label(
+    element: TagStruct<'_>,
+    names: &TagNameIndex,
+) -> Option<String> {
+    first_tag_reference_label(element, names)
+        .or_else(|| first_named_string_label(element))
+        .or_else(|| first_string_label(element))
+        .or_else(|| first_scalar_label(element, names))
+}
+
+pub(super) fn first_tag_reference_label(
+    element: TagStruct<'_>,
+    names: &TagNameIndex,
+) -> Option<String> {
+    for field in element.fields() {
+        if let Some(value) = field.value() {
+            if let TagFieldData::TagReference(reference) = value {
+                if reference.group_tag_and_name.is_some() {
+                    let label = format_foundation_scalar_value(
+                        names,
+                        &TagFieldData::TagReference(reference),
+                    );
+                    if !label.trim().is_empty() && label != "NONE" {
+                        return Some(label);
+                    }
+                }
+            }
+        }
+        if let Some(nested) = field.as_struct() {
+            if let Some(label) = first_tag_reference_label(nested, names) {
+                return Some(label);
+            }
+        }
+    }
+    None
+}
+
+pub(super) fn first_named_string_label(element: TagStruct<'_>) -> Option<String> {
+    for field in element.fields() {
+        if let Some(value) = field.value() {
+            if is_name_like_field(field.name()) {
+                if let Some(label) = stringish_label(&value) {
+                    return Some(label);
+                }
+            }
+        }
+        if let Some(nested) = field.as_struct() {
+            if let Some(label) = first_named_string_label(nested) {
+                return Some(label);
+            }
+        }
+    }
+    None
+}
+
+pub(super) fn first_string_label(element: TagStruct<'_>) -> Option<String> {
+    for field in element.fields() {
+        if let Some(value) = field.value() {
+            if let Some(label) = stringish_label(&value) {
+                return Some(label);
+            }
+        }
+        if let Some(nested) = field.as_struct() {
+            if let Some(label) = first_string_label(nested) {
+                return Some(label);
+            }
+        }
+    }
+    None
+}
+
+pub(super) fn first_scalar_label(element: TagStruct<'_>, names: &TagNameIndex) -> Option<String> {
+    for field in element.fields() {
+        if let Some(value) = field.value() {
+            if scalar_is_useful_for_block_label(&value) {
+                let value = format_foundation_scalar_value(names, &value);
+                if label_has_content(&value) {
+                    return Some(format!("{}: {value}", clean_field_name(field.name())));
+                }
+            }
+        }
+        if let Some(nested) = field.as_struct() {
+            if let Some(label) = first_scalar_label(nested, names) {
+                return Some(label);
+            }
+        }
+    }
+    None
+}
+
+pub(super) fn is_name_like_field(name: &str) -> bool {
+    let clean = clean_field_name(name).to_ascii_lowercase();
+    clean == "name"
+        || clean.ends_with(" name")
+        || clean.contains("material")
+        || clean.contains("permutation")
+        || clean.contains("region")
+        || clean.contains("variant")
+        || clean.contains("marker")
+        || clean.contains("node")
+}
+
+pub(super) fn stringish_label(value: &TagFieldData) -> Option<String> {
+    let raw = match value {
+        TagFieldData::String(text) | TagFieldData::LongString(text) => text.as_str(),
+        TagFieldData::StringId(id) | TagFieldData::OldStringId(id) => id.string.as_str(),
+        _ => return None,
+    };
+    let label = trim_formatted_value(raw);
+    label_has_content(&label).then_some(label)
+}
+
+pub(super) fn scalar_is_useful_for_block_label(value: &TagFieldData) -> bool {
+    matches!(
+        value,
+        TagFieldData::CharEnum { name: Some(_), .. }
+            | TagFieldData::ShortEnum { name: Some(_), .. }
+            | TagFieldData::LongEnum { name: Some(_), .. }
+            | TagFieldData::CharBlockIndex(_)
+            | TagFieldData::CustomCharBlockIndex(_)
+            | TagFieldData::ShortBlockIndex(_)
+            | TagFieldData::CustomShortBlockIndex(_)
+            | TagFieldData::LongBlockIndex(_)
+            | TagFieldData::CustomLongBlockIndex(_)
+            | TagFieldData::CharInteger(_)
+            | TagFieldData::ShortInteger(_)
+            | TagFieldData::LongInteger(_)
+            | TagFieldData::ByteInteger(_)
+            | TagFieldData::WordInteger(_)
+            | TagFieldData::DwordInteger(_)
+    )
+}
+
+pub(super) fn label_has_content(label: &str) -> bool {
+    let trimmed = label.trim();
+    !trimmed.is_empty() && trimmed != "NONE"
+}
+
 pub(super) fn draw_foundation_array(
     ui: &mut Ui,
     name: &str,
@@ -594,10 +761,7 @@ pub(super) fn draw_foundation_array(
     let selected_label = if count == 0 {
         "NONE".to_owned()
     } else {
-        format!(
-            "{sel}. {}",
-            array.element(sel).map(|e| e.name()).unwrap_or("element"),
-        )
+        block_element_dropdown_label(array.element(sel), names, sel)
     };
     let open_override = edit.resolve_open(path_prefix, depth == 0);
     let actions = draw_foundation_block_control(
@@ -615,12 +779,8 @@ pub(super) fn draw_foundation_array(
         depth == 0,
         open_override,
         None, // arrays are fixed-size — no element paste
-        |i| {
-            array
-                .element(i)
-                .map(|e| format!("{i}. {}", e.name()))
-                .unwrap_or_else(|| format!("{i}."))
-        },
+        None,
+        |i| block_element_dropdown_label(array.element(i), names, i),
         |ui| {
             if count == 0 {
                 ui.label(
@@ -669,6 +829,7 @@ pub(super) fn draw_foundation_block_control(
     // `Some(n)` when a compatible clipboard holds `n` element(s) (enables the
     // paste / replace menu items); `None` disables them.
     clipboard_len: Option<usize>,
+    block_size_label: Option<&str>,
     element_label: impl Fn(usize) -> String,
     add_contents: impl FnOnce(&mut Ui),
 ) -> BlockHeaderActions {
@@ -832,6 +993,16 @@ pub(super) fn draw_foundation_block_control(
                     .color(foundation_block_text())
                     .small(),
                 );
+
+                if let Some(size_label) = block_size_label {
+                    ui.label(
+                        RichText::new(size_label)
+                            .color(subtle_dark())
+                            .monospace()
+                            .small(),
+                    )
+                    .on_hover_text("Block memory usage: elements × element byte size");
+                }
 
                 // Structural edit buttons.
                 if foundation_header_button_clicked(ui, "Add", can_edit) {
@@ -1794,6 +1965,7 @@ pub(super) fn draw_foundation_function_row(
     function: &TagFunction,
     depth: usize,
     path: &str,
+    edit: &mut FieldEditContext<'_>,
 ) {
     ui.horizontal_top(|ui| {
         ui.add_space(depth as f32 * 12.0);
@@ -1810,6 +1982,31 @@ pub(super) fn draw_foundation_function_row(
                 // right.
                 ui.vertical(|ui| {
                     ui.set_min_width(640.0);
+                    ui.horizontal(|ui| {
+                        foundation_input_cell(ui, &shader_function_grid_text(function), 520.0);
+                        let can_edit = edit.editable && !meta.read_only;
+                        if ui
+                            .add_enabled(
+                                can_edit,
+                                egui::Button::new("f()").min_size(Vec2::new(30.0, 20.0)),
+                            )
+                            .on_hover_text(if can_edit {
+                                "Open function graph editor"
+                            } else {
+                                "Function is read-only"
+                            })
+                            .clicked()
+                        {
+                            *edit.function_request = Some(FunctionPopup::new(
+                                edit.tag_key.to_owned(),
+                                clean_field_name(path),
+                                FunctionView::from_function(function.clone())
+                                    .with_edit(foundation_function_edit_paths(path)),
+                                true,
+                            ));
+                        }
+                    });
+                    ui.add_space(4.0);
                     ui.push_id(("function", path), |ui| {
                         // Inline preview is always read-only; the editable
                         // editor lives in the f() popup.
@@ -1821,6 +2018,18 @@ pub(super) fn draw_foundation_function_row(
             });
         draw_field_help(ui, meta);
     });
+}
+
+pub(super) fn foundation_function_edit_paths(data_path: &str) -> FunctionEditPaths {
+    FunctionEditPaths {
+        data: data_path.to_owned(),
+        parameter_type: String::new(),
+        input_name: String::new(),
+        range_name: String::new(),
+        time_period: String::new(),
+        block_path: String::new(),
+        block_index: 0,
+    }
 }
 
 /// First-pass editable function types — others stay read-only (graph +

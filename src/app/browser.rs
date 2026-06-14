@@ -169,6 +169,21 @@ pub(super) fn draw_tree_node_lazy(
             }
         });
     response.header_response.context_menu(|ui| {
+        if ui.button("Move to...").clicked() {
+            clicked = Some(BrowserAction::MoveLooseFolder {
+                rel_path: node.rel_path.clone(),
+                label: node.label.clone(),
+            });
+            ui.close_menu();
+        }
+        if ui.button("Copy to...").clicked() {
+            clicked = Some(BrowserAction::CopyLooseFolder {
+                rel_path: node.rel_path.clone(),
+                label: node.label.clone(),
+            });
+            ui.close_menu();
+        }
+        ui.separator();
         if ui.button("Dump folder to JSON...").clicked() {
             clicked = Some(BrowserAction::DumpLooseFolderJson {
                 rel_path: node.rel_path.clone(),
@@ -547,6 +562,10 @@ pub(super) fn draw_entry(
     };
     let mut action = open_requested.then(|| BrowserAction::Select(entry.key.clone()));
     response.context_menu(|ui| {
+        if ui.button("Copy tag name").clicked() {
+            action = Some(BrowserAction::CopyTagName(entry.key.clone()));
+            ui.close_menu();
+        }
         if ui.button("Open with File Explorer").clicked() {
             action = Some(BrowserAction::OpenInExplorer(entry.key.clone()));
             ui.close_menu();

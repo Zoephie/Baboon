@@ -577,13 +577,31 @@ pub(super) fn apply_one_shader_param_op(
     let name_path = format!("{}[{}]/parameter name", op.parameters_block_path, new_idx);
     apply_field_edit(tag, &name_path, &op.parameter_name)?;
 
-    // Step 3: write real value.
-    let real_path = format!("{}[{}]/real", op.parameters_block_path, new_idx);
-    apply_field_edit(tag, &real_path, &op.real_value.to_string())?;
+    // Step 3: initialise requested fields.
+    for initial in &op.initial_fields {
+        let field = escape_field_path_segment(&initial.field);
+        let field_path = format!("{}[{}]/{}", op.parameters_block_path, new_idx, field);
+        apply_field_edit(tag, &field_path, &initial.input)?;
+    }
+
+    for animated in &op.animated_parameters {
+        let animated_block_path = format!(
+            "{}[{}]/animated parameters",
+            op.parameters_block_path, new_idx
+        );
+        apply_one_shader_op(
+            tag,
+            &ShaderOp {
+                animated_block_path,
+                output_type_index: animated.output_type_index,
+                initial_function_hex: animated.initial_function_hex.clone(),
+            },
+        )?;
+    }
 
     Ok(format!(
-        "Created parameter '{}' = {} at {}[{}]",
-        op.parameter_name, op.real_value, op.parameters_block_path, new_idx
+        "Created parameter '{}' at {}[{}]",
+        op.parameter_name, op.parameters_block_path, new_idx
     ))
 }
 
@@ -629,6 +647,10 @@ pub(super) fn append_field_path(prefix: &str, field_name: &str) -> String {
     } else {
         format!("{prefix}/{field_name}")
     }
+}
+
+pub(super) fn escape_field_path_segment(field_name: &str) -> String {
+    field_name.replace('\\', "\\\\").replace('/', "\\/")
 }
 
 pub(super) fn is_text_editable_value(value: &TagFieldData) -> bool {
@@ -785,6 +807,21 @@ pub(super) fn parse_gui_field_value(
         TagFieldType::TagReference => parse_tag_reference(trimmed).map(TagFieldData::TagReference),
         // Color values: comma-separated floats, written by the color picker
         // swatch. RGB = "r, g, b"; ARGB = "a, r, g, b".
+        TagFieldType::RgbColor => {
+            let (_, r, g, b) = parse_rgb_or_argb_color_channels(trimmed)?;
+            let raw = ((color_float_to_u8(r) as u32) << 16)
+                | ((color_float_to_u8(g) as u32) << 8)
+                | color_float_to_u8(b) as u32;
+            Ok(TagFieldData::RgbColor(blam_tags::math::RgbColor(raw)))
+        }
+        TagFieldType::ArgbColor => {
+            let (a, r, g, b) = parse_rgb_or_argb_color_channels(trimmed)?;
+            let raw = ((color_float_to_u8(a) as u32) << 24)
+                | ((color_float_to_u8(r) as u32) << 16)
+                | ((color_float_to_u8(g) as u32) << 8)
+                | color_float_to_u8(b) as u32;
+            Ok(TagFieldData::ArgbColor(blam_tags::math::ArgbColor(raw)))
+        }
         TagFieldType::RealRgbColor => {
             let [r, g, b] = parse_color_channels::<3>(trimmed)?;
             Ok(TagFieldData::RealRgbColor(blam_tags::math::RealRgbColor {
@@ -862,6 +899,26 @@ pub(super) fn parse_color_channels<const N: usize>(input: &str) -> Result<[f32; 
     parts
         .try_into()
         .map_err(|_: Vec<f32>| format!("expected {N} comma-separated color channels"))
+}
+
+pub(super) fn parse_rgb_or_argb_color_channels(
+    input: &str,
+) -> Result<(f32, f32, f32, f32), String> {
+    let parts = input
+        .split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(|part| parse_value::<f32>(part, "color channel"))
+        .collect::<Result<Vec<_>, _>>()?;
+    match parts.as_slice() {
+        [r, g, b] => Ok((1.0, *r, *g, *b)),
+        [a, r, g, b] => Ok((*a, *r, *g, *b)),
+        _ => Err("expected 3 or 4 comma-separated color channels".to_owned()),
+    }
+}
+
+pub(super) fn color_float_to_u8(value: f32) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 pub(super) fn parse_float_channels<const N: usize>(

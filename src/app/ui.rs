@@ -24,6 +24,11 @@ fn launcher_button(
     }
 }
 
+fn tab_label_width(ui: &Ui, label: &str, min_width: f32, max_width: f32) -> f32 {
+    let width = label.chars().count() as f32 * 7.0 + ui.spacing().button_padding.x * 2.0;
+    width.clamp(min_width, max_width)
+}
+
 impl Baboon {
     /// "Search fields" bar (Guerilla-style): typing a block or field name
     /// collapses the editor to just the matching node(s) and their ancestors.
@@ -106,16 +111,16 @@ impl Baboon {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("UI scale").color(subtle_dark()));
                     ui.add(
-                        egui::Slider::new(&mut self.ui_scale, MIN_UI_SCALE..=MAX_UI_SCALE)
+                        egui::Slider::new(&mut self.pending_ui_scale, MIN_UI_SCALE..=MAX_UI_SCALE)
                             .show_value(false)
                             .clamping(egui::SliderClamping::Always),
                     );
                     ui.label(
-                        RichText::new(format!("{:.0}%", self.ui_scale * 100.0))
+                        RichText::new(format!("{:.0}%", self.pending_ui_scale * 100.0))
                             .color(subtle_dark()),
                     );
                     if ui.button("Reset").clicked() {
-                        self.ui_scale = DEFAULT_UI_SCALE;
+                        self.pending_ui_scale = DEFAULT_UI_SCALE;
                     }
                 });
                 ui.horizontal(|ui| {
@@ -153,6 +158,7 @@ impl Baboon {
                 ui.add_space(8.0);
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("Apply").clicked() {
+                        self.ui_scale = self.pending_ui_scale.clamp(MIN_UI_SCALE, MAX_UI_SCALE);
                         let trimmed = self.blender_path_input.trim();
                         self.blender_path = if trimmed.is_empty() {
                             None
@@ -162,7 +168,7 @@ impl Baboon {
                         self.status = if let Some(path) = &self.blender_path {
                             format!("Blender path set to {}", path.display())
                         } else {
-                            "Blender path cleared".to_owned()
+                            "Settings applied".to_owned()
                         };
                     }
                     if ui.button("Clear").clicked() {
@@ -172,7 +178,163 @@ impl Baboon {
                     }
                 });
             });
+        if !open {
+            self.pending_ui_scale = self.ui_scale;
+        }
         self.settings_open = open;
+    }
+
+    fn draw_new_tag_window(&mut self, ctx: &egui::Context) {
+        if !self.new_tag_open {
+            return;
+        }
+
+        let mut open = self.new_tag_open;
+        let mut refresh_groups = false;
+        let mut create = false;
+        let mut close_requested = false;
+        egui::Window::new("New Tag")
+            .id(egui::Id::new("new_tag_dialog"))
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .default_width(560.0)
+            .show(ctx, |ui| {
+                if self.loaded_tags_root().is_none() {
+                    ui.label(
+                        RichText::new(
+                            "Load a loose editing-kit tags folder before creating a tag.",
+                        )
+                        .color(subtle_dark()),
+                    );
+                    ui.add_space(8.0);
+                }
+
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Game").color(subtle_dark()));
+                    let before = self.new_tag_dialog.game.clone();
+                    egui::ComboBox::from_id_salt("new_tag_game")
+                        .selected_text(&self.new_tag_dialog.game)
+                        .width(220.0)
+                        .show_ui(ui, |ui| {
+                            for game in crate::app::controller::available_definition_games() {
+                                ui.selectable_value(
+                                    &mut self.new_tag_dialog.game,
+                                    game.clone(),
+                                    game,
+                                );
+                            }
+                        });
+                    if self.new_tag_dialog.game != before {
+                        refresh_groups = true;
+                    }
+                });
+
+                let selected_group_before = self.new_tag_dialog.selected_group;
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Group").color(subtle_dark()));
+                    let selected = self
+                        .new_tag_dialog
+                        .groups
+                        .get(self.new_tag_dialog.selected_group)
+                        .map(|group| {
+                            format!("{} ({})", group.name, format_group_tag(group.group_tag))
+                        })
+                        .unwrap_or_else(|| "No schemas".to_owned());
+                    egui::ComboBox::from_id_salt("new_tag_group")
+                        .selected_text(selected)
+                        .width(320.0)
+                        .show_ui(ui, |ui| {
+                            for (index, group) in self.new_tag_dialog.groups.iter().enumerate() {
+                                ui.selectable_value(
+                                    &mut self.new_tag_dialog.selected_group,
+                                    index,
+                                    format!(
+                                        "{} ({})",
+                                        group.name,
+                                        format_group_tag(group.group_tag)
+                                    ),
+                                );
+                            }
+                        });
+                });
+                if self.new_tag_dialog.selected_group != selected_group_before {
+                    self.new_tag_dialog.rel_path.clear();
+                    self.new_tag_dialog.output_path = None;
+                    self.new_tag_dialog.error = None;
+                }
+
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Location").color(subtle_dark()));
+                    let location = if self.new_tag_dialog.rel_path.is_empty() {
+                        "No tag selected".to_owned()
+                    } else {
+                        self.new_tag_dialog.rel_path.clone()
+                    };
+                    let mut location_text = location;
+                    ui.add_enabled(
+                        false,
+                        egui::TextEdit::singleline(&mut location_text).desired_width(360.0),
+                    );
+                    if ui
+                        .add_enabled(
+                            self.loaded_tags_root().is_some()
+                                && !self.new_tag_dialog.groups.is_empty(),
+                            egui::Button::new("Choose..."),
+                        )
+                        .clicked()
+                    {
+                        self.choose_new_tag_output_path();
+                    }
+                });
+
+                if let Some(group) = self
+                    .new_tag_dialog
+                    .groups
+                    .get(self.new_tag_dialog.selected_group)
+                {
+                    ui.label(
+                        RichText::new(format!(
+                            "Creates a .{} tag relative to the loaded tags folder.",
+                            group.extension
+                        ))
+                        .color(subtle_dark())
+                        .small(),
+                    );
+                }
+
+                if let Some(error) = &self.new_tag_dialog.error {
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(error).color(material_delete_text()));
+                }
+
+                ui.add_space(10.0);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Cancel").clicked() {
+                        close_requested = true;
+                    }
+                    let can_create = self.loaded_tags_root().is_some()
+                        && !self.new_tag_dialog.groups.is_empty()
+                        && self.new_tag_dialog.output_path.is_some();
+                    if ui
+                        .add_enabled(can_create, egui::Button::new("Create"))
+                        .clicked()
+                    {
+                        create = true;
+                    }
+                });
+            });
+
+        if refresh_groups {
+            self.refresh_new_tag_groups();
+        }
+        if close_requested {
+            open = false;
+        }
+        self.new_tag_open = open;
+        if create {
+            self.create_new_tag();
+        }
     }
 
     fn draw_about_window(&mut self, ctx: &egui::Context) {
@@ -351,6 +513,10 @@ impl eframe::App for Baboon {
             .show(ctx, |ui| {
                 egui::menu::bar(ui, |ui| {
                     ui.menu_button("File", |ui| {
+                        if ui.button("New Tag...").clicked() {
+                            ui.close_menu();
+                            self.open_new_tag_dialog();
+                        }
                         if ui.button("Load Tag...").clicked() {
                             ui.close_menu();
                             self.begin_load_single(ctx.clone());
@@ -377,6 +543,44 @@ impl eframe::App for Baboon {
                         {
                             ui.close_menu();
                             self.save_current_tag_as();
+                        }
+                        ui.separator();
+                        if ui
+                            .add_enabled(
+                                self.selected_key.is_some(),
+                                egui::Button::new("Close Current Tag"),
+                            )
+                            .clicked()
+                        {
+                            if let Some(key) = self.selected_key.clone() {
+                                self.close_tab(&key);
+                            }
+                            ui.close_menu();
+                        }
+                        if ui
+                            .add_enabled(
+                                !self.open_tabs.is_empty() || !self.floating_tabs.is_empty(),
+                                egui::Button::new("Close All Tags"),
+                            )
+                            .clicked()
+                        {
+                            self.close_all_tabs();
+                            ui.close_menu();
+                        }
+                        ui.separator();
+                        let can_fix_dependencies = self.selected_key.is_some()
+                            && self.source.as_ref().is_some_and(|source| {
+                                matches!(source.source, TagSource::LooseFolder { .. })
+                            });
+                        if ui
+                            .add_enabled(
+                                can_fix_dependencies,
+                                egui::Button::new("Fix Tag Dependencies"),
+                            )
+                            .clicked()
+                        {
+                            ui.close_menu();
+                            self.fix_current_tag_dependencies();
                         }
                         // Regenerate Index: force a fresh full scan and
                         // overwrite the cached index file.
@@ -429,6 +633,7 @@ impl eframe::App for Baboon {
                         }
                         ui.separator();
                         ui.checkbox(&mut self.show_browser_prefixes, "Show [tag]/[folder]");
+                        ui.checkbox(&mut self.show_block_sizes, "Show block sizes");
                         ui.checkbox(&mut self.expert_mode, "Expert mode");
                         ui.separator();
                         let terminal_enabled = self.terminal_work_dir.is_some();
@@ -481,6 +686,20 @@ impl eframe::App for Baboon {
                     ui.label(RichText::new("Status").strong());
                     ui.separator();
                     ui.label(&self.status);
+                    if let Some(progress) = &self.folder_refactor {
+                        ui.separator();
+                        ui.label(RichText::new(&progress.label).strong());
+                        let mut bar = if let Some(value) = progress.progress {
+                            egui::ProgressBar::new(value.clamp(0.0, 1.0))
+                        } else {
+                            egui::ProgressBar::new(0.0).animate(true)
+                        };
+                        bar = bar
+                            .desired_width(180.0)
+                            .text(RichText::new(&progress.phase).color(text_dark()));
+                        ui.add(bar);
+                        ctx.request_repaint();
+                    }
                 });
             });
 
@@ -878,12 +1097,15 @@ impl eframe::App for Baboon {
                         );
                         rack_rect = Some(response.rect);
                     } else {
-                        const TAB_LABEL_WIDTH: f32 = 170.0;
-                        const TAB_WIDTH: f32 = 248.0;
+                        const TAB_BUTTON_SIZE: f32 = 18.0;
+                        const TAB_MIN_LABEL_WIDTH: f32 = 48.0;
+                        const TAB_MAX_LABEL_WIDTH: f32 = 170.0;
+                        const TAB_SIDE_PADDING: f32 = 8.0;
+                        const TAB_INNER_GAP: f32 = 3.0;
 
-                        let available_width = ui.available_width().max(TAB_WIDTH);
-                        let row_gap = ui.spacing().item_spacing.x;
-                        let mut rows = Vec::<Vec<(String, String, bool)>>::new();
+                        let available_width = ui.available_width().max(120.0);
+                        let row_gap = 3.0;
+                        let mut rows = Vec::<Vec<(String, String, bool, f32)>>::new();
                         let mut row = Vec::new();
                         let mut row_width = 0.0;
 
@@ -902,10 +1124,22 @@ impl eframe::App for Baboon {
                             } else {
                                 tag_tab_label(entry)
                             };
+                            let label_width = tab_label_width(
+                                ui,
+                                &label,
+                                TAB_MIN_LABEL_WIDTH,
+                                TAB_MAX_LABEL_WIDTH,
+                            );
+                            let tab_width = TAB_SIDE_PADDING
+                                + label_width
+                                + TAB_INNER_GAP
+                                + TAB_BUTTON_SIZE
+                                + TAB_INNER_GAP
+                                + TAB_BUTTON_SIZE;
                             let next_width = if row.is_empty() {
-                                TAB_WIDTH
+                                tab_width
                             } else {
-                                row_width + row_gap + TAB_WIDTH
+                                row_width + row_gap + tab_width
                             };
                             if !row.is_empty() && next_width > available_width {
                                 rows.push(row);
@@ -915,8 +1149,8 @@ impl eframe::App for Baboon {
                             if !row.is_empty() {
                                 row_width += row_gap;
                             }
-                            row_width += TAB_WIDTH;
-                            row.push((key, label, active));
+                            row_width += tab_width;
+                            row.push((key, label, active, label_width));
                         }
                         if !row.is_empty() {
                             rows.push(row);
@@ -924,24 +1158,25 @@ impl eframe::App for Baboon {
 
                         for row in rows {
                             let row_response = ui.horizontal(|ui| {
-                                for (key, label, active) in row {
-                                    let shown_label = truncate_for_cell(&label, TAB_LABEL_WIDTH);
+                                ui.spacing_mut().item_spacing.x = row_gap;
+                                for (key, label, active, label_width) in row {
+                                    let shown_label = truncate_for_cell(&label, label_width);
                                     let fill = if active { menu_bar() } else { row_type() };
-                                    Frame::none()
+                                    let tab_response = Frame::none()
                                         .fill(fill)
                                         .stroke(Stroke::new(1.0, grid_line()))
                                         .inner_margin(egui::Margin {
-                                            left: 6.0,
-                                            right: 4.0,
-                                            top: 3.0,
-                                            bottom: 3.0,
+                                            left: 3.0,
+                                            right: 3.0,
+                                            top: 2.0,
+                                            bottom: 2.0,
                                         })
                                         .show(ui, |ui| {
-                                            ui.set_width(TAB_WIDTH);
                                             ui.horizontal(|ui| {
+                                                ui.spacing_mut().item_spacing.x = TAB_INNER_GAP;
                                                 let label_response = ui
                                                     .add_sized(
-                                                        Vec2::new(TAB_LABEL_WIDTH, 20.0),
+                                                        Vec2::new(label_width, 18.0),
                                                         egui::SelectableLabel::new(
                                                             active,
                                                             RichText::new(shown_label.clone())
@@ -957,6 +1192,9 @@ impl eframe::App for Baboon {
                                                         ctx.clone(),
                                                     );
                                                 }
+                                                if label_response.middle_clicked() {
+                                                    close_key = Some(key.clone());
+                                                }
                                                 label_response.context_menu(|ui| {
                                                     if ui.button("Close all").clicked() {
                                                         close_all = true;
@@ -969,9 +1207,10 @@ impl eframe::App for Baboon {
                                                 });
                                                 if ui
                                                     .add(
-                                                        egui::Button::new("pop")
-                                                            .min_size(Vec2::new(30.0, 18.0)),
+                                                        egui::Button::new("⇱")
+                                                            .min_size(Vec2::splat(TAB_BUTTON_SIZE)),
                                                     )
+                                                    .on_hover_text("Pop tab out")
                                                     .clicked()
                                                 {
                                                     pop_key = Some(key.clone());
@@ -979,14 +1218,18 @@ impl eframe::App for Baboon {
                                                 if ui
                                                     .add(
                                                         egui::Button::new("x")
-                                                            .min_size(Vec2::new(18.0, 18.0)),
+                                                            .min_size(Vec2::splat(TAB_BUTTON_SIZE)),
                                                     )
+                                                    .on_hover_text("Close tab")
                                                     .clicked()
                                                 {
                                                     close_key = Some(key.clone());
                                                 }
                                             });
                                         });
+                                    if tab_response.response.middle_clicked() {
+                                        close_key = Some(key.clone());
+                                    }
                                 }
                             });
                             rack_rect = Some(match rack_rect {
@@ -1029,6 +1272,7 @@ impl eframe::App for Baboon {
                         let mut shader_param_ops = Vec::new();
                         let mut model_variant_ops = Vec::new();
                         let mut color_request = None;
+                        let mut function_request = None;
                         let mut block_clip_request = None;
                         let mut bitmap_reimport = None;
                         let field_filter = compute_pending_field_filter(
@@ -1049,6 +1293,7 @@ impl eframe::App for Baboon {
                                 }
                             }),
                             editable: is_editable_tag(&entry, &doc.tag),
+                            show_block_sizes: self.show_block_sizes,
                             buffers: &mut self.edit_buffers,
                             pending: &mut pending,
                             block_ops: &mut block_ops,
@@ -1060,6 +1305,7 @@ impl eframe::App for Baboon {
                             shader_param_ops: &mut shader_param_ops,
                             model_variant_ops: &mut model_variant_ops,
                             color_request: &mut color_request,
+                            function_request: &mut function_request,
                             block_clipboard: self.block_clipboard.as_ref(),
                             block_clip_request: &mut block_clip_request,
                             field_filter: field_filter.as_ref(),
@@ -1137,6 +1383,9 @@ impl eframe::App for Baboon {
                         if let Some(popup) = color_request {
                             self.color_popup = Some(popup);
                         }
+                        if let Some(popup) = function_request {
+                            self.function_popup = Some(popup);
+                        }
                         // Element(s) were copied: stash them on the clipboard.
                         if let Some(clip) = block_clip_request {
                             self.status = format!(
@@ -1161,6 +1410,7 @@ impl eframe::App for Baboon {
                 }
             });
         self.draw_settings_window(ctx);
+        self.draw_new_tag_window(ctx);
         self.draw_about_window(ctx);
         self.persist_prefs_if_changed();
         self.draw_floating_tabs(ctx);
@@ -1180,6 +1430,15 @@ impl eframe::App for Baboon {
                     if let Some(doc) = self.parsed_tags.get_mut(&tag_key) {
                         if let Some(status) =
                             apply_shader_ops(&mut doc.tag, vec![op], &mut doc.dirty)
+                        {
+                            self.status = status;
+                        }
+                    }
+                }
+                ColorPopupResult::ShaderParamOp { tag_key, op } => {
+                    if let Some(doc) = self.parsed_tags.get_mut(&tag_key) {
+                        if let Some(status) =
+                            apply_shader_param_ops(&mut doc.tag, vec![op], &mut doc.dirty)
                         {
                             self.status = status;
                         }

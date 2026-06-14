@@ -11,6 +11,8 @@ pub(super) enum WorkerMessage {
         result: Result<TagFile, String>,
     },
     ExportFinished(Result<String, String>),
+    FolderRefactorProgress(FolderRefactorProgress),
+    FolderRefactorFinished(Result<FolderRefactorFinished, String>),
     // Full recursive entry scan finished for a loose-folder source.
     AllEntriesScanned(Result<Vec<TagEntry>, String>),
     // One line of streamed terminal output.
@@ -19,6 +21,28 @@ pub(super) enum WorkerMessage {
     TerminalDone,
     // GitHub latest-release lookup finished.
     UpdateCheckFinished(Result<UpdateCheckResult, String>),
+}
+
+pub(super) struct FolderRefactorProgress {
+    pub(super) label: String,
+    pub(super) phase: String,
+    pub(super) progress: Option<f32>,
+}
+
+pub(super) struct FolderRefactorFinished {
+    pub(super) status: String,
+    pub(super) lines: Vec<String>,
+    pub(super) tree: TagTree,
+    pub(super) all_entries: Vec<TagEntry>,
+    pub(super) reverse_dependencies: Option<ReverseDependencyIndex>,
+    pub(super) old_to_new_keys: HashMap<String, String>,
+    pub(super) moved: bool,
+}
+
+pub(super) struct FolderRefactorUiState {
+    pub(super) label: String,
+    pub(super) phase: String,
+    pub(super) progress: Option<f32>,
 }
 
 pub(super) struct UpdateCheckResult {
@@ -38,10 +62,13 @@ pub(super) struct TerminalState {
 
 pub(super) enum BrowserAction {
     Select(String),
+    CopyTagName(String),
     DumpJson(String),
     OpenInExplorer(String),
     DumpLoadedFolderJson(Vec<String>),
     DumpLooseFolderJson { rel_path: PathBuf, label: String },
+    MoveLooseFolder { rel_path: PathBuf, label: String },
+    CopyLooseFolder { rel_path: PathBuf, label: String },
     ExtractRaw(String),
     ExtractBitmap(String),
     ExtractBitmapFolder(Vec<String>),
@@ -135,6 +162,7 @@ pub(super) struct GuiPrefs {
     pub(super) browser_mode: BrowserMode,
     pub(super) show_browser_prefixes: bool,
     pub(super) double_click_to_open_tags: bool,
+    pub(super) show_block_sizes: bool,
     pub(super) expert_mode: bool,
     pub(super) dark_mode: bool,
     pub(super) ui_scale: f32,
@@ -153,6 +181,38 @@ impl TagDocument {
     }
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct NewTagGroup {
+    pub(super) group_tag: u32,
+    pub(super) name: String,
+    pub(super) schema_path: PathBuf,
+    pub(super) extension: String,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct NewTagDialog {
+    pub(super) game: String,
+    pub(super) rel_path: String,
+    pub(super) output_path: Option<PathBuf>,
+    pub(super) groups: Vec<NewTagGroup>,
+    pub(super) selected_group: usize,
+    pub(super) error: Option<String>,
+}
+
+impl Default for NewTagDialog {
+    fn default() -> Self {
+        Self {
+            game: "halo3_mcc".to_owned(),
+            rel_path: String::new(),
+            output_path: None,
+            groups: Vec::new(),
+            selected_group: 0,
+            error: None,
+        }
+    }
+}
+
+#[derive(Clone)]
 pub(super) struct PendingFieldEdit {
     pub(super) path: String,
     pub(super) input: String,
@@ -249,16 +309,30 @@ pub(super) struct ShaderOp {
 }
 
 /// A deferred shader mutation: create a new `parameters[]` element, set its
-/// `parameter name` and `real` value. Used when the user edits a shader
-/// parameter that has no existing instance in the tag.
+/// `parameter name`, then initialise one or more leaf fields. Used when the
+/// user edits a shader parameter that has no existing instance in the tag.
 #[derive(Clone)]
 pub(super) struct ShaderParamOp {
     /// Absolute path to the `parameters` block, e.g. `render_method/parameters`.
     pub(super) parameters_block_path: String,
     /// The parameter name to write into the new element's `parameter name`.
     pub(super) parameter_name: String,
-    /// The real value to write into the new element's `real` field.
-    pub(super) real_value: f32,
+    /// Leaf field edits relative to the newly-created parameter element.
+    pub(super) initial_fields: Vec<ShaderParamInitialField>,
+    /// Animated parameter children to append below the newly-created element.
+    pub(super) animated_parameters: Vec<ShaderParamInitialAnimated>,
+}
+
+#[derive(Clone)]
+pub(super) struct ShaderParamInitialField {
+    pub(super) field: String,
+    pub(super) input: String,
+}
+
+#[derive(Clone)]
+pub(super) struct ShaderParamInitialAnimated {
+    pub(super) output_type_index: i32,
+    pub(super) initial_function_hex: String,
 }
 
 #[derive(Clone)]
@@ -310,6 +384,7 @@ pub(super) struct FieldEditContext<'a> {
     pub(super) group_tag: u32,
     pub(super) tags_root: Option<&'a Path>,
     pub(super) editable: bool,
+    pub(super) show_block_sizes: bool,
     pub(super) buffers: &'a mut HashMap<String, String>,
     pub(super) pending: &'a mut Vec<PendingFieldEdit>,
     pub(super) block_ops: &'a mut Vec<BlockOp>,
@@ -330,6 +405,10 @@ pub(super) struct FieldEditContext<'a> {
     /// it into `self.color_popup` after rendering so the shared popup handler
     /// can show the picker and apply the edit.
     pub(super) color_request: &'a mut Option<MaterialColorPopup>,
+    /// Set when the user clicks a function row; the caller hoists it into
+    /// `self.function_popup` after rendering so the shared popup handler can
+    /// show the graph editor and apply function-data edits.
+    pub(super) function_request: &'a mut Option<FunctionPopup>,
     /// The current block clipboard (read), for gating "Paste" in block menus.
     pub(super) block_clipboard: Option<&'a BlockClipboard>,
     /// Set when the user clicks "Copy element"; the caller hoists it into
@@ -396,6 +475,7 @@ impl Default for GuiPrefs {
             browser_mode: BrowserMode::Folders,
             show_browser_prefixes: false,
             double_click_to_open_tags: false,
+            show_block_sizes: false,
             expert_mode: false,
             dark_mode: false,
             ui_scale: DEFAULT_UI_SCALE,

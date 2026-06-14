@@ -259,6 +259,154 @@ pub(super) const MATERIAL_TEXT: Color32 = Color32::from_rgb(20, 20, 20);
 pub(super) const MATERIAL_MUTED_TEXT: Color32 = Color32::from_rgb(96, 96, 96);
 pub(super) const MATERIAL_FUNCTION_ROW: Color32 = Color32::from_rgb(239, 205, 137);
 pub(super) const MATERIAL_SECTION_HEADER: Color32 = Color32::from_rgb(255, 255, 224);
+pub(super) fn material_ref_row() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(30, 58, 40)
+    } else {
+        MATERIAL_REF_ROW
+    }
+}
+
+pub(super) fn material_numeric_row() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(62, 45, 39)
+    } else {
+        MATERIAL_NUMERIC_ROW
+    }
+}
+
+pub(super) fn material_data_row() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(42, 43, 41)
+    } else {
+        MATERIAL_DATA_ROW
+    }
+}
+
+pub(super) fn material_grid_light() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(54, 56, 52)
+    } else {
+        MATERIAL_GRID_LIGHT
+    }
+}
+
+pub(super) fn material_input_edge() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(82, 86, 78)
+    } else {
+        MATERIAL_INPUT_EDGE
+    }
+}
+
+pub(super) fn material_default_box() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(38, 39, 37)
+    } else {
+        MATERIAL_DEFAULT_BOX
+    }
+}
+
+pub(super) fn material_text() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(231, 232, 226)
+    } else {
+        MATERIAL_TEXT
+    }
+}
+
+pub(super) fn material_muted_text() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(155, 158, 150)
+    } else {
+        MATERIAL_MUTED_TEXT
+    }
+}
+
+pub(super) fn material_function_row() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(58, 47, 32)
+    } else {
+        MATERIAL_FUNCTION_ROW
+    }
+}
+
+pub(super) fn material_section_header() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(18, 18, 16)
+    } else {
+        MATERIAL_SECTION_HEADER
+    }
+}
+
+pub(super) fn material_input() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(27, 28, 27)
+    } else {
+        Color32::WHITE
+    }
+}
+
+pub(super) fn material_disabled_input() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(36, 37, 35)
+    } else {
+        Color32::from_gray(210)
+    }
+}
+
+pub(super) fn material_default_input() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(39, 40, 38)
+    } else {
+        Color32::from_gray(232)
+    }
+}
+
+pub(super) fn material_checkbox_disabled() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(34, 35, 33)
+    } else {
+        Color32::from_gray(220)
+    }
+}
+
+pub(super) fn material_hover() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(46, 58, 62)
+    } else {
+        Color32::from_rgb(238, 244, 255)
+    }
+}
+
+pub(super) fn material_pending_input() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(43, 37, 31)
+    } else {
+        Color32::from_rgb(255, 252, 235)
+    }
+}
+
+pub(super) fn material_delete_text() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(226, 92, 92)
+    } else {
+        Color32::DARK_RED
+    }
+}
+
+pub(super) fn material_color_swatch_edge(color: Color32) -> Color32 {
+    let luminance =
+        0.2126 * color.r() as f32 + 0.7152 * color.g() as f32 + 0.0722 * color.b() as f32;
+    if luminance < 80.0 {
+        Color32::from_rgb(238, 238, 232)
+    } else if luminance > 188.0 {
+        Color32::from_rgb(24, 24, 22)
+    } else {
+        material_input_edge()
+    }
+}
+
 pub(super) const MATERIAL_PARAMETER_SECTIONS: &[&str] = &[
     "ALBEDO",
     "BUMP_MAPPING",

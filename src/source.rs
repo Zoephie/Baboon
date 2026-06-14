@@ -71,7 +71,73 @@ pub struct LoadedSourceData {
     /// Full entry set from a completed background scan (or a loaded cache).
     /// Empty until populated. Groups mode and filtered search read from this.
     pub all_entries: Vec<TagEntry>,
+    /// Reverse dependency cache for loose-folder sources. Built lazily by
+    /// folder moves so future refactors can touch only dependent tags.
+    pub reverse_dependencies: Option<ReverseDependencyIndex>,
     pub initial_tag: Option<(String, TagFile)>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ReverseDependencyIndex {
+    by_tag: BTreeMap<String, Vec<DependencyRef>>,
+    by_dependency: BTreeMap<String, Vec<String>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DependencyRef {
+    pub group_tag: u32,
+    pub rel_path: String,
+}
+
+impl ReverseDependencyIndex {
+    pub fn set_tag_dependencies<I>(&mut self, tag_key: String, deps: I)
+    where
+        I: IntoIterator<Item = DependencyRef>,
+    {
+        self.clear_tag(&tag_key);
+        let mut deps = deps.into_iter().collect::<Vec<_>>();
+        deps.sort_by(|a, b| {
+            dependency_key(a.group_tag, &a.rel_path).cmp(&dependency_key(b.group_tag, &b.rel_path))
+        });
+        deps.dedup_by(|a, b| {
+            a.group_tag == b.group_tag && a.rel_path.eq_ignore_ascii_case(&b.rel_path)
+        });
+        for dep in &deps {
+            let key = dependency_key(dep.group_tag, &dep.rel_path);
+            let tags = self.by_dependency.entry(key).or_default();
+            if !tags.iter().any(|existing| existing == &tag_key) {
+                tags.push(tag_key.clone());
+                tags.sort();
+            }
+        }
+        self.by_tag.insert(tag_key, deps);
+    }
+
+    pub fn clear_tag(&mut self, tag_key: &str) {
+        let Some(deps) = self.by_tag.remove(tag_key) else {
+            return;
+        };
+        for dep in deps {
+            let key = dependency_key(dep.group_tag, &dep.rel_path);
+            if let Some(tags) = self.by_dependency.get_mut(&key) {
+                tags.retain(|existing| existing != tag_key);
+                if tags.is_empty() {
+                    self.by_dependency.remove(&key);
+                }
+            }
+        }
+    }
+
+    pub fn dependents_for(&self, group_tag: u32, rel_path: &str) -> &[String] {
+        self.by_dependency
+            .get(&dependency_key(group_tag, rel_path))
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    pub fn len(&self) -> usize {
+        self.by_tag.len()
+    }
 }
 
 #[derive(Debug)]
@@ -129,6 +195,7 @@ pub fn load_single_file(path: PathBuf, names: &TagNameIndex) -> Result<LoadedSou
         tree: build_tree(&entries),
         group_tree: build_group_tree(&entries),
         all_entries: Vec::new(),
+        reverse_dependencies: None,
         entries,
         initial_tag: Some((key, tag)),
     })
@@ -153,6 +220,9 @@ pub fn load_folder(
         .as_deref()
         .and_then(|g| load_entry_index(g, &info.scan_root))
         .unwrap_or_default();
+    let reverse_dependencies = game
+        .as_deref()
+        .and_then(|g| load_reverse_dependency_index(g, &info.scan_root));
     let group_tree = build_group_tree(&all_entries);
     Ok(LoadedSourceData {
         label: info.label,
@@ -165,6 +235,7 @@ pub fn load_folder(
         tree,
         group_tree,
         all_entries,
+        reverse_dependencies,
         initial_tag: None,
     })
 }
@@ -218,6 +289,7 @@ pub fn load_monolithic_blob_index(
         tree,
         group_tree,
         initial_tag: None,
+        reverse_dependencies: None,
     })
 }
 
@@ -466,15 +538,22 @@ pub fn scan_folder_subtree_entries(
 /// Derive a stable index filename from the game name stored in `FolderRootInfo`.
 /// e.g. "halo3_mcc" → `halo3_mcc_index.json`.
 pub fn index_path(game: &str) -> PathBuf {
-    app_index_path(game, "Baboon", "baboon")
+    app_cache_path(&format!("{game}_index.json"), "Baboon", "baboon")
+}
+
+pub fn reverse_dependency_index_path(game: &str) -> PathBuf {
+    app_cache_path(
+        &format!("{game}_reverse_dependencies.json"),
+        "Baboon",
+        "baboon",
+    )
 }
 
 fn legacy_index_path(game: &str) -> PathBuf {
-    app_index_path(game, "Genesis", "genesis")
+    app_cache_path(&format!("{game}_index.json"), "Genesis", "genesis")
 }
 
-fn app_index_path(game: &str, windows_folder: &str, unix_folder: &str) -> PathBuf {
-    let filename = format!("{game}_index.json");
+fn app_cache_path(filename: &str, windows_folder: &str, unix_folder: &str) -> PathBuf {
     if let Some(appdata) = std::env::var_os("APPDATA") {
         return PathBuf::from(appdata).join(windows_folder).join(filename);
     }
@@ -558,6 +637,80 @@ pub fn load_entry_index(game: &str, root: &Path) -> Option<Vec<TagEntry>> {
     } else {
         Some(entries)
     }
+}
+
+pub fn save_reverse_dependency_index(
+    game: &str,
+    root: &Path,
+    index: &ReverseDependencyIndex,
+) -> Result<()> {
+    let path = reverse_dependency_index_path(game);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).context("create config dir")?;
+    }
+    let tags = index
+        .by_tag
+        .iter()
+        .map(|(key, deps)| {
+            let deps = deps
+                .iter()
+                .map(|dep| {
+                    serde_json::json!({
+                        "group_tag": dep.group_tag,
+                        "rel_path": dep.rel_path,
+                    })
+                })
+                .collect::<Vec<_>>();
+            serde_json::json!({
+                "key": key,
+                "dependencies": deps,
+            })
+        })
+        .collect::<Vec<_>>();
+    let text = serde_json::to_string(&serde_json::json!({
+        "version": 1,
+        "root": root.display().to_string(),
+        "tags": tags,
+    }))
+    .context("serialize reverse dependency index")?;
+    std::fs::write(&path, text).context("write reverse dependency index")?;
+    Ok(())
+}
+
+pub fn load_reverse_dependency_index(game: &str, root: &Path) -> Option<ReverseDependencyIndex> {
+    let text = std::fs::read_to_string(reverse_dependency_index_path(game)).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    if value.get("version").and_then(|v| v.as_u64())? != 1 {
+        return None;
+    }
+    let saved_root = value.get("root").and_then(|v| v.as_str())?;
+    if saved_root != root.display().to_string() {
+        return None;
+    }
+    let mut index = ReverseDependencyIndex::default();
+    for item in value.get("tags")?.as_array()? {
+        let key = item.get("key")?.as_str()?.to_owned();
+        let deps = item
+            .get("dependencies")?
+            .as_array()?
+            .iter()
+            .filter_map(|dep| {
+                Some(DependencyRef {
+                    group_tag: dep.get("group_tag")?.as_u64()? as u32,
+                    rel_path: dep.get("rel_path")?.as_str()?.to_owned(),
+                })
+            })
+            .collect::<Vec<_>>();
+        index.set_tag_dependencies(key, deps);
+    }
+    Some(index)
+}
+
+fn dependency_key(group_tag: u32, rel_path: &str) -> String {
+    format!(
+        "{group_tag:08x}\t{}",
+        rel_path.replace('/', "\\").to_ascii_lowercase()
+    )
 }
 
 #[cfg(test)]
@@ -714,7 +867,7 @@ fn scan_folder_entries(root: &Path, names: &TagNameIndex) -> Result<Vec<TagEntry
     Ok(entries)
 }
 
-fn build_folder_directory_tree(root: &Path) -> Result<TagTree> {
+pub(crate) fn build_folder_directory_tree(root: &Path) -> Result<TagTree> {
     let mut tree = TagTree::default();
     tree.entries = Vec::new();
     tree.children = list_direct_child_nodes(root, Path::new(""))?;

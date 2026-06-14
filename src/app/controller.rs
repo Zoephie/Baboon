@@ -80,6 +80,10 @@ impl Baboon {
                             self.trim_tag_memory();
                         }
                         Err(error) => {
+                            self.terminal
+                                .lines
+                                .push(format!("Folder refactor failed: {error}"));
+                            self.terminal.scroll_to_bottom = true;
                             self.status = error;
                         }
                     }
@@ -109,6 +113,74 @@ impl Baboon {
                         Ok(message) => message,
                         Err(error) => error,
                     };
+                }
+                WorkerMessage::FolderRefactorProgress(progress) => {
+                    self.folder_refactor = Some(FolderRefactorUiState {
+                        label: progress.label.clone(),
+                        phase: progress.phase.clone(),
+                        progress: progress.progress,
+                    });
+                    self.status = format!("{}: {}", progress.label, progress.phase);
+                }
+                WorkerMessage::FolderRefactorFinished(result) => {
+                    self.folder_refactor = None;
+                    match result {
+                        Ok(done) => {
+                            if let Some(source) = self.source.as_mut() {
+                                source.entries.clear();
+                                source.all_entries = done.all_entries;
+                                source.tree = done.tree;
+                                source.group_tree =
+                                    crate::source::build_group_tree(&source.all_entries);
+                                source.reverse_dependencies = done.reverse_dependencies;
+                                if let TagSource::LooseFolder { root } = &source.source {
+                                    if !source.all_entries.is_empty()
+                                        && let Some(game) = source.game.as_deref()
+                                    {
+                                        let _ = crate::source::save_entry_index(
+                                            game,
+                                            root,
+                                            &source.all_entries,
+                                        );
+                                    }
+                                    if let (Some(game), Some(reverse_dependencies)) = (
+                                        source.game.as_deref(),
+                                        source.reverse_dependencies.as_ref(),
+                                    ) {
+                                        let _ = crate::source::save_reverse_dependency_index(
+                                            game,
+                                            root,
+                                            reverse_dependencies,
+                                        );
+                                    }
+                                }
+                            }
+                            if done.moved {
+                                remap_open_tag_keys(&mut self.open_tabs, &done.old_to_new_keys);
+                                remap_hashset_keys(&mut self.floating_tabs, &done.old_to_new_keys);
+                                if let Some(selected) = self.selected_key.clone()
+                                    && let Some(new_key) = done.old_to_new_keys.get(&selected)
+                                {
+                                    self.selected_key = Some(new_key.clone());
+                                }
+                            }
+                            self.parsed_tags.clear();
+                            self.loading_tags.clear();
+                            self.tag_cache_order.clear();
+                            self.bitmap_previews.clear();
+                            self.model_previews.clear();
+                            self.edit_buffers.clear();
+                            self.field_search.clear();
+                            self.field_search_applied.clear();
+                            self.source_generation = self.source_generation.wrapping_add(1);
+                            self.terminal.lines.extend(done.lines);
+                            self.terminal.scroll_to_bottom = true;
+                            self.status = done.status;
+                        }
+                        Err(error) => {
+                            self.status = error;
+                        }
+                    }
                 }
                 WorkerMessage::AllEntriesScanned(result) => {
                     self.scanning_entries = false;
@@ -206,6 +278,207 @@ impl Baboon {
             let _ = tx.send(WorkerMessage::SourceLoaded(result));
             ctx.request_repaint();
         });
+    }
+
+    pub(super) fn open_new_tag_dialog(&mut self) {
+        let default_game = self
+            .source
+            .as_ref()
+            .and_then(|source| source.game.as_deref())
+            .unwrap_or("halo3_mcc")
+            .to_owned();
+        self.new_tag_dialog = NewTagDialog {
+            game: default_game,
+            rel_path: String::new(),
+            output_path: None,
+            groups: Vec::new(),
+            selected_group: 0,
+            error: None,
+        };
+        self.refresh_new_tag_groups();
+        self.new_tag_open = true;
+    }
+
+    pub(super) fn refresh_new_tag_groups(&mut self) {
+        match load_new_tag_groups(&self.new_tag_dialog.game) {
+            Ok(groups) if groups.is_empty() => {
+                self.new_tag_dialog.groups = groups;
+                self.new_tag_dialog.selected_group = 0;
+                self.new_tag_dialog.error = Some(format!(
+                    "No tag schemas found for {}",
+                    self.new_tag_dialog.game
+                ));
+            }
+            Ok(groups) => {
+                self.new_tag_dialog.groups = groups;
+                self.new_tag_dialog.selected_group = self
+                    .new_tag_dialog
+                    .selected_group
+                    .min(self.new_tag_dialog.groups.len() - 1);
+                self.new_tag_dialog.rel_path.clear();
+                self.new_tag_dialog.output_path = None;
+                self.new_tag_dialog.error = None;
+            }
+            Err(error) => {
+                self.new_tag_dialog.groups.clear();
+                self.new_tag_dialog.selected_group = 0;
+                self.new_tag_dialog.rel_path.clear();
+                self.new_tag_dialog.output_path = None;
+                self.new_tag_dialog.error = Some(error);
+            }
+        }
+    }
+
+    pub(super) fn choose_new_tag_output_path(&mut self) {
+        let Some(root) = self.loaded_tags_root() else {
+            self.new_tag_dialog.error =
+                Some("Load a loose editing-kit tags folder before creating a tag".to_owned());
+            return;
+        };
+        let Some(group) = self
+            .new_tag_dialog
+            .groups
+            .get(self.new_tag_dialog.selected_group)
+            .cloned()
+        else {
+            self.new_tag_dialog.error = Some("Choose a tag group".to_owned());
+            return;
+        };
+
+        let mut dialog = rfd::FileDialog::new()
+            .set_title(format!("Create New {}", group.name))
+            .set_directory(&root)
+            .set_file_name(format!("new_tag.{}", group.extension))
+            .add_filter(
+                format!("{} tag", group.extension),
+                &[group.extension.as_str()],
+            );
+        if let Some(output) = self.new_tag_dialog.output_path.as_ref()
+            && let Some(parent) = output.parent()
+        {
+            dialog = dialog.set_directory(parent);
+        }
+        let Some(picked) = dialog.save_file() else {
+            return;
+        };
+        match new_tag_output_path_from_dialog(&root, &picked, &group.extension) {
+            Ok((output, rel_path)) => {
+                self.new_tag_dialog.output_path = Some(output);
+                self.new_tag_dialog.rel_path = rel_path;
+                self.new_tag_dialog.error = None;
+            }
+            Err(error) => {
+                self.new_tag_dialog.output_path = None;
+                self.new_tag_dialog.rel_path.clear();
+                self.new_tag_dialog.error = Some(error);
+            }
+        }
+    }
+
+    pub(super) fn create_new_tag(&mut self) {
+        let Some(root) = self.loaded_tags_root() else {
+            self.new_tag_dialog.error =
+                Some("Load a loose editing-kit tags folder before creating a tag".to_owned());
+            return;
+        };
+        let Some(group) = self
+            .new_tag_dialog
+            .groups
+            .get(self.new_tag_dialog.selected_group)
+            .cloned()
+        else {
+            self.new_tag_dialog.error = Some("Choose a tag group".to_owned());
+            return;
+        };
+        let Some(output) = self.new_tag_dialog.output_path.clone() else {
+            self.new_tag_dialog.error = Some("Choose a tag name and location".to_owned());
+            return;
+        };
+        let output = match new_tag_output_path_from_dialog(&root, &output, &group.extension) {
+            Ok((output, rel_path)) => {
+                self.new_tag_dialog.rel_path = rel_path;
+                output
+            }
+            Err(error) => {
+                self.new_tag_dialog.error = Some(error);
+                return;
+            }
+        };
+        if output.exists() {
+            self.new_tag_dialog.error = Some(format!("{} already exists", output.display()));
+            return;
+        }
+        let tag = match TagFile::new(&group.schema_path) {
+            Ok(tag) => tag,
+            Err(error) => {
+                self.new_tag_dialog.error = Some(format!("Could not create tag: {error}"));
+                return;
+            }
+        };
+        if let Some(parent) = output.parent()
+            && let Err(error) = fs::create_dir_all(parent)
+        {
+            self.new_tag_dialog.error =
+                Some(format!("Could not create {}: {error}", parent.display()));
+            return;
+        }
+        if let Err(error) = tag.write_atomic(&output) {
+            self.new_tag_dialog.error =
+                Some(format!("Could not write {}: {error}", output.display()));
+            return;
+        }
+
+        let display_path = output
+            .strip_prefix(&root)
+            .unwrap_or(output.as_path())
+            .to_string_lossy()
+            .replace('\\', "/");
+        let key = display_path.clone();
+        let entry = TagEntry {
+            key: key.clone(),
+            display_path,
+            group_tag: group.group_tag,
+            group_name: Some(group.name.clone()),
+            location: TagEntryLocation::LooseFile(output.clone()),
+        };
+        self.register_created_tag(entry, tag);
+        self.new_tag_open = false;
+        self.status = format!("Created {}", output.display());
+    }
+
+    pub(super) fn loaded_tags_root(&self) -> Option<PathBuf> {
+        let TagSource::LooseFolder { root } = &self.source.as_ref()?.source else {
+            return None;
+        };
+        Some(root.clone())
+    }
+
+    pub(super) fn register_created_tag(&mut self, entry: TagEntry, tag: TagFile) {
+        let key = entry.key.clone();
+        if let Some(source) = self.source.as_mut() {
+            source.entries.retain(|existing| existing.key != key);
+            source.entries.push(entry.clone());
+            source.all_entries.retain(|existing| existing.key != key);
+            source.all_entries.push(entry.clone());
+            if let TagSource::LooseFolder { root } = &source.source {
+                if let Ok(tree) = crate::source::build_folder_directory_tree(root) {
+                    source.tree = tree;
+                }
+                source.group_tree = crate::source::build_group_tree(&source.all_entries);
+                if let Some(game) = source.game.as_deref() {
+                    let _ = crate::source::save_entry_index(game, root, &source.all_entries);
+                }
+            }
+        }
+        self.source_generation = self.source_generation.wrapping_add(1);
+        self.parsed_tags
+            .insert(key.clone(), TagDocument::clean(tag));
+        if !self.open_tabs.iter().any(|tab| tab == &key) {
+            self.open_tabs.push(key.clone());
+        }
+        self.selected_key = Some(key.clone());
+        self.remember_tag_use(&key);
+        self.trim_open_tabs();
     }
 
     /// Trigger a background full recursive scan of a LooseFolder source so
@@ -541,6 +814,7 @@ impl Baboon {
     pub(super) fn handle_browser_action(&mut self, action: BrowserAction, ctx: egui::Context) {
         match action {
             BrowserAction::Select(key) => self.select_entry(key, ctx),
+            BrowserAction::CopyTagName(key) => self.copy_tag_name(&key, &ctx),
             BrowserAction::DumpJson(key) => self.begin_export_json(key, ctx),
             BrowserAction::OpenInExplorer(key) => self.open_entry_in_explorer(&key),
             BrowserAction::DumpLoadedFolderJson(keys) => {
@@ -548,6 +822,12 @@ impl Baboon {
             }
             BrowserAction::DumpLooseFolderJson { rel_path, label } => {
                 self.begin_export_loose_folder_json(rel_path, label, ctx)
+            }
+            BrowserAction::MoveLooseFolder { rel_path, label } => {
+                self.begin_refactor_loose_folder(rel_path, label, true)
+            }
+            BrowserAction::CopyLooseFolder { rel_path, label } => {
+                self.begin_refactor_loose_folder(rel_path, label, false)
             }
             BrowserAction::ExtractRaw(key) => self.begin_extract_raw(key, ctx),
             BrowserAction::ExtractBitmap(key) => self.begin_extract_bitmap(key, ctx),
@@ -568,6 +848,15 @@ impl Baboon {
                 self.begin_extract_hlsl_include_folder(keys, ctx)
             }
         }
+    }
+
+    pub(super) fn copy_tag_name(&mut self, key: &str, ctx: &egui::Context) {
+        let Some(entry) = self.entry_for_key(key) else {
+            self.status = "Tag is no longer in the browser".to_owned();
+            return;
+        };
+        ctx.output_mut(|output| output.copied_text = entry.display_path.clone());
+        self.status = format!("Copied {}", entry.display_path);
     }
 
     pub(super) fn open_entry_in_explorer(&mut self, key: &str) {
@@ -687,6 +976,79 @@ impl Baboon {
                 .map_err(|e| e.to_string());
             let _ = tx.send(WorkerMessage::ExportFinished(result));
             ctx.request_repaint();
+        });
+    }
+
+    pub(super) fn begin_refactor_loose_folder(
+        &mut self,
+        rel_path: PathBuf,
+        label: String,
+        move_folder: bool,
+    ) {
+        if self.folder_refactor.is_some() {
+            self.status = "A folder move/copy is already running".to_owned();
+            return;
+        }
+        if self.parsed_tags.values().any(|doc| doc.dirty) {
+            self.status = "Save or close dirty tags before moving/copying folders".to_owned();
+            return;
+        }
+        let Some(root) = self.loaded_tags_root() else {
+            self.status = "Folder move/copy requires a loaded tags folder".to_owned();
+            return;
+        };
+        let title = if move_folder {
+            format!("Move {label} To")
+        } else {
+            format!("Copy {label} To")
+        };
+        let Some(destination_parent) = rfd::FileDialog::new()
+            .set_title(title)
+            .set_directory(&root)
+            .pick_folder()
+        else {
+            return;
+        };
+        let names = self.names.clone();
+        let existing_all_entries = self
+            .source
+            .as_ref()
+            .map(|source| source.all_entries.clone())
+            .unwrap_or_default();
+        let existing_reverse_dependencies = self
+            .source
+            .as_ref()
+            .and_then(|source| source.reverse_dependencies.clone());
+        let game = self.source.as_ref().and_then(|source| source.game.clone());
+        let tx = self.tx.clone();
+        let job_label = if move_folder {
+            format!("Moving {label}")
+        } else {
+            format!("Copying {label}")
+        };
+        self.folder_refactor = Some(FolderRefactorUiState {
+            label: job_label.clone(),
+            phase: "Preparing".to_owned(),
+            progress: None,
+        });
+        self.status = format!("{job_label}: Preparing");
+        thread::spawn(move || {
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                run_folder_refactor_job(
+                    root,
+                    rel_path,
+                    destination_parent,
+                    move_folder,
+                    job_label,
+                    names,
+                    game,
+                    existing_all_entries,
+                    existing_reverse_dependencies,
+                    &tx,
+                )
+            }))
+            .unwrap_or_else(|_| Err("Folder move/copy worker crashed".to_owned()));
+            let _ = tx.send(WorkerMessage::FolderRefactorFinished(result));
         });
     }
 
@@ -1009,11 +1371,75 @@ impl Baboon {
         }
     }
 
+    pub(super) fn fix_current_tag_dependencies(&mut self) {
+        let Some(key) = self.selected_key.clone() else {
+            self.status = "No tag selected".to_owned();
+            return;
+        };
+        let Some(entry) = self.entry_for_key(&key).cloned() else {
+            self.status = "Selected tag is no longer in the source".to_owned();
+            return;
+        };
+        let TagEntryLocation::LooseFile(_) = entry.location else {
+            self.status = "Fix Tag Dependencies requires a loose-folder tag".to_owned();
+            return;
+        };
+        let Some(root) = self.loaded_tags_root() else {
+            self.status = "Fix Tag Dependencies requires a loaded tags folder".to_owned();
+            return;
+        };
+
+        let entries = match self.dependency_database_entries(&root) {
+            Ok(entries) => entries,
+            Err(error) => {
+                self.status = format!("Could not build dependency database: {error}");
+                return;
+            }
+        };
+        let names = self.names.clone();
+        let index = build_dependency_candidate_index(&entries, &names);
+        let Some(doc) = self.parsed_tags.get_mut(&key) else {
+            self.status = "Load the selected tag before fixing dependencies".to_owned();
+            return;
+        };
+        if doc.tag.endian != Endian::Le {
+            self.status = "Only little-endian loose tags can be edited".to_owned();
+            return;
+        }
+
+        let report = fix_tag_dependencies_in_tag(&mut doc.tag, &root, &names, &index);
+        if report.fixed > 0 {
+            doc.dirty = true;
+        }
+        let status = report.status();
+        self.terminal.lines.extend(report.lines);
+        self.terminal.scroll_to_bottom = true;
+        self.status = status;
+    }
+
+    fn dependency_database_entries(&mut self, root: &Path) -> Result<Vec<TagEntry>, String> {
+        let Some(source) = self.source.as_mut() else {
+            return Err("no tag source is loaded".to_owned());
+        };
+        if !matches!(source.source, TagSource::LooseFolder { .. }) {
+            return Err("load a loose editing-kit tags folder first".to_owned());
+        }
+        let entries = scan_folder_subtree_entries(root, Path::new(""), &self.names)
+            .map_err(|error| error.to_string())?;
+        source.all_entries = entries;
+        source.group_tree = crate::source::build_group_tree(&source.all_entries);
+        if let Some(game) = source.game.as_deref() {
+            let _ = crate::source::save_entry_index(game, root, &source.all_entries);
+        }
+        Ok(source.all_entries.clone())
+    }
+
     pub(super) fn current_prefs(&self) -> GuiPrefs {
         GuiPrefs {
             browser_mode: self.browser_mode,
             show_browser_prefixes: self.show_browser_prefixes,
             double_click_to_open_tags: self.double_click_to_open_tags,
+            show_block_sizes: self.show_block_sizes,
             expert_mode: self.expert_mode,
             dark_mode: self.dark_mode,
             ui_scale: self.ui_scale,
@@ -1382,6 +1808,7 @@ impl Baboon {
                         &mut self.field_search_applied,
                     );
                     let mut color_request = None;
+                    let mut function_request = None;
                     let mut block_clip_request = None;
                     let mut edit_context = FieldEditContext {
                         view_scope: "floating",
@@ -1395,6 +1822,7 @@ impl Baboon {
                                 _ => None,
                             }),
                         editable: is_editable_tag(&entry, &doc.tag),
+                        show_block_sizes: self.show_block_sizes,
                         buffers: &mut self.edit_buffers,
                         pending: &mut pending,
                         block_ops: &mut block_ops,
@@ -1406,6 +1834,7 @@ impl Baboon {
                         shader_param_ops: &mut shader_param_ops,
                         model_variant_ops: &mut model_variant_ops,
                         color_request: &mut color_request,
+                        function_request: &mut function_request,
                         block_clipboard: self.block_clipboard.as_ref(),
                         block_clip_request: &mut block_clip_request,
                         field_filter: field_filter.as_ref(),
@@ -1472,6 +1901,9 @@ impl Baboon {
                     // A color swatch was clicked: open the shared picker.
                     if let Some(popup) = color_request {
                         self.color_popup = Some(popup);
+                    }
+                    if let Some(popup) = function_request {
+                        self.function_popup = Some(popup);
                     }
                     // Element(s) were copied: stash them on the clipboard.
                     if let Some(clip) = block_clip_request {
@@ -1843,5 +2275,1276 @@ fn selected_tab_after_removal(
                     .and_then(|index| open_tabs.get(index))
             })
             .cloned()
+    }
+}
+
+pub(super) fn available_definition_games() -> Vec<String> {
+    let root = locate_definitions_root();
+    let Ok(entries) = fs::read_dir(root) else {
+        return vec!["halo3_mcc".to_owned()];
+    };
+    let mut games = entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            path.join("_meta.json")
+                .is_file()
+                .then(|| entry.file_name().to_string_lossy().trim().to_owned())
+        })
+        .filter(|name| !name.is_empty())
+        .collect::<Vec<_>>();
+    games.sort();
+    games.dedup();
+    if games.is_empty() {
+        games.push("halo3_mcc".to_owned());
+    }
+    games
+}
+
+pub(super) fn load_new_tag_groups(game: &str) -> Result<Vec<NewTagGroup>, String> {
+    let game_dir = locate_definitions_root().join(game);
+    let meta_path = game_dir.join("_meta.json");
+    let bytes = fs::read(&meta_path)
+        .map_err(|error| format!("Could not read {}: {error}", meta_path.display()))?;
+    let value: Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("Could not parse {}: {error}", meta_path.display()))?;
+    let Some(tag_index) = value.get("tag_index").and_then(Value::as_object) else {
+        return Err(format!("{} is missing tag_index", meta_path.display()));
+    };
+    let mut groups = Vec::new();
+    for (fourcc, name_value) in tag_index {
+        let Some(name) = name_value.as_str() else {
+            continue;
+        };
+        let Some(group_tag) = parse_group_tag(fourcc) else {
+            continue;
+        };
+        let schema_path = game_dir.join(format!("{name}.json"));
+        if !schema_path.is_file() {
+            continue;
+        }
+        groups.push(NewTagGroup {
+            group_tag,
+            name: name.to_owned(),
+            schema_path,
+            extension: group_tag_to_extension(group_tag)
+                .unwrap_or(name)
+                .trim()
+                .to_owned(),
+        });
+    }
+    groups.sort_by(|a, b| {
+        a.name
+            .cmp(&b.name)
+            .then_with(|| a.group_tag.cmp(&b.group_tag))
+    });
+    Ok(groups)
+}
+
+pub(super) fn new_tag_output_path(
+    tags_root: &Path,
+    rel_path: &str,
+    extension: &str,
+) -> Result<PathBuf, String> {
+    let cleaned = rel_path.trim().replace('\\', "/");
+    let cleaned = cleaned.trim_matches('/');
+    if cleaned.is_empty() {
+        return Err("Enter a relative tag path".to_owned());
+    }
+    let rel = Path::new(cleaned);
+    if rel.is_absolute() {
+        return Err("Tag path must be relative to the tags folder".to_owned());
+    }
+    if rel.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::ParentDir | std::path::Component::Prefix(_)
+        )
+    }) {
+        return Err("Tag path cannot contain .. or a drive prefix".to_owned());
+    }
+    let mut output = tags_root.join(rel);
+    output.set_extension(extension.trim_start_matches('.'));
+    Ok(output)
+}
+
+pub(super) fn new_tag_output_path_from_dialog(
+    tags_root: &Path,
+    picked_path: &Path,
+    extension: &str,
+) -> Result<(PathBuf, String), String> {
+    let extension = extension.trim_start_matches('.');
+    let mut output = picked_path.to_path_buf();
+    output.set_extension(extension);
+
+    let root = lexical_normalize_path(tags_root);
+    let output = lexical_normalize_path(&output);
+    if !output.starts_with(&root) {
+        return Err("Choose a location inside the loaded tags folder".to_owned());
+    }
+
+    let rel = output
+        .strip_prefix(&root)
+        .map_err(|_| "Choose a location inside the loaded tags folder".to_owned())?;
+    if rel.as_os_str().is_empty()
+        || rel.components().any(|component| {
+            matches!(
+                component,
+                std::path::Component::ParentDir | std::path::Component::Prefix(_)
+            )
+        })
+    {
+        return Err("Choose a tag name inside the loaded tags folder".to_owned());
+    }
+    let display = rel.to_string_lossy().replace('\\', "/");
+    Ok((output, display))
+}
+
+fn lexical_normalize_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    normalized
+}
+
+type DependencyCandidateIndex = HashMap<(u32, String), Vec<String>>;
+
+#[derive(Default)]
+struct DependencyFixReport {
+    scanned: usize,
+    fixed: usize,
+    already_ok: usize,
+    unresolved: usize,
+    ambiguous: usize,
+    skipped: usize,
+    lines: Vec<String>,
+}
+
+impl DependencyFixReport {
+    fn status(&self) -> String {
+        if self.fixed > 0 {
+            format!(
+                "Fixed {} dependenc{} ({} unresolved, {} ambiguous)",
+                self.fixed,
+                if self.fixed == 1 { "y" } else { "ies" },
+                self.unresolved,
+                self.ambiguous
+            )
+        } else if self.unresolved == 0 && self.ambiguous == 0 {
+            format!(
+                "No broken dependencies found across {} reference(s)",
+                self.scanned
+            )
+        } else {
+            format!(
+                "No dependencies auto-fixed ({} unresolved, {} ambiguous)",
+                self.unresolved, self.ambiguous
+            )
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct TagReferenceUse {
+    field_path: String,
+    group_tag: u32,
+    rel_path: String,
+}
+
+fn fix_tag_dependencies_in_tag(
+    tag: &mut TagFile,
+    tags_root: &Path,
+    names: &TagNameIndex,
+    index: &DependencyCandidateIndex,
+) -> DependencyFixReport {
+    let mut refs = Vec::new();
+    collect_tag_references(tag.root(), "", &mut refs);
+
+    let mut report = DependencyFixReport {
+        scanned: refs.len(),
+        lines: vec![format!(
+            "Fix Tag Dependencies: scanned {} reference(s)",
+            refs.len()
+        )],
+        ..Default::default()
+    };
+    let mut fixes = Vec::new();
+    for reference in refs {
+        let Some(extension) = names
+            .name_for(reference.group_tag)
+            .or_else(|| group_tag_to_extension(reference.group_tag))
+        else {
+            report.skipped += 1;
+            report.lines.push(format!(
+                "Skipped {}: unknown group {}",
+                reference.field_path,
+                format_group_tag(reference.group_tag)
+            ));
+            continue;
+        };
+        if dependency_target_exists(tags_root, &reference.rel_path, extension) {
+            report.already_ok += 1;
+            continue;
+        }
+
+        let leaf = dependency_leaf_key(&reference.rel_path);
+        let key = (reference.group_tag, leaf.clone());
+        let candidates = index.get(&key).map(Vec::as_slice).unwrap_or(&[]);
+        match candidates {
+            [candidate] if !candidate.eq_ignore_ascii_case(&reference.rel_path) => {
+                fixes.push((reference.clone(), candidate.clone()));
+            }
+            [] => {
+                report.unresolved += 1;
+                report.lines.push(format!(
+                    "Unresolved {}: {}",
+                    reference.field_path,
+                    format_reference_path(names, reference.group_tag, &reference.rel_path)
+                ));
+            }
+            _ => {
+                report.ambiguous += 1;
+                report.lines.push(format!(
+                    "Ambiguous {}: {} candidate(s) named {}.{}",
+                    reference.field_path,
+                    candidates.len(),
+                    leaf,
+                    extension
+                ));
+            }
+        }
+    }
+
+    for (reference, fixed_path) in fixes {
+        let mut root = tag.root_mut();
+        let Some(mut field) = root.field_path_mut(&reference.field_path) else {
+            report.unresolved += 1;
+            report.lines.push(format!(
+                "Skipped {}: field path no longer resolves",
+                reference.field_path
+            ));
+            continue;
+        };
+        let result = field.set(TagFieldData::TagReference(TagReferenceData {
+            group_tag_and_name: Some((reference.group_tag, fixed_path.clone())),
+        }));
+        match result {
+            Ok(()) => {
+                report.fixed += 1;
+                report.lines.push(format!(
+                    "Fixed {}: {} -> {}",
+                    reference.field_path,
+                    format_reference_path(names, reference.group_tag, &reference.rel_path),
+                    format_reference_path(names, reference.group_tag, &fixed_path)
+                ));
+            }
+            Err(error) => {
+                report.unresolved += 1;
+                report.lines.push(format!(
+                    "Skipped {}: could not write dependency ({error:?})",
+                    reference.field_path
+                ));
+            }
+        }
+    }
+
+    report.lines.push(report.status());
+    report
+}
+
+fn collect_tag_references(
+    tag_struct: TagStruct<'_>,
+    path_prefix: &str,
+    refs: &mut Vec<TagReferenceUse>,
+) {
+    for field in tag_struct.fields() {
+        let field_path = append_field_path(path_prefix, field.name());
+        if let Some(value) = field.value() {
+            if let TagFieldData::TagReference(reference) = value
+                && let Some((group_tag, rel_path)) = reference.group_tag_and_name
+            {
+                let rel_path = sanitize_ref_path(&rel_path).replace('/', "\\");
+                if !rel_path.is_empty() && !rel_path.eq_ignore_ascii_case("none") {
+                    refs.push(TagReferenceUse {
+                        field_path,
+                        group_tag,
+                        rel_path,
+                    });
+                }
+            }
+            continue;
+        }
+        if let Some(nested) = field.as_struct() {
+            collect_tag_references(nested, &field_path, refs);
+        } else if let Some(block) = field.as_block() {
+            for (index, element) in block.iter().enumerate() {
+                let element_path = format!("{field_path}[{index}]");
+                collect_tag_references(element, &element_path, refs);
+            }
+        } else if let Some(array) = field.as_array() {
+            for (index, element) in array.iter().enumerate() {
+                let element_path = format!("{field_path}[{index}]");
+                collect_tag_references(element, &element_path, refs);
+            }
+        }
+    }
+}
+
+fn build_dependency_candidate_index(
+    entries: &[TagEntry],
+    names: &TagNameIndex,
+) -> DependencyCandidateIndex {
+    let mut index: DependencyCandidateIndex = HashMap::new();
+    let mut seen = HashSet::new();
+    for entry in entries {
+        let Some(rel_path) = dependency_entry_reference_path(entry, names) else {
+            continue;
+        };
+        if !seen.insert((entry.group_tag, rel_path.to_ascii_lowercase())) {
+            continue;
+        }
+        let leaf = dependency_leaf_key(&rel_path);
+        index
+            .entry((entry.group_tag, leaf))
+            .or_default()
+            .push(rel_path);
+    }
+    for candidates in index.values_mut() {
+        candidates.sort();
+    }
+    index
+}
+
+fn dependency_entry_reference_path(entry: &TagEntry, names: &TagNameIndex) -> Option<String> {
+    let extension = names
+        .name_for(entry.group_tag)
+        .or_else(|| group_tag_to_extension(entry.group_tag));
+    let mut path = entry.display_path.replace('/', "\\");
+    if let Some(extension) = extension {
+        let suffix = format!(".{extension}");
+        if path
+            .to_ascii_lowercase()
+            .ends_with(&suffix.to_ascii_lowercase())
+        {
+            let keep = path.len().saturating_sub(suffix.len());
+            path.truncate(keep);
+            return Some(path);
+        }
+    }
+    Path::new(&path)
+        .with_extension("")
+        .to_str()
+        .map(|path| path.replace('/', "\\"))
+}
+
+fn dependency_leaf_key(rel_path: &str) -> String {
+    rel_path
+        .replace('/', "\\")
+        .rsplit('\\')
+        .next()
+        .unwrap_or(rel_path)
+        .to_ascii_lowercase()
+}
+
+fn dependency_target_exists(tags_root: &Path, rel_path: &str, extension: &str) -> bool {
+    resolve_tag_path(tags_root, rel_path, extension).is_file()
+}
+
+#[derive(Default)]
+struct ReferenceRewriteResult {
+    references_changed: usize,
+    tags_changed: usize,
+    changed_keys: Vec<String>,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_folder_refactor_job(
+    root: PathBuf,
+    rel_path: PathBuf,
+    destination_parent: PathBuf,
+    move_folder: bool,
+    label: String,
+    names: TagNameIndex,
+    game: Option<String>,
+    existing_all_entries: Vec<TagEntry>,
+    existing_reverse_dependencies: Option<ReverseDependencyIndex>,
+    tx: &Sender<WorkerMessage>,
+) -> Result<FolderRefactorFinished, String> {
+    send_folder_refactor_progress(tx, &label, "Preparing", None);
+    let root = lexical_normalize_path(&root);
+    let source_rel = validate_relative_folder_path(&rel_path)?;
+    let source = lexical_normalize_path(&root.join(&source_rel));
+    if !source.is_dir() {
+        return Err(format!("Folder not found: {}", source.display()));
+    }
+    let destination_parent = lexical_normalize_path(&destination_parent);
+    if !destination_parent.starts_with(&root) {
+        return Err("Choose a destination inside the loaded tags folder".to_owned());
+    }
+    let folder_name = source
+        .file_name()
+        .ok_or_else(|| "Cannot move/copy the tags root itself".to_owned())?;
+    let destination = lexical_normalize_path(&destination_parent.join(folder_name));
+    if destination == source {
+        return Err("Source and destination are the same folder".to_owned());
+    }
+    if destination.starts_with(&source) {
+        return Err("Cannot move/copy a folder into itself".to_owned());
+    }
+    if destination.exists() {
+        return Err(format!(
+            "Destination already exists: {}",
+            destination.display()
+        ));
+    }
+
+    send_folder_refactor_progress(tx, &label, "Scanning selected folder", None);
+    let old_entries =
+        scan_folder_subtree_entries(&root, &source_rel, &names).map_err(|e| e.to_string())?;
+    if old_entries.is_empty() {
+        return Err("No tags found in that folder".to_owned());
+    }
+    let rewrites =
+        build_folder_reference_rewrites(&root, &source, &destination, &old_entries, &names);
+    let all_entries_before = if move_folder && existing_all_entries.is_empty() {
+        send_folder_refactor_progress(tx, &label, "Building tag database", None);
+        scan_folder_subtree_entries(&root, Path::new(""), &names).map_err(|e| e.to_string())?
+    } else {
+        existing_all_entries.clone()
+    };
+    let mut reverse_dependencies = existing_reverse_dependencies.or_else(|| {
+        game.as_deref()
+            .and_then(|game| crate::source::load_reverse_dependency_index(game, &root))
+    });
+    if move_folder
+        && let Some(index) = reverse_dependencies.as_ref()
+        && index.len() != all_entries_before.len()
+    {
+        let _ = tx.send(WorkerMessage::TerminalLine(format!(
+            "Dependency index is stale ({} indexed tag(s), {} current tag(s)); rebuilding",
+            index.len(),
+            all_entries_before.len()
+        )));
+        reverse_dependencies = None;
+    }
+    if move_folder && reverse_dependencies.is_none() {
+        reverse_dependencies = Some(build_reverse_dependency_index(
+            &root,
+            &all_entries_before,
+            &label,
+            tx,
+        ));
+    }
+    let dependency_schema_path = game
+        .as_deref()
+        .map(|game| {
+            locate_definitions_root()
+                .join(game)
+                .join("tag_dependency_list.json")
+        })
+        .filter(|path| path.is_file());
+
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Could not create {}: {error}", parent.display()))?;
+    }
+    if move_folder {
+        send_folder_refactor_progress(tx, &label, "Moving files", Some(0.15));
+        fs::rename(&source, &destination).map_err(|error| {
+            format!(
+                "Could not move {} to {}: {error}",
+                source.display(),
+                destination.display()
+            )
+        })?;
+    } else {
+        copy_folder_recursive_progress(&source, &destination, &label, tx)?;
+    }
+
+    let new_entries = transform_folder_entries(&root, &source, &old_entries, &destination);
+    let rewrite_result = if move_folder {
+        let rewrite_entries = affected_move_rewrite_entries(
+            &all_entries_before,
+            &old_entries,
+            &new_entries,
+            &rewrites,
+            reverse_dependencies.as_ref(),
+        );
+        send_folder_refactor_progress(
+            tx,
+            &label,
+            &format!("Rewriting {} affected tag(s)", rewrite_entries.len()),
+            None,
+        );
+        rewrite_references_in_entries(
+            &rewrite_entries,
+            &rewrites,
+            &label,
+            tx,
+            dependency_schema_path.as_deref(),
+        )?
+    } else {
+        send_folder_refactor_progress(tx, &label, "Rewriting copied references", None);
+        rewrite_references_in_entries(
+            &new_entries,
+            &rewrites,
+            &label,
+            tx,
+            dependency_schema_path.as_deref(),
+        )?
+    };
+    let references_changed = rewrite_result.references_changed;
+    let tags_changed = rewrite_result.tags_changed;
+
+    send_folder_refactor_progress(tx, &label, "Refreshing browser", None);
+    let tree = crate::source::build_folder_directory_tree(&root).map_err(|e| e.to_string())?;
+    let all_entries = if move_folder {
+        merge_refactored_entries(all_entries_before, &old_entries, &new_entries, true)
+    } else if existing_all_entries.is_empty() {
+        Vec::new()
+    } else {
+        merge_refactored_entries(
+            existing_all_entries,
+            &old_entries,
+            &new_entries,
+            move_folder,
+        )
+    };
+    let old_to_new_keys = if move_folder {
+        moved_key_map(&root, &source, &old_entries, &destination)
+    } else {
+        HashMap::new()
+    };
+    if let Some(index) = reverse_dependencies.as_mut() {
+        refresh_reverse_dependency_index_after_refactor(
+            index,
+            move_folder,
+            &old_entries,
+            &new_entries,
+            &rewrite_result.changed_keys,
+            &all_entries,
+        );
+    }
+
+    let action = if move_folder { "Moved" } else { "Copied" };
+    let status = format!(
+        "{action} {} tag(s), updated {} reference(s) in {} tag(s)",
+        old_entries.len(),
+        references_changed,
+        tags_changed
+    );
+    let mut lines = vec![format!(
+        "{action} folder: {} -> {}",
+        source.strip_prefix(&root).unwrap_or(&source).display(),
+        destination
+            .strip_prefix(&root)
+            .unwrap_or(&destination)
+            .display()
+    )];
+    lines.push(format!(
+        "Updated {references_changed} reference(s) in {tags_changed} tag(s)"
+    ));
+
+    Ok(FolderRefactorFinished {
+        status,
+        lines,
+        tree,
+        all_entries,
+        reverse_dependencies,
+        old_to_new_keys,
+        moved: move_folder,
+    })
+}
+
+fn send_folder_refactor_progress(
+    tx: &Sender<WorkerMessage>,
+    label: &str,
+    phase: &str,
+    progress: Option<f32>,
+) {
+    let _ = tx.send(WorkerMessage::FolderRefactorProgress(
+        FolderRefactorProgress {
+            label: label.to_owned(),
+            phase: phase.to_owned(),
+            progress,
+        },
+    ));
+}
+
+fn validate_relative_folder_path(path: &Path) -> Result<PathBuf, String> {
+    if path.as_os_str().is_empty() || path.is_absolute() {
+        return Err("Choose a folder inside the loaded tags folder".to_owned());
+    }
+    if path.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::ParentDir | std::path::Component::Prefix(_)
+        )
+    }) {
+        return Err("Folder path cannot contain .. or a drive prefix".to_owned());
+    }
+    Ok(path.to_path_buf())
+}
+
+fn copy_folder_recursive_progress(
+    source: &Path,
+    destination: &Path,
+    label: &str,
+    tx: &Sender<WorkerMessage>,
+) -> Result<(), String> {
+    let items = walkdir::WalkDir::new(source)
+        .follow_links(false)
+        .into_iter()
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    let file_total = items
+        .iter()
+        .filter(|item| item.file_type().is_file())
+        .count();
+    let mut copied = 0usize;
+    for item in items {
+        let rel = item
+            .path()
+            .strip_prefix(source)
+            .map_err(|error| error.to_string())?;
+        let target = destination.join(rel);
+        if item.file_type().is_dir() {
+            fs::create_dir_all(&target)
+                .map_err(|error| format!("Could not create {}: {error}", target.display()))?;
+        } else if item.file_type().is_file() {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent)
+                    .map_err(|error| format!("Could not create {}: {error}", parent.display()))?;
+            }
+            fs::copy(item.path(), &target).map_err(|error| {
+                format!(
+                    "Could not copy {} to {}: {error}",
+                    item.path().display(),
+                    target.display()
+                )
+            })?;
+            copied += 1;
+            if copied == 1 || copied % 25 == 0 || copied == file_total {
+                let progress = if file_total == 0 {
+                    None
+                } else {
+                    Some(copied as f32 / file_total as f32)
+                };
+                send_folder_refactor_progress(
+                    tx,
+                    label,
+                    &format!("Copying files {copied}/{file_total}"),
+                    progress,
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+fn build_folder_reference_rewrites(
+    tags_root: &Path,
+    source: &Path,
+    destination: &Path,
+    old_entries: &[TagEntry],
+    names: &TagNameIndex,
+) -> HashMap<(u32, String), String> {
+    let mut rewrites = HashMap::new();
+    for entry in old_entries {
+        let TagEntryLocation::LooseFile(old_path) = &entry.location else {
+            continue;
+        };
+        let Some(old_ref) =
+            reference_path_from_abs_file(tags_root, old_path, entry.group_tag, names)
+        else {
+            continue;
+        };
+        let Ok(inner_rel) = old_path.strip_prefix(source) else {
+            continue;
+        };
+        let new_path = destination.join(inner_rel);
+        let Some(new_ref) =
+            reference_path_from_abs_file(tags_root, &new_path, entry.group_tag, names)
+        else {
+            continue;
+        };
+        rewrites.insert((entry.group_tag, old_ref.to_ascii_lowercase()), new_ref);
+    }
+    rewrites
+}
+
+fn transform_folder_entries(
+    tags_root: &Path,
+    source: &Path,
+    old_entries: &[TagEntry],
+    destination: &Path,
+) -> Vec<TagEntry> {
+    old_entries
+        .iter()
+        .filter_map(|entry| {
+            let TagEntryLocation::LooseFile(old_path) = &entry.location else {
+                return None;
+            };
+            let inner_rel = old_path.strip_prefix(source).ok()?;
+            let new_path = destination.join(inner_rel);
+            let display_path = new_path
+                .strip_prefix(tags_root)
+                .unwrap_or(&new_path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            Some(TagEntry {
+                key: format!("file:{}", new_path.display()),
+                display_path,
+                group_tag: entry.group_tag,
+                group_name: entry.group_name.clone(),
+                location: TagEntryLocation::LooseFile(new_path),
+            })
+        })
+        .collect()
+}
+
+fn merge_refactored_entries(
+    mut all_entries: Vec<TagEntry>,
+    old_entries: &[TagEntry],
+    new_entries: &[TagEntry],
+    moved: bool,
+) -> Vec<TagEntry> {
+    let old_keys = old_entries
+        .iter()
+        .map(|entry| entry.key.clone())
+        .collect::<HashSet<_>>();
+    if moved {
+        all_entries.retain(|entry| !old_keys.contains(&entry.key));
+    }
+    let existing = all_entries
+        .iter()
+        .map(|entry| entry.key.clone())
+        .collect::<HashSet<_>>();
+    all_entries.extend(
+        new_entries
+            .iter()
+            .filter(|entry| !existing.contains(&entry.key))
+            .cloned(),
+    );
+    all_entries.sort_by(|a, b| a.display_path.cmp(&b.display_path));
+    all_entries
+}
+
+fn affected_move_rewrite_entries(
+    all_entries: &[TagEntry],
+    old_entries: &[TagEntry],
+    new_entries: &[TagEntry],
+    rewrites: &HashMap<(u32, String), String>,
+    reverse_dependencies: Option<&ReverseDependencyIndex>,
+) -> Vec<TagEntry> {
+    let old_keys = old_entries
+        .iter()
+        .map(|entry| entry.key.as_str())
+        .collect::<HashSet<_>>();
+    let mut entries_by_key = all_entries
+        .iter()
+        .map(|entry| (entry.key.clone(), entry.clone()))
+        .collect::<HashMap<_, _>>();
+    for entry in new_entries {
+        entries_by_key.insert(entry.key.clone(), entry.clone());
+    }
+
+    let mut affected = new_entries
+        .iter()
+        .map(|entry| entry.key.clone())
+        .collect::<HashSet<_>>();
+    if let Some(index) = reverse_dependencies {
+        for ((group_tag, old_ref), _) in rewrites {
+            for dependent_key in index.dependents_for(*group_tag, old_ref) {
+                if !old_keys.contains(dependent_key.as_str()) {
+                    affected.insert(dependent_key.clone());
+                }
+            }
+        }
+    } else {
+        affected.extend(all_entries.iter().map(|entry| entry.key.clone()));
+    }
+
+    let mut entries = affected
+        .into_iter()
+        .filter_map(|key| entries_by_key.get(&key).cloned())
+        .collect::<Vec<_>>();
+    entries.sort_by(|a, b| natural_entry_order(a).cmp(&natural_entry_order(b)));
+    entries
+}
+
+fn natural_entry_order(entry: &TagEntry) -> String {
+    entry.display_path.to_ascii_lowercase().replace('\\', "/")
+}
+
+fn rewrite_references_in_entries(
+    entries: &[TagEntry],
+    rewrites: &HashMap<(u32, String), String>,
+    label: &str,
+    tx: &Sender<WorkerMessage>,
+    dependency_schema_path: Option<&Path>,
+) -> Result<ReferenceRewriteResult, String> {
+    let mut result = ReferenceRewriteResult::default();
+    let needles = rewrite_reference_needles(rewrites);
+    if needles.is_empty() {
+        return Ok(result);
+    }
+    let total = entries.len();
+    for (index, entry) in entries.iter().enumerate() {
+        let TagEntryLocation::LooseFile(path) = &entry.location else {
+            continue;
+        };
+        if index == 0 || (index + 1) % 25 == 0 || index + 1 == total {
+            let progress = if total == 0 {
+                None
+            } else {
+                Some((index + 1) as f32 / total as f32)
+            };
+            send_folder_refactor_progress(
+                tx,
+                label,
+                &format!("Rewriting affected references {}/{}", index + 1, total),
+                progress,
+            );
+        }
+        let bytes = fs::read(path)
+            .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
+        if !bytes_contain_any_ascii_case_insensitive(&bytes, &needles) {
+            continue;
+        }
+        send_folder_refactor_progress(
+            tx,
+            label,
+            &format!(
+                "Rewriting {}",
+                path.file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("tag")
+            ),
+            None,
+        );
+        let mut tag = TagFile::read_from_bytes(&bytes)
+            .map_err(|error| format!("Could not parse {}: {error}", path.display()))?;
+        let changed = rewrite_references_in_tag(&mut tag, rewrites);
+        if changed == 0 {
+            continue;
+        }
+        if let Some(schema_path) = dependency_schema_path
+            && let Err(error) = tag.rebuild_dependency_list(schema_path)
+        {
+            let _ = tx.send(WorkerMessage::TerminalLine(format!(
+                "Warning: could not rebuild dependency list for {}: {error}",
+                entry.display_path
+            )));
+        }
+        tag.write_atomic(&path)
+            .map_err(|error| format!("Could not write {}: {error}", path.display()))?;
+        result.references_changed += changed;
+        result.tags_changed += 1;
+        result.changed_keys.push(entry.key.clone());
+    }
+    Ok(result)
+}
+
+fn build_reverse_dependency_index(
+    root: &Path,
+    entries: &[TagEntry],
+    label: &str,
+    tx: &Sender<WorkerMessage>,
+) -> ReverseDependencyIndex {
+    let mut index = ReverseDependencyIndex::default();
+    let total = entries.len();
+    for (entry_index, entry) in entries.iter().enumerate() {
+        if entry_index == 0 || (entry_index + 1) % 50 == 0 || entry_index + 1 == total {
+            let progress = if total == 0 {
+                None
+            } else {
+                Some((entry_index + 1) as f32 / total as f32)
+            };
+            send_folder_refactor_progress(
+                tx,
+                label,
+                &format!("Building dependency index {}/{}", entry_index + 1, total),
+                progress,
+            );
+        }
+        let deps = match read_entry_dependencies(entry) {
+            Ok(deps) => deps,
+            Err(error) => {
+                let _ = tx.send(WorkerMessage::TerminalLine(format!(
+                    "Warning: skipped dependency index for {}: {error}",
+                    entry.display_path
+                )));
+                continue;
+            }
+        };
+        index.set_tag_dependencies(entry.key.clone(), deps);
+    }
+    let _ = tx.send(WorkerMessage::TerminalLine(format!(
+        "Built dependency index for {} tag(s) under {}",
+        index.len(),
+        root.display()
+    )));
+    index
+}
+
+fn refresh_reverse_dependency_index_after_refactor(
+    index: &mut ReverseDependencyIndex,
+    moved: bool,
+    old_entries: &[TagEntry],
+    new_entries: &[TagEntry],
+    changed_keys: &[String],
+    all_entries: &[TagEntry],
+) {
+    if moved {
+        for entry in old_entries {
+            index.clear_tag(&entry.key);
+        }
+    }
+    let entries_by_key = all_entries
+        .iter()
+        .map(|entry| (entry.key.as_str(), entry))
+        .collect::<HashMap<_, _>>();
+    let mut refresh_keys = new_entries
+        .iter()
+        .map(|entry| entry.key.clone())
+        .collect::<HashSet<_>>();
+    refresh_keys.extend(changed_keys.iter().cloned());
+    for key in refresh_keys {
+        let Some(entry) = entries_by_key.get(key.as_str()) else {
+            continue;
+        };
+        if let Ok(deps) = read_entry_dependencies(entry) {
+            index.set_tag_dependencies(entry.key.clone(), deps);
+        }
+    }
+}
+
+fn read_entry_dependencies(entry: &TagEntry) -> Result<Vec<DependencyRef>, String> {
+    let TagEntryLocation::LooseFile(path) = &entry.location else {
+        return Ok(Vec::new());
+    };
+    if let Some(refs) = TagFile::read_dependency_references(path)
+        .map_err(|error| format!("Could not read dependency list: {error}"))?
+    {
+        return Ok(refs
+            .into_iter()
+            .map(|(group_tag, rel_path)| DependencyRef {
+                group_tag,
+                rel_path: sanitize_ref_path(&rel_path).replace('/', "\\"),
+            })
+            .collect());
+    }
+    let tag = TagFile::read(path).map_err(|error| format!("Could not parse tag: {error}"))?;
+    let mut refs = Vec::new();
+    collect_tag_references(tag.root(), "", &mut refs);
+    Ok(refs
+        .into_iter()
+        .map(|reference| DependencyRef {
+            group_tag: reference.group_tag,
+            rel_path: reference.rel_path,
+        })
+        .collect())
+}
+
+fn rewrite_reference_needles(rewrites: &HashMap<(u32, String), String>) -> Vec<Vec<u8>> {
+    let mut seen = HashSet::new();
+    rewrites
+        .keys()
+        .filter_map(|(_, old_ref)| {
+            let lowered = old_ref.replace('/', "\\").to_ascii_lowercase().into_bytes();
+            (!lowered.is_empty() && seen.insert(lowered.clone())).then_some(lowered)
+        })
+        .collect()
+}
+
+fn bytes_contain_any_ascii_case_insensitive(bytes: &[u8], needles: &[Vec<u8>]) -> bool {
+    if needles.is_empty() || bytes.is_empty() {
+        return false;
+    }
+    let lowered = bytes.to_ascii_lowercase();
+    needles
+        .iter()
+        .any(|needle| contains_subslice(&lowered, needle.as_slice()))
+}
+
+fn contains_subslice(haystack: &[u8], needle: &[u8]) -> bool {
+    !needle.is_empty()
+        && needle.len() <= haystack.len()
+        && haystack
+            .windows(needle.len())
+            .any(|window| window == needle)
+}
+
+fn rewrite_references_in_tag(
+    tag: &mut TagFile,
+    rewrites: &HashMap<(u32, String), String>,
+) -> usize {
+    let mut refs = Vec::new();
+    collect_tag_references(tag.root(), "", &mut refs);
+    let mut changed = 0usize;
+    for reference in refs {
+        let key = (reference.group_tag, reference.rel_path.to_ascii_lowercase());
+        let Some(new_path) = rewrites.get(&key) else {
+            continue;
+        };
+        if new_path.eq_ignore_ascii_case(&reference.rel_path) {
+            continue;
+        }
+        let mut root = tag.root_mut();
+        let Some(mut field) = root.field_path_mut(&reference.field_path) else {
+            continue;
+        };
+        if field
+            .set(TagFieldData::TagReference(TagReferenceData {
+                group_tag_and_name: Some((reference.group_tag, new_path.clone())),
+            }))
+            .is_ok()
+        {
+            changed += 1;
+        }
+    }
+    changed
+}
+
+fn moved_key_map(
+    tags_root: &Path,
+    source: &Path,
+    old_entries: &[TagEntry],
+    destination: &Path,
+) -> HashMap<String, String> {
+    let mut map = HashMap::new();
+    for entry in old_entries {
+        let TagEntryLocation::LooseFile(old_path) = &entry.location else {
+            continue;
+        };
+        let Ok(inner_rel) = old_path.strip_prefix(source) else {
+            continue;
+        };
+        let new_path = destination.join(inner_rel);
+        if new_path.starts_with(tags_root) {
+            map.insert(entry.key.clone(), format!("file:{}", new_path.display()));
+        }
+    }
+    map
+}
+
+fn remap_open_tag_keys(keys: &mut Vec<String>, map: &HashMap<String, String>) {
+    for key in keys.iter_mut() {
+        if let Some(new_key) = map.get(key) {
+            *key = new_key.clone();
+        }
+    }
+    let mut seen = HashSet::new();
+    keys.retain(|key| seen.insert(key.clone()));
+}
+
+fn remap_hashset_keys(keys: &mut HashSet<String>, map: &HashMap<String, String>) {
+    if keys.is_empty() {
+        return;
+    }
+    *keys = keys
+        .drain()
+        .map(|key| map.get(&key).cloned().unwrap_or(key))
+        .collect();
+}
+
+fn reference_path_from_abs_file(
+    tags_root: &Path,
+    path: &Path,
+    group_tag: u32,
+    names: &TagNameIndex,
+) -> Option<String> {
+    let rel = path.strip_prefix(tags_root).ok()?;
+    reference_path_from_rel_file(rel, group_tag, names)
+}
+
+fn reference_path_from_rel_file(
+    rel_file: &Path,
+    group_tag: u32,
+    names: &TagNameIndex,
+) -> Option<String> {
+    let mut rel = rel_file.to_string_lossy().replace('/', "\\");
+    if let Some(extension) = names
+        .name_for(group_tag)
+        .or_else(|| group_tag_to_extension(group_tag))
+    {
+        let suffix = format!(".{extension}");
+        if rel
+            .to_ascii_lowercase()
+            .ends_with(&suffix.to_ascii_lowercase())
+        {
+            rel.truncate(rel.len().saturating_sub(suffix.len()));
+            return Some(rel);
+        }
+    }
+    Path::new(&rel)
+        .with_extension("")
+        .to_str()
+        .map(|path| path.replace('/', "\\"))
+}
+
+#[cfg(test)]
+mod dependency_tests {
+    use super::*;
+
+    fn entry(display_path: &str, group_tag: u32) -> TagEntry {
+        TagEntry {
+            key: format!("file:{display_path}"),
+            display_path: display_path.to_owned(),
+            group_tag,
+            group_name: None,
+            location: TagEntryLocation::LooseFile(PathBuf::from(display_path)),
+        }
+    }
+
+    fn abs_entry(root: &Path, display_path: &str, group_tag: u32) -> TagEntry {
+        TagEntry {
+            key: format!("file:{}", root.join(display_path).display()),
+            display_path: display_path.to_owned(),
+            group_tag,
+            group_name: None,
+            location: TagEntryLocation::LooseFile(root.join(display_path)),
+        }
+    }
+
+    #[test]
+    fn dependency_entry_reference_path_strips_only_group_extension() {
+        let names = TagNameIndex::default();
+        let bitmap = parse_group_tag("bitm").unwrap();
+        let entry = entry("objects/weapons/decal_road_1.bitmap.bitmap", bitmap);
+
+        assert_eq!(
+            dependency_entry_reference_path(&entry, &names).unwrap(),
+            "objects\\weapons\\decal_road_1.bitmap"
+        );
+    }
+
+    #[test]
+    fn dependency_candidate_index_matches_by_group_and_leaf_name() {
+        let names = TagNameIndex::default();
+        let bitmap = parse_group_tag("bitm").unwrap();
+        let shader = parse_group_tag("rmsh").unwrap();
+        let entries = vec![
+            entry("objects/new/run.bitmap", bitmap),
+            entry("objects/new/run.shader", shader),
+        ];
+
+        let index = build_dependency_candidate_index(&entries, &names);
+
+        assert_eq!(
+            index
+                .get(&(bitmap, "run".to_owned()))
+                .cloned()
+                .unwrap_or_default(),
+            vec!["objects\\new\\run".to_owned()]
+        );
+        assert_eq!(
+            index
+                .get(&(shader, "run".to_owned()))
+                .cloned()
+                .unwrap_or_default(),
+            vec!["objects\\new\\run".to_owned()]
+        );
+    }
+
+    #[test]
+    fn folder_reference_rewrites_point_moved_tags_at_new_folder() {
+        let names = TagNameIndex::default();
+        let bitmap = parse_group_tag("bitm").unwrap();
+        let root = Path::new("C:/kit/tags");
+        let source = root.join("objects/old");
+        let destination = root.join("objects/new/old");
+        let entries = vec![abs_entry(
+            root,
+            "objects/old/decal_road_1.bitmap.bitmap",
+            bitmap,
+        )];
+
+        let rewrites =
+            build_folder_reference_rewrites(root, &source, &destination, &entries, &names);
+
+        assert_eq!(
+            rewrites
+                .get(&(bitmap, "objects\\old\\decal_road_1.bitmap".to_owned()))
+                .cloned(),
+            Some("objects\\new\\old\\decal_road_1.bitmap".to_owned())
+        );
+    }
+
+    #[test]
+    fn rewrite_reference_prefilter_matches_ascii_case_insensitively() {
+        let shader = parse_group_tag("rmsh").unwrap();
+        let mut rewrites = HashMap::new();
+        rewrites.insert(
+            (shader, "objects\\characters\\bugger\\bugger".to_owned()),
+            "zoeph_test\\bugger\\bugger".to_owned(),
+        );
+        let needles = rewrite_reference_needles(&rewrites);
+
+        assert!(bytes_contain_any_ascii_case_insensitive(
+            b"xx OBJECTS\\CHARACTERS\\BUGGER\\BUGGER yy",
+            &needles
+        ));
+        assert!(!bytes_contain_any_ascii_case_insensitive(
+            b"objects\\characters\\dervish\\dervish",
+            &needles
+        ));
+    }
+
+    #[test]
+    fn affected_move_entries_include_moved_tags_and_external_dependents() {
+        let shader = parse_group_tag("rmsh").unwrap();
+        let model = parse_group_tag("hlmt").unwrap();
+        let old_shader = entry("objects/characters/jackal/jackal.shader", shader);
+        let new_shader = entry("zoeph_test/jackal/jackal.shader", shader);
+        let outside_model = entry("objects/characters/shared/shared.model", model);
+        let unrelated = entry("objects/characters/brute/brute.model", model);
+        let all_entries = vec![old_shader.clone(), outside_model.clone(), unrelated];
+        let old_entries = vec![old_shader.clone()];
+        let new_entries = vec![new_shader.clone()];
+        let mut rewrites = HashMap::new();
+        rewrites.insert(
+            (shader, "objects\\characters\\jackal\\jackal".to_owned()),
+            "zoeph_test\\jackal\\jackal".to_owned(),
+        );
+        let mut reverse = ReverseDependencyIndex::default();
+        reverse.set_tag_dependencies(
+            outside_model.key.clone(),
+            vec![DependencyRef {
+                group_tag: shader,
+                rel_path: "objects\\characters\\jackal\\jackal".to_owned(),
+            }],
+        );
+        reverse.set_tag_dependencies(
+            old_shader.key.clone(),
+            vec![DependencyRef {
+                group_tag: shader,
+                rel_path: "objects\\characters\\jackal\\jackal".to_owned(),
+            }],
+        );
+
+        let affected = affected_move_rewrite_entries(
+            &all_entries,
+            &old_entries,
+            &new_entries,
+            &rewrites,
+            Some(&reverse),
+        );
+        let affected_keys = affected
+            .into_iter()
+            .map(|entry| entry.key)
+            .collect::<HashSet<_>>();
+
+        assert_eq!(affected_keys.len(), 2);
+        assert!(affected_keys.contains(&new_shader.key));
+        assert!(affected_keys.contains(&outside_model.key));
     }
 }

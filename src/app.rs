@@ -9,9 +9,10 @@ use std::thread;
 use blam_tags::bitmap::decode::decode_to_rgba8;
 use blam_tags::paths::{derive_tags_root, group_tag_to_extension, resolve_tag_path, tag_ref_path};
 use blam_tags::render_method::{
-    RenderMethod, RenderMethodAnimatedParameter, RenderMethodAnimatedParameterType,
-    RenderMethodDefinition, RenderMethodOption, RenderMethodOptionParameter, RenderMethodParameter,
-    RenderMethodParameterType, compile_real_constant,
+    GlobalRenderMethodFlags, RenderMethod, RenderMethodAnimatedParameter,
+    RenderMethodAnimatedParameterType, RenderMethodDefinition, RenderMethodOption,
+    RenderMethodOptionParameter, RenderMethodParameter, RenderMethodParameterType,
+    compile_real_constant,
 };
 use blam_tags::{
     AssFile, Bitmap, ColorGraphType, Endian, FunctionFlags, FunctionType, JmsFile, RenderModel,
@@ -27,9 +28,9 @@ use serde_json::{Value, json};
 
 use crate::format::{TagNameIndex, format_value, group_label};
 use crate::source::{
-    LoadedSourceData, TagEntry, TagEntryLocation, TagSource, TagTree, TagTreeNode, load_folder,
-    load_folder_node_entries, load_monolithic_blob_index, load_single_file, read_entry,
-    resolve_folder_root, scan_folder_subtree_entries,
+    DependencyRef, LoadedSourceData, ReverseDependencyIndex, TagEntry, TagEntryLocation, TagSource,
+    TagTree, TagTreeNode, load_folder, load_folder_node_entries, load_monolithic_blob_index,
+    load_single_file, read_entry, resolve_folder_root, scan_folder_subtree_entries,
 };
 
 pub(super) const BABOON_GITHUB_URL: &str = "https://github.com/Zoephie/Baboon";
@@ -97,12 +98,16 @@ pub struct Baboon {
     browser_mode: BrowserMode,
     show_browser_prefixes: bool,
     double_click_to_open_tags: bool,
+    show_block_sizes: bool,
     expert_mode: bool,
     dark_mode: bool,
     ui_scale: f32,
+    pending_ui_scale: f32,
     model_preview_size: f32,
     saved_prefs: GuiPrefs,
     settings_open: bool,
+    new_tag_open: bool,
+    new_tag_dialog: NewTagDialog,
     about_open: bool,
     help_panel_tab: HelpPanelTab,
     map_names_game_tab: MapNamesGameTab,
@@ -111,6 +116,7 @@ pub struct Baboon {
     color_popup: Option<MaterialColorPopup>,
     function_popup: Option<FunctionPopup>,
     status: String,
+    folder_refactor: Option<FolderRefactorUiState>,
     /// True while a background full-scan of a loose-folder source is running.
     scanning_entries: bool,
     terminal: TerminalState,
@@ -174,12 +180,16 @@ impl Baboon {
             browser_mode: prefs.browser_mode,
             show_browser_prefixes: prefs.show_browser_prefixes,
             double_click_to_open_tags: prefs.double_click_to_open_tags,
+            show_block_sizes: prefs.show_block_sizes,
             expert_mode: prefs.expert_mode,
             dark_mode: prefs.dark_mode,
             ui_scale: prefs.ui_scale,
+            pending_ui_scale: prefs.ui_scale,
             model_preview_size: prefs.model_preview_size,
             saved_prefs: prefs.clone(),
             settings_open: false,
+            new_tag_open: false,
+            new_tag_dialog: NewTagDialog::default(),
             about_open: false,
             help_panel_tab: HelpPanelTab::About,
             map_names_game_tab: MapNamesGameTab::HaloCe,
@@ -192,6 +202,7 @@ impl Baboon {
             color_popup: None,
             function_popup: None,
             status: "Ready".to_owned(),
+            folder_refactor: None,
             scanning_entries: false,
             terminal: TerminalState {
                 input: String::new(),
@@ -270,6 +281,8 @@ fn load_ico_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egu
 
 #[cfg(test)]
 mod tests {
+    use crate::app::controller::{new_tag_output_path, new_tag_output_path_from_dialog};
+
     use super::*;
 
     #[test]
@@ -311,9 +324,21 @@ mod tests {
         let [a, r, _, _] = parse_color_channels::<4>("0.5, 1.0, 0.0, 0.25").unwrap();
         assert_eq!(a, 0.5);
         assert_eq!(r, 1.0);
+        assert_eq!(
+            parse_rgb_or_argb_color_channels("1.0, 0.0, 0.25").unwrap(),
+            (1.0, 1.0, 0.0, 0.25)
+        );
+        assert_eq!(
+            parse_rgb_or_argb_color_channels("0.5, 1.0, 0.0, 0.25").unwrap(),
+            (0.5, 1.0, 0.0, 0.25)
+        );
+        assert_eq!(color_float_to_u8(1.0), 255);
+        assert_eq!(color_float_to_u8(0.0), 0);
+        assert_eq!(color_float_to_u8(0.5), 128);
 
         assert!(parse_color_channels::<3>("0.1, 0.2").is_err());
         assert!(parse_color_channels::<3>("0.1, 0.2, x").is_err());
+        assert!(parse_rgb_or_argb_color_channels("0.1, 0.2").is_err());
     }
 
     #[test]
@@ -446,6 +471,74 @@ mod tests {
 
         assert!(summary.contains("RGB"));
         assert!(summary.contains("0.2, 0.4, 0.6"));
+    }
+
+    #[test]
+    fn shader_constant_color_with_unset_alpha_displays_opaque() {
+        let mut blob = [0u8; 32];
+        blob[0] = 1; // Constant
+        blob[2] = ColorGraphType::TwoColor as u8;
+        blob[4..8].copy_from_slice(&0x00_C0_C0_C0u32.to_le_bytes());
+        blob[16..20].copy_from_slice(&0x00_00_00_00u32.to_le_bytes());
+
+        let function = TagFunction::parse(&blob).unwrap();
+        let [r, g, b, a] = extract_constant_color(&function).unwrap();
+
+        assert_eq!(
+            (r, g, b, a),
+            (192.0 / 255.0, 192.0 / 255.0, 192.0 / 255.0, 1.0)
+        );
+    }
+
+    #[test]
+    fn generated_constant_color_functions_use_render_method_gpu_flag() {
+        let bytes = decode_hex(&constant_color_function_hex(1.0, 0.0, 0.0, 1.0)).unwrap();
+        let function = TagFunction::parse(&bytes).unwrap();
+
+        assert_eq!(function.color_graph_type(), ColorGraphType::OneColor);
+        assert!(function.flags().is_gpu());
+        assert_eq!(function.header().colors[0], 0xFFFF0000);
+    }
+
+    #[test]
+    fn new_tag_output_path_stays_under_tags_root() {
+        let root = Path::new("tags");
+
+        assert_eq!(
+            new_tag_output_path(root, "objects/test/example.shader", "shader").unwrap(),
+            PathBuf::from("tags/objects/test/example.shader")
+        );
+        assert_eq!(
+            new_tag_output_path(root, "objects\\test\\example", "shader").unwrap(),
+            PathBuf::from("tags/objects/test/example.shader")
+        );
+        assert!(new_tag_output_path(root, "../escape", "shader").is_err());
+        assert!(new_tag_output_path(root, "C:/escape", "shader").is_err());
+    }
+
+    #[test]
+    fn new_tag_dialog_path_uses_selected_file_name_inside_tags_root() {
+        let root = Path::new("C:/kit/tags");
+
+        let (output, display) =
+            new_tag_output_path_from_dialog(root, Path::new("C:/kit/tags/objects/foo"), "shader")
+                .unwrap();
+        assert_eq!(output, PathBuf::from("C:/kit/tags/objects/foo.shader"));
+        assert_eq!(display, "objects/foo.shader");
+
+        let (output, display) = new_tag_output_path_from_dialog(
+            root,
+            Path::new("C:/kit/tags/objects/foo.model"),
+            "shader",
+        )
+        .unwrap();
+        assert_eq!(output, PathBuf::from("C:/kit/tags/objects/foo.shader"));
+        assert_eq!(display, "objects/foo.shader");
+
+        assert!(
+            new_tag_output_path_from_dialog(root, Path::new("C:/other/foo.shader"), "shader")
+                .is_err()
+        );
     }
 }
 

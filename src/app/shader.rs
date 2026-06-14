@@ -32,7 +32,7 @@ pub(super) struct ShaderGridRow {
     /// When the row represents a function-backed channel but no animated
     /// parameter exists yet, show an "f()+" button that pushes this
     /// `ShaderOp` to create a constant animated parameter.
-    create_anim_op: Option<ShaderOp>,
+    create_anim_op: Option<ShaderContextAction>,
     /// When the row's animated parameter is a *constant* function (displayed
     /// as an editable scalar), this holds the full `FunctionView` (with edit
     /// paths) so the user can open the graph editor via an "f()" button and
@@ -48,7 +48,14 @@ pub(super) struct ShaderContextMenu {
 /// One action available in a `ShaderContextMenu`.
 pub(super) struct ShaderContextItem {
     label: String,
-    op: ShaderOp,
+    action: ShaderContextAction,
+}
+
+#[derive(Clone)]
+pub(super) enum ShaderContextAction {
+    AnimatedParameter(ShaderOp),
+    FieldEdits(Vec<PendingFieldEdit>),
+    ParameterOp(ShaderParamOp),
 }
 
 /// Editable backing for a shader grid row's value cell.
@@ -70,7 +77,14 @@ pub(super) enum ShaderRowEditKind {
     /// String-id text box (renders identically to Scalar; parsing is type-driven).
     StringId,
     /// Bitmap tag reference (text + browse + Clear).
-    BitmapRef { group_tag: u32 },
+    BitmapRef {
+        group_tag: u32,
+        create: Option<ShaderParamCreateTarget>,
+    },
+    /// Boolean checkbox backed by an existing field or a new shader parameter.
+    Bool {
+        create: Option<ShaderParamCreateTarget>,
+    },
     /// Index-valued dropdown over the given option labels.
     Enum(Vec<String>),
     /// Animated parameter that is currently a constant function: shows as an
@@ -90,14 +104,43 @@ pub(super) enum ShaderRowEditKind {
         block_path: String,
         block_index: usize,
     },
+    /// Plain shader parameter color field (`parameters[n]/color`): shown as a
+    /// swatch and written directly instead of creating an animated parameter.
+    ColorField { argb: bool },
     /// No Color animated parameter exists yet. The swatch opens the color
     /// popup and OK creates one initialized to the selected constant color.
-    CreateFunctionColor { op: ShaderOp },
+    CreateFunctionColor { target: ShaderFunctionCreateTarget },
+    /// No animated scalar function exists yet. Editing the numeric value creates
+    /// one initialized to the entered constant.
+    CreateFunctionScalar { target: ShaderFunctionCreateTarget },
     /// No parameter instance exists yet. On commit a new `parameters[]`
     /// element is created via `ShaderParamOp`.
     CreateScalarParam {
         parameters_block_path: String,
         parameter_name: String,
+        parameter_type_index: i32,
+    },
+}
+
+#[derive(Clone)]
+pub(super) struct ShaderParamCreateTarget {
+    parameters_block_path: String,
+    parameter_name: String,
+    parameter_type_index: i32,
+    field: &'static str,
+}
+
+#[derive(Clone)]
+pub(super) enum ShaderFunctionCreateTarget {
+    ExistingParameter {
+        animated_block_path: String,
+        output_type_index: i32,
+    },
+    NewParameter {
+        parameters_block_path: String,
+        parameter_name: String,
+        parameter_type_index: i32,
+        output_type_index: i32,
     },
 }
 
@@ -113,6 +156,9 @@ pub(super) struct ShaderEditorModel {
     shader_template_path: Option<String>,
     categories: Vec<ShaderEditorCategory>,
     sections: Vec<ShaderEditorSection>,
+    atmosphere_flags: ShaderFlagsRow,
+    custom_fog_setting_index: ShaderGridRow,
+    sort_layer: ShaderGridRow,
 }
 
 /// The 7 shader types that carry a `global material type` row (the first 8
@@ -137,6 +183,18 @@ pub(super) struct ShaderEditorSection {
     title: String,
     option_name: String,
     rows: Vec<ShaderGridRow>,
+}
+
+pub(super) struct ShaderFlagsRow {
+    label: String,
+    path: String,
+    raw: u64,
+    options: Vec<ShaderFlagOption>,
+}
+
+pub(super) struct ShaderFlagOption {
+    bit: u32,
+    label: &'static str,
 }
 
 pub(super) fn build_shader_editor_model(
@@ -186,7 +244,7 @@ pub(super) fn build_shader_editor_model(
         else {
             continue;
         };
-        let rows = shader_rows_from_option(&render_method, &option, &edit_prefix);
+        let rows = shader_rows_from_option(tag, &render_method, &option, &edit_prefix);
         if rows.is_empty() {
             continue;
         }
@@ -199,6 +257,49 @@ pub(super) fn build_shader_editor_model(
 
     let global_material_type = read_global_material_type(tag);
     let global_material_edit_path = append_field_path(&edit_prefix, "global material type");
+    let shader_flags_path =
+        render_method_existing_field_path(tag, &edit_prefix, &["shader flags", "shader flags*"]);
+    let custom_fog_path =
+        render_method_existing_field_path(tag, &edit_prefix, &["Custom fog setting index"]);
+    let sort_layer_path =
+        render_method_existing_field_path(tag, &edit_prefix, &["sort layer", "sort layer*"]);
+    let atmosphere_flags = ShaderFlagsRow {
+        label: "Flags".to_owned(),
+        path: shader_flags_path,
+        raw: render_method_flags_mask(&render_method),
+        options: vec![
+            ShaderFlagOption {
+                bit: 0,
+                label: "don't fog me",
+            },
+            ShaderFlagOption {
+                bit: 1,
+                label: "use custom setting",
+            },
+            ShaderFlagOption {
+                bit: 2,
+                label: "calculate Z camera",
+            },
+        ],
+    };
+    let custom_fog_setting_index = shader_int_value_row(
+        "Custom Setting Index".to_owned(),
+        "0".to_owned(),
+        render_method.custom_fog_setting_index.to_string(),
+        custom_fog_path,
+    );
+    let sort_layer = shader_enum_value_row(
+        "Sort layer".to_owned(),
+        "normal".to_owned(),
+        render_method.sort_layer.raw().max(0) as usize,
+        vec![
+            "invalid".to_owned(),
+            "pre-pass".to_owned(),
+            "normal".to_owned(),
+            "post-pass".to_owned(),
+        ],
+        sort_layer_path,
+    );
 
     Some(ShaderEditorModel {
         has_material_row: shader_type_has_material_row(group_tag),
@@ -212,7 +313,23 @@ pub(super) fn build_shader_editor_model(
             .filter(|path| !path.is_empty()),
         categories,
         sections,
+        atmosphere_flags,
+        custom_fog_setting_index,
+        sort_layer,
     })
+}
+
+pub(super) fn render_method_flags_mask(render_method: &RenderMethod) -> u64 {
+    let mut mask = 0u64;
+    for flag in render_method.flags.get() {
+        let bit = match flag {
+            GlobalRenderMethodFlags::DontFogMe => 0,
+            GlobalRenderMethodFlags::UseCustomSetting => 1,
+            GlobalRenderMethodFlags::CalculateZCamera => 2,
+        };
+        mask |= 1u64 << bit;
+    }
+    mask
 }
 
 pub(super) fn cached_render_method_definition(
@@ -263,6 +380,23 @@ pub(super) fn render_method_edit_prefix(tag: &TagFile) -> String {
     }
 }
 
+pub(super) fn render_method_existing_field_path(
+    tag: &TagFile,
+    edit_prefix: &str,
+    candidates: &[&str],
+) -> String {
+    for candidate in candidates {
+        let path = append_field_path(edit_prefix, candidate);
+        if tag.root().field_path(&path).is_some() {
+            return path;
+        }
+    }
+    candidates
+        .first()
+        .map(|candidate| append_field_path(edit_prefix, candidate))
+        .unwrap_or_default()
+}
+
 /// Read the `global material type` string-id from the render_method block.
 /// Returns the string name (e.g. `"default_material"`) or a fallback.
 pub(super) fn read_global_material_type(tag: &TagFile) -> String {
@@ -299,7 +433,99 @@ pub(super) fn animated_param_paths(
     }
 }
 
+pub(super) fn existing_shader_function_target(
+    edit_prefix: &str,
+    param_index: usize,
+    output_type_index: i32,
+) -> ShaderFunctionCreateTarget {
+    ShaderFunctionCreateTarget::ExistingParameter {
+        animated_block_path: append_field_path(
+            edit_prefix,
+            &format!("parameters[{param_index}]/animated parameters"),
+        ),
+        output_type_index,
+    }
+}
+
+pub(super) fn new_shader_function_target(
+    edit_prefix: &str,
+    parameter_name: &str,
+    parameter_type_index: i32,
+    output_type_index: i32,
+) -> ShaderFunctionCreateTarget {
+    ShaderFunctionCreateTarget::NewParameter {
+        parameters_block_path: append_field_path(edit_prefix, "parameters"),
+        parameter_name: parameter_name.to_owned(),
+        parameter_type_index,
+        output_type_index,
+    }
+}
+
+pub(super) fn shader_parameter_type_index(parameter: &RenderMethodOptionParameter) -> i32 {
+    parameter
+        .parameter_type
+        .map(|kind| kind.raw() as i32)
+        .unwrap_or(RenderMethodParameterType::Real as i32)
+}
+
+pub(super) fn shader_parameter_type_initial_field(
+    parameter_type_index: i32,
+) -> ShaderParamInitialField {
+    ShaderParamInitialField {
+        field: "parameter type".to_owned(),
+        input: parameter_type_index.to_string(),
+    }
+}
+
+pub(super) fn shader_function_action(
+    target: &ShaderFunctionCreateTarget,
+    initial_function_hex: String,
+) -> ShaderContextAction {
+    match target {
+        ShaderFunctionCreateTarget::ExistingParameter {
+            animated_block_path,
+            output_type_index,
+        } => ShaderContextAction::AnimatedParameter(ShaderOp {
+            animated_block_path: animated_block_path.clone(),
+            output_type_index: *output_type_index,
+            initial_function_hex,
+        }),
+        ShaderFunctionCreateTarget::NewParameter {
+            parameters_block_path,
+            parameter_name,
+            parameter_type_index,
+            output_type_index,
+        } => ShaderContextAction::ParameterOp(ShaderParamOp {
+            parameters_block_path: parameters_block_path.clone(),
+            parameter_name: parameter_name.clone(),
+            initial_fields: vec![shader_parameter_type_initial_field(*parameter_type_index)],
+            animated_parameters: vec![ShaderParamInitialAnimated {
+                output_type_index: *output_type_index,
+                initial_function_hex,
+            }],
+        }),
+    }
+}
+
+pub(super) fn push_shader_context_action(
+    edit: &mut FieldEditContext<'_>,
+    action: &ShaderContextAction,
+) {
+    match action {
+        ShaderContextAction::AnimatedParameter(op) => {
+            edit.shader_ops.push(op.clone());
+        }
+        ShaderContextAction::FieldEdits(edits) => {
+            edit.pending.extend(edits.iter().cloned());
+        }
+        ShaderContextAction::ParameterOp(op) => {
+            edit.shader_param_ops.push(op.clone());
+        }
+    }
+}
+
 pub(super) fn shader_rows_from_option(
+    tag: &TagFile,
     render_method: &RenderMethod,
     option: &RenderMethodOption,
     edit_prefix: &str,
@@ -314,7 +540,14 @@ pub(super) fn shader_rows_from_option(
             .iter()
             .position(|value| value.parameter_name == parameter.parameter_name);
         let instance = instance_index.map(|i| &render_method.parameters[i]);
-        push_shader_parameter_rows(&mut rows, parameter, instance, edit_prefix, instance_index);
+        push_shader_parameter_rows(
+            &mut rows,
+            parameter,
+            instance,
+            edit_prefix,
+            instance_index,
+            tag,
+        );
     }
     rows
 }
@@ -325,6 +558,7 @@ pub(super) fn push_shader_parameter_rows(
     instance: Option<&RenderMethodParameter>,
     edit_prefix: &str,
     param_index: Option<usize>,
+    tag: &TagFile,
 ) {
     match parameter
         .parameter_type
@@ -351,6 +585,7 @@ pub(super) fn push_shader_parameter_rows(
                 instance,
                 edit_prefix,
                 param_index,
+                tag,
             ));
             rows.push(shader_alpha_row(
                 parameter,
@@ -396,15 +631,25 @@ pub(super) fn shader_param_field_path(
     ))
 }
 
+pub(super) fn shader_param_existing_field_path(
+    tag: &TagFile,
+    prefix: &str,
+    param_index: Option<usize>,
+    field: &str,
+) -> Option<String> {
+    let path = shader_param_field_path(prefix, param_index, field)?;
+    tag.root().field_path(&path).is_some().then_some(path)
+}
+
 /// 32-byte `mapping_function` blob for a Constant function with value 1.0.
 /// Used as the default for scale transform animated parameters.
 pub(super) const CONSTANT_FUNCTION_1_HEX: &str =
-    "010000000000803f0000803f0000000000000000000000000000000000000000";
+    "012000000000803f0000803f0000000000000000000000000000000000000000";
 
 /// 32-byte `mapping_function` blob for a Constant function with value 0.0.
 /// Used as the default for translation/frame-index animated parameters.
 pub(super) const CONSTANT_FUNCTION_0_HEX: &str =
-    "0100000000000000000000000000000000000000000000000000000000000000";
+    "0120000000000000000000000000000000000000000000000000000000000000";
 
 /// Build a 32-byte `mapping_function` hex blob for `Constant(v)`.
 ///
@@ -413,6 +658,7 @@ pub(super) const CONSTANT_FUNCTION_0_HEX: &str =
 pub(super) fn constant_function_hex(v: f32) -> String {
     let mut blob = [0u8; 32];
     blob[0] = 1; // FunctionType::Constant
+    blob[1] = FunctionFlags::GPU;
     blob[4..8].copy_from_slice(&v.to_le_bytes());
     blob[8..12].copy_from_slice(&v.to_le_bytes());
     blob.iter().map(|b| format!("{b:02x}")).collect()
@@ -431,11 +677,12 @@ pub(super) fn extract_constant_color(f: &TagFunction) -> Option<[f32; 4]> {
         return None;
     }
     let argb = f.header().colors[0];
+    let alpha = ((argb >> 24) & 0xFF) as f32 / 255.0;
     Some([
         ((argb >> 16) & 0xFF) as f32 / 255.0, // r
         ((argb >> 8) & 0xFF) as f32 / 255.0,  // g
         (argb & 0xFF) as f32 / 255.0,         // b
-        ((argb >> 24) & 0xFF) as f32 / 255.0, // a
+        if alpha == 0.0 { 1.0 } else { alpha },
     ])
 }
 
@@ -444,6 +691,7 @@ pub(super) fn extract_constant_color(f: &TagFunction) -> Option<[f32; 4]> {
 pub(super) fn constant_color_function_hex(r: f32, g: f32, b: f32, a: f32) -> String {
     let mut blob = [0u8; 32];
     blob[0] = 1; // FunctionType::Constant
+    blob[1] = FunctionFlags::GPU;
     blob[2] = 1; // ColorGraphType::OneColor
     let a8 = (a.clamp(0.0, 1.0) * 255.0).round() as u8;
     let r8 = (r.clamp(0.0, 1.0) * 255.0).round() as u8;
@@ -488,6 +736,40 @@ pub(super) const BITMAP_TRANSFORM_TYPES: &[(RenderMethodAnimatedParameterType, &
     ),
 ];
 
+const BITMAP_FLAG_FILTER: i16 = 0x01;
+const BITMAP_FLAG_ADDRESS: i16 = 0x02;
+const BITMAP_FLAG_ADDRESS_X: i16 = 0x04;
+const BITMAP_FLAG_ADDRESS_Y: i16 = 0x08;
+
+pub(super) struct BitmapSamplerOverride {
+    menu_label: &'static str,
+    field: &'static str,
+    flag_bit: i16,
+}
+
+pub(super) const BITMAP_SAMPLER_OVERRIDES: &[BitmapSamplerOverride] = &[
+    BitmapSamplerOverride {
+        menu_label: "wrap mode",
+        field: "bitmap address mode",
+        flag_bit: BITMAP_FLAG_ADDRESS,
+    },
+    BitmapSamplerOverride {
+        menu_label: "wrap mode x",
+        field: "bitmap address mode x",
+        flag_bit: BITMAP_FLAG_ADDRESS_X,
+    },
+    BitmapSamplerOverride {
+        menu_label: "wrap mode y",
+        field: "bitmap address mode y",
+        flag_bit: BITMAP_FLAG_ADDRESS_Y,
+    },
+    BitmapSamplerOverride {
+        menu_label: "filter mode",
+        field: "bitmap filter mode",
+        flag_bit: BITMAP_FLAG_FILTER,
+    },
+];
+
 pub(super) fn shader_bitmap_row(
     parameter: &RenderMethodOptionParameter,
     instance: Option<&RenderMethodParameter>,
@@ -505,32 +787,151 @@ pub(super) fn shader_bitmap_row(
     } else {
         format!("{}.bitmap", value.replace('\\', "/"))
     };
+    let bitmap_input = display.clone();
+    let parameter_type_index = shader_parameter_type_index(parameter);
 
     // Build right-click context menu: offer transform types not yet present.
-    let context_menu = param_index.map(|pidx| {
-        let animated_block_path = append_field_path(
-            edit_prefix,
-            &format!("parameters[{pidx}]/animated parameters"),
-        );
+    let context_menu = {
         let existing_types: std::collections::HashSet<i32> = instance
             .iter()
             .flat_map(|inst| &inst.animated_parameters)
             .filter_map(|ap| ap.parameter_type.map(|t| t.raw()))
             .collect();
-        let items: Vec<ShaderContextItem> = BITMAP_TRANSFORM_TYPES
-            .iter()
-            .filter(|(kind, _, _)| !existing_types.contains(&(*kind as i32)))
-            .map(|(kind, suffix, hex)| ShaderContextItem {
-                label: format!("Add {}_{}", parameter.parameter_name, suffix),
-                op: ShaderOp {
-                    animated_block_path: animated_block_path.clone(),
-                    output_type_index: *kind as i32,
-                    initial_function_hex: hex.to_string(),
-                },
-            })
-            .collect();
-        ShaderContextMenu { items }
-    });
+        let mut items = Vec::new();
+        if let Some(pidx) = param_index {
+            let animated_block_path = append_field_path(
+                edit_prefix,
+                &format!("parameters[{pidx}]/animated parameters"),
+            );
+            for (kind, suffix, hex) in BITMAP_TRANSFORM_TYPES {
+                if existing_types.contains(&(*kind as i32)) {
+                    continue;
+                }
+                items.push(ShaderContextItem {
+                    label: suffix.replace('_', " "),
+                    action: ShaderContextAction::AnimatedParameter(ShaderOp {
+                        animated_block_path: animated_block_path.clone(),
+                        output_type_index: *kind as i32,
+                        initial_function_hex: hex.to_string(),
+                    }),
+                });
+            }
+        } else {
+            let parameters_block_path = append_field_path(edit_prefix, "parameters");
+            for (kind, suffix, hex) in BITMAP_TRANSFORM_TYPES {
+                items.push(ShaderContextItem {
+                    label: suffix.replace('_', " "),
+                    action: ShaderContextAction::ParameterOp(ShaderParamOp {
+                        parameters_block_path: parameters_block_path.clone(),
+                        parameter_name: parameter.parameter_name.clone(),
+                        initial_fields: vec![
+                            shader_parameter_type_initial_field(parameter_type_index),
+                            ShaderParamInitialField {
+                                field: "bitmap".to_owned(),
+                                input: bitmap_input.clone(),
+                            },
+                        ],
+                        animated_parameters: vec![ShaderParamInitialAnimated {
+                            output_type_index: *kind as i32,
+                            initial_function_hex: hex.to_string(),
+                        }],
+                    }),
+                });
+            }
+        }
+        let current_flags = instance.map(|inst| inst.bitmap_flags).unwrap_or(0);
+        for sampler in BITMAP_SAMPLER_OVERRIDES {
+            if current_flags & sampler.flag_bit != 0 {
+                continue;
+            }
+            let initial_value = if sampler.flag_bit == BITMAP_FLAG_FILTER {
+                parameter.default_filter_mode.raw()
+            } else {
+                parameter.default_address_mode.raw()
+            };
+            if let Some(pidx) = param_index {
+                let flag_path =
+                    append_field_path(edit_prefix, &format!("parameters[{pidx}]/bitmap flags"));
+                let field_path = append_field_path(
+                    edit_prefix,
+                    &format!("parameters[{pidx}]/{}", sampler.field),
+                );
+                items.push(ShaderContextItem {
+                    label: sampler.menu_label.to_owned(),
+                    action: ShaderContextAction::FieldEdits(vec![
+                        PendingFieldEdit {
+                            path: flag_path,
+                            input: (current_flags | sampler.flag_bit).to_string(),
+                        },
+                        PendingFieldEdit {
+                            path: field_path,
+                            input: initial_value.to_string(),
+                        },
+                    ]),
+                });
+            } else {
+                items.push(ShaderContextItem {
+                    label: sampler.menu_label.to_owned(),
+                    action: ShaderContextAction::ParameterOp(ShaderParamOp {
+                        parameters_block_path: append_field_path(edit_prefix, "parameters"),
+                        parameter_name: parameter.parameter_name.clone(),
+                        initial_fields: vec![
+                            shader_parameter_type_initial_field(parameter_type_index),
+                            ShaderParamInitialField {
+                                field: "bitmap".to_owned(),
+                                input: bitmap_input.clone(),
+                            },
+                            ShaderParamInitialField {
+                                field: "bitmap flags".to_owned(),
+                                input: sampler.flag_bit.to_string(),
+                            },
+                            ShaderParamInitialField {
+                                field: sampler.field.to_owned(),
+                                input: initial_value.to_string(),
+                            },
+                        ],
+                        animated_parameters: Vec::new(),
+                    }),
+                });
+            }
+        }
+        if instance.and_then(|inst| inst.bitmap_extern_mode).is_none() {
+            if let Some(pidx) = param_index {
+                let field_path = append_field_path(
+                    edit_prefix,
+                    &format!("parameters[{pidx}]/bitmap extern RTT mode"),
+                );
+                items.push(ShaderContextItem {
+                    label: "extern mode".to_owned(),
+                    action: ShaderContextAction::FieldEdits(vec![PendingFieldEdit {
+                        path: field_path,
+                        input: "1".to_owned(),
+                    }]),
+                });
+            } else {
+                items.push(ShaderContextItem {
+                    label: "extern mode".to_owned(),
+                    action: ShaderContextAction::ParameterOp(ShaderParamOp {
+                        parameters_block_path: append_field_path(edit_prefix, "parameters"),
+                        parameter_name: parameter.parameter_name.clone(),
+                        initial_fields: vec![
+                            shader_parameter_type_initial_field(parameter_type_index),
+                            ShaderParamInitialField {
+                                field: "bitmap".to_owned(),
+                                input: bitmap_input.clone(),
+                            },
+                            ShaderParamInitialField {
+                                field: "bitmap extern RTT mode".to_owned(),
+                                input: "1".to_owned(),
+                            },
+                        ],
+                        animated_parameters: Vec::new(),
+                    }),
+                });
+            }
+        }
+        Some(ShaderContextMenu { items })
+    };
 
     ShaderGridRow {
         label: parameter.parameter_name.clone(),
@@ -544,11 +945,11 @@ pub(super) fn shader_bitmap_row(
             value_kind: if value.is_empty() { "default" } else { "value" },
             color: None,
         },
-        fill: MATERIAL_REF_ROW,
+        fill: material_ref_row(),
         parameter_type: Some("bitmap".to_owned()),
         function: None,
-        edit: shader_param_field_path(edit_prefix, param_index, "bitmap").map(|path| {
-            ShaderRowEdit {
+        edit: shader_param_field_path(edit_prefix, param_index, "bitmap")
+            .map(|path| ShaderRowEdit {
                 path,
                 current: if value.is_empty() {
                     "NONE".to_owned()
@@ -557,9 +958,28 @@ pub(super) fn shader_bitmap_row(
                 },
                 kind: ShaderRowEditKind::BitmapRef {
                     group_tag: u32::from_be_bytes(*b"bitm"),
+                    create: None,
                 },
-            }
-        }),
+            })
+            .or_else(|| {
+                Some(ShaderRowEdit {
+                    path: String::new(),
+                    current: if value.is_empty() {
+                        "NONE".to_owned()
+                    } else {
+                        format!("{}.bitmap", value.replace('\\', "/"))
+                    },
+                    kind: ShaderRowEditKind::BitmapRef {
+                        group_tag: u32::from_be_bytes(*b"bitm"),
+                        create: Some(ShaderParamCreateTarget {
+                            parameters_block_path: append_field_path(edit_prefix, "parameters"),
+                            parameter_name: parameter.parameter_name.clone(),
+                            parameter_type_index,
+                            field: "bitmap",
+                        }),
+                    },
+                })
+            }),
         context_menu,
         create_anim_op: None,
         constant_function_view: None,
@@ -577,74 +997,64 @@ pub(super) fn shader_bitmap_expansion_rows(
     let filter_opts = bitmap_filter_option_labels();
     let addr_opts = bitmap_address_option_labels();
 
-    // filter_mode — sampler filter enum dropdown.
-    rows.push(shader_sampler_enum_row(
-        format!("{name}_filter_mode"),
-        parameter.default_filter_mode.raw(),
-        instance
-            .map(|p| p.bitmap_filter_mode as i16)
-            .unwrap_or(parameter.default_filter_mode.raw()),
-        filter_opts,
-        edit_prefix,
-        param_index,
-        "bitmap filter mode",
-    ));
-    // wrap_mode / wrap_mode_x / wrap_mode_y — sampler address enum dropdowns.
-    for (suffix, field, current) in [
-        (
-            "wrap_mode",
-            "bitmap address mode",
-            instance
-                .map(|p| p.bitmap_address_mode as i16)
-                .unwrap_or(parameter.default_address_mode.raw()),
-        ),
-        (
-            "wrap_mode_x",
-            "bitmap address mode x",
-            instance
-                .map(|p| p.bitmap_address_mode_x as i16)
-                .unwrap_or(parameter.default_address_mode.raw()),
-        ),
-        (
-            "wrap_mode_y",
-            "bitmap address mode y",
-            instance
-                .map(|p| p.bitmap_address_mode_y as i16)
-                .unwrap_or(parameter.default_address_mode.raw()),
-        ),
-    ] {
-        rows.push(shader_sampler_enum_row(
-            format!("{name}_{suffix}"),
-            parameter.default_address_mode.raw(),
-            current,
-            addr_opts.clone(),
-            edit_prefix,
-            param_index,
-            field,
-        ));
+    if let Some(instance) = instance {
+        let flags = instance.bitmap_flags;
+        if flags & BITMAP_FLAG_FILTER != 0 {
+            rows.push(shader_sampler_enum_row(
+                format!("{name}_filter_mode"),
+                parameter.default_filter_mode.raw(),
+                instance.bitmap_filter_mode as i16,
+                filter_opts,
+                edit_prefix,
+                param_index,
+                "bitmap filter mode",
+            ));
+        }
+        if flags & BITMAP_FLAG_ADDRESS != 0 {
+            rows.push(shader_sampler_enum_row(
+                format!("{name}_wrap_mode"),
+                parameter.default_address_mode.raw(),
+                instance.bitmap_address_mode as i16,
+                addr_opts.clone(),
+                edit_prefix,
+                param_index,
+                "bitmap address mode",
+            ));
+        }
+        if flags & BITMAP_FLAG_ADDRESS_X != 0 {
+            rows.push(shader_sampler_enum_row(
+                format!("{name}_wrap_mode_x"),
+                parameter.default_address_mode.raw(),
+                instance.bitmap_address_mode_x as i16,
+                addr_opts.clone(),
+                edit_prefix,
+                param_index,
+                "bitmap address mode x",
+            ));
+        }
+        if flags & BITMAP_FLAG_ADDRESS_Y != 0 {
+            rows.push(shader_sampler_enum_row(
+                format!("{name}_wrap_mode_y"),
+                parameter.default_address_mode.raw(),
+                instance.bitmap_address_mode_y as i16,
+                addr_opts.clone(),
+                edit_prefix,
+                param_index,
+                "bitmap address mode y",
+            ));
+        }
+        if let Some(mode) = instance.bitmap_extern_mode {
+            rows.push(shader_sampler_enum_row(
+                format!("{name}_extern_mode"),
+                0,
+                mode as i16,
+                bitmap_extern_option_labels(),
+                edit_prefix,
+                param_index,
+                "bitmap extern RTT mode",
+            ));
+        }
     }
-    // comparison_function / extern_texture — no authoritative option-name
-    // table, so edit as plain integers.
-    rows.push(shader_sampler_int_row(
-        format!("{name}_comparison_function"),
-        parameter.default_comparison_function.raw(),
-        instance
-            .map(|p| p.bitmap_comparison_function as i16)
-            .unwrap_or(parameter.default_comparison_function.raw()),
-        edit_prefix,
-        param_index,
-        "bitmap comparison function",
-    ));
-    rows.push(shader_sampler_int_row(
-        format!("{name}_extern_texture"),
-        0,
-        instance
-            .and_then(|p| p.bitmap_extern_mode.map(|mode| mode as i16))
-            .unwrap_or(0),
-        edit_prefix,
-        param_index,
-        "bitmap extern RTT mode",
-    ));
 
     if let Some(instance) = instance {
         for (j, animated) in instance.animated_parameters.iter().enumerate() {
@@ -693,7 +1103,7 @@ pub(super) fn shader_bitmap_expansion_rows(
                         "value: {}",
                         format_shader_float(const_val)
                     )),
-                    fill: MATERIAL_NUMERIC_ROW,
+                    fill: material_numeric_row(),
                     parameter_type: Some("animated scalar".to_owned()),
                     function: None,
                     edit: if data_path.is_empty() {
@@ -722,14 +1132,6 @@ pub(super) fn shader_bitmap_expansion_rows(
                 rows.push(shader_function_grid_row(format!("{name}_{suffix}"), view));
             }
         }
-    } else if parameter.default_bitmap_scale != 0.0 {
-        rows.push(shader_plain_value_row(
-            format!("{name}_scale_uniform"),
-            format_shader_float(parameter.default_bitmap_scale),
-            "value".to_owned(),
-            MATERIAL_FUNCTION_ROW,
-            Some("function".to_owned()),
-        ));
     }
     rows
 }
@@ -775,7 +1177,7 @@ pub(super) fn shader_scalar_row(
                         format_shader_float(parameter.default_real_value)
                     ))),
                     value_cell: shader_value_cell(format!("value: {current}")),
-                    fill: MATERIAL_NUMERIC_ROW,
+                    fill: material_numeric_row(),
                     parameter_type: Some("animated scalar".to_owned()),
                     function: None,
                     edit: if data_path.is_empty() {
@@ -816,7 +1218,7 @@ pub(super) fn shader_scalar_row(
             label: parameter.parameter_name.clone(),
             default_cell: Some(shader_default_value_cell(default_val)),
             value_cell: shader_value_cell(format!("value: {current}")),
-            fill: MATERIAL_NUMERIC_ROW,
+            fill: material_numeric_row(),
             parameter_type: Some("real".to_owned()),
             function: None,
             edit: Some(ShaderRowEdit {
@@ -839,6 +1241,7 @@ pub(super) fn shader_scalar_row(
             kind: ShaderRowEditKind::CreateScalarParam {
                 parameters_block_path,
                 parameter_name: parameter.parameter_name.clone(),
+                parameter_type_index: shader_parameter_type_index(parameter),
             },
         })
     } else {
@@ -848,7 +1251,7 @@ pub(super) fn shader_scalar_row(
         label: parameter.parameter_name.clone(),
         default_cell: Some(shader_default_value_cell(default_val.clone())),
         value_cell: shader_value_cell(format!("value: {current}")),
-        fill: MATERIAL_NUMERIC_ROW,
+        fill: material_numeric_row(),
         parameter_type: Some("real".to_owned()),
         function: None,
         edit,
@@ -871,7 +1274,7 @@ pub(super) fn shader_int_row(
         parameter.parameter_name.clone(),
         parameter.default_int_bool_value.to_string(),
         value.to_string(),
-        MATERIAL_DATA_ROW,
+        material_data_row(),
         Some("enum".to_owned()),
     );
     row.edit =
@@ -896,14 +1299,28 @@ pub(super) fn shader_bool_row(
         parameter.parameter_name.clone(),
         (parameter.default_int_bool_value != 0).to_string(),
         (raw != 0).to_string(),
-        MATERIAL_DATA_ROW,
+        material_data_row(),
         Some("bool".to_owned()),
     );
-    row.edit =
-        shader_param_field_path(edit_prefix, param_index, "int/bool").map(|path| ShaderRowEdit {
+    row.edit = shader_param_field_path(edit_prefix, param_index, "int/bool")
+        .map(|path| ShaderRowEdit {
             path,
             current: raw.to_string(),
-            kind: ShaderRowEditKind::Enum(vec!["false".to_owned(), "true".to_owned()]),
+            kind: ShaderRowEditKind::Bool { create: None },
+        })
+        .or_else(|| {
+            Some(ShaderRowEdit {
+                path: String::new(),
+                current: raw.to_string(),
+                kind: ShaderRowEditKind::Bool {
+                    create: Some(ShaderParamCreateTarget {
+                        parameters_block_path: append_field_path(edit_prefix, "parameters"),
+                        parameter_name: parameter.parameter_name.clone(),
+                        parameter_type_index: shader_parameter_type_index(parameter),
+                        field: "int/bool",
+                    }),
+                },
+            })
         });
     row
 }
@@ -913,20 +1330,66 @@ pub(super) fn shader_color_row(
     instance: Option<&RenderMethodParameter>,
     edit_prefix: &str,
     param_index: Option<usize>,
+    tag: &TagFile,
 ) -> ShaderGridRow {
     let (slot, _) = compile_real_constant(parameter, instance);
     let default_color =
         material_color_from_argb(&parameter.parameter_name, parameter.default_color.0);
-    // slot = [r, g, b, a] from compile_real_constant for Color type.
+    let is_argb_parameter = matches!(
+        parameter.parameter_type.map(|kind| kind.get()),
+        Some(RenderMethodParameterType::ArgbColor)
+    );
+    let mut raw_color = instance
+        .map(|param| argb_to_rgba(param.color_parameter.0))
+        .unwrap_or(slot);
+    if !is_argb_parameter {
+        raw_color[3] = 1.0;
+    }
+    let color_field_path = shader_param_existing_field_path(tag, edit_prefix, param_index, "color");
     let value_color = MaterialColorPopup::new(
         &parameter.parameter_name,
-        slot[0],
-        slot[1],
-        slot[2],
-        slot[3],
+        raw_color[0],
+        raw_color[1],
+        raw_color[2],
+        raw_color[3],
     );
+    let argb = parameter.default_color.0;
+    let a8 = ((argb >> 24) & 0xFF) as u8;
+    let r8 = ((argb >> 16) & 0xFF) as u8;
+    let g8 = ((argb >> 8) & 0xFF) as u8;
+    let b8 = (argb & 0xFF) as u8;
+    let function_alpha = if is_argb_parameter {
+        a8 as f32 / 255.0
+    } else {
+        1.0
+    };
+    let default_function_hex = constant_color_function_hex(
+        r8 as f32 / 255.0,
+        g8 as f32 / 255.0,
+        b8 as f32 / 255.0,
+        function_alpha,
+    );
+    let create_target = param_index
+        .map(|pidx| {
+            existing_shader_function_target(
+                edit_prefix,
+                pidx,
+                RenderMethodAnimatedParameterType::Color as i32,
+            )
+        })
+        .unwrap_or_else(|| {
+            new_shader_function_target(
+                edit_prefix,
+                &parameter.parameter_name,
+                shader_parameter_type_index(parameter),
+                RenderMethodAnimatedParameterType::Color as i32,
+            )
+        });
+    let create_action = shader_function_action(&create_target, default_function_hex);
 
-    // Check if there is a constant 1-color Color animated parameter.
+    // If a Color animated parameter already exists, use that as the editable
+    // backing. Editing the plain fallback color while function data is present
+    // leaves Guerilla/the runtime reading the old animated value.
     if let Some(inst) = instance {
         for (j, animated) in inst.animated_parameters.iter().enumerate() {
             if !matches!(
@@ -943,7 +1406,10 @@ pub(super) fn shader_color_row(
                 view = view.with_edit(animated_param_paths(edit_prefix, i, j));
             }
 
-            if let Some(rgba) = extract_constant_color(function) {
+            if let Some(mut rgba) = extract_constant_color(function) {
+                if !is_argb_parameter {
+                    rgba[3] = 1.0;
+                }
                 // Constant 1-color: show as inline editable color swatch.
                 let data_path = view
                     .edit
@@ -973,7 +1439,7 @@ pub(super) fn shader_color_row(
                         value_kind: "value",
                         color: Some(color_val),
                     },
-                    fill: MATERIAL_NUMERIC_ROW,
+                    fill: material_numeric_row(),
                     parameter_type: Some("color".to_owned()),
                     function: None,
                     edit: if data_path.is_empty() {
@@ -1001,28 +1467,43 @@ pub(super) fn shader_color_row(
         }
     }
 
-    // No Color animated parameter — show static color swatch + f()+ create button.
-    let create_anim_op = param_index.map(|pidx| ShaderOp {
-        animated_block_path: append_field_path(
-            edit_prefix,
-            &format!("parameters[{pidx}]/animated parameters"),
-        ),
-        output_type_index: RenderMethodAnimatedParameterType::Color as i32,
-        initial_function_hex: {
-            // Build a constant-color blob using the template default color.
-            let argb = parameter.default_color.0;
-            let a8 = ((argb >> 24) & 0xFF) as u8;
-            let r8 = ((argb >> 16) & 0xFF) as u8;
-            let g8 = ((argb >> 8) & 0xFF) as u8;
-            let b8 = (argb & 0xFF) as u8;
-            constant_color_function_hex(
-                r8 as f32 / 255.0,
-                g8 as f32 / 255.0,
-                b8 as f32 / 255.0,
-                a8 as f32 / 255.0,
-            )
-        },
-    });
+    // No Color animated parameter exists. Use the plain shader color field as a
+    // solid color backing when this tag layout exposes one.
+    if let Some(path) = color_field_path.clone() {
+        return ShaderGridRow {
+            label: parameter.parameter_name.clone(),
+            default_cell: Some(ShaderGridCell {
+                text: "color: RGB".to_owned(),
+                value_kind: "default",
+                color: Some(default_color),
+            }),
+            value_cell: ShaderGridCell {
+                text: "color: RGB".to_owned(),
+                value_kind: "value",
+                color: Some(value_color),
+            },
+            fill: material_numeric_row(),
+            parameter_type: Some("color".to_owned()),
+            function: None,
+            edit: Some(ShaderRowEdit {
+                path,
+                current: format!(
+                    "{},{},{},{}",
+                    raw_color[0], raw_color[1], raw_color[2], raw_color[3]
+                ),
+                kind: ShaderRowEditKind::ColorField {
+                    argb: is_argb_parameter,
+                },
+            }),
+            context_menu: None,
+            create_anim_op: Some(create_action),
+            constant_function_view: None,
+        };
+    }
+
+    // No Color animated parameter — show a solid color swatch. Clicking it
+    // creates constant-color backing data; f()+ is available for users who
+    // explicitly want to add/open function data.
     ShaderGridRow {
         label: parameter.parameter_name.clone(),
         default_cell: Some(ShaderGridCell {
@@ -1035,18 +1516,39 @@ pub(super) fn shader_color_row(
             value_kind: "value",
             color: Some(value_color),
         },
-        fill: MATERIAL_NUMERIC_ROW,
+        fill: material_numeric_row(),
         parameter_type: Some("color".to_owned()),
         function: None,
-        edit: create_anim_op.clone().map(|op| ShaderRowEdit {
-            path: format!("create:{}", parameter.parameter_name),
-            current: format!("{},{},{},{}", slot[0], slot[1], slot[2], slot[3]),
-            kind: ShaderRowEditKind::CreateFunctionColor { op },
-        }),
+        edit: color_field_path
+            .map(|path| ShaderRowEdit {
+                path,
+                current: format!("{},{},{},{}", slot[0], slot[1], slot[2], slot[3]),
+                kind: ShaderRowEditKind::ColorField {
+                    argb: is_argb_parameter,
+                },
+            })
+            .or_else(|| {
+                Some(ShaderRowEdit {
+                    path: format!("create:{}", parameter.parameter_name),
+                    current: format!("{},{},{},{}", slot[0], slot[1], slot[2], slot[3]),
+                    kind: ShaderRowEditKind::CreateFunctionColor {
+                        target: create_target.clone(),
+                    },
+                })
+            }),
         context_menu: None,
-        create_anim_op,
+        create_anim_op: Some(create_action),
         constant_function_view: None,
     }
+}
+
+pub(super) fn argb_to_rgba(argb: u32) -> [f32; 4] {
+    [
+        ((argb >> 16) & 0xFF) as f32 / 255.0,
+        ((argb >> 8) & 0xFF) as f32 / 255.0,
+        (argb & 0xFF) as f32 / 255.0,
+        ((argb >> 24) & 0xFF) as f32 / 255.0,
+    ]
 }
 
 pub(super) fn shader_alpha_row(
@@ -1055,35 +1557,103 @@ pub(super) fn shader_alpha_row(
     edit_prefix: &str,
     param_index: Option<usize>,
 ) -> ShaderGridRow {
-    let function = first_render_method_function(instance, edit_prefix, param_index, |kind| {
-        matches!(kind, RenderMethodAnimatedParameterType::Alpha)
-    });
     let (slot, _) = compile_real_constant(parameter, instance);
     let default_alpha = ((parameter.default_color.0 >> 24) & 0xFF) as f32 / 255.0;
-    if let Some(function) = function {
-        return shader_function_grid_row(format!("{}_alpha", parameter.parameter_name), function);
+    let current_alpha = slot[3];
+    if let Some(inst) = instance {
+        for (j, animated) in inst.animated_parameters.iter().enumerate() {
+            if !matches!(
+                animated.parameter_type.map(|kind| kind.get()),
+                Some(RenderMethodAnimatedParameterType::Alpha)
+            ) {
+                continue;
+            }
+            let Some(function) = animated.function.clone() else {
+                continue;
+            };
+            let mut view = FunctionView::from_animated(animated, function.clone());
+            if let Some(i) = param_index {
+                view = view.with_edit(animated_param_paths(edit_prefix, i, j));
+            }
+            if let Some(const_val) = function.as_constant() {
+                let data_path = view
+                    .edit
+                    .as_ref()
+                    .map(|e| e.data.clone())
+                    .unwrap_or_default();
+                let (block_path, block_index) = match view.edit.as_ref() {
+                    Some(e) => (e.block_path.clone(), e.block_index),
+                    None => (String::new(), 0),
+                };
+                let current = format_shader_float(const_val);
+                let mut row = ShaderGridRow {
+                    label: format!("{}_alpha", parameter.parameter_name),
+                    default_cell: Some(shader_default_value_cell(format!(
+                        "value: {}",
+                        format_shader_float(default_alpha)
+                    ))),
+                    value_cell: shader_value_cell(format!("value: {current}")),
+                    fill: material_numeric_row(),
+                    parameter_type: Some("alpha".to_owned()),
+                    function: None,
+                    edit: if data_path.is_empty() {
+                        None
+                    } else {
+                        Some(ShaderRowEdit {
+                            path: data_path,
+                            current,
+                            kind: ShaderRowEditKind::FunctionScalar {
+                                block_path,
+                                block_index,
+                            },
+                        })
+                    },
+                    context_menu: None,
+                    create_anim_op: None,
+                    constant_function_view: None,
+                };
+                row.constant_function_view = Some(view);
+                return row;
+            }
+            return shader_function_grid_row(format!("{}_alpha", parameter.parameter_name), view);
+        }
     }
-    let create_anim_op = param_index.map(|pidx| ShaderOp {
-        animated_block_path: append_field_path(
-            edit_prefix,
-            &format!("parameters[{pidx}]/animated parameters"),
-        ),
-        output_type_index: RenderMethodAnimatedParameterType::Alpha as i32,
-        initial_function_hex: CONSTANT_FUNCTION_1_HEX.to_owned(),
-    });
+    let create_target = param_index
+        .map(|pidx| {
+            existing_shader_function_target(
+                edit_prefix,
+                pidx,
+                RenderMethodAnimatedParameterType::Alpha as i32,
+            )
+        })
+        .unwrap_or_else(|| {
+            new_shader_function_target(
+                edit_prefix,
+                &parameter.parameter_name,
+                shader_parameter_type_index(parameter),
+                RenderMethodAnimatedParameterType::Alpha as i32,
+            )
+        });
+    let current = format_shader_float(current_alpha);
     ShaderGridRow {
         label: format!("{}_alpha", parameter.parameter_name),
         default_cell: Some(shader_default_value_cell(format!(
             "value: {}",
             format_shader_float(default_alpha)
         ))),
-        value_cell: shader_value_cell(format!("value: {}", format_shader_float(slot[0]))),
-        fill: MATERIAL_NUMERIC_ROW,
+        value_cell: shader_value_cell(format!("value: {current}")),
+        fill: material_numeric_row(),
         parameter_type: Some("alpha".to_owned()),
         function: None,
-        edit: None,
+        edit: Some(ShaderRowEdit {
+            path: format!("create:{}_alpha", parameter.parameter_name),
+            current,
+            kind: ShaderRowEditKind::CreateFunctionScalar {
+                target: create_target,
+            },
+        }),
         context_menu: None,
-        create_anim_op,
+        create_anim_op: None,
         constant_function_view: None,
     }
 }
@@ -1140,9 +1710,54 @@ pub(super) fn shader_option_value_row(
         label,
         default,
         value,
-        MATERIAL_DATA_ROW,
+        material_data_row(),
         Some("option".to_owned()),
     )
+}
+
+pub(super) fn shader_int_value_row(
+    label: String,
+    default: String,
+    value: String,
+    path: String,
+) -> ShaderGridRow {
+    let mut row = shader_plain_value_row(
+        label,
+        default,
+        value.clone(),
+        material_data_row(),
+        Some("integer".to_owned()),
+    );
+    if !path.is_empty() {
+        row.edit = Some(ShaderRowEdit {
+            path,
+            current: value,
+            kind: ShaderRowEditKind::Int,
+        });
+    }
+    row
+}
+
+pub(super) fn shader_enum_value_row(
+    label: String,
+    default: String,
+    current_index: usize,
+    options: Vec<String>,
+    path: String,
+) -> ShaderGridRow {
+    let current = options
+        .get(current_index)
+        .cloned()
+        .unwrap_or_else(|| current_index.to_string());
+    let mut row = shader_option_value_row(label, default, current);
+    if !path.is_empty() {
+        row.edit = Some(ShaderRowEdit {
+            path,
+            current: current_index.to_string(),
+            kind: ShaderRowEditKind::Enum(options),
+        });
+    }
+    row
 }
 
 /// Sampler-state filter modes (Guerilla `off_14143B738` order).
@@ -1172,6 +1787,64 @@ pub(super) fn bitmap_address_option_labels() -> Vec<String> {
         .collect()
 }
 
+pub(super) fn bitmap_extern_option_labels() -> Vec<String> {
+    [
+        "none",
+        "texaccum target",
+        "normal target",
+        "z target",
+        "shadow 1 target",
+        "shadow 2 target",
+        "shadow 3 target",
+        "shadow 4 target",
+        "texture camera target",
+        "reflection target",
+        "refraction target",
+        "lightprobe texture",
+        "dominant light intensity texture",
+        "unused 1",
+        "unused 2",
+        "change color primary",
+        "change color secondary",
+        "change color tertiary",
+        "change color quaternary",
+        "change color quinary",
+        "emblem color background",
+        "emblem color primary",
+        "emblem color secondary",
+        "dynamic environment map 1",
+        "dynamic environment map 2",
+        "cook torrance cc0236",
+        "cook torrance dd0236",
+        "cook torrance c78d78",
+        "light dir 0",
+        "light color 0",
+        "light dir 1",
+        "light color 1",
+        "light dir 2",
+        "light color 2",
+        "light dir 3",
+        "light color 3",
+        "unused 3",
+        "unused 4",
+        "unused 5",
+        "dynamic light gel 0",
+        "flat envmap matrix x",
+        "flat envmap matrix y",
+        "flat envmap matrix z",
+        "debug tint",
+        "screen constants",
+        "active camo distortion texture",
+        "scene ldr texture",
+        "scene hdr texture",
+        "water memexport addr",
+        "tree animation timer",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
 /// A bitmap sampler sub-row backed by an enum dropdown (filter / wrap modes).
 /// The underlying tag field is a plain short integer, so the dropdown writes
 /// the selected option index.
@@ -1197,26 +1870,6 @@ pub(super) fn shader_sampler_enum_row(
         path,
         current: current_index.to_string(),
         kind: ShaderRowEditKind::Enum(options),
-    });
-    row
-}
-
-/// A bitmap sampler sub-row edited as a plain integer (comparison function /
-/// extern texture mode — no authoritative option-name table).
-pub(super) fn shader_sampler_int_row(
-    label: String,
-    default_value: i16,
-    current_value: i16,
-    edit_prefix: &str,
-    param_index: Option<usize>,
-    field: &str,
-) -> ShaderGridRow {
-    let mut row =
-        shader_option_value_row(label, default_value.to_string(), current_value.to_string());
-    row.edit = shader_param_field_path(edit_prefix, param_index, field).map(|path| ShaderRowEdit {
-        path,
-        current: current_value.to_string(),
-        kind: ShaderRowEditKind::Int,
     });
     row
 }
@@ -1263,7 +1916,7 @@ pub(super) fn shader_function_grid_row(label: String, function: FunctionView) ->
             value_kind: "value",
             color: None,
         },
-        fill: MATERIAL_FUNCTION_ROW,
+        fill: material_function_row(),
         parameter_type: Some("function".to_owned()),
         function: Some(function),
         edit: None,
@@ -1290,12 +1943,13 @@ pub(super) fn shader_default_value_cell(text: String) -> ShaderGridCell {
 }
 
 pub(super) fn material_color_from_argb(title: &str, argb: u32) -> MaterialColorPopup {
+    let alpha = ((argb >> 24) & 0xFF) as f32 / 255.0;
     MaterialColorPopup::new(
         title,
         ((argb >> 16) & 0xFF) as f32 / 255.0,
         ((argb >> 8) & 0xFF) as f32 / 255.0,
         (argb & 0xFF) as f32 / 255.0,
-        ((argb >> 24) & 0xFF) as f32 / 255.0,
+        if alpha == 0.0 { 1.0 } else { alpha },
     )
 }
 
@@ -1462,7 +2116,7 @@ pub(super) fn draw_shader_editor_model(
                 value_kind: "value",
                 color: None,
             },
-            fill: MATERIAL_DATA_ROW,
+            fill: material_data_row(),
             parameter_type: Some("string id".to_owned()),
             function: None,
             edit: if mat_edit_path.is_empty() {
@@ -1489,7 +2143,7 @@ pub(super) fn draw_shader_editor_model(
             value_kind: "value",
             color: None,
         },
-        fill: MATERIAL_REF_ROW,
+        fill: material_ref_row(),
         parameter_type: Some("tag reference".to_owned()),
         function: None,
         edit: None,
@@ -1508,7 +2162,7 @@ pub(super) fn draw_shader_editor_model(
                 value_kind: "value",
                 color: None,
             },
-            fill: MATERIAL_REF_ROW,
+            fill: material_ref_row(),
             parameter_type: Some("tag reference".to_owned()),
             function: None,
             edit: None,
@@ -1535,7 +2189,7 @@ pub(super) fn draw_shader_editor_model(
                     value_kind: "value",
                     color: None,
                 },
-                fill: MATERIAL_DATA_ROW,
+                fill: material_data_row(),
                 parameter_type: Some("option".to_owned()),
                 function: None,
                 edit: None,
@@ -1549,6 +2203,20 @@ pub(super) fn draw_shader_editor_model(
             draw_shader_grid_row(ui, row, 0, color_popup, function_popup, edit);
         }
     }
+
+    draw_shader_grid_section_header(ui, "ATMOSPHERE PROPERTIES");
+    draw_shader_flags_row(ui, &model.atmosphere_flags, edit);
+    draw_shader_grid_row(
+        ui,
+        &model.custom_fog_setting_index,
+        0,
+        color_popup,
+        function_popup,
+        edit,
+    );
+
+    draw_shader_grid_section_header(ui, "SORTING PROPERTIES");
+    draw_shader_grid_row(ui, &model.sort_layer, 0, color_popup, function_popup, edit);
 }
 
 pub(super) fn draw_shader_category_row(
@@ -1561,10 +2229,10 @@ pub(super) fn draw_shader_category_row(
     let value_width = (available - label_width - 24.0).max(240.0);
     let height = 25.0;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(available, height), Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, MATERIAL_DATA_ROW);
+    ui.painter().rect_filled(rect, 0.0, material_data_row());
     ui.painter().line_segment(
         [rect.left_bottom(), rect.right_bottom()],
-        Stroke::new(1.0, MATERIAL_GRID_LIGHT),
+        Stroke::new(1.0, material_grid_light()),
     );
     let label_rect = egui::Rect::from_min_size(
         rect.left_top() + Vec2::new(4.0, 0.0),
@@ -1575,7 +2243,7 @@ pub(super) fn draw_shader_category_row(
         Align2::RIGHT_CENTER,
         truncate_for_cell(&category.name, label_width - 12.0),
         FontId::proportional(12.5),
-        MATERIAL_TEXT,
+        material_text(),
     );
 
     let combo_rect = egui::Rect::from_min_size(
@@ -1625,7 +2293,7 @@ pub(super) fn draw_shader_category_row(
                 "read-only"
             },
             FontId::proportional(11.0),
-            MATERIAL_MUTED_TEXT,
+            material_muted_text(),
         );
     }
 }
@@ -1658,7 +2326,7 @@ pub(super) fn draw_material_template_summary(
             label,
             default_cell: None,
             value_cell: cell,
-            fill: MATERIAL_REF_ROW,
+            fill: material_ref_row(),
             parameter_type: Some("tag reference".to_owned()),
             function: None,
             edit: None,
@@ -1794,14 +2462,14 @@ pub(super) fn shader_grid_row_from_parameter(
         .as_ref()
         .or(first.as_ref())
         .map(|value| value.fill)
-        .unwrap_or(MATERIAL_DATA_ROW);
+        .unwrap_or(material_data_row());
 
     if function.is_some() {
         if let Some(function) = function.as_ref() {
             value_cell.text = shader_function_grid_text(&function.function);
         }
         value_cell.value_kind = "value";
-        fill = MATERIAL_FUNCTION_ROW;
+        fill = material_function_row();
     }
 
     ShaderGridRow {
@@ -1838,6 +2506,7 @@ pub(super) fn draw_shader_grid_row_readonly(
     let mut bitmap_reimport = None;
     let mut buffers = HashMap::new();
     let mut color_request = None;
+    let mut function_request = None;
     let mut block_clip_request = None;
     let mut ctx = FieldEditContext {
         view_scope: "readonly",
@@ -1845,6 +2514,7 @@ pub(super) fn draw_shader_grid_row_readonly(
         group_tag: 0,
         tags_root: None,
         editable: false,
+        show_block_sizes: false,
         buffers: &mut buffers,
         pending: &mut pending,
         block_ops: &mut block_ops,
@@ -1856,6 +2526,7 @@ pub(super) fn draw_shader_grid_row_readonly(
         shader_param_ops: &mut shader_param_ops,
         model_variant_ops: &mut model_variant_ops,
         color_request: &mut color_request,
+        function_request: &mut function_request,
         block_clipboard: None,
         block_clip_request: &mut block_clip_request,
         field_filter: None,
@@ -1901,18 +2572,148 @@ pub(super) fn draw_shader_grid_section_header(ui: &mut Ui, title: &str) {
     let available = ui.available_width().max(640.0);
     let height = 22.0;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(available, height), Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, MATERIAL_SECTION_HEADER);
+    ui.painter()
+        .rect_filled(rect, 0.0, material_section_header());
     ui.painter().line_segment(
         [rect.left_bottom(), rect.right_bottom()],
-        Stroke::new(1.0, MATERIAL_GRID_LIGHT),
+        Stroke::new(1.0, material_grid_light()),
     );
     ui.painter().text(
         rect.left_center() + Vec2::new(4.0, 0.0),
         Align2::LEFT_CENTER,
         title,
         FontId::proportional(13.0),
-        MATERIAL_TEXT,
+        material_text(),
     );
+}
+
+pub(super) fn draw_shader_flags_row(
+    ui: &mut Ui,
+    row: &ShaderFlagsRow,
+    edit: &mut FieldEditContext<'_>,
+) {
+    let available = ui.available_width().max(780.0);
+    let label_width = 230.0;
+    let default_width = 110.0;
+    let value_width = (available - label_width - default_width - 30.0).max(240.0);
+    let line_height = 17.0;
+    let height = (8.0 + line_height * row.options.len() as f32 + 5.0).max(25.0);
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(available, height), Sense::hover());
+    ui.painter().rect_filled(rect, 0.0, material_data_row());
+    ui.painter().line_segment(
+        [rect.left_bottom(), rect.right_bottom()],
+        Stroke::new(1.0, material_grid_light()),
+    );
+
+    let label_rect = egui::Rect::from_min_size(
+        rect.left_top() + Vec2::new(4.0, 0.0),
+        Vec2::new(label_width, height),
+    );
+    ui.painter().text(
+        label_rect.right_center() - Vec2::new(6.0, 0.0),
+        Align2::RIGHT_CENTER,
+        truncate_for_cell(&row.label, label_width - 12.0),
+        FontId::proportional(12.5),
+        material_text(),
+    );
+
+    let default_rect = egui::Rect::from_min_size(
+        label_rect.right_top() + Vec2::new(2.0, 2.0),
+        Vec2::new(default_width, height - 4.0),
+    );
+    ui.painter()
+        .rect_filled(default_rect, 0.0, material_default_input());
+    ui.painter()
+        .rect_stroke(default_rect, 0.0, Stroke::new(1.0, material_input_edge()));
+
+    let value_rect = egui::Rect::from_min_size(
+        default_rect.right_top() + Vec2::new(6.0, 0.0),
+        Vec2::new(value_width, height - 4.0),
+    );
+    ui.painter().rect_filled(value_rect, 0.0, material_input());
+    ui.painter()
+        .rect_stroke(value_rect, 0.0, Stroke::new(1.0, material_input_edge()));
+
+    let enabled = edit.editable && !row.path.is_empty();
+    for (index, option) in row.options.iter().enumerate() {
+        let row_rect = egui::Rect::from_min_size(
+            value_rect.left_top() + Vec2::new(8.0, 4.0 + index as f32 * line_height),
+            Vec2::new(value_rect.width() - 16.0, line_height),
+        );
+        let checkbox_rect =
+            egui::Rect::from_min_size(row_rect.left_top() + Vec2::new(0.0, 2.0), Vec2::splat(13.0));
+        let id = ui.make_persistent_id((
+            edit.view_scope,
+            edit.tag_key,
+            &row.path,
+            "shader_flag",
+            option.bit,
+        ));
+        let response = ui
+            .interact(
+                row_rect,
+                id,
+                if enabled {
+                    Sense::click()
+                } else {
+                    Sense::hover()
+                },
+            )
+            .on_hover_text(option.label);
+        if response.hovered() {
+            ui.painter().rect_filled(row_rect, 0.0, material_hover());
+        }
+
+        let is_set = row.raw & (1u64 << option.bit) != 0;
+        ui.painter().rect_filled(
+            checkbox_rect,
+            0.0,
+            if enabled {
+                material_input()
+            } else {
+                material_checkbox_disabled()
+            },
+        );
+        ui.painter()
+            .rect_stroke(checkbox_rect, 0.0, Stroke::new(1.0, material_input_edge()));
+        if is_set {
+            let stroke = Stroke::new(1.6, material_text());
+            ui.painter().line_segment(
+                [
+                    checkbox_rect.left_center() + Vec2::new(3.0, 0.0),
+                    checkbox_rect.center() + Vec2::new(-1.0, 3.0),
+                ],
+                stroke,
+            );
+            ui.painter().line_segment(
+                [
+                    checkbox_rect.center() + Vec2::new(-1.0, 3.0),
+                    checkbox_rect.right_center() + Vec2::new(-2.0, -4.0),
+                ],
+                stroke,
+            );
+        }
+        ui.painter().text(
+            row_rect.left_center() + Vec2::new(20.0, 0.0),
+            Align2::LEFT_CENTER,
+            option.label,
+            FontId::proportional(12.0),
+            material_text(),
+        );
+
+        if response.clicked() {
+            let mut next_mask = row.raw;
+            if is_set {
+                next_mask &= !(1u64 << option.bit);
+            } else {
+                next_mask |= 1u64 << option.bit;
+            }
+            edit.pending.push(PendingFieldEdit {
+                path: row.path.clone(),
+                input: next_mask.to_string(),
+            });
+        }
+    }
 }
 
 pub(super) fn draw_shader_grid_row(
@@ -1946,7 +2747,7 @@ pub(super) fn draw_shader_grid_row(
     ui.painter().rect_filled(rect, 0.0, row.fill);
     ui.painter().line_segment(
         [rect.left_bottom(), rect.right_bottom()],
-        Stroke::new(1.0, MATERIAL_GRID_LIGHT),
+        Stroke::new(1.0, material_grid_light()),
     );
 
     let label_rect = egui::Rect::from_min_size(
@@ -1958,7 +2759,7 @@ pub(super) fn draw_shader_grid_row(
         Align2::RIGHT_CENTER,
         truncate_for_cell(&row.label, label_width - 12.0),
         FontId::proportional(12.5),
-        MATERIAL_TEXT,
+        material_text(),
     );
 
     let default_rect = egui::Rect::from_min_size(
@@ -2002,30 +2803,30 @@ pub(super) fn draw_shader_grid_row(
             range_rect.left_top() + Vec2::new(0.0, 2.0),
             Vec2::splat(14.0),
         );
-        ui.painter().rect_filled(check_rect, 0.0, Color32::WHITE);
+        ui.painter().rect_filled(check_rect, 0.0, material_input());
         ui.painter()
-            .rect_stroke(check_rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+            .rect_stroke(check_rect, 0.0, Stroke::new(1.0, material_input_edge()));
         ui.painter().text(
             check_rect.right_center() + Vec2::new(4.0, 0.0),
             Align2::LEFT_CENTER,
             "range:",
             FontId::proportional(12.0),
-            MATERIAL_TEXT,
+            material_text(),
         );
 
         let button_rect = egui::Rect::from_min_size(
             range_rect.right_top() + Vec2::new(4.0, -1.0),
             Vec2::new(28.0, height - 4.0),
         );
-        ui.painter().rect_filled(button_rect, 0.0, Color32::WHITE);
+        ui.painter().rect_filled(button_rect, 0.0, material_input());
         ui.painter()
-            .rect_stroke(button_rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+            .rect_stroke(button_rect, 0.0, Stroke::new(1.0, material_input_edge()));
         ui.painter().text(
             button_rect.center(),
             Align2::CENTER_CENTER,
             "f()",
             FontId::proportional(12.0),
-            MATERIAL_TEXT,
+            material_text(),
         );
 
         let click_response = ui
@@ -2051,15 +2852,15 @@ pub(super) fn draw_shader_grid_row(
                     button_rect.right_top() + Vec2::new(4.0, 0.0),
                     Vec2::new(18.0, height - 4.0),
                 );
-                ui.painter().rect_filled(del_rect, 0.0, Color32::WHITE);
+                ui.painter().rect_filled(del_rect, 0.0, material_input());
                 ui.painter()
-                    .rect_stroke(del_rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+                    .rect_stroke(del_rect, 0.0, Stroke::new(1.0, material_input_edge()));
                 ui.painter().text(
                     del_rect.center(),
                     Align2::CENTER_CENTER,
                     "×",
                     FontId::proportional(13.0),
-                    Color32::DARK_RED,
+                    material_delete_text(),
                 );
                 if ui
                     .interact(
@@ -2083,15 +2884,15 @@ pub(super) fn draw_shader_grid_row(
             value_rect.right_top() + Vec2::new(4.0, 2.0),
             Vec2::new(26.0, height - 4.0),
         );
-        ui.painter().rect_filled(f_rect, 0.0, Color32::WHITE);
+        ui.painter().rect_filled(f_rect, 0.0, material_input());
         ui.painter()
-            .rect_stroke(f_rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+            .rect_stroke(f_rect, 0.0, Stroke::new(1.0, material_input_edge()));
         ui.painter().text(
             f_rect.center(),
             Align2::CENTER_CENTER,
             "f()",
             FontId::proportional(11.0),
-            MATERIAL_TEXT,
+            material_text(),
         );
         if ui
             .interact(
@@ -2116,15 +2917,15 @@ pub(super) fn draw_shader_grid_row(
                     f_rect.right_top() + Vec2::new(2.0, 0.0),
                     Vec2::new(18.0, height - 4.0),
                 );
-                ui.painter().rect_filled(del_rect, 0.0, Color32::WHITE);
+                ui.painter().rect_filled(del_rect, 0.0, material_input());
                 ui.painter()
-                    .rect_stroke(del_rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+                    .rect_stroke(del_rect, 0.0, Stroke::new(1.0, material_input_edge()));
                 ui.painter().text(
                     del_rect.center(),
                     Align2::CENTER_CENTER,
                     "×",
                     FontId::proportional(13.0),
-                    Color32::DARK_RED,
+                    material_delete_text(),
                 );
                 if ui
                     .interact(
@@ -2142,21 +2943,21 @@ pub(super) fn draw_shader_grid_row(
                 }
             }
         }
-    } else if let (true, Some(op)) = (editable, row.create_anim_op.as_ref()) {
+    } else if let (true, Some(action)) = (editable, row.create_anim_op.as_ref()) {
         // No animated parameter yet — show an "f()+" button to create one.
         let button_rect = egui::Rect::from_min_size(
             value_rect.right_top() + Vec2::new(12.0, 2.0),
             Vec2::new(34.0, height - 4.0),
         );
-        ui.painter().rect_filled(button_rect, 0.0, Color32::WHITE);
+        ui.painter().rect_filled(button_rect, 0.0, material_input());
         ui.painter()
-            .rect_stroke(button_rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+            .rect_stroke(button_rect, 0.0, Stroke::new(1.0, material_input_edge()));
         ui.painter().text(
             button_rect.center(),
             Align2::CENTER_CENTER,
             "f()+",
             FontId::proportional(11.0),
-            MATERIAL_TEXT,
+            material_text(),
         );
         let add_response = ui
             .interact(
@@ -2166,7 +2967,7 @@ pub(super) fn draw_shader_grid_row(
             )
             .on_hover_text("Create animated parameter");
         if add_response.clicked() {
-            edit.shader_ops.push(op.clone());
+            push_shader_context_action(edit, action);
         }
     } else {
         // context_menu takes &self so call it first; on_hover_text takes self.
@@ -2177,7 +2978,7 @@ pub(super) fn draw_shader_grid_row(
                     ui.separator();
                     for item in &menu.items {
                         if ui.button(&item.label).clicked() {
-                            edit.shader_ops.push(item.op.clone());
+                            push_shader_context_action(edit, &item.action);
                             ui.close_menu();
                         }
                     }
@@ -2262,12 +3063,12 @@ pub(super) fn draw_shader_editable_value(
             }
             let mut commit_val: Option<f32> = None;
             ui.scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
-                ui.visuals_mut().extreme_bg_color = Color32::WHITE;
+                ui.visuals_mut().extreme_bg_color = material_input();
                 let resp = ui.add(
                     egui::TextEdit::singleline(buffer)
                         .id(id)
                         .desired_width(text_rect.width())
-                        .text_color(MATERIAL_TEXT)
+                        .text_color(material_text())
                         .font(egui::TextStyle::Monospace),
                 );
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
@@ -2284,15 +3085,15 @@ pub(super) fn draw_shader_editable_value(
                 });
             }
             // × delete button
-            ui.painter().rect_filled(del_rect, 0.0, Color32::WHITE);
+            ui.painter().rect_filled(del_rect, 0.0, material_input());
             ui.painter()
-                .rect_stroke(del_rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+                .rect_stroke(del_rect, 0.0, Stroke::new(1.0, material_input_edge()));
             ui.painter().text(
                 del_rect.center(),
                 Align2::CENTER_CENTER,
                 "×",
                 FontId::proportional(13.0),
-                Color32::DARK_RED,
+                material_delete_text(),
             );
             if ui
                 .interact(
@@ -2311,7 +3112,7 @@ pub(super) fn draw_shader_editable_value(
         }
 
         // BitmapRef → text box + Open + "..." browse button.
-        ShaderRowEditKind::BitmapRef { group_tag } => {
+        ShaderRowEditKind::BitmapRef { group_tag, create } => {
             let current = row_edit.current.clone();
             // Reserve the right edge: "..." browse (24px) then Open (40px).
             let browse_rect = egui::Rect::from_min_size(
@@ -2339,19 +3140,19 @@ pub(super) fn draw_shader_editable_value(
                 open_rect,
                 0.0,
                 if open_enabled {
-                    Color32::WHITE
+                    material_input()
                 } else {
-                    Color32::from_gray(210)
+                    material_disabled_input()
                 },
             );
             ui.painter()
-                .rect_stroke(open_rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+                .rect_stroke(open_rect, 0.0, Stroke::new(1.0, material_input_edge()));
             ui.painter().text(
                 open_rect.center(),
                 Align2::CENTER_CENTER,
                 "Open",
                 FontId::proportional(11.0),
-                MATERIAL_TEXT,
+                material_text(),
             );
             if open_enabled
                 && ui
@@ -2378,12 +3179,12 @@ pub(super) fn draw_shader_editable_value(
             }
             let mut commit = None;
             ui.scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
-                ui.visuals_mut().extreme_bg_color = Color32::WHITE;
+                ui.visuals_mut().extreme_bg_color = material_input();
                 let resp = ui.add(
                     egui::TextEdit::singleline(buffer)
                         .id(id)
                         .desired_width(text_rect.width())
-                        .text_color(MATERIAL_TEXT)
+                        .text_color(material_text())
                         .font(egui::TextStyle::Monospace),
                 );
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
@@ -2392,21 +3193,18 @@ pub(super) fn draw_shader_editable_value(
                 }
             });
             if let Some(input) = commit {
-                edit.pending.push(PendingFieldEdit {
-                    path: row_edit.path.clone(),
-                    input,
-                });
+                push_shader_value_edit(edit, row_edit, create.as_ref(), input);
             }
             // "..." browse button
-            ui.painter().rect_filled(browse_rect, 0.0, Color32::WHITE);
+            ui.painter().rect_filled(browse_rect, 0.0, material_input());
             ui.painter()
-                .rect_stroke(browse_rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+                .rect_stroke(browse_rect, 0.0, Stroke::new(1.0, material_input_edge()));
             ui.painter().text(
                 browse_rect.center(),
                 Align2::CENTER_CENTER,
                 "...",
                 FontId::proportional(11.0),
-                MATERIAL_TEXT,
+                material_text(),
             );
             if ui
                 .interact(
@@ -2430,11 +3228,26 @@ pub(super) fn draw_shader_editable_value(
                     // Update the text buffer so the row shows the chosen path.
                     let buf = edit.buffers.entry(buffer_key).or_insert_with(String::new);
                     *buf = rel.clone();
-                    edit.pending.push(PendingFieldEdit {
-                        path: row_edit.path.clone(),
-                        input: rel,
-                    });
+                    push_shader_value_edit(edit, row_edit, create.as_ref(), rel);
                 }
+            }
+        }
+
+        ShaderRowEditKind::Bool { create } => {
+            let current_raw = row_edit.current.trim().parse::<i32>().unwrap_or(0);
+            let mut checked = current_raw != 0;
+            let response = ui
+                .scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+                    ui.add_enabled(edit.editable, egui::Checkbox::new(&mut checked, ""))
+                })
+                .inner;
+            if response.changed() {
+                push_shader_value_edit(
+                    edit,
+                    row_edit,
+                    create.as_ref(),
+                    if checked { "1" } else { "0" }.to_owned(),
+                );
             }
         }
 
@@ -2468,20 +3281,14 @@ pub(super) fn draw_shader_editable_value(
                 float_channel_to_u8(b),
                 float_channel_to_u8(a),
             );
-            ui.painter().rect_filled(swatch_rect, 0.0, Color32::WHITE);
-            ui.painter()
-                .rect_stroke(swatch_rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
-            // Inner color swatch.
+            draw_shader_color_swatch(ui, swatch_rect, color32);
             let inner = swatch_rect.shrink(3.0);
-            ui.painter().rect_filled(inner, 0.0, color32);
-            ui.painter()
-                .rect_stroke(inner, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
             ui.painter().text(
                 swatch_rect.left_center() + Vec2::new(inner.width() + 8.0, 0.0),
                 Align2::LEFT_CENTER,
                 "color: RGB",
                 FontId::monospace(12.0),
-                MATERIAL_TEXT,
+                material_text(),
             );
             if ui
                 .interact(
@@ -2498,15 +3305,15 @@ pub(super) fn draw_shader_editable_value(
                 );
             }
             // × delete button
-            ui.painter().rect_filled(del_rect, 0.0, Color32::WHITE);
+            ui.painter().rect_filled(del_rect, 0.0, material_input());
             ui.painter()
-                .rect_stroke(del_rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+                .rect_stroke(del_rect, 0.0, Stroke::new(1.0, material_input_edge()));
             ui.painter().text(
                 del_rect.center(),
                 Align2::CENTER_CENTER,
                 "×",
                 FontId::proportional(13.0),
-                Color32::DARK_RED,
+                material_delete_text(),
             );
             if ui
                 .interact(
@@ -2524,7 +3331,7 @@ pub(super) fn draw_shader_editable_value(
             }
         }
 
-        ShaderRowEditKind::CreateFunctionColor { op } => {
+        ShaderRowEditKind::ColorField { argb } => {
             let parts: Vec<f32> = row_edit
                 .current
                 .split(',')
@@ -2541,19 +3348,57 @@ pub(super) fn draw_shader_editable_value(
                 float_channel_to_u8(b),
                 float_channel_to_u8(a),
             );
-            ui.painter().rect_filled(rect, 0.0, Color32::WHITE);
-            ui.painter()
-                .rect_stroke(rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+            draw_shader_color_swatch(ui, rect, color32);
             let inner = rect.shrink(3.0);
-            ui.painter().rect_filled(inner, 0.0, color32);
-            ui.painter()
-                .rect_stroke(inner, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
             ui.painter().text(
                 rect.left_center() + Vec2::new(inner.width() + 8.0, 0.0),
                 Align2::LEFT_CENTER,
                 "color: RGB",
                 FontId::monospace(12.0),
-                MATERIAL_TEXT,
+                material_text(),
+            );
+            if ui
+                .interact(
+                    rect,
+                    ui.make_persistent_id(format!("shader_color_field:{label}")),
+                    Sense::click(),
+                )
+                .on_hover_text("Click to edit color")
+                .clicked()
+            {
+                *color_popup = Some(MaterialColorPopup::new(label, r, g, b, a).with_color_field(
+                    edit.tag_key,
+                    row_edit.path.clone(),
+                    *argb,
+                ));
+            }
+        }
+
+        ShaderRowEditKind::CreateFunctionColor { target } => {
+            let parts: Vec<f32> = row_edit
+                .current
+                .split(',')
+                .filter_map(|s| s.trim().parse::<f32>().ok())
+                .collect();
+            let (r, g, b, a) = if parts.len() == 4 {
+                (parts[0], parts[1], parts[2], parts[3])
+            } else {
+                (1.0, 1.0, 1.0, 1.0)
+            };
+            let color32 = Color32::from_rgba_unmultiplied(
+                float_channel_to_u8(r),
+                float_channel_to_u8(g),
+                float_channel_to_u8(b),
+                float_channel_to_u8(a),
+            );
+            draw_shader_color_swatch(ui, rect, color32);
+            let inner = rect.shrink(3.0);
+            ui.painter().text(
+                rect.left_center() + Vec2::new(inner.width() + 8.0, 0.0),
+                Align2::LEFT_CENTER,
+                "color: RGB",
+                FontId::monospace(12.0),
+                material_text(),
             );
             if ui
                 .interact(
@@ -2564,10 +3409,49 @@ pub(super) fn draw_shader_editable_value(
                 .on_hover_text("Click to edit color")
                 .clicked()
             {
-                *color_popup = Some(
-                    MaterialColorPopup::new(label, r, g, b, a)
-                        .with_shader_op(edit.tag_key, op.clone()),
+                *color_popup = Some(shader_color_create_popup(
+                    edit.tag_key,
+                    label,
+                    r,
+                    g,
+                    b,
+                    a,
+                    target,
+                ));
+            }
+        }
+
+        ShaderRowEditKind::CreateFunctionScalar { target } => {
+            let current = row_edit.current.clone();
+            let create_buf_key = format!("{}|create_fn_scalar:{label}", edit.tag_key);
+            let id = edit.widget_id(("shader_create_fn_scalar", label));
+            let buffer = edit
+                .buffers
+                .entry(create_buf_key)
+                .or_insert_with(|| current.clone());
+            if !ui.memory(|m| m.has_focus(id)) && *buffer != current {
+                *buffer = current.clone();
+            }
+            let mut commit_val: Option<f32> = None;
+            ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
+                ui.visuals_mut().extreme_bg_color = material_pending_input();
+                let resp = ui.add(
+                    egui::TextEdit::singleline(buffer)
+                        .id(id)
+                        .desired_width(rect.width())
+                        .text_color(material_text())
+                        .font(egui::TextStyle::Monospace),
                 );
+                text_edit_cursor_to_start_on_tab_focus(ui, &resp);
+                if resp.lost_focus() && buffer.trim() != current.trim() {
+                    if let Ok(v) = buffer.trim().parse::<f32>() {
+                        commit_val = Some(v);
+                    }
+                }
+            });
+            if let Some(v) = commit_val {
+                let action = shader_function_action(target, constant_function_hex(v));
+                push_shader_context_action(edit, &action);
             }
         }
 
@@ -2575,6 +3459,7 @@ pub(super) fn draw_shader_editable_value(
         ShaderRowEditKind::CreateScalarParam {
             parameters_block_path,
             parameter_name,
+            parameter_type_index,
         } => {
             let current = row_edit.current.clone();
             let create_buf_key = format!("{}|create:{label}", edit.tag_key);
@@ -2588,12 +3473,12 @@ pub(super) fn draw_shader_editable_value(
             }
             let mut commit_val: Option<f32> = None;
             ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
-                ui.visuals_mut().extreme_bg_color = Color32::from_rgb(255, 252, 235);
+                ui.visuals_mut().extreme_bg_color = material_pending_input();
                 let resp = ui.add(
                     egui::TextEdit::singleline(buffer)
                         .id(id)
                         .desired_width(rect.width())
-                        .text_color(MATERIAL_TEXT)
+                        .text_color(material_text())
                         .font(egui::TextStyle::Monospace),
                 );
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
@@ -2607,7 +3492,14 @@ pub(super) fn draw_shader_editable_value(
                 edit.shader_param_ops.push(ShaderParamOp {
                     parameters_block_path: parameters_block_path.clone(),
                     parameter_name: parameter_name.clone(),
-                    real_value: v,
+                    initial_fields: vec![
+                        shader_parameter_type_initial_field(*parameter_type_index),
+                        ShaderParamInitialField {
+                            field: "real".to_owned(),
+                            input: v.to_string(),
+                        },
+                    ],
+                    animated_parameters: Vec::new(),
                 });
             }
         }
@@ -2625,12 +3517,12 @@ pub(super) fn draw_shader_editable_value(
             }
             let mut commit = None;
             ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
-                ui.visuals_mut().extreme_bg_color = Color32::WHITE;
+                ui.visuals_mut().extreme_bg_color = material_input();
                 let resp = ui.add(
                     egui::TextEdit::singleline(buffer)
                         .id(id)
                         .desired_width(rect.width())
-                        .text_color(MATERIAL_TEXT)
+                        .text_color(material_text())
                         .font(egui::TextStyle::Monospace),
                 );
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
@@ -2645,6 +3537,89 @@ pub(super) fn draw_shader_editable_value(
                 });
             }
         }
+    }
+}
+
+pub(super) fn draw_shader_color_swatch(ui: &mut Ui, rect: egui::Rect, color: Color32) {
+    let display_color = Color32::from_rgb(color.r(), color.g(), color.b());
+    ui.painter().rect_filled(rect, 0.0, material_input());
+    ui.painter()
+        .rect_stroke(rect, 0.0, Stroke::new(1.0, material_input_edge()));
+    let inner = rect.shrink(3.0);
+    ui.painter().rect_filled(inner, 0.0, display_color);
+    ui.painter().rect_stroke(
+        inner,
+        0.0,
+        Stroke::new(1.25, material_color_swatch_edge(display_color)),
+    );
+}
+
+pub(super) fn push_shader_value_edit(
+    edit: &mut FieldEditContext<'_>,
+    row_edit: &ShaderRowEdit,
+    create: Option<&ShaderParamCreateTarget>,
+    input: String,
+) {
+    if let Some(create) = create {
+        edit.shader_param_ops.push(ShaderParamOp {
+            parameters_block_path: create.parameters_block_path.clone(),
+            parameter_name: create.parameter_name.clone(),
+            initial_fields: vec![
+                shader_parameter_type_initial_field(create.parameter_type_index),
+                ShaderParamInitialField {
+                    field: create.field.to_owned(),
+                    input,
+                },
+            ],
+            animated_parameters: Vec::new(),
+        });
+    } else {
+        edit.pending.push(PendingFieldEdit {
+            path: row_edit.path.clone(),
+            input,
+        });
+    }
+}
+
+pub(super) fn shader_color_create_popup(
+    tag_key: &str,
+    label: &str,
+    r: f32,
+    g: f32,
+    b: f32,
+    a: f32,
+    target: &ShaderFunctionCreateTarget,
+) -> MaterialColorPopup {
+    let popup = MaterialColorPopup::new(label, r, g, b, a);
+    match target {
+        ShaderFunctionCreateTarget::ExistingParameter {
+            animated_block_path,
+            output_type_index,
+        } => popup.with_shader_op(
+            tag_key,
+            ShaderOp {
+                animated_block_path: animated_block_path.clone(),
+                output_type_index: *output_type_index,
+                initial_function_hex: constant_color_function_hex(r, g, b, a),
+            },
+        ),
+        ShaderFunctionCreateTarget::NewParameter {
+            parameters_block_path,
+            parameter_name,
+            parameter_type_index,
+            output_type_index,
+        } => popup.with_shader_param_op(
+            tag_key,
+            ShaderParamOp {
+                parameters_block_path: parameters_block_path.clone(),
+                parameter_name: parameter_name.clone(),
+                initial_fields: vec![shader_parameter_type_initial_field(*parameter_type_index)],
+                animated_parameters: vec![ShaderParamInitialAnimated {
+                    output_type_index: *output_type_index,
+                    initial_function_hex: constant_color_function_hex(r, g, b, a),
+                }],
+            },
+        ),
     }
 }
 
@@ -2685,12 +3660,12 @@ pub(super) fn draw_shader_grid_cell(
     color_popup: &mut Option<MaterialColorPopup>,
 ) {
     let (fill, text_color) = match cell.map(|cell| cell.value_kind) {
-        Some("default") | None => (MATERIAL_DEFAULT_BOX, MATERIAL_MUTED_TEXT),
-        _ => (Color32::WHITE, MATERIAL_TEXT),
+        Some("default") | None => (material_default_box(), material_muted_text()),
+        _ => (material_input(), material_text()),
     };
     ui.painter().rect_filled(rect, 0.0, fill);
     ui.painter()
-        .rect_stroke(rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+        .rect_stroke(rect, 0.0, Stroke::new(1.0, material_input_edge()));
 
     let Some(cell) = cell else {
         return;
@@ -2703,9 +3678,7 @@ pub(super) fn draw_shader_grid_cell(
             rect.right_top() - Vec2::new(swatch_size + 4.0, -2.5),
             Vec2::splat(swatch_size),
         );
-        ui.painter().rect_filled(swatch_rect, 0.0, color.color32());
-        ui.painter()
-            .rect_stroke(swatch_rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+        draw_shader_color_swatch(ui, swatch_rect, color.color32());
         let swatch_response = ui
             .interact(
                 swatch_rect,
