@@ -821,9 +821,24 @@ pub(super) fn lerp_color(a: Color32, b: Color32, t: f32) -> Color32 {
 }
 
 #[derive(Clone)]
+pub(super) enum FunctionDataStorage {
+    DataField(String),
+    Halo2ByteBlock(String),
+}
+
+impl FunctionDataStorage {
+    pub(super) fn data_field_path(&self) -> Option<&str> {
+        match self {
+            Self::DataField(path) => Some(path),
+            Self::Halo2ByteBlock(_) => None,
+        }
+    }
+}
+
+#[derive(Clone)]
 pub(super) struct FunctionEditPaths {
-    /// `function/data` — the raw `mapping_function` blob.
-    pub(super) data: String,
+    /// Backing storage for the raw `mapping_function` blob.
+    pub(super) data: FunctionDataStorage,
     /// `type` — the Output enum (`RenderMethodAnimatedParameterType`).
     pub(super) parameter_type: String,
     /// `input name` — string_id.
@@ -944,6 +959,7 @@ impl FunctionSnapshot {
 pub(super) struct FunctionEditBatch {
     pub(super) tag_key: String,
     pub(super) edits: Vec<PendingFieldEdit>,
+    pub(super) data_ops: Vec<FunctionDataOp>,
 }
 
 /// Diff a view's current values against the last-applied snapshot and
@@ -954,14 +970,26 @@ pub(super) fn push_function_edit(
     paths: &FunctionEditPaths,
     prev: &FunctionSnapshot,
     view: &FunctionView,
-) -> Vec<PendingFieldEdit> {
+) -> FunctionEditBatch {
     let mut edits = Vec::new();
+    let mut data_ops = Vec::new();
     let data = view.function.to_bytes();
-    if data != prev.data && !paths.data.is_empty() {
-        edits.push(PendingFieldEdit {
-            path: paths.data.clone(),
-            input: encode_hex(&data),
-        });
+    if data != prev.data {
+        match &paths.data {
+            FunctionDataStorage::DataField(path) if !path.is_empty() => {
+                edits.push(PendingFieldEdit {
+                    path: path.clone(),
+                    input: encode_hex(&data),
+                });
+            }
+            FunctionDataStorage::Halo2ByteBlock(block_path) if !block_path.is_empty() => {
+                data_ops.push(FunctionDataOp {
+                    block_path: block_path.clone(),
+                    data,
+                });
+            }
+            _ => {}
+        }
     }
     if view.output_index != prev.output_index && !paths.parameter_type.is_empty() {
         if let Some(index) = view.output_index {
@@ -997,7 +1025,11 @@ pub(super) fn push_function_edit(
             input: view.time_period_in_seconds.to_string(),
         });
     }
-    edits
+    FunctionEditBatch {
+        tag_key: String::new(),
+        edits,
+        data_ops,
+    }
 }
 
 pub(super) fn draw_function_popup(
@@ -1007,6 +1039,7 @@ pub(super) fn draw_function_popup(
     let popup = function_popup.as_mut()?;
     let mut open = true;
     let mut close = false;
+    let mut commit = false;
     let editable = popup.editable;
     egui::Window::new(popup.title.clone())
         .collapsible(false)
@@ -1026,22 +1059,26 @@ pub(super) fn draw_function_popup(
             ui.horizontal(|ui| {
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui.button("OK").clicked() {
+                        commit = true;
                         close = true;
                     }
                 });
             });
         });
 
-    // Emit edits for whatever changed since the last frame.
+    // Commit edits only when OK is pressed. Live-writing while a modal is
+    // open can invalidate classic H2 wrapper fields underneath combo boxes.
     let mut batch = None;
-    if editable {
+    if editable && commit {
         if let Some(paths) = popup.view.edit.clone() {
-            let edits = push_function_edit(&paths, &popup.last_applied, &popup.view);
-            if !edits.is_empty() {
+            let mut edits = push_function_edit(&paths, &popup.last_applied, &popup.view);
+            if !edits.edits.is_empty() || !edits.data_ops.is_empty() {
                 popup.last_applied = FunctionSnapshot::from_view(&popup.view);
+                edits.tag_key = popup.tag_key.clone();
                 batch = Some(FunctionEditBatch {
-                    tag_key: popup.tag_key.clone(),
-                    edits,
+                    tag_key: edits.tag_key,
+                    edits: edits.edits,
+                    data_ops: edits.data_ops,
                 });
             }
         }

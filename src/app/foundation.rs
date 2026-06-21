@@ -2022,7 +2022,7 @@ pub(super) fn draw_foundation_function_row(
 
 pub(super) fn foundation_function_edit_paths(data_path: &str) -> FunctionEditPaths {
     FunctionEditPaths {
-        data: data_path.to_owned(),
+        data: FunctionDataStorage::DataField(data_path.to_owned()),
         parameter_type: String::new(),
         input_name: String::new(),
         range_name: String::new(),
