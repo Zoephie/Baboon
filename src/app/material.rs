@@ -24,10 +24,17 @@ pub(super) fn draw_material_tag(
         })
         .show(ui, |ui| {
             if is_shader_tag(entry) {
-                if let Some(model) =
-                    build_shader_editor_model(tag, entry.group_tag, source, rmdf_cache, rmop_cache)
-                        .or_else(|| build_classic_shader_editor_model(tag, names))
-                {
+                let model =
+                    build_h2ek_shader_editor_model(tag, entry, names, source).or_else(|| {
+                        build_shader_editor_model(
+                            tag,
+                            entry.group_tag,
+                            source,
+                            rmdf_cache,
+                            rmop_cache,
+                        )
+                    });
+                if let Some(model) = model {
                     draw_shader_editor_model(ui, &model, color_popup, function_popup, edit);
                     return;
                 }
@@ -1287,6 +1294,24 @@ pub(super) fn is_shader_tag(entry: &TagEntry) -> bool {
             || tag == u32::from_be_bytes(*b"rmb ")
             || tag == u32::from_be_bytes(*b"rmco")
             || tag == u32::from_be_bytes(*b"rmlv")
+    )
+}
+
+pub(super) fn is_h2ek_shader_family_group(group_tag: u32) -> bool {
+    matches!(
+        &group_tag.to_be_bytes(),
+        b"rmsh"
+            | b"shad"
+            | b"rmtr"
+            | b"rmcs"
+            | b"rmhg"
+            | b"rmfl"
+            | b"rmsk"
+            | b"rmct"
+            | b"rmp "
+            | b"rmb "
+            | b"rmd "
+            | b"rmw "
     )
 }
 

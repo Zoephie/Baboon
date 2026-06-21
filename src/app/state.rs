@@ -218,6 +218,12 @@ pub(super) struct PendingFieldEdit {
     pub(super) input: String,
 }
 
+#[derive(Clone)]
+pub(super) struct FunctionDataOp {
+    pub(super) block_path: String,
+    pub(super) data: Vec<u8>,
+}
+
 /// A deferred structural edit to a block (add/insert/duplicate/delete),
 /// applied to the tag after the immutable render borrow ends.
 #[derive(Clone)]

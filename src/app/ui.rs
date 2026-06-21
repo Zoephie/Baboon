@@ -1452,6 +1452,11 @@ impl eframe::App for Baboon {
                 {
                     self.status = status;
                 }
+                if let Some(status) =
+                    apply_function_data_ops(&mut doc.tag, batch.data_ops, &mut doc.dirty)
+                {
+                    self.status = status;
+                }
             }
         }
         self.handle_block_confirm(ctx);

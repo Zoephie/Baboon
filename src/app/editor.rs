@@ -288,7 +288,7 @@ pub(super) fn apply_pending_edits(
 ) -> Option<String> {
     let mut status = None;
     for edit in edits {
-        let result = apply_field_edit(tag, &edit.path, &edit.input);
+        let result = catch_edit_unwind(|| apply_field_edit(tag, &edit.path, &edit.input));
         match result {
             Ok(()) => {
                 *dirty = true;
@@ -321,6 +321,61 @@ pub(super) fn apply_block_ops(
         }
     }
     status
+}
+
+pub(super) fn apply_function_data_ops(
+    tag: &mut TagFile,
+    ops: Vec<FunctionDataOp>,
+    dirty: &mut bool,
+) -> Option<String> {
+    let mut status = None;
+    for op in ops {
+        let result =
+            catch_edit_unwind(|| replace_halo2_function_byte_block(tag, &op.block_path, &op.data));
+        match result {
+            Ok(()) => {
+                *dirty = true;
+                status = Some(format!("Edited {}", op.block_path));
+            }
+            Err(error) => {
+                status = Some(format!(
+                    "Function edit failed for {}: {error}",
+                    op.block_path
+                ));
+            }
+        }
+    }
+    status
+}
+
+fn catch_edit_unwind(f: impl FnOnce() -> Result<(), String>) -> Result<(), String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f))
+        .map_err(|panic| panic_message(panic))?
+}
+
+fn panic_message(panic: Box<dyn std::any::Any + Send>) -> String {
+    if let Some(message) = panic.downcast_ref::<String>() {
+        format!("internal edit panic: {message}")
+    } else if let Some(message) = panic.downcast_ref::<&'static str>() {
+        format!("internal edit panic: {message}")
+    } else {
+        "internal edit panic".to_owned()
+    }
+}
+
+pub(super) fn replace_halo2_function_byte_block(
+    tag: &mut TagFile,
+    block_path: &str,
+    data: &[u8],
+) -> Result<(), String> {
+    TagFunction::parse(data).map_err(|error| format!("invalid mapping_function data: {error}"))?;
+    clear_block(tag, block_path)?;
+    for (index, byte) in data.iter().copied().enumerate() {
+        add_block_element(tag, block_path)?;
+        let value = (byte as i8).to_string();
+        apply_field_edit(tag, &format!("{block_path}[{index}]/Value"), &value)?;
+    }
+    Ok(())
 }
 
 pub(super) fn apply_one_block_op(tag: &mut TagFile, op: &BlockOp) -> Result<String, String> {
@@ -400,8 +455,23 @@ pub(super) fn apply_field_edit(tag: &mut TagFile, path: &str, input: &str) -> Re
     let mut field = root
         .field_path_mut(path)
         .ok_or_else(|| "field path no longer resolves".to_owned())?;
-    let value = parse_gui_field_value(&field.as_ref(), input)?;
+    let field_ref = field.as_ref();
+    if is_subchunk_backed_field(field_ref.field_type()) && field_ref.value().is_none() {
+        return Err("field data is absent in this tag version".to_owned());
+    }
+    let value = parse_gui_field_value(&field_ref, input)?;
     field.set(value).map_err(|error| format!("{error:?}"))
+}
+
+fn is_subchunk_backed_field(field_type: TagFieldType) -> bool {
+    matches!(
+        field_type,
+        TagFieldType::StringId
+            | TagFieldType::OldStringId
+            | TagFieldType::TagReference
+            | TagFieldType::Data
+            | TagFieldType::ApiInterop
+    )
 }
 
 pub(super) fn apply_shader_ops(
@@ -1470,4 +1540,96 @@ pub(super) fn filtered_bitmap_rgba(
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn model_variant_ops_create_update_and_drop_regions() {
+        let mut tag = TagFile::new("definitions/halo2_mcc/model.json").unwrap();
+        let mut dirty = false;
+
+        let status = apply_model_variant_ops(
+            &mut tag,
+            vec![ModelVariantOp::Create {
+                name: "test".to_owned(),
+                regions: vec![ModelVariantRegionChoice {
+                    region_name: "body".to_owned(),
+                    permutation_name: "default".to_owned(),
+                }],
+            }],
+            &mut dirty,
+        );
+        assert_eq!(status.as_deref(), Some("Created model variant 'test'"));
+        assert!(dirty);
+        assert_variant(&tag, 0, "test", "body", "default");
+
+        let status = apply_model_variant_ops(
+            &mut tag,
+            vec![ModelVariantOp::Update {
+                variant_index: 0,
+                regions: vec![ModelVariantRegionChoice {
+                    region_name: "head".to_owned(),
+                    permutation_name: "damaged".to_owned(),
+                }],
+            }],
+            &mut dirty,
+        );
+        assert_eq!(status.as_deref(), Some("Updated model variant 0"));
+        assert_variant(&tag, 0, "test", "head", "damaged");
+
+        let status = apply_model_variant_ops(
+            &mut tag,
+            vec![ModelVariantOp::Drop { variant_index: 0 }],
+            &mut dirty,
+        );
+        assert_eq!(status.as_deref(), Some("Deleted model variant 0"));
+        let variants = tag
+            .root()
+            .field("variants")
+            .and_then(|field| field.as_block())
+            .unwrap();
+        assert_eq!(variants.len(), 0);
+    }
+
+    fn assert_variant(
+        tag: &TagFile,
+        variant_index: usize,
+        variant_name: &str,
+        region_name: &str,
+        permutation_name: &str,
+    ) {
+        let variants = tag
+            .root()
+            .field("variants")
+            .and_then(|field| field.as_block())
+            .unwrap();
+        let variant = variants.element(variant_index).unwrap();
+        assert_eq!(
+            variant.read_string_id("name").as_deref(),
+            Some(variant_name)
+        );
+        let regions = variant
+            .field("regions")
+            .and_then(|field| field.as_block())
+            .unwrap();
+        assert_eq!(regions.len(), 1);
+        let region = regions.element(0).unwrap();
+        assert_eq!(
+            region.read_string_id("region name").as_deref(),
+            Some(region_name)
+        );
+        let permutations = region
+            .field("permutations")
+            .and_then(|field| field.as_block())
+            .unwrap();
+        assert_eq!(permutations.len(), 1);
+        let permutation = permutations.element(0).unwrap();
+        assert_eq!(
+            permutation.read_string_id("permutation name").as_deref(),
+            Some(permutation_name)
+        );
+    }
 }

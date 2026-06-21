@@ -328,9 +328,10 @@ pub(super) fn build_classic_shader_editor_model(
 
     let mut general_rows = Vec::new();
     let mut sections = Vec::new();
-    for field in tag.root().fields() {
+    let root = tag.root();
+    for field in root.fields() {
         let path = escape_field_path_segment(field.name());
-        if let Some(row) = classic_shader_row_from_field(field, &path, "", names) {
+        if let Some(row) = classic_shader_row_from_field(root, field, &path, "", names) {
             general_rows.push(row);
             continue;
         }
@@ -404,6 +405,844 @@ pub(super) fn build_classic_shader_editor_model(
     })
 }
 
+pub(super) fn build_h2ek_shader_editor_model(
+    tag: &TagFile,
+    entry: &TagEntry,
+    names: &TagNameIndex,
+    source: Option<&TagSource>,
+) -> Option<ShaderEditorModel> {
+    if tag.classic_engine()? != blam_tags::classic::ClassicEngine::Halo2V4 {
+        return None;
+    }
+    if !is_h2ek_shader_family_group(entry.group_tag) {
+        return None;
+    }
+
+    let root = tag.root();
+    let template_tag = h2_load_shader_template(source, root);
+    let template_root = template_tag.as_ref().map(|template| template.root());
+    let mut sections = Vec::new();
+    h2_push_section(
+        &mut sections,
+        "STANDARD_PARAMETERS",
+        h2_standard_parameter_rows(root, names),
+    );
+    h2_push_section(
+        &mut sections,
+        &h2_template_parameter_section_title(root, template_root, names),
+        h2_compact_parameter_rows(root, template_root, names),
+    );
+    h2_push_section(&mut sections, "RAW PARAMETERS", h2_raw_parameter_rows(root));
+
+    if sections.is_empty() {
+        return None;
+    }
+
+    Some(ShaderEditorModel {
+        has_material_row: false,
+        global_material_type: String::new(),
+        global_material_edit_path: String::new(),
+        definition_path: String::new(),
+        shader_template_path: None,
+        categories: Vec::new(),
+        sections,
+        atmosphere_flags: ShaderFlagsRow {
+            label: String::new(),
+            path: String::new(),
+            raw: 0,
+            options: Vec::new(),
+        },
+        custom_fog_setting_index: empty_shader_grid_row(),
+        sort_layer: empty_shader_grid_row(),
+    })
+}
+
+fn h2_load_shader_template(source: Option<&TagSource>, root: TagStruct<'_>) -> Option<TagFile> {
+    let source = source?;
+    let reference = h2_shader_template_reference(root)?;
+    load_referenced_tag_from_source(source, &reference, "shader_template", b"stem").ok()
+}
+
+fn h2_shader_template_reference(root: TagStruct<'_>) -> Option<String> {
+    let value = root.field("template")?.value()?;
+    let TagFieldData::TagReference(reference) = value else {
+        return None;
+    };
+    let (group_tag, path) = reference.group_tag_and_name.as_ref()?;
+    if *group_tag != u32::from_be_bytes(*b"stem") || path.is_empty() {
+        return None;
+    }
+    Some(h2_normalize_shader_template_reference(path))
+}
+
+fn h2_normalize_shader_template_reference(path: &str) -> String {
+    let mut normalized = path.trim_end_matches('\0').to_owned();
+    let lower = normalized.to_ascii_lowercase();
+    for suffix in [".shader_template", ".stem"] {
+        if lower.ends_with(suffix) {
+            normalized.truncate(normalized.len() - suffix.len());
+            break;
+        }
+    }
+    normalized
+}
+
+fn h2_push_section(sections: &mut Vec<ShaderEditorSection>, title: &str, rows: Vec<ShaderGridRow>) {
+    if rows.is_empty() {
+        return;
+    }
+    sections.push(ShaderEditorSection {
+        title: title.to_owned(),
+        option_name: String::new(),
+        rows,
+    });
+}
+
+fn h2_standard_parameter_rows(root: TagStruct<'_>, names: &TagNameIndex) -> Vec<ShaderGridRow> {
+    let mut rows = Vec::new();
+    for field_name in [
+        "template",
+        "material name",
+        "flags",
+        "light response",
+        "shader LOD bias",
+        "specular type",
+        "lightmap type",
+        "lightmap specular brightness",
+        "lightmap ambient bias",
+        "Added depth bias offset",
+        "Added depth bias slope scale",
+    ] {
+        h2_push_direct_field_row(root, field_name, "", names, &mut rows);
+    }
+    if let Some(runtime) = root
+        .field("runtime properties")
+        .and_then(|field| field.as_block())
+    {
+        if let Some(element) = runtime.element(0) {
+            for field in element.fields() {
+                let path = format!(
+                    "runtime properties[0]/{}",
+                    escape_field_path_segment(field.name())
+                );
+                if let Some(row) = h2_shader_row_from_field(element, field, &path, "", names) {
+                    rows.push(row);
+                }
+            }
+        }
+    }
+    rows
+}
+
+fn h2_push_direct_field_row(
+    tag_struct: TagStruct<'_>,
+    field_name: &str,
+    path_prefix: &str,
+    names: &TagNameIndex,
+    rows: &mut Vec<ShaderGridRow>,
+) {
+    let Some(field) = tag_struct.field(field_name) else {
+        return;
+    };
+    let path = if path_prefix.is_empty() {
+        escape_field_path_segment(field_name)
+    } else {
+        append_field_path(path_prefix, &escape_field_path_segment(field_name))
+    };
+    if let Some(row) = h2_shader_row_from_field(tag_struct, field, &path, "", names) {
+        rows.push(row);
+    }
+}
+
+fn h2_template_parameter_section_title(
+    root: TagStruct<'_>,
+    template: Option<TagStruct<'_>>,
+    names: &TagNameIndex,
+) -> String {
+    if let Some(template) = template {
+        if let Some(category) = template
+            .field("categories")
+            .and_then(|field| field.as_block())
+            .and_then(|block| block.element(0))
+            .and_then(|category| category.read_string_id("name"))
+            .filter(|name| !name.is_empty())
+        {
+            return category.replace('_', " ").to_ascii_uppercase();
+        }
+    }
+    let Some(value) = root.field("template").and_then(|field| field.value()) else {
+        return "PARAMETERS".to_owned();
+    };
+    let formatted = trim_formatted_value(&format_value(names, &value, false));
+    let normalized = formatted.replace('\\', "/").to_ascii_lowercase();
+    let Some(pos) = normalized.find("shader_templates/") else {
+        return "PARAMETERS".to_owned();
+    };
+    let rest = &normalized[pos + "shader_templates/".len()..];
+    let Some((folder, _)) = rest.split_once('/') else {
+        return "PARAMETERS".to_owned();
+    };
+    if folder.is_empty() {
+        "PARAMETERS".to_owned()
+    } else {
+        folder.replace('_', " ").to_ascii_uppercase()
+    }
+}
+
+fn h2_compact_parameter_rows(
+    root: TagStruct<'_>,
+    template: Option<TagStruct<'_>>,
+    names: &TagNameIndex,
+) -> Vec<ShaderGridRow> {
+    if let Some(template) = template {
+        let rows = h2_template_parameter_rows(root, template, names);
+        if !rows.is_empty() {
+            return rows;
+        }
+    }
+    let mut rows = Vec::new();
+    let Some(block) = root.field("parameters").and_then(|field| field.as_block()) else {
+        return rows;
+    };
+    for (index, element) in block.iter().enumerate() {
+        if let Some(row) = h2_compact_parameter_row(element, index, names) {
+            rows.push(row);
+        }
+        if let Some(animated) = element
+            .field("animation properties")
+            .and_then(|field| field.as_block())
+        {
+            for (anim_index, animation) in animated.iter().enumerate() {
+                let path = format!("parameters[{index}]/animation properties[{anim_index}]");
+                if let Some(row) = h2_animation_parameter_row(element, animation, &path) {
+                    rows.push(row);
+                }
+            }
+        }
+    }
+    rows
+}
+
+fn h2_template_parameter_rows(
+    shader_root: TagStruct<'_>,
+    template_root: TagStruct<'_>,
+    names: &TagNameIndex,
+) -> Vec<ShaderGridRow> {
+    let mut rows = Vec::new();
+    let instances = h2_shader_parameter_instances(shader_root);
+    let Some(categories) = template_root
+        .field("categories")
+        .and_then(|field| field.as_block())
+    else {
+        return rows;
+    };
+    for category in categories.iter() {
+        let Some(parameters) = category
+            .field("parameters")
+            .and_then(|field| field.as_block())
+        else {
+            continue;
+        };
+        for template_param in parameters.iter() {
+            let name = h2_template_parameter_name(template_param);
+            if name.is_empty() {
+                continue;
+            }
+            let instance = instances.iter().find(|instance| instance.name == name);
+            rows.extend(h2_template_parameter_display_rows(
+                template_param,
+                instance,
+                names,
+            ));
+        }
+    }
+    rows
+}
+
+struct H2ParameterInstance<'a> {
+    index: usize,
+    name: String,
+    element: TagStruct<'a>,
+}
+
+fn h2_shader_parameter_instances(root: TagStruct<'_>) -> Vec<H2ParameterInstance<'_>> {
+    let Some(block) = root.field("parameters").and_then(|field| field.as_block()) else {
+        return Vec::new();
+    };
+    block
+        .iter()
+        .enumerate()
+        .map(|(index, element)| H2ParameterInstance {
+            index,
+            name: h2_parameter_name(element, index),
+            element,
+        })
+        .collect()
+}
+
+fn h2_template_parameter_display_rows(
+    template_param: TagStruct<'_>,
+    instance: Option<&H2ParameterInstance<'_>>,
+    names: &TagNameIndex,
+) -> Vec<ShaderGridRow> {
+    let mut rows = Vec::new();
+    if let Some(row) = h2_template_base_parameter_row(template_param, instance, names) {
+        rows.push(row);
+    }
+    if h2_template_parameter_type_index(template_param) == 0 {
+        rows.extend(h2_template_bitmap_animation_rows(template_param, instance));
+    } else if h2_template_flags(template_param) & 1 != 0 {
+        rows.push(h2_template_value_animation_row(template_param, instance));
+    }
+    rows
+}
+
+fn h2_template_base_parameter_row(
+    template_param: TagStruct<'_>,
+    instance: Option<&H2ParameterInstance<'_>>,
+    names: &TagNameIndex,
+) -> Option<ShaderGridRow> {
+    let label = h2_template_parameter_name(template_param);
+    let parameter_type = h2_template_parameter_type_index(template_param);
+    let (field_name, default_field, parameter_type_label, fill) = match parameter_type {
+        0 => ("bitmap", "default bitmap", "bitmap", material_ref_row()),
+        2 => (
+            "const color",
+            "default const color",
+            "color",
+            material_numeric_row(),
+        ),
+        1 | 3 => (
+            "const value",
+            "default const value",
+            "value",
+            material_numeric_row(),
+        ),
+        _ => (
+            "const value",
+            "default const value",
+            "value",
+            material_numeric_row(),
+        ),
+    };
+    if parameter_type == 0 && h2_template_flags(template_param) & 2 != 0 {
+        return None;
+    }
+    let default_cell =
+        h2_template_default_cell(template_param, default_field, names).or_else(|| {
+            Some(ShaderGridCell {
+                text: h2_parameter_type_label(parameter_type).to_owned(),
+                value_kind: "default",
+                color: None,
+            })
+        });
+    let instance_value = instance.and_then(|instance| {
+        instance
+            .element
+            .field(field_name)
+            .and_then(|field| field.value())
+            .map(|value| (instance.index, value))
+    });
+    let (value_text, value_kind, color, edit) = if let Some((index, value)) = instance_value {
+        let formatted = format_value(names, &value, false);
+        let color = color_popup_for_value(&label, &value, &formatted);
+        let path = format!(
+            "parameters[{index}]/{}",
+            escape_field_path_segment(field_name)
+        );
+        (
+            if color.is_some() {
+                "color: RGB".to_owned()
+            } else {
+                formatted.clone()
+            },
+            "value",
+            color,
+            classic_shader_row_edit(&path, &value, &formatted),
+        )
+    } else {
+        let fallback = h2_template_default_text(template_param, default_field, names)
+            .unwrap_or_else(|| String::new());
+        (fallback, "default", None, None)
+    };
+    Some(ShaderGridRow {
+        label,
+        default_cell,
+        value_cell: ShaderGridCell {
+            text: value_text,
+            value_kind,
+            color,
+        },
+        fill,
+        parameter_type: Some(parameter_type_label.to_owned()),
+        function: None,
+        edit,
+        context_menu: None,
+        create_anim_op: None,
+        constant_function_view: None,
+    })
+}
+
+fn h2_template_bitmap_animation_rows(
+    template_param: TagStruct<'_>,
+    instance: Option<&H2ParameterInstance<'_>>,
+) -> Vec<ShaderGridRow> {
+    let flags = h2_template_bitmap_animation_flags(template_param);
+    let mut rows = Vec::new();
+    let specs: &[(u32, &[(i32, &str)])] = &[
+        (1 << 0, &[(0, "scale")]),
+        (1 << 1, &[(1, "scale_x"), (2, "scale_y")]),
+        (1 << 2, &[(4, "translation_x"), (5, "translation_y")]),
+        (1 << 3, &[(7, "rotation")]),
+        (1 << 4, &[(13, "index")]),
+    ];
+    for (bit, entries) in specs {
+        if flags & bit == 0 {
+            continue;
+        }
+        for (animation_type, suffix) in *entries {
+            rows.push(h2_template_animation_row(
+                template_param,
+                instance,
+                *animation_type,
+                suffix,
+            ));
+        }
+    }
+    rows
+}
+
+fn h2_template_value_animation_row(
+    template_param: TagStruct<'_>,
+    instance: Option<&H2ParameterInstance<'_>>,
+) -> ShaderGridRow {
+    let suffix = if h2_template_parameter_type_index(template_param) == 2 {
+        "tint"
+    } else {
+        "value"
+    };
+    h2_template_animation_row(template_param, instance, 11, suffix)
+}
+
+fn h2_template_animation_row(
+    template_param: TagStruct<'_>,
+    instance: Option<&H2ParameterInstance<'_>>,
+    animation_type: i32,
+    suffix: &str,
+) -> ShaderGridRow {
+    let base = h2_template_parameter_name(template_param);
+    let label = format!("{base}_{suffix}");
+    let function = instance.and_then(|instance| {
+        h2_find_animation_by_type(instance.element, animation_type).and_then(
+            |(anim_index, anim)| {
+                let path = format!(
+                    "parameters[{}]/animation properties[{anim_index}]",
+                    instance.index
+                );
+                let function_struct = anim.field("function")?.as_struct()?;
+                let function_path = append_field_path(&path, "function");
+                h2_function_view_from_animation_property(anim, function_struct, &function_path)
+            },
+        )
+    });
+    let mut row = if let Some(function) = function {
+        shader_function_grid_row(label, function)
+    } else {
+        h2_missing_function_row(label)
+    };
+    row.default_cell = Some(ShaderGridCell {
+        text: String::new(),
+        value_kind: "default",
+        color: None,
+    });
+    row
+}
+
+fn h2_find_animation_by_type(
+    instance: TagStruct<'_>,
+    animation_type: i32,
+) -> Option<(usize, TagStruct<'_>)> {
+    let block = instance
+        .field("animation properties")
+        .and_then(|field| field.as_block())?;
+    block.iter().enumerate().find(|(_, animation)| {
+        animation
+            .read_int_any("type")
+            .and_then(|value| i32::try_from(value).ok())
+            == Some(animation_type)
+    })
+}
+
+fn h2_missing_function_row(label: String) -> ShaderGridRow {
+    ShaderGridRow {
+        label,
+        default_cell: None,
+        value_cell: ShaderGridCell {
+            text: String::new(),
+            value_kind: "default",
+            color: None,
+        },
+        fill: material_numeric_row(),
+        parameter_type: Some("function".to_owned()),
+        function: None,
+        edit: None,
+        context_menu: None,
+        create_anim_op: None,
+        constant_function_view: None,
+    }
+}
+
+fn h2_template_parameter_name(template_param: TagStruct<'_>) -> String {
+    template_param.read_string_id("name").unwrap_or_default()
+}
+
+fn h2_template_parameter_type_index(template_param: TagStruct<'_>) -> i32 {
+    template_param
+        .read_int_any("type")
+        .and_then(|value| i32::try_from(value).ok())
+        .unwrap_or_default()
+}
+
+fn h2_template_flags(template_param: TagStruct<'_>) -> u32 {
+    template_param
+        .read_int_any("flags")
+        .and_then(|value| u32::try_from(value).ok())
+        .unwrap_or_default()
+}
+
+fn h2_template_bitmap_animation_flags(template_param: TagStruct<'_>) -> u32 {
+    template_param
+        .read_int_any("bitmap animation flags")
+        .and_then(|value| u32::try_from(value).ok())
+        .unwrap_or_default()
+}
+
+fn h2_template_default_cell(
+    template_param: TagStruct<'_>,
+    field_name: &str,
+    names: &TagNameIndex,
+) -> Option<ShaderGridCell> {
+    let text = h2_template_default_text(template_param, field_name, names)?;
+    Some(ShaderGridCell {
+        text,
+        value_kind: "default",
+        color: None,
+    })
+}
+
+fn h2_template_default_text(
+    template_param: TagStruct<'_>,
+    field_name: &str,
+    names: &TagNameIndex,
+) -> Option<String> {
+    let value = template_param.field(field_name)?.value()?;
+    Some(trim_formatted_value(&format_value(names, &value, false)))
+}
+
+fn h2_compact_parameter_row(
+    element: TagStruct<'_>,
+    index: usize,
+    names: &TagNameIndex,
+) -> Option<ShaderGridRow> {
+    let label = h2_parameter_name(element, index);
+    let parameter_type = h2_parameter_type_index(element);
+    let (field_name, parameter_type_label, fill) = match parameter_type {
+        0 => ("bitmap", "bitmap", material_ref_row()),
+        2 => (
+            "const color",
+            "color",
+            material_row_tint(&element.field("const color")?.value()?),
+        ),
+        1 | 3 => ("const value", "value", material_numeric_row()),
+        _ => ("const value", "value", material_numeric_row()),
+    };
+    let field = element.field(field_name)?;
+    let path = format!(
+        "parameters[{index}]/{}",
+        escape_field_path_segment(field_name)
+    );
+    let value = field.value()?;
+    let formatted = format_value(names, &value, false);
+    let color = color_popup_for_value(&label, &value, &formatted);
+    let edit = classic_shader_row_edit(&path, &value, &formatted);
+    Some(ShaderGridRow {
+        label,
+        default_cell: Some(ShaderGridCell {
+            text: h2_parameter_type_label(parameter_type).to_owned(),
+            value_kind: "default",
+            color: None,
+        }),
+        value_cell: ShaderGridCell {
+            text: if color.is_some() {
+                "color: RGB".to_owned()
+            } else {
+                formatted
+            },
+            value_kind: "value",
+            color,
+        },
+        fill,
+        parameter_type: Some(parameter_type_label.to_owned()),
+        function: None,
+        edit,
+        context_menu: None,
+        create_anim_op: None,
+        constant_function_view: None,
+    })
+}
+
+fn h2_animation_parameter_row(
+    parameter: TagStruct<'_>,
+    animation: TagStruct<'_>,
+    animation_path: &str,
+) -> Option<ShaderGridRow> {
+    let function_struct = animation.field("function")?.as_struct()?;
+    let function_path = append_field_path(animation_path, "function");
+    let view =
+        h2_function_view_from_animation_property(animation, function_struct, &function_path)?;
+    let label = h2_animation_row_label(parameter, animation);
+    let mut row = shader_function_grid_row(label, view);
+    row.default_cell = Some(ShaderGridCell {
+        text: h2_animation_type_label(animation).to_owned(),
+        value_kind: "default",
+        color: None,
+    });
+    Some(row)
+}
+
+fn h2_raw_parameter_rows(root: TagStruct<'_>) -> Vec<ShaderGridRow> {
+    let count = root
+        .field("parameters")
+        .and_then(|field| field.as_block())
+        .map(|block| block.len())
+        .unwrap_or_default();
+    vec![ShaderGridRow {
+        label: "parameters".to_owned(),
+        default_cell: None,
+        value_cell: ShaderGridCell {
+            text: count.to_string(),
+            value_kind: "value",
+            color: None,
+        },
+        fill: material_data_row(),
+        parameter_type: Some("count".to_owned()),
+        function: None,
+        edit: None,
+        context_menu: None,
+        create_anim_op: None,
+        constant_function_view: None,
+    }]
+}
+
+fn h2_parameter_name(element: TagStruct<'_>, index: usize) -> String {
+    element
+        .read_string_id("name")
+        .or_else(|| element.read_string_id("parameter name"))
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| format!("parameter_{index}"))
+}
+
+fn h2_parameter_type_index(element: TagStruct<'_>) -> i32 {
+    element
+        .read_int_any("type")
+        .and_then(|value| i32::try_from(value).ok())
+        .unwrap_or_default()
+}
+
+fn h2_parameter_type_label(index: i32) -> &'static str {
+    match index {
+        0 => "bitmap",
+        1 => "value",
+        2 => "color",
+        3 => "switch",
+        _ => "value",
+    }
+}
+
+fn h2_animation_type_label(animation: TagStruct<'_>) -> &'static str {
+    match animation
+        .read_int_any("type")
+        .and_then(|value| i32::try_from(value).ok())
+        .unwrap_or_default()
+    {
+        0 => "scale",
+        1 => "scale x",
+        2 => "scale y",
+        3 => "scale z",
+        4 => "translation x",
+        5 => "translation y",
+        6 => "translation z",
+        7 => "rotation angle",
+        8 => "rotation axis x",
+        9 => "rotation axis y",
+        10 => "rotation axis z",
+        11 => "value",
+        12 => "color",
+        13 => "bitmap index",
+        _ => "function",
+    }
+}
+
+fn h2_animation_row_label(parameter: TagStruct<'_>, animation: TagStruct<'_>) -> String {
+    let base = h2_parameter_name(parameter, 0);
+    let suffix = h2_animation_type_label(animation).replace(' ', "_");
+    if suffix == "value" || suffix == "color" {
+        base
+    } else {
+        format!("{base}_{suffix}")
+    }
+}
+
+fn h2_shader_row_from_field(
+    parent: TagStruct<'_>,
+    field: TagField<'_>,
+    path: &str,
+    label_prefix: &str,
+    names: &TagNameIndex,
+) -> Option<ShaderGridRow> {
+    if let Some(function) = field.as_function() {
+        return Some(shader_function_grid_row(
+            h2_nested_label(label_prefix, field.name()),
+            FunctionView::from_function(function),
+        ));
+    }
+    if field.name() == "function" {
+        if let Some(nested) = field.as_struct() {
+            if let Some(function) = h2_function_view_from_animation_property(parent, nested, path) {
+                return Some(shader_function_grid_row(
+                    h2_nested_label(label_prefix, "animation function"),
+                    function,
+                ));
+            }
+        }
+    }
+
+    let value = field.value()?;
+    if matches!(
+        value,
+        TagFieldData::Data(_) | TagFieldData::ApiInterop(_) | TagFieldData::Custom(_)
+    ) {
+        return None;
+    }
+    let label = h2_nested_label(label_prefix, field.name());
+    let formatted = format_value(names, &value, false);
+    let color = color_popup_for_value(&label, &value, &formatted);
+    let edit = classic_shader_row_edit(path, &value, &formatted);
+    let value_kind = if is_none_like_value(&formatted) {
+        "default"
+    } else {
+        "value"
+    };
+    Some(ShaderGridRow {
+        label,
+        default_cell: None,
+        value_cell: ShaderGridCell {
+            text: if color.is_some() {
+                "color: RGB".to_owned()
+            } else {
+                formatted
+            },
+            value_kind,
+            color,
+        },
+        fill: material_row_tint(&value),
+        parameter_type: Some(classic_shader_value_kind(&value).to_owned()),
+        function: None,
+        edit,
+        context_menu: None,
+        create_anim_op: None,
+        constant_function_view: None,
+    })
+}
+
+fn h2_function_view_from_animation_property(
+    animation_property: TagStruct<'_>,
+    function_struct: TagStruct<'_>,
+    function_path: &str,
+) -> Option<FunctionView> {
+    let data_block_path = h2_function_data_path(function_struct, function_path)?;
+    let bytes = halo2_function_bytes_from_struct(function_struct)?;
+    let function = TagFunction::parse(&bytes).ok()?;
+    let mut view = FunctionView::from_function(function);
+    view.input_name = animation_property
+        .read_string_id("input name")
+        .unwrap_or_default();
+    view.range_name = animation_property
+        .read_string_id("range name")
+        .unwrap_or_default();
+    view.output_index = animation_property
+        .read_int_any("type")
+        .and_then(|value| i32::try_from(value).ok());
+    view.time_period_in_seconds = animation_property
+        .read_real("time period")
+        .or_else(|| animation_property.read_real("time period in seconds"))
+        .unwrap_or_default();
+
+    let animation_path = function_path
+        .rsplit_once('/')
+        .map(|(base, _)| base)
+        .unwrap_or("");
+    let sibling_path = |name: &str| {
+        if animation_path.is_empty() {
+            escape_field_path_segment(name)
+        } else {
+            append_field_path(animation_path, &escape_field_path_segment(name))
+        }
+    };
+    let time_field = if animation_property.field("time period").is_some() {
+        "time period"
+    } else if animation_property.field("time period in seconds").is_some() {
+        "time period in seconds"
+    } else {
+        ""
+    };
+    Some(
+        view.with_edit(FunctionEditPaths {
+            data: FunctionDataStorage::Halo2ByteBlock(data_block_path),
+            parameter_type: animation_property
+                .field("type")
+                .and_then(|field| field.value())
+                .is_some()
+                .then(|| sibling_path("type"))
+                .unwrap_or_default(),
+            input_name: animation_property
+                .field("input name")
+                .and_then(|field| field.value())
+                .is_some()
+                .then(|| sibling_path("input name"))
+                .unwrap_or_default(),
+            range_name: animation_property
+                .field("range name")
+                .and_then(|field| field.value())
+                .is_some()
+                .then(|| sibling_path("range name"))
+                .unwrap_or_default(),
+            time_period: (!time_field.is_empty()
+                && animation_property
+                    .field(time_field)
+                    .and_then(|field| field.value())
+                    .is_some())
+            .then(|| sibling_path(time_field))
+            .unwrap_or_default(),
+            block_path: animation_path.to_owned(),
+            block_index: animation_path
+                .rsplit_once('[')
+                .and_then(|(_, rest)| rest.strip_suffix(']'))
+                .and_then(|index| index.parse::<usize>().ok())
+                .unwrap_or_default(),
+        }),
+    )
+}
+
+fn h2_function_data_path(function_struct: TagStruct<'_>, function_path: &str) -> Option<String> {
+    function_struct.field("data")?.as_block()?;
+    Some(append_field_path(function_path, "data"))
+}
+
+fn h2_nested_label(prefix: &str, name: &str) -> String {
+    classic_nested_label(prefix, name)
+}
+
 fn push_classic_shader_rows(
     tag_struct: TagStruct<'_>,
     path_prefix: &str,
@@ -413,7 +1252,9 @@ fn push_classic_shader_rows(
 ) {
     for field in tag_struct.fields() {
         let path = append_field_path(path_prefix, &escape_field_path_segment(field.name()));
-        if let Some(row) = classic_shader_row_from_field(field, &path, label_prefix, names) {
+        if let Some(row) =
+            classic_shader_row_from_field(tag_struct, field, &path, label_prefix, names)
+        {
             rows.push(row);
             continue;
         }
@@ -435,6 +1276,7 @@ fn push_classic_shader_rows(
 }
 
 fn classic_shader_row_from_field(
+    parent: TagStruct<'_>,
     field: TagField<'_>,
     path: &str,
     label_prefix: &str,
@@ -445,6 +1287,16 @@ fn classic_shader_row_from_field(
             classic_nested_label(label_prefix, field.name()),
             FunctionView::from_function(function),
         ));
+    }
+    if let Some(nested) = field.as_struct() {
+        if let Some(function) =
+            classic_halo2_function_view_from_struct(parent, nested, path, field.name())
+        {
+            return Some(shader_function_grid_row(
+                classic_nested_label(label_prefix, field.name()),
+                function,
+            ));
+        }
     }
     let value = field.value()?;
     if matches!(
@@ -482,6 +1334,199 @@ fn classic_shader_row_from_field(
         create_anim_op: None,
         constant_function_view: None,
     })
+}
+
+fn classic_halo2_function_view_from_struct(
+    parent: TagStruct<'_>,
+    tag_struct: TagStruct<'_>,
+    path: &str,
+    _field_name: &str,
+) -> Option<FunctionView> {
+    let (data_block_path, bytes) = if let Some(bytes) = halo2_function_bytes_from_struct(tag_struct)
+    {
+        (append_field_path(path, "data"), bytes)
+    } else {
+        let inner = tag_struct.field("function")?.as_struct()?;
+        (
+            append_field_path(path, "function/data"),
+            halo2_function_bytes_from_struct(inner)?,
+        )
+    };
+    let function = TagFunction::parse(&bytes).ok()?;
+    let mut view = FunctionView::from_function(function);
+    view.input_name = parent.read_string_id("input name").unwrap_or_default();
+    view.range_name = parent.read_string_id("range name").unwrap_or_default();
+    view.time_period_in_seconds = parent
+        .read_real("time period")
+        .or_else(|| parent.read_real("time period in seconds"))
+        .unwrap_or_default();
+
+    let parent_path = path.rsplit_once('/').map(|(base, _)| base).unwrap_or("");
+    let sibling_path = |name: &str| {
+        if parent_path.is_empty() {
+            escape_field_path_segment(name)
+        } else {
+            append_field_path(parent_path, &escape_field_path_segment(name))
+        }
+    };
+    let time_field = if parent.field("time period").is_some() {
+        "time period"
+    } else if parent.field("time period in seconds").is_some() {
+        "time period in seconds"
+    } else {
+        ""
+    };
+    let input_editable = parent
+        .field("input name")
+        .and_then(|field| field.value())
+        .is_some();
+    let range_editable = parent
+        .field("range name")
+        .and_then(|field| field.value())
+        .is_some();
+    let time_editable = !time_field.is_empty()
+        && parent
+            .field(time_field)
+            .and_then(|field| field.value())
+            .is_some();
+
+    Some(
+        view.with_edit(FunctionEditPaths {
+            data: FunctionDataStorage::Halo2ByteBlock(data_block_path),
+            parameter_type: String::new(),
+            input_name: input_editable
+                .then(|| sibling_path("input name"))
+                .unwrap_or_default(),
+            range_name: range_editable
+                .then(|| sibling_path("range name"))
+                .unwrap_or_default(),
+            time_period: time_editable
+                .then(|| sibling_path(time_field))
+                .unwrap_or_default(),
+            block_path: String::new(),
+            block_index: 0,
+        }),
+    )
+}
+
+pub(super) fn halo2_function_bytes_from_struct(tag_struct: TagStruct<'_>) -> Option<Vec<u8>> {
+    let block = tag_struct.field("data")?.as_block()?;
+    let mut bytes = Vec::with_capacity(block.len());
+    for element in block.iter() {
+        let value = element.read_int_any("Value")?;
+        bytes.push(value as i8 as u8);
+    }
+    Some(bytes)
+}
+
+#[cfg(test)]
+pub(super) fn first_halo2_byte_block_function_row(
+    model: &ShaderEditorModel,
+) -> Option<(Vec<u8>, String)> {
+    for row in model
+        .sections
+        .iter()
+        .flat_map(|section| section.rows.iter())
+    {
+        if let Some(view) = row.function.as_ref() {
+            if let Some(edit) = view.edit.as_ref() {
+                if let FunctionDataStorage::Halo2ByteBlock(path) = &edit.data {
+                    return Some((view.function.to_bytes(), path.clone()));
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+pub(super) fn shader_row_edit_path_and_kind(
+    model: &ShaderEditorModel,
+    label: &str,
+) -> Option<(String, &'static str)> {
+    let edit = model
+        .sections
+        .iter()
+        .flat_map(|section| section.rows.iter())
+        .find(|row| row.label == label)?
+        .edit
+        .as_ref()?;
+    let kind = match &edit.kind {
+        ShaderRowEditKind::Scalar => "scalar",
+        ShaderRowEditKind::Int => "int",
+        ShaderRowEditKind::StringId => "string_id",
+        ShaderRowEditKind::BitmapRef { .. } => "bitmap_ref",
+        ShaderRowEditKind::Bool { .. } => "bool",
+        ShaderRowEditKind::Enum(_) => "enum",
+        ShaderRowEditKind::FunctionScalar { .. } => "function_scalar",
+        ShaderRowEditKind::FunctionColor { .. } => "function_color",
+        ShaderRowEditKind::ColorField { .. } => "color",
+        ShaderRowEditKind::CreateFunctionColor { .. } => "create_function_color",
+        ShaderRowEditKind::CreateFunctionScalar { .. } => "create_function_scalar",
+        ShaderRowEditKind::CreateScalarParam { .. } => "create_scalar_param",
+    };
+    Some((edit.path.clone(), kind))
+}
+
+#[cfg(test)]
+pub(super) fn h2_template_row_labels_for_test(shader: &TagFile, template: &TagFile) -> Vec<String> {
+    h2_template_parameter_rows(shader.root(), template.root(), &TagNameIndex::default())
+        .into_iter()
+        .map(|row| row.label)
+        .collect()
+}
+
+#[cfg(test)]
+pub(super) fn h2_shader_template_reference_for_test(tag: &TagFile) -> Option<String> {
+    h2_shader_template_reference(tag.root())
+}
+
+#[cfg(test)]
+pub(super) struct H2FunctionEditSummary {
+    pub(super) bytes: Vec<u8>,
+    pub(super) output_index: Option<i32>,
+    pub(super) input_name: String,
+    pub(super) range_name: String,
+    pub(super) time_period: f32,
+    pub(super) data_path: String,
+    pub(super) parameter_type_path: String,
+    pub(super) input_name_path: String,
+    pub(super) range_name_path: String,
+    pub(super) time_period_path: String,
+}
+
+#[cfg(test)]
+pub(super) fn first_h2_function_edit_summary(
+    model: &ShaderEditorModel,
+) -> Option<H2FunctionEditSummary> {
+    for row in model
+        .sections
+        .iter()
+        .flat_map(|section| section.rows.iter())
+    {
+        let Some(view) = row.function.as_ref() else {
+            continue;
+        };
+        let Some(edit) = view.edit.as_ref() else {
+            continue;
+        };
+        let FunctionDataStorage::Halo2ByteBlock(data_path) = &edit.data else {
+            continue;
+        };
+        return Some(H2FunctionEditSummary {
+            bytes: view.function.to_bytes(),
+            output_index: view.output_index,
+            input_name: view.input_name.clone(),
+            range_name: view.range_name.clone(),
+            time_period: view.time_period_in_seconds,
+            data_path: data_path.clone(),
+            parameter_type_path: edit.parameter_type.clone(),
+            input_name_path: edit.input_name.clone(),
+            range_name_path: edit.range_name.clone(),
+            time_period_path: edit.time_period.clone(),
+        });
+    }
+    None
 }
 
 fn classic_shader_row_edit(
@@ -531,9 +1576,19 @@ fn classic_shader_row_edit(
             })
         }
         TagFieldData::TagReference(reference) => {
-            let (group_tag, name) = reference.group_tag_and_name.as_ref()?;
+            let Some((group_tag, name)) = reference.group_tag_and_name.as_ref() else {
+                return Some(ShaderRowEdit {
+                    path: path.to_owned(),
+                    current: "NONE".to_owned(),
+                    kind: ShaderRowEditKind::StringId,
+                });
+            };
             if *group_tag != u32::from_be_bytes(*b"bitm") {
-                return None;
+                return Some(ShaderRowEdit {
+                    path: path.to_owned(),
+                    current: formatted.to_owned(),
+                    kind: ShaderRowEditKind::StringId,
+                });
             }
             let current = if name.is_empty() {
                 "NONE".to_owned()
@@ -549,6 +1604,11 @@ fn classic_shader_row_edit(
                 },
             })
         }
+        TagFieldData::StringId(value) | TagFieldData::OldStringId(value) => Some(ShaderRowEdit {
+            path: path.to_owned(),
+            current: value.string.clone(),
+            kind: ShaderRowEditKind::StringId,
+        }),
         TagFieldData::Real(value)
         | TagFieldData::RealSlider(value)
         | TagFieldData::RealFraction(value)
@@ -740,7 +1800,7 @@ pub(super) fn animated_param_paths(
     );
     let base = format!("{block_path}[{animated_index}]");
     FunctionEditPaths {
-        data: append_field_path(&base, "function/data"),
+        data: FunctionDataStorage::DataField(append_field_path(&base, "function/data")),
         parameter_type: append_field_path(&base, "type"),
         input_name: append_field_path(&base, "input name"),
         range_name: append_field_path(&base, "range name"),
@@ -1403,7 +2463,7 @@ pub(super) fn shader_bitmap_expansion_rows(
                 let data_path = view
                     .edit
                     .as_ref()
-                    .map(|e| e.data.clone())
+                    .and_then(|e| e.data.data_field_path().map(str::to_owned))
                     .unwrap_or_default();
                 let (block_path, block_index) = match view.edit.as_ref() {
                     Some(e) => (e.block_path.clone(), e.block_index),
@@ -1484,7 +2544,7 @@ pub(super) fn shader_scalar_row(
                 let data_path = view
                     .edit
                     .as_ref()
-                    .map(|e| e.data.clone())
+                    .and_then(|e| e.data.data_field_path().map(str::to_owned))
                     .unwrap_or_default();
                 let (block_path, block_index) = match view.edit.as_ref() {
                     Some(e) => (e.block_path.clone(), e.block_index),
@@ -1735,7 +2795,7 @@ pub(super) fn shader_color_row(
                 let data_path = view
                     .edit
                     .as_ref()
-                    .map(|e| e.data.clone())
+                    .and_then(|e| e.data.data_field_path().map(str::to_owned))
                     .unwrap_or_default();
                 let (block_path, block_index) = match view.edit.as_ref() {
                     Some(e) => (e.block_path.clone(), e.block_index),
@@ -1900,7 +2960,7 @@ pub(super) fn shader_alpha_row(
                 let data_path = view
                     .edit
                     .as_ref()
-                    .map(|e| e.data.clone())
+                    .and_then(|e| e.data.data_field_path().map(str::to_owned))
                     .unwrap_or_default();
                 let (block_path, block_index) = match view.edit.as_ref() {
                     Some(e) => (e.block_path.clone(), e.block_index),
