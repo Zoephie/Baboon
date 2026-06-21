@@ -15,11 +15,9 @@ use blam_tags::render_method::{
     compile_real_constant,
 };
 use blam_tags::{
-    AssFile, Bitmap, ColorGraphType, Endian, FunctionFlags, FunctionType, JmsFile, RenderModel,
-    RenderModelPreview, RenderModelPreviewBatch, RenderModelPreviewMarker,
-    RenderModelPreviewRegion, RenderModelPreviewVertex, StringIdData, TagBlock, TagField,
-    TagFieldData, TagFieldType, TagFile, TagFunction, TagReferenceData, TagResource,
-    TagResourceKind, TagStruct, format_group_tag, parse_group_tag,
+    AssFile, Bitmap, ColorGraphType, Endian, FunctionFlags, FunctionKind, FunctionType, JmsFile,
+    RenderModel, StringIdData, TagBlock, TagField, TagFieldData, TagFieldType, TagFile, TagFunction,
+    TagReferenceData, TagResource, TagResourceKind, TagStruct, format_group_tag, parse_group_tag,
 };
 use eframe::egui::{
     self, Align2, Color32, FontData, FontDefinitions, FontFamily, FontId, Frame, RichText,
@@ -238,16 +236,18 @@ impl Baboon {
     }
 }
 
-/// Locate the bundled `definitions/` folder, which carries the per-game group
-/// name → file extension index. Source builds use the submodule copy at
-/// `blam-tags/definitions`; release builds may put `definitions` beside the
-/// executable. Without this the name index is empty, which breaks tag-reference
-/// Open and the geometry Import button (both rely on resolving the referenced
-/// group's extension).
+/// Locate the on-disk `definitions/` folder, which carries the per-game tag
+/// layouts and group name → file extension index. Source builds place it at
+/// `definitions/` in the working directory (it is too large — ~1 GB — to vendor
+/// in-repo, and now that blam-tags is an external crate it is no longer carried
+/// by a submodule); release builds may put `definitions` beside the executable.
+/// Without this the name index falls back to the small embedded meta tables, so
+/// tag-reference Open and the geometry Import button still resolve common
+/// groups, but full per-tag layouts won't load.
 pub(super) fn locate_definitions_root() -> PathBuf {
     for candidate in [
-        PathBuf::from("blam-tags").join("definitions"),
         PathBuf::from("definitions"),
+        PathBuf::from("blam-tags").join("definitions"),
     ] {
         if candidate.is_dir() {
             return candidate;
@@ -268,7 +268,7 @@ pub(super) fn locate_definitions_root() -> PathBuf {
             dir = d.parent().map(Path::to_path_buf);
         }
     }
-    PathBuf::from("blam-tags").join("definitions")
+    PathBuf::from("definitions")
 }
 
 /// Decode an embedded `.ico` into an egui texture for a toolbar button.

@@ -1,9 +1,9 @@
 # Standalone repo: its own workspace root so it doesn't get absorbed into a
-# parent workspace. The blam-tags engine is referenced through the Git submodule
-# at ./blam-tags.
+# parent workspace. The blam-tags engine is a pinned Git dependency
+# (camden-smallwood/blam-tags), not a submodule.
 [workspace]
-members = [".", "blam-tags/blam-tag-shell"]
-default-members = [".", "blam-tags/blam-tag-shell"]
+members = ["."]
+default-members = ["."]
 
 [package]
 name = "baboon"
@@ -18,7 +18,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
-blam-tags = { path = "blam-tags/blam-tags" }
+blam-tags = { git = "https://github.com/camden-smallwood/blam-tags", rev = "03e12096c9598790cde70ea0d8175beb749f5eda" }
 eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }
 image = { version = "0.25", default-features = false, features = ["ico"] }
 rfd = "0.15"

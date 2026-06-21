@@ -653,15 +653,15 @@ pub(super) fn draw_function_graph_preview(
 }
 
 pub(super) fn function_control_points(function: &TagFunction) -> Vec<(f32, f32)> {
-    match function {
-        TagFunction::LinearKey { .. } | TagFunction::MultiLinearKey { .. } => {
+    match function.kind() {
+        FunctionKind::LinearKey { .. } | FunctionKind::MultiLinearKey { .. } => {
             // Only return the active (non-padding) points. Trailing slots
             // that are bit-identical to the preceding slot are padding.
             let pts = function.linear_key_points().unwrap();
             let n = function.active_linear_key_point_count();
             pts[..n].to_vec()
         }
-        TagFunction::MultiSpline { compact, .. } => {
+        FunctionKind::MultiSpline { compact, .. } => {
             // Expose the segment join points (the visible kinks) so each
             // one can be clicked and inspected.
             let mut result = vec![(0.0_f32, function.evaluate_shape(0.0, 0.0))];
@@ -874,7 +874,12 @@ impl FunctionView {
             function,
             input_name: animated.input_name.clone(),
             range_name: animated.range_name.clone(),
-            output_index: animated.parameter_type.map(|kind| kind.raw()),
+            output_index: animated.parameter_type.and_then(|kind| {
+                OUTPUT_TYPE_OPTIONS
+                    .iter()
+                    .find(|(_, name)| name.eq_ignore_ascii_case(kind.name()))
+                    .map(|(value, _)| *value)
+            }),
             time_period_in_seconds: animated.time_period_in_seconds,
             edit: None,
         }
@@ -965,9 +970,16 @@ pub(super) fn push_function_edit(
     }
     if view.output_index != prev.output_index && !paths.parameter_type.is_empty() {
         if let Some(index) = view.output_index {
+            // Write the schema name (resolved by parse_enum_value) rather than
+            // a raw integer, so the edit doesn't depend on wire-value order.
+            let input = OUTPUT_TYPE_OPTIONS
+                .iter()
+                .find(|(value, _)| *value == index)
+                .map(|(_, name)| (*name).to_owned())
+                .unwrap_or_else(|| index.to_string());
             edits.push(PendingFieldEdit {
                 path: paths.parameter_type.clone(),
-                input: index.to_string(),
+                input,
             });
         }
     }

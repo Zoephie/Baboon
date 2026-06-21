@@ -69,15 +69,21 @@ impl TagNameIndex {
     /// Group→name mappings baked into the binary (the per-game `_meta.json`
     /// `tag_index` chunks). Used as a fallback so tag-reference resolution works
     /// even when the on-disk `definitions/` folder can't be located at runtime.
+    ///
+    /// These small meta files are vendored under `src/meta/` (copied from the
+    /// blam-tags definitions) so the binary stays self-contained now that
+    /// blam-tags is an external crate rather than an in-tree submodule. The
+    /// full per-tag layouts are still loaded from the on-disk `definitions/`
+    /// folder at runtime via [`locate_definitions_root`].
     pub fn embedded_fallback() -> Self {
         const EMBEDDED: &[&str] = &[
-            include_str!("../blam-tags/definitions/halo3_mcc/_meta.json"),
-            include_str!("../blam-tags/definitions/halo3odst_mcc/_meta.json"),
-            include_str!("../blam-tags/definitions/haloreach_mcc/_meta.json"),
-            include_str!("../blam-tags/definitions/halo4_mcc/_meta.json"),
-            include_str!("../blam-tags/definitions/halo2amp_mcc/_meta.json"),
-            include_str!("../blam-tags/definitions/halo2_mcc/_meta.json"),
-            include_str!("../blam-tags/definitions/haloce_mcc/_meta.json"),
+            include_str!("meta/halo3_mcc/_meta.json"),
+            include_str!("meta/halo3odst_mcc/_meta.json"),
+            include_str!("meta/haloreach_mcc/_meta.json"),
+            include_str!("meta/halo4_mcc/_meta.json"),
+            include_str!("meta/halo2amp_mcc/_meta.json"),
+            include_str!("meta/halo2_mcc/_meta.json"),
+            include_str!("meta/haloce_mcc/_meta.json"),
         ];
         let mut index = TagNameIndex::default();
         for json in EMBEDDED {

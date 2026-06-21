@@ -288,16 +288,17 @@ pub(super) fn build_shader_editor_model(
         render_method.custom_fog_setting_index.to_string(),
         custom_fog_path,
     );
+    let sort_layer_options = vec![
+        "invalid".to_owned(),
+        "pre-pass".to_owned(),
+        "normal".to_owned(),
+        "post-pass".to_owned(),
+    ];
     let sort_layer = shader_enum_value_row(
         "Sort layer".to_owned(),
         "normal".to_owned(),
-        render_method.sort_layer.raw().max(0) as usize,
-        vec![
-            "invalid".to_owned(),
-            "pre-pass".to_owned(),
-            "normal".to_owned(),
-            "post-pass".to_owned(),
-        ],
+        option_index_for_name(&sort_layer_options, render_method.sort_layer.name()),
+        sort_layer_options,
         sort_layer_path,
     );
 
@@ -778,9 +779,13 @@ pub(super) fn new_shader_function_target(
 }
 
 pub(super) fn shader_parameter_type_index(parameter: &RenderMethodOptionParameter) -> i32 {
+    // Canonical schema index, consumed only as an internal selector by
+    // shader_parameter_type_initial_field's write (which routes through the
+    // edit system's declaration-index == wire assumption). Avoids exposing
+    // the raw wire value.
     parameter
         .parameter_type
-        .map(|kind| kind.raw() as i32)
+        .map(|kind| kind.get() as i32)
         .unwrap_or(RenderMethodParameterType::Real as i32)
 }
 
@@ -983,7 +988,7 @@ pub(super) fn constant_function_hex(v: f32) -> String {
 /// True when `f` is a Constant-type function with a color (not scalar) output.
 /// Used to decide whether to show a constant color swatch vs a graph row.
 pub(super) fn is_constant_color_fn(f: &TagFunction) -> bool {
-    f.color_graph_type() != ColorGraphType::Scalar && matches!(f, TagFunction::Constant { .. })
+    f.color_graph_type() != ColorGraphType::Scalar && matches!(f.kind(), FunctionKind::Constant { .. })
 }
 
 /// Extract the (r, g, b, a) components from a constant 1-color function.
@@ -1108,10 +1113,10 @@ pub(super) fn shader_bitmap_row(
 
     // Build right-click context menu: offer transform types not yet present.
     let context_menu = {
-        let existing_types: std::collections::HashSet<i32> = instance
+        let existing_types: std::collections::HashSet<RenderMethodAnimatedParameterType> = instance
             .iter()
             .flat_map(|inst| &inst.animated_parameters)
-            .filter_map(|ap| ap.parameter_type.map(|t| t.raw()))
+            .filter_map(|ap| ap.parameter_type.map(|t| t.get()))
             .collect();
         let mut items = Vec::new();
         if let Some(pidx) = param_index {
@@ -1120,7 +1125,7 @@ pub(super) fn shader_bitmap_row(
                 &format!("parameters[{pidx}]/animated parameters"),
             );
             for (kind, suffix, hex) in BITMAP_TRANSFORM_TYPES {
-                if existing_types.contains(&(*kind as i32)) {
+                if existing_types.contains(kind) {
                     continue;
                 }
                 items.push(ShaderContextItem {
@@ -1161,9 +1166,9 @@ pub(super) fn shader_bitmap_row(
                 continue;
             }
             let initial_value = if sampler.flag_bit == BITMAP_FLAG_FILTER {
-                parameter.default_filter_mode.raw()
+                parameter.default_filter_mode.name()
             } else {
-                parameter.default_address_mode.raw()
+                parameter.default_address_mode.name()
             };
             if let Some(pidx) = param_index {
                 let flag_path =
@@ -1181,7 +1186,7 @@ pub(super) fn shader_bitmap_row(
                         },
                         PendingFieldEdit {
                             path: field_path,
-                            input: initial_value.to_string(),
+                            input: initial_value.to_owned(),
                         },
                     ]),
                 });
@@ -1318,7 +1323,7 @@ pub(super) fn shader_bitmap_expansion_rows(
         if flags & BITMAP_FLAG_FILTER != 0 {
             rows.push(shader_sampler_enum_row(
                 format!("{name}_filter_mode"),
-                parameter.default_filter_mode.raw(),
+                option_index_for_name(&filter_opts, parameter.default_filter_mode.name()) as i16,
                 instance.bitmap_filter_mode as i16,
                 filter_opts,
                 edit_prefix,
@@ -1329,7 +1334,7 @@ pub(super) fn shader_bitmap_expansion_rows(
         if flags & BITMAP_FLAG_ADDRESS != 0 {
             rows.push(shader_sampler_enum_row(
                 format!("{name}_wrap_mode"),
-                parameter.default_address_mode.raw(),
+                option_index_for_name(&addr_opts, parameter.default_address_mode.name()) as i16,
                 instance.bitmap_address_mode as i16,
                 addr_opts.clone(),
                 edit_prefix,
@@ -1340,7 +1345,7 @@ pub(super) fn shader_bitmap_expansion_rows(
         if flags & BITMAP_FLAG_ADDRESS_X != 0 {
             rows.push(shader_sampler_enum_row(
                 format!("{name}_wrap_mode_x"),
-                parameter.default_address_mode.raw(),
+                option_index_for_name(&addr_opts, parameter.default_address_mode.name()) as i16,
                 instance.bitmap_address_mode_x as i16,
                 addr_opts.clone(),
                 edit_prefix,
@@ -1351,7 +1356,7 @@ pub(super) fn shader_bitmap_expansion_rows(
         if flags & BITMAP_FLAG_ADDRESS_Y != 0 {
             rows.push(shader_sampler_enum_row(
                 format!("{name}_wrap_mode_y"),
-                parameter.default_address_mode.raw(),
+                option_index_for_name(&addr_opts, parameter.default_address_mode.name()) as i16,
                 instance.bitmap_address_mode_y as i16,
                 addr_opts.clone(),
                 edit_prefix,
@@ -2054,6 +2059,16 @@ pub(super) fn shader_int_value_row(
     row
 }
 
+/// Resolve an enum value to its position in a display-option list by name,
+/// so the UI selects/pre-fills by the schema name rather than the raw wire
+/// integer. Falls back to 0 when the name isn't in the list.
+pub(super) fn option_index_for_name(options: &[String], name: &str) -> usize {
+    options
+        .iter()
+        .position(|opt| opt.eq_ignore_ascii_case(name))
+        .unwrap_or(0)
+}
+
 pub(super) fn shader_enum_value_row(
     label: String,
     default: String,
@@ -2308,9 +2323,9 @@ pub(super) fn shader_function_grid_text(function: &TagFunction) -> String {
         return format!("value: {}", format_shader_float(value));
     }
 
-    match function {
-        TagFunction::Identity { .. } => format!("identity: {}", function_sample_summary(function)),
-        TagFunction::Constant { header } => {
+    match function.kind() {
+        FunctionKind::Identity { .. } => format!("identity: {}", function_sample_summary(function)),
+        FunctionKind::Constant { header } => {
             if header.flags.is_ranged() {
                 format!(
                     "range value: {} to {}",
@@ -2321,34 +2336,34 @@ pub(super) fn shader_function_grid_text(function: &TagFunction) -> String {
                 format!("value: {}", format_shader_float(header.clamp_range_min))
             }
         }
-        TagFunction::Transition { compact, .. } => format!(
+        FunctionKind::Transition { compact, .. } => format!(
             "transition {}: {}",
             compact.function_index,
             function_sample_summary(function)
         ),
-        TagFunction::Periodic { compact, .. } => format!(
+        FunctionKind::Periodic { compact, .. } => format!(
             "periodic {} freq {} phase {}: {}",
             compact.function_index,
             format_shader_float(compact.frequency),
             format_shader_float(compact.phase),
             function_sample_summary(function)
         ),
-        TagFunction::Linear { compact, .. } => format!(
+        FunctionKind::Linear { compact, .. } => format!(
             "linear: {}*x + {} ({})",
             format_shader_float(compact.slope),
             format_shader_float(compact.offset),
             function_sample_summary(function)
         ),
-        TagFunction::LinearKey { compact, .. } => {
+        FunctionKind::LinearKey { compact, .. } => {
             format!("curve: {}", function_points_summary(&compact.graph_points))
         }
-        TagFunction::MultiLinearKey { compact, .. } => {
+        FunctionKind::MultiLinearKey { compact, .. } => {
             format!(
                 "multi curve: {}",
                 function_points_summary(&compact.graph_points)
             )
         }
-        TagFunction::Spline { compact, .. } => format!(
+        FunctionKind::Spline { compact, .. } => format!(
             "spline: {}, {}, {}, {} ({})",
             format_shader_float(compact.i),
             format_shader_float(compact.j),
@@ -2356,27 +2371,27 @@ pub(super) fn shader_function_grid_text(function: &TagFunction) -> String {
             format_shader_float(compact.l),
             function_sample_summary(function)
         ),
-        TagFunction::Spline2 { compact, .. } => format!(
+        FunctionKind::Spline2 { compact, .. } => format!(
             "spline2: x {} width {} bias {} ({})",
             format_shader_float(compact.left_x),
             format_shader_float(compact.width),
             format_shader_float(compact.bias),
             function_sample_summary(function)
         ),
-        TagFunction::MultiSpline { compact, .. } => format!(
+        FunctionKind::MultiSpline { compact, .. } => format!(
             "multi-part curve: {} segment{} ({})",
             compact.parts.len(),
             if compact.parts.len() == 1 { "" } else { "s" },
             function_sample_summary(function)
         ),
-        TagFunction::Exponent { compact, .. } => format!(
+        FunctionKind::Exponent { compact, .. } => format!(
             "exponent: {} to {}, pow {} ({})",
             format_shader_float(compact.amplitude_min),
             format_shader_float(compact.amplitude_max),
             format_shader_float(compact.exponent),
             function_sample_summary(function)
         ),
-        TagFunction::Unsupported { header, raw } => format!(
+        FunctionKind::Unsupported { header, raw } => format!(
             "{:?}: {} bytes",
             header.function_type,
             raw.len().saturating_sub(32)

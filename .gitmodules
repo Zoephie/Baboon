@@ -1,4 +1,3 @@
-[submodule "blam-tags"]
-	path = blam-tags
-	url = https://github.com/Zoephie/blam-tags.git
-	branch = back
+[submodule "definitions"]
+	path = definitions
+	url = https://github.com/camden-smallwood/definitions

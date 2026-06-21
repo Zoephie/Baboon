@@ -1,4 +1,48 @@
 use super::*;
+use blam_tags::math::{RealPoint3d, RealQuaternion, RealVector3d};
+use blam_tags::render_model::{Marker, Node, RenderMesh};
+
+/// Renderer-facing preview geometry derived from a [`RenderModel`]. Lives in
+/// Baboon (not blam-tags) since it is purely a GUI concern.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RenderModelPreview {
+    pub regions: Vec<RenderModelPreviewRegion>,
+    pub vertices: Vec<RenderModelPreviewVertex>,
+    pub indices: Vec<u32>,
+    pub batches: Vec<RenderModelPreviewBatch>,
+    pub markers: Vec<RenderModelPreviewMarker>,
+    pub bounds_min: [f32; 3],
+    pub bounds_max: [f32; 3],
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RenderModelPreviewRegion {
+    pub name: String,
+    pub permutations: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct RenderModelPreviewVertex {
+    pub position: [f32; 3],
+    pub normal: [f32; 3],
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RenderModelPreviewBatch {
+    pub region_name: String,
+    pub permutation_name: String,
+    pub material_index: u16,
+    pub part_type: i8,
+    pub index_start: u32,
+    pub index_count: u32,
+}
+
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RenderModelPreviewMarker {
+    pub name: String,
+    pub position: [f32; 3],
+    pub axes: [[f32; 3]; 3],
+}
 
 pub(super) fn draw_model_preview_panel(
     ui: &mut Ui,
@@ -197,7 +241,9 @@ fn load_model_preview(
         preview_from_jms(&jms, &region_perms)
     } else {
         let render_model = RenderModel::from_tag(&render_tag).map_err(|error| error.to_string())?;
-        render_model.to_preview()
+        let render_meshes =
+            RenderModel::derive_render_meshes(&render_tag).map_err(|error| error.to_string())?;
+        render_model_to_preview(&render_model, &render_meshes)
     };
     if preview.batches.is_empty() {
         return Err("Referenced render_model has no previewable draw batches.".to_owned());
@@ -1168,4 +1214,155 @@ impl PreviewCamera {
         let fit = self.rect.width().min(self.rect.height()) / (self.radius * 2.2).max(0.001);
         self.radius * self.scale * fit
     }
+}
+
+/// Build flat preview geometry with draw batches grouped by region and
+/// permutation. Ported from blam-tags so the GUI owns its preview type; the
+/// render meshes are derived separately via `RenderModel::derive_render_meshes`.
+fn render_model_to_preview(model: &RenderModel, render_meshes: &[RenderMesh]) -> RenderModelPreview {
+    let node_world = preview_node_world_transforms(&model.nodes);
+    let mut preview = RenderModelPreview {
+        regions: model
+            .regions
+            .iter()
+            .map(|region| RenderModelPreviewRegion {
+                name: region.name.clone(),
+                permutations: region
+                    .permutations
+                    .iter()
+                    .map(|permutation| permutation.name.clone())
+                    .collect(),
+            })
+            .collect(),
+        bounds_min: [f32::INFINITY; 3],
+        bounds_max: [f32::NEG_INFINITY; 3],
+        ..Default::default()
+    };
+
+    for region in &model.regions {
+        for permutation in &region.permutations {
+            let first_mesh = permutation.mesh_index.max(0) as usize;
+            let mesh_count = permutation.mesh_count.max(0) as usize;
+            for mesh_index in first_mesh..first_mesh.saturating_add(mesh_count) {
+                let Some(mesh) = render_meshes.get(mesh_index) else {
+                    continue;
+                };
+                for part in &mesh.parts {
+                    let index_start = preview.indices.len() as u32;
+                    for source_index in
+                        part.index_start..part.index_start.saturating_add(part.index_count)
+                    {
+                        let Some(&vertex_index) = mesh.indices.get(source_index as usize) else {
+                            continue;
+                        };
+                        let Some(vertex) = mesh.vertices.get(vertex_index as usize) else {
+                            continue;
+                        };
+                        let position = point3_to_array(vertex.position);
+                        let normal = vector3_to_array(vertex.normal);
+                        expand_preview_bounds_local(
+                            &mut preview.bounds_min,
+                            &mut preview.bounds_max,
+                            position,
+                        );
+                        let new_index = preview.vertices.len() as u32;
+                        preview
+                            .vertices
+                            .push(RenderModelPreviewVertex { position, normal });
+                        preview.indices.push(new_index);
+                    }
+                    let index_count = preview.indices.len() as u32 - index_start;
+                    if index_count > 0 {
+                        preview.batches.push(RenderModelPreviewBatch {
+                            region_name: region.name.clone(),
+                            permutation_name: permutation.name.clone(),
+                            material_index: part.material_index,
+                            part_type: part.part_type as i8,
+                            index_start,
+                            index_count,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    if preview.vertices.is_empty() {
+        preview.bounds_min = [0.0; 3];
+        preview.bounds_max = [0.0; 3];
+    }
+
+    for group in &model.marker_groups {
+        for marker in &group.markers {
+            preview.markers.push(RenderModelPreviewMarker {
+                name: group.name.clone(),
+                position: transform_preview_marker_position(marker, &node_world),
+                axes: transform_preview_marker_axes(marker, &node_world),
+            });
+        }
+    }
+
+    preview
+}
+
+fn preview_node_world_transforms(nodes: &[Node]) -> Vec<(RealQuaternion, RealPoint3d)> {
+    let mut world: Vec<(RealQuaternion, RealPoint3d)> = Vec::with_capacity(nodes.len());
+    for node in nodes {
+        let local_rot = node.default_rotation.normalized();
+        let local_trans = node.default_translation;
+        if node.parent_node >= 0
+            && let Some((parent_rot, parent_trans)) = world.get(node.parent_node as usize).copied()
+        {
+            let rot = (parent_rot * local_rot).normalized();
+            let trans = parent_trans + (parent_rot * local_trans.as_vector());
+            world.push((rot, trans));
+            continue;
+        }
+        world.push((local_rot, local_trans));
+    }
+    world
+}
+
+fn transform_preview_marker_position(
+    marker: &Marker,
+    node_world: &[(RealQuaternion, RealPoint3d)],
+) -> [f32; 3] {
+    let local = marker.translation;
+    let world = if marker.node_index >= 0 {
+        node_world
+            .get(marker.node_index as usize)
+            .map(|(rot, trans)| *trans + (*rot * local.as_vector()))
+            .unwrap_or(local)
+    } else {
+        local
+    };
+    point3_to_array(world)
+}
+
+fn transform_preview_marker_axes(
+    marker: &Marker,
+    node_world: &[(RealQuaternion, RealPoint3d)],
+) -> [[f32; 3]; 3] {
+    let local_rot = marker.rotation.normalized();
+    let world_rot = if marker.node_index >= 0 {
+        node_world
+            .get(marker.node_index as usize)
+            .map(|(rot, _)| (*rot * local_rot).normalized())
+            .unwrap_or(local_rot)
+    } else {
+        local_rot
+    };
+    [
+        vector3_to_array(world_rot * RealVector3d { i: 1.0, j: 0.0, k: 0.0 }),
+        vector3_to_array(world_rot * RealVector3d { i: 0.0, j: 1.0, k: 0.0 }),
+        vector3_to_array(world_rot * RealVector3d { i: 0.0, j: 0.0, k: 1.0 }),
+    ]
+}
+
+fn point3_to_array(p: RealPoint3d) -> [f32; 3] {
+    [p.x, p.y, p.z]
+}
+
+fn vector3_to_array(v: RealVector3d) -> [f32; 3] {
+    [v.i, v.j, v.k]
 }
