@@ -453,6 +453,8 @@ pub(super) struct MaterialColorPopup {
     /// When Some, clicking OK creates a shader parameter with a constant-color
     /// animated child.
     create_shader_param_op: Option<ShaderParamOp>,
+    /// When Some, clicking OK creates/edits a classic H2 shader parameter.
+    create_h2_shader_param_op: Option<H2ShaderParamOp>,
     /// Tag key that owns the write_path. Used by draw_color_popup to route the edit.
     tag_key: String,
 }
@@ -488,6 +490,7 @@ impl MaterialColorPopup {
             write_color_field: None,
             create_shader_op: None,
             create_shader_param_op: None,
+            create_h2_shader_param_op: None,
             tag_key: String::new(),
         }
     }
@@ -531,6 +534,16 @@ impl MaterialColorPopup {
     ) -> Self {
         self.tag_key = tag_key.into();
         self.create_shader_param_op = Some(op);
+        self
+    }
+
+    pub(super) fn with_h2_shader_param_op(
+        mut self,
+        tag_key: impl Into<String>,
+        op: H2ShaderParamOp,
+    ) -> Self {
+        self.tag_key = tag_key.into();
+        self.create_h2_shader_param_op = Some(op);
         self
     }
 
@@ -625,6 +638,10 @@ pub(super) enum ColorPopupResult {
         tag_key: String,
         op: ShaderParamOp,
     },
+    H2ShaderParamOp {
+        tag_key: String,
+        op: H2ShaderParamOp,
+    },
 }
 
 /// Draw the color inspector / editor popup.
@@ -640,7 +657,8 @@ pub(super) fn draw_color_popup(
     let editable = color.write_path.is_some()
         || color.write_color_field.is_some()
         || color.create_shader_op.is_some()
-        || color.create_shader_param_op.is_some();
+        || color.create_shader_param_op.is_some()
+        || color.create_h2_shader_param_op.is_some();
     let mut result: Option<ColorPopupResult> = None;
     egui::Window::new(color.title.clone())
         .collapsible(false)
@@ -731,6 +749,33 @@ pub(super) fn draw_color_popup(
                             );
                         }
                         result = Some(ColorPopupResult::ShaderParamOp {
+                            tag_key: color.tag_key.clone(),
+                            op,
+                        });
+                    } else if let Some(mut op) = color.create_h2_shader_param_op.clone() {
+                        match &mut op {
+                            H2ShaderParamOp::EditTemplateBackedValue { input, .. } => {
+                                *input = format!("{}, {}, {}", color.red, color.green, color.blue);
+                            }
+                            H2ShaderParamOp::EnsureAnimationProperty {
+                                initial_function_data,
+                                ..
+                            }
+                            | H2ShaderParamOp::EditFunctionData {
+                                data: initial_function_data,
+                                ..
+                            } => {
+                                *initial_function_data = h2_constant_color_function_data(
+                                    color.red,
+                                    color.green,
+                                    color.blue,
+                                    color.alpha,
+                                    Some(initial_function_data.as_slice()),
+                                );
+                            }
+                            H2ShaderParamOp::EnsureParameter { .. } => {}
+                        }
+                        result = Some(ColorPopupResult::H2ShaderParamOp {
                             tag_key: color.tag_key.clone(),
                             op,
                         });

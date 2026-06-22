@@ -368,7 +368,25 @@ pub(super) fn replace_halo2_function_byte_block(
     block_path: &str,
     data: &[u8],
 ) -> Result<(), String> {
-    TagFunction::parse(data).map_err(|error| format!("invalid mapping_function data: {error}"))?;
+    if TagFunction::parse(data).is_err() && !is_h2_legacy_constant_function_data(data) {
+        return Err("invalid mapping_function data".to_owned());
+    }
+    let current_len = tag
+        .root()
+        .field_path(block_path)
+        .and_then(|field| field.as_block())
+        .map(|block| block.len());
+    let Some(current_len) = current_len else {
+        return replace_halo2_wrapped_function_byte_block(tag, block_path, data)
+            .ok_or_else(|| format!("function byte block not found: {block_path}"))?;
+    };
+    if current_len == data.len() && current_len > 0 {
+        for (index, byte) in data.iter().copied().enumerate() {
+            let value = (byte as i8).to_string();
+            apply_field_edit(tag, &format!("{block_path}[{index}]/Value"), &value)?;
+        }
+        return Ok(());
+    }
     clear_block(tag, block_path)?;
     for (index, byte) in data.iter().copied().enumerate() {
         add_block_element(tag, block_path)?;
@@ -376,6 +394,237 @@ pub(super) fn replace_halo2_function_byte_block(
         apply_field_edit(tag, &format!("{block_path}[{index}]/Value"), &value)?;
     }
     Ok(())
+}
+
+fn replace_halo2_wrapped_function_byte_block(
+    tag: &mut TagFile,
+    block_path: &str,
+    data: &[u8],
+) -> Option<Result<(), String>> {
+    let wrapper_path = block_path.strip_suffix("/function/data")?;
+    let mut root = tag.root_mut();
+    let mut wrapper_field = root.field_path_mut(wrapper_path)?;
+    let mut wrapper = wrapper_field.as_struct_mut()?;
+    let mut result = None;
+    wrapper.for_each_field_mut(|mut field| {
+        if result.is_some()
+            || field.as_ref().name() != "function"
+            || field.as_ref().field_type() != TagFieldType::Struct
+        {
+            return;
+        }
+        let Some(mut mapping) = field.as_struct_mut() else {
+            return;
+        };
+        let Some(mut data_field) = mapping.field_mut("data") else {
+            return;
+        };
+        let Some(mut block) = data_field.as_block_mut() else {
+            return;
+        };
+        block.clear();
+        for byte in data.iter().copied() {
+            let index = block.add_element();
+            let Some(mut element) = block.element_mut(index) else {
+                result = Some(Err("failed to create function byte element".to_owned()));
+                return;
+            };
+            let Some(mut value_field) = element.field_mut("Value") else {
+                result = Some(Err("function byte element missing Value field".to_owned()));
+                return;
+            };
+            if let Err(error) = value_field.set(TagFieldData::CharInteger(byte as i8)) {
+                result = Some(Err(format!("{error:?}")));
+                return;
+            }
+        }
+        result = Some(Ok(()));
+    });
+    result
+}
+
+pub(super) fn apply_h2_shader_param_ops(
+    tag: &mut TagFile,
+    ops: Vec<H2ShaderParamOp>,
+    dirty: &mut bool,
+) -> Option<String> {
+    let mut status = None;
+    for op in ops {
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            apply_one_h2_shader_param_op(tag, &op)
+        }))
+        .map_err(panic_message)
+        .and_then(|result| result);
+        match result {
+            Ok(msg) => {
+                *dirty = true;
+                status = Some(msg);
+            }
+            Err(error) => {
+                status = Some(format!("H2 shader edit failed: {error}"));
+            }
+        }
+    }
+    status
+}
+
+pub(super) fn apply_one_h2_shader_param_op(
+    tag: &mut TagFile,
+    op: &H2ShaderParamOp,
+) -> Result<String, String> {
+    match op {
+        H2ShaderParamOp::EnsureParameter {
+            parameters_block_path,
+            parameter_name,
+            parameter_type_index,
+        } => {
+            let index = ensure_h2_shader_parameter(
+                tag,
+                parameters_block_path,
+                parameter_name,
+                *parameter_type_index,
+            )?;
+            Ok(format!(
+                "Ensured H2 parameter '{}' at {}[{}]",
+                parameter_name, parameters_block_path, index
+            ))
+        }
+        H2ShaderParamOp::EnsureAnimationProperty {
+            parameters_block_path,
+            parameter_name,
+            parameter_type_index,
+            animation_type_index,
+            initial_function_data,
+        } => {
+            let parameter_index = ensure_h2_shader_parameter(
+                tag,
+                parameters_block_path,
+                parameter_name,
+                *parameter_type_index,
+            )?;
+            let animation_index = ensure_h2_animation_property(
+                tag,
+                parameters_block_path,
+                parameter_index,
+                *animation_type_index,
+            )?;
+            let data_path = format!(
+                "{}[{}]/animation properties[{}]/function/data",
+                parameters_block_path, parameter_index, animation_index
+            );
+            replace_halo2_function_byte_block(tag, &data_path, initial_function_data)?;
+            Ok(format!(
+                "Created H2 function row '{}' type {}",
+                parameter_name, animation_type_index
+            ))
+        }
+        H2ShaderParamOp::EditFunctionData { block_path, data } => {
+            replace_halo2_function_byte_block(tag, block_path, data)?;
+            Ok(format!("Edited H2 function data at {block_path}"))
+        }
+        H2ShaderParamOp::EditTemplateBackedValue {
+            parameters_block_path,
+            parameter_name,
+            parameter_type_index,
+            field,
+            input,
+        } => {
+            let index = ensure_h2_shader_parameter(
+                tag,
+                parameters_block_path,
+                parameter_name,
+                *parameter_type_index,
+            )?;
+            let path = format!(
+                "{}[{}]/{}",
+                parameters_block_path,
+                index,
+                escape_field_path_segment(field)
+            );
+            apply_field_edit(tag, &path, input)?;
+            Ok(format!(
+                "Edited H2 parameter '{}' {}",
+                parameter_name, field
+            ))
+        }
+    }
+}
+
+fn ensure_h2_shader_parameter(
+    tag: &mut TagFile,
+    parameters_block_path: &str,
+    parameter_name: &str,
+    parameter_type_index: i32,
+) -> Result<usize, String> {
+    if let Some(index) = h2_shader_parameter_index(tag, parameters_block_path, parameter_name) {
+        return Ok(index);
+    }
+    let index = add_block_element(tag, parameters_block_path)?;
+    apply_field_edit(
+        tag,
+        &format!("{parameters_block_path}[{index}]/name"),
+        parameter_name,
+    )?;
+    apply_field_edit(
+        tag,
+        &format!("{parameters_block_path}[{index}]/type"),
+        &parameter_type_index.to_string(),
+    )?;
+    Ok(index)
+}
+
+fn h2_shader_parameter_index(
+    tag: &TagFile,
+    parameters_block_path: &str,
+    parameter_name: &str,
+) -> Option<usize> {
+    let block = tag
+        .root()
+        .field_path(parameters_block_path)
+        .and_then(|field| field.as_block())?;
+    block.iter().enumerate().find_map(|(index, element)| {
+        (element.read_string_id("name").as_deref() == Some(parameter_name)).then_some(index)
+    })
+}
+
+fn ensure_h2_animation_property(
+    tag: &mut TagFile,
+    parameters_block_path: &str,
+    parameter_index: usize,
+    animation_type_index: i32,
+) -> Result<usize, String> {
+    let animation_block_path =
+        format!("{parameters_block_path}[{parameter_index}]/animation properties");
+    if let Some(index) =
+        h2_animation_property_index(tag, &animation_block_path, animation_type_index)
+    {
+        return Ok(index);
+    }
+    let index = add_block_element(tag, &animation_block_path)?;
+    apply_field_edit(
+        tag,
+        &format!("{animation_block_path}[{index}]/type"),
+        &animation_type_index.to_string(),
+    )?;
+    Ok(index)
+}
+
+fn h2_animation_property_index(
+    tag: &TagFile,
+    animation_block_path: &str,
+    animation_type_index: i32,
+) -> Option<usize> {
+    let block = tag
+        .root()
+        .field_path(animation_block_path)
+        .and_then(|field| field.as_block())?;
+    block.iter().enumerate().find_map(|(index, element)| {
+        (element
+            .read_int_any("type")
+            .and_then(|value| i32::try_from(value).ok())
+            == Some(animation_type_index))
+        .then_some(index)
+    })
 }
 
 pub(super) fn apply_one_block_op(tag: &mut TagFile, op: &BlockOp) -> Result<String, String> {
@@ -1548,7 +1797,7 @@ mod tests {
 
     #[test]
     fn model_variant_ops_create_update_and_drop_regions() {
-        let mut tag = TagFile::new("definitions/halo2_mcc/model.json").unwrap();
+        let mut tag = TagFile::new(test_definition_path("halo2_mcc/model.json")).unwrap();
         let mut dirty = false;
 
         let status = apply_model_variant_ops(

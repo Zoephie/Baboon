@@ -217,6 +217,8 @@ pub(super) fn draw_function_editor_contents(
             .as_ref()
             .is_some_and(|paths| !paths.time_period.is_empty());
 
+    let show_color_controls = !(view.hide_scalar_color_controls
+        && view.function.color_graph_type() == ColorGraphType::Scalar);
     ui.horizontal(|ui| {
         ui.label(RichText::new("Function type:").color(text_dark()).small());
         changed |= function_type_combo(ui, &mut view.function, editable);
@@ -241,8 +243,10 @@ pub(super) fn draw_function_editor_contents(
 
         ui.label(RichText::new("Output:").color(text_dark()).small());
         changed |= output_type_combo(ui, &mut view.output_index, output_editable);
-        ui.label(RichText::new("Color:").color(text_dark()).small());
-        changed |= color_graph_combo(ui, &mut view.function, type_editable);
+        if show_color_controls {
+            ui.label(RichText::new("Color:").color(text_dark()).small());
+            changed |= color_graph_combo(ui, &mut view.function, type_editable);
+        }
     });
     ui.add_space(4.0);
     ui.label(
@@ -867,6 +871,7 @@ pub(super) struct FunctionView {
     /// path (material parameter blocks, template summaries) → the editor
     /// renders read-only.
     pub(super) edit: Option<FunctionEditPaths>,
+    pub(super) hide_scalar_color_controls: bool,
 }
 
 impl FunctionView {
@@ -878,6 +883,7 @@ impl FunctionView {
             output_index: None,
             time_period_in_seconds: 0.0,
             edit: None,
+            hide_scalar_color_controls: false,
         }
     }
 
@@ -897,11 +903,17 @@ impl FunctionView {
             }),
             time_period_in_seconds: animated.time_period_in_seconds,
             edit: None,
+            hide_scalar_color_controls: false,
         }
     }
 
     pub(super) fn with_edit(mut self, paths: FunctionEditPaths) -> Self {
         self.edit = Some(paths);
+        self
+    }
+
+    pub(super) fn with_h2_scalar_ui(mut self) -> Self {
+        self.hide_scalar_color_controls = true;
         self
     }
 }

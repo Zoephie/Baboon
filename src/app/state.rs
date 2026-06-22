@@ -224,6 +224,34 @@ pub(super) struct FunctionDataOp {
     pub(super) data: Vec<u8>,
 }
 
+#[derive(Clone)]
+pub(super) enum H2ShaderParamOp {
+    #[allow(dead_code)]
+    EnsureParameter {
+        parameters_block_path: String,
+        parameter_name: String,
+        parameter_type_index: i32,
+    },
+    EnsureAnimationProperty {
+        parameters_block_path: String,
+        parameter_name: String,
+        parameter_type_index: i32,
+        animation_type_index: i32,
+        initial_function_data: Vec<u8>,
+    },
+    EditFunctionData {
+        block_path: String,
+        data: Vec<u8>,
+    },
+    EditTemplateBackedValue {
+        parameters_block_path: String,
+        parameter_name: String,
+        parameter_type_index: i32,
+        field: String,
+        input: String,
+    },
+}
+
 /// A deferred structural edit to a block (add/insert/duplicate/delete),
 /// applied to the tag after the immutable render borrow ends.
 #[derive(Clone)]
@@ -405,6 +433,8 @@ pub(super) struct FieldEditContext<'a> {
     pub(super) shader_ops: &'a mut Vec<ShaderOp>,
     /// Shader-specific deferred ops (create parameter entry + set real value).
     pub(super) shader_param_ops: &'a mut Vec<ShaderParamOp>,
+    /// H2EK-specific deferred ops (create classic shader parameters/animations).
+    pub(super) h2_shader_param_ops: &'a mut Vec<H2ShaderParamOp>,
     /// Model-preview variant edits queued from the render model tab.
     pub(super) model_variant_ops: &'a mut Vec<ModelVariantOp>,
     /// Set when the user clicks a color swatch on a value row; the caller hoists

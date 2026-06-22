@@ -1270,6 +1270,7 @@ impl eframe::App for Baboon {
                         let mut block_ops = Vec::new();
                         let mut shader_ops = Vec::new();
                         let mut shader_param_ops = Vec::new();
+                        let mut h2_shader_param_ops = Vec::new();
                         let mut model_variant_ops = Vec::new();
                         let mut color_request = None;
                         let mut function_request = None;
@@ -1303,6 +1304,7 @@ impl eframe::App for Baboon {
                             bitmap_reimport: &mut bitmap_reimport,
                             shader_ops: &mut shader_ops,
                             shader_param_ops: &mut shader_param_ops,
+                            h2_shader_param_ops: &mut h2_shader_param_ops,
                             model_variant_ops: &mut model_variant_ops,
                             color_request: &mut color_request,
                             function_request: &mut function_request,
@@ -1368,6 +1370,13 @@ impl eframe::App for Baboon {
                         if let Some(status) =
                             apply_shader_param_ops(&mut doc.tag, shader_param_ops, &mut doc.dirty)
                         {
+                            self.status = status;
+                        }
+                        if let Some(status) = apply_h2_shader_param_ops(
+                            &mut doc.tag,
+                            h2_shader_param_ops,
+                            &mut doc.dirty,
+                        ) {
                             self.status = status;
                         }
                         if let Some(status) =
@@ -1439,6 +1448,15 @@ impl eframe::App for Baboon {
                     if let Some(doc) = self.parsed_tags.get_mut(&tag_key) {
                         if let Some(status) =
                             apply_shader_param_ops(&mut doc.tag, vec![op], &mut doc.dirty)
+                        {
+                            self.status = status;
+                        }
+                    }
+                }
+                ColorPopupResult::H2ShaderParamOp { tag_key, op } => {
+                    if let Some(doc) = self.parsed_tags.get_mut(&tag_key) {
+                        if let Some(status) =
+                            apply_h2_shader_param_ops(&mut doc.tag, vec![op], &mut doc.dirty)
                         {
                             self.status = status;
                         }
