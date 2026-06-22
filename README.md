@@ -1,7 +1,7 @@
 # Baboon
 
 **Baboon** is a native desktop viewer and editor for Halo tag files, built in
-Rust with [`eframe`/`egui`]. It links the [`blam-tags`] engine directly for
+Rust with [`eframe`/`egui`](https://github.com/emilk/egui). It links the [`blam-tags`](https://github.com/camden-smallwood/blam-tags) engine directly for
 byte-exact tag reading, editing, and asset extraction, and presents a
 Guerilla-style editing surface for working with the loose tag files shipped in
 the **Halo: The Master Chief Collection** editing kits — no round-trip through
@@ -22,18 +22,18 @@ animations — all from one application.
 Baboon recognises and auto-configures itself for the following MCC editing
 kits, detected from the kit's root folder name:
 
-| Editing kit | Folder | Game identifier |
-|-------------|--------|-----------------|
-| Halo CE | `HCEEK` / `H1EK` | `haloce_mcc` |
-| Halo 2 | `H2EK` | `halo2_mcc` |
-| Halo 3 | `H3EK` | `halo3_mcc` |
-| Halo 3: ODST | `H3ODSTEK` | `halo3odst_mcc` |
-| Halo: Reach | `HREK` | `haloreach_mcc` |
-| Halo 4 | `H4EK` | `halo4_mcc` |
-| Halo 2: Anniversary (MP) | `H2AMPEK` / `H2AEK` | `halo2amp_mcc` |
+| Editing kit              | Folder              | Game identifier |
+| ------------------------ | ------------------- | --------------- |
+| Halo CE                  | `HCEEK` / `H1EK`    | `haloce_mcc`    |
+| Halo 2                   | `H2EK`              | `halo2_mcc`     |
+| Halo 3                   | `H3EK`              | `halo3_mcc`     |
+| Halo 3: ODST             | `H3ODSTEK`          | `halo3odst_mcc` |
+| Halo: Reach              | `HREK`              | `haloreach_mcc` |
+| Halo 4                   | `H4EK`              | `halo4_mcc`     |
+| Halo 2: Anniversary (MP) | `H2AMPEK` / `H2AEK` | `halo2amp_mcc`  |
 
-Per-game group-name tables (`blam-tags/definitions/<game>/_meta.json`) are
-provided by the submodule and embedded into the binary at compile time, so
+Per-game group-name tables (`definitions/<game>/_meta.json`) are provided by
+the definitions submodule and embedded into the binary at compile time, so
 friendly tag-group names and reference resolution work regardless of where the
 executable is launched from.
 
@@ -179,8 +179,7 @@ per game:
 - **Sapien** (`sapien.exe`).
 - **tag_test** — the game-specific build (`halo_tag_test.exe`,
   `halo2_tag_test.exe`, `halo3_tag_test.exe`, `atlas_tag_test.exe`,
-  `reach_tag_test.exe`, `halo4_tag_test.exe`, or the generic
-  `tag_test.exe`).
+  `reach_tag_test.exe`, `halo4_tag_test.exe`, or the generic `tag_test.exe`).
 - **Blender** — at a user-configured path (set in *File → Settings*).
 
 Launchers are disabled until the relevant executable is found in the kit.
@@ -196,11 +195,11 @@ launch.
 ## Technical overview
 
 - **Language / edition** — Rust 2024.
-- **UI** — [`eframe`/`egui`] (immediate-mode GUI) with the `glow` (OpenGL)
-  backend and bundled default fonts. Native file dialogs via [`rfd`].
-- **Engine** — the [`blam-tags`] crate, linked by path, provides all binary tag
-  parsing/serialisation, bitmap decoding, geometry export (JMS/ASS), render-
-  method handling, and the monolithic cache reader.
+- **UI** — [`eframe`/`egui`](https://github.com/emilk/egui) (immediate-mode GUI) with the `glow` (OpenGL)
+  backend and bundled default fonts. Native file dialogs via [`rfd`](https://github.com/PolyMeilex/rfd).
+- **Engine** — the [`blam-tags`](https://github.com/camden-smallwood/blam-tags) crate, pulled as a pinned Cargo git dependency,
+  provides all binary tag parsing/serialisation, bitmap decoding, geometry
+  export (JMS/ASS), render-method handling, and the monolithic cache reader.
 - **Concurrency** — all file I/O (loading, scanning, indexing, export) runs on
   worker threads that communicate with the UI via an `mpsc` channel and request
   repaints; the UI thread never blocks on disk.
@@ -218,42 +217,36 @@ launch.
 
 ## Building
 
-This crate depends on the `blam-tags` engine crate through a Git submodule
-pinned to the `back` branch of `https://github.com/Zoephie/blam-tags.git`.
+Clone the repo with submodules (required for the tag definitions):
 
 ```
-Baboon/
-├── blam-tags/         <- Git submodule
-│   └── blam-tags/     <- the library crate
-└── src/
-```
-
-Clone with submodules:
-
-```sh
-git clone --recurse-submodules <Baboon-repo-url>
+git clone --recurse-submodules https://github.com/Zoephie/Baboon.git
 cd Baboon
 ```
 
 Or, after a normal clone:
 
-```sh
+```
 git submodule update --init --recursive
 ```
 
 Then build:
 
-```sh
+```
 cargo build --release
 ```
 
-The per-game definition tables under `blam-tags/definitions/` are embedded at
+`blam-tags` is fetched automatically by Cargo — you do not need to clone it
+separately. The per-game definition tables under `definitions/` are embedded at
 compile time, so the binary resolves group names and references no matter where
-it is launched from. Geometry/animation/import-info extraction additionally
-relies on the companion `blam-tag-shell` binary. The root workspace builds
-Baboon and `blam-tag-shell` together, placing them side by side in
-`target/debug/` or `target/release/`. Ship both `Baboon.exe` and
-`blam-tag-shell.exe` in releases.
+it is launched from.
+
+Geometry/animation/import-info extraction additionally relies on the companion
+`blam-tag-shell` binary. The root workspace builds Baboon and `blam-tag-shell`
+together, placing them side by side in `target/debug/` or `target/release/`.
+Ship both `Baboon.exe` and `blam-tag-shell.exe` in releases.
+
+---
 
 ## Usage
 
@@ -262,7 +255,3 @@ editing-kit `tags/` directory), or a Halo 4 monolithic cache (`blob_index.dat`).
 Browse or search in the left panel, click a tag to open it in a tab, and edit
 inline. Save loose little-endian tags back to disk from the editor. The toolbar
 buttons launch the kit's Sapien / tag_test and Blender.
-
-[`eframe`/`egui`]: https://github.com/emilk/egui
-[`rfd`]: https://github.com/PolyMeilex/rfd
-[`blam-tags`]: ../blam-tags
