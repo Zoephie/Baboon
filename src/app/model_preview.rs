@@ -1219,7 +1219,10 @@ impl PreviewCamera {
 /// Build flat preview geometry with draw batches grouped by region and
 /// permutation. Ported from blam-tags so the GUI owns its preview type; the
 /// render meshes are derived separately via `RenderModel::derive_render_meshes`.
-fn render_model_to_preview(model: &RenderModel, render_meshes: &[RenderMesh]) -> RenderModelPreview {
+fn render_model_to_preview(
+    model: &RenderModel,
+    render_meshes: &[RenderMesh],
+) -> RenderModelPreview {
     let node_world = preview_node_world_transforms(&model.nodes);
     let mut preview = RenderModelPreview {
         regions: model
@@ -1353,9 +1356,30 @@ fn transform_preview_marker_axes(
         local_rot
     };
     [
-        vector3_to_array(world_rot * RealVector3d { i: 1.0, j: 0.0, k: 0.0 }),
-        vector3_to_array(world_rot * RealVector3d { i: 0.0, j: 1.0, k: 0.0 }),
-        vector3_to_array(world_rot * RealVector3d { i: 0.0, j: 0.0, k: 1.0 }),
+        vector3_to_array(
+            world_rot
+                * RealVector3d {
+                    i: 1.0,
+                    j: 0.0,
+                    k: 0.0,
+                },
+        ),
+        vector3_to_array(
+            world_rot
+                * RealVector3d {
+                    i: 0.0,
+                    j: 1.0,
+                    k: 0.0,
+                },
+        ),
+        vector3_to_array(
+            world_rot
+                * RealVector3d {
+                    i: 0.0,
+                    j: 0.0,
+                    k: 1.0,
+                },
+        ),
     ]
 }
 

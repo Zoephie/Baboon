@@ -1058,13 +1058,7 @@ pub(super) fn draw_h2_legacy_function_editor_contents(
     changed
 }
 
-fn h2_number_stepper(
-    ui: &mut Ui,
-    id: &str,
-    value: &mut f32,
-    step: f32,
-    editable: bool,
-) -> bool {
+fn h2_number_stepper(ui: &mut Ui, id: &str, value: &mut f32, step: f32, editable: bool) -> bool {
     let mut changed = false;
     ui.push_id(id, |ui| {
         ui.horizontal(|ui| {

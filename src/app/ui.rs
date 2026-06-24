@@ -24,6 +24,84 @@ fn launcher_button(
     }
 }
 
+const MONITOR_COMMANDS_BY_GAME: &[(&str, &[&str])] = &[
+    (
+        "halo2_mcc",
+        &[
+            "monitor-bitmaps",
+            "monitor-bitmaps-data-and-tags",
+            "monitor-models",
+            "monitor-structures",
+        ],
+    ),
+    (
+        "halo3_mcc",
+        &[
+            "monitor-bitmaps",
+            "monitor-models",
+            "monitor-models-draft",
+            "monitor-strings",
+            "monitor-structures",
+        ],
+    ),
+    (
+        "halo3odst_mcc",
+        &[
+            "monitor-bitmaps",
+            "monitor-models",
+            "monitor-models-draft",
+            "monitor-strings",
+            "monitor-structures",
+        ],
+    ),
+    (
+        "haloreach_mcc",
+        &[
+            "monitor-bitmaps",
+            "monitor-models",
+            "monitor-models-draft",
+            "monitor-strings",
+        ],
+    ),
+    ("halo4_mcc", &["monitor-bitmaps", "monitor-strings"]),
+    ("haloce_mcc", &[]),
+];
+
+fn monitor_commands_for_game(game: Option<&str>) -> &'static [&'static str] {
+    let Some(game) = game else {
+        return &[];
+    };
+    MONITOR_COMMANDS_BY_GAME
+        .iter()
+        .find(|(candidate, _)| *candidate == game)
+        .map(|(_, commands)| *commands)
+        .unwrap_or(&[])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn monitor_commands_are_game_specific() {
+        assert_eq!(
+            monitor_commands_for_game(Some("halo2_mcc")),
+            &[
+                "monitor-bitmaps",
+                "monitor-bitmaps-data-and-tags",
+                "monitor-models",
+                "monitor-structures",
+            ]
+        );
+        assert_eq!(
+            monitor_commands_for_game(Some("halo4_mcc")),
+            &["monitor-bitmaps", "monitor-strings"]
+        );
+        assert!(monitor_commands_for_game(Some("haloce_mcc")).is_empty());
+        assert!(monitor_commands_for_game(None).is_empty());
+    }
+}
+
 fn tab_label_width(ui: &Ui, label: &str, min_width: f32, max_width: f32) -> f32 {
     let width = label.chars().count() as f32 * 7.0 + ui.spacing().button_padding.x * 2.0;
     width.clamp(min_width, max_width)
@@ -62,6 +140,8 @@ impl Baboon {
                 self.launch_blender();
             }
 
+            self.draw_monitor_menu_button(ui);
+
             let tag_test_ready = self
                 .kit_tool_path(self.tag_test_executable())
                 .is_some_and(|path| path.is_file());
@@ -82,6 +162,32 @@ impl Baboon {
                 self.launch_sapien();
             }
         });
+    }
+
+    fn draw_monitor_menu_button(&mut self, ui: &mut Ui) {
+        let game = self
+            .source
+            .as_ref()
+            .and_then(|source| source.game.as_deref());
+        let commands = monitor_commands_for_game(game);
+        if commands.is_empty() {
+            ui.add_enabled(false, egui::Button::new("M").min_size(Vec2::splat(22.0)))
+                .on_hover_text("No monitor commands available for this game");
+            return;
+        }
+
+        let ctx = ui.ctx().clone();
+        ui.menu_button("M", |ui| {
+            ui.set_min_width(210.0);
+            for command in commands {
+                if ui.button(*command).clicked() {
+                    self.submit_terminal_command(format!("tool {command}"), ctx.clone());
+                    ui.close_menu();
+                }
+            }
+        })
+        .response
+        .on_hover_text("Run monitor command");
     }
 
     fn draw_settings_window(&mut self, ctx: &egui::Context) {

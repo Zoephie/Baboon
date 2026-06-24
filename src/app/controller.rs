@@ -55,11 +55,7 @@ impl Baboon {
                         self.remember_tag_use(&key);
                         self.parsed_tags.insert(key, TagDocument::clean(tag));
                     }
-                    self.status = format!(
-                        "Loaded {} tag(s) from {}",
-                        loaded.entries.len(),
-                        loaded.label
-                    );
+                    self.status = loaded_source_status(&loaded);
                     self.source = Some(loaded);
                     // New entry universe — invalidate any cached search results.
                     self.source_generation = self.source_generation.wrapping_add(1);
@@ -522,6 +518,10 @@ impl Baboon {
         if command.is_empty() {
             return;
         }
+        self.submit_terminal_command(command, ctx);
+    }
+
+    pub(super) fn submit_terminal_command(&mut self, command: String, ctx: egui::Context) {
         if self.terminal.history.last() != Some(&command) {
             self.terminal.history.push(command.clone());
         }
@@ -2232,6 +2232,26 @@ fn command_error(stderr: &[u8]) -> String {
     }
 }
 
+fn loaded_source_status(source: &LoadedSourceData) -> String {
+    match &source.source {
+        TagSource::LooseFolder { .. } if source.all_entries.is_empty() => {
+            format!("Browsing tags from {}", source.label)
+        }
+        TagSource::LooseFolder { .. } => {
+            format!(
+                "Found {} tag(s) in {}",
+                source.all_entries.len(),
+                source.label
+            )
+        }
+        _ => format!(
+            "Loaded {} tag(s) from {}",
+            source.entries.len(),
+            source.label
+        ),
+    }
+}
+
 fn update_check_status(result: &UpdateCheckResult) -> String {
     let current = env!("CARGO_PKG_VERSION");
     if is_newer_release(&result.latest_tag, current) {
@@ -3455,6 +3475,52 @@ mod dependency_tests {
             group_name: None,
             location: TagEntryLocation::LooseFile(root.join(display_path)),
         }
+    }
+
+    fn loose_source_with_counts(label: &str, entries: Vec<TagEntry>) -> LoadedSourceData {
+        LoadedSourceData {
+            label: label.to_owned(),
+            source: TagSource::LooseFolder {
+                root: PathBuf::from("C:/kit/tags"),
+                game: Some("halo3_mcc".to_owned()),
+                definitions_root: PathBuf::from("C:/kit/definitions"),
+            },
+            names: TagNameIndex::default(),
+            game: Some("halo3_mcc".to_owned()),
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: entries,
+            reverse_dependencies: None,
+            initial_tag: None,
+        }
+    }
+
+    #[test]
+    fn loose_folder_status_does_not_report_zero_loaded_tags_before_scan() {
+        let source = loose_source_with_counts("H3EK/tags (halo3_mcc)", Vec::new());
+
+        assert_eq!(
+            loaded_source_status(&source),
+            "Browsing tags from H3EK/tags (halo3_mcc)"
+        );
+    }
+
+    #[test]
+    fn loose_folder_status_uses_recursive_index_when_available() {
+        let shader = parse_group_tag("rmsh").unwrap();
+        let source = loose_source_with_counts(
+            "H3EK/tags (halo3_mcc)",
+            vec![
+                entry("objects/a.shader", shader),
+                entry("objects/b.shader", shader),
+            ],
+        );
+
+        assert_eq!(
+            loaded_source_status(&source),
+            "Found 2 tag(s) in H3EK/tags (halo3_mcc)"
+        );
     }
 
     #[test]

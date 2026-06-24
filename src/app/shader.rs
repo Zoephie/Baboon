@@ -613,11 +613,8 @@ fn h2_apply_standard_field_widget(field_name: &str, row: &mut ShaderGridRow) {
                 "default shiny".to_owned(),
                 "dull".to_owned(),
             ]);
-            row.value_cell.text = h2_enum_display_value(&edit.current, &[
-                "none",
-                "default shiny",
-                "dull",
-            ]);
+            row.value_cell.text =
+                h2_enum_display_value(&edit.current, &["none", "default shiny", "dull"]);
         }
         "lightmap type" => {
             edit.kind = ShaderRowEditKind::Enum(vec![
@@ -626,12 +623,15 @@ fn h2_apply_standard_field_widget(field_name: &str, row: &mut ShaderGridRow) {
                 "dull specular".to_owned(),
                 "shiny specular".to_owned(),
             ]);
-            row.value_cell.text = h2_enum_display_value(&edit.current, &[
-                "diffuse",
-                "default specular",
-                "dull specular",
-                "shiny specular",
-            ]);
+            row.value_cell.text = h2_enum_display_value(
+                &edit.current,
+                &[
+                    "diffuse",
+                    "default specular",
+                    "dull specular",
+                    "shiny specular",
+                ],
+            );
         }
         "shader LOD bias" => {
             edit.kind = ShaderRowEditKind::Enum(vec![
@@ -644,16 +644,19 @@ fn h2_apply_standard_field_widget(field_name: &str, row: &mut ShaderGridRow) {
                 "cinematic".to_owned(),
                 "lowest".to_owned(),
             ]);
-            row.value_cell.text = h2_enum_display_value(&edit.current, &[
-                "none",
-                "4x size",
-                "2x size",
-                "1/2 size",
-                "1/4 size",
-                "never",
-                "cinematic",
-                "lowest",
-            ]);
+            row.value_cell.text = h2_enum_display_value(
+                &edit.current,
+                &[
+                    "none",
+                    "4x size",
+                    "2x size",
+                    "1/2 size",
+                    "1/4 size",
+                    "never",
+                    "cinematic",
+                    "lowest",
+                ],
+            );
         }
         _ => {}
     }
@@ -2268,7 +2271,10 @@ fn h2_shader_row_from_field(
     let edit = classic_shader_row_edit(path, &value, &formatted).or_else(|| {
         (field.name() == "flags").then(|| ShaderRowEdit {
             path: path.to_owned(),
-            current: parent.read_int_any(field.name()).unwrap_or_default().to_string(),
+            current: parent
+                .read_int_any(field.name())
+                .unwrap_or_default()
+                .to_string(),
             kind: ShaderRowEditKind::Flags(vec![
                 "water".to_owned(),
                 "sort first".to_owned(),
@@ -2621,7 +2627,10 @@ pub(super) fn shader_row_value_text_for_test(
 
 #[cfg(test)]
 pub(super) fn h2_function_data_range_for_test(data: &[u8]) -> (bool, Option<f32>) {
-    (h2_function_range_enabled(data), h2_function_range_value(data))
+    (
+        h2_function_range_enabled(data),
+        h2_function_range_value(data),
+    )
 }
 
 #[cfg(test)]
@@ -5788,7 +5797,11 @@ enum H2RangeControl {
 }
 
 fn h2_range_control_for_row(row: &ShaderGridRow) -> Option<H2RangeControl> {
-    if let Some(function) = row.function.as_ref().filter(|function| is_h2_function_view(function)) {
+    if let Some(function) = row
+        .function
+        .as_ref()
+        .filter(|function| is_h2_function_view(function))
+    {
         return h2_range_control_from_function(function);
     }
     if let Some(function) = row
@@ -5893,13 +5906,18 @@ fn h2_function_data_with_range(data: &[u8], enabled: bool, value: Option<f32>) -
     next
 }
 
-fn h2_push_range_data_edit(edit: &mut FieldEditContext<'_>, control: &H2RangeControl, data: Vec<u8>) {
+fn h2_push_range_data_edit(
+    edit: &mut FieldEditContext<'_>,
+    control: &H2RangeControl,
+    data: Vec<u8>,
+) {
     match control {
         H2RangeControl::Existing { block_path, .. } => {
-            edit.h2_shader_param_ops.push(H2ShaderParamOp::EditFunctionData {
-                block_path: block_path.clone(),
-                data,
-            });
+            edit.h2_shader_param_ops
+                .push(H2ShaderParamOp::EditFunctionData {
+                    block_path: block_path.clone(),
+                    data,
+                });
         }
         H2RangeControl::Create { op, .. } => {
             let mut op = op.clone();
@@ -5930,7 +5948,8 @@ fn draw_h2_function_range_control(
     }
     let enabled = h2_function_range_enabled(data);
     let mut checked = enabled;
-    let check_rect = egui::Rect::from_min_size(rect.left_top() + Vec2::new(0.0, 2.0), Vec2::splat(14.0));
+    let check_rect =
+        egui::Rect::from_min_size(rect.left_top() + Vec2::new(0.0, 2.0), Vec2::splat(14.0));
     let response = ui
         .scope_builder(egui::UiBuilder::new().max_rect(check_rect), |ui| {
             ui.add_enabled(edit.editable, egui::Checkbox::new(&mut checked, ""))
