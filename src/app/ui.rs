@@ -1393,6 +1393,22 @@ impl eframe::App for Baboon {
                             view_scope: "docked",
                             tag_key: &selected_key,
                             group_tag: entry.group_tag,
+                            game: self
+                                .source
+                                .as_ref()
+                                .and_then(|source| source.game.as_deref()),
+                            definitions_root: self.source.as_ref().and_then(|source| match &source
+                                .source
+                            {
+                                TagSource::LooseFolder {
+                                    definitions_root, ..
+                                } => Some(definitions_root.as_path()),
+                                _ => None,
+                            }),
+                            definition_group_name: self
+                                .names
+                                .name_for(entry.group_tag)
+                                .or_else(|| group_tag_to_extension(entry.group_tag)),
                             tags_root: self.source.as_ref().and_then(|source| {
                                 match &source.source {
                                     TagSource::LooseFolder { root, .. } => Some(root.as_path()),

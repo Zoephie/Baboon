@@ -420,6 +420,9 @@ pub(super) struct FieldEditContext<'a> {
     pub(super) tag_key: &'a str,
     /// Group tag of the tag being rendered — gates block paste compatibility.
     pub(super) group_tag: u32,
+    pub(super) game: Option<&'a str>,
+    pub(super) definitions_root: Option<&'a Path>,
+    pub(super) definition_group_name: Option<&'a str>,
     pub(super) tags_root: Option<&'a Path>,
     pub(super) editable: bool,
     pub(super) show_block_sizes: bool,

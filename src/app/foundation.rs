@@ -144,7 +144,7 @@ pub(super) fn draw_struct_fields(
         depth <= 1,
         open_override,
         |ui| {
-            for field in tag_struct.fields() {
+            for field in tag_struct.fields_all() {
                 draw_field(ui, field, names, depth, expert_mode, path_prefix, edit);
             }
         },
@@ -176,7 +176,7 @@ pub(super) fn draw_inherited_object_fields(
             open_override,
             |ui| {
                 let parent_field = inherited_parent_field_name(*struct_value);
-                for field in struct_value.fields() {
+                for field in struct_value.fields_all() {
                     if parent_field.is_some_and(|name| name == field.name()) {
                         continue;
                     }
@@ -235,9 +235,32 @@ pub(super) fn draw_field(
     edit: &mut FieldEditContext<'_>,
 ) {
     let field_path = append_field_path(path_prefix, field.name());
+    log_vibration_function_field(
+        field.name(),
+        field.type_name(),
+        field.field_type(),
+        path_prefix,
+    );
     let meta = field_display_meta(field.name());
     if meta.advanced && !expert_mode {
         return;
+    }
+    if is_internal_schema_marker_name(field.name()) {
+        return;
+    }
+    match field.field_type() {
+        TagFieldType::Terminator
+        | TagFieldType::Pad
+        | TagFieldType::UselessPad
+        | TagFieldType::Skip
+        | TagFieldType::Unknown => {
+            return;
+        }
+        TagFieldType::Explanation => {
+            draw_foundation_explanation_row(ui, field.name(), &field_path, depth, edit);
+            return;
+        }
+        _ => {}
     }
     if let Some(function) = field.as_function() {
         draw_foundation_function_row(ui, &meta, &function, depth, &field_path, edit);
@@ -262,11 +285,28 @@ pub(super) fn draw_field(
     }
 
     if let Some(nested) = field.as_struct() {
+        if let Some((function_view, data_path)) =
+            inline_mapping_function_from_struct(nested, &field_path)
+        {
+            eprintln!(
+                "inline function render triggered for: {} ({field_path})",
+                field.name()
+            );
+            draw_foundation_inline_function_row(
+                ui,
+                inline_function_label(field.name(), path_prefix),
+                function_view,
+                depth,
+                &data_path,
+                edit,
+            );
+            return;
+        }
         let nested_default_open = depth == 0 || is_priority_section(field.name());
         let open_override = edit.resolve_open(&field_path, nested_default_open);
         draw_foundation_group(
             ui,
-            clean_field_name(field.name()),
+            visible_container_title(field.name(), path_prefix),
             ("field_struct", &field_path),
             depth + 1,
             nested_default_open,
@@ -330,9 +370,294 @@ pub(super) fn draw_struct_fields_inline(
     path_prefix: &str,
     edit: &mut FieldEditContext<'_>,
 ) {
-    for field in tag_struct.fields() {
+    for field in tag_struct.fields_all() {
         draw_field(ui, field, names, depth, expert_mode, path_prefix, edit);
     }
+}
+
+pub(super) fn draw_foundation_explanation_row(
+    ui: &mut Ui,
+    name: &str,
+    path: &str,
+    depth: usize,
+    edit: &FieldEditContext<'_>,
+) {
+    let Some(text) = explanation_text_for_field(name, path, edit) else {
+        return;
+    };
+    if text.trim().is_empty() {
+        return;
+    }
+
+    let indent = depth as f32 * 12.0;
+    let width = (ui.available_width() - indent - 20.0).clamp(360.0, 980.0);
+    ui.horizontal(|ui| {
+        ui.add_space(indent);
+        Frame::none()
+            .fill(foundation_group_bg())
+            .stroke(Stroke::new(1.0, foundation_group_edge()))
+            .inner_margin(egui::Margin::same(8.0))
+            .show(ui, |ui| {
+                ui.set_max_width(width);
+                let label = clean_field_name(name);
+                if !label.is_empty() {
+                    ui.label(RichText::new(label).color(text_dark()).strong().small());
+                    ui.add_space(3.0);
+                }
+                ui.label(RichText::new(text).color(subtle_dark()).small().monospace());
+            });
+    });
+    ui.add_space(3.0);
+}
+
+fn explanation_text_for_field(
+    name: &str,
+    path: &str,
+    edit: &FieldEditContext<'_>,
+) -> Option<String> {
+    explanation_text_from_definition_json(path, edit).or_else(|| known_explanation_text(name))
+}
+
+fn explanation_text_from_definition_json(
+    path: &str,
+    edit: &FieldEditContext<'_>,
+) -> Option<String> {
+    let root = edit.definitions_root?;
+    let game = edit.game?;
+    let group_name = edit.definition_group_name?;
+    let json_path = root.join(game).join(format!("{group_name}.json"));
+    let json = std::fs::read_to_string(json_path).ok()?;
+    let value: Value = serde_json::from_str(&json).ok()?;
+    let structs = value.get("structs")?.as_object()?;
+    let blocks = value.get("blocks")?.as_object()?;
+    let mut struct_name = value
+        .get("block")
+        .and_then(Value::as_str)
+        .and_then(|block_name| blocks.get(block_name))
+        .and_then(|block| block.get("struct"))
+        .and_then(Value::as_str)?;
+
+    for segment in strip_node_indices(path)
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+    {
+        let fields = structs.get(struct_name)?.get("fields")?.as_array()?;
+        let field = fields
+            .iter()
+            .find(|field| field.get("name").and_then(Value::as_str) == Some(segment))?;
+        match field.get("type").and_then(Value::as_str)? {
+            "explanation" => {
+                return field
+                    .get("definition")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+            }
+            "struct" => {
+                struct_name = field.get("definition").and_then(Value::as_str)?;
+            }
+            "block" => {
+                struct_name = field
+                    .get("definition")
+                    .and_then(Value::as_str)
+                    .and_then(|block_name| blocks.get(block_name))
+                    .and_then(|block| block.get("struct"))
+                    .and_then(Value::as_str)?;
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
+fn known_explanation_text(name: &str) -> Option<String> {
+    (clean_field_key(name) == "screen flash").then(|| {
+        "There are seven screen flash types:\n\nNONE: DST'= DST\nLIGHTEN: DST'= DST(1 - A) + C\nDARKEN: DST'= DST(1 - A) - C\nMAX: DST'= MAX[DST(1 - C), (C - A)(1-DST)]\nMIN: DST'= MIN[DST(1 - C), (C + A)(1-DST)]\nTINT: DST'= DST(1 - C) + (A*PIN[2C - 1, 0, 1] + A)(1-DST)\nINVERT: DST'= DST(1 - C) + A)\n\nIn the above equations C and A represent the color and alpha of the screen flash, DST represents the color in the framebuffer before the screen flash is applied, and DST' represents the color after the screen flash is applied.".to_owned()
+    })
+}
+
+fn visible_container_title(name: &str, path_prefix: &str) -> String {
+    if is_internal_placeholder_name(name) {
+        path_prefix
+            .rsplit('/')
+            .next()
+            .map(strip_index_suffix)
+            .filter(|parent| !parent.is_empty())
+            .map(clean_field_name)
+            .unwrap_or_else(|| "function".to_owned())
+    } else {
+        clean_field_name(name)
+    }
+}
+
+fn inline_function_label(name: &str, path_prefix: &str) -> String {
+    if is_internal_placeholder_name(name) {
+        "function".to_owned()
+    } else {
+        visible_container_title(name, path_prefix)
+    }
+}
+
+fn is_internal_placeholder_name(name: &str) -> bool {
+    matches!(
+        internal_marker_key(name).as_str(),
+        "dirty whore" | "whore function" | "hide group id" | "end hide group id"
+    )
+}
+
+fn is_internal_schema_marker_name(name: &str) -> bool {
+    matches!(
+        internal_marker_key(name).as_str(),
+        "hide group id" | "end hide group id" | "whore function"
+    )
+}
+
+fn internal_marker_key(name: &str) -> String {
+    clean_field_key(name).replace('_', " ")
+}
+
+fn strip_index_suffix(segment: &str) -> &str {
+    segment.split_once('[').map_or(segment, |(name, _)| name)
+}
+
+fn inline_mapping_function_from_struct(
+    tag_struct: TagStruct<'_>,
+    struct_path: &str,
+) -> Option<(FunctionView, String)> {
+    if let Some(bytes) = halo2_function_bytes_from_struct(tag_struct) {
+        if should_log_vibration_function_path(struct_path) {
+            log_vibration_blob(struct_path, &bytes);
+        }
+        if !bytes.is_empty() {
+            let data_path = append_field_path(struct_path, "data");
+            if let Some(view) = legacy_mapping_function_view_for_path(&bytes, struct_path) {
+                return Some((view, data_path));
+            }
+            if let Ok(function) = TagFunction::parse(&bytes) {
+                return Some((FunctionView::from_function(function), data_path));
+            }
+        }
+    }
+
+    for field in tag_struct.fields_all() {
+        log_vibration_function_field(
+            field.name(),
+            field.type_name(),
+            field.field_type(),
+            struct_path,
+        );
+        if field.field_type() != TagFieldType::Data {
+            continue;
+        }
+        let data_path = append_field_path(struct_path, field.name());
+        if let Some(function) = field.as_function() {
+            return Some((FunctionView::from_function(function), data_path));
+        }
+        let bytes = field.as_data()?.to_vec();
+        if bytes.is_empty() {
+            continue;
+        }
+        if let Some(view) = legacy_mapping_function_view(&bytes) {
+            return Some((view, data_path));
+        }
+    }
+    None
+}
+
+fn log_vibration_function_field(
+    name: &str,
+    type_name: &str,
+    field_type: TagFieldType,
+    path_prefix: &str,
+) {
+    if should_log_vibration_function_field(name, path_prefix) {
+        eprintln!(
+            "damage_effect vibration field: path={} name={} type_name={} field_type={:?}",
+            append_field_path(path_prefix, name),
+            name,
+            type_name,
+            field_type
+        );
+    }
+}
+
+fn should_log_vibration_function_field(name: &str, path_prefix: &str) -> bool {
+    let name = internal_marker_key(name);
+    let path = internal_marker_key(path_prefix);
+    name.contains("low frequency rumble")
+        || name.contains("high frequency rumble")
+        || name.contains("low frequency vibration")
+        || name.contains("high frequency vibration")
+        || name == "dirty whore"
+        || name == "whore function"
+        || (name == "data" && should_log_vibration_function_path(&path))
+}
+
+fn should_log_vibration_function_path(path: &str) -> bool {
+    let path = internal_marker_key(path);
+    (path.contains("low frequency rumble")
+        || path.contains("high frequency rumble")
+        || path.contains("low frequency vibration")
+        || path.contains("high frequency vibration"))
+        && (path.contains("dirty whore") || path.contains("function"))
+}
+
+fn log_vibration_blob(field_name: &str, bytes: &[u8]) {
+    eprintln!(
+        "vibration blob {}: len={} {:02x?}",
+        field_name,
+        bytes.len(),
+        bytes
+    );
+    let float_candidates = (0..=bytes.len().saturating_sub(4))
+        .filter_map(|offset| {
+            let value = f32::from_le_bytes(bytes.get(offset..offset + 4)?.try_into().ok()?);
+            value
+                .is_finite()
+                .then_some((offset, value))
+                .filter(|(_, value)| value.abs() <= 10.0)
+        })
+        .map(|(offset, value)| format!("{offset}:{value:.6}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    eprintln!(
+        "vibration blob {} f32 candidates: [{}]",
+        field_name, float_candidates
+    );
+    eprintln!(
+        "vibration blob {} enum bytes: [{}]",
+        field_name,
+        bytes
+            .iter()
+            .enumerate()
+            .map(|(index, byte)| format!("{index}:{byte}"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    );
+}
+
+fn legacy_mapping_function_view_for_path(bytes: &[u8], path: &str) -> Option<FunctionView> {
+    if should_log_vibration_function_path(path) {
+        if let Some(view) = damage_effect_vibration_function_view(bytes) {
+            return Some(view);
+        }
+    }
+    legacy_mapping_function_view(bytes)
+}
+
+fn damage_effect_vibration_function_view(bytes: &[u8]) -> Option<FunctionView> {
+    let h2_legacy = H2LegacyFunctionView::parse_damage_effect_vibration(bytes.to_vec())?;
+    let function = decode_hex(&constant_function_hex(0.0))
+        .ok()
+        .and_then(|data| TagFunction::parse(&data).ok())?;
+    Some(FunctionView::from_function(function).with_h2_legacy(h2_legacy))
+}
+
+fn legacy_mapping_function_view(bytes: &[u8]) -> Option<FunctionView> {
+    let h2_legacy = H2LegacyFunctionView::parse(bytes.to_vec())?;
+    let function = decode_hex(&constant_function_hex(0.0))
+        .ok()
+        .and_then(|data| TagFunction::parse(&data).ok())?;
+    Some(FunctionView::from_function(function).with_h2_legacy(h2_legacy))
 }
 
 pub(super) fn draw_foundation_group(
@@ -1262,7 +1587,10 @@ pub(super) fn draw_foundation_value_row(
 
     if matches!(
         value,
-        TagFieldData::RealRgbColor(_) | TagFieldData::RealArgbColor(_)
+        TagFieldData::RealRgbColor(_)
+            | TagFieldData::RealArgbColor(_)
+            | TagFieldData::RgbColor(_)
+            | TagFieldData::ArgbColor(_)
     ) {
         draw_foundation_color_row(ui, meta, value, depth, path, edit);
         return;
@@ -1329,9 +1657,8 @@ pub(super) fn draw_foundation_value_row(
     );
 }
 
-/// A color value row (`real_rgb_color` / `real_argb_color`): channel readouts
-/// plus a clickable swatch that opens the color picker. Used e.g. for a
-/// permutation's `color lower bound` / `color upper bound`.
+/// A color value row: channel readouts plus a clickable swatch that opens the
+/// color picker. ARGB rows show all four components in a/r/g/b order.
 pub(super) fn draw_foundation_color_row(
     ui: &mut Ui,
     meta: &FieldDisplayMeta,
@@ -1344,6 +1671,26 @@ pub(super) fn draw_foundation_color_row(
     let (a, r, g, b, argb) = match value {
         TagFieldData::RealRgbColor(c) => (1.0, c.red, c.green, c.blue, false),
         TagFieldData::RealArgbColor(c) => (c.alpha, c.red, c.green, c.blue, true),
+        TagFieldData::RgbColor(c) => {
+            let raw = c.0;
+            (
+                1.0,
+                ((raw >> 16) & 0xFF) as f32 / 255.0,
+                ((raw >> 8) & 0xFF) as f32 / 255.0,
+                (raw & 0xFF) as f32 / 255.0,
+                false,
+            )
+        }
+        TagFieldData::ArgbColor(c) => {
+            let raw = c.0;
+            (
+                ((raw >> 24) & 0xFF) as f32 / 255.0,
+                ((raw >> 16) & 0xFF) as f32 / 255.0,
+                ((raw >> 8) & 0xFF) as f32 / 255.0,
+                (raw & 0xFF) as f32 / 255.0,
+                true,
+            )
+        }
         _ => return,
     };
     let channels: &[(&str, f32)] = if argb {
@@ -2020,6 +2367,45 @@ pub(super) fn draw_foundation_function_row(
     });
 }
 
+pub(super) fn draw_foundation_inline_function_row(
+    ui: &mut Ui,
+    label: String,
+    mut view: FunctionView,
+    depth: usize,
+    data_path: &str,
+    edit: &mut FieldEditContext<'_>,
+) {
+    view = view.with_edit(foundation_function_edit_paths(data_path));
+    ui.horizontal_top(|ui| {
+        ui.add_space(depth as f32 * 12.0);
+        foundation_label_cell(ui, &label);
+        Frame::none()
+            .fill(foundation_group_bg())
+            .stroke(Stroke::new(1.0, foundation_group_edge()))
+            .inner_margin(egui::Margin::same(6.0))
+            .show(ui, |ui| {
+                ui.vertical(|ui| {
+                    ui.set_min_width(640.0);
+                    let previous = FunctionSnapshot::from_view(&view);
+                    let mut selected = 0usize;
+                    let changed = if view.h2_legacy.is_some() {
+                        draw_h2_legacy_function_editor_contents(ui, &mut view, edit.editable)
+                    } else {
+                        draw_function_editor_contents(ui, &mut view, edit.editable, &mut selected)
+                    };
+                    if changed {
+                        let batch = push_function_edit(
+                            &foundation_function_edit_paths(data_path),
+                            &previous,
+                            &view,
+                        );
+                        edit.pending.extend(batch.edits);
+                    }
+                });
+            });
+    });
+}
+
 pub(super) fn foundation_function_edit_paths(data_path: &str) -> FunctionEditPaths {
     FunctionEditPaths {
         data: FunctionDataStorage::DataField(data_path.to_owned()),
@@ -2306,6 +2692,104 @@ pub(super) fn fmt_real(value: f32) -> String {
 
 pub(super) fn is_hidden_non_expert_value(value: &TagFieldData, expert_mode: bool) -> bool {
     !expert_mode && matches!(value, TagFieldData::Custom(bytes) if bytes.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn with_test_edit_context(assertion: impl FnOnce(&FieldEditContext<'_>)) {
+        let definitions_root = locate_definitions_root();
+        let mut buffers = HashMap::new();
+        let mut pending = Vec::new();
+        let mut block_ops = Vec::new();
+        let mut block_confirm = None;
+        let mut open_request = None;
+        let mut tool_import = None;
+        let mut bitmap_reimport = None;
+        let mut shader_ops = Vec::new();
+        let mut shader_param_ops = Vec::new();
+        let mut h2_shader_param_ops = Vec::new();
+        let mut model_variant_ops = Vec::new();
+        let mut color_request = None;
+        let mut function_request = None;
+        let mut block_clip_request = None;
+        let edit = FieldEditContext {
+            view_scope: "test",
+            tag_key: "test",
+            group_tag: parse_group_tag("jpt!").unwrap(),
+            game: Some("halo3_mcc"),
+            definitions_root: Some(definitions_root.as_path()),
+            definition_group_name: Some("damage_effect"),
+            tags_root: None,
+            editable: true,
+            show_block_sizes: false,
+            buffers: &mut buffers,
+            pending: &mut pending,
+            block_ops: &mut block_ops,
+            block_confirm: &mut block_confirm,
+            open_request: &mut open_request,
+            tool_import: &mut tool_import,
+            bitmap_reimport: &mut bitmap_reimport,
+            shader_ops: &mut shader_ops,
+            shader_param_ops: &mut shader_param_ops,
+            h2_shader_param_ops: &mut h2_shader_param_ops,
+            model_variant_ops: &mut model_variant_ops,
+            color_request: &mut color_request,
+            function_request: &mut function_request,
+            block_clipboard: None,
+            block_clip_request: &mut block_clip_request,
+            field_filter: None,
+        };
+        assertion(&edit);
+    }
+
+    #[test]
+    fn damage_effect_screen_flash_explanation_comes_from_definition_json() {
+        with_test_edit_context(|edit| {
+            let text = explanation_text_for_field(
+                "screen flash",
+                "player responses[0]/screen flash",
+                edit,
+            )
+            .unwrap();
+
+            assert!(text.contains("There are seven screen flash types"));
+            assert!(text.contains("LIGHTEN"));
+            assert!(text.contains("DST'"));
+        });
+    }
+
+    #[test]
+    fn internal_placeholder_titles_do_not_leak() {
+        assert_eq!(
+            inline_function_label("dirty whore", "rumble/low frequency rumble"),
+            "function"
+        );
+        assert_eq!(
+            visible_container_title("dirty whore", "rumble/low frequency rumble"),
+            "low frequency rumble"
+        );
+        assert!(is_internal_schema_marker_name("HIDE_GROUP_ID"));
+        assert!(is_internal_schema_marker_name("END_HIDE_GROUP_ID"));
+        assert!(is_internal_schema_marker_name("whore function"));
+    }
+
+    #[test]
+    fn legacy_mapping_function_bytes_build_inline_function_view() {
+        let mut raw = vec![0; 20];
+        raw[0] = 4;
+        raw[1] = 1;
+        raw[2] = 5;
+        raw[4..8].copy_from_slice(&0.8f32.to_le_bytes());
+        raw[8..12].copy_from_slice(&0.4f32.to_le_bytes());
+        raw[12..16].copy_from_slice(&0.25f32.to_le_bytes());
+
+        let view = legacy_mapping_function_view(&raw).expect("legacy data should parse");
+
+        assert!(view.h2_legacy.is_some());
+        assert_eq!(view.data_bytes(), raw);
+    }
 }
 
 pub(super) fn draw_resource(

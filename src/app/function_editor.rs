@@ -80,6 +80,17 @@ pub(super) const H2_EXPONENT_OPTIONS: [(u8, &str); 13] = [
     (12, "spark"),
 ];
 
+pub(super) const H2_TRANSITION_EXPONENT_OPTIONS: [(u8, &str); 8] = [
+    (0, "linear"),
+    (1, "early"),
+    (2, "late"),
+    (3, "very early"),
+    (4, "very late"),
+    (5, "cosine"),
+    (6, "zero"),
+    (7, "one"),
+];
+
 pub(super) const COLOR_GRAPH_OPTIONS: [(ColorGraphType, &str); 5] = [
     (ColorGraphType::Scalar, "scalar"),
     (ColorGraphType::OneColor, "1-color"),
@@ -1025,11 +1036,16 @@ pub(super) fn draw_h2_legacy_function_editor_contents(
     });
     ui.horizontal(|ui| {
         ui.label(RichText::new("Exponent:").color(text_dark()).small());
+        let exponent_options: &[(u8, &str)] = if h2.function_type == 2 {
+            &H2_TRANSITION_EXPONENT_OPTIONS
+        } else {
+            &H2_EXPONENT_OPTIONS
+        };
         changed |= h2_legacy_combo(
             ui,
             "h2_fn_exponent",
             &mut h2.exponent,
-            &H2_EXPONENT_OPTIONS,
+            exponent_options,
             editable,
             150.0,
         );
@@ -1120,8 +1136,15 @@ fn draw_h2_legacy_graph_preview(ui: &mut Ui, h2: &H2LegacyFunctionView) {
 }
 
 #[derive(Clone, PartialEq)]
+enum H2LegacyFunctionLayout {
+    Default,
+    DamageEffectVibration36,
+}
+
+#[derive(Clone, PartialEq)]
 pub(super) struct H2LegacyFunctionView {
     raw: Vec<u8>,
+    layout: H2LegacyFunctionLayout,
     function_type: u8,
     output_type: u8,
     exponent: u8,
@@ -1162,6 +1185,33 @@ impl H2LegacyFunctionView {
             frequency,
             phase,
             raw,
+            layout: H2LegacyFunctionLayout::Default,
+        })
+    }
+
+    pub(super) fn parse_damage_effect_vibration(raw: Vec<u8>) -> Option<Self> {
+        if raw.len() < 20 {
+            return None;
+        }
+        let function_type = raw[0];
+        let output_type = raw[1];
+        let exponent = raw[2];
+        let min = read_f32_le(&raw, 20).unwrap_or(0.0);
+        let max = read_f32_le(&raw, 24).unwrap_or(1.0);
+        eprintln!(
+            "vibration decoded: fn_type={} output={} exponent={} min={} max={}",
+            function_type, output_type, exponent, min, max
+        );
+        Some(Self {
+            function_type,
+            output_type,
+            exponent,
+            min,
+            max,
+            frequency: 0.0,
+            phase: 0.0,
+            raw,
+            layout: H2LegacyFunctionLayout::DamageEffectVibration36,
         })
     }
 
@@ -1172,6 +1222,15 @@ impl H2LegacyFunctionView {
         }
         raw[0] = self.function_type;
         raw[1] = self.output_type;
+        if self.layout == H2LegacyFunctionLayout::DamageEffectVibration36 {
+            raw[2] = self.exponent;
+            if raw.len() < 28 {
+                raw.resize(28, 0);
+            }
+            raw[20..24].copy_from_slice(&self.min.to_le_bytes());
+            raw[24..28].copy_from_slice(&self.max.to_le_bytes());
+            return raw;
+        }
         raw[4..8].copy_from_slice(&self.min.to_le_bytes());
         raw[8..12].copy_from_slice(&self.max.to_le_bytes());
         if raw.len() >= 52 && self.function_type == 3 {
@@ -1190,6 +1249,7 @@ impl H2LegacyFunctionView {
         let n = match self.function_type {
             0 => x,
             1 => 0.0,
+            2 => h2_transition_sample(self.exponent, x),
             3 => h2_periodic_sample(self.exponent, x * self.frequency + self.phase),
             4 => x,
             _ => x,
@@ -1220,6 +1280,21 @@ fn h2_periodic_sample(exponent: u8, x: f32) -> f32 {
     }
 }
 
+fn h2_transition_sample(exponent: u8, x: f32) -> f32 {
+    let t = x.clamp(0.0, 1.0);
+    match exponent {
+        0 => t,
+        1 => t * t,
+        2 => t * t * t,
+        3 => t.sqrt(),
+        4 => t.cbrt(),
+        5 => (1.0 - (t * std::f32::consts::PI).cos()) * 0.5,
+        6 => 0.0,
+        7 => 1.0,
+        _ => t,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1242,6 +1317,28 @@ mod tests {
         assert_eq!(view.frequency, 0.25);
         assert_eq!(view.phase, 0.0);
         assert_eq!(&view.to_bytes()[20..24], &0.25f32.to_le_bytes());
+    }
+
+    #[test]
+    fn damage_effect_vibration_function_reads_transition_values_at_observed_offsets() {
+        let mut raw = vec![0; 36];
+        raw[0] = 2;
+        raw[1] = 0;
+        raw[2] = 1;
+        raw[20..24].copy_from_slice(&0.8f32.to_le_bytes());
+        raw[24..28].copy_from_slice(&0.4f32.to_le_bytes());
+        raw[32..36].copy_from_slice(&1.0f32.to_le_bytes());
+
+        let view = H2LegacyFunctionView::parse_damage_effect_vibration(raw)
+            .expect("damage effect vibration function should parse");
+
+        assert_eq!(view.function_type, 2);
+        assert_eq!(view.output_type, 0);
+        assert_eq!(view.exponent, 1);
+        assert_eq!(view.min, 0.8);
+        assert_eq!(view.max, 0.4);
+        assert_eq!(&view.to_bytes()[20..24], &0.8f32.to_le_bytes());
+        assert_eq!(&view.to_bytes()[24..28], &0.4f32.to_le_bytes());
     }
 }
 
