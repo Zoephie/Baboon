@@ -371,6 +371,7 @@ pub(super) fn replace_halo2_function_byte_block(
     if TagFunction::parse(data).is_err()
         && !is_h2_legacy_constant_function_data(data)
         && !is_h2_legacy_editable_function_data(data)
+        && !is_damage_effect_vibration_function_data(data)
     {
         return Err("invalid mapping_function data".to_owned());
     }
@@ -401,6 +402,18 @@ pub(super) fn replace_halo2_function_byte_block(
 
 fn is_h2_legacy_editable_function_data(data: &[u8]) -> bool {
     data.len() >= 20 && data.len() != 32 && data.first().is_some_and(|kind| *kind <= 10)
+}
+
+fn is_damage_effect_vibration_function_data(data: &[u8]) -> bool {
+    data.len() == 36
+        && data.first().is_some_and(|kind| *kind <= 10)
+        && data.get(2).is_some_and(|exponent| *exponent <= 7)
+        && data.get(20..24).is_some_and(|bytes| {
+            f32::from_le_bytes(bytes.try_into().unwrap_or_default()).is_finite()
+        })
+        && data.get(24..28).is_some_and(|bytes| {
+            f32::from_le_bytes(bytes.try_into().unwrap_or_default()).is_finite()
+        })
 }
 
 fn replace_halo2_wrapped_function_byte_block(

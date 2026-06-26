@@ -1801,6 +1801,7 @@ impl Baboon {
                     let mut shader_ops = Vec::new();
                     let mut shader_param_ops = Vec::new();
                     let mut h2_shader_param_ops = Vec::new();
+                    let mut function_data_ops = Vec::new();
                     let mut model_variant_ops = Vec::new();
                     let mut bitmap_reimport = None;
                     let field_filter = compute_pending_field_filter(
@@ -1852,6 +1853,7 @@ impl Baboon {
                         shader_ops: &mut shader_ops,
                         shader_param_ops: &mut shader_param_ops,
                         h2_shader_param_ops: &mut h2_shader_param_ops,
+                        function_data_ops: &mut function_data_ops,
                         model_variant_ops: &mut model_variant_ops,
                         color_request: &mut color_request,
                         function_request: &mut function_request,
@@ -1911,6 +1913,11 @@ impl Baboon {
                     }
                     if let Some(status) =
                         apply_h2_shader_param_ops(&mut doc.tag, h2_shader_param_ops, &mut doc.dirty)
+                    {
+                        edit_status = Some(status);
+                    }
+                    if let Some(status) =
+                        apply_function_data_ops(&mut doc.tag, function_data_ops, &mut doc.dirty)
                     {
                         edit_status = Some(status);
                     }

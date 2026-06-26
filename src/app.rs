@@ -141,6 +141,8 @@ pub struct Baboon {
     /// Pending "import geometry via tool" request from an Import button.
     pending_tool_import: Option<ToolImportRequest>,
     /// Toolbar launcher icons (decoded from embedded .ico at startup).
+    blender_icon: Option<egui::TextureHandle>,
+    monitor_icon: Option<egui::TextureHandle>,
     sapien_icon: Option<egui::TextureHandle>,
     tag_test_icon: Option<egui::TextureHandle>,
     /// Clipboard for copy/paste of a block element between identical tags.
@@ -224,6 +226,16 @@ impl Baboon {
             block_confirm: None,
             pending_open: None,
             pending_tool_import: None,
+            blender_icon: load_ico_texture(
+                &cc.egui_ctx,
+                "blender_icon",
+                include_bytes!("../icons/blender.ico"),
+            ),
+            monitor_icon: load_ico_texture(
+                &cc.egui_ctx,
+                "monitor_icon",
+                include_bytes!("../icons/monitor.ico"),
+            ),
             sapien_icon: load_ico_texture(
                 &cc.egui_ctx,
                 "sapien_icon",
@@ -1937,6 +1949,51 @@ mod tests {
             .unwrap();
         assert_eq!(halo2_function_bytes_from_struct(mapping).unwrap(), edited);
         assert_h2_write_atomic_verifies(&tag, "h2_function_same_len");
+    }
+
+    #[test]
+    fn damage_effect_vibration_byte_block_same_length_edit_preserves_36_bytes() {
+        let mut tag = h2_classic_shader_tag();
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "parameters".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "parameters[0]/animation properties".to_owned(),
+                kind: BlockOpKind::Add,
+            },
+        )
+        .unwrap();
+        let block_path = "parameters[0]/animation properties[0]/function/data";
+        let mut original = vec![0; 36];
+        original[0] = 2;
+        original[1] = 0;
+        original[2] = 1;
+        original[20..24].copy_from_slice(&0.8f32.to_le_bytes());
+        original[24..28].copy_from_slice(&0.4f32.to_le_bytes());
+        original[32..36].copy_from_slice(&1.0f32.to_le_bytes());
+        seed_halo2_raw_function_byte_block_for_test(&mut tag, block_path, &original);
+        let mut edited = original.clone();
+        edited[2] = 2;
+        edited[20..24].copy_from_slice(&1.0f32.to_le_bytes());
+        edited[24..28].copy_from_slice(&0.7f32.to_le_bytes());
+
+        replace_halo2_function_byte_block(&mut tag, block_path, &edited).unwrap();
+
+        let mapping = tag
+            .root()
+            .descend("parameters[0]/animation properties[0]/function")
+            .unwrap();
+        let written = halo2_function_bytes_from_struct(mapping).unwrap();
+        assert_eq!(written.len(), 36);
+        assert_eq!(written, edited);
+        assert_eq!(&written[32..36], &original[32..36]);
     }
 
     #[test]

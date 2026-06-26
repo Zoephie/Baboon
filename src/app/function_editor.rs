@@ -1198,10 +1198,6 @@ impl H2LegacyFunctionView {
         let exponent = raw[2];
         let min = read_f32_le(&raw, 20).unwrap_or(0.0);
         let max = read_f32_le(&raw, 24).unwrap_or(1.0);
-        eprintln!(
-            "vibration decoded: fn_type={} output={} exponent={} min={} max={}",
-            function_type, output_type, exponent, min, max
-        );
         Some(Self {
             function_type,
             output_type,
@@ -1339,6 +1335,49 @@ mod tests {
         assert_eq!(view.max, 0.4);
         assert_eq!(&view.to_bytes()[20..24], &0.8f32.to_le_bytes());
         assert_eq!(&view.to_bytes()[24..28], &0.4f32.to_le_bytes());
+    }
+
+    #[test]
+    fn damage_effect_vibration_edit_emits_byte_block_op() {
+        let mut raw = vec![0; 36];
+        raw[0] = 2;
+        raw[1] = 0;
+        raw[2] = 1;
+        raw[20..24].copy_from_slice(&0.8f32.to_le_bytes());
+        raw[24..28].copy_from_slice(&0.4f32.to_le_bytes());
+        raw[32..36].copy_from_slice(&1.0f32.to_le_bytes());
+        let h2_legacy = H2LegacyFunctionView::parse_damage_effect_vibration(raw.clone())
+            .expect("damage effect vibration function should parse");
+        let function = TagFunction::parse(&decode_hex(&constant_function_hex(0.0)).unwrap())
+            .expect("placeholder function should parse");
+        let mut view = FunctionView::from_function(function).with_h2_legacy(h2_legacy);
+        let previous = FunctionSnapshot::from_view(&view);
+        let h2 = view.h2_legacy.as_mut().unwrap();
+        h2.exponent = 2;
+        h2.min = 1.0;
+        h2.max = 0.7;
+        let paths = FunctionEditPaths {
+            data: FunctionDataStorage::Halo2ByteBlock(
+                "player responses[1]/vibration/low frequency vibration/dirty whore/data".to_owned(),
+            ),
+            parameter_type: String::new(),
+            input_name: String::new(),
+            range_name: String::new(),
+            time_period: String::new(),
+            block_path: String::new(),
+            block_index: 0,
+        };
+
+        let batch = push_function_edit(&paths, &previous, &view);
+
+        assert!(batch.edits.is_empty());
+        assert_eq!(batch.data_ops.len(), 1);
+        let data = &batch.data_ops[0].data;
+        assert_eq!(data.len(), 36);
+        assert_eq!(data[2], 2);
+        assert_eq!(&data[20..24], &1.0f32.to_le_bytes());
+        assert_eq!(&data[24..28], &0.7f32.to_le_bytes());
+        assert_eq!(&data[32..36], &raw[32..36]);
     }
 }
 

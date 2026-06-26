@@ -235,12 +235,6 @@ pub(super) fn draw_field(
     edit: &mut FieldEditContext<'_>,
 ) {
     let field_path = append_field_path(path_prefix, field.name());
-    log_vibration_function_field(
-        field.name(),
-        field.type_name(),
-        field.field_type(),
-        path_prefix,
-    );
     let meta = field_display_meta(field.name());
     if meta.advanced && !expert_mode {
         return;
@@ -288,10 +282,6 @@ pub(super) fn draw_field(
         if let Some((function_view, data_path)) =
             inline_mapping_function_from_struct(nested, &field_path)
         {
-            eprintln!(
-                "inline function render triggered for: {} ({field_path})",
-                field.name()
-            );
             draw_foundation_inline_function_row(
                 ui,
                 inline_function_label(field.name(), path_prefix),
@@ -524,9 +514,6 @@ fn inline_mapping_function_from_struct(
     struct_path: &str,
 ) -> Option<(FunctionView, String)> {
     if let Some(bytes) = halo2_function_bytes_from_struct(tag_struct) {
-        if should_log_vibration_function_path(struct_path) {
-            log_vibration_blob(struct_path, &bytes);
-        }
         if !bytes.is_empty() {
             let data_path = append_field_path(struct_path, "data");
             if let Some(view) = legacy_mapping_function_view_for_path(&bytes, struct_path) {
@@ -539,12 +526,6 @@ fn inline_mapping_function_from_struct(
     }
 
     for field in tag_struct.fields_all() {
-        log_vibration_function_field(
-            field.name(),
-            field.type_name(),
-            field.field_type(),
-            struct_path,
-        );
         if field.field_type() != TagFieldType::Data {
             continue;
         }
@@ -563,36 +544,7 @@ fn inline_mapping_function_from_struct(
     None
 }
 
-fn log_vibration_function_field(
-    name: &str,
-    type_name: &str,
-    field_type: TagFieldType,
-    path_prefix: &str,
-) {
-    if should_log_vibration_function_field(name, path_prefix) {
-        eprintln!(
-            "damage_effect vibration field: path={} name={} type_name={} field_type={:?}",
-            append_field_path(path_prefix, name),
-            name,
-            type_name,
-            field_type
-        );
-    }
-}
-
-fn should_log_vibration_function_field(name: &str, path_prefix: &str) -> bool {
-    let name = internal_marker_key(name);
-    let path = internal_marker_key(path_prefix);
-    name.contains("low frequency rumble")
-        || name.contains("high frequency rumble")
-        || name.contains("low frequency vibration")
-        || name.contains("high frequency vibration")
-        || name == "dirty whore"
-        || name == "whore function"
-        || (name == "data" && should_log_vibration_function_path(&path))
-}
-
-fn should_log_vibration_function_path(path: &str) -> bool {
+fn is_vibration_function_path(path: &str) -> bool {
     let path = internal_marker_key(path);
     (path.contains("low frequency rumble")
         || path.contains("high frequency rumble")
@@ -601,42 +553,8 @@ fn should_log_vibration_function_path(path: &str) -> bool {
         && (path.contains("dirty whore") || path.contains("function"))
 }
 
-fn log_vibration_blob(field_name: &str, bytes: &[u8]) {
-    eprintln!(
-        "vibration blob {}: len={} {:02x?}",
-        field_name,
-        bytes.len(),
-        bytes
-    );
-    let float_candidates = (0..=bytes.len().saturating_sub(4))
-        .filter_map(|offset| {
-            let value = f32::from_le_bytes(bytes.get(offset..offset + 4)?.try_into().ok()?);
-            value
-                .is_finite()
-                .then_some((offset, value))
-                .filter(|(_, value)| value.abs() <= 10.0)
-        })
-        .map(|(offset, value)| format!("{offset}:{value:.6}"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    eprintln!(
-        "vibration blob {} f32 candidates: [{}]",
-        field_name, float_candidates
-    );
-    eprintln!(
-        "vibration blob {} enum bytes: [{}]",
-        field_name,
-        bytes
-            .iter()
-            .enumerate()
-            .map(|(index, byte)| format!("{index}:{byte}"))
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
-}
-
 fn legacy_mapping_function_view_for_path(bytes: &[u8], path: &str) -> Option<FunctionView> {
-    if should_log_vibration_function_path(path) {
+    if is_vibration_function_path(path) {
         if let Some(view) = damage_effect_vibration_function_view(bytes) {
             return Some(view);
         }
@@ -2400,6 +2318,7 @@ pub(super) fn draw_foundation_inline_function_row(
                             &view,
                         );
                         edit.pending.extend(batch.edits);
+                        edit.function_data_ops.extend(batch.data_ops);
                     }
                 });
             });
@@ -2408,7 +2327,11 @@ pub(super) fn draw_foundation_inline_function_row(
 
 pub(super) fn foundation_function_edit_paths(data_path: &str) -> FunctionEditPaths {
     FunctionEditPaths {
-        data: FunctionDataStorage::DataField(data_path.to_owned()),
+        data: if is_vibration_function_data_path(data_path) {
+            FunctionDataStorage::Halo2ByteBlock(data_path.to_owned())
+        } else {
+            FunctionDataStorage::DataField(data_path.to_owned())
+        },
         parameter_type: String::new(),
         input_name: String::new(),
         range_name: String::new(),
@@ -2416,6 +2339,10 @@ pub(super) fn foundation_function_edit_paths(data_path: &str) -> FunctionEditPat
         block_path: String::new(),
         block_index: 0,
     }
+}
+
+fn is_vibration_function_data_path(path: &str) -> bool {
+    is_vibration_function_path(path)
 }
 
 /// First-pass editable function types — others stay read-only (graph +
@@ -2710,6 +2637,7 @@ mod tests {
         let mut shader_ops = Vec::new();
         let mut shader_param_ops = Vec::new();
         let mut h2_shader_param_ops = Vec::new();
+        let mut function_data_ops = Vec::new();
         let mut model_variant_ops = Vec::new();
         let mut color_request = None;
         let mut function_request = None;
@@ -2734,6 +2662,7 @@ mod tests {
             shader_ops: &mut shader_ops,
             shader_param_ops: &mut shader_param_ops,
             h2_shader_param_ops: &mut h2_shader_param_ops,
+            function_data_ops: &mut function_data_ops,
             model_variant_ops: &mut model_variant_ops,
             color_request: &mut color_request,
             function_request: &mut function_request,

@@ -442,6 +442,8 @@ pub(super) struct FieldEditContext<'a> {
     pub(super) shader_param_ops: &'a mut Vec<ShaderParamOp>,
     /// H2EK-specific deferred ops (create classic shader parameters/animations).
     pub(super) h2_shader_param_ops: &'a mut Vec<H2ShaderParamOp>,
+    /// Function byte-block edits emitted by inline function editors.
+    pub(super) function_data_ops: &'a mut Vec<FunctionDataOp>,
     /// Model-preview variant edits queued from the render model tab.
     pub(super) model_variant_ops: &'a mut Vec<ModelVariantOp>,
     /// Set when the user clicks a color swatch on a value row; the caller hoists

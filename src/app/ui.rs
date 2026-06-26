@@ -132,8 +132,7 @@ impl Baboon {
 
     fn draw_tool_launcher_buttons(&mut self, ui: &mut Ui) {
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui
-                .add(egui::Button::new("B").min_size(Vec2::splat(22.0)))
+            if launcher_button(ui, self.blender_icon.as_ref(), "B", true)
                 .on_hover_text("Launch Blender")
                 .clicked()
             {
@@ -171,13 +170,14 @@ impl Baboon {
             .and_then(|source| source.game.as_deref());
         let commands = monitor_commands_for_game(game);
         if commands.is_empty() {
-            ui.add_enabled(false, egui::Button::new("M").min_size(Vec2::splat(22.0)))
+            launcher_button(ui, self.monitor_icon.as_ref(), "M", false)
                 .on_hover_text("No monitor commands available for this game");
             return;
         }
 
         let ctx = ui.ctx().clone();
-        ui.menu_button("M", |ui| {
+        let monitor_texture = self.monitor_icon.as_ref().map(|texture| texture.id());
+        let add_commands = |ui: &mut Ui| {
             ui.set_min_width(210.0);
             for command in commands {
                 if ui.button(*command).clicked() {
@@ -185,9 +185,19 @@ impl Baboon {
                     ui.close_menu();
                 }
             }
-        })
-        .response
-        .on_hover_text("Run monitor command");
+        };
+        if let Some(texture_id) = monitor_texture {
+            ui.menu_image_button(
+                egui::load::SizedTexture::new(texture_id, Vec2::splat(20.0)),
+                add_commands,
+            )
+            .response
+            .on_hover_text("Run monitor command");
+        } else {
+            ui.menu_button("M", add_commands)
+                .response
+                .on_hover_text("Run monitor command");
+        }
     }
 
     fn draw_settings_window(&mut self, ctx: &egui::Context) {
@@ -1377,6 +1387,7 @@ impl eframe::App for Baboon {
                         let mut shader_ops = Vec::new();
                         let mut shader_param_ops = Vec::new();
                         let mut h2_shader_param_ops = Vec::new();
+                        let mut function_data_ops = Vec::new();
                         let mut model_variant_ops = Vec::new();
                         let mut color_request = None;
                         let mut function_request = None;
@@ -1427,6 +1438,7 @@ impl eframe::App for Baboon {
                             shader_ops: &mut shader_ops,
                             shader_param_ops: &mut shader_param_ops,
                             h2_shader_param_ops: &mut h2_shader_param_ops,
+                            function_data_ops: &mut function_data_ops,
                             model_variant_ops: &mut model_variant_ops,
                             color_request: &mut color_request,
                             function_request: &mut function_request,
@@ -1499,6 +1511,11 @@ impl eframe::App for Baboon {
                             h2_shader_param_ops,
                             &mut doc.dirty,
                         ) {
+                            self.status = status;
+                        }
+                        if let Some(status) =
+                            apply_function_data_ops(&mut doc.tag, function_data_ops, &mut doc.dirty)
+                        {
                             self.status = status;
                         }
                         if let Some(status) =
