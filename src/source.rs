@@ -150,6 +150,22 @@ pub(crate) struct FolderRootInfo {
     pub(crate) game: Option<&'static str>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct EkFolderAlias {
+    pub(crate) folder_name: String,
+    pub(crate) game: String,
+}
+
+pub(crate) const SUPPORTED_EK_GAMES: &[(&str, &str)] = &[
+    ("Halo CE", "haloce_mcc"),
+    ("Halo 2", "halo2_mcc"),
+    ("Halo 2 Anniversary Multiplayer", "halo2amp_mcc"),
+    ("Halo 3", "halo3_mcc"),
+    ("Halo 3 ODST", "halo3odst_mcc"),
+    ("Halo Reach", "haloreach_mcc"),
+    ("Halo 4", "halo4_mcc"),
+];
+
 #[derive(Default)]
 pub struct TagTree {
     pub children: Vec<TagTreeNode>,
@@ -209,8 +225,9 @@ pub fn load_folder(
     selected_root: PathBuf,
     fallback_names: &TagNameIndex,
     definitions_root: &Path,
+    aliases: &[EkFolderAlias],
 ) -> Result<LoadedSourceData> {
-    let info = resolve_folder_root(&selected_root)?;
+    let info = resolve_folder_root(&selected_root, aliases)?;
     let game = info.game.map(str::to_owned);
     let names = game
         .as_deref()
@@ -804,8 +821,11 @@ pub fn field_row_summaries(tag: &TagFile, names: &TagNameIndex, limit: usize) ->
     rows
 }
 
-pub(crate) fn resolve_folder_root(selected_root: &Path) -> Result<FolderRootInfo> {
-    let ek_root = detect_ek_root(selected_root);
+pub(crate) fn resolve_folder_root(
+    selected_root: &Path,
+    aliases: &[EkFolderAlias],
+) -> Result<FolderRootInfo> {
+    let ek_root = detect_ek_root_with_aliases(selected_root, aliases);
     let game = ek_root.as_ref().map(|(_, game)| *game);
     let scan_root = if is_tags_folder(selected_root) {
         selected_root.to_path_buf()
@@ -864,16 +884,31 @@ fn is_tags_folder(path: &Path) -> bool {
 
 #[cfg(test)]
 fn detect_ek_game(path: &Path) -> Option<&'static str> {
-    detect_ek_root(path).map(|(_, game)| game)
+    detect_ek_root_with_aliases(path, &[]).map(|(_, game)| game)
 }
 
-fn detect_ek_root(path: &Path) -> Option<(PathBuf, &'static str)> {
-    path.ancestors()
+fn detect_ek_root_with_aliases(
+    path: &Path,
+    aliases: &[EkFolderAlias],
+) -> Option<(PathBuf, &'static str)> {
+    let built_in = path
+        .ancestors()
         .filter_map(|ancestor| {
             ancestor
                 .file_name()
                 .and_then(|name| name.to_str())
                 .and_then(|name| ek_folder_game(name).map(|game| (ancestor.to_path_buf(), game)))
+        })
+        .next();
+    if built_in.is_some() {
+        return built_in;
+    }
+
+    path.ancestors()
+        .filter_map(|ancestor| {
+            let name = ancestor.file_name().and_then(|name| name.to_str())?;
+            let game = alias_folder_game(name, aliases)?;
+            Some((ancestor.to_path_buf(), game))
         })
         .next()
 }
@@ -889,6 +924,22 @@ fn ek_folder_game(name: &str) -> Option<&'static str> {
         "H2AMPEK" | "H2AEK" => Some("halo2amp_mcc"),
         _ => None,
     }
+}
+
+fn alias_folder_game(name: &str, aliases: &[EkFolderAlias]) -> Option<&'static str> {
+    aliases.iter().rev().find_map(|alias| {
+        let folder_name = alias.folder_name.trim();
+        if folder_name.is_empty() || !folder_name.eq_ignore_ascii_case(name) {
+            return None;
+        }
+        supported_ek_game_id(&alias.game)
+    })
+}
+
+pub(crate) fn supported_ek_game_id(game: &str) -> Option<&'static str> {
+    SUPPORTED_EK_GAMES
+        .iter()
+        .find_map(|(_, id)| id.eq_ignore_ascii_case(game).then_some(*id))
 }
 
 fn folder_source_label(
@@ -1233,6 +1284,7 @@ mod tests {
             ek_root.clone(),
             &TagNameIndex::default(),
             &root.join("definitions"),
+            &[],
         )
         .unwrap();
         fs::remove_dir_all(&root).unwrap();
@@ -1306,7 +1358,7 @@ mod tests {
         let ek_root = root.join("HREK");
         fs::create_dir_all(ek_root.join("data/tags")).unwrap();
 
-        let error = resolve_folder_root(&ek_root).unwrap_err().to_string();
+        let error = resolve_folder_root(&ek_root, &[]).unwrap_err().to_string();
         fs::remove_dir_all(&root).unwrap();
 
         assert!(error.contains("expected tags folder was missing"));
@@ -1340,6 +1392,55 @@ mod tests {
             detect_ek_game(&PathBuf::from("H3EK").join("tags")),
             Some("halo3_mcc")
         );
+    }
+
+    #[test]
+    fn custom_ek_alias_detects_root_folder() {
+        let root = temp_dir("custom_ek_alias_root");
+        let ek_root = root.join("h2rek");
+        fs::create_dir_all(ek_root.join("tags/objects")).unwrap();
+        let aliases = vec![EkFolderAlias {
+            folder_name: "h2rek".to_owned(),
+            game: "halo2_mcc".to_owned(),
+        }];
+
+        let info = resolve_folder_root(&ek_root, &aliases).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(info.game, Some("halo2_mcc"));
+        assert!(info.scan_root.ends_with("tags"));
+        assert_eq!(info.label, "h2rek/tags (halo2_mcc)");
+    }
+
+    #[test]
+    fn custom_ek_alias_detects_tags_folder() {
+        let root = temp_dir("custom_ek_alias_tags");
+        let tags_root = root.join("h2rek").join("tags");
+        fs::create_dir_all(tags_root.join("objects")).unwrap();
+        let aliases = vec![EkFolderAlias {
+            folder_name: "h2rek".to_owned(),
+            game: "halo2_mcc".to_owned(),
+        }];
+
+        let info = resolve_folder_root(&tags_root, &aliases).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(info.game, Some("halo2_mcc"));
+        assert!(info.scan_root.ends_with("tags"));
+        assert_eq!(info.label, "tags (halo2_mcc)");
+    }
+
+    #[test]
+    fn built_in_ek_name_takes_precedence_over_alias() {
+        let path = PathBuf::from("H2EK").join("tags");
+        let aliases = vec![EkFolderAlias {
+            folder_name: "H2EK".to_owned(),
+            game: "halo3_mcc".to_owned(),
+        }];
+
+        let detected = detect_ek_root_with_aliases(&path, &aliases).map(|(_, game)| game);
+
+        assert_eq!(detected, Some("halo2_mcc"));
     }
 
     #[test]

@@ -28,9 +28,10 @@ use serde_json::{Value, json};
 
 use crate::format::{TagNameIndex, format_value, group_label};
 use crate::source::{
-    DependencyRef, LoadedSourceData, ReverseDependencyIndex, TagEntry, TagEntryLocation, TagSource,
-    TagTree, TagTreeNode, load_folder, load_folder_node_entries, load_monolithic_blob_index,
-    load_single_file, read_entry, resolve_folder_root, scan_folder_subtree_entries,
+    DependencyRef, EkFolderAlias, LoadedSourceData, ReverseDependencyIndex, SUPPORTED_EK_GAMES,
+    TagEntry, TagEntryLocation, TagSource, TagTree, TagTreeNode, load_folder,
+    load_folder_node_entries, load_monolithic_blob_index, load_single_file, read_entry,
+    resolve_folder_root, scan_folder_subtree_entries, supported_ek_game_id,
 };
 
 pub(super) const BABOON_GITHUB_URL: &str = "https://github.com/Zoephie/Baboon";
@@ -109,6 +110,9 @@ pub struct Baboon {
     ui_scale: f32,
     pending_ui_scale: f32,
     model_preview_size: f32,
+    ek_folder_aliases: Vec<EkFolderAlias>,
+    new_ek_alias_name: String,
+    new_ek_alias_game: String,
     saved_prefs: GuiPrefs,
     settings_open: bool,
     new_tag_open: bool,
@@ -190,6 +194,9 @@ impl Baboon {
             ui_scale: prefs.ui_scale,
             pending_ui_scale: prefs.ui_scale,
             model_preview_size: prefs.model_preview_size,
+            ek_folder_aliases: prefs.ek_folder_aliases.clone(),
+            new_ek_alias_name: String::new(),
+            new_ek_alias_game: "halo2_mcc".to_owned(),
             saved_prefs: prefs.clone(),
             settings_open: false,
             new_tag_open: false,

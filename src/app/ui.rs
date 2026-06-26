@@ -67,6 +67,13 @@ const MONITOR_COMMANDS_BY_GAME: &[(&str, &[&str])] = &[
     ("haloce_mcc", &[]),
 ];
 
+fn ek_game_label(game: &str) -> &str {
+    SUPPORTED_EK_GAMES
+        .iter()
+        .find_map(|(label, id)| (*id == game).then_some(*label))
+        .unwrap_or(game)
+}
+
 fn monitor_commands_for_game(game: Option<&str>) -> &'static [&'static str] {
     let Some(game) = game else {
         return &[];
@@ -219,6 +226,129 @@ impl Baboon {
                     &mut self.double_click_to_open_tags,
                     "Double-click to open tags",
                 );
+                ui.add_space(10.0);
+
+                ui.label(RichText::new("Editing Kit Folder Aliases").color(text_dark()).strong());
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(
+                        "Map custom kit folder names to a game profile, for example h2rek -> halo2_mcc.",
+                    )
+                    .color(subtle_dark()),
+                );
+                ui.add_space(4.0);
+                let mut remove_alias = None;
+                let mut aliases_changed = false;
+                ui.label(RichText::new("Configured aliases").color(subtle_dark()));
+                if self.ek_folder_aliases.is_empty() {
+                    ui.label(RichText::new("No custom aliases added").color(subtle_dark()));
+                }
+                for index in 0..self.ek_folder_aliases.len() {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Folder").color(subtle_dark()));
+                        if ui
+                            .add(
+                            egui::TextEdit::singleline(
+                                &mut self.ek_folder_aliases[index].folder_name,
+                            )
+                            .desired_width(160.0),
+                            )
+                            .changed()
+                        {
+                            aliases_changed = true;
+                        }
+                        let selected_label = ek_game_label(&self.ek_folder_aliases[index].game);
+                        egui::ComboBox::from_id_salt(("ek_folder_alias_game", index))
+                            .selected_text(selected_label)
+                            .width(210.0)
+                            .show_ui(ui, |ui| {
+                                for (label, game) in SUPPORTED_EK_GAMES {
+                                    if ui
+                                        .selectable_value(
+                                        &mut self.ek_folder_aliases[index].game,
+                                        (*game).to_owned(),
+                                        *label,
+                                        )
+                                        .changed()
+                                    {
+                                        aliases_changed = true;
+                                    }
+                                }
+                            });
+                        ui.label(
+                            RichText::new(format!(
+                                "-> {}",
+                                self.ek_folder_aliases[index].game
+                            ))
+                            .color(subtle_dark()),
+                        );
+                        if ui.small_button("Remove").clicked() {
+                            remove_alias = Some(index);
+                        }
+                    });
+                }
+                if let Some(index) = remove_alias {
+                    self.ek_folder_aliases.remove(index);
+                    aliases_changed = true;
+                    self.status = "Editing kit folder alias removed".to_owned();
+                }
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("New").color(subtle_dark()));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.new_ek_alias_name)
+                            .hint_text(
+                                RichText::new("example: h2rek")
+                                    .italics()
+                                    .color(placeholder_text()),
+                            )
+                            .desired_width(160.0),
+                    );
+                    egui::ComboBox::from_id_salt("new_ek_folder_alias_game")
+                        .selected_text(ek_game_label(&self.new_ek_alias_game))
+                        .width(210.0)
+                        .show_ui(ui, |ui| {
+                            for (label, game) in SUPPORTED_EK_GAMES {
+                                ui.selectable_value(
+                                    &mut self.new_ek_alias_game,
+                                    (*game).to_owned(),
+                                    *label,
+                                );
+                            }
+                        });
+                    if ui.button("Add").clicked() {
+                        let folder_name = self.new_ek_alias_name.trim().to_owned();
+                        if folder_name.is_empty() {
+                            self.status = "Enter a folder name before adding an alias".to_owned();
+                        } else if supported_ek_game_id(&self.new_ek_alias_game).is_none() {
+                            self.status = "Choose a supported game before adding an alias".to_owned();
+                        } else if let Some(existing) =
+                            self.ek_folder_aliases.iter_mut().find(|alias| {
+                                alias
+                                    .folder_name
+                                    .trim()
+                                    .eq_ignore_ascii_case(&folder_name)
+                            })
+                        {
+                            existing.folder_name = folder_name.clone();
+                            existing.game = self.new_ek_alias_game.clone();
+                            self.new_ek_alias_name.clear();
+                            aliases_changed = true;
+                            self.status = format!("Updated editing kit alias {folder_name}");
+                        } else {
+                            self.ek_folder_aliases.push(EkFolderAlias {
+                                folder_name: folder_name.clone(),
+                                game: self.new_ek_alias_game.clone(),
+                            });
+                            self.new_ek_alias_name.clear();
+                            aliases_changed = true;
+                            self.status = format!("Added editing kit alias {folder_name}");
+                        }
+                    }
+                });
+                if aliases_changed {
+                    self.reapply_current_folder_profile();
+                }
                 ui.add_space(10.0);
 
                 ui.label(RichText::new("Appearance").color(text_dark()).strong());

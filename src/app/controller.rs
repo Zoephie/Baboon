@@ -240,7 +240,8 @@ impl Baboon {
         let tx = self.tx.clone();
         let names = self.default_names.clone();
         let definitions_root = locate_definitions_root();
-        let folder_info = match resolve_folder_root(&path) {
+        let ek_folder_aliases = self.ek_folder_aliases.clone();
+        let folder_info = match resolve_folder_root(&path, &ek_folder_aliases) {
             Ok(info) => info,
             Err(error) => {
                 self.status = error.to_string();
@@ -252,7 +253,8 @@ impl Baboon {
             None => format!("Indexing {}", folder_info.scan_root.display()),
         };
         thread::spawn(move || {
-            let result = load_folder(path, &names, &definitions_root).map_err(|e| e.to_string());
+            let result = load_folder(path, &names, &definitions_root, &ek_folder_aliases)
+                .map_err(|e| e.to_string());
             let _ = tx.send(WorkerMessage::SourceLoaded(result));
             ctx.request_repaint();
         });
@@ -1445,7 +1447,44 @@ impl Baboon {
             ui_scale: self.ui_scale,
             model_preview_size: self.model_preview_size,
             blender_path: self.blender_path.clone(),
+            ek_folder_aliases: self.ek_folder_aliases.clone(),
         }
+    }
+
+    pub(super) fn reapply_current_folder_profile(&mut self) {
+        let Some(source) = self.source.as_mut() else {
+            return;
+        };
+        let TagSource::LooseFolder {
+            root,
+            game,
+            definitions_root,
+        } = &mut source.source
+        else {
+            return;
+        };
+        let Ok(info) = resolve_folder_root(root, &self.ek_folder_aliases) else {
+            return;
+        };
+        let new_game = info.game.map(str::to_owned);
+        if source.game == new_game && *game == new_game {
+            return;
+        }
+
+        source.label = info.label;
+        source.game = new_game.clone();
+        *game = new_game.clone();
+        self.names = new_game
+            .as_deref()
+            .and_then(|game| TagNameIndex::load_game(definitions_root, game).ok())
+            .unwrap_or_else(|| self.default_names.clone());
+        source.names = self.names.clone();
+        source.group_tree = crate::source::build_group_tree(&source.all_entries);
+        self.source_generation = self.source_generation.wrapping_add(1);
+        self.status = match new_game {
+            Some(game) => format!("Current folder now uses {game} definitions"),
+            None => "Current folder no longer has a detected game profile".to_owned(),
+        };
     }
 
     pub(super) fn editing_kit_root(&self) -> Option<PathBuf> {

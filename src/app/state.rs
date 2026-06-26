@@ -168,6 +168,7 @@ pub(super) struct GuiPrefs {
     pub(super) ui_scale: f32,
     pub(super) model_preview_size: f32,
     pub(super) blender_path: Option<PathBuf>,
+    pub(super) ek_folder_aliases: Vec<EkFolderAlias>,
 }
 
 pub(super) struct TagDocument {
@@ -526,6 +527,7 @@ impl Default for GuiPrefs {
             ui_scale: DEFAULT_UI_SCALE,
             model_preview_size: DEFAULT_MODEL_PREVIEW_SIZE,
             blender_path: None,
+            ek_folder_aliases: Vec::new(),
         }
     }
 }

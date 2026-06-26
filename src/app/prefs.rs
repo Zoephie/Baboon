@@ -79,7 +79,31 @@ pub(super) fn load_gui_prefs() -> GuiPrefs {
             .and_then(Value::as_str)
             .filter(|path| !path.trim().is_empty())
             .map(PathBuf::from),
+        ek_folder_aliases: load_ek_folder_aliases(&value),
     }
+}
+
+fn load_ek_folder_aliases(value: &Value) -> Vec<EkFolderAlias> {
+    value
+        .get("ek_folder_aliases")
+        .and_then(Value::as_array)
+        .map(|aliases| {
+            aliases
+                .iter()
+                .filter_map(|alias| {
+                    let folder_name = alias.get("folder_name")?.as_str()?.trim();
+                    let game = alias.get("game")?.as_str()?.trim();
+                    if folder_name.is_empty() {
+                        return None;
+                    }
+                    Some(EkFolderAlias {
+                        folder_name: folder_name.to_owned(),
+                        game: supported_ek_game_id(game)?.to_owned(),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 pub(super) fn save_gui_prefs(
@@ -106,6 +130,12 @@ pub(super) fn save_gui_prefs(
         "ui_scale": prefs.ui_scale,
         "model_preview_size": prefs.model_preview_size,
         "blender_path": prefs.blender_path.as_ref().map(|path| path.display().to_string()),
+        "ek_folder_aliases": prefs.ek_folder_aliases.iter().map(|alias| {
+            json!({
+                "folder_name": alias.folder_name,
+                "game": alias.game,
+            })
+        }).collect::<Vec<_>>(),
         "terminal_open_games": games,
     });
     let text = serde_json::to_string_pretty(&value)
