@@ -5,6 +5,7 @@
 mod app;
 mod format;
 mod source;
+mod tool_commands;
 
 use anyhow::Result;
 

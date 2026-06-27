@@ -1448,6 +1448,10 @@ impl Baboon {
             model_preview_size: self.model_preview_size,
             blender_path: self.blender_path.clone(),
             ek_folder_aliases: self.ek_folder_aliases.clone(),
+            tool_commands_window_pos: self.tool_commands_window_pos,
+            tool_commands_window_size: Some(self.tool_commands_window_size),
+            tool_commands_left_width: self.tool_commands_left_width,
+            tool_commands_collapsed_categories: self.tool_commands_collapsed_categories.clone(),
         }
     }
 

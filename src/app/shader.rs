@@ -4980,7 +4980,8 @@ pub(super) fn draw_shader_category_row(
     let value_width = (available - label_width - 24.0).max(240.0);
     let height = 25.0;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(available, height), Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, material_data_row());
+    let row_fill = material_data_row();
+    ui.painter().rect_filled(rect, 0.0, row_fill);
     ui.painter().line_segment(
         [rect.left_bottom(), rect.right_bottom()],
         Stroke::new(1.0, material_grid_light()),
@@ -4994,7 +4995,7 @@ pub(super) fn draw_shader_category_row(
         Align2::RIGHT_CENTER,
         truncate_for_cell(&category.name, label_width - 12.0),
         FontId::proportional(12.5),
-        material_text(),
+        material_text_for_bg(row_fill),
     );
 
     let combo_rect = egui::Rect::from_min_size(
@@ -5330,8 +5331,8 @@ pub(super) fn draw_shader_grid_section_header(ui: &mut Ui, title: &str) {
     let available = ui.available_width().max(640.0);
     let height = 22.0;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(available, height), Sense::hover());
-    ui.painter()
-        .rect_filled(rect, 0.0, material_section_header());
+    let header_fill = material_section_header();
+    ui.painter().rect_filled(rect, 0.0, header_fill);
     ui.painter().line_segment(
         [rect.left_bottom(), rect.right_bottom()],
         Stroke::new(1.0, material_grid_light()),
@@ -5341,7 +5342,7 @@ pub(super) fn draw_shader_grid_section_header(ui: &mut Ui, title: &str) {
         Align2::LEFT_CENTER,
         title,
         FontId::proportional(13.0),
-        material_text(),
+        material_text_for_bg(header_fill),
     );
 }
 
@@ -5357,7 +5358,9 @@ pub(super) fn draw_shader_flags_row(
     let line_height = 17.0;
     let height = (8.0 + line_height * row.options.len() as f32 + 5.0).max(25.0);
     let (rect, _) = ui.allocate_exact_size(Vec2::new(available, height), Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, material_data_row());
+    let row_fill = material_data_row();
+    let row_text = material_text_for_bg(row_fill);
+    ui.painter().rect_filled(rect, 0.0, row_fill);
     ui.painter().line_segment(
         [rect.left_bottom(), rect.right_bottom()],
         Stroke::new(1.0, material_grid_light()),
@@ -5372,7 +5375,7 @@ pub(super) fn draw_shader_flags_row(
         Align2::RIGHT_CENTER,
         truncate_for_cell(&row.label, label_width - 12.0),
         FontId::proportional(12.5),
-        material_text(),
+        row_text,
     );
 
     let default_rect = egui::Rect::from_min_size(
@@ -5456,7 +5459,7 @@ pub(super) fn draw_shader_flags_row(
             Align2::LEFT_CENTER,
             option.label,
             FontId::proportional(12.0),
-            material_text(),
+            row_text,
         );
 
         if response.clicked() {
@@ -5492,6 +5495,7 @@ pub(super) fn draw_shader_grid_row(
     let right_controls_width = shader_right_controls_width(row, has_h2_range);
     let height = shader_grid_row_height(row);
     let (rect, response) = ui.allocate_exact_size(Vec2::new(available, height), Sense::click());
+    let row_text = material_text_for_bg(row.fill);
     ui.painter().rect_filled(rect, 0.0, row.fill);
     ui.painter().line_segment(
         [rect.left_bottom(), rect.right_bottom()],
@@ -5507,7 +5511,7 @@ pub(super) fn draw_shader_grid_row(
         Align2::RIGHT_CENTER,
         truncate_for_cell(&row.label, label_width - 12.0),
         FontId::proportional(12.5),
-        material_text(),
+        row_text,
     );
 
     let default_rect = egui::Rect::from_min_size(
@@ -5965,7 +5969,7 @@ fn draw_h2_function_range_control(
         Align2::LEFT_CENTER,
         "range:",
         FontId::proportional(12.0),
-        material_text(),
+        material_text_for_bg(row.fill),
     );
     if response.changed() {
         h2_push_range_data_edit(
@@ -7201,8 +7205,14 @@ pub(super) fn draw_shader_grid_cell(
     color_popup: &mut Option<MaterialColorPopup>,
 ) {
     let (fill, text_color) = match cell.map(|cell| cell.value_kind) {
-        Some("default") | None => (material_default_box(), material_muted_text()),
-        _ => (material_input(), material_text()),
+        Some("default") | None => {
+            let fill = material_default_box();
+            (fill, material_text_for_bg(fill))
+        }
+        _ => {
+            let fill = material_input();
+            (fill, material_text_for_bg(fill))
+        }
     };
     ui.painter().rect_filled(rect, 0.0, fill);
     ui.painter()

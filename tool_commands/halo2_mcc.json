@@ -1,0 +1,1915 @@
+{
+  "commands": [
+    {
+      "name": "bitmaps",
+      "category": "Bitmaps",
+      "description": "TIFF (.tif/.tiff) images can be compiled into a bitmap using the bitmaps verb:",
+      "example": "tool bitmaps \"scenarios\\bitmaps\\solo\\spacestation\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to a folder containing a set of images for processing.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "build-noise-map",
+      "category": "Bitmaps",
+      "description": "This command generates random noise like you would see in an image editor. The result can then be converted into a bitmap tag or taken to your image editing software to tweak further.",
+      "example": "tool build-noise-map bitmap_test\\256x256_20001_noise.tif 256 256 2 0 0 0 1",
+      "args": [
+        {
+          "name": "tiff-file",
+          "type": "path_file",
+          "description": "A local data path to where the generated tiff will be placed. Make sure to include filename and extension.",
+          "required": true
+        },
+        {
+          "name": "width",
+          "type": "string",
+          "description": "The width of the image with a max range of 16-4096. Value should be a power of 2 dimension",
+          "required": true
+        },
+        {
+          "name": "height",
+          "type": "string",
+          "description": "The height of the image with a max range of 16-4096. Value should be a power of 2 dimension",
+          "required": true
+        },
+        {
+          "name": "low-freq-skip",
+          "type": "string",
+          "description": "Low-frequency \"octaves\" to skip. A higher value means more noise",
+          "required": true
+        },
+        {
+          "name": "high-freq-skip",
+          "type": "string",
+          "description": "High-frequency \"octaves\" to skip. A higher value more blur",
+          "required": true
+        },
+        {
+          "name": "roughness",
+          "type": "string",
+          "description": "How smooth or rough the image is with a range of 0.0-1.0. With 0.0 being the smoothest image possible and 1.0 being the roughest image possible.",
+          "required": true
+        },
+        {
+          "name": "blur-passes",
+          "type": "string",
+          "description": "The number of times to apply a blur pass.",
+          "required": true
+        },
+        {
+          "name": "random-seed",
+          "type": "string",
+          "description": "A random seed for noise.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "lightmaps-farm-merge",
+      "category": "Bitmaps",
+      "description": "Merge the results from lightmaps-farm-worker to form the final lightmap bitmap tag.",
+      "example": "tool lightmaps-farm-merge \"scenarios\\multi\\halo\\coagulation\\coagulation\" \"coagulation\" 2",
+      "args": [
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario tag without extension.",
+          "required": true
+        },
+        {
+          "name": "bsp-name",
+          "type": "string",
+          "description": "The name of a scenario_structure_bsp tag without extension and belongs to the referenced scenario.",
+          "required": true
+        },
+        {
+          "name": "worker-count",
+          "type": "string",
+          "description": "The number of lightmaps-farm-worker instances that were used.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "build-cache-file",
+      "category": "Cache Files",
+      "description": "A scenario can be compiled into a map using the build-cache-file verb. Simply provide your scenario's tag path. (the last two arguments are optional):",
+      "example": "tool build-cache-file \"scenarios\\multi\\example\\example\" dx11_64 compress|resource_sharing",
+      "args": [
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to your scenario without the file extension",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-import-crates",
+      "category": "Import / Export",
+      "description": "Compile multiple source directories in a single run to generate a crate tag and all the relevant tags involved.",
+      "example": "tool bulk-import-crates \"objects\\multi\\jmi_Test.JMI\"",
+      "args": [
+        {
+          "name": "jmi-file",
+          "type": "path_file",
+          "description": "A local data path to where the JMI file is located.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-import-scenery",
+      "category": "Import / Export",
+      "description": "Compile multiple source directories in a single run to generate a scenery tag and all the relevant tags involved.",
+      "example": "tool bulk-import-scenery \"objects\\multi\\jmi_Test.JMI\"",
+      "args": [
+        {
+          "name": "jmi-file",
+          "type": "path_file",
+          "description": "A local data path to where the JMI file is located.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "export-tag-to-xml",
+      "category": "Import / Export",
+      "description": "Dumps the tag values set in the tag to an XML format to easily compare in text editors.",
+      "example": "tool export-tag-to-xml \"(ABSOLUTE-PATH-TO-H2-EK)\\tags\\objects\\characters\\masterchief\\masterchief.render_model\" \"(ABSOLUTE-PATH-TO-H2-EK)\\tags\\objects\\characters\\masterchief\\masterchief.xml\"",
+      "args": [
+        {
+          "name": "tag-file",
+          "type": "path_tag",
+          "description": "An absolute tag path with extension.",
+          "required": true
+        },
+        {
+          "name": "output-file",
+          "type": "path_file",
+          "description": "A absolute path with file name and XML extension to set where to write the XML to.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "export-tags-to-xml",
+      "category": "Import / Export",
+      "description": "Exports multiple tags to multiple XML files in a single run to easily compare in text editors. Files will get dumped to the root of your H2-EK root unless you give an absolute path",
+      "example": "tool export-tags-to-xml \"F:\\tag_list.txt\"",
+      "args": [
+        {
+          "name": "export-tag-to-xml-params-listing",
+          "type": "path_file",
+          "description": "An absolute file path to a text file containing a list of tags to export. Sample file below.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "export-windows-font",
+      "category": "Import / Export",
+      "description": "Given a system font, this verb generates .tif files for each of its glyphs within a subdirectory of data.",
+      "example": "tool export-windows-font",
+      "args": [
+        {
+          "name": "output-directory",
+          "type": "string",
+          "description": "The name of the directory within data where tif files will be generated to. Tool expects that this directory and a subdirectory. called exported alread exist. For an argument of example, Tool would expect to find the directory data\\example\\exported.",
+          "required": true
+        },
+        {
+          "name": "font-file",
+          "type": "optional_string",
+          "description": "While this argument is marked optional, it appears to be required to make the command work but is possibly unused. Use any string.",
+          "required": false
+        },
+        {
+          "name": "typeface-name",
+          "type": "string",
+          "description": "The name of the system font to be exported, e.g. \"Arial Bold\".",
+          "required": true
+        },
+        {
+          "name": "point-size",
+          "type": "string",
+          "description": "The font size to generate glyphs at.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "import-decorator-set",
+      "category": "Import / Export",
+      "description": "Imports a JMI set to generate a decorator_set tag.",
+      "example": "tool import-decorator-set \"objects\\characters\\brute\\garbage\\brute_helmet.JMI\"",
+      "args": [
+        {
+          "name": "jmi-file",
+          "type": "path_file",
+          "description": "A local data path to a JMI file.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-collision",
+      "category": "Models",
+      "description": "Multiple directories can have their collision files compiled in a single run using this command.",
+      "example": "tool bulk-collision \"objects\\multi\\jmi_Test.JMI\"",
+      "args": [
+        {
+          "name": "jmi-file",
+          "type": "path_file",
+          "description": "A local data path to where the JMI file is located.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-import-crates-folder",
+      "category": "Models",
+      "description": "Generates a crate tag and compiles the render, collision, and physics directory of a model in a single run. Just point it at the root of your model folder and go!",
+      "example": "tool bulk-import-crates-folder \"objects\\multi\\world_node_a\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to the root of a model source directory.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-import-model-folder",
+      "category": "Models",
+      "description": "Generates a model tag and compiles the render, collision, and physics directory of a model in a single run. Just point it at the root of your model folder and go!",
+      "example": "tool bulk-import-model-folder \"objects\\multi\\world_node_a\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to the root of a model source directory.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-import-models",
+      "category": "Models",
+      "description": "Compile multiple source directories in a single run to generate a model tag and all the relevant tags involved.",
+      "example": "tool bulk-import-models \"objects\\multi\\jmi_Test.JMI\"",
+      "args": [
+        {
+          "name": "jmi-file",
+          "type": "path_file",
+          "description": "A local data path to where the JMI file is located.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-import-scenery-folder",
+      "category": "Models",
+      "description": "Generates a scenery tag and compiles the render, collision, and physics directory of a model in a single run. Just point it at the root of your model folder and go!",
+      "example": "tool bulk-import-scenery-folder \"objects\\multi\\world_node_a\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to the root of a model source directory.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-physics",
+      "category": "Models",
+      "description": "Multiple directories can have their physics files compiled in a single run using this command.",
+      "example": "tool bulk-physics \"objects\\multi\\jmi_Test.JMI\"",
+      "args": [
+        {
+          "name": "jmi-file",
+          "type": "path_file",
+          "description": "A local data path to where the JMI file is located.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-render",
+      "category": "Models",
+      "description": "Multiple directories can have their render files compiled in a single run using this command.",
+      "example": "tool bulk-render \"objects\\multi\\jmi_Test.JMI\"",
+      "args": [
+        {
+          "name": "jmi-file",
+          "type": "path_file",
+          "description": "A local data path to where the JMI file is located.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "camera-track",
+      "category": "Models",
+      "description": "This commands takes a JMA file directly and converts it to a camera_track for the game. The length of the animation should be at most 16 as that is the max number of control points a camera track tag can contain. The JMA should contain a skeleton made up of a single bone that will change its position each frame. The orientation of the bone will determine the position and rotation of the control point for that index. The name of the JMA file will be the name of the tag.",
+      "example": "tool camera-track cameras\\ohno.JMA",
+      "args": [
+        {
+          "name": "source-file",
+          "type": "path_file",
+          "description": "A local data path to where the JMA file is located.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "collision",
+      "category": "Models",
+      "description": "A JMS file containing a collision model can be compiled into a collision model tag",
+      "example": "tool collision \"objects\\characters\\masterchief\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to the root of a model source directory.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "extract-collision-data",
+      "category": "Models",
+      "description": "Extracts import info from a collision_model tag to retrieve the original JMS used to create the tag. Don't expect this command to do anything if there is no import info.",
+      "example": "tool extract-collision-data \"objects\\characters\\masterchief\\masterchief\"",
+      "args": [
+        {
+          "name": "collision_model",
+          "type": "path_tag",
+          "description": "A local tag path to a collision tag without file extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "extract-physics-data",
+      "category": "Models",
+      "description": "Extracts import info from a physics_model tag to retrieve the original JMS used to create the tag. Don't expect this command to do anything if there is no import info.",
+      "example": "tool extract-physics-data \"objects\\vehicles\\scorpion\\scorpion\"",
+      "args": [
+        {
+          "name": "physics_model",
+          "type": "path_tag",
+          "description": "A local tag path to a physics_model tag without extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "extract-render-data",
+      "category": "Models",
+      "description": "Extracts import info from a render_model tag to retrieve the original JMS used to create the tag. Don't expect this command to do anything if there is no import info.",
+      "example": "tool extract-render-data \"objects\\vehicles\\scorpion\\scorpion\"",
+      "args": [
+        {
+          "name": "render_model",
+          "type": "path_tag",
+          "description": "A local tag path to a render_model tag without extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "extract-structure-data",
+      "category": "Models",
+      "description": "Extracts import info from a scenario_structure_bsp tag to retrieve the original ASS or JMS used to create the tag. Don't expect this command to do anything if there is no import info stored in the BSP tag.",
+      "example": "tool extract-structure-data \"scenarios\\solo\\01b_spacestation\\01_bsp_2\"",
+      "args": [
+        {
+          "name": "scenario_structure_bsp",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario_structure_bsp tag without extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "fbx-to-ass",
+      "category": "Models",
+      "description": "This command takes an FBX and converts it to an ASS file for Halo 2 level importing. Use this if you don't have access to an export script.",
+      "example": "tool fbx-to-ass \"F:\\dreamer.fbx\" \"F:\\dreamer.ASS\"",
+      "args": [
+        {
+          "name": "fbx",
+          "type": "path_file",
+          "description": "An absolute filepath to a valid FBX file.",
+          "required": true
+        },
+        {
+          "name": "ass",
+          "type": "path_file",
+          "description": "An absolute filepath that includes name and extension to write the output to.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "fbx-to-jma",
+      "category": "Models",
+      "description": "This command takes an FBX and converts it to an animation source file for Halo 2 importing. Use this if you don't have access to an export script. Be aware that the extension can be any of the available extensions for animation importing. It does not specifically needs to be JMA. You can type JMO as the extension and the output is still valid.",
+      "example": "tool fbx-to-jma \"E:\\my_fbx_files\\cyborg_dab.fbx\" F:\\cyborg_my_custom_anim.JMA",
+      "args": [
+        {
+          "name": "fbx",
+          "type": "path_file",
+          "description": "An absolute filepath to a valid FBX file.",
+          "required": true
+        },
+        {
+          "name": "jma",
+          "type": "path_file",
+          "description": "An absolute filepath that includes name and extension to write the output to.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "fbx-to-jmi",
+      "category": "Models",
+      "description": "This command takes an FBX and converts it to a JMI source file for Halo 2 importing. Use this if you don't have access to an export script.",
+      "example": "tool fbx-to-jmi \"E:\\my_fbx_files\\scenery_set.fbx\" F:\\scenery_set.JMI",
+      "args": [
+        {
+          "name": "fbx",
+          "type": "path_file",
+          "description": "An absolute filepath to a valid FBX file.",
+          "required": true
+        },
+        {
+          "name": "jmi",
+          "type": "path_file",
+          "description": "An absolute filepath that includes name and extension to write the output to.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "fbx-to-jms",
+      "category": "Models",
+      "description": "FBX to JMS",
+      "example": "tool fbx-to-jms render \"F:\\dreamer.fbx\" \"F:\\dreamer.JMS\"",
+      "args": [
+        {
+          "name": "render,collision,physics-or-all",
+          "type": "string",
+          "description": "Sets the type of geo this FBX is for. Use either render, collision, physics, or all only. The geo class set will determine what geometry gets exported from the JMS",
+          "required": true
+        },
+        {
+          "name": "fbx",
+          "type": "path_file",
+          "description": "An absolute filepath to a valid FBX file.",
+          "required": true
+        },
+        {
+          "name": "jms",
+          "type": "path_file",
+          "description": "An absolute filepath that includes name and extension to write the output to.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "fix-model-materials",
+      "category": "Models",
+      "description": "Sets global material names for model tags in a directory if the name is invalid.",
+      "example": "tool fix-model-materials \"incompetent\" hey",
+      "args": [
+        {
+          "name": "root-directory",
+          "type": "path_tag",
+          "description": "A local tag path to a directory containing model tags.",
+          "required": true
+        },
+        {
+          "name": "material-name",
+          "type": "string",
+          "description": "What to set the global material name to.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "fp-model-animations",
+      "category": "Models",
+      "description": "Import animation source files as a first person animation. Use this if you're making FP weapon animations.",
+      "example": "tool fp-model-animations \"objects\\characters\\masterchief\\fp\\weapons\\rifle\\fp_smg\" \"objects\\characters\\masterchief\\fp\" \"objects\\weapons\\rifle\\smg\\fp_smg\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to the root of a model source directory.",
+          "required": true
+        },
+        {
+          "name": "character-directory",
+          "type": "path_data",
+          "description": "A local data path to the root of the first person character model source directory the weapon is using.",
+          "required": true
+        },
+        {
+          "name": "weapon-directory",
+          "type": "path_data",
+          "description": "A local data path to the root of the first person weapon model source directory the character is using.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "import-particle-model",
+      "category": "Models",
+      "description": "Imports a JMI set to generate a particle tag.",
+      "example": "tool import-particle-model \"objects\\characters\\brute\\garbage\\brute_helmet.JMI\"",
+      "args": [
+        {
+          "name": "jmi-file",
+          "type": "path_file",
+          "description": "A local data path to a JMI file.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "model-animation-count",
+      "category": "Models",
+      "description": "Goes to all the animations in a directory and child directories. Once it's done it prints debug info.",
+      "example": "tool model-animation-count \"objects\\characters\\masterchief\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local tag path to a directory containing model_animation_graph tags or child folders with model_animation_graph tags.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "model-animation-status",
+      "category": "Models",
+      "description": "Goes to all the animations in a directory and child directories. Once it's done it prints debug info.",
+      "example": "tool model-animation-status \"objects\\characters\\masterchief\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local tag path to a directory containing model_animation_graph tags or child folders with model_animation_graph tags.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "model-animations",
+      "category": "Models",
+      "description": "A set of animation source files can be compiled into a model_animation_graph tag.",
+      "example": "tool model-animations \"objects\\characters\\masterchief\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to the root of a model source directory.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "physics",
+      "category": "Models",
+      "description": "A JMS file containing physic meshes can be compiled into a physics_model tag",
+      "example": "tool physics \"objects\\characters\\masterchief\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to the root of a model source directory.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "prt-simulation",
+      "category": "Models",
+      "description": "Run a PRT (precomputed radiance transfer) simulation on an already existing render_model tag.",
+      "example": "tool prt-simulation \"scenarios\\objects\\covenant\\military\\scarab\\scarab\"",
+      "args": [
+        {
+          "name": "render-model",
+          "type": "path_tag",
+          "description": "A local tag path to a render_model tag without extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "render",
+      "category": "Models",
+      "description": "A JMS file containing render geometry can be compiled into a render_model tag",
+      "example": "tool render \"objects\\characters\\masterchief\" false false",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to the root of a model source directory.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "structure",
+      "category": "Models",
+      "description": "A JMS file containing level geometry can be compiled into a scenario_structure_bsp tag. Do not use this command for level imports as it's outdated (use structure-new-from-ass instead).",
+      "example": "tool structure \"scenarios\\multi\\example\" \"example\"",
+      "args": [
+        {
+          "name": "scenario-directory",
+          "type": "path_data",
+          "description": "A local data path to root directory of a level.",
+          "required": true
+        },
+        {
+          "name": "bsp-name",
+          "type": "string",
+          "description": "The JMS filename without extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "structure-compatible",
+      "category": "Models",
+      "description": "A JMS file containing level geometry can be compiled into a scenario_structure_bsp tag. Do not use this command for level imports as it's outdated (use structure-new-from-ass instead).",
+      "example": "tool structure-compatible \"scenarios\\multi\\example\" \"example\"",
+      "args": [
+        {
+          "name": "scenario-directory",
+          "type": "path_data",
+          "description": "A local data path to root directory of a level.",
+          "required": true
+        },
+        {
+          "name": "bsp-name",
+          "type": "string",
+          "description": "The JMS filename without extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "structure-compatible-from-jms",
+      "category": "Models",
+      "description": "A JMS file containing level geometry can be compiled into a scenario_structure_bsp tag. Do not use this command for level imports as it's outdated (use structure-new-from-ass instead).",
+      "example": "tool structure-compatible-from-jms \"scenarios\\multi\\example\\structure\\example.JMS\"",
+      "args": [
+        {
+          "name": "jms-file",
+          "type": "path_file",
+          "description": "A local data path to a JMS file with extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "structure-from-jms",
+      "category": "Models",
+      "description": "A JMS file containing level geometry can be compiled into a scenario_structure_bsp tag. Do not use this command for level imports as it's outdated (use structure-new-from-ass instead).",
+      "example": "tool structure-from-jms \"scenarios\\multi\\example\\structure\\example.JMS\"",
+      "args": [
+        {
+          "name": "jms-file",
+          "type": "path_file",
+          "description": "A local data path to a JMS file with extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "structure-new",
+      "category": "Models",
+      "description": "A ASS file containing level geometry can be compiled into a scenario_structure_bsp tag. Do not use this command for level imports as it's outdated (use structure-new-from-ass instead).",
+      "example": "tool structure-new \"scenarios\\multi\\example\" \"example\"",
+      "args": [
+        {
+          "name": "scenario-directory",
+          "type": "path_data",
+          "description": "A local data path to root directory of a level.",
+          "required": true
+        },
+        {
+          "name": "bsp-name",
+          "type": "string",
+          "description": "The ASS filename without extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "structure-new-from-ass",
+      "category": "Models",
+      "description": "A ASS file containing level geometry can be compiled into a scenario_structure_bsp tag.",
+      "example": "tool structure-new-from-ass \"scenarios\\multi\\example\\structure\\example.ASS\"",
+      "args": [
+        {
+          "name": "ass-file",
+          "type": "path_file",
+          "description": "A local data path to a ASS file with extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "structure-new-verbose-from-ass",
+      "category": "Models",
+      "description": "A ASS file containing level geometry can be compiled into a scenario_structure_bsp tag. This version of the structure command gives verbose output.",
+      "example": "tool structure-new-verbose-from-ass \"scenarios\\multi\\example\\structure\\example.ASS\"",
+      "args": [
+        {
+          "name": "ass-file",
+          "type": "path_file",
+          "description": "A local data path to a ASS file with extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "count-all-class-sounds",
+      "category": "Sounds",
+      "description": "Goes through all of the sound tags in a directory and prints how many sounds belong to a specific class",
+      "example": "tool count-all-class-sounds \"sound\\ambience\"",
+      "args": [
+        {
+          "name": "root-path",
+          "type": "path_tag",
+          "description": "A local tag path to the root of a directory containing sound tags or child folders with sound tags.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "count-class-sounds",
+      "category": "Sounds",
+      "description": "Goes through all of the sound tags in the tags directory and prints the paths for sounds that use a specific sound class",
+      "example": "tool count-class-sounds projectile_impact",
+      "args": [
+        {
+          "name": "sound-class",
+          "type": "string",
+          "description": "The sound class you want to specify. The list is as follows.Placeholder",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "count-sound-tags",
+      "category": "Sounds",
+      "description": "Prints all existing sound tags in a directory.",
+      "example": "tool count-sound-tags \"sound\\ambience\"",
+      "args": [
+        {
+          "name": "root-path",
+          "type": "path_tag",
+          "description": "A local tag path to the root of a directory containing sound tags or child folders with sound tags.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "dialogue-import",
+      "category": "Sounds",
+      "description": "Collects all sound tag paths and adds them to a generated dialogue tag.",
+      "example": "tool dialogue-import \"sound\\dialog\\combat\\brute_bloodthirsty\"",
+      "args": [
+        {
+          "name": "root-directory",
+          "type": "path_tag",
+          "description": "A local tag path to a root directory containing sound tags. A dialogue tag is generated adjacent to this root directory with the same name, e.g. sound\\dialog\\combat\\brute_bloodthirsty.dialogue.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "dump-uncompressed-sounds",
+      "category": "Sounds",
+      "description": "Prints the paths of sound tags that use none (little endian) as their compression format.",
+      "example": "tool dump-uncompressed-sounds \"sound_remastered\"",
+      "args": [
+        {
+          "name": "root-path",
+          "type": "path_tag",
+          "description": "A local tag path to the root of a directory containing sound tags.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "extract-lpc-data",
+      "category": "Sounds",
+      "description": "Dumps a file called test.aif in the root of H2-EK. This is likely to be linear predictive coding data for the sound file but this hasn't be verified.",
+      "example": "tool extract-lpc-data \"sound_test\\aiff\\soundtest.aiff\"",
+      "args": [
+        {
+          "name": "sound-file",
+          "type": "path_file",
+          "description": "A local data path to an AIF/AIFF file.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "mission-dialogue-import",
+      "category": "Sounds",
+      "description": "Gathers all sound tags in a directory to generate an ai_mission_dialogue tag",
+      "example": "tool mission-dialogue-import \"sound\\dialog\\levels\\08_controlroom\"",
+      "args": [
+        {
+          "name": "root-directory",
+          "type": "path_tag",
+          "description": "A local tag path to a directory containing a cinematic and mission folder that contain sound files.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "reimport-sounds",
+      "category": "Sounds",
+      "description": "Goes through all sound tags in a directory or child directories. Any sound tags that are found will have their sound files from data reimported.",
+      "example": "tool reimport-sounds \"sound\\dialog\\combat\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local tag path to a directory or child directory containing sound tags.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "reimport-sounds-single",
+      "category": "Sounds",
+      "description": "Reimports the specified sound if sound data was found in the data folder.",
+      "example": "tool reimport-sounds-single \"sound\\dialog\\combat\\brute_bloodthirsty\\01_alert\\coming\"",
+      "args": [
+        {
+          "name": "source-file",
+          "type": "path_tag",
+          "description": "A local tag path to a sound tag without extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "reimport-sounds-to-opus",
+      "category": "Sounds",
+      "description": "Goes through all sound tags in a directory or child directories. Any sound tags that are found will have their sound files from data reimported. Sounds reimported using this command will use Opus for their compression setting.",
+      "example": "tool reimport-sounds-to-opus \"sound\\dialog\\combat\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local tag path to a directory or child directory containing sound tags.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "reimport-sounds-to-opus-single",
+      "category": "Sounds",
+      "description": "Reimports the specified sound if sound data was found in the data folder. Sounds reimported using this command will use Opus for their compression setting.",
+      "example": "tool reimport-sounds-to-opus-single \"sound\\dialog\\combat\\brute_bloodthirsty\\01_alert\\coming\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local tag path to a directory or child directory containing sound tags.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "set-sound-class",
+      "category": "Sounds",
+      "description": "Grabs all the sound tags in a directory and changes the class to whatever was specified by the user.",
+      "example": "tool set-sound-class sound_test ??? projectile_impact",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local tag path to the root of a directory containing sound tags or child folders with sound tags.",
+          "required": true
+        },
+        {
+          "name": "path-spec",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "new-sound-class",
+          "type": "string",
+          "description": "A sound class string.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "sound-multi-layer",
+      "category": "Sounds",
+      "description": "Imports sound files in a directory with the import type set to multi-layer. All sound files the source directory and child directories will be combined into one sound file.",
+      "example": "tool sound-multi-layer \"sound_test\" projectile_impact adpcm",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to a directory or child directories containing sound files. Supported extensions are WAV saved as 16 bit PCM and AIFF.",
+          "required": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "Set the sound class",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "sound-multi-layer",
+      "category": "Sounds",
+      "description": "Imports a single sound file",
+      "example": "tool sound-multi-layer \"sound_test\\aiff\" projectile_impact adpcm",
+      "args": [
+        {
+          "name": "source-file",
+          "type": "path_data",
+          "description": "A local data path to the root of a directory containing sound files. Supported extensions are WAV saved as 16 bit PCM and AIFF.",
+          "required": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "Set the sound class",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "sounds-music",
+      "category": "Sounds",
+      "description": "Generates an empty sound looping tag from the folders in data. Probably an error?",
+      "example": "tool sounds-music \"sound_test\" projectile_impact adpcm",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "Set the sound class",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "sounds-one-shot",
+      "category": "Sounds",
+      "description": "Imports sound files in a directory with the import type set to single-shot. Each sound file will get its own sound tag.",
+      "example": "tool sounds-one-shot \"sound_test\" projectile_impact adpcm",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "Set the sound class",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "sounds-single-layer",
+      "category": "Sounds",
+      "description": "Imports sound files in a directory with the import type set to single-layer. Each directory will get its own sound tag.",
+      "example": "tool sounds-single-layer \"sound_test\" projectile_impact adpcm",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "Set the sound class",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "sounds-single-mixed",
+      "category": "Sounds",
+      "description": "Imports sound files in a directory with the import type set to single-layer. Each directory will get its own sound tag.",
+      "example": "tool sounds-single-mixed \"sound_test\" projectile_impact adpcm",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "Set the sound class",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "strip-single-tag-file",
+      "category": "Sounds",
+      "description": "Imports sound files in a directory with the import type set to single-layer. Each directory will get its own sound tag.",
+      "example": "tool strip-single-tag-file \"objects\\characters\\masterchief\\masterchief.render_model\"",
+      "args": [
+        {
+          "name": "tag",
+          "type": "path_tag",
+          "description": "A local tag path to a tag file with extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "verify-sound-folder",
+      "category": "Sounds",
+      "description": "Gathers all sounds in a directory or child directories and prints some debug info at the end.",
+      "example": "tool verify-sound-folder \"sound\\characters\"",
+      "args": [
+        {
+          "name": "root-path",
+          "type": "path_tag",
+          "description": "A local tag path to a directory or child directories containing sound tags.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "extract-unicode-strings",
+      "category": "Strings",
+      "description": "Extract strings from multilingual_unicode_string_list and dumps the results back to a text file in data. Results may not match original source exactly so give the files a read to make sure tool won't have any issues.",
+      "example": "tool extract-unicode-strings \"ui\\hud\\hud_messages\"",
+      "args": [
+        {
+          "name": "multilingual_unicode_string_list",
+          "type": "path_tag",
+          "description": "A local tag path to a multilingual_unicode_string_list tag without extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "new-strings",
+      "category": "Strings",
+      "description": "Converts all text files in a directory to multilingual_unicode_string_list tags. Text files should be saved as UTF-16",
+      "example": "tool new-strings \"ui\\hud\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to a directory containing text files.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "pack-unicode-strings",
+      "category": "Strings",
+      "description": "This command generates the STR files found in the font folder. These files contain the string data the game reads to display text ingame.",
+      "example": "tool pack-unicode-strings en \"F:\\Program Files (x86)\\Steam\\steamapps\\common\\Halo MCCEK\\Halo Assets\\2\\Vanilla\\data\\strings_list.txt\"",
+      "args": [
+        {
+          "name": "language",
+          "type": "string",
+          "description": "The language you are compiling a STR file for. The following the the list of languages currently used by MCC.chs",
+          "required": true
+        },
+        {
+          "name": "tag-list-file",
+          "type": "path_file",
+          "description": "An absolute file path to a text file containing a list of multilingual_unicode_string_list tags to include in the packaged STR file.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "extract-hs-scripts",
+      "category": "Structure",
+      "description": "Finds all scenario_hs_source_file tags in a directory and dumps the contents to an .hsc file in data.",
+      "example": "tool extract-hs-scripts \"scenarios\\solo\\01b_spacestation\\scripts\"",
+      "args": [
+        {
+          "name": "name_substring",
+          "type": "path_tag",
+          "description": "A local tag path to a directory containing scenario_hs_source_file tag files.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "lightmaps",
+      "category": "Structure",
+      "description": "Run a lightmap instance. No fuss no muss.",
+      "example": "tool lightmaps \"scenarios\\multi\\halo\\coagulation\\coagulation\" \"coagulation\" direct_only",
+      "args": [
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario tag without extension.",
+          "required": true
+        },
+        {
+          "name": "bsp-name",
+          "type": "string",
+          "description": "The name of a scenario_structure_bsp tag without extension and belongs to the referenced scenario.",
+          "required": true
+        },
+        {
+          "name": "quality-setting",
+          "type": "string",
+          "description": "Standard Halo 2 light quality string. The list of options is as follows.checkerboard",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "lightmaps-debug",
+      "category": "Structure",
+      "description": "A command to debug lightmaps. Debug them how you ask? That's an excellent question! Lets move on to the next command.",
+      "example": "tool lightmaps-debug \"scenarios\\multi\\halo\\coagulation\\coagulation\" \"coagulation\" direct_only 0 1",
+      "args": [
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario tag without extension.",
+          "required": true
+        },
+        {
+          "name": "bsp-name",
+          "type": "string",
+          "description": "The name of a scenario_structure_bsp tag without extension and belongs to the referenced scenario.",
+          "required": true
+        },
+        {
+          "name": "quality-setting",
+          "type": "string",
+          "description": "Standard Halo 2 light quality string. The list of options is as follows.checkerboard",
+          "required": true
+        },
+        {
+          "name": "begin-light-index",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "end-light-index",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "lightmaps-farm-worker",
+      "category": "Structure",
+      "description": "Run a lightmap-worker instance to cut down on time spent lighting. Make sure to run lightmaps-farm-merge afterwards to complete the process.",
+      "example": "tool lightmaps-farm-worker \"scenarios\\multi\\halo\\coagulation\\coagulation\" \"coagulation\" direct_only 0 3",
+      "args": [
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario tag without extension.",
+          "required": true
+        },
+        {
+          "name": "bsp-name",
+          "type": "string",
+          "description": "The name of a scenario_structure_bsp tag without extension and belongs to the referenced scenario.",
+          "required": true
+        },
+        {
+          "name": "quality-setting",
+          "type": "string",
+          "description": "Standard Halo 2 light quality string. The list of options is as follows.checkerboard",
+          "required": true
+        },
+        {
+          "name": "worker-index",
+          "type": "string",
+          "description": "The instance ID starting from 0. The range for this depends on the number set for worker-count.",
+          "required": true
+        },
+        {
+          "name": "worker-count",
+          "type": "string",
+          "description": "The number of instances that will be launched.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "rebuild-scenario-scripts",
+      "category": "Structure",
+      "description": "Recompiles HSC script files from data using the scenario_hs_source_file tags referenced in the scenario tag.",
+      "example": "tool rebuild-scenario-scripts \"scenarios\\solo\\01b_spacestation\\01b_spacestation\"",
+      "args": [
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario tag without extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "scenario-analyze",
+      "category": "Structure",
+      "description": "Run an action on a scenario for debug purposes.",
+      "example": "tool scenario-analyze \"scenarios\\multi\\halo\\coagulation\\coagulation\" \"count tags\"",
+      "args": [
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario tag without extension.",
+          "required": true
+        },
+        {
+          "name": "inspection-type",
+          "type": "string",
+          "description": "The action to run on the referenced scenario. Make sure to surround it in quotes since someone at Bungie thought it would be funny.count tags",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "structure-analyze",
+      "category": "Structure",
+      "description": "A dev command for running misc tasks on a scenario, unlikely to be useful.",
+      "example": "tool structure-analyze \"scenarios\\multi\\halo\\coagulation\\coagulation\"",
+      "args": [
+        {
+          "name": "scenario_structure_bsp",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario_structure_bsp tag without extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "structure-plane-debug",
+      "category": "Structure",
+      "description": "??? Something about a plane_debug_geometry.txt",
+      "example": "tool structure-plane-debug \"scenarios\\multi\\example\" \"example\"",
+      "args": [
+        {
+          "name": "scenario-directory",
+          "type": "path_data",
+          "description": "A local data path to root directory of a level.",
+          "required": true
+        },
+        {
+          "name": "bsp-name",
+          "type": "string",
+          "description": "The ASS filename without extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "build-convolution-map",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool build-convolution-map",
+      "args": [
+        {
+          "name": "tiff-file",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "passes",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "blur-subpasses",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "e",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        },
+        {
+          "name": "scale",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "build-gradient-map",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool build-gradient-map",
+      "args": [
+        {
+          "name": "tiff-file",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "width",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "height",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "exponent",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "options",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "build-plasma-control-map",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool build-plasma-control-map",
+      "args": [
+        {
+          "name": "tiff-file",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "k",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "e",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "build-quadratic-map",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool build-quadratic-map",
+      "args": [
+        {
+          "name": "tiff-file",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "build-trace-map",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool build-trace-map",
+      "args": [
+        {
+          "name": "tiff-file",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        },
+        {
+          "name": "options",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        },
+        {
+          "name": "time-bias",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        },
+        {
+          "name": "time-scale",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        },
+        {
+          "name": "min-delta-time",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        },
+        {
+          "name": "max-delta-time",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "convert-pixel-shaders",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool convert-pixel-shaders",
+      "args": []
+    },
+    {
+      "name": "convert-tiled-tiff",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool convert-tiled-tiff \"F:\\masterchief.tiff\" \"F:\\masterchief_output.tiff\"",
+      "args": [
+        {
+          "name": "input-tiff-file",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "output-tiff-file",
+          "type": "path_file",
+          "description": "An absolute path to a path with filename and extension to generate the output file in.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "dialogue-globals-import",
+      "category": "Advanced / Unknown",
+      "description": "Compiles a CSV file to generate a new ai_dialogue_globals tag. The file path for the CSV file is data\\ai\\ai_dialogue_globals.csv and tags\\ai\\ai_dialogue_globals.ai_dialogue_globals is generated.",
+      "example": "tool dialogue-globals-import",
+      "args": []
+    },
+    {
+      "name": "dump-tiff-to-header",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool dump-tiff-to-header",
+      "args": [
+        {
+          "name": "quantization-factor",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "tiff-file",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "constant-prefix-string",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "output-file",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "fix-tags",
+      "category": "Advanced / Unknown",
+      "description": "Various command to fix up tags. Almost all of them are meant for porting Xbox to PC.",
+      "example": "tool fix-tags count-scripts",
+      "args": [
+        {
+          "name": "action",
+          "type": "string",
+          "description": "What action to take. Type something invalid like \"help\" to see a full list of options.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "import-damage-table",
+      "category": "Advanced / Unknown",
+      "description": "Imports data\\globals\\armor_vs_damage.csv to update the damage table block in globals. The CSV (which can be exported from any spreadsheet software like Excel) uses Damage Groups as the columns, and Armor Modifiers as the rows, with each cell being the applicable Damage Multiplier.",
+      "example": "tool import-damage-table",
+      "args": []
+    },
+    {
+      "name": "lightprobes",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool lightprobes \"scenarios\\multi\\halo\\coagulation\\coagulation\" \"coagulation\" direct_only",
+      "args": [
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario tag without extension.",
+          "required": true
+        },
+        {
+          "name": "bsp-name",
+          "type": "string",
+          "description": "The name of a scenario_structure_bsp tag without extension and belongs to the referenced scenario.",
+          "required": true
+        },
+        {
+          "name": "quality-setting",
+          "type": "string",
+          "description": "Standard Halo 2 light quality string. The list of options is as follows.checkerboard",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "model-animation-reset-compression",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool model-animation-reset-compression \"objects\\characters\\masterchief\\masterchief\"",
+      "args": [
+        {
+          "name": "model-animation-graph",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "monitor-bitmaps",
+      "category": "Advanced / Unknown",
+      "description": "Keeps watch of the data directory for any file changes. If any tiff places are modified or placed in the data directory then tool will immediately attempt to import the image file as bitmap tags.",
+      "example": "tool monitor-bitmaps",
+      "args": []
+    },
+    {
+      "name": "monitor-data-and-tags-bitmaps",
+      "category": "Advanced / Unknown",
+      "description": "Keeps watch of the data and tags directory for any file changes. If any tiff or tags are modified or placed in the data or tags directory then tool will immediately attempt to import the image file as bitmap tags.",
+      "example": "tool monitor-data-and-tags-bitmaps",
+      "args": []
+    },
+    {
+      "name": "monitor-models",
+      "category": "Advanced / Unknown",
+      "description": "Keeps watch of the data directory for any file changes. If any model related intermediate files are modified or moved to the data directory then tool will immediately attempt to import the source files as render_model, collision_model, or physics_model tags.",
+      "example": "tool monitor-models",
+      "args": []
+    },
+    {
+      "name": "monitor-structures",
+      "category": "Advanced / Unknown",
+      "description": "Keeps watch of the data directory for any file changes. If any level related intermediate files are modified or moved to the data directory then tool will immediately attempt to import the source files as levels.",
+      "example": "tool monitor-structures",
+      "args": []
+    },
+    {
+      "name": "pixel-shaders",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool pixel-shaders",
+      "args": [
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "???",
+          "required": true,
+          "values": [
+            "pc"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "plate",
+      "category": "Advanced / Unknown",
+      "description": "Gather images in a directory and set up a plate with all the images placed properly. Useful for creating animated textures from multiple images easily.",
+      "example": "tool plate \"F:\\bitmap_test\" true",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "An absolute file path to a directory containing image files.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "process-sounds",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool process-sounds",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "path-spec",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "command",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "value",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "rebuild-structure-audibility",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool rebuild-structure-audibility \"scenarios\\solo\\01b_spacestation\\01_bsp_2\"",
+      "args": [
+        {
+          "name": "structure",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario_structure_bsp tag without extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "reimport-model-animations",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool reimport-model-animations",
+      "args": []
+    },
+    {
+      "name": "replace-font-char",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool replace-font-char",
+      "args": [
+        {
+          "name": "font-file",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "tiff-file",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "utf16-code",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "script-doc",
+      "category": "Advanced / Unknown",
+      "description": "Prints the script_doc or any command that contains the given string.",
+      "example": "tool script-doc \"debug_objects\"",
+      "args": []
+    },
+    {
+      "name": "sound-looping",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool sound-looping",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "sound-looping-scenery",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool sound-looping-scenery",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "structure-plane-debug-generate",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool structure-plane-debug-generate \"scenarios\\multi\\example\" \"example\"",
+      "args": [
+        {
+          "name": "scenario-directory",
+          "type": "path_data",
+          "description": "A local data path to root directory of a level.",
+          "required": true
+        },
+        {
+          "name": "bsp-name",
+          "type": "string",
+          "description": "The ASS filename without extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "tag-file-report",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool tag-file-report \"scenarios\\multi\\halo\\coagulation\\coagulation.scenario_structure_bsp\"",
+      "args": [
+        {
+          "name": "tag-file",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "verify-tag-load",
+      "category": "Advanced / Unknown",
+      "description": "Checks if a tag is valid",
+      "example": "tool verify-tag-load",
+      "args": [
+        {
+          "name": "tag-file",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "version",
+      "category": "Advanced / Unknown",
+      "description": "Outputs the build version for tool.exe",
+      "example": "tool version",
+      "args": []
+    },
+    {
+      "name": "vertex-shader",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool vertex-shader",
+      "args": [
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "???",
+          "required": true,
+          "values": [
+            "pc"
+          ]
+        },
+        {
+          "name": "src-platform",
+          "type": "enum",
+          "description": "???",
+          "required": true,
+          "values": [
+            "pc"
+          ]
+        },
+        {
+          "name": "shader",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "vertex-shaders",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool vertex-shaders",
+      "args": [
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "???",
+          "required": true,
+          "values": [
+            "pc"
+          ]
+        },
+        {
+          "name": "src-platform",
+          "type": "enum",
+          "description": "???",
+          "required": true,
+          "values": [
+            "pc"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "windows-font",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool windows-font",
+      "args": [
+        {
+          "name": "font-file",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "ea:n-where-n-is-a-number",
+          "type": "optional_string",
+          "description": "???",
+          "required": false
+        }
+      ]
+    }
+  ]
+}

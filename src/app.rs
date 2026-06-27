@@ -61,6 +61,8 @@ mod model_preview;
 use model_preview::*;
 mod map_names;
 use map_names::*;
+mod tool_commands;
+use tool_commands::*;
 mod editor;
 use editor::*;
 mod controller;
@@ -120,6 +122,11 @@ pub struct Baboon {
     about_open: bool,
     help_panel_tab: HelpPanelTab,
     map_names_game_tab: MapNamesGameTab,
+    tool_commands: ToolCommandsUiState,
+    tool_commands_window_pos: Option<egui::Pos2>,
+    tool_commands_window_size: Vec2,
+    tool_commands_left_width: f32,
+    tool_commands_collapsed_categories: HashSet<String>,
     blender_path: Option<PathBuf>,
     blender_path_input: String,
     color_popup: Option<MaterialColorPopup>,
@@ -204,6 +211,15 @@ impl Baboon {
             about_open: false,
             help_panel_tab: HelpPanelTab::About,
             map_names_game_tab: MapNamesGameTab::HaloCe,
+            tool_commands: ToolCommandsUiState::default(),
+            tool_commands_window_pos: prefs.tool_commands_window_pos,
+            tool_commands_window_size: prefs
+                .tool_commands_window_size
+                .unwrap_or(DEFAULT_TOOL_COMMANDS_WINDOW_SIZE),
+            tool_commands_left_width: prefs
+                .tool_commands_left_width
+                .max(MIN_TOOL_COMMANDS_LEFT_WIDTH),
+            tool_commands_collapsed_categories: prefs.tool_commands_collapsed_categories.clone(),
             blender_path_input: prefs
                 .blender_path
                 .as_ref()

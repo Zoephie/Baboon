@@ -267,6 +267,15 @@ pub(super) const MATERIAL_TEXT: Color32 = Color32::from_rgb(20, 20, 20);
 pub(super) const MATERIAL_MUTED_TEXT: Color32 = Color32::from_rgb(96, 96, 96);
 pub(super) const MATERIAL_FUNCTION_ROW: Color32 = Color32::from_rgb(239, 205, 137);
 pub(super) const MATERIAL_SECTION_HEADER: Color32 = Color32::from_rgb(255, 255, 224);
+
+pub(super) fn disclosure_triangle_green() -> Color32 {
+    Color32::from_rgb(28, 143, 66)
+}
+
+pub(super) fn disclosure_triangle_blue() -> Color32 {
+    Color32::from_rgb(24, 111, 205)
+}
+
 pub(super) fn material_ref_row() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(30, 58, 40)
@@ -323,6 +332,15 @@ pub(super) fn material_text() -> Color32 {
     }
 }
 
+pub(super) fn material_text_for_bg(bg: Color32) -> Color32 {
+    let luminance = 0.2126 * bg.r() as f32 + 0.7152 * bg.g() as f32 + 0.0722 * bg.b() as f32;
+    if luminance < 128.0 {
+        Color32::from_gray(232)
+    } else {
+        Color32::from_gray(20)
+    }
+}
+
 pub(super) fn material_muted_text() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(155, 158, 150)
@@ -341,7 +359,7 @@ pub(super) fn material_function_row() -> Color32 {
 
 pub(super) fn material_section_header() -> Color32 {
     if is_dark_mode() {
-        Color32::from_rgb(18, 18, 16)
+        Color32::from_rgb(42, 58, 48)
     } else {
         MATERIAL_SECTION_HEADER
     }
@@ -426,5 +444,22 @@ pub(super) const MATERIAL_PARAMETER_SECTIONS: &[&str] = &[
 ];
 pub(super) const MAX_OPEN_TABS: usize = 32;
 pub(super) const MAX_PARSED_TAGS: usize = 24;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn material_text_for_bg_chooses_contrasting_foreground() {
+        assert_eq!(
+            material_text_for_bg(Color32::from_rgb(42, 43, 41)),
+            Color32::from_gray(232)
+        );
+        assert_eq!(
+            material_text_for_bg(Color32::from_rgb(232, 191, 171)),
+            Color32::from_gray(20)
+        );
+    }
+}
 pub(super) const MAX_BROWSER_ENTRIES_PER_NODE: usize = 500;
 pub(super) const FOUNDATION_LABEL_WIDTH: f32 = 280.0;

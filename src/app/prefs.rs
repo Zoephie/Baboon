@@ -80,7 +80,52 @@ pub(super) fn load_gui_prefs() -> GuiPrefs {
             .filter(|path| !path.trim().is_empty())
             .map(PathBuf::from),
         ek_folder_aliases: load_ek_folder_aliases(&value),
+        tool_commands_window_pos: load_pos2(&value, "tool_commands_window_pos"),
+        tool_commands_window_size: load_vec2(&value, "tool_commands_window_size"),
+        tool_commands_left_width: value
+            .get("tool_commands_left_width")
+            .and_then(Value::as_f64)
+            .map(|value| value as f32)
+            .unwrap_or(DEFAULT_TOOL_COMMANDS_LEFT_WIDTH)
+            .max(MIN_TOOL_COMMANDS_LEFT_WIDTH),
+        tool_commands_collapsed_categories: load_string_set(
+            &value,
+            "tool_commands_collapsed_categories",
+        ),
     }
+}
+
+fn load_pos2(value: &Value, key: &str) -> Option<egui::Pos2> {
+    let arr = value.get(key)?.as_array()?;
+    let x = arr.first()?.as_f64()? as f32;
+    let y = arr.get(1)?.as_f64()? as f32;
+    Some(egui::pos2(x, y))
+}
+
+fn load_vec2(value: &Value, key: &str) -> Option<Vec2> {
+    let arr = value.get(key)?.as_array()?;
+    let x = arr.first()?.as_f64()? as f32;
+    let y = arr.get(1)?.as_f64()? as f32;
+    Some(Vec2::new(
+        x.max(MIN_TOOL_COMMANDS_WINDOW_SIZE.x),
+        y.max(MIN_TOOL_COMMANDS_WINDOW_SIZE.y),
+    ))
+}
+
+fn load_string_set(value: &Value, key: &str) -> HashSet<String> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::trim)
+                .filter(|item| !item.is_empty())
+                .map(str::to_owned)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn load_ek_folder_aliases(value: &Value) -> Vec<EkFolderAlias> {
@@ -117,6 +162,9 @@ pub(super) fn save_gui_prefs(
     }
     let mut games: Vec<&String> = terminal_open_games.iter().collect();
     games.sort();
+    let mut collapsed_tool_categories: Vec<&String> =
+        prefs.tool_commands_collapsed_categories.iter().collect();
+    collapsed_tool_categories.sort();
     let value = json!({
         "browser_mode": match prefs.browser_mode {
             BrowserMode::Folders => "folders",
@@ -136,6 +184,10 @@ pub(super) fn save_gui_prefs(
                 "game": alias.game,
             })
         }).collect::<Vec<_>>(),
+        "tool_commands_window_pos": prefs.tool_commands_window_pos.map(|pos| vec![pos.x, pos.y]),
+        "tool_commands_window_size": prefs.tool_commands_window_size.map(|size| vec![size.x, size.y]),
+        "tool_commands_left_width": prefs.tool_commands_left_width,
+        "tool_commands_collapsed_categories": collapsed_tool_categories,
         "terminal_open_games": games,
     });
     let text = serde_json::to_string_pretty(&value)

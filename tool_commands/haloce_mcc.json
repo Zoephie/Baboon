@@ -1,0 +1,269 @@
+{
+  "commands": [
+    {
+      "name": "animations",
+      "category": "Advanced / Unknown",
+      "description": "Animation data files containing transforms for a skeleton can be imported into a model_animations tag using the animations verb:",
+      "example": "tool animations \"characters\\cyborg\"",
+      "args": []
+    },
+    {
+      "name": "bitmap",
+      "category": "Advanced / Unknown",
+      "description": "Import a single TIFF image into a bitmap using the bitmap verb:",
+      "example": "tool bitmap \"characters\\cyborg\\bitmaps\\cyborg\"",
+      "args": []
+    },
+    {
+      "name": "bitmaps",
+      "category": "Advanced / Unknown",
+      "description": "A folder of TIFF (.tif/.tiff) images can be bulk-imported into bitmap tags using the bitmaps verb:",
+      "example": "tool bitmaps \"characters\\cyborg\\bitmaps\"",
+      "args": []
+    },
+    {
+      "name": "build-cache-file",
+      "category": "Advanced / Unknown",
+      "description": "A scenario can be built into a map using the build-cache-file verb. Simply provide your scenario's tag path and choose classic or remastered mode (the last two arguments are optional):",
+      "example": "tool build-cache-file \"levels\\test\\tutorial\\tutorial\"",
+      "args": []
+    },
+    {
+      "name": "build-resource-list",
+      "category": "Advanced / Unknown",
+      "description": "Resource lists are used by the S3D engine (engine developed in-house by Saber Interactive that's used for the remastered graphics). This verb is only applicable to H1A Tool.",
+      "example": "tool build-resource-list a10",
+      "args": []
+    },
+    {
+      "name": "camera-track",
+      "category": "Advanced / Unknown",
+      "description": "H1A Tool only. This commands takes a JMA file path and imports it as a camera_track tag. The length of the animation should be at most 16 frames, wich is the maximum number of control points a camera_track tag can contain. The JMA should contain a skeleton made up of a single bone that will change its position each frame. The orientation of the bone will determine the position and rotation of the control point for that index. The name of the JMA file will be the name of the tag.",
+      "example": "tool camera-track cameras\\mytrack.jma",
+      "args": []
+    },
+    {
+      "name": "check-map",
+      "category": "Advanced / Unknown",
+      "description": "H1A Tool only. This checks the scenario tag and tags it references for issues. Errors will be printed to console. You should not consider this to be a complete check for any invalid tag data; invader-build can do a much better job of that.",
+      "example": "tool check-map levels\\test\\my_broke_level\\my_broke_level",
+      "args": []
+    },
+    {
+      "name": "check-shaders",
+      "category": "Advanced / Unknown",
+      "description": "H1A Tool only. Checks all the shader tags in a tag path (including sub-directories). Errors will be printed to console.",
+      "example": "tool check-shaders levels\\test\\my_broke_level",
+      "args": []
+    },
+    {
+      "name": "collision-geometry",
+      "category": "Advanced / Unknown",
+      "description": "Imports a JMS file containing a collision model to a model_collision_geometry tag.",
+      "example": "tool collision-geometry \"scenery\\rock\"",
+      "args": []
+    },
+    {
+      "name": "compile-shaders",
+      "category": "Advanced / Unknown",
+      "description": "H1A Tool only. Compiles the shader files in the shaders subdirectory into fx.bin, psh.bin and vsh.bin. These are not the same as the shader tags and unless you have a working understanding of 3D graphics programming you don't need to touch this command. You would use this to create distributable graphics modifications for your mod which alter how the game is rendered.",
+      "example": "tool compile-shaders dx11 all",
+      "args": []
+    },
+    {
+      "name": "copy-detail-objects",
+      "category": "Advanced / Unknown",
+      "description": "H1A Tool only. This command takes two scenarios and copies detail objects from the source to the destination. The scenarios do not have to be the same but it was probably intended to be used on child scenarios. This command has no output to indicate success or failure so you will have to check if the detail objects got copied correctly yourself.",
+      "example": "tool copy-detail-objects levels\\test\\deathisland\\deathisland levels\\test\\my_deathisland_test\\my_deathisland_test",
+      "args": []
+    },
+    {
+      "name": "dump-metagame-info",
+      "category": "Advanced / Unknown",
+      "description": "H1A Tool only. Dumps information about the \"metagame\" (MCC scoring information) to a file metagame_info_dump.txt.",
+      "example": "tool dump-metagame-info",
+      "args": []
+    },
+    {
+      "name": "export-sounds-to-fsb",
+      "category": "Advanced / Unknown",
+      "description": "H1A uses FMOD as its sound middleware. This command builds a FMOD SoundBank file for that use case.",
+      "example": "tool export-sounds-to-fsb \"sound\\sfx\" # export all sounds in sounds/sfx",
+      "args": []
+    },
+    {
+      "name": "export-structure-mesh-obj",
+      "category": "Advanced / Unknown",
+      "description": "H1A Tool only. This writes a scenario's first BSP's render mesh to OBJ format in standard output. Don't use this to bring models into your 3D software; instead use the Halo Asset Blender Development Toolset to import the BSP tag directly with better support.",
+      "example": "tool export-structure-mesh-obj levels\\tutorial\\tutorial # print in the console",
+      "args": []
+    },
+    {
+      "name": "export-tag-to-xml",
+      "category": "Advanced / Unknown",
+      "description": "H1A Tool only. This exports a tag to XML format, but some data isn't included so should only be used to compare tags and not as an alternative storage format.",
+      "example": "tool export-tag-to-xml tags\\ui\\english.virtual_keyboard english.virtual_keyboard.xml",
+      "args": []
+    },
+    {
+      "name": "export-tags-to-xml",
+      "category": "Advanced / Unknown",
+      "description": "H1A Tool only. Exports multiple tags to multiple XML files.",
+      "example": "tool export-tags-to-xml tags.txt 1",
+      "args": []
+    },
+    {
+      "name": "fbx-to-jms",
+      "category": "Advanced / Unknown",
+      "description": "H1A Tool only. This is used to create JMA files from an FBX file. The start and end keyframes are optional and will default to including the full animation provided. For some details on how to setup the FBX file see FBX for H1A.",
+      "example": "tool fbx-to-jms data\\characters\\cyborg\\models\\cyborg_my_custom_anim.fbx data\\characters\\cyborg\\animations\\cyborg_my_custom_anim.jma",
+      "args": []
+    },
+    {
+      "name": "fbx-to-jms",
+      "category": "Advanced / Unknown",
+      "description": "H1A Tool only. This is used to create JMS files from an FBX file. For some details on how to setup the FBX file see FBX for H1A.",
+      "example": "tool fbx-to-jms data\\characters\\cyborg\\models\\cyborg.fbx data\\characters\\cyborg\\models\\cyborg.jms",
+      "args": []
+    },
+    {
+      "name": "find-dialogue",
+      "category": "Advanced / Unknown",
+      "description": "H1A Tool only. This command allows scanning a directory (including sub-directories) for sound references to add to a dialogue tag.",
+      "example": "tool find-dialogue test\\test_dialogue sound\\dialog\\jackal\\combat2",
+      "args": []
+    },
+    {
+      "name": "hud-messages",
+      "category": "Advanced / Unknown",
+      "description": "Imports UTF-16 LE text files with an .HMT extension into a hud_message_text tag.",
+      "example": "tool hud-messages \"levels\\a10\" \"a10\"",
+      "args": []
+    },
+    {
+      "name": "import-device-defaults",
+      "category": "Advanced / Unknown",
+      "description": "Unknown purpose.",
+      "example": "tool import-device-defaults <(defaults,profiles)> <savegame path>",
+      "args": [
+        {
+          "name": "defaults|profiles",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        },
+        {
+          "name": "savegame path",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "lightmaps",
+      "category": "Advanced / Unknown",
+      "description": "This generates static lighting (lightmaps) for a level's BSP using the radiosity process. Although you can also use Sapien, it's recommended to use Tool since it's faster.",
+      "example": "tool lightmaps \"levels\\test\\tutorial\\tutorial\" tutorial 0 0.1",
+      "args": []
+    },
+    {
+      "name": "model",
+      "category": "Advanced / Unknown",
+      "description": "A JMS file containing model geometry can be compiled into a gbxmodel using the model verb:",
+      "example": "tool model \"scenery\\rock\"",
+      "args": []
+    },
+    {
+      "name": "physics",
+      "category": "Advanced / Unknown",
+      "description": "A JMS file containing collision spheres can be compiled into a physics using the physics verb:",
+      "example": "tool physics \"vehicles\\wraith\"",
+      "args": []
+    },
+    {
+      "name": "plate",
+      "category": "Advanced / Unknown",
+      "description": "H1A Tool only. The plate verb takes a set of images and places them in a sequence surrounded by a border to be imported as either sprites or animated images.",
+      "example": "tool plate \"scenery\\rock\\bitmaps\" 2 0.5 2",
+      "args": []
+    },
+    {
+      "name": "print-tag-to-xml",
+      "category": "Advanced / Unknown",
+      "description": "More or less the same thing as export-tag-to-xml but prints the tag to standard output (the console) instead. This can be useful for shell scripting or integrating with other tooling like git diff.",
+      "example": "tool print-tag-to-xml ui\\english.virtual_keyboard",
+      "args": []
+    },
+    {
+      "name": "process-sounds",
+      "category": "Advanced / Unknown",
+      "description": "This command applies bulk changes in gain or distance settings to sound tags in a directory.",
+      "example": "tool process-sounds \"sound\\sfx\\ambience\\a10\" \"klax\" gain+ 1",
+      "args": []
+    },
+    {
+      "name": "script_doc",
+      "category": "Advanced / Unknown",
+      "description": "H1A Tool only. The script_doc verb can be used to output documentation for script functions and globals. You can also run script_doc in the console to generate hs_doc.txt. The documentation has already been incorporated into this site's H1 scripting page.",
+      "example": "tool script_doc # generate a full hs_doc.txt",
+      "args": []
+    },
+    {
+      "name": "sounds",
+      "category": "Advanced / Unknown",
+      "description": "A 16-bit WAV file can be imported into a sound tag using the sounds verb:",
+      "example": "tool sounds \"vehicles\\ghost\" ogg 1",
+      "args": []
+    },
+    {
+      "name": "sounds_by_type",
+      "category": "Advanced / Unknown",
+      "description": "Similar to the sounds verb, but imports sounds with a given sound class and defaults to the Xbox platform so make sure you have the codec installed.",
+      "example": "tool sounds_by_type \"vehicles\\ghost\" projectile_impact yes",
+      "args": []
+    },
+    {
+      "name": "structure",
+      "category": "Advanced / Unknown",
+      "description": "A JMS file containing level geometry can be imported into a scenario_structure_bsp using the structure verb:",
+      "example": "tool structure levels\\a30 a30_a",
+      "args": []
+    },
+    {
+      "name": "structure-breakable-surfaces",
+      "category": "Advanced / Unknown",
+      "description": "Updates breakable surface data for an existing BSP tag. Saves the tag if only if there was no error.",
+      "example": "tool structure-breakable-surfaces \"levels\\a10\\a10a\"",
+      "args": []
+    },
+    {
+      "name": "structure-lens-flares",
+      "category": "Advanced / Unknown",
+      "description": "This command updates a BSP's lens flare markers using the current lens flare fields in the BSP's referenced shader_environment tags. This can be used to update the markers after changes to the shader fields without having to recompile the BSP entirely with the structure verb.",
+      "example": "tool structure-lens-flares \"levels\\a10\\a10a\"",
+      "args": []
+    },
+    {
+      "name": "unicode-strings",
+      "category": "Advanced / Unknown",
+      "description": "UTF-16 text files containing strings can be imported into a unicode_string_list using the unicode-strings verb:",
+      "example": "tool unicode-strings \"ui\\mp_map_ui\"",
+      "args": []
+    },
+    {
+      "name": "windows-font",
+      "category": "Advanced / Unknown",
+      "description": "This will open a window to preview font packaged installed on your machine. From there you can select a font to package into a valid font tag for Halo to make use of.",
+      "example": "tool windows-font",
+      "args": []
+    },
+    {
+      "name": "zoners_model_upgrade",
+      "category": "Advanced / Unknown",
+      "description": "This verb is only present in HEK Tool. It upgrades models to gbxmodel, likely used to port models from the Xbox edition of the game to PC by Gearbox.",
+      "example": "tool zoners_model_upgrade",
+      "args": []
+    }
+  ]
+}

@@ -1,0 +1,2544 @@
+{
+  "commands": [
+    {
+      "name": "bitmap_single",
+      "category": "Bitmaps",
+      "description": "Imports a single image file and converts it to a bitmap.",
+      "example": "tool bitmap_single",
+      "args": [
+        {
+          "name": "image-file",
+          "type": "path_file",
+          "description": "A local data path to a tif/tiff file with extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bitmaps",
+      "category": "Bitmaps",
+      "description": "TIFF (.tif/.tiff) images can be compiled into a bitmap using the bitmaps verb:",
+      "example": "tool bitmaps \"levels\\multi\\chill\\bitmaps\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to a folder containing a set of images for processing.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bitmaps-debug",
+      "category": "Bitmaps",
+      "description": "This command compiles images like the bitmaps command but was intended to debug the generated plate data. Obsolete as of H3.",
+      "example": "tool bitmaps-debug \"levels\\multi\\chill\\bitmaps\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to a folder containing a set of images for processing.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bitmaps-with-type",
+      "category": "Bitmaps",
+      "description": "This command compiles images like the bitmaps command but allows the user to set the type of bitmap to generate.",
+      "example": "tool bitmaps-with-type \"levels\\multi\\chill\\bitmaps\" 2d",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to a folder containing a set of images for processing.",
+          "required": true
+        },
+        {
+          "name": "type",
+          "type": "enum",
+          "description": "sets the type of bitmap the image will be converted to. This will change how the source image is expected to be setup. The list of valid options is as follows:2d",
+          "required": true,
+          "values": [
+            "2d",
+            "3d",
+            "cubemaps",
+            "sprites",
+            "interface"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "export-bitmap-dds",
+      "category": "Bitmaps",
+      "description": "Takes the processed pixel data from a bitmap tag and dumps it to a DDS image.",
+      "example": "tool export-bitmap-dds \"objects\\characters\\brute\\bitmaps\\brute\" \"C:\\pixel_data_\"",
+      "args": [
+        {
+          "name": "bitmap-tag",
+          "type": "path_tag",
+          "description": "A local tag path to a bitmap tag without extension.",
+          "required": true
+        },
+        {
+          "name": "output-path-prefix",
+          "type": "path_file",
+          "description": "An absolute file path to a directory to output the DDS file to along with a prefix to append to the start of the DDS filename. If only a prefix is given then the file will be dumped at the root of your H3EK directory.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "export-bitmap-pfm",
+      "category": "Bitmaps",
+      "description": "Takes the processed pixel data from a bitmap tag and dumps it to a PFM image.",
+      "example": "tool export-bitmap-pfm \"objects\\characters\\brute\\bitmaps\\brute\" \"F:\\pixel_data_\"",
+      "args": [
+        {
+          "name": "bitmap-tag",
+          "type": "path_tag",
+          "description": "A local tag path to a bitmap tag without extension.",
+          "required": true
+        },
+        {
+          "name": "output-path-prefix",
+          "type": "path_file",
+          "description": "An absolute file path to a directory to output the PFM file to along with a prefix to append to the start of the PFM filename. If only a prefix is given then the file will be dumped at the root of your H3EK directory.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "export-bitmap-tga",
+      "category": "Bitmaps",
+      "description": "Takes the processed pixel data from a bitmap tag and dumps it to a TGA image.",
+      "example": "tool export-bitmap-tga \"objects\\characters\\brute\\bitmaps\\brute\" \"F:\\pixel_data_\"",
+      "args": [
+        {
+          "name": "bitmap-tag",
+          "type": "path_tag",
+          "description": "A local tag path to a bitmap tag without extension.",
+          "required": true
+        },
+        {
+          "name": "output-path-prefix",
+          "type": "path_file",
+          "description": "An absolute file path to a directory to output the TGA file to along with a prefix to append to the start of the TGA filename. If only a prefix is given then the file will be dumped at the root of your H3EK directory.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "export-dxt5-array-from-bitmap-array",
+      "category": "Bitmaps",
+      "description": "Takes the processed pixel data from a bitmap tag and dumps it to PFM images.",
+      "example": "tool export-dxt5-array-from-bitmap-array \"levels\\multi\\cyberdyne\\cyberdyne_lightmap_cyberdyne_16f_lp_array_dxt5\" \"F:\\pixel_data_\"",
+      "args": [
+        {
+          "name": "bitmap-tag",
+          "type": "path_tag",
+          "description": "A local tag path to a lightmap bitmap tag without extension.",
+          "required": true
+        },
+        {
+          "name": "output-path-prefix",
+          "type": "path_file",
+          "description": "An absolute file path to a directory to output the file to along with a prefix to append to the start of the filename. If only a prefix is given then the file will be dumped at the root of your H3EK directory.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "build-cache-file",
+      "category": "Cache Files",
+      "description": "A scenario can be compiled into a map using the build-cache-file verb. Simply provide your scenario's tag path.",
+      "example": "tool build-cache-file \"levels\\multi\\chill\\chill\" pc",
+      "args": [
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to your scenario without the file extension",
+          "required": true
+        },
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "The platform this cache file is being built for. If nothing is set then it will default to pc. This is an optional argument",
+          "required": false,
+          "values": [
+            "pc"
+          ]
+        },
+        {
+          "name": "audio-configuration",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "target-language",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "dedicated-server",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "compress_more|compress_most",
+          "type": "enum",
+          "description": "??? This is an optional argument",
+          "required": false,
+          "values": [
+            "compress_more",
+            "compress_most"
+          ]
+        },
+        {
+          "name": "use-fmod-data",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "build-cache-file-cache",
+      "category": "Cache Files",
+      "description": "Builds the resource maps and associated cache files needed for tag sharing.",
+      "example": "tool build-cache-file-cache pc",
+      "args": [
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "The platform this cache file is being built for. If nothing is set then it will default to pc. This is an optional argument",
+          "required": false,
+          "values": [
+            "pc"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "build-cache-file-cache-campaign-second",
+      "category": "Cache Files",
+      "description": "Builds resources files and cache files for campaign maps. Requires build-cache-file-cache-shared-first to be done first.",
+      "example": "tool build-cache-file-cache-campaign-second pc",
+      "args": [
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "The platform this cache file is being built for. If nothing is set then it will default to pc. This is an optional argument",
+          "required": false,
+          "values": [
+            "pc"
+          ]
+        },
+        {
+          "name": "target-language",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "minor-version-number",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "optimizable",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "dedicated-server",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "use-fmod-data",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "build-cache-file-cache-custom",
+      "category": "Cache Files",
+      "description": "Builds cache files needed for tag sharing.",
+      "example": "tool build-cache-file-cache-custom",
+      "args": [
+        {
+          "name": "shared-manifest-list",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "campaign-manifest-list",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "The platform this cache file is being built for. If nothing is set then it will default to pc. This is an optional argument",
+          "required": false,
+          "values": [
+            "pc"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "build-cache-file-cache-language-version",
+      "category": "Cache Files",
+      "description": "Builds the resource maps and associated cache files needed for tag sharing.",
+      "example": "tool build-cache-file-cache-language-version english \"\" pc",
+      "args": [
+        {
+          "name": "target-language",
+          "type": "string",
+          "description": "self explanatory",
+          "required": true
+        },
+        {
+          "name": "minor-version-number",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "The platform this cache file is being built for. If nothing is set then it will default to pc. This is an optional argument",
+          "required": false,
+          "values": [
+            "pc"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "build-cache-file-cache-shared-first",
+      "category": "Cache Files",
+      "description": "Builds the resource maps and associated cache files needed for tag sharing.",
+      "example": "tool build-cache-file-cache-shared-first pc",
+      "args": [
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "The platform this cache file is being built for. If nothing is set then it will default to pc. This is an optional argument",
+          "required": false,
+          "values": [
+            "pc"
+          ]
+        },
+        {
+          "name": "target-language",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "minor-version-number",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "sound-config",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "optimizable",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "dedicated-server",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "use-fmod-data",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "build-cache-file-cache-sounds",
+      "category": "Cache Files",
+      "description": "Builds the resource maps and associated cache files needed for tag sharing. Requires build-cache-file-cache-sounds-index to be done first.",
+      "example": "tool build-cache-file-cache-sounds pc",
+      "args": [
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "The platform this cache file is being built for. If nothing is set then it will default to pc. This is an optional argument",
+          "required": false,
+          "values": [
+            "pc"
+          ]
+        },
+        {
+          "name": "target-language",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "minor-version-number",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "dedicated-server",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "use-fmod-data",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "build-cache-file-cache-version",
+      "category": "Cache Files",
+      "description": "Build a cache files with a specific version",
+      "example": "tool build-cache-file-cache-version \"\" pc",
+      "args": [
+        {
+          "name": "minor-version-number",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "The platform this cache file is being built for. If nothing is set then it will default to pc. This is an optional argument",
+          "required": false,
+          "values": [
+            "pc"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "build-cache-file-for-cubemaps",
+      "category": "Cache Files",
+      "description": "Builds the provided scenario along with the associated cache files needed for tag sharing cubemap data.",
+      "example": "tool build-cache-file-for-cubemaps \"levels\\multi\\chill\\chill\" pc",
+      "args": [
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario tag without extension.",
+          "required": true
+        },
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "The platform this cache file is being built for. If nothing is set then it will default to pc. This is an optional argument",
+          "required": false,
+          "values": [
+            "pc"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "build-cache-file-generate-dlc-layout",
+      "category": "Cache Files",
+      "description": "Crashes",
+      "example": "tool build-cache-file-generate-dlc-layout \"\" pc",
+      "args": [
+        {
+          "name": "map-name",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "The platform this cache file is being built for. If nothing is set then it will default to pc. This is an optional argument",
+          "required": false,
+          "values": [
+            "pc"
+          ]
+        },
+        {
+          "name": "dedicated-server",
+          "type": "optional_string",
+          "description": "??? This is an optional argument.",
+          "required": false
+        },
+        {
+          "name": "use-fmod-data",
+          "type": "optional_string",
+          "description": "??? This is an optional argument.",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "build-cache-file-generate-main-menu-layout",
+      "category": "Cache Files",
+      "description": "Crashes",
+      "example": "tool build-cache-file-generate-main-menu-layout \"\" pc",
+      "args": [
+        {
+          "name": "map-name",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "The platform this cache file is being built for. If nothing is set then it will default to pc. This is an optional argument",
+          "required": false,
+          "values": [
+            "pc"
+          ]
+        },
+        {
+          "name": "dedicated-server",
+          "type": "optional_string",
+          "description": "??? This is an optional argument.",
+          "required": false
+        },
+        {
+          "name": "use-fmod-data",
+          "type": "optional_string",
+          "description": "??? This is an optional argument.",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "build-cache-file-generate-new-layout",
+      "category": "Cache Files",
+      "description": "Crashes",
+      "example": "tool build-cache-file-generate-new-layout \"\" pc",
+      "args": [
+        {
+          "name": "map-name",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "The platform this cache file is being built for. If nothing is set then it will default to pc. This is an optional argument",
+          "required": false,
+          "values": [
+            "pc"
+          ]
+        },
+        {
+          "name": "dedicated-server",
+          "type": "optional_string",
+          "description": "??? This is an optional argument.",
+          "required": false
+        },
+        {
+          "name": "use-fmod-data",
+          "type": "optional_string",
+          "description": "??? This is an optional argument.",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "build-cache-file-language",
+      "category": "Cache Files",
+      "description": "A scenario can be compiled into a map using the build-cache-file-language verb. Simply provide your scenario's tag path.",
+      "example": "tool build-cache-file-language english \"levels\\multi\\chill\\chill\" pc",
+      "args": [
+        {
+          "name": "target-language",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario tag without extension.",
+          "required": true
+        },
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "The platform this cache file is being built for. If nothing is set then it will default to pc. This is an optional argument",
+          "required": false,
+          "values": [
+            "pc"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "build-cache-file-language-version",
+      "category": "Cache Files",
+      "description": "A scenario can be compiled into a map using the build-cache-file-language-version verb. Simply provide your scenario's tag path.",
+      "example": "tool build-cache-file-language-version english \"\" \"levels\\multi\\chill\\chill\" pc",
+      "args": [
+        {
+          "name": "target-language",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "minor-version-number",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario tag without extension.",
+          "required": true
+        },
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "The platform this cache file is being built for. If nothing is set then it will default to pc. This is an optional argument",
+          "required": false,
+          "values": [
+            "pc"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "build-cache-file-language-version-optimizable-use-sharing",
+      "category": "Cache Files",
+      "description": "Crashes",
+      "example": "tool build-cache-file-language-version-optimizable-use-sharing english \"\" \"levels\\multi\\chill\\chill\" pc",
+      "args": [
+        {
+          "name": "target-language",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "minor-version-number",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario tag without extension.",
+          "required": true
+        },
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "The platform this cache file is being built for. If nothing is set then it will default to pc. This is an optional argument",
+          "required": false,
+          "values": [
+            "pc"
+          ]
+        },
+        {
+          "name": "sound-config",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "dedicated-server",
+          "type": "optional_string",
+          "description": "???",
+          "required": false
+        },
+        {
+          "name": "use-fmod-data",
+          "type": "optional_string",
+          "description": "???",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "build-cache-file-language-version-sharing-main-menu",
+      "category": "Cache Files",
+      "description": "Crashes",
+      "example": "tool build-cache-file-language-version-sharing-main-menu english \"\" \"levels\\multi\\chill\\chill\" pc",
+      "args": [
+        {
+          "name": "target-language",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "minor-version-number",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario tag without extension.",
+          "required": true
+        },
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "The platform this cache file is being built for. If nothing is set then it will default to pc. This is an optional argument",
+          "required": false,
+          "values": [
+            "pc"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "build-cache-file-optimize-post-link",
+      "category": "Cache Files",
+      "description": "Crashes",
+      "example": "tool build-cache-file-optimize-post-link \"chill\" pc",
+      "args": [
+        {
+          "name": "map-name",
+          "type": "string",
+          "description": "The filename of a map file located in your maps folder without extension",
+          "required": true
+        },
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "The platform this cache file is being built for. If nothing is set then it will default to pc. This is an optional argument",
+          "required": false,
+          "values": [
+            "pc"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "build-cache-file-pilot",
+      "category": "Cache Files",
+      "description": "Crashes",
+      "example": "tool build-cache-file-pilot \"levels\\multi\\chill\\chill\" pc",
+      "args": [
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario tag without extension.",
+          "required": true
+        },
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "The platform this cache file is being built for. If nothing is set then it will default to pc. This is an optional argument",
+          "required": false,
+          "values": [
+            "pc"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "build-cache-file-use-sharing",
+      "category": "Cache Files",
+      "description": "crashes",
+      "example": "tool build-cache-file-use-sharing \"levels\\multi\\chill\\chill\" pc",
+      "args": [
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to your scenario without the file extension",
+          "required": true
+        },
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "The platform this cache file is being built for. If nothing is set then it will default to pc. This is an optional argument",
+          "required": false,
+          "values": [
+            "pc"
+          ]
+        },
+        {
+          "name": "target-language",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "minor-version-number",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "sound-config",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "dedicated-server",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "use-fmod-data",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "dump-binary",
+      "category": "Diagnostics",
+      "description": "Dumps binary files to a C style array. Meant for developers.",
+      "example": "tool dump-binary \"C:\\processed_pixel_data.bin\" \"C:\\processed_pixel_data_output.txt\"",
+      "args": [
+        {
+          "name": "binary-file",
+          "type": "path_file",
+          "description": "An absolute file path to a binary file with extension.",
+          "required": true
+        },
+        {
+          "name": "output-file",
+          "type": "path_file",
+          "description": "An absolute file path to an output location with filename and extension",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "export-game-variant-settings",
+      "category": "Import / Export",
+      "description": "Takes a multiplayer_variant_settings_interface_definition tag and outputs some debug info in command prompt.",
+      "example": "tool export-game-variant-settings \"multiplayer\\game_variant_settings\\slayer\\slayer.multiplayer_variant_settings_interface_definition\"",
+      "args": [
+        {
+          "name": "tag-file",
+          "type": "path_tag",
+          "description": "A local tag path to a `multiplayer_variant_settings_interface_definition tag with extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "export-tag-to-xml",
+      "category": "Import / Export",
+      "description": "Takes a tag and dumps the contents to an XML format. Use this for easy comparisons.",
+      "example": "tool export-tag-to-xml \"F:\\H3EK\\tags\\objects\\characters\\masterchief\\masterchief.render_model\" \"F:\\masterchief.xml\"",
+      "args": [
+        {
+          "name": "tag-file",
+          "type": "path_tag",
+          "description": "An absolute tag path to a tag with extension.",
+          "required": true
+        },
+        {
+          "name": "output-file",
+          "type": "path_file",
+          "description": "An absolute file path to an output directory with file name and extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-collision",
+      "category": "Models",
+      "description": "Multiple directories can have their collision files compiled in a single run using this command.",
+      "example": "tool bulk-collision \"objects\\multi\\jmi_Test.JMI\"",
+      "args": [
+        {
+          "name": "jmi-file",
+          "type": "path_file",
+          "description": "A local data path to where the JMI file is located.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-import-crates",
+      "category": "Models",
+      "description": "Compile multiple source directories in a single run to generate a crate tag and all the relevant tags involved. Render tags will use PRT",
+      "example": "tool bulk-import-crates \"objects\\multi\\jmi_Test.JMI\"",
+      "args": [
+        {
+          "name": "jmi-file",
+          "type": "path_file",
+          "description": "A local data path to where the JMI file is located.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-import-crates-draft",
+      "category": "Models",
+      "description": "Compile multiple source directories in a single run to generate a crate tag and all the relevant tags involved. Render tags will not use PRT",
+      "example": "tool bulk-import-crates-draft \"objects\\multi\\jmi_Test.JMI\"",
+      "args": [
+        {
+          "name": "jmi-file",
+          "type": "path_file",
+          "description": "A local data path to where the JMI file is located.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-import-crates-folder",
+      "category": "Models",
+      "description": "Generates a crate tag and compiles the render, collision, and physics directory of a model in a single run. Just point it at the root of your model folder and go! Render tags will use PRT",
+      "example": "tool bulk-import-crates-folder \"objects\\multi\\world_node_a\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to the root of a model source directory.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-import-crates-folder-draft",
+      "category": "Models",
+      "description": "Generates a crate tag and compiles the render, collision, and physics directory of a model in a single run. Just point it at the root of your model folder and go! Render tags will not use PRT",
+      "example": "tool bulk-import-crates-folder-draft \"objects\\multi\\world_node_a\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to the root of a model source directory.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-import-model-folder",
+      "category": "Models",
+      "description": "Generates a model tag and compiles the render, collision, and physics directory of a model in a single run. Just point it at the root of your model folder and go! Render tags will use PRT",
+      "example": "tool bulk-import-model-folder \"objects\\multi\\world_node_a\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to the root of a model source directory.",
+          "required": true
+        },
+        {
+          "name": "skip-coarse-optimization|-s",
+          "type": "enum",
+          "description": "???",
+          "required": false,
+          "values": [
+            "skip-coarse-optimization",
+            "-s"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "bulk-import-model-folder-draft",
+      "category": "Models",
+      "description": "Generates a model tag and compiles the render, collision, and physics directory of a model in a single run. Just point it at the root of your model folder and go! Render tags will not use PRT",
+      "example": "tool bulk-import-model-folder-draft \"objects\\multi\\world_node_a\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to the root of a model source directory.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-import-models",
+      "category": "Models",
+      "description": "Compile multiple source directories in a single run to generate a model tag and all the relevant tags involved. Render tags will use PRT",
+      "example": "tool bulk-import-models \"objects\\multi\\jmi_Test.JMI\"",
+      "args": [
+        {
+          "name": "jmi-file",
+          "type": "path_file",
+          "description": "A local data path to where the JMI file is located.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-import-models-draft",
+      "category": "Models",
+      "description": "Compile multiple source directories in a single run to generate a model tag and all the relevant tags involved. Render tags will not use PRT",
+      "example": "tool bulk-import-models-draft \"objects\\multi\\jmi_Test.JMI\"",
+      "args": [
+        {
+          "name": "jmi-file",
+          "type": "path_file",
+          "description": "A local data path to where the JMI file is located.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-import-scenery",
+      "category": "Models",
+      "description": "Compile multiple source directories in a single run to generate a scenery tag and all the relevant tags involved. Render tags will use PRT",
+      "example": "tool bulk-import-scenery \"objects\\multi\\jmi_Test.JMI\"",
+      "args": [
+        {
+          "name": "jmi-file",
+          "type": "path_file",
+          "description": "A local data path to where the JMI file is located.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-import-scenery-draft",
+      "category": "Models",
+      "description": "Compile multiple source directories in a single run to generate a scenery tag and all the relevant tags involved. Render tags will not use PRT",
+      "example": "tool bulk-import-scenery-draft \"objects\\multi\\jmi_Test.JMI\"",
+      "args": [
+        {
+          "name": "jmi-file",
+          "type": "path_file",
+          "description": "A local data path to where the JMI file is located.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-import-scenery-folder",
+      "category": "Models",
+      "description": "Generates a scenery tag and compiles the render, collision, and physics directory of a model in a single run. Just point it at the root of your model folder and go! Render tags will use PRT",
+      "example": "tool bulk-import-scenery-folder \"objects\\multi\\world_node_a\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to the root of a model source directory.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-import-scenery-folder-draft",
+      "category": "Models",
+      "description": "Generates a scenery tag and compiles the render, collision, and physics directory of a model in a single run. Just point it at the root of your model folder and go! Render tags will not use PRT",
+      "example": "tool bulk-import-scenery-folder-draft \"objects\\multi\\world_node_a\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to the root of a model source directory.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-physics",
+      "category": "Models",
+      "description": "Multiple directories can have their physics files compiled in a single run using this command.",
+      "example": "tool bulk-physics \"objects\\multi\\jmi_Test.JMI\"",
+      "args": [
+        {
+          "name": "jmi-file",
+          "type": "path_file",
+          "description": "A local data path to where the JMI file is located.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-render",
+      "category": "Models",
+      "description": "Multiple directories can have their render files compiled in a single run using this command. Render tags will not use PRT",
+      "example": "tool bulk-render \"objects\\multi\\jmi_Test.JMI\"",
+      "args": [
+        {
+          "name": "jmi-file",
+          "type": "path_file",
+          "description": "A local data path to where the JMI file is located.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "bulk-render-final",
+      "category": "Models",
+      "description": "Multiple directories can have their render files compiled in a single run using this command. Render tags will use PRT",
+      "example": "tool bulk-render-final \"objects\\multi\\jmi_Test.JMI\"",
+      "args": [
+        {
+          "name": "jmi-file",
+          "type": "path_file",
+          "description": "A local data path to where the JMI file is located.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "camera-track",
+      "category": "Models",
+      "description": "This commands takes a JMA file directly and converts it to a camera_track for the game. The length of the animation should be at most 16 as that is the max number of control points a camera track tag can contain. The JMA should contain a skeleton made up of a single bone that will change its position each frame. The orientation of the bone will determine the position and rotation of the control point for that index. The name of the JMA file will be the name of the tag. Keep in mind that the extension check for this command is case sensitive. Keep the JMA portion lower case.",
+      "example": "tool camera-track camera\\vehicle_longsword.jma",
+      "args": [
+        {
+          "name": "source-file",
+          "type": "path_file",
+          "description": "A local data path to where the JMA file is located.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "collision",
+      "category": "Models",
+      "description": "A JMS file containing a collision model can be compiled into a collision model tag",
+      "example": "tool collision \"objects\\characters\\masterchief\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to the root of a model source directory.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "decorator-set-link-render-model",
+      "category": "Models",
+      "description": "Sets the render_model tag reference in a decorator-set tag.",
+      "example": "tool decorator-set-link-render-model \"levels\\shared\\decorators\\barnacles\\barnacles\" \"levels\\shared\\decorators\\barnacles\\barnacles\"",
+      "args": [
+        {
+          "name": "decorator-set",
+          "type": "path_tag",
+          "description": "A local tag path to a decorator_set tag file without extension.",
+          "required": true
+        },
+        {
+          "name": "render-model",
+          "type": "path_tag",
+          "description": "A local tag path to a render_model tag file without extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "extract-import-info",
+      "category": "Models",
+      "description": "Dumps the stored import-info data used to originally import the tag file. Only tags that contain valid import-info can use this. This means only render_model, collision_model, physics_model, and scenario_structure_bsp.",
+      "example": "tool extract-import-info \"F:\\H3EK\\tags\\objects\\characters\\masterchief\\masterchief.render_model\"",
+      "args": [
+        {
+          "name": "tag-file",
+          "type": "path_file",
+          "description": "An absolute file path to a tag containing valid import info.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "extract-render-data",
+      "category": "Models",
+      "description": "Dumps the stored import-info data used to originally import the render_model file. Only render_model tags that contain valid import-info can use this.",
+      "example": "tool extract-render-data \"objects\\characters\\masterchief\\masterchief\"",
+      "args": [
+        {
+          "name": "render-model",
+          "type": "path_tag",
+          "description": "A local tag path to a render_model tag without extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "fbx-to-ass",
+      "category": "Models",
+      "description": "This command takes an FBX and converts it to an ASS file for Halo 3 level importing. Use this if you don't have access to an export script.",
+      "example": "tool fbx-to-ass \"F:\\dreamer.fbx\" \"F:\\dreamer.ASS\"",
+      "args": [
+        {
+          "name": "fbx",
+          "type": "path_file",
+          "description": "An absolute filepath to a valid FBX file.",
+          "required": true
+        },
+        {
+          "name": "ass",
+          "type": "path_file",
+          "description": "An absolute filepath that includes name and extension to write the output to.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "fbx-to-jma",
+      "category": "Models",
+      "description": "This command takes an FBX and converts it to an animation source file for Halo 3 importing. Use this if you don't have access to an export script. Be aware that the extension can be any of the available extensions for animation importing. It does not specifically needs to be JMA. You can type JMO as the extension and the output is still valid.",
+      "example": "tool fbx-to-jma \"E:\\my_fbx_files\\cyborg_dab.fbx\" F:\\cyborg_my_custom_anim.JMA",
+      "args": [
+        {
+          "name": "fbx",
+          "type": "path_file",
+          "description": "An absolute filepath to a valid FBX file.",
+          "required": true
+        },
+        {
+          "name": "jma",
+          "type": "path_file",
+          "description": "An absolute filepath that includes name and extension to write the output to.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "fbx-to-jmi",
+      "category": "Models",
+      "description": "This command takes an FBX and converts it to a JMI source file for Halo 3 importing. Use this if you don't have access to an export script.",
+      "example": "tool fbx-to-jmi \"E:\\my_fbx_files\\scenery_set.fbx\" F:\\scenery_set.JMI",
+      "args": [
+        {
+          "name": "fbx",
+          "type": "path_file",
+          "description": "An absolute filepath to a valid FBX file.",
+          "required": true
+        },
+        {
+          "name": "jmi",
+          "type": "path_file",
+          "description": "An absolute filepath that includes name and extension to write the output to.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "fbx-to-jms",
+      "category": "Models",
+      "description": "FBX to JMS",
+      "example": "tool fbx-to-jms render \"F:\\dreamer.fbx\" \"F:\\dreamer.JMS\"",
+      "args": [
+        {
+          "name": "render,collision,physics-or-all",
+          "type": "string",
+          "description": "Sets the type of geo this FBX is for. Use either render, collision, physics, or all only. The geo class set will determine what geometry gets exported from the JMS",
+          "required": true
+        },
+        {
+          "name": "fbx",
+          "type": "path_file",
+          "description": "An absolute filepath to a valid FBX file.",
+          "required": true
+        },
+        {
+          "name": "jms",
+          "type": "path_file",
+          "description": "An absolute filepath that includes name and extension to write the output to.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "fp-model-animations",
+      "category": "Models",
+      "description": "This command compiles animation data. Use this to import first-person weapon animations.",
+      "example": "tool fp-model-animations \"objects\\characters\\masterchief\\fp\\weapons\\rifle\\fp_assault_rifle\" \"objects\\characters\\masterchief\\fp\" \"objects\\weapons\\rifle\\assault_rifle\\fp_assault_rifle\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to a folder that has a subfolder named animations",
+          "required": true
+        },
+        {
+          "name": "character-directory",
+          "type": "path_data",
+          "description": "A local data path to a folder that has a subfolder named render",
+          "required": true
+        },
+        {
+          "name": "weapon-directory",
+          "type": "path_data",
+          "description": "A local data path to a folder that has a subfolder named render",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "model-animations",
+      "category": "Models",
+      "description": "This command compiles animation data. Use this to import animations for characters, machines, vehicles, and other objects.",
+      "example": "tool model-animations \"objects\\characters\\masterchief\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to the root of a model source directory",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "structure",
+      "category": "Models",
+      "description": "A ASS file containing level geometry can be compiled into a scenario_structure_bsp tag.",
+      "example": "tool structure \"levels\\multi\\example\\structure\\example.ASS\"",
+      "args": [
+        {
+          "name": "ass-file",
+          "type": "path_file",
+          "description": "A local data path to a ASS file with extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "compile-shader",
+      "category": "Shaders",
+      "description": "Compile the template needed for a specific shader.",
+      "example": "tool compile-shader \"objects\\block\\shaders\\discard\" \"win\"",
+      "args": [
+        {
+          "name": "render-method",
+          "type": "string",
+          "description": "Shader to compile",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "estimate-overdraw-threshold",
+      "category": "Shaders",
+      "description": "Requires the shader compiler fix, but it's very useful seems to be designed for Xenon.",
+      "example": "tool estimate-overdraw-threshold \"objects\\weapons\\turret\\flamethrower\\fx\\projectile\"",
+      "args": [
+        {
+          "name": "effect",
+          "type": "path_tag",
+          "description": "A local tag path to an effect tag without extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "count-all-class-sounds",
+      "category": "Sounds",
+      "description": "Goes through all of the sound tags in a directory and prints how many sounds belong to a specific class",
+      "example": "tool count-all-class-sounds \"sound\\ambience\"",
+      "args": [
+        {
+          "name": "root-path",
+          "type": "path_tag",
+          "description": "A local tag path to the root of a directory containing sound tags or child folders with sound tags.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "count-class-sounds",
+      "category": "Sounds",
+      "description": "Goes through all of the sound tags in the tags directory and prints the paths for sounds that use a specific sound class",
+      "example": "tool count-class-sounds projectile_impact",
+      "args": [
+        {
+          "name": "sound-class",
+          "type": "string",
+          "description": "The sound class you want to specify. The list is as follows.Placeholder",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "count-sound-tags",
+      "category": "Sounds",
+      "description": "Prints all existing sound tags in a directory.",
+      "example": "tool count-sound-tags \"sound\\ambience\"",
+      "args": [
+        {
+          "name": "root-path",
+          "type": "path_tag",
+          "description": "A local tag path to the root of a directory containing sound tags or child folders with sound tags.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "dialogue-import",
+      "category": "Sounds",
+      "description": "Collects all sound tag paths and adds them to a generated dialogue tag.",
+      "example": "tool dialogue-import \"sound\\dialog\\combat\\brute_bloodthirsty\"",
+      "args": [
+        {
+          "name": "root-directory",
+          "type": "path_tag",
+          "description": "A local tag path to a root directory containing sound tags. A dialogue tag is generated adjacent to this root directory with the same name, e.g. sound\\dialog\\combat\\brute_bloodthirsty.dialogue.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "extract-lpc-data",
+      "category": "Sounds",
+      "description": "Dumps a file called test.aif in the root of H3EK. This is likely to be linear predictive coding data for the sound file but this hasn't be verified.",
+      "example": "tool extract-lpc-data \"sound_test\\aiff\\soundtest.aiff\"",
+      "args": [
+        {
+          "name": "sound-file",
+          "type": "path_file",
+          "description": "A local data path to an AIF/AIFF file.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "reimport-sounds",
+      "category": "Sounds",
+      "description": "Goes through all sound tags in a directory or child directories. Any sound tags that are found will have their sound files from data reimported.",
+      "example": "tool reimport-sounds \"sound\\dialog\\combat\" default downmix unit_dialog english",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local tag path to a directory or child directory containing sound tags.",
+          "required": true
+        },
+        {
+          "name": "compressor",
+          "type": "string",
+          "description": "Specify the compressor (default, pcm, xma, xma2)",
+          "required": true
+        },
+        {
+          "name": "downmix",
+          "type": "optional_string",
+          "description": "Down mix the adpcm sample (downmix). This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "bank:suffix-where-suffix-is-a-fmod-bank-suffix",
+          "type": "optional_string",
+          "description": "Specify the fmod soundbank that should contain this sound. This is an optional argument",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "reimport-sounds",
+      "category": "Sounds",
+      "description": "Reimports the specified sound if sound data was found in the data folder.",
+      "example": "tool reimport-sounds \"sound\\dialog\\combat\" default downmix unit_dialog english",
+      "args": [
+        {
+          "name": "source-file",
+          "type": "path_tag",
+          "description": "A local tag path to a sound tag without extension.",
+          "required": true
+        },
+        {
+          "name": "compressor",
+          "type": "string",
+          "description": "Specify the compressor (default, pcm, xma, xma2)",
+          "required": true
+        },
+        {
+          "name": "downmix",
+          "type": "optional_string",
+          "description": "Down mix the adpcm sample (downmix). This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "bank:suffix-where-suffix-is-a-fmod-bank-suffix",
+          "type": "optional_string",
+          "description": "Specify the fmod soundbank that should contain this sound. This is an optional argument",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "reimport-sounds-for-senario",
+      "category": "Sounds",
+      "description": "Reimports the sounds for a scenario if the sound data is found in the data folder.",
+      "example": "tool reimport-sounds-for-senario \"levels\\multi\\riverworld\\riverworld\" default downmix music sfx",
+      "args": [
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario without extension.",
+          "required": true
+        },
+        {
+          "name": "compressor",
+          "type": "string",
+          "description": "Specify the compressor (default, pcm, xma, xma2)",
+          "required": true
+        },
+        {
+          "name": "downmix",
+          "type": "optional_string",
+          "description": "Down mix the adpcm sample (downmix). This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "Only reimport the sample if it matches the specified type criteria.",
+          "required": true
+        },
+        {
+          "name": "bank:suffix-where-suffix-is-a-fmod-bank-suffix",
+          "type": "optional_string",
+          "description": "Specify the fmod soundbank that should contain this sound. This is an optional argument",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "set-sound-class",
+      "category": "Sounds",
+      "description": "Grabs all the sound tags in a directory and changes the class to whatever was specified by the user.",
+      "example": "tool set-sound-class sound_test ??? projectile_impact",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local tag path to the root of a directory containing sound tags or child folders with sound tags.",
+          "required": true
+        },
+        {
+          "name": "path-spec",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "new-sound-class",
+          "type": "string",
+          "description": "A sound class string.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "sound-multi-layer",
+      "category": "Sounds",
+      "description": "Imports sound files in a directory with the import type set to multi-layer. All sound files the source directory and child directories will be combined into one sound file.",
+      "example": "tool sound-multi-layer \"sound_test\" projectile_impact sfx",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "A local data path to a directory or child directories containing sound files. Supported extensions are WAV saved as 16 bit PCM and AIFF.",
+          "required": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "Set the sound class",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "sound-single",
+      "category": "Sounds",
+      "description": "Imports a single sound file",
+      "example": "tool sound-single \"sound_test\\sound_file.aiff\" projectile_impact sfx",
+      "args": [
+        {
+          "name": "source-file",
+          "type": "path_file",
+          "description": "A local data path to the sound file with extension. Supported extensions are WAV saved as 16 bit PCM and AIFF.",
+          "required": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "Set the sound class",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "sounds-music",
+      "category": "Sounds",
+      "description": "Generates an empty sound looping tag from the folders in data. Probably an error?",
+      "example": "tool sounds-music \"sound_test\" projectile_impact sfx",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "Set the sound class",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "sounds-one-shot",
+      "category": "Sounds",
+      "description": "Imports sound files in a directory with the import type set to single-shot. Each sound file will get its own sound tag.",
+      "example": "tool sounds-one-shot \"sound_test\" projectile_impact sfx",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "Set the sound class",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "sounds-single-layer",
+      "category": "Sounds",
+      "description": "Imports sound files in a directory with the import type set to single-layer. Each directory will get its own sound tag.",
+      "example": "tool sounds-single-layer \"sound_test\" projectile_impact sfx",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "Set the sound class",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "sounds-single-mixed",
+      "category": "Sounds",
+      "description": "Imports sound files in a directory with the import type set to single-layer. Each directory will get its own sound tag.",
+      "example": "tool sounds-single-mixed \"sound_test\" projectile_impact sfx",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "Set the sound class",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "cubemaps",
+      "category": "Structure",
+      "description": "Generates cubemaps to be used by dynamic cubemap enabled shaders. This command requires some setup before you can use it. Do the following:",
+      "example": "tool cubemaps \"levels\\multi\\guardian\\guardian\" \"F:\\H3EK\\cubemaps\"",
+      "args": [
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario file without extension.",
+          "required": true
+        },
+        {
+          "name": "input-folder",
+          "type": "path_file",
+          "description": "An absolute path to a folder containing cubemap DDS files generated by standalone",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "export-structure-mesh-obj",
+      "category": "Structure",
+      "description": "Takes a scenario tag and finds the structure_bsp referenced. The mesh is then outputted in an OBJ file format in tool output.",
+      "example": "tool export-structure-mesh-obj \"levels\\multi\\snowbound\\snowbound\"",
+      "args": [
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario tag without extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "faux_data_sync",
+      "category": "Structure",
+      "description": "Before you can start the lightmapping process you need to ensure certain data is synced. If the data is synced already this process is nearly instantaneous otherwise it can take a while depending on the BSP.",
+      "example": "tool faux_data_sync \"levels\\multi\\riverworld\\riverworld\" \"riverworld\"",
+      "args": [
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario without extension",
+          "required": true
+        },
+        {
+          "name": "bsp-name",
+          "type": "string",
+          "description": "The name of a BSP tag referenced by the scenario tag",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "analyze-cache-file-sharing",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool analyze-cache-file-sharing",
+      "args": [
+        {
+          "name": "starting-cache-file",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "ending-cache-file",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "analyze-font",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool analyze-font",
+      "args": [
+        {
+          "name": "font-file",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "analyze-font-table",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool analyze-font-table",
+      "args": [
+        {
+          "name": "font-table-to-analyze",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "analyze-fonts",
+      "category": "Advanced / Unknown",
+      "description": "Crashes",
+      "example": "tool analyze-fonts",
+      "args": []
+    },
+    {
+      "name": "analyze-implicit-sharing",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool analyze-implicit-sharing",
+      "args": [
+        {
+          "name": "tag-list",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "build-and-deploy-network-files",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool build-and-deploy-network-files",
+      "args": []
+    },
+    {
+      "name": "build-and-deploy-retail-network-files",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool build-and-deploy-retail-network-files",
+      "args": []
+    },
+    {
+      "name": "build-and-deploy-tracked-network-files",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool build-and-deploy-tracked-network-files",
+      "args": []
+    },
+    {
+      "name": "build-animation-database",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool build-animation-database",
+      "args": []
+    },
+    {
+      "name": "build-cache-file-cache-sounds-index",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool build-cache-file-cache-sounds-index",
+      "args": [
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "append",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "sound-configuration",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "The platform this cache file is being built for. If nothing is set then it will default to pc. This is an optional argument",
+          "required": false,
+          "values": [
+            "pc"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "build-cache-file-link",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool build-cache-file-link \"levels\\multi\\chill\\chill\" pc",
+      "args": [
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario tag without extension.",
+          "required": true
+        },
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "The platform this cache file is being built for. If nothing is set then it will default to pc. This is an optional argument",
+          "required": false,
+          "values": [
+            "pc"
+          ]
+        },
+        {
+          "name": "dedicated-server",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        },
+        {
+          "name": "use-fmod-data",
+          "type": "optional_string",
+          "description": "??? This is an optional argument",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "build-cache-file-optimize",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool build-cache-file-optimize \"chill\" pc",
+      "args": [
+        {
+          "name": "map-name",
+          "type": "string",
+          "description": "The filename of a map file located in your maps folder without extension",
+          "required": true
+        },
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "The platform this cache file is being built for. If nothing is set then it will default to pc. This is an optional argument",
+          "required": false,
+          "values": [
+            "pc"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "build-cache-file-profile",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool build-cache-file-profile \"levels\\multi\\chill\\chill\"",
+      "args": [
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario tag without extension.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "cache-asset-depot-thumbnails",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool cache-asset-depot-thumbnails",
+      "args": [
+        {
+          "name": "tag-file",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "cache-asset-depot-thumbnails-from-directory",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool cache-asset-depot-thumbnails-from-directory",
+      "args": [
+        {
+          "name": "tag-directory",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "cache-asset-depot-thumbnails-list",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool cache-asset-depot-thumbnails-list",
+      "args": [
+        {
+          "name": "tag-list",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "check-all-tags",
+      "category": "Advanced / Unknown",
+      "description": "Checks if your tags are valid.",
+      "example": "tool check-all-tags",
+      "args": []
+    },
+    {
+      "name": "convert-tag-files-explicit-pilot",
+      "category": "Advanced / Unknown",
+      "description": "Converts tags from one backend to another. E.g. loose tag files to the monolithic backend. Seems to crash, maybe will be fixed in the future. Likely not useful for non-devs.",
+      "example": "tool convert-tag-files-explicit-pilot default monolithic_new \"\"",
+      "args": [
+        {
+          "name": "source-backend",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        },
+        {
+          "name": "dest-backend",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        },
+        {
+          "name": "optional:-tag-list",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": false
+        }
+      ]
+    },
+    {
+      "name": "convert-tiled-tiff",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool convert-tiled-tiff \"F:\\masterchief.tiff\" \"F:\\masterchief_output.tiff\"",
+      "args": [
+        {
+          "name": "input-tiff-file",
+          "type": "path_file",
+          "description": "An absolute path to a tiff file.",
+          "required": true
+        },
+        {
+          "name": "output-tiff-file",
+          "type": "path_file",
+          "description": "An absolute path to a path with filename and extension to generate the output file in.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "create-custom-network-hopper-and-variant-files",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool create-custom-network-hopper-and-variant-files",
+      "args": [
+        {
+          "name": "hopper-file",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "create-custom-network-hopper-file",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool create-custom-network-hopper-file",
+      "args": [
+        {
+          "name": "hopper-file",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "create-custom-network-variant-file",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool create-custom-network-variant-file",
+      "args": [
+        {
+          "name": "variant-file",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "output-directory",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "create-network-hopper-file",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool create-network-hopper-file",
+      "args": []
+    },
+    {
+      "name": "dialogue-globals-import",
+      "category": "Advanced / Unknown",
+      "description": "Compiles a CSV file to generate a new ai_dialogue_globals tag. The file path for the CSV file is data\\ai\\ai_dialogue_globals.csv and tags\\ai\\ai_dialogue_globals.ai_dialogue_globals is generated.",
+      "example": "tool dialogue-globals-import",
+      "args": []
+    },
+    {
+      "name": "dump-cache-resource-gestalt",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool dump-cache-resource-gestalt",
+      "args": [
+        {
+          "name": "cache-resource-gestalt",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "dump-cache-resource-gestalt-file-locations",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool dump-cache-resource-gestalt-file-locations",
+      "args": [
+        {
+          "name": "cache-resource-gestalt",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "dump-gestalt-links",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool dump-gestalt-links",
+      "args": [
+        {
+          "name": "cache-resource-gestalt",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "tag/resource-substring",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "tag-type",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "dump-gestalt-links",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool dump-gestalt-links",
+      "args": [
+        {
+          "name": "cache-resource-gestalt",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "file-of-tag/resource-substrings-(one-per-line)",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "tag-type",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "dump-render-method-options",
+      "category": "Advanced / Unknown",
+      "description": "Dumps an index of all shader templates used by shaders, once it's done it prints out some statistics and saves information to the shaders folder in binary or text form. Required for building templates.",
+      "example": "tool dump-render-method-options",
+      "args": []
+    },
+    {
+      "name": "dump-tiff-to-header",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool dump-tiff-to-header",
+      "args": [
+        {
+          "name": "quantization-factor",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "tiff-file",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "constant-prefix-string",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "output-file",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "export-shipping-game-variants",
+      "category": "Advanced / Unknown",
+      "description": "Writes gametype bin files to your H3EK root. Currently broken.",
+      "example": "tool export-shipping-game-variants",
+      "args": []
+    },
+    {
+      "name": "export-windows-font",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool export-windows-font",
+      "args": [
+        {
+          "name": "output-directory",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "font-file",
+          "type": "optional_string",
+          "description": "???",
+          "required": false
+        },
+        {
+          "name": "typeface-name",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "point-size",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "export-xenon-bitmap-pfm",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool export-xenon-bitmap-pfm",
+      "args": [
+        {
+          "name": "bitmap-tag",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "output-path-prefix",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "faux-build-linear-textures-with-intensity-from-quadratic",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool faux-build-linear-textures-with-intensity-from-quadratic \"levels\\multi\\example\\example\" \"example\"",
+      "args": [
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario without extension",
+          "required": true
+        },
+        {
+          "name": "bsp-name",
+          "type": "string",
+          "description": "The name of a BSP tag referenced by the scenario tag",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "faux-compress-scenario-bitmaps-dxt5",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool faux-compress-scenario-bitmaps-dxt5 \"levels\\multi\\example\\example\" \"example\"",
+      "args": [
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario without extension",
+          "required": true
+        },
+        {
+          "name": "bsp-name",
+          "type": "string",
+          "description": "The name of a BSP tag referenced by the scenario tag",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "faux-farm-compression-merge",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool faux-farm-compression-merge \"levels\\multi\\example\\example\" \"example\"",
+      "args": [
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario without extension",
+          "required": true
+        },
+        {
+          "name": "bsp-name",
+          "type": "string",
+          "description": "The name of a BSP tag referenced by the scenario tag",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "faux_farm_begin",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool faux_farm_begin \"levels\\multi\\example\\example\" \"example\" all direct_only 123",
+      "args": [
+        {
+          "name": "scenario",
+          "type": "path_tag",
+          "description": "A local tag path to a scenario without extension.",
+          "required": true
+        },
+        {
+          "name": "bsp-name",
+          "type": "string",
+          "description": "The name of a BSP tag referenced by the scenario tag.",
+          "required": true
+        },
+        {
+          "name": "light-group-name",
+          "type": "string",
+          "description": "Only light a certain region of the level.",
+          "required": true
+        },
+        {
+          "name": "quality-setting",
+          "type": "enum",
+          "description": "The quality used for lightmapping. The following are valid options:direct_only",
+          "required": true,
+          "values": [
+            "direct_only",
+            "draft",
+            "debug",
+            "low",
+            "medium",
+            "high",
+            "super"
+          ]
+        },
+        {
+          "name": "job-id",
+          "type": "string",
+          "description": "A random value to use for the faux data.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "faux_farm_dillum",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool faux_farm_dillum",
+      "args": [
+        {
+          "name": "blob-path",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "client-index",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "client-count",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "faux_farm_dillum",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool faux_farm_dillum",
+      "args": [
+        {
+          "name": "blob-path",
+          "type": "string",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "client-count",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "fp-model-animations-uncompressed",
+      "category": "Advanced / Unknown",
+      "description": "Use this verb to import first-person animations without compression.",
+      "example": "tool fp-model-animations-uncompressed \"objects\\characters\\masterchief\\fp\\weapons\\rifle\\fp_assault_rifle\" \"objects\\characters\\masterchief\\fp\" \"objects\\weapons\\rifle\\assault_rifle\\fp_assault_rifle\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        },
+        {
+          "name": "character-directory",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        },
+        {
+          "name": "weapon-directory",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "import-bitmap-folder-as-single-tag",
+      "category": "Advanced / Unknown",
+      "description": "This command compiles multiple .tif files from a folder into a single .bitmap tag.",
+      "example": "tool import-bitmap-folder-as-single-tag \"objects\\scenery\\example\\bitmaps\\combined-images\"",
+      "args": [
+        {
+          "name": "source_directory",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "model-animations-uncompressed",
+      "category": "Advanced / Unknown",
+      "description": "Use this verb to import animations without compression.",
+      "example": "tool model-animations-uncompressed \"objects\\characters\\masterchief\"",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "shaders",
+      "category": "Advanced / Unknown",
+      "description": "Compiles non-template shaders, only useful if you are writing custom shaders.",
+      "example": "tool shaders win",
+      "args": [
+        {
+          "name": "debug",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": false
+        },
+        {
+          "name": "pdb-path",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": false
+        },
+        {
+          "name": "platform",
+          "type": "string",
+          "description": "Argument documented by the command syntax.",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "sound-looping",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool sound-looping",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    },
+    {
+      "name": "sound-looping-scenery",
+      "category": "Advanced / Unknown",
+      "description": "???",
+      "example": "tool sound-looping-scenery",
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "???",
+          "required": true
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "description": "???",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

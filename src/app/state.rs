@@ -169,6 +169,10 @@ pub(super) struct GuiPrefs {
     pub(super) model_preview_size: f32,
     pub(super) blender_path: Option<PathBuf>,
     pub(super) ek_folder_aliases: Vec<EkFolderAlias>,
+    pub(super) tool_commands_window_pos: Option<egui::Pos2>,
+    pub(super) tool_commands_window_size: Option<Vec2>,
+    pub(super) tool_commands_left_width: f32,
+    pub(super) tool_commands_collapsed_categories: HashSet<String>,
 }
 
 pub(super) struct TagDocument {
@@ -528,6 +532,10 @@ impl Default for GuiPrefs {
             model_preview_size: DEFAULT_MODEL_PREVIEW_SIZE,
             blender_path: None,
             ek_folder_aliases: Vec::new(),
+            tool_commands_window_pos: None,
+            tool_commands_window_size: None,
+            tool_commands_left_width: DEFAULT_TOOL_COMMANDS_LEFT_WIDTH,
+            tool_commands_collapsed_categories: HashSet::new(),
         }
     }
 }
@@ -539,6 +547,11 @@ pub(super) const MAX_UI_SCALE: f32 = 1.5;
 pub(super) const DEFAULT_MODEL_PREVIEW_SIZE: f32 = 1.0;
 pub(super) const MIN_MODEL_PREVIEW_SIZE: f32 = 0.8;
 pub(super) const MAX_MODEL_PREVIEW_SIZE: f32 = 2.6;
+
+pub(super) const DEFAULT_TOOL_COMMANDS_WINDOW_SIZE: Vec2 = Vec2::new(800.0, 600.0);
+pub(super) const MIN_TOOL_COMMANDS_WINDOW_SIZE: Vec2 = Vec2::new(600.0, 400.0);
+pub(super) const DEFAULT_TOOL_COMMANDS_LEFT_WIDTH: f32 = 280.0;
+pub(super) const MIN_TOOL_COMMANDS_LEFT_WIDTH: f32 = 200.0;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum BitmapPanelTab {

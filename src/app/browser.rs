@@ -623,14 +623,22 @@ pub(super) fn is_monolithic_entry(entry: &TagEntry) -> bool {
 }
 
 pub(super) fn folder_arrow_icon(ui: &mut Ui, openness: f32, response: &egui::Response) {
-    let center = response.rect.center();
-    let size = 7.0;
     let color = if openness > 0.5 {
-        Color32::from_rgb(28, 143, 66)
+        disclosure_triangle_green()
     } else {
-        Color32::from_rgb(24, 111, 205)
+        disclosure_triangle_blue()
     };
-    let points = if openness > 0.5 {
+    disclosure_triangle_icon(ui, openness > 0.5, response.rect.center(), color);
+}
+
+pub(super) fn disclosure_triangle_icon(
+    ui: &mut Ui,
+    open: bool,
+    center: egui::Pos2,
+    color: Color32,
+) {
+    let size = 7.0;
+    let points = if open {
         vec![
             egui::pos2(center.x - size, center.y - size * 0.4),
             egui::pos2(center.x + size, center.y - size * 0.4),
