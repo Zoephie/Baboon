@@ -131,6 +131,8 @@ pub struct Baboon {
     blender_path: Option<PathBuf>,
     blender_path_input: String,
     color_popup: Option<MaterialColorPopup>,
+    custom_color_swatches: Vec<Option<[u8; 4]>>,
+    palette_last_dir: Option<PathBuf>,
     function_popup: Option<FunctionPopup>,
     status: String,
     folder_refactor: Option<FolderRefactorUiState>,
@@ -229,6 +231,8 @@ impl Baboon {
                 .unwrap_or_default(),
             blender_path: prefs.blender_path,
             color_popup: None,
+            custom_color_swatches: prefs.custom_color_swatches.clone(),
+            palette_last_dir: prefs.palette_last_dir.clone(),
             function_popup: None,
             status: "Ready".to_owned(),
             folder_refactor: None,
@@ -378,6 +382,49 @@ mod tests {
         assert!(parse_color_channels::<3>("0.1, 0.2").is_err());
         assert!(parse_color_channels::<3>("0.1, 0.2, x").is_err());
         assert!(parse_rgb_or_argb_color_channels("0.1, 0.2").is_err());
+    }
+
+    #[test]
+    fn editable_color_hex_accepts_standard_rgb_codes() {
+        assert_eq!(parse_rgb_hex("#FF8040").unwrap(), [255, 128, 64]);
+        assert_eq!(parse_rgb_hex("00aaff").unwrap(), [0, 170, 255]);
+        assert_eq!(format_rgb_hex(1.0, 0.5, 0.0), "#FF8000");
+        assert!(parse_rgb_hex("#12345").is_err());
+        assert!(parse_rgb_hex("#12XX56").is_err());
+    }
+
+    #[test]
+    fn baboon_palette_format_round_trips_custom_swatches() {
+        let mut swatches = vec![None; CUSTOM_COLOR_SWATCH_COUNT];
+        swatches[0] = Some([0, 0, 0, 255]);
+        swatches[1] = Some([255, 87, 51, 255]);
+        swatches[3] = Some([51, 255, 87, 128]);
+
+        let encoded = encode_baboon_palette("My Custom Palette", &swatches);
+        assert!(encoded.contains("# Baboon Colour Palette"));
+        assert!(encoded.contains("# Name: My Custom Palette"));
+        assert!(encoded.contains("#FF5733FF"));
+        assert!(encoded.contains("#empty"));
+
+        let decoded = decode_baboon_palette(&encoded).unwrap();
+        assert_eq!(decoded.len(), CUSTOM_COLOR_SWATCH_COUNT);
+        assert_eq!(decoded[0], Some([0, 0, 0, 255]));
+        assert_eq!(decoded[1], Some([255, 87, 51, 255]));
+        assert_eq!(decoded[2], None);
+        assert_eq!(decoded[3], Some([51, 255, 87, 128]));
+    }
+
+    #[test]
+    fn baboon_palette_load_pads_and_ignores_comments() {
+        let decoded = decode_baboon_palette(
+            "# Baboon Colour Palette\n# Name: Small\n# Comment\n#11223344\n#empty\n",
+        )
+        .unwrap();
+
+        assert_eq!(decoded.len(), CUSTOM_COLOR_SWATCH_COUNT);
+        assert_eq!(decoded[0], Some([17, 34, 51, 68]));
+        assert_eq!(decoded[1], None);
+        assert!(decoded[2..].iter().all(Option::is_none));
     }
 
     #[test]

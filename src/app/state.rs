@@ -177,6 +177,8 @@ pub(super) struct GuiPrefs {
     pub(super) tool_commands_left_width: f32,
     pub(super) tool_commands_collapsed_categories: HashSet<String>,
     pub(super) recent_folders: Vec<PathBuf>,
+    pub(super) custom_color_swatches: Vec<Option<[u8; 4]>>,
+    pub(super) palette_last_dir: Option<PathBuf>,
 }
 
 pub(super) struct TagDocument {
@@ -433,6 +435,7 @@ pub(super) struct FieldEditContext<'a> {
     pub(super) definitions_root: Option<&'a Path>,
     pub(super) definition_group_name: Option<&'a str>,
     pub(super) tags_root: Option<&'a Path>,
+    pub(super) status: Option<&'a mut String>,
     pub(super) editable: bool,
     pub(super) show_block_sizes: bool,
     pub(super) buffers: &'a mut HashMap<String, String>,
@@ -541,6 +544,8 @@ impl Default for GuiPrefs {
             tool_commands_left_width: DEFAULT_TOOL_COMMANDS_LEFT_WIDTH,
             tool_commands_collapsed_categories: HashSet::new(),
             recent_folders: Vec::new(),
+            custom_color_swatches: vec![None; CUSTOM_COLOR_SWATCH_COUNT],
+            palette_last_dir: None,
         }
     }
 }
@@ -558,6 +563,7 @@ pub(super) const MIN_TOOL_COMMANDS_WINDOW_SIZE: Vec2 = Vec2::new(600.0, 400.0);
 pub(super) const DEFAULT_TOOL_COMMANDS_LEFT_WIDTH: f32 = 280.0;
 pub(super) const MIN_TOOL_COMMANDS_LEFT_WIDTH: f32 = 200.0;
 pub(super) const MAX_RECENT_FOLDERS: usize = 10;
+pub(super) const CUSTOM_COLOR_SWATCH_COUNT: usize = 16;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum BitmapPanelTab {

@@ -5270,6 +5270,7 @@ pub(super) fn draw_shader_grid_row_readonly(
         definitions_root: None,
         definition_group_name: None,
         tags_root: None,
+        status: None,
         editable: false,
         show_block_sizes: false,
         buffers: &mut buffers,
@@ -6307,13 +6308,18 @@ pub(super) fn draw_shader_editable_value(
                     dialog = dialog.set_directory(tag_reference_start_dir(tags_root, &open_ref));
                 }
                 if let Some(path) = dialog.pick_file() {
-                    // Normalise to forward slashes and strip .bitmap extension
-                    // so the value matches the tag-reference path format.
-                    let rel = normalize_bitmap_browse_path(&path, edit.tags_root);
-                    // Update the text buffer so the row shows the chosen path.
-                    let buf = edit.buffers.entry(buffer_key).or_insert_with(String::new);
-                    *buf = rel.clone();
-                    push_shader_value_edit(edit, row_edit, create.as_ref(), rel);
+                    match normalize_bitmap_browse_path(&path, edit.tags_root) {
+                        Ok(rel) => {
+                            let buf = edit.buffers.entry(buffer_key).or_insert_with(String::new);
+                            *buf = rel.clone();
+                            push_shader_value_edit(edit, row_edit, create.as_ref(), rel);
+                        }
+                        Err(error) => {
+                            if let Some(status) = edit.status.as_deref_mut() {
+                                *status = error;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -6426,10 +6432,18 @@ pub(super) fn draw_shader_editable_value(
                     dialog = dialog.set_directory(tag_reference_start_dir(tags_root, &open_ref));
                 }
                 if let Some(path) = dialog.pick_file() {
-                    let rel = normalize_shader_template_browse_path(&path, edit.tags_root);
-                    let buf = edit.buffers.entry(buffer_key).or_insert_with(String::new);
-                    *buf = rel.clone();
-                    push_h2_template_reference_edit(edit, row_edit, rel);
+                    match normalize_shader_template_browse_path(&path, edit.tags_root) {
+                        Ok(rel) => {
+                            let buf = edit.buffers.entry(buffer_key).or_insert_with(String::new);
+                            *buf = rel.clone();
+                            push_h2_template_reference_edit(edit, row_edit, rel);
+                        }
+                        Err(error) => {
+                            if let Some(status) = edit.status.as_deref_mut() {
+                                *status = error;
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -7160,41 +7174,24 @@ pub(super) fn shader_color_create_popup(
 }
 
 /// Convert an absolute `.bitmap` file path from the OS file-picker into the
-/// tag-reference path format used inside shader tags: forward-slash separated,
-/// `.bitmap` extension stripped, and relative to the first `tags` directory
-/// ancestor when possible. Falls back to the bare stem if no `tags` root is
-/// found.
+/// tag-reference path format used inside shader tags: tags-root-relative with
+/// the `.bitmap` extension preserved.
 pub(super) fn normalize_bitmap_browse_path(
     path: &std::path::Path,
     tags_root: Option<&std::path::Path>,
-) -> String {
-    use blam_tags::paths::derive_tags_root;
-    if let Some(root) = tags_root {
-        if let Ok(rel) = path.strip_prefix(root) {
-            let without_ext = rel.with_extension("");
-            return without_ext.to_string_lossy().replace('\\', "/");
-        }
-    }
-    // Try to find the tags root and build a relative path from it.
-    if let Some(root) = derive_tags_root(path) {
-        if let Ok(rel) = path.strip_prefix(&root) {
-            let without_ext = rel.with_extension("");
-            return without_ext.to_string_lossy().replace('\\', "/");
-        }
-    }
-    // Fall back: use the file stem (no directory, no extension).
-    path.file_stem()
-        .map(|s| s.to_string_lossy().into_owned())
-        .unwrap_or_else(|| path.to_string_lossy().into_owned())
+) -> Result<String, String> {
+    let Some(root) = tags_root else {
+        return Err("Selected file must be inside the tags folder".to_owned());
+    };
+    tag_reference_relative_path_with_extension(path, root)
 }
 
 pub(super) fn normalize_shader_template_browse_path(
     path: &std::path::Path,
     tags_root: Option<&std::path::Path>,
-) -> String {
-    let mut normalized = normalize_bitmap_browse_path(path, tags_root);
-    normalized = h2_normalize_shader_template_reference(&normalized);
-    normalized
+) -> Result<String, String> {
+    let normalized = normalize_bitmap_browse_path(path, tags_root)?;
+    Ok(h2_normalize_shader_template_reference(&normalized))
 }
 
 pub(super) fn draw_shader_grid_cell(

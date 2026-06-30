@@ -1968,12 +1968,20 @@ pub(super) fn draw_foundation_tag_reference_row(
         if browse_clicked {
             if let Some(tags_root) = edit.tags_root {
                 let start_ref = target.as_ref().map(|(_, rel_path)| rel_path.as_str());
-                if let Some(input) = choose_tag_reference_input(tags_root, start_ref) {
-                    *buffer = input.clone();
-                    edit.pending.push(PendingFieldEdit {
-                        path: path.to_owned(),
-                        input,
-                    });
+                match choose_tag_reference_input(tags_root, start_ref) {
+                    Ok(Some(input)) => {
+                        *buffer = input.clone();
+                        edit.pending.push(PendingFieldEdit {
+                            path: path.to_owned(),
+                            input,
+                        });
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        if let Some(status) = edit.status.as_deref_mut() {
+                            *status = error;
+                        }
+                    }
                 }
             }
         }
@@ -2048,19 +2056,47 @@ pub(super) fn tag_reference_start_dir(tags_root: &Path, rel_path: &str) -> PathB
 pub(super) fn choose_tag_reference_input(
     tags_root: &Path,
     start_ref: Option<&str>,
-) -> Option<String> {
+) -> Result<Option<String>, String> {
     let start_dir = start_ref
         .map(|rel_path| tag_reference_start_dir(tags_root, rel_path))
         .unwrap_or_else(|| tags_root.to_path_buf());
     let picked = rfd::FileDialog::new()
         .set_title("Select Tag Reference")
         .set_directory(start_dir)
-        .pick_file()?;
-    let rel = picked.strip_prefix(tags_root).ok()?;
-    let extension = rel.extension().and_then(|ext| ext.to_str())?;
-    let group_tag = extension_to_group_tag(extension)?;
+        .pick_file();
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let rel = tag_reference_relative_path(&picked, tags_root)?;
+    let extension = rel
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .ok_or_else(|| "Selected tag file has no extension".to_owned())?;
+    let group_tag = extension_to_group_tag(extension)
+        .ok_or_else(|| format!("Unknown tag extension: {extension}"))?;
     let path = rel.with_extension("").to_string_lossy().replace('/', "\\");
-    Some(format!("{}:{path}", format_group_tag(group_tag)))
+    Ok(Some(format!("{}:{path}", format_group_tag(group_tag))))
+}
+
+pub(super) fn tag_reference_relative_path(
+    picked: &Path,
+    tags_root: &Path,
+) -> Result<PathBuf, String> {
+    picked
+        .strip_prefix(tags_root)
+        .map(Path::to_path_buf)
+        .map_err(|_| "Selected file must be inside the tags folder".to_owned())
+}
+
+pub(super) fn tag_reference_relative_path_with_extension(
+    picked: &Path,
+    tags_root: &Path,
+) -> Result<String, String> {
+    let rel = tag_reference_relative_path(picked, tags_root)?;
+    if rel.extension().and_then(|ext| ext.to_str()).is_none() {
+        return Err("Selected tag file has no extension".to_owned());
+    }
+    Ok(rel.to_string_lossy().replace('/', "\\"))
 }
 
 pub(super) fn draw_foundation_flags_row(
@@ -2650,6 +2686,7 @@ mod tests {
             definitions_root: Some(definitions_root.as_path()),
             definition_group_name: Some("damage_effect"),
             tags_root: None,
+            status: None,
             editable: true,
             show_block_sizes: false,
             buffers: &mut buffers,
@@ -2718,6 +2755,33 @@ mod tests {
 
         assert!(view.h2_legacy.is_some());
         assert_eq!(view.data_bytes(), raw);
+    }
+
+    #[test]
+    fn tag_reference_picker_paths_must_be_under_tags_root() {
+        let tags_root = PathBuf::from("tags");
+        let picked = tags_root
+            .join("objects")
+            .join("characters")
+            .join("brute")
+            .join("bitmaps")
+            .join("mask.bitmap");
+
+        assert_eq!(
+            tag_reference_relative_path_with_extension(&picked, &tags_root).unwrap(),
+            r"objects\characters\brute\bitmaps\mask.bitmap"
+        );
+
+        let outside = PathBuf::from("data")
+            .join("objects")
+            .join("characters")
+            .join("brute")
+            .join("bitmaps")
+            .join("mask.tif");
+        assert_eq!(
+            tag_reference_relative_path_with_extension(&outside, &tags_root).unwrap_err(),
+            "Selected file must be inside the tags folder"
+        );
     }
 }
 

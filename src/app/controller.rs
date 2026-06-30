@@ -1506,6 +1506,8 @@ impl Baboon {
             tool_commands_left_width: self.tool_commands_left_width,
             tool_commands_collapsed_categories: self.tool_commands_collapsed_categories.clone(),
             recent_folders: self.recent_folders.clone(),
+            custom_color_swatches: self.custom_color_swatches.clone(),
+            palette_last_dir: self.palette_last_dir.clone(),
         }
     }
 
@@ -1938,6 +1940,7 @@ impl Baboon {
                                 TagSource::LooseFolder { root, .. } => Some(root.as_path()),
                                 _ => None,
                             }),
+                        status: Some(&mut self.status),
                         editable: is_editable_tag(&entry, &doc.tag),
                         show_block_sizes: self.show_block_sizes,
                         buffers: &mut self.edit_buffers,

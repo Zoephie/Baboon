@@ -2038,6 +2038,7 @@ impl eframe::App for Baboon {
                                     _ => None,
                                 }
                             }),
+                            status: Some(&mut self.status),
                             editable: is_editable_tag(&entry, &doc.tag),
                             show_block_sizes: self.show_block_sizes,
                             buffers: &mut self.edit_buffers,
@@ -2176,7 +2177,12 @@ impl eframe::App for Baboon {
         self.persist_prefs_if_changed();
         self.draw_floating_tabs(ctx);
         self.handle_floating_tab_drop(ctx);
-        if let Some(result) = draw_color_popup(ctx, &mut self.color_popup) {
+        if let Some(result) = draw_color_popup(
+            ctx,
+            &mut self.color_popup,
+            &mut self.custom_color_swatches,
+            &mut self.palette_last_dir,
+        ) {
             match result {
                 ColorPopupResult::FieldEdit { tag_key, edit } => {
                     if let Some(doc) = self.parsed_tags.get_mut(&tag_key) {
