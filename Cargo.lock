@@ -298,6 +298,7 @@ dependencies = [
  "blam-tags",
  "eframe",
  "egui_extras",
+ "flate2",
  "image",
  "rfd",
  "serde_json",

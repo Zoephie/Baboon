@@ -1124,6 +1124,27 @@ pub(super) fn parse_gui_field_value(
                 k,
             }))
         }
+        TagFieldType::RealPoint2d => {
+            let [x, y] = parse_float_channels::<2>(trimmed, "real point 2d")?;
+            Ok(TagFieldData::RealPoint2d(blam_tags::math::RealPoint2d {
+                x,
+                y,
+            }))
+        }
+        TagFieldType::RealPoint3d => {
+            let [x, y, z] = parse_float_channels::<3>(trimmed, "real point 3d")?;
+            Ok(TagFieldData::RealPoint3d(blam_tags::math::RealPoint3d {
+                x,
+                y,
+                z,
+            }))
+        }
+        TagFieldType::RealQuaternion => {
+            let [i, j, k, w] = parse_float_channels::<4>(trimmed, "real quaternion")?;
+            Ok(TagFieldData::RealQuaternion(
+                blam_tags::math::RealQuaternion { i, j, k, w },
+            ))
+        }
         TagFieldType::Real => parse_value(trimmed, "f32").map(TagFieldData::Real),
         TagFieldType::RealSlider => parse_value(trimmed, "f32").map(TagFieldData::RealSlider),
         TagFieldType::RealFraction => parse_value(trimmed, "f32").map(TagFieldData::RealFraction),
@@ -1903,6 +1924,104 @@ mod tests {
             .and_then(|field| field.as_block())
             .unwrap();
         assert_eq!(variants.len(), 0);
+    }
+
+    #[test]
+    fn h2_render_model_marker_translation_and_rotation_are_editable() {
+        let mut tag = TagFile::new(test_definition_path("halo2_mcc/render_model.json")).unwrap();
+        tag.container = test_halo2_render_model_container();
+        {
+            let mut root = tag.root_mut();
+            let mut field = root.field_path_mut("marker groups").unwrap();
+            let mut marker_groups = field.as_block_mut().unwrap();
+            marker_groups.add_element();
+        }
+        {
+            let mut root = tag.root_mut();
+            let mut field = root.field_path_mut("marker groups[0]/markers").unwrap();
+            let mut markers = field.as_block_mut().unwrap();
+            markers.add_element();
+        }
+
+        let mut dirty = false;
+        let status = apply_pending_edits(
+            &mut tag,
+            vec![
+                PendingFieldEdit {
+                    path: "marker groups[0]/markers[0]/translation".to_owned(),
+                    input: "-0.27, 0, 0.73".to_owned(),
+                },
+                PendingFieldEdit {
+                    path: "marker groups[0]/markers[0]/rotation".to_owned(),
+                    input: "-0.38, 0, -0.92, 0".to_owned(),
+                },
+            ],
+            &mut dirty,
+        );
+
+        assert_eq!(
+            status.as_deref(),
+            Some("Edited marker groups[0]/markers[0]/rotation")
+        );
+        assert!(dirty);
+        let root = tag.root();
+        let translation = root
+            .field_path("marker groups[0]/markers[0]/translation")
+            .unwrap()
+            .value()
+            .unwrap();
+        let TagFieldData::RealPoint3d(translation) = translation else {
+            panic!("translation should be a real point 3d");
+        };
+        assert!((translation.x + 0.27).abs() < 0.0001);
+        assert!((translation.y - 0.0).abs() < 0.0001);
+        assert!((translation.z - 0.73).abs() < 0.0001);
+
+        let rotation = root
+            .field_path("marker groups[0]/markers[0]/rotation")
+            .unwrap()
+            .value()
+            .unwrap();
+        let TagFieldData::RealQuaternion(rotation) = rotation else {
+            panic!("rotation should be a real quaternion");
+        };
+        assert!((rotation.i + 0.38).abs() < 0.0001);
+        assert!((rotation.j - 0.0).abs() < 0.0001);
+        assert!((rotation.k + 0.92).abs() < 0.0001);
+        assert!((rotation.w - 0.0).abs() < 0.0001);
+        assert_h2_render_model_write_atomic_verifies(&tag);
+    }
+
+    fn test_halo2_render_model_container() -> blam_tags::file::TagContainer {
+        let mut header = vec![0; 64];
+        header[36..40].copy_from_slice(b"edom");
+        header[56..58].copy_from_slice(&0u16.to_le_bytes());
+        header[60..64].copy_from_slice(b"!MLB");
+        blam_tags::file::TagContainer::Classic {
+            engine: blam_tags::classic::ClassicEngine::Halo2V4,
+            header,
+        }
+    }
+
+    fn assert_h2_render_model_write_atomic_verifies(tag: &TagFile) {
+        let mut path = std::env::temp_dir();
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        path.push(format!(
+            "baboon_h2_render_model_marker_{}_{}.render_model",
+            std::process::id(),
+            stamp
+        ));
+        let _ = std::fs::remove_file(&path);
+        tag.write_atomic(&path).unwrap_or_else(|error| {
+            panic!(
+                "write_atomic verification failed for {}: {error}",
+                path.display()
+            )
+        });
+        let _ = std::fs::remove_file(&path);
     }
 
     fn assert_variant(

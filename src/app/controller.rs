@@ -1209,8 +1209,8 @@ impl Baboon {
         self.status = format!("Extracting import info from {}", entry.display_path);
         let tx = self.tx.clone();
         thread::spawn(move || {
-            let result = run_shell_extraction(&source, &entry, "extract-import-info", &output)
-                .map_err(|e| e.to_string());
+            let result =
+                extract_import_info_for_entry(&source, &entry, &output).map_err(|e| e.to_string());
             let _ = tx.send(WorkerMessage::ExportFinished(result));
             ctx.request_repaint();
         });

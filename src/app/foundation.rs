@@ -144,8 +144,18 @@ pub(super) fn draw_struct_fields(
         depth <= 1,
         open_override,
         |ui| {
+            let parent_raw = tag_struct.raw();
             for field in tag_struct.fields_all() {
-                draw_field(ui, field, names, depth, expert_mode, path_prefix, edit);
+                draw_field(
+                    ui,
+                    field,
+                    parent_raw,
+                    names,
+                    depth,
+                    expert_mode,
+                    path_prefix,
+                    edit,
+                );
             }
         },
     );
@@ -176,11 +186,21 @@ pub(super) fn draw_inherited_object_fields(
             open_override,
             |ui| {
                 let parent_field = inherited_parent_field_name(*struct_value);
+                let parent_raw = struct_value.raw();
                 for field in struct_value.fields_all() {
                     if parent_field.is_some_and(|name| name == field.name()) {
                         continue;
                     }
-                    draw_field(ui, field, names, 0, expert_mode, path_prefix, edit);
+                    draw_field(
+                        ui,
+                        field,
+                        parent_raw,
+                        names,
+                        0,
+                        expert_mode,
+                        path_prefix,
+                        edit,
+                    );
                 }
             },
         );
@@ -228,6 +248,7 @@ pub(super) fn is_inherited_parent_name(name: &str) -> bool {
 pub(super) fn draw_field(
     ui: &mut Ui,
     field: TagField<'_>,
+    parent_raw: &[u8],
     names: &TagNameIndex,
     depth: usize,
     expert_mode: bool,
@@ -260,7 +281,7 @@ pub(super) fn draw_field(
         draw_foundation_function_row(ui, &meta, &function, depth, &field_path, edit);
         return;
     }
-    if let Some(value) = field.value() {
+    if let Some(value) = field_value_with_legacy_inline_old_string_id(field, parent_raw) {
         if is_hidden_non_expert_value(&value, expert_mode) {
             return;
         }
@@ -360,8 +381,18 @@ pub(super) fn draw_struct_fields_inline(
     path_prefix: &str,
     edit: &mut FieldEditContext<'_>,
 ) {
+    let parent_raw = tag_struct.raw();
     for field in tag_struct.fields_all() {
-        draw_field(ui, field, names, depth, expert_mode, path_prefix, edit);
+        draw_field(
+            ui,
+            field,
+            parent_raw,
+            names,
+            depth,
+            expert_mode,
+            path_prefix,
+            edit,
+        );
     }
 }
 
@@ -865,8 +896,9 @@ pub(super) fn first_tag_reference_label(
     element: TagStruct<'_>,
     names: &TagNameIndex,
 ) -> Option<String> {
+    let parent_raw = element.raw();
     for field in element.fields() {
-        if let Some(value) = field.value() {
+        if let Some(value) = field_value_with_legacy_inline_old_string_id(field, parent_raw) {
             if let TagFieldData::TagReference(reference) = value {
                 if reference.group_tag_and_name.is_some() {
                     let label = format_foundation_scalar_value(
@@ -889,8 +921,9 @@ pub(super) fn first_tag_reference_label(
 }
 
 pub(super) fn first_named_string_label(element: TagStruct<'_>) -> Option<String> {
+    let parent_raw = element.raw();
     for field in element.fields() {
-        if let Some(value) = field.value() {
+        if let Some(value) = field_value_with_legacy_inline_old_string_id(field, parent_raw) {
             if is_name_like_field(field.name()) {
                 if let Some(label) = stringish_label(&value) {
                     return Some(label);
@@ -907,8 +940,9 @@ pub(super) fn first_named_string_label(element: TagStruct<'_>) -> Option<String>
 }
 
 pub(super) fn first_string_label(element: TagStruct<'_>) -> Option<String> {
+    let parent_raw = element.raw();
     for field in element.fields() {
-        if let Some(value) = field.value() {
+        if let Some(value) = field_value_with_legacy_inline_old_string_id(field, parent_raw) {
             if let Some(label) = stringish_label(&value) {
                 return Some(label);
             }
@@ -923,8 +957,9 @@ pub(super) fn first_string_label(element: TagStruct<'_>) -> Option<String> {
 }
 
 pub(super) fn first_scalar_label(element: TagStruct<'_>, names: &TagNameIndex) -> Option<String> {
+    let parent_raw = element.raw();
     for field in element.fields() {
-        if let Some(value) = field.value() {
+        if let Some(value) = field_value_with_legacy_inline_old_string_id(field, parent_raw) {
             if scalar_is_useful_for_block_label(&value) {
                 let value = format_foundation_scalar_value(names, &value);
                 if label_has_content(&value) {
@@ -939,6 +974,40 @@ pub(super) fn first_scalar_label(element: TagStruct<'_>, names: &TagNameIndex) -
         }
     }
     None
+}
+
+pub(super) fn field_value_with_legacy_inline_old_string_id(
+    field: TagField<'_>,
+    parent_raw: &[u8],
+) -> Option<TagFieldData> {
+    if let Some(value) = field.value() {
+        return Some(value);
+    }
+    legacy_inline_old_string_id(field, parent_raw)
+        .map(|string| TagFieldData::OldStringId(StringIdData { string }))
+}
+
+pub(super) fn legacy_inline_old_string_id(
+    field: TagField<'_>,
+    parent_raw: &[u8],
+) -> Option<String> {
+    if field.field_type() != TagFieldType::OldStringId {
+        return None;
+    }
+    let offset = field.definition().offset() as usize;
+    let bytes = parent_raw.get(offset..offset + 32)?;
+    let end = bytes
+        .iter()
+        .position(|&byte| byte == 0)
+        .unwrap_or(bytes.len());
+    let value = std::str::from_utf8(&bytes[..end]).ok()?.trim();
+    if value.is_empty() {
+        return None;
+    }
+    if !value.bytes().all(|byte| matches!(byte, 0x20..=0x7e)) {
+        return None;
+    }
+    Some(value.to_owned())
 }
 
 pub(super) fn is_name_like_field(name: &str) -> bool {
@@ -2589,6 +2658,15 @@ pub(super) fn foundation_editable_component_parts(
     value: &TagFieldData,
 ) -> Option<Vec<(String, String)>> {
     match value {
+        TagFieldData::RealPoint2d(p) => Some(vec![
+            ("x".to_owned(), fmt_real(p.x)),
+            ("y".to_owned(), fmt_real(p.y)),
+        ]),
+        TagFieldData::RealPoint3d(p) => Some(vec![
+            ("x".to_owned(), fmt_real(p.x)),
+            ("y".to_owned(), fmt_real(p.y)),
+            ("z".to_owned(), fmt_real(p.z)),
+        ]),
         TagFieldData::RealVector2d(v) => Some(vec![
             ("i".to_owned(), fmt_real(v.i)),
             ("j".to_owned(), fmt_real(v.j)),
@@ -2597,6 +2675,12 @@ pub(super) fn foundation_editable_component_parts(
             ("i".to_owned(), fmt_real(v.i)),
             ("j".to_owned(), fmt_real(v.j)),
             ("k".to_owned(), fmt_real(v.k)),
+        ]),
+        TagFieldData::RealQuaternion(q) => Some(vec![
+            ("i".to_owned(), fmt_real(q.i)),
+            ("j".to_owned(), fmt_real(q.j)),
+            ("k".to_owned(), fmt_real(q.k)),
+            ("w".to_owned(), fmt_real(q.w)),
         ]),
         _ => None,
     }

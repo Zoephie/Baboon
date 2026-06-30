@@ -1,4 +1,6 @@
 use super::*;
+use flate2::read::ZlibDecoder;
+use std::io::{BufWriter, Read, Write};
 
 pub(super) fn export_tag_json(
     source: &TagSource,
@@ -223,6 +225,144 @@ pub(super) fn extract_geometry_for_entry(
             format_group_tag(entry.group_tag)
         ),
     }
+}
+
+pub(super) fn extract_import_info_for_entry(
+    source: &TagSource,
+    entry: &TagEntry,
+    output: &Path,
+) -> anyhow::Result<String> {
+    let tag = read_entry(source, entry)?;
+    let root = tag.root();
+    let import_info = resolve_import_info_struct(&tag, root).ok_or_else(|| {
+        anyhow::anyhow!(
+            "tag has no import info stream or root `import info` block; there is no baked import source to extract"
+        )
+    })?;
+    let files = import_info
+        .field("files")
+        .and_then(|field| field.as_block())
+        .ok_or_else(|| anyhow::anyhow!("`info` stream is missing the `files` block"))?;
+    if files.is_empty() {
+        anyhow::bail!("import-info `files` block is empty");
+    }
+
+    fs::create_dir_all(output)?;
+    let mut total_compressed = 0u64;
+    let mut total_decompressed = 0u64;
+    let mut written = 0usize;
+    let mut failures = Vec::new();
+
+    for (index, file) in files.iter().enumerate() {
+        let source_path = read_import_info_string(&file, "path")
+            .filter(|path| !path.trim().is_empty())
+            .unwrap_or_else(|| format!("file_{index}"));
+        let zipped = file
+            .field("zipped data")
+            .and_then(|field| field.as_data())
+            .unwrap_or(&[]);
+        total_compressed += zipped.len() as u64;
+
+        let relative_path = sanitize_import_info_path(&source_path);
+        let target = output.join(&relative_path);
+        if let Some(parent) = target.parent() {
+            if let Err(error) = fs::create_dir_all(parent) {
+                failures.push(format!(
+                    "{}: create parent failed: {error}",
+                    target.display()
+                ));
+                continue;
+            }
+        }
+
+        match decompress_import_info_file(zipped, &target) {
+            Ok(size) => {
+                total_decompressed += size;
+                written += 1;
+            }
+            Err(error) => failures.push(format!("{}: {error}", target.display())),
+        }
+    }
+
+    if written == 0 && !failures.is_empty() {
+        anyhow::bail!("failed to extract import info: {}", failures.join("; "));
+    }
+    if written == 0 {
+        anyhow::bail!("no import-info files were written");
+    }
+
+    let mut message = format!(
+        "Extracted {written} import-info file(s) to {} ({} bytes compressed -> {} bytes decompressed)",
+        output.display(),
+        total_compressed,
+        total_decompressed
+    );
+    if !failures.is_empty() {
+        message.push_str(&format!("; {} failed", failures.len()));
+    }
+    Ok(message)
+}
+
+fn resolve_import_info_struct<'a>(tag: &'a TagFile, root: TagStruct<'a>) -> Option<TagStruct<'a>> {
+    tag.import_info().or_else(|| {
+        root.field("import info")
+            .and_then(|field| field.as_block())
+            .and_then(|block| block.element(0))
+    })
+}
+
+fn read_import_info_string(tag_struct: &TagStruct<'_>, name: &str) -> Option<String> {
+    tag_struct
+        .field(name)
+        .and_then(|field| field.value())
+        .and_then(|value| match value {
+            TagFieldData::String(text) | TagFieldData::LongString(text) => Some(text),
+            _ => None,
+        })
+}
+
+pub(super) fn sanitize_import_info_path(input: &str) -> PathBuf {
+    let mut text = input.replace('\\', "/");
+    if text.len() >= 2 {
+        let bytes = text.as_bytes();
+        if bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
+            text = text[2..].to_owned();
+        }
+    }
+    while text.starts_with('/') {
+        text = text[1..].to_owned();
+    }
+    let mut out = PathBuf::new();
+    for component in Path::new(&text).components() {
+        match component {
+            std::path::Component::Normal(part) => out.push(part),
+            std::path::Component::CurDir => {}
+            _ => {}
+        }
+    }
+    if out.as_os_str().is_empty() {
+        PathBuf::from("file")
+    } else {
+        out
+    }
+}
+
+fn decompress_import_info_file(zipped: &[u8], target: &Path) -> anyhow::Result<u64> {
+    let mut decoder = ZlibDecoder::new(zipped);
+    let file = fs::File::create(target)?;
+    let mut writer = BufWriter::new(file);
+    let mut buffer = [0u8; 64 * 1024];
+    let mut total = 0u64;
+    loop {
+        let read = decoder.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+        writer.write_all(&buffer[..read])?;
+        total += read as u64;
+    }
+    writer.flush()?;
+    Ok(total)
 }
 
 pub(super) fn extract_material_shader_sources(
@@ -944,5 +1084,43 @@ pub(super) fn field_value_to_json(value: TagFieldData) -> Value {
         TagFieldData::ApiInterop(value) => json!({ "raw_bytes": value.raw.len() }),
         TagFieldData::Custom(bytes) => json!({ "bytes": bytes.len() }),
         other => json!(format!("{other:?}")),
+    }
+}
+
+#[cfg(test)]
+mod import_info_tests {
+    use super::*;
+
+    #[test]
+    fn import_info_paths_are_sanitized_to_relative_paths() {
+        assert_eq!(
+            sanitize_import_info_path(r"c:\mcc\source\objects\brute\brute.jms"),
+            PathBuf::from("mcc")
+                .join("source")
+                .join("objects")
+                .join("brute")
+                .join("brute.jms")
+        );
+        assert_eq!(
+            sanitize_import_info_path(r"..\..\escape.jms"),
+            PathBuf::from("escape.jms")
+        );
+        assert_eq!(sanitize_import_info_path(""), PathBuf::from("file"));
+    }
+
+    #[test]
+    fn h2_render_model_import_info_resolves_from_root_block() {
+        let mut tag = TagFile::new(test_definition_path("halo2_mcc/render_model.json")).unwrap();
+        {
+            let mut root = tag.root_mut();
+            let mut import_info_field = root.field_path_mut("import info").unwrap();
+            let mut import_info = import_info_field.as_block_mut().unwrap();
+            import_info.add_element();
+        }
+
+        let root = tag.root();
+        let import_info = resolve_import_info_struct(&tag, root).expect("root import info block");
+
+        assert!(import_info.field("files").is_some());
     }
 }
