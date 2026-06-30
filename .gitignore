@@ -1,3 +1,7 @@
 /target
 guerilla_tag_save/
 .baboon-prefs.json
+# Runtime caches written to the working dir in dev (entry / reverse-dep / field indexes, keywords)
+*_index.json
+*_reverse_dependencies.json
+*_keywords.json

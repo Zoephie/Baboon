@@ -60,6 +60,32 @@ impl Baboon {
                         self.field_index.install(generation, blobs);
                     }
                 }
+                WorkerMessage::ReverseDependenciesBuilt { generation, index } => {
+                    self.building_reverse_dependencies = false;
+                    // Discard a build that finished against a now-stale source.
+                    if generation != self.source_generation {
+                        continue;
+                    }
+                    if let Some(source) = self.source.as_mut() {
+                        let n = index.len();
+                        // Persist so the next launch skips the rebuild entirely.
+                        if let (Some(game), TagSource::LooseFolder { root, .. }) =
+                            (source.game.clone(), &source.source)
+                        {
+                            let root = root.clone();
+                            let to_save = index.clone();
+                            thread::spawn(move || {
+                                if let Err(e) = crate::source::save_reverse_dependency_index(
+                                    &game, &root, &to_save,
+                                ) {
+                                    eprintln!("reverse-dependency index save failed: {e}");
+                                }
+                            });
+                        }
+                        source.reverse_dependencies = Some(index);
+                        self.status = format!("Reference index complete: {n} tags");
+                    }
+                }
                 WorkerMessage::SourceLoaded {
                     result: Ok(mut loaded),
                     recent_path,
@@ -1810,13 +1836,22 @@ impl Baboon {
                     title,
                     entries: Vec::new(),
                     annotations: Vec::new(),
-                    note: Some(
-                        "Reference index unavailable — load a loose-folder source and let it \
-                         finish scanning."
-                            .to_owned(),
-                    ),
+                    note: Some(self.reference_index_unavailable_note()),
                 });
             }
+        }
+    }
+
+    /// Explain why a reference lookup found no index, tailored to whether one is
+    /// currently building (auto after the full scan, or via Tools → Build
+    /// Reference Index).
+    fn reference_index_unavailable_note(&self) -> String {
+        if self.building_reverse_dependencies || self.scanning_entries {
+            "Reference index is building — try again in a moment.".to_owned()
+        } else {
+            "Reference index unavailable — it builds automatically for loose-folder sources, or \
+             run Tools → Build Reference Index."
+                .to_owned()
         }
     }
 
@@ -1838,11 +1873,7 @@ impl Baboon {
                     title: "Unreferenced tags".to_owned(),
                     entries: Vec::new(),
                     annotations: Vec::new(),
-                    note: Some(
-                        "Reference index unavailable — load a loose-folder source and let it \
-                         finish scanning."
-                            .to_owned(),
-                    ),
+                    note: Some(self.reference_index_unavailable_note()),
                 });
             }
         }
@@ -2033,6 +2064,56 @@ impl Baboon {
         thread::spawn(move || {
             let blobs = build_field_value_index(&tag_source, &entries);
             let _ = tx.send(WorkerMessage::FieldIndexBuilt { generation, blobs });
+            ctx.request_repaint();
+        });
+    }
+
+    /// Build the reverse-dependency index in the background so the
+    /// find-references / unreferenced / Content Explorer features work without
+    /// first running a move/rename. Idempotent: skips while a build is running,
+    /// and skips an already-present index unless `force` is set (Tools →
+    /// Rebuild). Loose-folder sources only; the result is persisted to disk so
+    /// future launches load it instantly.
+    pub(super) fn begin_build_reverse_dependencies(&mut self, ctx: egui::Context, force: bool) {
+        if self.building_reverse_dependencies {
+            return;
+        }
+        let Some(source) = self.source.as_ref() else {
+            return;
+        };
+        if !matches!(source.source, TagSource::LooseFolder { .. }) {
+            return;
+        }
+        if source.reverse_dependencies.is_some() && !force {
+            return;
+        }
+        let entries = source.all_entries.clone();
+        if entries.is_empty() {
+            // The full entry set isn't ready yet. A reverse-dep index built from
+            // the partially-loaded folder would be wrong (it would flag tags as
+            // unreferenced just because their referrers weren't scanned), so
+            // kick the full scan first. `begin_scan_all_entries` is idempotent
+            // (guards on `scanning_entries`); the update loop re-enters here and
+            // builds the index once the scan lands.
+            if !self.scanning_entries {
+                self.status = "Indexing tags, then building reference index…".to_owned();
+            }
+            self.begin_scan_all_entries(ctx);
+            return;
+        }
+        let tag_source = source.source.clone();
+        let generation = self.source_generation;
+        let tx = self.tx.clone();
+        self.building_reverse_dependencies = true;
+        self.status = "Building reference index…".to_owned();
+        thread::spawn(move || {
+            let mut index = ReverseDependencyIndex::default();
+            for entry in &entries {
+                if let Ok(deps) = read_entry_dependencies(&tag_source, entry) {
+                    index.set_tag_dependencies(entry.key.clone(), deps);
+                }
+            }
+            let _ = tx.send(WorkerMessage::ReverseDependenciesBuilt { generation, index });
             ctx.request_repaint();
         });
     }
