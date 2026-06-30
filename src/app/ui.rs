@@ -1100,6 +1100,10 @@ fn draw_about_tab(ui: &mut Ui) {
                 .strong(),
         );
     });
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Icons by").color(text_dark()));
+        ui.label(RichText::new("Paddy Tee").color(foundation_blue()).strong());
+    });
     ui.add_space(10.0);
     ui.separator();
     ui.add_space(8.0);
@@ -1833,7 +1837,7 @@ impl eframe::App for Baboon {
 
                         let available_width = ui.available_width().max(120.0);
                         let row_gap = 3.0;
-                        let mut rows = Vec::<Vec<(String, String, bool, f32)>>::new();
+                        let mut rows = Vec::<Vec<(String, String, bool, f32, u32)>>::new();
                         let mut row = Vec::new();
                         let mut row_width = 0.0;
 
@@ -1859,6 +1863,8 @@ impl eframe::App for Baboon {
                                 TAB_MAX_LABEL_WIDTH,
                             );
                             let tab_width = TAB_SIDE_PADDING
+                                + 16.0
+                                + TAB_INNER_GAP
                                 + label_width
                                 + TAB_INNER_GAP
                                 + TAB_BUTTON_SIZE
@@ -1878,7 +1884,7 @@ impl eframe::App for Baboon {
                                 row_width += row_gap;
                             }
                             row_width += tab_width;
-                            row.push((key, label, active, label_width));
+                            row.push((key, label, active, label_width, entry.group_tag));
                         }
                         if !row.is_empty() {
                             rows.push(row);
@@ -1887,7 +1893,7 @@ impl eframe::App for Baboon {
                         for row in rows {
                             let row_response = ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = row_gap;
-                                for (key, label, active, label_width) in row {
+                                for (key, label, active, label_width, group_tag) in row {
                                     let shown_label = truncate_for_cell(&label, label_width);
                                     let fill = if active { menu_bar() } else { row_type() };
                                     let tab_response = Frame::none()
@@ -1902,6 +1908,7 @@ impl eframe::App for Baboon {
                                         .show(ui, |ui| {
                                             ui.horizontal(|ui| {
                                                 ui.spacing_mut().item_spacing.x = TAB_INNER_GAP;
+                                                draw_tag_icon(ui, group_tag, 16.0);
                                                 let label_response = ui
                                                     .add_sized(
                                                         Vec2::new(label_width, 18.0),

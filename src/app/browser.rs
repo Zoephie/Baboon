@@ -550,10 +550,14 @@ pub(super) fn draw_entry(
         label.to_owned()
     };
     let response = ui
-        .selectable_label(
-            selected == Some(entry.key.as_str()),
-            RichText::new(label).color(text_dark()),
-        )
+        .horizontal(|ui| {
+            draw_tag_icon(ui, entry.group_tag, 16.0);
+            ui.selectable_label(
+                selected == Some(entry.key.as_str()),
+                RichText::new(label).color(text_dark()),
+            )
+        })
+        .inner
         .on_hover_text(&entry.display_path);
     let open_requested = if double_click_to_open {
         response.double_clicked()

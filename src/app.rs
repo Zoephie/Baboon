@@ -63,6 +63,8 @@ mod map_names;
 use map_names::*;
 mod tool_commands;
 use tool_commands::*;
+mod tag_icons;
+use tag_icons::*;
 mod editor;
 use editor::*;
 mod controller;
@@ -167,6 +169,7 @@ impl Baboon {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         cc.egui_ctx.set_fonts(foundation_fonts());
         cc.egui_ctx.set_style(foundation_style());
+        egui_extras::install_image_loaders(&cc.egui_ctx);
         let prefs = load_gui_prefs();
         let terminal_open_games = load_terminal_open_games();
         set_dark_mode(prefs.dark_mode);
