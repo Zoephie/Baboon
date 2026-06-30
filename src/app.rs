@@ -169,6 +169,8 @@ pub struct Baboon {
     folder_refactor: Option<FolderRefactorUiState>,
     /// True while a background full-scan of a loose-folder source is running.
     scanning_entries: bool,
+    /// True while a background reverse-dependency index build is running.
+    building_reverse_dependencies: bool,
     terminal: TerminalState,
     terminal_open: bool,
     /// Working directory for terminal commands (game kit root, parent of tags/).
@@ -287,6 +289,7 @@ impl Baboon {
             status: "Ready".to_owned(),
             folder_refactor: None,
             scanning_entries: false,
+            building_reverse_dependencies: false,
             terminal: TerminalState {
                 input: String::new(),
                 lines: Vec::new(),

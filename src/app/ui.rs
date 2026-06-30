@@ -657,13 +657,13 @@ impl Baboon {
                             .color(text_dark()),
                     );
                     if explorer.index_unavailable {
-                        ui.label(
-                            RichText::new(
-                                "Reference index unavailable — load a loose-folder source and \
-                                 let it finish scanning.",
-                            )
-                            .color(subtle_dark()),
-                        );
+                        let note = if self.building_reverse_dependencies || self.scanning_entries {
+                            "Reference index is building — reopen this in a moment."
+                        } else {
+                            "Reference index unavailable — it builds automatically for \
+                             loose-folder sources, or run Tools → Build Reference Index."
+                        };
+                        ui.label(RichText::new(note).color(subtle_dark()));
                     }
                     ui.separator();
                     let filter_lower = filter.trim().to_ascii_lowercase();
@@ -2209,6 +2209,11 @@ impl eframe::App for Baboon {
                         }
                     });
                     ui.menu_button("Tools", |ui| {
+                        if ui.button("Run Tool...").clicked() {
+                            ui.close_menu();
+                            self.tool_commands.open = true;
+                        }
+                        ui.separator();
                         if ui
                             .add_enabled(
                                 self.selected_key.is_some(),
@@ -2236,6 +2241,31 @@ impl eframe::App for Baboon {
                         if ui.button("Find Unreferenced Tags...").clicked() {
                             ui.close_menu();
                             self.show_unreferenced_tags();
+                        }
+                        {
+                            let is_loose = self.source.as_ref().is_some_and(|source| {
+                                matches!(source.source, TagSource::LooseFolder { .. })
+                            });
+                            let has_index = self.source.as_ref().is_some_and(|source| {
+                                source.reverse_dependencies.is_some()
+                            });
+                            let label = if self.building_reverse_dependencies {
+                                "Building Reference Index…"
+                            } else if has_index {
+                                "Rebuild Reference Index"
+                            } else {
+                                "Build Reference Index"
+                            };
+                            if ui
+                                .add_enabled(
+                                    is_loose && !self.building_reverse_dependencies,
+                                    egui::Button::new(label),
+                                )
+                                .clicked()
+                            {
+                                ui.close_menu();
+                                self.begin_build_reverse_dependencies(ctx.clone(), true);
+                            }
                         }
                         if ui.button("List Scenario Map IDs...").clicked() {
                             ui.close_menu();
@@ -2316,9 +2346,6 @@ impl eframe::App for Baboon {
                             ui.close_menu();
                         }
                     });
-                    if ui.button("Tool").clicked() {
-                        self.tool_commands.open = true;
-                    }
                     ui.menu_button("Help", |ui| {
                         if ui.button("About...").clicked() {
                             self.help_panel_tab = HelpPanelTab::About;
@@ -2772,6 +2799,19 @@ impl eframe::App for Baboon {
                     // it must be called after the `source` borrow ends.
                     if need_scan {
                         self.begin_scan_all_entries(ctx.clone());
+                    }
+                    // Auto-build the reverse-dependency index so find-references
+                    // / unreferenced / Content Explorer work without first
+                    // running a move/rename. If the full entry list isn't in
+                    // yet this kicks the scan first, then builds when it lands.
+                    // Idempotent and self-gating (see the method + scan guard).
+                    if !self.building_reverse_dependencies
+                        && self.source.as_ref().is_some_and(|source| {
+                            matches!(source.source, TagSource::LooseFolder { .. })
+                                && source.reverse_dependencies.is_none()
+                        })
+                    {
+                        self.begin_build_reverse_dependencies(ctx.clone(), false);
                     }
                 } else {
                     ui.label("Use File to load a tag, folder, or monolithic cache.");

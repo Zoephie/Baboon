@@ -37,6 +37,12 @@ pub(super) enum WorkerMessage {
         generation: u64,
         blobs: Vec<(String, String)>,
     },
+    // Background reverse-dependency index build finished. `generation` guards
+    // against staleness after a source reload.
+    ReverseDependenciesBuilt {
+        generation: u64,
+        index: ReverseDependencyIndex,
+    },
 }
 
 /// One tag whose field values matched a field-value search, with the first
