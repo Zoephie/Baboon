@@ -6264,20 +6264,39 @@ pub(super) fn draw_shader_editable_value(
                 *buffer = current.clone();
             }
             let mut commit = None;
-            ui.scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
-                ui.visuals_mut().extreme_bg_color = material_input();
-                let resp = ui.add(
-                    egui::TextEdit::singleline(buffer)
-                        .id(id)
-                        .desired_width(text_rect.width())
-                        .text_color(material_text())
-                        .font(egui::TextStyle::Monospace),
-                );
-                text_edit_cursor_to_start_on_tab_focus(ui, &resp);
-                if resp.lost_focus() && buffer.trim() != current.trim() {
-                    commit = Some(buffer.trim().to_owned());
+            let text_response = ui
+                .scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
+                    ui.visuals_mut().extreme_bg_color = material_input();
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(buffer)
+                            .id(id)
+                            .desired_width(text_rect.width())
+                            .text_color(material_text())
+                            .font(egui::TextStyle::Monospace),
+                    );
+                    text_edit_cursor_to_start_on_tab_focus(ui, &resp);
+                    if resp.lost_focus() && buffer.trim() != current.trim() {
+                        commit = Some(buffer.trim().to_owned());
+                    }
+                    resp
+                })
+                .inner;
+            paint_tag_reference_drop_feedback(ui, &text_response, Some(*group_tag));
+            if edit.editable {
+                if let Some(payload) = text_response.dnd_release_payload::<TagDragPayload>() {
+                    match tag_reference_drop_input(&payload, Some(*group_tag)) {
+                        Ok(input) => {
+                            *buffer = input.clone();
+                            commit = Some(input);
+                        }
+                        Err(error) => {
+                            if let Some(status) = edit.status.as_deref_mut() {
+                                *status = error;
+                            }
+                        }
+                    }
                 }
-            });
+            }
             if let Some(input) = commit {
                 push_shader_value_edit(edit, row_edit, create.as_ref(), input);
             }
@@ -6388,20 +6407,40 @@ pub(super) fn draw_shader_editable_value(
                 *buffer = current.clone();
             }
             let mut commit = None;
-            ui.scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
-                ui.visuals_mut().extreme_bg_color = material_input();
-                let resp = ui.add(
-                    egui::TextEdit::singleline(buffer)
-                        .id(id)
-                        .desired_width(text_rect.width())
-                        .text_color(material_text())
-                        .font(egui::TextStyle::Monospace),
-                );
-                text_edit_cursor_to_start_on_tab_focus(ui, &resp);
-                if resp.lost_focus() && buffer.trim() != current.trim() {
-                    commit = Some(buffer.trim().to_owned());
+            let text_response = ui
+                .scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
+                    ui.visuals_mut().extreme_bg_color = material_input();
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(buffer)
+                            .id(id)
+                            .desired_width(text_rect.width())
+                            .text_color(material_text())
+                            .font(egui::TextStyle::Monospace),
+                    );
+                    text_edit_cursor_to_start_on_tab_focus(ui, &resp);
+                    if resp.lost_focus() && buffer.trim() != current.trim() {
+                        commit = Some(buffer.trim().to_owned());
+                    }
+                    resp
+                })
+                .inner;
+            let shader_template_group = u32::from_be_bytes(*b"stem");
+            paint_tag_reference_drop_feedback(ui, &text_response, Some(shader_template_group));
+            if edit.editable {
+                if let Some(payload) = text_response.dnd_release_payload::<TagDragPayload>() {
+                    match tag_reference_drop_input(&payload, Some(shader_template_group)) {
+                        Ok(input) => {
+                            *buffer = input.clone();
+                            commit = Some(input);
+                        }
+                        Err(error) => {
+                            if let Some(status) = edit.status.as_deref_mut() {
+                                *status = error;
+                            }
+                        }
+                    }
                 }
-            });
+            }
             if let Some(input) = commit {
                 push_h2_template_reference_edit(edit, row_edit, input);
             }

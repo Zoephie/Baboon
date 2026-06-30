@@ -161,6 +161,7 @@ pub struct Baboon {
     monitor_icon: Option<egui::TextureHandle>,
     sapien_icon: Option<egui::TextureHandle>,
     tag_test_icon: Option<egui::TextureHandle>,
+    game_banner_textures: HashMap<String, egui::TextureHandle>,
     /// Clipboard for copy/paste of a block element between identical tags.
     block_clipboard: Option<BlockClipboard>,
 }
@@ -278,8 +279,25 @@ impl Baboon {
                 "tag_test_icon",
                 include_bytes!("../icons/tag_test.ico"),
             ),
+            game_banner_textures: HashMap::new(),
             block_clipboard: None,
         }
+    }
+
+    fn game_banner_texture(
+        &mut self,
+        ctx: &egui::Context,
+        game: &str,
+    ) -> Option<&egui::TextureHandle> {
+        if !self.game_banner_textures.contains_key(game) {
+            let texture = load_png_texture(
+                ctx,
+                &format!("game_banner_{game}"),
+                get_game_banner_bytes(game),
+            )?;
+            self.game_banner_textures.insert(game.to_owned(), texture);
+        }
+        self.game_banner_textures.get(game)
     }
 }
 
@@ -323,6 +341,38 @@ fn load_ico_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egu
     let size = [rgba.width() as usize, rgba.height() as usize];
     let color = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
     Some(ctx.load_texture(name, color, egui::TextureOptions::LINEAR))
+}
+
+fn load_png_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egui::TextureHandle> {
+    let image = image::load_from_memory_with_format(bytes, image::ImageFormat::Png).ok()?;
+    let rgba = image.to_rgba8();
+    let size = [rgba.width() as usize, rgba.height() as usize];
+    let color = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+    Some(ctx.load_texture(name, color, egui::TextureOptions::LINEAR))
+}
+
+pub(super) fn get_game_banner_bytes(game: &str) -> &'static [u8] {
+    match game {
+        "haloce_mcc" => include_bytes!("../assets/Game Icons/ce.png"),
+        "halo2_mcc" => include_bytes!("../assets/Game Icons/h2.png"),
+        "halo3_mcc" => include_bytes!("../assets/Game Icons/h3.png"),
+        "halo3odst_mcc" => include_bytes!("../assets/Game Icons/h3odst.png"),
+        "haloreach_mcc" => include_bytes!("../assets/Game Icons/reach.png"),
+        "halo4_mcc" => include_bytes!("../assets/Game Icons/h4.png"),
+        _ => include_bytes!("../assets/Game Icons/ce.png"),
+    }
+}
+
+pub(super) fn game_display_name(game: &str) -> &'static str {
+    match game {
+        "haloce_mcc" => "Halo: Combat Evolved",
+        "halo2_mcc" => "Halo 2",
+        "halo3_mcc" => "Halo 3",
+        "halo3odst_mcc" => "Halo 3: ODST",
+        "haloreach_mcc" => "Halo: Reach",
+        "halo4_mcc" => "Halo 4",
+        _ => "Unknown Game",
+    }
 }
 
 #[cfg(test)]

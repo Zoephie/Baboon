@@ -84,6 +84,13 @@ pub(super) enum BrowserAction {
     ExtractHlslIncludeFolder(Vec<String>),
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct TagDragPayload {
+    pub(super) rel_path: String,
+    pub(super) group_tag: u32,
+    pub(super) label: String,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum BrowserMode {
     Folders,

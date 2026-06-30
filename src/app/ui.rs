@@ -24,6 +24,51 @@ fn launcher_button(
     }
 }
 
+fn draw_game_banner_header(ui: &mut Ui, app: &mut Baboon, game: &str, path_label: &str) {
+    let texture = app.game_banner_texture(ui.ctx(), game).cloned();
+    Frame::none()
+        .fill(if is_dark_mode() {
+            Color32::from_rgb(43, 43, 41)
+        } else {
+            Color32::from_rgb(235, 235, 230)
+        })
+        .inner_margin(egui::Margin::same(8.0))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                if let Some(texture) = texture {
+                    ui.add(
+                        egui::Image::new(egui::load::SizedTexture::new(
+                            texture.id(),
+                            Vec2::splat(72.0),
+                        ))
+                        .fit_to_exact_size(Vec2::splat(72.0)),
+                    );
+                }
+                ui.add_space(4.0);
+                ui.vertical(|ui| {
+                    ui.add_space(8.0);
+                    ui.label(
+                        RichText::new(format!("Tags - {} (MCC)", game_display_name(game)))
+                            .color(text_dark())
+                            .strong(),
+                    );
+                    ui.add(
+                        egui::Label::new(RichText::new(path_label).color(subtle_dark()).small())
+                            .wrap(),
+                    );
+                });
+            });
+        });
+}
+
+fn sidebar_source_path_label(source: &TagSource) -> String {
+    match source {
+        TagSource::SingleFile { path } => path.display().to_string(),
+        TagSource::LooseFolder { root, .. } => root.display().to_string(),
+        TagSource::MonolithicCache { root, .. } => root.display().to_string(),
+    }
+}
+
 const MONITOR_COMMANDS_BY_GAME: &[(&str, &[&str])] = &[
     (
         "halo2_mcc",
@@ -1597,14 +1642,24 @@ impl eframe::App for Baboon {
                 bottom: 6.0,
             }))
             .show(ctx, |ui| {
-                ui.heading(RichText::new("Tags").color(text_dark()));
+                let sidebar_header = self.source.as_ref().map(|source| {
+                    (
+                        source.game.clone(),
+                        source.source.origin_label(),
+                        sidebar_source_path_label(&source.source),
+                    )
+                });
+                if let Some((Some(game), _origin, path_label)) = sidebar_header.as_ref() {
+                    draw_game_banner_header(ui, self, game, path_label);
+                } else {
+                    ui.heading(RichText::new("Tags").color(text_dark()));
+                    if let Some((_, origin, _)) = sidebar_header.as_ref() {
+                        ui.small(RichText::new(origin).color(subtle_dark()));
+                        ui.add_space(8.0);
+                    }
+                }
+
                 if let Some(source) = &mut self.source {
-                    ui.label(
-                        RichText::new(&source.label)
-                            .color(foundation_blue())
-                            .strong(),
-                    );
-                    ui.small(RichText::new(source.source.origin_label()).color(subtle_dark()));
                     ui.add_space(8.0);
                     let scanning = self.scanning_entries;
                     // Collect deferred scan-trigger here; execute after borrow ends.

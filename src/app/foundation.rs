@@ -1992,6 +1992,8 @@ pub(super) fn draw_foundation_tag_reference_row(
         ui.add_space(indent);
         foundation_label_cell(ui, &meta.label);
         let editable = edit.editable && !meta.read_only;
+        let expected_group = target.as_ref().map(|(group_tag, _)| *group_tag);
+        let mut dropped_input = None;
         if editable {
             let response = foundation_text_edit_cell(
                 ui,
@@ -1999,6 +2001,17 @@ pub(super) fn draw_foundation_tag_reference_row(
                 foundation_value_width(buffer, available_value_width),
                 id,
             );
+            paint_tag_reference_drop_feedback(ui, &response, expected_group);
+            if let Some(payload) = response.dnd_release_payload::<TagDragPayload>() {
+                match tag_reference_drop_input(&payload, expected_group) {
+                    Ok(input) => dropped_input = Some(input),
+                    Err(error) => {
+                        if let Some(status) = edit.status.as_deref_mut() {
+                            *status = error;
+                        }
+                    }
+                }
+            }
             if response.lost_focus() && buffer.trim() != value.trim() {
                 edit.pending.push(PendingFieldEdit {
                     path: path.to_owned(),
@@ -2006,11 +2019,19 @@ pub(super) fn draw_foundation_tag_reference_row(
                 });
             }
         } else {
-            foundation_input_cell(
+            let response = foundation_input_cell(
                 ui,
                 value,
                 foundation_value_width(value, available_value_width),
             );
+            paint_tag_reference_drop_feedback(ui, &response, expected_group);
+        }
+        if let Some(input) = dropped_input {
+            *buffer = input.clone();
+            edit.pending.push(PendingFieldEdit {
+                path: path.to_owned(),
+                input,
+            });
         }
         let browse_clicked =
             foundation_header_button_clicked(ui, "...", editable && edit.tags_root.is_some());
@@ -2071,6 +2092,47 @@ pub(super) fn draw_foundation_tag_reference_row(
         ui.label(RichText::new(suffix).color(subtle_dark()).small());
         draw_field_help(ui, meta);
     });
+}
+
+pub(super) fn tag_reference_drop_input(
+    payload: &TagDragPayload,
+    expected_group: Option<u32>,
+) -> Result<String, String> {
+    if let Some(expected_group) = expected_group {
+        if payload.group_tag != expected_group {
+            return Err(format!(
+                "Cannot assign {}: expected group {}, got {}",
+                payload.label,
+                format_group_tag(expected_group),
+                format_group_tag(payload.group_tag)
+            ));
+        }
+    }
+    Ok(payload.rel_path.replace('/', "\\"))
+}
+
+pub(super) fn tag_reference_drop_is_compatible(
+    payload: &TagDragPayload,
+    expected_group: Option<u32>,
+) -> bool {
+    expected_group.is_none_or(|expected_group| payload.group_tag == expected_group)
+}
+
+pub(super) fn paint_tag_reference_drop_feedback(
+    ui: &Ui,
+    response: &egui::Response,
+    expected_group: Option<u32>,
+) {
+    let Some(payload) = response.dnd_hover_payload::<TagDragPayload>() else {
+        return;
+    };
+    let color = if tag_reference_drop_is_compatible(&payload, expected_group) {
+        Color32::from_rgb(70, 140, 235)
+    } else {
+        Color32::from_rgb(210, 70, 70)
+    };
+    ui.painter()
+        .rect_stroke(response.rect.expand(1.0), 0.0, Stroke::new(2.0, color));
 }
 
 /// Strip the trailing NUL terminator (and surrounding whitespace) from an
@@ -2501,7 +2563,7 @@ pub(super) fn foundation_label_cell(ui: &mut Ui, text: &str) {
     }
 }
 
-pub(super) fn foundation_input_cell(ui: &mut Ui, text: &str, width: f32) {
+pub(super) fn foundation_input_cell(ui: &mut Ui, text: &str, width: f32) -> egui::Response {
     let height = 24.0;
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
     ui.painter().rect_filled(rect, 0.0, foundation_input());
@@ -2515,7 +2577,9 @@ pub(super) fn foundation_input_cell(ui: &mut Ui, text: &str, width: f32) {
         text_dark(),
     );
     if response.hovered() {
-        response.on_hover_text(text);
+        response.on_hover_text(text)
+    } else {
+        response
     }
 }
 
@@ -2866,6 +2930,36 @@ mod tests {
             tag_reference_relative_path_with_extension(&outside, &tags_root).unwrap_err(),
             "Selected file must be inside the tags folder"
         );
+    }
+
+    #[test]
+    fn tag_reference_drop_payload_normalizes_to_tag_relative_input() {
+        let payload = TagDragPayload {
+            rel_path: "objects/characters/brute/brute.render_model".to_owned(),
+            group_tag: parse_group_tag("mode").unwrap(),
+            label: "brute.render_model".to_owned(),
+        };
+
+        assert_eq!(
+            tag_reference_drop_input(&payload, Some(parse_group_tag("mode").unwrap())).unwrap(),
+            r"objects\characters\brute\brute.render_model"
+        );
+    }
+
+    #[test]
+    fn tag_reference_drop_payload_rejects_wrong_group() {
+        let payload = TagDragPayload {
+            rel_path: "objects/characters/brute/brute.render_model".to_owned(),
+            group_tag: parse_group_tag("mode").unwrap(),
+            label: "brute.render_model".to_owned(),
+        };
+
+        let error =
+            tag_reference_drop_input(&payload, Some(parse_group_tag("hlmt").unwrap())).unwrap_err();
+
+        assert!(error.contains("Cannot assign brute.render_model"));
+        assert!(error.contains("expected group hlmt"));
+        assert!(error.contains("got mode"));
     }
 }
 
