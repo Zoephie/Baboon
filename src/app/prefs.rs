@@ -103,6 +103,12 @@ pub(super) fn load_gui_prefs() -> GuiPrefs {
             "tool_commands_collapsed_categories",
         ),
         recent_folders: load_path_list(&value, "recent_folders"),
+        custom_color_swatches: load_custom_color_swatches(&value),
+        palette_last_dir: value
+            .get("palette_last_dir")
+            .and_then(Value::as_str)
+            .filter(|path| !path.trim().is_empty())
+            .map(PathBuf::from),
     }
 }
 
@@ -159,6 +165,32 @@ fn load_path_list(value: &Value, key: &str) -> Vec<PathBuf> {
         }
     }
     paths
+}
+
+fn load_custom_color_swatches(value: &Value) -> Vec<Option<[u8; 4]>> {
+    let mut swatches = vec![None; CUSTOM_COLOR_SWATCH_COUNT];
+    if let Some(items) = value.get("custom_color_swatches").and_then(Value::as_array) {
+        for (index, item) in items.iter().take(CUSTOM_COLOR_SWATCH_COUNT).enumerate() {
+            let Some(text) = item.as_str() else {
+                continue;
+            };
+            swatches[index] = parse_pref_rgba(text);
+        }
+    }
+    swatches
+}
+
+fn parse_pref_rgba(text: &str) -> Option<[u8; 4]> {
+    let hex = text.trim().strip_prefix('#').unwrap_or(text.trim());
+    if hex.len() != 8 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some([
+        u8::from_str_radix(&hex[0..2], 16).ok()?,
+        u8::from_str_radix(&hex[2..4], 16).ok()?,
+        u8::from_str_radix(&hex[4..6], 16).ok()?,
+        u8::from_str_radix(&hex[6..8], 16).ok()?,
+    ])
 }
 
 pub(super) fn clean_recent_path(path: PathBuf) -> PathBuf {
@@ -249,6 +281,10 @@ pub(super) fn save_gui_prefs(
         "tool_commands_left_width": prefs.tool_commands_left_width,
         "tool_commands_collapsed_categories": collapsed_tool_categories,
         "recent_folders": prefs.recent_folders.iter().map(|path| path.display().to_string()).collect::<Vec<_>>(),
+        "custom_color_swatches": prefs.custom_color_swatches.iter().map(|swatch| {
+            swatch.map(|rgba| format!("#{:02X}{:02X}{:02X}{:02X}", rgba[0], rgba[1], rgba[2], rgba[3]))
+        }).collect::<Vec<_>>(),
+        "palette_last_dir": prefs.palette_last_dir.as_ref().map(|path| path.display().to_string()),
         "terminal_open_games": games,
     });
     let text = serde_json::to_string_pretty(&value)
@@ -274,4 +310,28 @@ pub(super) fn load_terminal_open_games() -> HashSet<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn custom_color_swatches_load_as_fixed_global_slots() {
+        let value = serde_json::json!({
+            "custom_color_swatches": [
+                "#FF0000FF",
+                null,
+                "#33669980",
+                "not-a-color"
+            ]
+        });
+
+        let swatches = load_custom_color_swatches(&value);
+        assert_eq!(swatches.len(), CUSTOM_COLOR_SWATCH_COUNT);
+        assert_eq!(swatches[0], Some([255, 0, 0, 255]));
+        assert_eq!(swatches[1], None);
+        assert_eq!(swatches[2], Some([51, 102, 153, 128]));
+        assert_eq!(swatches[3], None);
+    }
 }

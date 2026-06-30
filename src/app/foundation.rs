@@ -167,7 +167,16 @@ pub(super) fn draw_struct_fields(
         depth <= 1,
         open_override,
         |ui| {
-            draw_fields_with_docs(ui, &tag_struct, names, depth, expert_mode, path_prefix, edit, None);
+            draw_fields_with_docs(
+                ui,
+                &tag_struct,
+                names,
+                depth,
+                expert_mode,
+                path_prefix,
+                edit,
+                None,
+            );
         },
     );
 }
@@ -266,6 +275,7 @@ pub(super) fn draw_fields_with_docs(
 ) {
     let guid = tag_struct.definition().guid();
     let entries: &[DefEntry] = edit.docs.map(|docs| docs.entries_for(&guid)).unwrap_or(&[]);
+    let parent_raw = tag_struct.raw();
     let mut cursor = 0usize;
     for field in tag_struct.fields_all() {
         if skip_field == Some(field.name()) {
@@ -309,6 +319,7 @@ pub(super) fn draw_fields_with_docs(
         draw_field(
             ui,
             field,
+            parent_raw,
             names,
             depth,
             expert_mode,
@@ -335,6 +346,7 @@ pub(super) fn draw_fields_with_docs(
 pub(super) fn draw_field(
     ui: &mut Ui,
     field: TagField<'_>,
+    parent_raw: &[u8],
     names: &TagNameIndex,
     depth: usize,
     expert_mode: bool,
@@ -383,7 +395,7 @@ pub(super) fn draw_field(
         }
         return;
     }
-    if let Some(value) = field.value() {
+    if let Some(value) = field_value_with_legacy_inline_old_string_id(field, parent_raw) {
         if is_hidden_non_expert_value(&value, expert_mode) {
             return;
         }
@@ -1005,8 +1017,9 @@ pub(super) fn first_tag_reference_label(
     element: TagStruct<'_>,
     names: &TagNameIndex,
 ) -> Option<String> {
+    let parent_raw = element.raw();
     for field in element.fields() {
-        if let Some(value) = field.value() {
+        if let Some(value) = field_value_with_legacy_inline_old_string_id(field, parent_raw) {
             if let TagFieldData::TagReference(reference) = value {
                 if reference.group_tag_and_name.is_some() {
                     let label = format_foundation_scalar_value(
@@ -1029,8 +1042,9 @@ pub(super) fn first_tag_reference_label(
 }
 
 pub(super) fn first_named_string_label(element: TagStruct<'_>) -> Option<String> {
+    let parent_raw = element.raw();
     for field in element.fields() {
-        if let Some(value) = field.value() {
+        if let Some(value) = field_value_with_legacy_inline_old_string_id(field, parent_raw) {
             if is_name_like_field(field.name()) {
                 if let Some(label) = stringish_label(&value) {
                     return Some(label);
@@ -1047,8 +1061,9 @@ pub(super) fn first_named_string_label(element: TagStruct<'_>) -> Option<String>
 }
 
 pub(super) fn first_string_label(element: TagStruct<'_>) -> Option<String> {
+    let parent_raw = element.raw();
     for field in element.fields() {
-        if let Some(value) = field.value() {
+        if let Some(value) = field_value_with_legacy_inline_old_string_id(field, parent_raw) {
             if let Some(label) = stringish_label(&value) {
                 return Some(label);
             }
@@ -1063,8 +1078,9 @@ pub(super) fn first_string_label(element: TagStruct<'_>) -> Option<String> {
 }
 
 pub(super) fn first_scalar_label(element: TagStruct<'_>, names: &TagNameIndex) -> Option<String> {
+    let parent_raw = element.raw();
     for field in element.fields() {
-        if let Some(value) = field.value() {
+        if let Some(value) = field_value_with_legacy_inline_old_string_id(field, parent_raw) {
             if scalar_is_useful_for_block_label(&value) {
                 let value = format_foundation_scalar_value(names, &value);
                 if label_has_content(&value) {
@@ -1079,6 +1095,40 @@ pub(super) fn first_scalar_label(element: TagStruct<'_>, names: &TagNameIndex) -
         }
     }
     None
+}
+
+pub(super) fn field_value_with_legacy_inline_old_string_id(
+    field: TagField<'_>,
+    parent_raw: &[u8],
+) -> Option<TagFieldData> {
+    if let Some(value) = field.value() {
+        return Some(value);
+    }
+    legacy_inline_old_string_id(field, parent_raw)
+        .map(|string| TagFieldData::OldStringId(StringIdData { string }))
+}
+
+pub(super) fn legacy_inline_old_string_id(
+    field: TagField<'_>,
+    parent_raw: &[u8],
+) -> Option<String> {
+    if field.field_type() != TagFieldType::OldStringId {
+        return None;
+    }
+    let offset = field.definition().offset() as usize;
+    let bytes = parent_raw.get(offset..offset + 32)?;
+    let end = bytes
+        .iter()
+        .position(|&byte| byte == 0)
+        .unwrap_or(bytes.len());
+    let value = std::str::from_utf8(&bytes[..end]).ok()?.trim();
+    if value.is_empty() {
+        return None;
+    }
+    if !value.bytes().all(|byte| matches!(byte, 0x20..=0x7e)) {
+        return None;
+    }
+    Some(value.to_owned())
 }
 
 pub(super) fn is_name_like_field(name: &str) -> bool {
@@ -2511,12 +2561,20 @@ pub(super) fn draw_foundation_tag_reference_row(
         if browse_clicked {
             if let Some(tags_root) = edit.tags_root {
                 let start_ref = target.as_ref().map(|(_, rel_path)| rel_path.as_str());
-                if let Some(input) = choose_tag_reference_input(tags_root, start_ref) {
-                    *buffer = input.clone();
-                    edit.pending.push(PendingFieldEdit {
-                        path: path.to_owned(),
-                        input,
-                    });
+                match choose_tag_reference_input(tags_root, start_ref) {
+                    Ok(Some(input)) => {
+                        *buffer = input.clone();
+                        edit.pending.push(PendingFieldEdit {
+                            path: path.to_owned(),
+                            input,
+                        });
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        if let Some(status) = edit.status.as_deref_mut() {
+                            *status = error;
+                        }
+                    }
                 }
             }
         }
@@ -2624,19 +2682,47 @@ pub(super) fn tag_reference_start_dir(tags_root: &Path, rel_path: &str) -> PathB
 pub(super) fn choose_tag_reference_input(
     tags_root: &Path,
     start_ref: Option<&str>,
-) -> Option<String> {
+) -> Result<Option<String>, String> {
     let start_dir = start_ref
         .map(|rel_path| tag_reference_start_dir(tags_root, rel_path))
         .unwrap_or_else(|| tags_root.to_path_buf());
     let picked = rfd::FileDialog::new()
         .set_title("Select Tag Reference")
         .set_directory(start_dir)
-        .pick_file()?;
-    let rel = picked.strip_prefix(tags_root).ok()?;
-    let extension = rel.extension().and_then(|ext| ext.to_str())?;
-    let group_tag = extension_to_group_tag(extension)?;
+        .pick_file();
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let rel = tag_reference_relative_path(&picked, tags_root)?;
+    let extension = rel
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .ok_or_else(|| "Selected tag file has no extension".to_owned())?;
+    let group_tag = extension_to_group_tag(extension)
+        .ok_or_else(|| format!("Unknown tag extension: {extension}"))?;
     let path = rel.with_extension("").to_string_lossy().replace('/', "\\");
-    Some(format!("{}:{path}", format_group_tag(group_tag)))
+    Ok(Some(format!("{}:{path}", format_group_tag(group_tag))))
+}
+
+pub(super) fn tag_reference_relative_path(
+    picked: &Path,
+    tags_root: &Path,
+) -> Result<PathBuf, String> {
+    picked
+        .strip_prefix(tags_root)
+        .map(Path::to_path_buf)
+        .map_err(|_| "Selected file must be inside the tags folder".to_owned())
+}
+
+pub(super) fn tag_reference_relative_path_with_extension(
+    picked: &Path,
+    tags_root: &Path,
+) -> Result<String, String> {
+    let rel = tag_reference_relative_path(picked, tags_root)?;
+    if rel.extension().and_then(|ext| ext.to_str()).is_none() {
+        return Err("Selected tag file has no extension".to_owned());
+    }
+    Ok(rel.to_string_lossy().replace('/', "\\"))
 }
 
 pub(super) fn draw_foundation_flags_row(
@@ -3165,6 +3251,15 @@ pub(super) fn foundation_editable_component_parts(
     value: &TagFieldData,
 ) -> Option<Vec<(String, String)>> {
     match value {
+        TagFieldData::RealPoint2d(p) => Some(vec![
+            ("x".to_owned(), fmt_real(p.x)),
+            ("y".to_owned(), fmt_real(p.y)),
+        ]),
+        TagFieldData::RealPoint3d(p) => Some(vec![
+            ("x".to_owned(), fmt_real(p.x)),
+            ("y".to_owned(), fmt_real(p.y)),
+            ("z".to_owned(), fmt_real(p.z)),
+        ]),
         TagFieldData::RealVector2d(v) => Some(vec![
             ("i".to_owned(), fmt_real(v.i)),
             ("j".to_owned(), fmt_real(v.j)),
@@ -3173,6 +3268,12 @@ pub(super) fn foundation_editable_component_parts(
             ("i".to_owned(), fmt_real(v.i)),
             ("j".to_owned(), fmt_real(v.j)),
             ("k".to_owned(), fmt_real(v.k)),
+        ]),
+        TagFieldData::RealQuaternion(q) => Some(vec![
+            ("i".to_owned(), fmt_real(q.i)),
+            ("j".to_owned(), fmt_real(q.j)),
+            ("k".to_owned(), fmt_real(q.k)),
+            ("w".to_owned(), fmt_real(q.w)),
         ]),
         _ => None,
     }
@@ -3361,6 +3462,7 @@ mod tests {
             definitions_root: Some(definitions_root.as_path()),
             definition_group_name: Some("damage_effect"),
             tags_root: None,
+            status: None,
             editable: true,
             show_block_sizes: false,
             buffers: &mut buffers,
@@ -3424,6 +3526,34 @@ mod tests {
         assert!(view.h2_legacy.is_some());
         assert_eq!(view.data_bytes(), raw);
     }
+
+    #[test]
+    fn tag_reference_picker_paths_must_be_under_tags_root() {
+        let tags_root = PathBuf::from("tags");
+        let picked = tags_root
+            .join("objects")
+            .join("characters")
+            .join("brute")
+            .join("bitmaps")
+            .join("mask.bitmap");
+
+        assert_eq!(
+            tag_reference_relative_path_with_extension(&picked, &tags_root).unwrap(),
+            r"objects\characters\brute\bitmaps\mask.bitmap"
+        );
+
+        let outside = PathBuf::from("data")
+            .join("objects")
+            .join("characters")
+            .join("brute")
+            .join("bitmaps")
+            .join("mask.tif");
+        assert_eq!(
+            tag_reference_relative_path_with_extension(&outside, &tags_root).unwrap_err(),
+            "Selected file must be inside the tags folder"
+        );
+    }
+
 }
 
 pub(super) fn draw_resource(

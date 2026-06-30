@@ -443,6 +443,10 @@ pub(super) struct MaterialColorPopup {
     blue: f32,
     alpha: f32,
     pub(super) sc_hex: String,
+    pc_hex_input: String,
+    pc_hex_error: Option<String>,
+    palette_status: Option<String>,
+    confirm_clear_palette: bool,
     /// When Some, clicking OK writes a constant-color function blob to this path.
     write_path: Option<String>,
     /// When Some, clicking OK writes a plain RGB/ARGB color value to this path
@@ -486,6 +490,10 @@ impl MaterialColorPopup {
                 format_pc_float(green),
                 format_pc_float(blue)
             ),
+            pc_hex_input: format_rgb_hex(red, green, blue),
+            pc_hex_error: None,
+            palette_status: None,
+            confirm_clear_palette: false,
             write_path: None,
             write_color_field: None,
             create_shader_op: None,
@@ -554,6 +562,19 @@ impl MaterialColorPopup {
             float_channel_to_u8(self.blue),
             float_channel_to_u8(self.alpha),
         )
+    }
+
+    fn set_rgb_bytes(&mut self, red: u8, green: u8, blue: u8) {
+        self.red = byte_to_float(red);
+        self.green = byte_to_float(green);
+        self.blue = byte_to_float(blue);
+        self.pc_hex_input = format!("#{red:02X}{green:02X}{blue:02X}");
+        self.pc_hex_error = None;
+    }
+
+    fn set_rgba_bytes(&mut self, red: u8, green: u8, blue: u8, alpha: u8) {
+        self.set_rgb_bytes(red, green, blue);
+        self.alpha = byte_to_float(alpha);
     }
 }
 
@@ -650,6 +671,8 @@ pub(super) enum ColorPopupResult {
 pub(super) fn draw_color_popup(
     ctx: &egui::Context,
     color_popup: &mut Option<MaterialColorPopup>,
+    custom_swatches: &mut Vec<Option<[u8; 4]>>,
+    palette_last_dir: &mut Option<PathBuf>,
 ) -> Option<ColorPopupResult> {
     let color = color_popup.as_mut()?;
     let mut open = true;
@@ -667,7 +690,7 @@ pub(super) fn draw_color_popup(
         .default_size(Vec2::new(448.0, 480.0))
         .show(ctx, |ui| {
             if editable {
-                draw_color_picker_editor(ui, color);
+                draw_color_picker_editor(ui, color, custom_swatches, palette_last_dir);
             } else {
                 ui.horizontal(|ui| {
                     let (rect, _) = ui.allocate_exact_size(Vec2::splat(80.0), Sense::hover());
@@ -794,7 +817,12 @@ pub(super) fn draw_color_popup(
     result
 }
 
-pub(super) fn draw_color_picker_editor(ui: &mut Ui, color: &mut MaterialColorPopup) {
+pub(super) fn draw_color_picker_editor(
+    ui: &mut Ui,
+    color: &mut MaterialColorPopup,
+    custom_swatches: &mut Vec<Option<[u8; 4]>>,
+    palette_last_dir: &mut Option<PathBuf>,
+) {
     ui.horizontal(|ui| {
         draw_color_sv_square(ui, color);
         ui.add_space(8.0);
@@ -813,6 +841,11 @@ pub(super) fn draw_color_picker_editor(ui: &mut Ui, color: &mut MaterialColorPop
     });
     ui.add_space(8.0);
     draw_palette_grid(ui, color);
+    ui.add_space(8.0);
+    draw_custom_color_swatches(ui, color, custom_swatches);
+    draw_palette_file_controls(ui, color, custom_swatches, palette_last_dir);
+    ui.add_space(8.0);
+    draw_editable_pc_hex(ui, color);
 }
 
 pub(super) fn draw_color_sv_square(ui: &mut Ui, color: &mut MaterialColorPopup) {
@@ -1032,15 +1065,288 @@ pub(super) fn draw_palette_grid(ui: &mut Ui, color: &mut MaterialColorPopup) {
                 ui.painter()
                     .rect_stroke(rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
                 if response.clicked() {
-                    color.red = byte_to_float(r);
-                    color.green = byte_to_float(g);
-                    color.blue = byte_to_float(b);
+                    color.set_rgb_bytes(r, g, b);
                 }
                 if (i + 1) % 16 == 0 {
                     ui.end_row();
                 }
             }
         });
+}
+
+pub(super) fn draw_custom_color_swatches(
+    ui: &mut Ui,
+    color: &mut MaterialColorPopup,
+    custom_swatches: &mut Vec<Option<[u8; 4]>>,
+) {
+    if custom_swatches.len() < CUSTOM_COLOR_SWATCH_COUNT {
+        custom_swatches.resize(CUSTOM_COLOR_SWATCH_COUNT, None);
+    }
+    ui.label(
+        RichText::new("Custom swatches")
+            .color(subtle_dark())
+            .small(),
+    );
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::new(5.0, 5.0);
+        for index in 0..CUSTOM_COLOR_SWATCH_COUNT {
+            let (rect, response) = ui.allocate_exact_size(Vec2::splat(18.0), Sense::click());
+            match custom_swatches[index] {
+                Some([r, g, b, a]) => {
+                    ui.painter().rect_filled(
+                        rect,
+                        0.0,
+                        Color32::from_rgba_unmultiplied(r, g, b, a),
+                    );
+                    if response.clicked() {
+                        color.set_rgba_bytes(r, g, b, a);
+                    }
+                }
+                None => {
+                    draw_empty_custom_swatch(ui, rect);
+                }
+            }
+            ui.painter()
+                .rect_stroke(rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+            if response.secondary_clicked() {
+                custom_swatches[index] = Some([
+                    float_channel_to_u8(color.red),
+                    float_channel_to_u8(color.green),
+                    float_channel_to_u8(color.blue),
+                    float_channel_to_u8(color.alpha),
+                ]);
+            }
+            response
+                .on_hover_text("Left-click to apply. Right-click to save the current colour here.");
+            if (index + 1) % 16 == 0 {
+                ui.end_row();
+            }
+        }
+    });
+    if ui
+        .small_button("Save current colour to first empty slot")
+        .clicked()
+    {
+        let slot = custom_swatches
+            .iter()
+            .position(Option::is_none)
+            .unwrap_or(0);
+        custom_swatches[slot] = Some([
+            float_channel_to_u8(color.red),
+            float_channel_to_u8(color.green),
+            float_channel_to_u8(color.blue),
+            float_channel_to_u8(color.alpha),
+        ]);
+    }
+}
+
+pub(super) fn draw_palette_file_controls(
+    ui: &mut Ui,
+    color: &mut MaterialColorPopup,
+    custom_swatches: &mut Vec<Option<[u8; 4]>>,
+    palette_last_dir: &mut Option<PathBuf>,
+) {
+    ui.horizontal(|ui| {
+        if ui.small_button("Save Palette...").clicked() {
+            match save_custom_palette(custom_swatches, palette_last_dir) {
+                Ok(Some(path)) => {
+                    color.palette_status = Some(format!("Saved palette: {}", path.display()))
+                }
+                Ok(None) => {}
+                Err(error) => color.palette_status = Some(error),
+            }
+        }
+        if ui.small_button("Load Palette...").clicked() {
+            match load_custom_palette(palette_last_dir) {
+                Ok(Some(swatches)) => {
+                    *custom_swatches = swatches;
+                    color.palette_status = Some("Loaded palette".to_owned());
+                    color.confirm_clear_palette = false;
+                }
+                Ok(None) => {}
+                Err(error) => color.palette_status = Some(error),
+            }
+        }
+        if ui.small_button("Clear Palette").clicked() {
+            color.confirm_clear_palette = true;
+        }
+    });
+    if color.confirm_clear_palette {
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Clear all custom swatches?").color(text_dark()));
+            if ui.small_button("Clear").clicked() {
+                *custom_swatches = vec![None; CUSTOM_COLOR_SWATCH_COUNT];
+                color.palette_status = Some("Cleared palette".to_owned());
+                color.confirm_clear_palette = false;
+            }
+            if ui.small_button("Cancel").clicked() {
+                color.confirm_clear_palette = false;
+            }
+        });
+    }
+    if let Some(status) = color.palette_status.as_deref() {
+        ui.small(RichText::new(status).color(subtle_dark()));
+    }
+}
+
+pub(super) fn save_custom_palette(
+    custom_swatches: &[Option<[u8; 4]>],
+    palette_last_dir: &mut Option<PathBuf>,
+) -> Result<Option<PathBuf>, String> {
+    let start_dir = palette_last_dir
+        .clone()
+        .or_else(documents_dir)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let Some(mut path) = rfd::FileDialog::new()
+        .set_title("Save Baboon Palette")
+        .add_filter("Baboon Palette", &["baboon_palette"])
+        .set_directory(start_dir)
+        .set_file_name("palette.baboon_palette")
+        .save_file()
+    else {
+        return Ok(None);
+    };
+    if path.extension().and_then(|ext| ext.to_str()) != Some("baboon_palette") {
+        path.set_extension("baboon_palette");
+    }
+    let name = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .filter(|stem| !stem.trim().is_empty())
+        .unwrap_or("Untitled");
+    let text = encode_baboon_palette(name, custom_swatches);
+    std::fs::write(&path, text).map_err(|error| format!("Could not save palette: {error}"))?;
+    if let Some(parent) = path.parent() {
+        *palette_last_dir = Some(parent.to_path_buf());
+    }
+    Ok(Some(path))
+}
+
+pub(super) fn load_custom_palette(
+    palette_last_dir: &mut Option<PathBuf>,
+) -> Result<Option<Vec<Option<[u8; 4]>>>, String> {
+    let start_dir = palette_last_dir
+        .clone()
+        .or_else(documents_dir)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Load Baboon Palette")
+        .add_filter("Baboon Palette", &["baboon_palette"])
+        .set_directory(start_dir)
+        .pick_file()
+    else {
+        return Ok(None);
+    };
+    let text = std::fs::read_to_string(&path)
+        .map_err(|error| format!("Could not load palette: {error}"))?;
+    let swatches = decode_baboon_palette(&text)?;
+    if let Some(parent) = path.parent() {
+        *palette_last_dir = Some(parent.to_path_buf());
+    }
+    Ok(Some(swatches))
+}
+
+pub(super) fn encode_baboon_palette(name: &str, swatches: &[Option<[u8; 4]>]) -> String {
+    let mut out = String::new();
+    out.push_str("# Baboon Colour Palette\n");
+    out.push_str("# Name: ");
+    out.push_str(if name.trim().is_empty() {
+        "Untitled"
+    } else {
+        name.trim()
+    });
+    out.push('\n');
+    for index in 0..CUSTOM_COLOR_SWATCH_COUNT {
+        match swatches.get(index).copied().flatten() {
+            Some([r, g, b, a]) => out.push_str(&format!("#{r:02X}{g:02X}{b:02X}{a:02X}\n")),
+            None => out.push_str("#empty\n"),
+        }
+    }
+    out
+}
+
+pub(super) fn decode_baboon_palette(text: &str) -> Result<Vec<Option<[u8; 4]>>, String> {
+    let mut swatches = Vec::with_capacity(CUSTOM_COLOR_SWATCH_COUNT);
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty()
+            || trimmed.eq_ignore_ascii_case("# Baboon Colour Palette")
+            || trimmed.starts_with("# Name:")
+        {
+            continue;
+        }
+        if trimmed.eq_ignore_ascii_case("#empty") {
+            swatches.push(None);
+        } else if let Some(color) = parse_palette_rgba(trimmed) {
+            swatches.push(Some(color));
+        } else if trimmed.starts_with('#') {
+            continue;
+        } else {
+            return Err(format!("Invalid palette entry: {trimmed}"));
+        }
+        if swatches.len() >= CUSTOM_COLOR_SWATCH_COUNT {
+            break;
+        }
+    }
+    swatches.resize(CUSTOM_COLOR_SWATCH_COUNT, None);
+    Ok(swatches)
+}
+
+fn parse_palette_rgba(text: &str) -> Option<[u8; 4]> {
+    let hex = text.trim().strip_prefix('#').unwrap_or(text.trim());
+    if hex.len() != 8 || !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some([
+        u8::from_str_radix(&hex[0..2], 16).ok()?,
+        u8::from_str_radix(&hex[2..4], 16).ok()?,
+        u8::from_str_radix(&hex[4..6], 16).ok()?,
+        u8::from_str_radix(&hex[6..8], 16).ok()?,
+    ])
+}
+
+fn documents_dir() -> Option<PathBuf> {
+    std::env::var_os("USERPROFILE")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
+        .map(|home| home.join("Documents"))
+        .filter(|path| path.is_dir())
+}
+
+fn draw_empty_custom_swatch(ui: &mut Ui, rect: egui::Rect) {
+    ui.painter()
+        .rect_filled(rect, 0.0, ui.visuals().extreme_bg_color);
+    let stroke = Stroke::new(1.0, subtle_dark());
+    ui.painter()
+        .line_segment([rect.left_top(), rect.right_bottom()], stroke);
+    ui.painter()
+        .line_segment([rect.right_top(), rect.left_bottom()], stroke);
+}
+
+pub(super) fn draw_editable_pc_hex(ui: &mut Ui, color: &mut MaterialColorPopup) {
+    let current_hex = format_rgb_hex(color.red, color.green, color.blue);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Hex:").color(text_dark()));
+        let response = ui.add_sized(
+            Vec2::new(118.0, 20.0),
+            egui::TextEdit::singleline(&mut color.pc_hex_input)
+                .hint_text("#RRGGBB")
+                .desired_width(118.0),
+        );
+        if !response.has_focus() && color.pc_hex_input != current_hex {
+            color.pc_hex_input = current_hex;
+        }
+        let enter_pressed = ui.input(|input| input.key_pressed(egui::Key::Enter));
+        if response.lost_focus() && enter_pressed {
+            match parse_rgb_hex(&color.pc_hex_input) {
+                Ok([r, g, b]) => color.set_rgb_bytes(r, g, b),
+                Err(error) => color.pc_hex_error = Some(error),
+            }
+        }
+    });
+    if let Some(error) = color.pc_hex_error.as_deref() {
+        ui.small(RichText::new(error).color(Color32::from_rgb(220, 80, 80)));
+    }
 }
 
 pub(super) fn hsb_to_rgb(h: f32, s: f32, b: f32) -> (f32, f32, f32) {
@@ -1270,6 +1576,33 @@ pub(super) fn format_pc_float(value: f32) -> String {
         text.pop();
     }
     text
+}
+
+pub(super) fn format_rgb_hex(red: f32, green: f32, blue: f32) -> String {
+    format!(
+        "#{:02X}{:02X}{:02X}",
+        float_channel_to_u8(red),
+        float_channel_to_u8(green),
+        float_channel_to_u8(blue)
+    )
+}
+
+pub(super) fn parse_rgb_hex(input: &str) -> Result<[u8; 3], String> {
+    let hex = input.trim().strip_prefix('#').unwrap_or(input.trim());
+    if hex.len() != 6 {
+        return Err("Use #RRGGBB or RRGGBB".to_owned());
+    }
+    if !hex.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err("Hex colour contains invalid characters".to_owned());
+    }
+    Ok([
+        u8::from_str_radix(&hex[0..2], 16)
+            .map_err(|_| "Hex colour contains invalid red value".to_owned())?,
+        u8::from_str_radix(&hex[2..4], 16)
+            .map_err(|_| "Hex colour contains invalid green value".to_owned())?,
+        u8::from_str_radix(&hex[4..6], 16)
+            .map_err(|_| "Hex colour contains invalid blue value".to_owned())?,
+    ])
 }
 
 pub(super) fn rgb_to_hsb_255(red: f32, green: f32, blue: f32) -> (u8, u8, u8) {

@@ -72,6 +72,8 @@ mod map_names;
 use map_names::*;
 mod tool_commands;
 use tool_commands::*;
+mod tag_icons;
+use tag_icons::*;
 mod editor;
 use editor::*;
 mod controller;
@@ -142,6 +144,8 @@ pub struct Baboon {
     blender_path: Option<PathBuf>,
     blender_path_input: String,
     color_popup: Option<MaterialColorPopup>,
+    custom_color_swatches: Vec<Option<[u8; 4]>>,
+    palette_last_dir: Option<PathBuf>,
     function_popup: Option<FunctionPopup>,
     query_results: Option<TagQueryResults>,
     /// "Compare Tags" (Tag Diff) window state.
@@ -186,6 +190,7 @@ pub struct Baboon {
     monitor_icon: Option<egui::TextureHandle>,
     sapien_icon: Option<egui::TextureHandle>,
     tag_test_icon: Option<egui::TextureHandle>,
+    game_banner_textures: HashMap<String, egui::TextureHandle>,
     /// Clipboard for copy/paste of a block element between identical tags.
     block_clipboard: Option<BlockClipboard>,
 }
@@ -194,6 +199,7 @@ impl Baboon {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         cc.egui_ctx.set_fonts(foundation_fonts());
         cc.egui_ctx.set_style(foundation_style());
+        egui_extras::install_image_loaders(&cc.egui_ctx);
         let prefs = load_gui_prefs();
         let terminal_open_games = load_terminal_open_games();
         set_dark_mode(prefs.dark_mode);
@@ -260,6 +266,8 @@ impl Baboon {
                 .unwrap_or_default(),
             blender_path: prefs.blender_path,
             color_popup: None,
+            custom_color_swatches: prefs.custom_color_swatches.clone(),
+            palette_last_dir: prefs.palette_last_dir.clone(),
             function_popup: None,
             query_results: None,
             tag_diff: None,
@@ -317,8 +325,25 @@ impl Baboon {
                 "tag_test_icon",
                 include_bytes!("../icons/tag_test.ico"),
             ),
+            game_banner_textures: HashMap::new(),
             block_clipboard: None,
         }
+    }
+
+    fn game_banner_texture(
+        &mut self,
+        ctx: &egui::Context,
+        game: &str,
+    ) -> Option<&egui::TextureHandle> {
+        if !self.game_banner_textures.contains_key(game) {
+            let texture = load_png_texture(
+                ctx,
+                &format!("game_banner_{game}"),
+                get_game_banner_bytes(game),
+            )?;
+            self.game_banner_textures.insert(game.to_owned(), texture);
+        }
+        self.game_banner_textures.get(game)
     }
 }
 
@@ -362,6 +387,38 @@ fn load_ico_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egu
     let size = [rgba.width() as usize, rgba.height() as usize];
     let color = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
     Some(ctx.load_texture(name, color, egui::TextureOptions::LINEAR))
+}
+
+fn load_png_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egui::TextureHandle> {
+    let image = image::load_from_memory_with_format(bytes, image::ImageFormat::Png).ok()?;
+    let rgba = image.to_rgba8();
+    let size = [rgba.width() as usize, rgba.height() as usize];
+    let color = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
+    Some(ctx.load_texture(name, color, egui::TextureOptions::LINEAR))
+}
+
+pub(super) fn get_game_banner_bytes(game: &str) -> &'static [u8] {
+    match game {
+        "haloce_mcc" => include_bytes!("../assets/Game Icons/ce.png"),
+        "halo2_mcc" => include_bytes!("../assets/Game Icons/h2.png"),
+        "halo3_mcc" => include_bytes!("../assets/Game Icons/h3.png"),
+        "halo3odst_mcc" => include_bytes!("../assets/Game Icons/h3odst.png"),
+        "haloreach_mcc" => include_bytes!("../assets/Game Icons/reach.png"),
+        "halo4_mcc" => include_bytes!("../assets/Game Icons/h4.png"),
+        _ => include_bytes!("../assets/Game Icons/ce.png"),
+    }
+}
+
+pub(super) fn game_display_name(game: &str) -> &'static str {
+    match game {
+        "haloce_mcc" => "Halo: Combat Evolved",
+        "halo2_mcc" => "Halo 2",
+        "halo3_mcc" => "Halo 3",
+        "halo3odst_mcc" => "Halo 3: ODST",
+        "haloreach_mcc" => "Halo: Reach",
+        "halo4_mcc" => "Halo 4",
+        _ => "Unknown Game",
+    }
 }
 
 #[cfg(test)]
@@ -424,6 +481,49 @@ mod tests {
         assert!(parse_color_channels::<3>("0.1, 0.2").is_err());
         assert!(parse_color_channels::<3>("0.1, 0.2, x").is_err());
         assert!(parse_rgb_or_argb_color_channels("0.1, 0.2").is_err());
+    }
+
+    #[test]
+    fn editable_color_hex_accepts_standard_rgb_codes() {
+        assert_eq!(parse_rgb_hex("#FF8040").unwrap(), [255, 128, 64]);
+        assert_eq!(parse_rgb_hex("00aaff").unwrap(), [0, 170, 255]);
+        assert_eq!(format_rgb_hex(1.0, 0.5, 0.0), "#FF8000");
+        assert!(parse_rgb_hex("#12345").is_err());
+        assert!(parse_rgb_hex("#12XX56").is_err());
+    }
+
+    #[test]
+    fn baboon_palette_format_round_trips_custom_swatches() {
+        let mut swatches = vec![None; CUSTOM_COLOR_SWATCH_COUNT];
+        swatches[0] = Some([0, 0, 0, 255]);
+        swatches[1] = Some([255, 87, 51, 255]);
+        swatches[3] = Some([51, 255, 87, 128]);
+
+        let encoded = encode_baboon_palette("My Custom Palette", &swatches);
+        assert!(encoded.contains("# Baboon Colour Palette"));
+        assert!(encoded.contains("# Name: My Custom Palette"));
+        assert!(encoded.contains("#FF5733FF"));
+        assert!(encoded.contains("#empty"));
+
+        let decoded = decode_baboon_palette(&encoded).unwrap();
+        assert_eq!(decoded.len(), CUSTOM_COLOR_SWATCH_COUNT);
+        assert_eq!(decoded[0], Some([0, 0, 0, 255]));
+        assert_eq!(decoded[1], Some([255, 87, 51, 255]));
+        assert_eq!(decoded[2], None);
+        assert_eq!(decoded[3], Some([51, 255, 87, 128]));
+    }
+
+    #[test]
+    fn baboon_palette_load_pads_and_ignores_comments() {
+        let decoded = decode_baboon_palette(
+            "# Baboon Colour Palette\n# Name: Small\n# Comment\n#11223344\n#empty\n",
+        )
+        .unwrap();
+
+        assert_eq!(decoded.len(), CUSTOM_COLOR_SWATCH_COUNT);
+        assert_eq!(decoded[0], Some([17, 34, 51, 68]));
+        assert_eq!(decoded[1], None);
+        assert!(decoded[2..].iter().all(Option::is_none));
     }
 
     #[test]

@@ -24,6 +24,51 @@ fn launcher_button(
     }
 }
 
+fn draw_game_banner_header(ui: &mut Ui, app: &mut Baboon, game: &str, path_label: &str) {
+    let texture = app.game_banner_texture(ui.ctx(), game).cloned();
+    Frame::none()
+        .fill(if is_dark_mode() {
+            Color32::from_rgb(43, 43, 41)
+        } else {
+            Color32::from_rgb(235, 235, 230)
+        })
+        .inner_margin(egui::Margin::same(8.0))
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                if let Some(texture) = texture {
+                    ui.add(
+                        egui::Image::new(egui::load::SizedTexture::new(
+                            texture.id(),
+                            Vec2::splat(72.0),
+                        ))
+                        .fit_to_exact_size(Vec2::splat(72.0)),
+                    );
+                }
+                ui.add_space(4.0);
+                ui.vertical(|ui| {
+                    ui.add_space(8.0);
+                    ui.label(
+                        RichText::new(format!("Tags - {} (MCC)", game_display_name(game)))
+                            .color(text_dark())
+                            .strong(),
+                    );
+                    ui.add(
+                        egui::Label::new(RichText::new(path_label).color(subtle_dark()).small())
+                            .wrap(),
+                    );
+                });
+            });
+        });
+}
+
+fn sidebar_source_path_label(source: &TagSource) -> String {
+    match source {
+        TagSource::SingleFile { path } => path.display().to_string(),
+        TagSource::LooseFolder { root, .. } => root.display().to_string(),
+        TagSource::MonolithicCache { root, .. } => root.display().to_string(),
+    }
+}
+
 const MONITOR_COMMANDS_BY_GAME: &[(&str, &[&str])] = &[
     (
         "halo2_mcc",
@@ -1889,6 +1934,10 @@ fn draw_about_tab(ui: &mut Ui) {
                 .strong(),
         );
     });
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Icons by").color(text_dark()));
+        ui.label(RichText::new("Paddy Tee").color(foundation_blue()).strong());
+    });
     ui.add_space(10.0);
     ui.separator();
     ui.add_space(8.0);
@@ -2486,14 +2535,24 @@ impl eframe::App for Baboon {
                 bottom: 6.0,
             }))
             .show(ctx, |ui| {
-                ui.heading(RichText::new("Tags").color(text_dark()));
+                let sidebar_header = self.source.as_ref().map(|source| {
+                    (
+                        source.game.clone(),
+                        source.source.origin_label(),
+                        sidebar_source_path_label(&source.source),
+                    )
+                });
+                if let Some((Some(game), _origin, path_label)) = sidebar_header.as_ref() {
+                    draw_game_banner_header(ui, self, game, path_label);
+                } else {
+                    ui.heading(RichText::new("Tags").color(text_dark()));
+                    if let Some((_, origin, _)) = sidebar_header.as_ref() {
+                        ui.small(RichText::new(origin).color(subtle_dark()));
+                        ui.add_space(8.0);
+                    }
+                }
+
                 if let Some(source) = &mut self.source {
-                    ui.label(
-                        RichText::new(&source.label)
-                            .color(foundation_blue())
-                            .strong(),
-                    );
-                    ui.small(RichText::new(source.source.origin_label()).color(subtle_dark()));
                     ui.add_space(8.0);
                     let scanning = self.scanning_entries;
                     // Collect deferred scan-trigger here; execute after borrow ends.
@@ -2749,8 +2808,9 @@ impl eframe::App for Baboon {
 
                         let available_width = ui.available_width().max(120.0);
                         let row_gap = 3.0;
-                        // (key, label, active, dirty, label_width)
-                        let mut rows = Vec::<Vec<(String, String, bool, bool, f32)>>::new();
+                        // (key, label, active, dirty, label_width, group_tag)
+                        let mut rows =
+                            Vec::<Vec<(String, String, bool, bool, f32, u32)>>::new();
                         let mut row = Vec::new();
                         let mut row_width = 0.0;
 
@@ -2776,6 +2836,8 @@ impl eframe::App for Baboon {
                                 TAB_MAX_LABEL_WIDTH,
                             );
                             let tab_width = TAB_SIDE_PADDING
+                                + 16.0
+                                + TAB_INNER_GAP
                                 + label_width
                                 + TAB_INNER_GAP
                                 + TAB_BUTTON_SIZE
@@ -2795,7 +2857,7 @@ impl eframe::App for Baboon {
                                 row_width += row_gap;
                             }
                             row_width += tab_width;
-                            row.push((key, label, active, dirty, label_width));
+                            row.push((key, label, active, dirty, label_width, entry.group_tag));
                         }
                         if !row.is_empty() {
                             rows.push(row);
@@ -2804,7 +2866,7 @@ impl eframe::App for Baboon {
                         for row in rows {
                             let row_response = ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = row_gap;
-                                for (key, label, active, dirty, label_width) in row {
+                                for (key, label, active, dirty, label_width, group_tag) in row {
                                     let shown_label = truncate_for_cell(&label, label_width);
                                     let base_fill = if active { menu_bar() } else { row_type() };
                                     // Subtle amber tint flags tabs with unsaved edits
@@ -2826,6 +2888,7 @@ impl eframe::App for Baboon {
                                         .show(ui, |ui| {
                                             ui.horizontal(|ui| {
                                                 ui.spacing_mut().item_spacing.x = TAB_INNER_GAP;
+                                                draw_tag_icon(ui, group_tag, 16.0);
                                                 let label_response = ui
                                                     .add_sized(
                                                         Vec2::new(label_width, 18.0),
@@ -2968,6 +3031,7 @@ impl eframe::App for Baboon {
                                     _ => None,
                                 }
                             }),
+                            status: Some(&mut self.status),
                             editable: is_editable_tag(&entry, &doc.tag),
                             show_block_sizes: self.show_block_sizes,
                             buffers: &mut self.edit_buffers,
@@ -3140,7 +3204,12 @@ impl eframe::App for Baboon {
         self.keywords.save_if_dirty();
         self.draw_floating_tabs(ctx);
         self.handle_floating_tab_drop(ctx);
-        if let Some(result) = draw_color_popup(ctx, &mut self.color_popup) {
+        if let Some(result) = draw_color_popup(
+            ctx,
+            &mut self.color_popup,
+            &mut self.custom_color_swatches,
+            &mut self.palette_last_dir,
+        ) {
             match result {
                 ColorPopupResult::FieldEdit { tag_key, edit } => {
                     if let Some(doc) = self.parsed_tags.get_mut(&tag_key) {

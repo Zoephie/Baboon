@@ -695,37 +695,66 @@ pub(super) fn draw_entry(
     double_click_to_open: bool,
     reveal_key: Option<&str>,
 ) -> Option<BrowserAction> {
-    let label = entry
+    let leaf_label = entry
         .display_path
         .rsplit(['/', '\\'])
         .next()
         .unwrap_or(&entry.display_path);
     let label = if show_prefixes {
-        format!("[tag] {label}")
+        format!("[tag] {leaf_label}")
     } else {
-        label.to_owned()
+        leaf_label.to_owned()
     };
     // The row is a drag source: drag it onto a tag-reference cell to set the
-    // reference. We add drag sense to the selectable label itself (rather than
-    // wrapping it in `dnd_drag_source`, which forces a "grab hand" cursor over
-    // the whole row and makes plain clicks feel draggy). Clicking still selects;
-    // the payload is only published once an actual drag begins.
+    // reference. Payload is our `DraggedTagRef` (what the ref-cell + shader-row
+    // drop targets expect); the row paints a tag icon + a cursor drag-preview.
     let payload = DraggedTagRef {
         group_tag: entry.group_tag,
         input: entry_reference_input(entry),
         rel_path: entry_rel_path(entry),
         label: label.clone(),
     };
-    let response = ui
-        .selectable_label(
-            selected == Some(entry.key.as_str()),
-            RichText::new(label).color(text_dark()),
-        )
-        .on_hover_text(&entry.display_path)
-        .interact(egui::Sense::click_and_drag());
+    let selected = selected == Some(entry.key.as_str());
+    let row_size = Vec2::new(ui.available_width(), ui.spacing().interact_size.y);
+    let (row_rect, response) = ui.allocate_exact_size(row_size, Sense::click_and_drag());
+    let response = response.on_hover_text(&entry.display_path);
     response.dnd_set_drag_payload(payload);
     if reveal_key == Some(entry.key.as_str()) {
         response.scroll_to_me(Some(egui::Align::Center));
+    }
+    if ui.is_rect_visible(row_rect) {
+        let visuals = ui.style().interact_selectable(&response, selected);
+        if selected || response.hovered() || response.highlighted() || response.has_focus() {
+            ui.painter().rect(
+                row_rect.expand(visuals.expansion),
+                visuals.rounding,
+                visuals.weak_bg_fill,
+                visuals.bg_stroke,
+            );
+        }
+        let icon_size = 16.0;
+        let icon_rect = egui::Rect::from_center_size(
+            egui::pos2(row_rect.left() + icon_size * 0.5, row_rect.center().y),
+            Vec2::splat(icon_size),
+        );
+        paint_tag_icon_at(ui, entry.group_tag, icon_rect);
+        ui.painter().text(
+            row_rect.left_center() + Vec2::new(icon_size + 5.0, 0.0),
+            Align2::LEFT_CENTER,
+            label,
+            FontId::proportional(12.5),
+            text_dark(),
+        );
+    }
+    if response.dragged()
+        && let Some(pointer_pos) = ui.ctx().pointer_interact_pos()
+    {
+        egui::Area::new(ui.make_persistent_id(("tag_tree_drag_preview", &entry.key)))
+            .order(egui::Order::Tooltip)
+            .fixed_pos(pointer_pos + Vec2::new(12.0, 12.0))
+            .show(ui.ctx(), |ui| {
+                ui.label(RichText::new(leaf_label).color(text_dark()));
+            });
     }
     let open_requested = if double_click_to_open {
         response.double_clicked()
@@ -800,6 +829,14 @@ pub(super) fn draw_entry(
         }
     });
     action
+}
+
+fn paint_tag_icon_at(ui: &Ui, group_tag: u32, rect: egui::Rect) {
+    let group = format_group_tag(group_tag);
+    let uri = format!("bytes://baboon_tag_icons/{group}.svg");
+    egui::Image::from_bytes(uri, get_icon_svg(&group).as_bytes())
+        .fit_to_exact_size(rect.size())
+        .paint_at(ui, rect);
 }
 
 pub(super) fn is_monolithic_entry(entry: &TagEntry) -> bool {
