@@ -749,18 +749,18 @@ impl Baboon {
 
     /// Floating window listing the results of a tag query (find-references /
     /// unreferenced). Clicking an entry opens it.
-    fn source_game(&self) -> Option<&str> {
+    pub(super) fn source_game(&self) -> Option<&str> {
         self.source.as_ref().and_then(|source| source.game.as_deref())
     }
 
-    fn source_tags_root(&self) -> Option<&std::path::Path> {
+    pub(super) fn source_tags_root(&self) -> Option<&std::path::Path> {
         self.source.as_ref().and_then(|source| match &source.source {
             TagSource::LooseFolder { root, .. } => Some(root.as_path()),
             _ => None,
         })
     }
 
-    fn source_definitions_root(&self) -> Option<&std::path::Path> {
+    pub(super) fn source_definitions_root(&self) -> Option<&std::path::Path> {
         self.source.as_ref().and_then(|source| match &source.source {
             TagSource::LooseFolder {
                 definitions_root, ..

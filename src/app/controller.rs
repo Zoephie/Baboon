@@ -1,4 +1,5 @@
 use super::*;
+use anyhow::Context as _;
 
 impl Baboon {
     pub(super) fn process_worker_messages(&mut self) {
@@ -2298,8 +2299,22 @@ impl Baboon {
     /// Apply a snapshot returned by the journal: re-parse the bytes into the
     /// document and invalidate derived caches.
     fn restore_snapshot(&mut self, key: &str, restored: Option<(Vec<u8>, String)>, verb: &str) {
+        // Classic (Halo CE / Halo 2) snapshots are serialized in classic format,
+        // which `read_from_bytes` can't parse — re-parse with the JSON layout.
+        let group_tag = self.parsed_tags.get(key).map(|doc| doc.tag.group().tag);
+        let game = self.source_game().map(str::to_owned);
+        let definitions_root = self.source_definitions_root().map(Path::to_owned);
         match restored {
-            Some((bytes, label)) => match TagFile::read_from_bytes(&bytes) {
+            Some((bytes, label)) => match group_tag
+                .context("no open tag to restore")
+                .and_then(|group_tag| {
+                    crate::source::read_tag_from_bytes(
+                        &bytes,
+                        game.as_deref(),
+                        definitions_root.as_deref(),
+                        group_tag,
+                    )
+                }) {
                 Ok(tag) => {
                     if let Some(doc) = self.parsed_tags.get_mut(key) {
                         doc.tag = tag;

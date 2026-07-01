@@ -375,6 +375,34 @@ pub fn read_tag_at_path(
     TagFile::read(path).map_err(Into::into)
 }
 
+/// Re-parse in-memory tag bytes, honoring classic (Halo CE / Halo 2) format.
+///
+/// Classic tags serialize with reversed signatures (`!MLB`/`BMAL`, no `BLAM`
+/// at 0x3C) and are not self-describing, so `TagFile::read_from_bytes` fails on
+/// them — the JSON layout for `group_tag` must be supplied out of band. Used by
+/// the undo/redo journal, whose snapshots come straight from
+/// `TagFile::write_to_bytes` (which writes classic format for classic tags).
+pub fn read_tag_from_bytes(
+    bytes: &[u8],
+    game: Option<&str>,
+    definitions_root: Option<&Path>,
+    group_tag: u32,
+) -> Result<TagFile> {
+    if ClassicHeader::parse(bytes).is_some() {
+        let game = game.context("classic tag requires a detected game profile")?;
+        let definitions_root =
+            definitions_root.context("classic tag requires a definitions root")?;
+        let group_name = group_tag_to_extension(group_tag)
+            .context("unknown group for classic tag layout")?;
+        let def_path = definitions_root.join(game).join(format!("{group_name}.json"));
+        let layout = TagLayout::from_json(&def_path)
+            .with_context(|| format!("failed to load classic layout {}", def_path.display()))?;
+        return read_classic_tag_file(bytes, layout)
+            .map_err(|error| anyhow::anyhow!("failed to decode classic tag: {error}"));
+    }
+    TagFile::read_from_bytes(bytes).map_err(Into::into)
+}
+
 fn read_loose_tag(
     path: &Path,
     entry: &TagEntry,
