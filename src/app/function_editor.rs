@@ -122,14 +122,16 @@ pub(super) fn seeded_name_combo(ui: &mut Ui, id: &str, value: &mut String, edita
     if !value.is_empty() && !options.iter().any(|o| o == value) {
         options.push(value.clone());
     }
-    egui::ComboBox::from_id_salt(id)
-        .selected_text(if value.is_empty() {
+    let (_, wheel_delta) = combo_box_with_scroll(
+        ui,
+        egui::ComboBox::from_id_salt(id)
+            .selected_text(if value.is_empty() {
             "none".to_owned()
         } else {
             value.clone()
-        })
-        .width(120.0)
-        .show_ui(ui, |ui| {
+            })
+            .width(120.0),
+        |ui| {
             for opt in &options {
                 let label = if opt.is_empty() { "none" } else { opt.as_str() };
                 if ui.selectable_label(value == opt, label).clicked() {
@@ -137,7 +139,15 @@ pub(super) fn seeded_name_combo(ui: &mut Ui, id: &str, value: &mut String, edita
                     changed = true;
                 }
             }
-        });
+        },
+    );
+    if let Some(delta) = wheel_delta {
+        let current = options.iter().position(|opt| opt == value).unwrap_or(0);
+        if let Some(next) = combo_scroll_next_index(current, options.len(), delta) {
+            *value = options[next].clone();
+            changed = true;
+        }
+    }
     let response = ui.add(egui::TextEdit::singleline(value).desired_width(90.0));
     text_edit_cursor_to_start_on_tab_focus(ui, &response);
     if response.changed() {
@@ -153,10 +163,12 @@ pub(super) fn function_type_combo(ui: &mut Ui, function: &mut TagFunction, edita
         return false;
     }
     let mut changed = false;
-    egui::ComboBox::from_id_salt("fn_type")
-        .selected_text(function_type_label(current))
-        .width(130.0)
-        .show_ui(ui, |ui| {
+    let (_, wheel_delta) = combo_box_with_scroll(
+        ui,
+        egui::ComboBox::from_id_salt("fn_type")
+            .selected_text(function_type_label(current))
+            .width(130.0),
+        |ui| {
             for kind in EDITABLE_FUNCTION_TYPES {
                 if ui
                     .selectable_label(current == kind, function_type_label(kind))
@@ -167,7 +179,21 @@ pub(super) fn function_type_combo(ui: &mut Ui, function: &mut TagFunction, edita
                     changed = true;
                 }
             }
-        });
+        },
+    );
+    if let Some(delta) = wheel_delta {
+        let current_index = EDITABLE_FUNCTION_TYPES
+            .iter()
+            .position(|kind| *kind == current)
+            .unwrap_or(0);
+        if let Some(next) =
+            combo_scroll_next_index(current_index, EDITABLE_FUNCTION_TYPES.len(), delta)
+        {
+            let kind = EDITABLE_FUNCTION_TYPES[next];
+            function.set_function_type(kind);
+            changed = true;
+        }
+    }
     changed
 }
 
@@ -189,10 +215,12 @@ pub(super) fn output_type_combo(
         return false;
     }
     let mut changed = false;
-    egui::ComboBox::from_id_salt("fn_output")
-        .selected_text(label)
-        .width(120.0)
-        .show_ui(ui, |ui| {
+    let (_, wheel_delta) = combo_box_with_scroll(
+        ui,
+        egui::ComboBox::from_id_salt("fn_output")
+            .selected_text(label)
+            .width(120.0),
+        |ui| {
             for (value, name) in OUTPUT_TYPE_OPTIONS {
                 if ui
                     .selectable_label(*output_index == Some(value), name)
@@ -203,7 +231,20 @@ pub(super) fn output_type_combo(
                     changed = true;
                 }
             }
-        });
+        },
+    );
+    if let Some(delta) = wheel_delta {
+        let current_index = OUTPUT_TYPE_OPTIONS
+            .iter()
+            .position(|(value, _)| *output_index == Some(*value))
+            .unwrap_or(0);
+        if let Some(next) = combo_scroll_next_index(current_index, OUTPUT_TYPE_OPTIONS.len(), delta)
+        {
+            let value = OUTPUT_TYPE_OPTIONS[next].0;
+            *output_index = Some(value);
+            changed = true;
+        }
+    }
     changed
 }
 
@@ -219,17 +260,32 @@ pub(super) fn color_graph_combo(ui: &mut Ui, function: &mut TagFunction, editabl
         return false;
     }
     let mut changed = false;
-    egui::ComboBox::from_id_salt("fn_colorgraph")
-        .selected_text(label)
-        .width(90.0)
-        .show_ui(ui, |ui| {
+    let (_, wheel_delta) = combo_box_with_scroll(
+        ui,
+        egui::ComboBox::from_id_salt("fn_colorgraph")
+            .selected_text(label)
+            .width(90.0),
+        |ui| {
             for (kind, name) in COLOR_GRAPH_OPTIONS {
                 if ui.selectable_label(current == kind, name).clicked() && current != kind {
                     function.set_color_graph_type(kind);
                     changed = true;
                 }
             }
-        });
+        },
+    );
+    if let Some(delta) = wheel_delta {
+        let current_index = COLOR_GRAPH_OPTIONS
+            .iter()
+            .position(|(kind, _)| *kind == current)
+            .unwrap_or(0);
+        if let Some(next) = combo_scroll_next_index(current_index, COLOR_GRAPH_OPTIONS.len(), delta)
+        {
+            let kind = COLOR_GRAPH_OPTIONS[next].0;
+            function.set_color_graph_type(kind);
+            changed = true;
+        }
+    }
     changed
 }
 
@@ -963,10 +1019,12 @@ fn h2_legacy_combo(
         return false;
     }
     let mut changed = false;
-    egui::ComboBox::from_id_salt(id)
-        .selected_text(label)
-        .width(width)
-        .show_ui(ui, |ui| {
+    let (_, wheel_delta) = combo_box_with_scroll(
+        ui,
+        egui::ComboBox::from_id_salt(id)
+            .selected_text(label)
+            .width(width),
+        |ui| {
             for (option_value, name) in options {
                 if ui
                     .selectable_label(*value == *option_value, *name)
@@ -977,7 +1035,19 @@ fn h2_legacy_combo(
                     changed = true;
                 }
             }
-        });
+        },
+    );
+    if let Some(delta) = wheel_delta {
+        let current_index = options
+            .iter()
+            .position(|(option_value, _)| *value == *option_value)
+            .unwrap_or(0);
+        if let Some(next) = combo_scroll_next_index(current_index, options.len(), delta) {
+            let option_value = options[next].0;
+            *value = option_value;
+            changed = true;
+        }
+    }
     changed
 }
 

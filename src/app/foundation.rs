@@ -316,6 +316,8 @@ pub(super) fn draw_fields_with_docs(
         // the element dropdown; `None` falls back to the numeric editor.
         let root = edit.root;
         let block_index = block_index_target_options(tag_struct, &field, names, root, path_prefix);
+        let semantic_short_index =
+            semantic_short_index_target_options(ui, edit, tag_struct, &field, names, root, path_prefix);
         draw_field(
             ui,
             field,
@@ -327,6 +329,7 @@ pub(super) fn draw_fields_with_docs(
             edit,
             meta_override,
             block_index,
+            semantic_short_index,
         );
     }
     // Any explanations after the last matched field.
@@ -354,6 +357,7 @@ pub(super) fn draw_field(
     edit: &mut FieldEditContext<'_>,
     meta_override: Option<FieldDisplayMeta>,
     block_index: Option<(Vec<String>, String)>,
+    semantic_short_index: Option<(Vec<String>, String)>,
 ) {
     let field_path = append_field_path(path_prefix, field.name());
     // `meta_override` carries help/units recovered from the JSON definition
@@ -412,6 +416,7 @@ pub(super) fn draw_field(
                     &field_path,
                     edit,
                     block_index.as_ref(),
+                    semantic_short_index.as_ref(),
                 );
             });
         } else {
@@ -426,6 +431,7 @@ pub(super) fn draw_field(
                 &field_path,
                 edit,
                 block_index.as_ref(),
+                semantic_short_index.as_ref(),
             );
         }
         return;
@@ -1514,37 +1520,45 @@ pub(super) fn draw_foundation_block_control(
                 // Instance selector dropdown — built lazily (only when open).
                 let combo_width = foundation_selected_width(row_width);
                 if has_sel {
-                    let combo_response = egui::ComboBox::from_id_salt((
-                        "block_instance",
-                        view_scope,
-                        tag_key,
-                        path_salt,
-                        depth,
-                    ))
-                    .selected_text(truncate_for_cell(selected_label, combo_width - 24.0))
-                    .width(combo_width)
-                    .show_ui(ui, |ui| {
-                        selector_active |= ui.rect_contains_pointer(ui.max_rect());
-                        // Cap the rendered list for very large blocks.
-                        let cap = count.min(2000);
-                        for i in 0..cap {
-                            if ui
-                                .selectable_label(i == selected_index, element_label(i))
-                                .clicked()
-                            {
-                                actions.new_selection = Some(i);
+                    let (combo_response, wheel_delta) = combo_box_with_scroll(
+                        ui,
+                        egui::ComboBox::from_id_salt((
+                            "block_instance",
+                            view_scope,
+                            tag_key,
+                            path_salt,
+                            depth,
+                        ))
+                        .selected_text(truncate_for_cell(selected_label, combo_width - 24.0))
+                        .width(combo_width),
+                        |ui| {
+                            selector_active |= ui.rect_contains_pointer(ui.max_rect());
+                            // Cap the rendered list for very large blocks.
+                            let cap = count.min(2000);
+                            for i in 0..cap {
+                                if ui
+                                    .selectable_label(i == selected_index, element_label(i))
+                                    .clicked()
+                                {
+                                    actions.new_selection = Some(i);
+                                }
                             }
-                        }
-                        if cap < count {
-                            ui.label(
-                                RichText::new(format!("… {} more", count - cap))
-                                    .small()
-                                    .color(subtle_dark()),
-                            );
-                        }
-                    });
+                            if cap < count {
+                                ui.label(
+                                    RichText::new(format!("… {} more", count - cap))
+                                        .small()
+                                        .color(subtle_dark()),
+                                );
+                            }
+                        },
+                    );
                     selector_active |=
                         combo_response.response.hovered() || combo_response.response.has_focus();
+                    if let Some(delta) = wheel_delta {
+                        if let Some(next) = combo_scroll_next_index(selected_index, count, delta) {
+                            actions.new_selection = Some(next);
+                        }
+                    }
                 } else {
                     foundation_header_value_cell(ui, "NONE", combo_width);
                 }
@@ -1626,10 +1640,6 @@ pub(super) fn draw_foundation_block_control(
                 -1
             } else if input.key_pressed(egui::Key::ArrowDown) {
                 1
-            } else if input.raw_scroll_delta.y > f32::EPSILON {
-                -1
-            } else if input.raw_scroll_delta.y < -f32::EPSILON {
-                1
             } else {
                 0
             }
@@ -1640,9 +1650,6 @@ pub(super) fn draw_foundation_block_control(
             } else if navigation_delta > 0 && selected_index + 1 < count {
                 actions.new_selection = Some(selected_index + 1);
             }
-        }
-        if ui.input(|input| input.raw_scroll_delta.y.abs() > f32::EPSILON) {
-            consume_mouse_wheel(ui);
         }
     }
 
@@ -1662,20 +1669,124 @@ pub(super) fn draw_foundation_block_control(
                 top: 8.0,
                 bottom: 8.0,
             })
-            .show(ui, add_contents);
+            .show(ui, |ui| {
+                if depth > 0 {
+                    egui::ScrollArea::vertical()
+                        .id_salt(("foundation_block_body", view_scope, tag_key, path_salt, depth))
+                        .max_height(420.0)
+                        .min_scrolled_height(160.0)
+                        .auto_shrink([false, false])
+                        .show(ui, add_contents);
+                } else {
+                    add_contents(ui);
+                }
+            });
     });
 
     actions
 }
 
 pub(super) fn consume_mouse_wheel(ui: &Ui) {
-    ui.input_mut(|input| {
+    consume_mouse_wheel_ctx(ui.ctx());
+}
+
+fn consume_mouse_wheel_ctx(ctx: &egui::Context) {
+    ctx.input_mut(|input| {
         input
             .events
             .retain(|event| !matches!(event, egui::Event::MouseWheel { .. }));
         input.raw_scroll_delta = Vec2::ZERO;
         input.smooth_scroll_delta = Vec2::ZERO;
     });
+}
+
+pub(super) fn set_combo_scroll_cycle_enabled(ctx: &egui::Context, enabled: bool) {
+    ctx.data_mut(|data| data.insert_temp(combo_scroll_cycle_enabled_id(), enabled));
+}
+
+fn combo_scroll_cycle_enabled(ui: &Ui) -> bool {
+    ui.data(|data| {
+        data.get_temp::<bool>(combo_scroll_cycle_enabled_id())
+            .unwrap_or(true)
+    })
+}
+
+pub(super) fn combo_box_with_scroll<R>(
+    ui: &mut Ui,
+    combo: egui::ComboBox,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> (egui::InnerResponse<Option<R>>, Option<i32>) {
+    let response = combo.show_ui(ui, add_contents);
+    let popup_open = response.inner.is_some();
+    let delta = dropdown_wheel_delta(ui, &response.response, popup_open);
+    (response, delta)
+}
+
+pub(super) fn combo_scroll_next_index(current: usize, len: usize, delta: i32) -> Option<usize> {
+    if len == 0 || delta == 0 {
+        return None;
+    }
+    let delta = delta.signum();
+    let current = current.min(len - 1);
+    let next = (current as i32 + delta).clamp(0, len as i32 - 1) as usize;
+    (next != current).then_some(next)
+}
+
+pub(super) fn combo_scroll_next_i64(current: i64, min: i64, max: i64, delta: i32) -> Option<i64> {
+    if min > max || delta == 0 {
+        return None;
+    }
+    let delta = delta.signum() as i64;
+    let current = current.clamp(min, max);
+    let next = (current + delta).clamp(min, max);
+    (next != current).then_some(next)
+}
+
+pub(super) fn dropdown_wheel_delta(
+    ui: &Ui,
+    response: &egui::Response,
+    popup_open: bool,
+) -> Option<i32> {
+    if popup_open || !combo_scroll_cycle_enabled(ui) {
+        return None;
+    }
+    let hovered = ui
+        .ctx()
+        .input(|input| input.pointer.hover_pos())
+        .is_some_and(|hover_pos| response.rect.contains(hover_pos));
+    if !hovered {
+        return None;
+    }
+    let delta = wheel_event_delta_from_context(ui.ctx());
+    consume_mouse_wheel(ui);
+    if delta == 0 {
+        return None;
+    }
+    Some(delta)
+}
+
+fn wheel_event_delta_from_context(ctx: &egui::Context) -> i32 {
+    ctx.input(|input| {
+        let wheel_y = input
+            .events
+            .iter()
+            .filter_map(|event| match event {
+                egui::Event::MouseWheel { delta, .. } => Some(delta.y),
+                _ => None,
+            })
+            .sum::<f32>();
+        if wheel_y > f32::EPSILON {
+            -1
+        } else if wheel_y < -f32::EPSILON {
+            1
+        } else {
+            0
+        }
+    })
+}
+
+fn combo_scroll_cycle_enabled_id() -> egui::Id {
+    egui::Id::new("combo_scroll_cycle_enabled")
 }
 
 pub(super) fn foundation_header_toggle_cell(
@@ -1874,6 +1985,140 @@ pub(super) fn block_index_target_options(
     None
 }
 
+/// Some classic schemas expose parent links as plain signed shorts instead of
+/// first-class block-index fields. Render only well-known parent references as
+/// dropdowns so ordinary counters/indices remain numeric.
+pub(super) fn semantic_short_index_target_options(
+    ui: &Ui,
+    edit: &FieldEditContext<'_>,
+    tag_struct: &TagStruct<'_>,
+    field: &TagField<'_>,
+    names: &TagNameIndex,
+    root: Option<TagStruct<'_>>,
+    struct_path: &str,
+) -> Option<(Vec<String>, String)> {
+    if field.field_type() != TagFieldType::ShortInteger {
+        return None;
+    }
+    let target_key = semantic_short_index_target_key(field.name())?;
+    find_target_block_by_clean_key(tag_struct, target_key, names, struct_path).or_else(|| {
+        find_ancestor_target_block_by_clean_key(ui, edit, root?, target_key, names, struct_path)
+    })
+}
+
+fn semantic_short_index_target_key(field_name: &str) -> Option<&'static str> {
+    match clean_field_key(field_name).as_str() {
+        "parent variant" | "variant" => Some("variants"),
+        "parent node" => Some("nodes"),
+        "damage section" | "indirect damage section" => Some("damage sections"),
+        _ => None,
+    }
+}
+
+fn find_ancestor_target_block_by_clean_key(
+    ui: &Ui,
+    edit: &FieldEditContext<'_>,
+    root: TagStruct<'_>,
+    target_key: &str,
+    names: &TagNameIndex,
+    struct_path: &str,
+) -> Option<(Vec<String>, String)> {
+    let mut current = Some(struct_path);
+    while let Some(path) = current {
+        let parent = path.rsplit_once('/').map(|(p, _)| p).unwrap_or("");
+        let ancestor = if parent.is_empty() {
+            root
+        } else {
+            root.descend(parent)?
+        };
+        if let Some(found) = find_target_block_by_clean_key(&ancestor, target_key, names, parent) {
+            return Some(found);
+        }
+        if let Some(found) =
+            find_nested_target_block_by_clean_key(ui, edit, &ancestor, target_key, names, parent, 4)
+        {
+            return Some(found);
+        }
+        current = (!parent.is_empty()).then_some(parent);
+    }
+    None
+}
+
+fn find_nested_target_block_by_clean_key(
+    ui: &Ui,
+    edit: &FieldEditContext<'_>,
+    tag_struct: &TagStruct<'_>,
+    target_key: &str,
+    names: &TagNameIndex,
+    struct_path: &str,
+    depth_left: usize,
+) -> Option<(Vec<String>, String)> {
+    if depth_left == 0 {
+        return None;
+    }
+    for field in tag_struct.fields_all() {
+        let field_path = append_field_path(struct_path, field.name());
+        if let Some(block) = field.as_block() {
+            if clean_field_key(field.name()) == target_key {
+                let labels = (0..block.len())
+                    .map(|i| block_element_dropdown_label(block.element(i), names, i))
+                    .collect();
+                return Some((labels, field_path));
+            }
+            let count = block.len();
+            if count > 0 {
+                let selected = block_selected_index(ui, edit, &field_path, count);
+                if let Some(element) = block.element(selected) {
+                    let element_path = format!("{field_path}[{selected}]");
+                    if let Some(found) = find_nested_target_block_by_clean_key(
+                        ui,
+                        edit,
+                        &element,
+                        target_key,
+                        names,
+                        &element_path,
+                        depth_left - 1,
+                    ) {
+                        return Some(found);
+                    }
+                }
+            }
+        } else if let Some(nested) = field.as_struct() {
+            if let Some(found) = find_nested_target_block_by_clean_key(
+                ui,
+                edit,
+                &nested,
+                target_key,
+                names,
+                &field_path,
+                depth_left - 1,
+            ) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+fn find_target_block_by_clean_key(
+    tag_struct: &TagStruct<'_>,
+    target_key: &str,
+    names: &TagNameIndex,
+    struct_path: &str,
+) -> Option<(Vec<String>, String)> {
+    for sibling in tag_struct.fields_all() {
+        if let Some(block) = sibling.as_block() {
+            if clean_field_key(sibling.name()) == target_key {
+                let labels = (0..block.len())
+                    .map(|i| block_element_dropdown_label(block.element(i), names, i))
+                    .collect();
+                return Some((labels, append_field_path(struct_path, sibling.name())));
+            }
+        }
+    }
+    None
+}
+
 /// Find a block field whose definition name is `target_name` directly within
 /// `tag_struct`, returning `(element labels, full block path)`.
 fn find_target_block(
@@ -1923,10 +2168,12 @@ pub(super) fn draw_foundation_block_index_row(
 
         if editable {
             let mut new_index: Option<i64> = None;
-            egui::ComboBox::from_id_salt(("block_index", path))
-                .selected_text(truncate_for_cell(&selected_text, 280.0))
-                .width(300.0)
-                .show_ui(ui, |ui| {
+            let (_, wheel_delta) = combo_box_with_scroll(
+                ui,
+                egui::ComboBox::from_id_salt(("block_index", path))
+                    .selected_text(truncate_for_cell(&selected_text, 280.0))
+                    .width(300.0),
+                |ui| {
                     if ui.selectable_label(current < 0, "<none>").clicked() {
                         new_index = Some(-1);
                     }
@@ -1935,7 +2182,15 @@ pub(super) fn draw_foundation_block_index_row(
                             new_index = Some(i as i64);
                         }
                     }
-                });
+                },
+            );
+            if let Some(delta) = wheel_delta {
+                if let Some(next) =
+                    combo_scroll_next_i64(current, -1, labels.len() as i64 - 1, delta)
+                {
+                    new_index = Some(next);
+                }
+            }
             if let Some(index) = new_index {
                 edit.pending.push(PendingFieldEdit {
                     path: path.to_owned(),
@@ -1981,9 +2236,25 @@ pub(super) fn draw_foundation_value_row(
     // whose target block was found among the struct's siblings; `None` for
     // non-block-index fields and unresolvable (custom) indices → numeric editor.
     block_index: Option<&(Vec<String>, String)>,
+    semantic_short_index: Option<&(Vec<String>, String)>,
 ) {
     if let (Some((labels, target_path)), Some(index)) = (block_index, block_index_value(value)) {
         draw_foundation_block_index_row(ui, meta, index, labels, target_path, depth, path, edit);
+        return;
+    }
+    if let (TagFieldData::ShortInteger(index), Some((labels, target_path))) =
+        (value, semantic_short_index)
+    {
+        draw_foundation_block_index_row(
+            ui,
+            meta,
+            *index as i64,
+            labels,
+            target_path,
+            depth,
+            path,
+            edit,
+        );
         return;
     }
     if let TagFieldData::TagReference(reference) = value {
@@ -2496,10 +2767,35 @@ pub(super) fn draw_foundation_tag_reference_row(
                 id,
             );
             if response.lost_focus() && buffer.trim() != value.trim() {
-                edit.pending.push(PendingFieldEdit {
-                    path: path.to_owned(),
-                    input: buffer.trim().to_owned(),
-                });
+                let input = buffer.trim().to_owned();
+                if let Some(required_group) = target.as_ref().map(|(group, _)| *group) {
+                    match parse_tag_reference(&input) {
+                        Ok(parsed) if tag_reference_group_allowed(&parsed, required_group) => {
+                            edit.pending.push(PendingFieldEdit {
+                                path: path.to_owned(),
+                                input,
+                            });
+                        }
+                        Ok(_) => {
+                            if let Some(status) = edit.status.as_deref_mut() {
+                                *status = format!(
+                                    "Reference must be a {} tag",
+                                    tag_group_display_name(required_group)
+                                );
+                            }
+                        }
+                        Err(error) => {
+                            if let Some(status) = edit.status.as_deref_mut() {
+                                *status = format!("Invalid tag reference: {error}");
+                            }
+                        }
+                    }
+                } else {
+                    edit.pending.push(PendingFieldEdit {
+                        path: path.to_owned(),
+                        input,
+                    });
+                }
             }
         } else if !has_ref {
             foundation_input_cell_colored(
@@ -2561,7 +2857,8 @@ pub(super) fn draw_foundation_tag_reference_row(
         if browse_clicked {
             if let Some(tags_root) = edit.tags_root {
                 let start_ref = target.as_ref().map(|(_, rel_path)| rel_path.as_str());
-                match choose_tag_reference_input(tags_root, start_ref) {
+                let required_group = target.as_ref().map(|(group, _)| *group);
+                match choose_tag_reference_input(tags_root, start_ref, required_group) {
                     Ok(Some(input)) => {
                         *buffer = input.clone();
                         edit.pending.push(PendingFieldEdit {
@@ -2682,14 +2979,20 @@ pub(super) fn tag_reference_start_dir(tags_root: &Path, rel_path: &str) -> PathB
 pub(super) fn choose_tag_reference_input(
     tags_root: &Path,
     start_ref: Option<&str>,
+    required_group: Option<u32>,
 ) -> Result<Option<String>, String> {
     let start_dir = start_ref
         .map(|rel_path| tag_reference_start_dir(tags_root, rel_path))
         .unwrap_or_else(|| tags_root.to_path_buf());
-    let picked = rfd::FileDialog::new()
+    let mut dialog = rfd::FileDialog::new()
         .set_title("Select Tag Reference")
-        .set_directory(start_dir)
-        .pick_file();
+        .set_directory(start_dir);
+    if let Some(group_tag) = required_group
+        && let Some(extension) = blam_tags::paths::group_tag_to_extension(group_tag)
+    {
+        dialog = dialog.add_filter(extension, &[extension]);
+    }
+    let picked = dialog.pick_file();
     let Some(picked) = picked else {
         return Ok(None);
     };
@@ -2702,6 +3005,19 @@ pub(super) fn choose_tag_reference_input(
         .ok_or_else(|| format!("Unknown tag extension: {extension}"))?;
     let path = rel.with_extension("").to_string_lossy().replace('/', "\\");
     Ok(Some(format!("{}:{path}", format_group_tag(group_tag))))
+}
+
+fn tag_reference_group_allowed(reference: &TagReferenceData, required_group: u32) -> bool {
+    reference
+        .group_tag_and_name
+        .as_ref()
+        .is_none_or(|(group, _)| *group == required_group)
+}
+
+fn tag_group_display_name(group_tag: u32) -> String {
+    blam_tags::paths::group_tag_to_extension(group_tag)
+        .map(str::to_owned)
+        .unwrap_or_else(|| format_group_tag(group_tag))
 }
 
 pub(super) fn tag_reference_relative_path(
@@ -3023,14 +3339,23 @@ pub(super) fn draw_foundation_enum_row(
         ui.add_space(depth as f32 * 12.0);
         foundation_label_cell(ui, &meta.label, meta.help.as_deref());
         ui.add_enabled_ui(edit.editable && !meta.read_only, |ui| {
-            egui::ComboBox::from_id_salt((edit.view_scope, edit.tag_key, path, "enum"))
-                .width(240.0)
-                .selected_text(enum_option_label(options, selected))
-                .show_ui(ui, |ui| {
+            let (_, wheel_delta) = combo_box_with_scroll(
+                ui,
+                egui::ComboBox::from_id_salt((edit.view_scope, edit.tag_key, path, "enum"))
+                    .width(240.0)
+                    .selected_text(enum_option_label(options, selected)),
+                |ui| {
                     for (index, option) in options.iter().enumerate() {
                         ui.selectable_value(&mut selected, index as i64, *option);
                     }
-                });
+                },
+            );
+            if let Some(delta) = wheel_delta
+                && let Some(next) =
+                    combo_scroll_next_i64(selected, 0, options.len() as i64 - 1, delta)
+            {
+                selected = next;
+            }
         });
         if Some(selected) != current && selected >= 0 {
             edit.pending.push(PendingFieldEdit {
@@ -3552,6 +3877,58 @@ mod tests {
             tag_reference_relative_path_with_extension(&outside, &tags_root).unwrap_err(),
             "Selected file must be inside the tags folder"
         );
+    }
+
+    #[test]
+    fn tag_reference_group_validator_allows_none_and_matching_group() {
+        let render_model = parse_group_tag("mode").unwrap();
+        let collision_model = parse_group_tag("coll").unwrap();
+        let empty = TagReferenceData {
+            group_tag_and_name: None,
+        };
+        let matching = TagReferenceData {
+            group_tag_and_name: Some((render_model, r"objects\foo\foo".to_owned())),
+        };
+        let mismatched = TagReferenceData {
+            group_tag_and_name: Some((collision_model, r"objects\foo\foo".to_owned())),
+        };
+
+        assert!(tag_reference_group_allowed(&empty, render_model));
+        assert!(tag_reference_group_allowed(&matching, render_model));
+        assert!(!tag_reference_group_allowed(&mismatched, render_model));
+    }
+
+    #[test]
+    fn format_block_size_label_is_stable_and_human_readable() {
+        assert_eq!(format_block_size_label(2, 36), "2 x 36 B = 72 B");
+        assert_eq!(format_block_size_label(64, 36), "64 x 36 B = 2.2 KiB");
+    }
+
+    #[test]
+    fn combo_scroll_next_index_clamps_and_uses_delta_direction() {
+        assert_eq!(combo_scroll_next_index(1, 3, 1), Some(2));
+        assert_eq!(combo_scroll_next_index(1, 3, 120), Some(2));
+        assert_eq!(combo_scroll_next_index(1, 3, -1), Some(0));
+        assert_eq!(combo_scroll_next_index(1, 3, -120), Some(0));
+        assert_eq!(combo_scroll_next_index(0, 3, -1), None);
+        assert_eq!(combo_scroll_next_index(2, 3, 1), None);
+        assert_eq!(combo_scroll_next_index(0, 0, 1), None);
+    }
+
+    #[test]
+    fn semantic_short_index_target_names_cover_damage_sections() {
+        let cases = [
+            ("parent variant", Some("variants")),
+            ("variant", Some("variants")),
+            ("parent node", Some("nodes")),
+            ("damage section", Some("damage sections")),
+            ("indirect damage section", Some("damage sections")),
+            ("runtime region index", None),
+        ];
+
+        for (field_name, expected) in cases {
+            assert_eq!(semantic_short_index_target_key(field_name), expected);
+        }
     }
 
 }
