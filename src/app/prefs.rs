@@ -60,6 +60,10 @@ pub(super) fn load_gui_prefs() -> GuiPrefs {
             .get("show_block_sizes")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        scroll_to_cycle_dropdowns: value
+            .get("scroll_to_cycle_dropdowns")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
         expert_mode: value
             .get("expert_mode")
             .and_then(Value::as_bool)
@@ -264,6 +268,7 @@ pub(super) fn save_gui_prefs(
         "show_browser_prefixes": prefs.show_browser_prefixes,
         "double_click_to_open_tags": prefs.double_click_to_open_tags,
         "show_block_sizes": prefs.show_block_sizes,
+        "scroll_to_cycle_dropdowns": prefs.scroll_to_cycle_dropdowns,
         "expert_mode": prefs.expert_mode,
         "field_search_passive": prefs.field_search_passive,
         "dark_mode": prefs.dark_mode,

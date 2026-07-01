@@ -748,10 +748,12 @@ fn draw_variant_controls(
                 .unwrap_or("<None>"),
             None => "(custom)",
         };
-        egui::ComboBox::from_id_salt(("model_preview_variant", &data.source_key))
-            .selected_text(selected)
-            .width(180.0)
-            .show_ui(ui, |ui| {
+        let (_, wheel_delta) = combo_box_with_scroll(
+            ui,
+            egui::ComboBox::from_id_salt(("model_preview_variant", &data.source_key))
+                .selected_text(selected)
+                .width(180.0),
+            |ui| {
                 if ui
                     .selectable_label(state.selected_variant.is_none(), "<None>")
                     .clicked()
@@ -769,7 +771,20 @@ fn draw_variant_controls(
                         reset_model_preview_selection(state, data, Some(index));
                     }
                 }
-            });
+            },
+        );
+        if let Some(delta) = wheel_delta {
+            let current = state
+                .selected_variant
+                .map(|index| index as i32 + 1)
+                .unwrap_or(0);
+            if let Some(next) =
+                combo_scroll_next_index(current as usize, data.variants.len() + 1, delta)
+            {
+                let selected_variant = if next == 0 { None } else { Some(next - 1) };
+                reset_model_preview_selection(state, data, selected_variant);
+            }
+        }
     });
     ui.add_space(6.0);
 

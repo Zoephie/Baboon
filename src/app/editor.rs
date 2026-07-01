@@ -2258,10 +2258,12 @@ pub(super) fn draw_bitmap_preview(
         ui.label(RichText::new(&data.type_name).color(subtle_dark()));
         ui.separator();
         ui.label(RichText::new(format!("Zoom {:.0}%", preview.zoom * 100.0)).color(subtle_dark()));
-        egui::ComboBox::from_id_salt(("bitmap_zoom_preset", &entry.key))
-            .selected_text("Set…")
-            .width(58.0)
-            .show_ui(ui, |ui| {
+        let (_, zoom_wheel_delta) = combo_box_with_scroll(
+            ui,
+            egui::ComboBox::from_id_salt(("bitmap_zoom_preset", &entry.key))
+                .selected_text("Set…")
+                .width(58.0),
+            |ui| {
                 if ui.selectable_label(false, "Fit").clicked() {
                     preview.zoom_initialized = false; // refit next frame
                     preview.pan = Vec2::ZERO;
@@ -2273,23 +2275,62 @@ pub(super) fn draw_bitmap_preview(
                         preview.pan = Vec2::ZERO;
                     }
                 }
-            });
+            },
+        );
+        if let Some(delta) = zoom_wheel_delta {
+            let presets = [0u32, 25, 50, 100, 200, 400];
+            let current_pct = (preview.zoom * 100.0).round() as u32;
+            let current = presets
+                .iter()
+                .position(|pct| *pct == current_pct)
+                .unwrap_or_else(|| {
+                    presets
+                        .iter()
+                        .enumerate()
+                        .skip(1)
+                        .min_by_key(|(_, pct)| pct.abs_diff(current_pct))
+                        .map(|(index, _)| index)
+                        .unwrap_or(0)
+                });
+            if let Some(next) = combo_scroll_next_index(current, presets.len(), delta) {
+                if presets[next] == 0 {
+                    preview.zoom_initialized = false;
+                } else {
+                    preview.zoom = presets[next] as f32 / 100.0;
+                    preview.zoom_initialized = true;
+                }
+                preview.pan = Vec2::ZERO;
+            }
+        }
         if ui.button("Reset zoom").clicked() {
             preview.zoom_initialized = false; // triggers fit-to-view on next frame
             preview.pan = Vec2::ZERO;
         }
         ui.separator();
         ui.label(RichText::new("BG").color(subtle_dark()));
-        egui::ComboBox::from_id_salt(("bitmap_bg", &entry.key))
-            .selected_text(preview.bg.label())
-            .width(86.0)
-            .show_ui(ui, |ui| {
+        let (_, bg_wheel_delta) = combo_box_with_scroll(
+            ui,
+            egui::ComboBox::from_id_salt(("bitmap_bg", &entry.key))
+                .selected_text(preview.bg.label())
+                .width(86.0),
+            |ui| {
                 for bg in BitmapPreviewBg::ALL {
                     if ui.selectable_label(preview.bg == bg, bg.label()).clicked() {
                         preview.bg = bg;
                     }
                 }
-            });
+            },
+        );
+        if let Some(delta) = bg_wheel_delta {
+            let current = BitmapPreviewBg::ALL
+                .iter()
+                .position(|bg| *bg == preview.bg)
+                .unwrap_or(0);
+            if let Some(next) = combo_scroll_next_index(current, BitmapPreviewBg::ALL.len(), delta)
+            {
+                preview.bg = BitmapPreviewBg::ALL[next];
+            }
+        }
     });
     ui.add_space(6.0);
 

@@ -2339,6 +2339,7 @@ impl Baboon {
             show_browser_prefixes: self.show_browser_prefixes,
             double_click_to_open_tags: self.double_click_to_open_tags,
             show_block_sizes: self.show_block_sizes,
+            scroll_to_cycle_dropdowns: self.scroll_to_cycle_dropdowns,
             expert_mode: self.expert_mode,
             field_search_passive: self.field_search_passive,
             dark_mode: self.dark_mode,

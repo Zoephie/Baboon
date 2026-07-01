@@ -796,21 +796,23 @@ impl Baboon {
                         .clone()
                         .map(|k| k.replace('\\', "/"))
                         .unwrap_or_else(|| "(open tag)".to_owned());
-                    egui::ComboBox::from_id_salt("tag_diff_b")
-                        .selected_text(selected)
-                        .width(380.0)
-                        .show_ui(ui, |ui| {
-                            let mut keys: Vec<&String> = self
-                                .parsed_tags
-                                .keys()
-                                .filter(|k| {
-                                    **k != state.a_key
-                                        && self.parsed_tags.get(*k).map(|d| d.tag.group().tag)
-                                            == a_group
-                                })
-                                .collect();
-                            keys.sort();
-                            for key in keys {
+                    let mut keys: Vec<String> = self
+                        .parsed_tags
+                        .keys()
+                        .filter(|k| {
+                            **k != state.a_key
+                                && self.parsed_tags.get(*k).map(|d| d.tag.group().tag) == a_group
+                        })
+                        .cloned()
+                        .collect();
+                    keys.sort();
+                    let (_, wheel_delta) = combo_box_with_scroll(
+                        ui,
+                        egui::ComboBox::from_id_salt("tag_diff_b")
+                            .selected_text(selected)
+                            .width(380.0),
+                        |ui| {
+                            for key in &keys {
                                 if ui
                                     .selectable_label(
                                         state.b_key.as_deref() == Some(key.as_str()),
@@ -823,7 +825,21 @@ impl Baboon {
                                     state.results = None;
                                 }
                             }
-                        });
+                        },
+                    );
+                    if let Some(delta) = wheel_delta {
+                        let current = state
+                            .b_key
+                            .as_ref()
+                            .and_then(|selected| keys.iter().position(|key| key == selected))
+                            .unwrap_or(0);
+                        if let Some(next) = combo_scroll_next_index(current, keys.len(), delta) {
+                            let key = keys[next].clone();
+                            state.b_key = Some(key.clone());
+                            state.b_display = Some(key);
+                            state.results = None;
+                        }
+                    }
                     if ui
                         .add_enabled(state.b_key.is_some(), egui::Button::new("Compare"))
                         .clicked()
@@ -1078,10 +1094,12 @@ impl Baboon {
                             aliases_changed = true;
                         }
                         let selected_label = ek_game_label(&self.ek_folder_aliases[index].game);
-                        egui::ComboBox::from_id_salt(("ek_folder_alias_game", index))
-                            .selected_text(selected_label)
-                            .width(210.0)
-                            .show_ui(ui, |ui| {
+                        let (_, wheel_delta) = combo_box_with_scroll(
+                            ui,
+                            egui::ComboBox::from_id_salt(("ek_folder_alias_game", index))
+                                .selected_text(selected_label)
+                                .width(210.0),
+                            |ui| {
                                 for (label, game) in SUPPORTED_EK_GAMES {
                                     if ui
                                         .selectable_value(
@@ -1094,7 +1112,21 @@ impl Baboon {
                                         aliases_changed = true;
                                     }
                                 }
-                            });
+                            },
+                        );
+                        if let Some(delta) = wheel_delta {
+                            let current = SUPPORTED_EK_GAMES
+                                .iter()
+                                .position(|(_, game)| *game == self.ek_folder_aliases[index].game)
+                                .unwrap_or(0);
+                            if let Some(next) =
+                                combo_scroll_next_index(current, SUPPORTED_EK_GAMES.len(), delta)
+                            {
+                                let game = SUPPORTED_EK_GAMES[next].1.to_owned();
+                                self.ek_folder_aliases[index].game = game;
+                                aliases_changed = true;
+                            }
+                        }
                         ui.label(
                             RichText::new(format!(
                                 "-> {}",
@@ -1124,10 +1156,12 @@ impl Baboon {
                             )
                             .desired_width(160.0),
                     );
-                    egui::ComboBox::from_id_salt("new_ek_folder_alias_game")
-                        .selected_text(ek_game_label(&self.new_ek_alias_game))
-                        .width(210.0)
-                        .show_ui(ui, |ui| {
+                    let (_, wheel_delta) = combo_box_with_scroll(
+                        ui,
+                        egui::ComboBox::from_id_salt("new_ek_folder_alias_game")
+                            .selected_text(ek_game_label(&self.new_ek_alias_game))
+                            .width(210.0),
+                        |ui| {
                             for (label, game) in SUPPORTED_EK_GAMES {
                                 ui.selectable_value(
                                     &mut self.new_ek_alias_game,
@@ -1135,7 +1169,19 @@ impl Baboon {
                                     *label,
                                 );
                             }
-                        });
+                        },
+                    );
+                    if let Some(delta) = wheel_delta {
+                        let current = SUPPORTED_EK_GAMES
+                            .iter()
+                            .position(|(_, game)| *game == self.new_ek_alias_game)
+                            .unwrap_or(0);
+                        if let Some(next) =
+                            combo_scroll_next_index(current, SUPPORTED_EK_GAMES.len(), delta)
+                        {
+                            self.new_ek_alias_game = SUPPORTED_EK_GAMES[next].1.to_owned();
+                        }
+                    }
                     if ui.button("Add").clicked() {
                         let folder_name = self.new_ek_alias_name.trim().to_owned();
                         if folder_name.is_empty() {
@@ -1633,18 +1679,32 @@ impl Baboon {
             ui.add_space(4.0);
             match arg.kind {
                 ToolCommandArgKind::Enum => {
-                    egui::ComboBox::from_id_salt(("tool_arg_enum", &command.name, &arg.name))
-                        .selected_text(if value.is_empty() {
+                    let (_, wheel_delta) = combo_box_with_scroll(
+                        ui,
+                        egui::ComboBox::from_id_salt(("tool_arg_enum", &command.name, &arg.name))
+                            .selected_text(if value.is_empty() {
                             arg.values.first().map(String::as_str).unwrap_or("")
                         } else {
                             value.as_str()
-                        })
-                        .width(180.0)
-                        .show_ui(ui, |ui| {
+                            })
+                            .width(180.0),
+                        |ui| {
                             for option in &arg.values {
                                 ui.selectable_value(&mut value, option.clone(), option);
                             }
-                        });
+                        },
+                    );
+                    if let Some(delta) = wheel_delta {
+                        let current = arg
+                            .values
+                            .iter()
+                            .position(|option| option == &value)
+                            .unwrap_or(0);
+                        if let Some(next) = combo_scroll_next_index(current, arg.values.len(), delta)
+                        {
+                            value = arg.values[next].clone();
+                        }
+                    }
                 }
                 _ => {
                     let mut edit = egui::TextEdit::singleline(&mut value)
@@ -1753,18 +1813,31 @@ impl Baboon {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Game").color(subtle_dark()));
                     let before = self.new_tag_dialog.game.clone();
-                    egui::ComboBox::from_id_salt("new_tag_game")
-                        .selected_text(&self.new_tag_dialog.game)
-                        .width(220.0)
-                        .show_ui(ui, |ui| {
-                            for game in crate::app::controller::available_definition_games() {
+                    let games = crate::app::controller::available_definition_games();
+                    let (_, wheel_delta) = combo_box_with_scroll(
+                        ui,
+                        egui::ComboBox::from_id_salt("new_tag_game")
+                            .selected_text(&self.new_tag_dialog.game)
+                            .width(220.0),
+                        |ui| {
+                            for game in &games {
                                 ui.selectable_value(
                                     &mut self.new_tag_dialog.game,
                                     game.clone(),
                                     game,
                                 );
                             }
-                        });
+                        },
+                    );
+                    if let Some(delta) = wheel_delta {
+                        let current = games
+                            .iter()
+                            .position(|game| game == &self.new_tag_dialog.game)
+                            .unwrap_or(0);
+                        if let Some(next) = combo_scroll_next_index(current, games.len(), delta) {
+                            self.new_tag_dialog.game = games[next].clone();
+                        }
+                    }
                     if self.new_tag_dialog.game != before {
                         refresh_groups = true;
                     }
@@ -1781,10 +1854,12 @@ impl Baboon {
                             format!("{} ({})", group.name, format_group_tag(group.group_tag))
                         })
                         .unwrap_or_else(|| "No schemas".to_owned());
-                    egui::ComboBox::from_id_salt("new_tag_group")
-                        .selected_text(selected)
-                        .width(320.0)
-                        .show_ui(ui, |ui| {
+                    let (_, wheel_delta) = combo_box_with_scroll(
+                        ui,
+                        egui::ComboBox::from_id_salt("new_tag_group")
+                            .selected_text(selected)
+                            .width(320.0),
+                        |ui| {
                             for (index, group) in self.new_tag_dialog.groups.iter().enumerate() {
                                 ui.selectable_value(
                                     &mut self.new_tag_dialog.selected_group,
@@ -1796,7 +1871,16 @@ impl Baboon {
                                     ),
                                 );
                             }
-                        });
+                        },
+                    );
+                    if let Some(delta) = wheel_delta {
+                        let current = self.new_tag_dialog.selected_group;
+                        if let Some(next) =
+                            combo_scroll_next_index(current, self.new_tag_dialog.groups.len(), delta)
+                        {
+                            self.new_tag_dialog.selected_group = next;
+                        }
+                    }
                 });
                 if self.new_tag_dialog.selected_group != selected_group_before {
                     self.new_tag_dialog.rel_path.clear();
@@ -2043,6 +2127,7 @@ impl eframe::App for Baboon {
         ctx.set_zoom_factor(self.ui_scale);
         set_dark_mode(self.dark_mode);
         ctx.set_visuals(foundation_visuals());
+        set_combo_scroll_cycle_enabled(ctx, self.scroll_to_cycle_dropdowns);
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::S)) {
             self.save_current_tag();
         }
@@ -2331,6 +2416,10 @@ impl eframe::App for Baboon {
                         ui.separator();
                         ui.checkbox(&mut self.show_browser_prefixes, "Show [tag]/[folder]");
                         ui.checkbox(&mut self.show_block_sizes, "Show block sizes");
+                        ui.checkbox(
+                            &mut self.scroll_to_cycle_dropdowns,
+                            "Scroll wheel cycles dropdowns",
+                        );
                         ui.checkbox(&mut self.expert_mode, "Expert mode");
                         ui.separator();
                         let terminal_enabled = self.terminal_work_dir.is_some();

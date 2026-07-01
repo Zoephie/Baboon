@@ -5072,27 +5072,40 @@ pub(super) fn draw_shader_category_row(
     let editable = edit.editable && category.edit_path.is_some();
     ui.scope_builder(egui::UiBuilder::new().max_rect(combo_rect), |ui| {
         ui.add_enabled_ui(editable, |ui| {
-            egui::ComboBox::from_id_salt((
-                edit.view_scope,
-                edit.tag_key,
-                "shader_category",
-                category.index,
-            ))
-            .selected_text(selected_text)
-            .width(value_width)
-            .show_ui(ui, |ui| {
-                for (index, option) in category.options.iter().enumerate() {
-                    let selected = index == selected_index;
-                    if ui.selectable_label(selected, option).clicked() {
-                        if let Some(path) = category.edit_path.as_ref() {
-                            edit.pending.push(PendingFieldEdit {
-                                path: path.clone(),
-                                input: index.to_string(),
-                            });
+            let (_, wheel_delta) = combo_box_with_scroll(
+                ui,
+                egui::ComboBox::from_id_salt((
+                    edit.view_scope,
+                    edit.tag_key,
+                    "shader_category",
+                    category.index,
+                ))
+                .selected_text(selected_text)
+                .width(value_width),
+                |ui| {
+                    for (index, option) in category.options.iter().enumerate() {
+                        let selected = index == selected_index;
+                        if ui.selectable_label(selected, option).clicked() {
+                            if let Some(path) = category.edit_path.as_ref() {
+                                edit.pending.push(PendingFieldEdit {
+                                    path: path.clone(),
+                                    input: index.to_string(),
+                                });
+                            }
                         }
                     }
-                }
-            });
+                },
+            );
+            if let Some(delta) = wheel_delta
+                && let Some(next) =
+                    combo_scroll_next_index(selected_index, category.options.len(), delta)
+                && let Some(path) = category.edit_path.as_ref()
+            {
+                edit.pending.push(PendingFieldEdit {
+                    path: path.clone(),
+                    input: next.to_string(),
+                });
+            }
         });
     });
 
@@ -6536,21 +6549,29 @@ pub(super) fn draw_shader_editable_value(
                 .unwrap_or_else(|| row_edit.current.clone());
             let mut chosen = None;
             ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
-                egui::ComboBox::from_id_salt((
-                    edit.view_scope,
-                    edit.tag_key,
-                    &buffer_key,
-                    "shader_enum",
-                ))
-                .selected_text(selected_text)
-                .width(rect.width())
-                .show_ui(ui, |ui| {
-                    for (i, opt) in options.iter().enumerate() {
-                        if ui.selectable_label(i == current_idx, opt).clicked() {
-                            chosen = Some(i);
+                let (_, wheel_delta) = combo_box_with_scroll(
+                    ui,
+                    egui::ComboBox::from_id_salt((
+                        edit.view_scope,
+                        edit.tag_key,
+                        &buffer_key,
+                        "shader_enum",
+                    ))
+                    .selected_text(selected_text)
+                    .width(rect.width()),
+                    |ui| {
+                        for (i, opt) in options.iter().enumerate() {
+                            if ui.selectable_label(i == current_idx, opt).clicked() {
+                                chosen = Some(i);
+                            }
                         }
-                    }
-                });
+                    },
+                );
+                if let Some(delta) = wheel_delta
+                    && let Some(next) = combo_scroll_next_index(current_idx, options.len(), delta)
+                {
+                    chosen = Some(next);
+                }
             });
             if let Some(i) = chosen {
                 edit.pending.push(PendingFieldEdit {
