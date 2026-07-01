@@ -2818,6 +2818,8 @@ impl Baboon {
                         block_ops: &mut block_ops,
                         block_confirm: &mut self.block_confirm,
                         open_request: &mut self.pending_open,
+                        sound_play_request: &mut self.audio.pending,
+                        sound_status: self.audio.status.as_deref(),
                         tool_import: &mut self.pending_tool_import,
                         bitmap_reimport: &mut bitmap_reimport,
                         shader_ops: &mut shader_ops,

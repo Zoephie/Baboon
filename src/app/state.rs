@@ -601,6 +601,11 @@ pub(super) struct FieldEditContext<'a> {
     pub(super) block_confirm: &'a mut Option<BlockConfirm>,
     /// Set when the user clicks "Open" on a tag-reference row.
     pub(super) open_request: &'a mut Option<OpenTagRequest>,
+    /// Set when the user clicks a Play/Stop control in the sound-player panel;
+    /// the app drains it after rendering to drive FMOD bank playback.
+    pub(super) sound_play_request: &'a mut Option<super::audio::SoundAction>,
+    /// Last sound-player status line (bank/resolve/playback result), for display.
+    pub(super) sound_status: Option<&'a str>,
     /// Set when the user clicks "Import" on a geometry tag-reference row.
     pub(super) tool_import: &'a mut Option<ToolImportRequest>,
     /// Set when the user clicks "Reimport" on a bitmap tag.

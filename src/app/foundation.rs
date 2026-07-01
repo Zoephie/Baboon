@@ -3442,6 +3442,7 @@ mod tests {
         let mut block_ops = Vec::new();
         let mut block_confirm = None;
         let mut open_request = None;
+        let mut sound_play_request = None;
         let mut tool_import = None;
         let mut bitmap_reimport = None;
         let mut shader_ops = Vec::new();
@@ -3470,6 +3471,8 @@ mod tests {
             block_ops: &mut block_ops,
             block_confirm: &mut block_confirm,
             open_request: &mut open_request,
+            sound_play_request: &mut sound_play_request,
+            sound_status: None,
             tool_import: &mut tool_import,
             bitmap_reimport: &mut bitmap_reimport,
             shader_ops: &mut shader_ops,

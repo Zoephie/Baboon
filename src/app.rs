@@ -76,6 +76,7 @@ mod tag_icons;
 use tag_icons::*;
 mod editor;
 use editor::*;
+mod audio;
 mod controller;
 mod ui;
 
@@ -183,6 +184,8 @@ pub struct Baboon {
     tab_rack_rect: Option<egui::Rect>,
     /// Pending destructive block op (delete / delete all) awaiting confirm.
     block_confirm: Option<BlockConfirm>,
+    /// Sound-tag audition: FMOD bank playback (rodio output + bank cache).
+    audio: audio::AudioState,
     /// Pending "open referenced tag in a new tab" request.
     pending_open: Option<OpenTagRequest>,
     /// Pending "import geometry via tool" request from an Import button.
@@ -306,6 +309,7 @@ impl Baboon {
             dragging_floating_tab: None,
             tab_rack_rect: None,
             block_confirm: None,
+            audio: audio::AudioState::default(),
             pending_open: None,
             pending_tool_import: None,
             blender_icon: load_ico_texture(

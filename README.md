@@ -208,6 +208,26 @@ For `model` (`hlmt`) and `render_model` (`mode`) tags, a real-time 3D preview:
   resolves.
 - Edit `render_model` **marker fields and names** inline.
 
+### Sound playback
+
+For `sound` (`snd!`) tags, an in-editor player auditions the tag's audio without
+leaving Baboon — decoded in pure Rust by `blam-tags` and played through
+[`rodio`](https://github.com/RustAudio/rodio). Baboon resolves each game's audio
+storage automatically:
+
+- **Halo CE** — inline Ogg Vorbis on each permutation.
+- **Halo 2** — inline Opus, Xbox-IMA-ADPCM (mono / stereo / quad), or PCM, per
+  the tag's compression and encoding.
+- **Halo 3 / Reach** — FMOD-Vorbis subsounds paged out to the kit's FMOD banks
+  (`<game>/fmod/pc/*.fsb`), resolved by permutation name.
+- **Halo 4** — Wwise: the tag's event name is resolved through the game's sound
+  packages (`<game>/sound/pc/*.pck`) — event → action → sound / container →
+  media — and the referenced Wwise-Vorbis audio is rebuilt to Ogg and decoded.
+
+A **play button per permutation** (or per event for Halo 4), a **Stop** control,
+and a status line showing the current clip and its duration. Decoded audio is
+cached, and the banks / packages are opened lazily on first play.
+
 ### Cross-game tag overviews
 
 Curated summary panels for tags that are otherwise tedious as raw field dumps,
@@ -286,7 +306,8 @@ launch.
   backend and bundled default fonts. Native file dialogs via [`rfd`](https://github.com/PolyMeilex/rfd).
 - **Engine** — the [`blam-tags`](https://github.com/camden-smallwood/blam-tags) crate, pulled as a pinned Cargo git dependency,
   provides all binary tag parsing/serialisation, bitmap decoding, geometry
-  export (JMS/ASS), render-method handling, and the monolithic cache reader.
+  export (JMS/ASS), render-method handling, sound-tag audio decoding (all games,
+  via its `audio` feature), and the monolithic cache reader.
 - **Concurrency** — all file I/O (loading, scanning, indexing, export) runs on
   worker threads that communicate with the UI via an `mpsc` channel and request
   repaints; the UI thread never blocks on disk.
@@ -298,8 +319,8 @@ launch.
   *Open in File Explorer* and the bundled tool launchers are Windows-specific;
   the core editor is platform-neutral.
 - **Dependencies** — `eframe`, `egui_extras` (SVG tag icons), `image`
-  (icon/bitmap handling), `flate2`, `rfd` (dialogs), `walkdir` (folder scanning),
-  `serde_json` (JSON dump & index/prefs), `anyhow`.
+  (icon/bitmap handling), `flate2`, `rfd` (dialogs), `rodio` (audio output),
+  `walkdir` (folder scanning), `serde_json` (JSON dump & index/prefs), `anyhow`.
 
 ---
 

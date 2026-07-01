@@ -3079,6 +3079,8 @@ impl eframe::App for Baboon {
                             block_ops: &mut block_ops,
                             block_confirm: &mut self.block_confirm,
                             open_request: &mut self.pending_open,
+                            sound_play_request: &mut self.audio.pending,
+                            sound_status: self.audio.status.as_deref(),
                             tool_import: &mut self.pending_tool_import,
                             bitmap_reimport: &mut bitmap_reimport,
                             shader_ops: &mut shader_ops,
@@ -3316,6 +3318,21 @@ impl eframe::App for Baboon {
         }
         self.handle_block_confirm(ctx);
         self.process_pending_open(ctx);
+        // Drain queued sound-player actions: resolve the permutation against the
+        // FMOD banks, decode (cached), and play/stop. Runs every frame so voices
+        // are reaped even when idle; the tags root is only cloned when acting.
+        let sound_root = if self.audio.pending.is_some() {
+            self.source_tags_root().map(std::path::Path::to_path_buf)
+        } else {
+            None
+        };
+        self.audio.process(sound_root.as_deref(), ctx);
+        // While the Wwise index builds off-thread, keep repainting so the drain
+        // loop polls it (the worker also pings on completion, but this covers
+        // the "loading…" status update).
+        if self.audio.is_busy() {
+            ctx.request_repaint();
+        }
         self.process_pending_tool_import(ctx);
     }
 }
