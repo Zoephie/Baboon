@@ -1,0 +1,318 @@
+{
+  "version": 1,
+  "tabs": [
+    {
+      "id": "doc",
+      "title": "Doc",
+      "sections": [
+        {
+          "title": "Supported games",
+          "blocks": [
+            {
+              "kind": "paragraph",
+              "text": "Baboon detects MCC editing kits from the loaded kit root or from a folder named after a game id."
+            },
+            {
+              "kind": "bullets",
+              "items": [
+                "Supported kits: Halo CE, Halo 2, Halo 3, Halo 3: ODST, Halo: Reach, Halo 4, and Halo 2: Anniversary multiplayer.",
+                "Recognized roots include HCEEK, H1EK, H2EK, H3EK, H3ODSTEK, HREK, H4EK, H2AMPEK, and H2AEK.",
+                "Use File > Settings to map a custom editing-kit folder name to a game when your layout is non-standard.",
+                "Per-game schemas are loaded from definitions/<game>/*.json next to Baboon.exe in release builds."
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Loading tag sources",
+          "blocks": [
+            {
+              "kind": "paragraph",
+              "text": "Baboon can open a single tag, a loose tags folder, or a monolithic cache. Loading runs on a background thread so the UI stays responsive."
+            },
+            {
+              "kind": "bullets",
+              "items": [
+                "Use File > Load Folder to choose the root of your editing kit, such as H3EK, HREK, H4EK, H3ODSTEK, or H2AMPEK/H2AEK.",
+                "Baboon will load the kit's tags folder from that root. Picking the kit root also lets the terminal, launcher buttons, and tool import commands resolve the correct working directory.",
+                "Choosing the tags folder directly works for browsing tags, but the kit root is the safest habit when you want Baboon to work with external tools.",
+                "Loose folder trees load lazily as you expand directories, while a background scan builds the full index for global tools.",
+                "Halo 4 monolithic blob_index.dat caches open read-only and can be browsed as tag entries.",
+                "Tag files are detected by probing the BLAM or MALB header, so non-tag files are skipped."
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Tag browser",
+          "blocks": [
+            {
+              "kind": "paragraph",
+              "text": "The browser can show the on-disk folder tree or regroup tags by tag group, with icons and friendly names from the definitions."
+            },
+            {
+              "kind": "bullets",
+              "items": [
+                "Recent folders appear in File for quick reopening.",
+                "Search supports space-separated AND terms, | OR terms, and ^prefix, suffix$, or ^exact$ anchors.",
+                "Sort each folder or group naturally, by name, or by type.",
+                "Reveal in tree jumps the browser to a tag and opens its parent folders.",
+                "Background indexing is persisted per game under Baboon's app data folder so later launches can skip the full scan.",
+                "Right-click tags in the browser to open actions for that tag.",
+                "Render models, models, scenarios, BSPs, collision models, and physics models can expose geometry extraction actions from this menu.",
+                "Model animation graph tags can expose animation extraction actions from this menu.",
+                "Bitmap tags can extract bitmap images, and monolithic cache entries can extract raw tag files.",
+                "Folder context menus can run batch actions such as JSON dump or bulk extraction where supported."
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Search, navigation, and cross-referencing",
+          "blocks": [
+            {
+              "kind": "bullets",
+              "items": [
+                "Field-value search finds text inside tag field values, optionally scoped to a tag group, and opens results in a clickable window.",
+                "Find References lists every indexed tag that references the current tag.",
+                "Content Explorer shows the current tag's parents and children as a reference graph with history and filtering.",
+                "Unreferenced tag scans help find tags that nothing else points at.",
+                "Keyword tagging stores freeform labels in a sidecar outside the tags and lets you browse or filter by them.",
+                "Scenario map ID and sound tools expose common kit-wide lists without hand-searching raw tags.",
+                "Tag Diff compares the current tag against another open tab or a tag on disk and can export differences as TSV."
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Tabbed, dockable editor",
+          "blocks": [
+            {
+              "kind": "bullets",
+              "items": [
+                "Open tags appear as tabs with their group icon.",
+                "Tabs with unsaved edits show an amber tint and marker.",
+                "Tear a tab into a floating resizable window, then dock it back into the tab rack.",
+                "Baboon keeps an LRU cache of parsed tags so large sessions do not keep every document loaded forever."
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Field editing",
+          "blocks": [
+            {
+              "kind": "paragraph",
+              "text": "Loose little-endian tags can be edited inline. Monolithic-cache tags and big-endian tags open read-only."
+            },
+            {
+              "kind": "bullets",
+              "items": [
+                "Edit scalars, integers, reals, strings, string_ids, enums, flags, and colors.",
+                "Tag references can be opened directly; Alt-click opens the target in a floating window.",
+                "Drag a tag from the browser onto a reference field to set it, and missing references are highlighted.",
+                "Tag-reference rows for render_model, collision_model, physics_model, and model_animation_graph can show an Import button.",
+                "Import runs the matching editing-kit tool command from the kit root, so it needs a loaded editing-kit folder.",
+                "For animation graphs, Baboon uses the model-animations-uncompressed tool command.",
+                "Block-index fields render as a dropdown of target elements plus a go-to control.",
+                "Field docs, units, ranges, and explanation blocks come from the JSON definitions.",
+                "Undo and redo cover field edits and structural block edits.",
+                "Search fields collapses the editor to matching fields and their ancestors.",
+                "Expert mode reveals advanced fields that are normally hidden."
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Block and array editing",
+          "blocks": [
+            {
+              "kind": "bullets",
+              "items": [
+                "Blocks support add, insert, duplicate, delete, and delete all where the tag format allows count changes.",
+                "Fixed-size arrays omit count-changing actions but still support copy and replace.",
+                "Right-click a block name in the editor header to copy and paste block data.",
+                "Copy element copies the selected block entry. Copy entire block copies every entry in that block.",
+                "Paste, Replace selected element, and Replace entire block appear when the clipboard is compatible with the current tag group and block path.",
+                "Copy block as TSV and Paste TSV let leaf fields round-trip through a spreadsheet.",
+                "Click or focus a block's element selector, then use the mouse wheel to move up and down through entries.",
+                "Arrow Up and Arrow Down also move through the selected block entries.",
+                "The < and > buttons beside the selector do the same one-entry step when you prefer clicking.",
+                "Nested blocks include jump-to-parent navigation with the path shown on hover."
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Shader and material editor",
+          "blocks": [
+            {
+              "kind": "bullets",
+              "items": [
+                "Shader, material, and material_shader tags use a Guerilla-style parameter grid instead of only the raw field tree.",
+                "Baboon resolves render-method definitions and options, then caches them across tags.",
+                "Bitmap, scalar, integer, color, and category parameters show their defaults and edit inline.",
+                "Bitmap-reference rows can show thumbnails with a larger hover preview.",
+                "Changed rows get a differs-from-default indicator and can be reset from the context menu.",
+                "The label column is resizable, and full parameter names and types are shown on hover.",
+                "Optional animated parameters can be added from context menus and edited through their functions."
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Function editor",
+          "blocks": [
+            {
+              "kind": "bullets",
+              "items": [
+                "Tag mapping functions can be edited as identity, constant, linear, or linear key functions.",
+                "Curve points, color graphs, and input or range string_ids are exposed through focused controls.",
+                "Common inputs such as time, frame, random, and shield vitality are available for selection.",
+                "The raw hex blob path preserves arbitrary function data losslessly when Baboon cannot present every detail structurally."
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Bitmap preview",
+          "blocks": [
+            {
+              "kind": "bullets",
+              "items": [
+                "Bitmap tags decode to an RGBA preview inside Baboon.",
+                "Use image and mip selectors to inspect multi-image bitmaps and mip levels.",
+                "Toggle R, G, B, and A channels, including alpha-only inspection.",
+                "Zoom to cursor, drag to pan, use preset zoom levels, or fit the image.",
+                "The preview reports pixel coordinates, RGBA values, format, dimensions, and image count."
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Model preview",
+          "blocks": [
+            {
+              "kind": "bullets",
+              "items": [
+                "Open a .model tag and choose the Render model tab to inspect the referenced render_model without scrolling through the field tree.",
+                "Model and render_model tags can render a real-time 3D preview with orbit, pan, and zoom camera controls.",
+                "Use the variant selector to inspect named variants and their region or permutation choices.",
+                "Marker overlays can be filtered, and render_model marker fields and names can be edited inline.",
+                "The Viewport slider in the render tab scales the preview from 80% to 260%; the value is global and saved in preferences.",
+                "If the preview becomes too wide for the editor panel, the region and variant controls move below it automatically."
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Sound playback and extraction",
+          "blocks": [
+            {
+              "kind": "paragraph",
+              "text": "Sound, dialogue, and sound_looping tags can be auditioned in the editor without leaving Baboon."
+            },
+            {
+              "kind": "bullets",
+              "items": [
+                "Halo CE inline Ogg, Halo 2 inline Opus, Xbox IMA ADPCM, PCM, Halo 3/ODST/Reach FMOD banks, and Halo 4/H2A Wwise packages are resolved by game.",
+                "Use per-permutation or per-event play controls, Stop, volume, language selection, and status readouts.",
+                "Decoded audio and external banks or packages are cached lazily.",
+                "Dialogue and sound_looping tags expose play and extraction controls for referenced sounds.",
+                "Extract one sound or all sounds to WAV under the data folder structure that tool expects; Halo CE can also extract original Ogg streams."
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Cross-game tag overviews",
+          "blocks": [
+            {
+              "kind": "bullets",
+              "items": [
+                "Curated overview panels summarize tags that are tedious as raw field dumps.",
+                "material_effects, dialogue, and sound_classes include cross-game tables where available.",
+                "Clickable references in overview tables jump to related tags."
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Custom color palettes",
+          "blocks": [
+            {
+              "kind": "bullets",
+              "items": [
+                "Save colors from the color editor into reusable Baboon palettes.",
+                "Reload palettes in other tags to keep shader and material colors consistent.",
+                "Palette sidecars are stored outside the tag files."
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Export and extraction",
+          "blocks": [
+            {
+              "kind": "paragraph",
+              "text": "Export work runs on background threads and reports progress through the status bar."
+            },
+            {
+              "kind": "bullets",
+              "items": [
+                "Dump a single tag or folder subtree to pretty-printed JSON.",
+                "Extract raw tag files, including entries from monolithic caches.",
+                "Extract bitmap images to TIFF individually or in bulk across a folder.",
+                "Extract model, render_model, collision_model, physics_model, scenario_structure_bsp, and scenario geometry to JMS or ASS where supported.",
+                "Import info and animation extraction run through the companion blam-tag-shell tools."
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Geometry import and integrated terminal",
+          "blocks": [
+            {
+              "kind": "bullets",
+              "items": [
+                "Import buttons on geometry and animation references run the matching tool verb against the source asset.",
+                "The integrated terminal runs commands in the editing-kit root with live streamed output.",
+                "Terminal open or closed state is remembered per editing kit."
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Tool launchers and command runner",
+          "blocks": [
+            {
+              "kind": "bullets",
+              "items": [
+                "Toolbar buttons launch the loaded kit's Sapien, tag_test, and Blender when their executables are available.",
+                "Blender uses the path configured in File > Settings.",
+                "Run Tool Command lists each game's tool commands from per-game JSON and builds a form for the selected command.",
+                "Command forms use dropdowns, path pickers, and validation for required parameters before running.",
+                "Assembled commands run in the integrated terminal."
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Preferences",
+          "blocks": [
+            {
+              "kind": "bullets",
+              "items": [
+                "Use File > Settings > Appearance to switch Dark mode on or off and adjust UI scale.",
+                "Appearance settings are saved in Baboon's preferences, so they stay set the next time you launch the app.",
+                "The same Appearance section also has the default Model viewport size used by .model render previews.",
+                "Settings also cover browser mode, browser prefixes, double-click behavior, expert mode, scroll wheel dropdown behavior, Blender path, and custom editing-kit aliases.",
+                "Recent folders, keyword sidecars, palette sidecars, last-session restore preference, and per-kit terminal state are persisted under Baboon's app data folder."
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

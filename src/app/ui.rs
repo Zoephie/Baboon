@@ -157,10 +157,8 @@ mod tests {
 /// A clickable tag entry row in the Content Explorer. Returns true on click.
 fn explorer_entry_row(ui: &mut Ui, entry: &TagEntry) -> bool {
     ui.add(
-        egui::Label::new(
-            RichText::new(entry.display_path.replace('\\', "/")).color(text_dark()),
-        )
-        .sense(Sense::click()),
+        egui::Label::new(RichText::new(entry.display_path.replace('\\', "/")).color(text_dark()))
+            .sense(Sense::click()),
     )
     .on_hover_text("Click to navigate here")
     .clicked()
@@ -304,8 +302,7 @@ impl Baboon {
                     .hint_text("add keyword")
                     .desired_width(120.0),
             );
-            let submitted =
-                resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let submitted = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             if (ui.button("Add").clicked() || submitted) && !self.keyword_input.trim().is_empty() {
                 self.keywords.add(tag_key, &self.keyword_input);
                 self.keyword_input.clear();
@@ -333,7 +330,11 @@ impl Baboon {
                 .default_width(560.0)
                 .show(ctx, |ui| {
                     ui.label(RichText::new("Current path").color(subtle_dark()).small());
-                    ui.label(RichText::new(&state.old_display).color(text_dark()).monospace());
+                    ui.label(
+                        RichText::new(&state.old_display)
+                            .color(text_dark())
+                            .monospace(),
+                    );
                     ui.add_space(6.0);
                     ui.label(
                         RichText::new("New path (relative, no extension)")
@@ -361,8 +362,7 @@ impl Baboon {
                         );
                     } else if state.referrers.is_empty() {
                         ui.label(
-                            RichText::new("No other tags reference this tag.")
-                                .color(subtle_dark()),
+                            RichText::new("No other tags reference this tag.").color(subtle_dark()),
                         );
                     } else {
                         ui.label(
@@ -377,9 +377,7 @@ impl Baboon {
                             .max_height(220.0)
                             .show(ui, |ui| {
                                 for referrer in &state.referrers {
-                                    ui.label(
-                                        RichText::new(referrer).color(subtle_dark()).small(),
-                                    );
+                                    ui.label(RichText::new(referrer).color(subtle_dark()).small());
                                 }
                             });
                     }
@@ -436,21 +434,20 @@ impl Baboon {
                         .color(subtle_dark()),
                     );
                     ui.add_space(4.0);
-                    egui::ScrollArea::vertical().max_height(280.0).show(ui, |ui| {
-                        ui.add(
-                            egui::TextEdit::multiline(&mut paste.text)
-                                .desired_rows(12)
-                                .desired_width(f32::INFINITY)
-                                .font(egui::TextStyle::Monospace)
-                                .hint_text("paste TSV here (Ctrl+V)"),
-                        );
-                    });
+                    egui::ScrollArea::vertical()
+                        .max_height(280.0)
+                        .show(ui, |ui| {
+                            ui.add(
+                                egui::TextEdit::multiline(&mut paste.text)
+                                    .desired_rows(12)
+                                    .desired_width(f32::INFINITY)
+                                    .font(egui::TextStyle::Monospace)
+                                    .hint_text("paste TSV here (Ctrl+V)"),
+                            );
+                        });
                     ui.horizontal(|ui| {
                         if ui
-                            .add_enabled(
-                                !paste.text.trim().is_empty(),
-                                egui::Button::new("Apply"),
-                            )
+                            .add_enabled(!paste.text.trim().is_empty(), egui::Button::new("Apply"))
                             .clicked()
                         {
                             do_apply = true;
@@ -496,8 +493,8 @@ impl Baboon {
                             .hint_text("value to find")
                             .desired_width(240.0),
                     );
-                    let submitted = response.lost_focus()
-                        && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let submitted =
+                        response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                     if self.field_value_searching {
                         ui.spinner();
                         ui.label(RichText::new("searching…").color(subtle_dark()));
@@ -526,11 +523,15 @@ impl Baboon {
                     } else if self.field_index.is_building() {
                         ui.spinner();
                         ui.label(
-                            RichText::new("building index…").color(subtle_dark()).small(),
+                            RichText::new("building index…")
+                                .color(subtle_dark())
+                                .small(),
                         );
                     } else {
                         ui.label(
-                            RichText::new("not indexed — first search scans live").color(subtle_dark()).small(),
+                            RichText::new("not indexed — first search scans live")
+                                .color(subtle_dark())
+                                .small(),
                         );
                         if ui.small_button("Build index").clicked() {
                             do_build = true;
@@ -750,23 +751,29 @@ impl Baboon {
     /// Floating window listing the results of a tag query (find-references /
     /// unreferenced). Clicking an entry opens it.
     pub(super) fn source_game(&self) -> Option<&str> {
-        self.source.as_ref().and_then(|source| source.game.as_deref())
+        self.source
+            .as_ref()
+            .and_then(|source| source.game.as_deref())
     }
 
     pub(super) fn source_tags_root(&self) -> Option<&std::path::Path> {
-        self.source.as_ref().and_then(|source| match &source.source {
-            TagSource::LooseFolder { root, .. } => Some(root.as_path()),
-            _ => None,
-        })
+        self.source
+            .as_ref()
+            .and_then(|source| match &source.source {
+                TagSource::LooseFolder { root, .. } => Some(root.as_path()),
+                _ => None,
+            })
     }
 
     pub(super) fn source_definitions_root(&self) -> Option<&std::path::Path> {
-        self.source.as_ref().and_then(|source| match &source.source {
-            TagSource::LooseFolder {
-                definitions_root, ..
-            } => Some(definitions_root.as_path()),
-            _ => None,
-        })
+        self.source
+            .as_ref()
+            .and_then(|source| match &source.source {
+                TagSource::LooseFolder {
+                    definitions_root, ..
+                } => Some(definitions_root.as_path()),
+                _ => None,
+            })
     }
 
     fn draw_tag_diff_window(&mut self, ctx: &egui::Context) {
@@ -893,19 +900,21 @@ impl Baboon {
                             }
                         });
                         ui.separator();
-                        egui::ScrollArea::vertical().max_height(460.0).show(ui, |ui| {
-                            egui::Grid::new("tag_diff_grid")
-                                .num_columns(3)
-                                .striped(true)
-                                .show(ui, |ui| {
-                                    for diff in &results.diffs {
-                                        ui.label(RichText::new(&diff.path).monospace().small());
-                                        ui.label(RichText::new(&diff.a).color(text_dark()));
-                                        ui.label(RichText::new(&diff.b).color(text_dark()));
-                                        ui.end_row();
-                                    }
-                                });
-                        });
+                        egui::ScrollArea::vertical()
+                            .max_height(460.0)
+                            .show(ui, |ui| {
+                                egui::Grid::new("tag_diff_grid")
+                                    .num_columns(3)
+                                    .striped(true)
+                                    .show(ui, |ui| {
+                                        for diff in &results.diffs {
+                                            ui.label(RichText::new(&diff.path).monospace().small());
+                                            ui.label(RichText::new(&diff.a).color(text_dark()));
+                                            ui.label(RichText::new(&diff.b).color(text_dark()));
+                                            ui.end_row();
+                                        }
+                                    });
+                            });
                     }
                 }
             });
@@ -949,7 +958,8 @@ impl Baboon {
                             }
                         }
                         Err(error) => {
-                            self.status = format!("Compare: could not load {}: {error}", path.display());
+                            self.status =
+                                format!("Compare: could not load {}: {error}", path.display());
                         }
                     }
                 }
@@ -1008,10 +1018,8 @@ impl Baboon {
                                 };
                                 let row = ui
                                     .add(
-                                        egui::Label::new(
-                                            RichText::new(label).color(text_dark()),
-                                        )
-                                        .sense(Sense::click()),
+                                        egui::Label::new(RichText::new(label).color(text_dark()))
+                                            .sense(Sense::click()),
                                     )
                                     .on_hover_text("Click to open · right-click to reveal");
                                 if row.clicked() {
@@ -1672,9 +1680,8 @@ impl Baboon {
             });
         // Inline validation: a required parameter left empty is flagged before
         // Run (the Run button is also disabled). Enum args always have a value.
-        let is_invalid = arg.required
-            && arg.kind != ToolCommandArgKind::Enum
-            && value.trim().is_empty();
+        let is_invalid =
+            arg.required && arg.kind != ToolCommandArgKind::Enum && value.trim().is_empty();
         let mut browse_clicked = false;
         ui.horizontal(|ui| {
             ui.set_min_height(24.0);
@@ -1691,9 +1698,9 @@ impl Baboon {
                         ui,
                         egui::ComboBox::from_id_salt(("tool_arg_enum", &command.name, &arg.name))
                             .selected_text(if value.is_empty() {
-                            arg.values.first().map(String::as_str).unwrap_or("")
-                        } else {
-                            value.as_str()
+                                arg.values.first().map(String::as_str).unwrap_or("")
+                            } else {
+                                value.as_str()
                             })
                             .width(180.0),
                         |ui| {
@@ -1708,7 +1715,8 @@ impl Baboon {
                             .iter()
                             .position(|option| option == &value)
                             .unwrap_or(0);
-                        if let Some(next) = combo_scroll_next_index(current, arg.values.len(), delta)
+                        if let Some(next) =
+                            combo_scroll_next_index(current, arg.values.len(), delta)
                         {
                             value = arg.values[next].clone();
                         }
@@ -1883,9 +1891,11 @@ impl Baboon {
                     );
                     if let Some(delta) = wheel_delta {
                         let current = self.new_tag_dialog.selected_group;
-                        if let Some(next) =
-                            combo_scroll_next_index(current, self.new_tag_dialog.groups.len(), delta)
-                        {
+                        if let Some(next) = combo_scroll_next_index(
+                            current,
+                            self.new_tag_dialog.groups.len(),
+                            delta,
+                        ) {
                             self.new_tag_dialog.selected_group = next;
                         }
                     }
@@ -1996,7 +2006,7 @@ impl Baboon {
                 ui.add_space(8.0);
                 match self.help_panel_tab {
                     HelpPanelTab::About => draw_about_tab(ui),
-                    HelpPanelTab::Doc => draw_doc_tab(ui),
+                    HelpPanelTab::Doc => draw_doc_tab(ui, &self.help_docs),
                     HelpPanelTab::MapNames => draw_map_names_tab(ui, &mut self.map_names_game_tab),
                 }
             });
@@ -2037,96 +2047,70 @@ fn draw_about_tab(ui: &mut Ui) {
     ui.hyperlink_to(BABOON_GITHUB_URL, BABOON_GITHUB_URL);
 }
 
-fn draw_doc_tab(ui: &mut Ui) {
+fn draw_doc_tab(ui: &mut Ui, docs: &HelpDocsState) {
     ScrollArea::vertical()
         .auto_shrink([false, false])
-        .show(ui, |ui| {
-            doc_section(
-                ui,
-                "Load Folder",
-                &[
-                    "Use File > Load Folder to choose the root of your editing kit, such as H3EK, HREK, H4EK, H3ODSTEK, or H2AMPEK/H2AEK.",
-                    "Baboon will load the kit's tags folder from that root. Picking the kit root also lets the terminal, launcher buttons, and tool import commands resolve the correct working directory.",
-                    "Choosing the tags folder directly works for browsing tags, but the kit root is the safest habit when you want Baboon to work with external tools.",
-                ],
-            );
-            doc_section(
-                ui,
-                "Tag Browser Context Menus",
-                &[
-                    "Right-click tags in the browser to open actions for that tag.",
-                    "Render models, models, scenarios, BSPs, collision models, and physics models can expose geometry extraction actions from this menu.",
-                    "Model animation graph tags can expose animation extraction actions from this menu.",
-                    "Bitmap tags can extract bitmap images, and monolithic cache entries can extract raw tag files.",
-                ],
-            );
-            doc_section(
-                ui,
-                "Block Context Menus",
-                &[
-                    "Right-click a block name in the editor header to copy and paste block data.",
-                    "Copy element copies the selected block entry. Copy entire block copies every entry in that block.",
-                    "Paste, Replace selected element, and Replace entire block appear when the clipboard is compatible with the current tag group and block path.",
-                ],
-            );
-            doc_section(
-                ui,
-                "Appearance Settings",
-                &[
-                    "Use File > Settings > Appearance to switch Dark mode on or off and adjust UI scale.",
-                    "Appearance settings are saved in Baboon's preferences, so they stay set the next time you launch the app.",
-                    "The same Appearance section also has the default Model viewport size used by .model render previews.",
-                ],
-            );
-            doc_section(
-                ui,
-                "Model Render View",
-                &[
-                    "Open a .model tag and choose the Render model tab to inspect the referenced render_model without scrolling through the field tree.",
-                    "The Viewport slider in the render tab scales the preview from 80% to 260%; the value is global and saved in preferences.",
-                    "If the preview becomes too wide for the editor panel, the region and variant controls move below it automatically.",
-                ],
-            );
-            doc_section(
-                ui,
-                "Moving Through Blocks",
-                &[
-                    "Click or focus a block's element selector, then use the mouse wheel to move up and down through entries.",
-                    "Arrow Up and Arrow Down also move through the selected block entries.",
-                    "The < and > buttons beside the selector do the same one-entry step when you prefer clicking.",
-                ],
-            );
-            doc_section(
-                ui,
-                "Import Buttons",
-                &[
-                    "Tag-reference rows for render_model, collision_model, physics_model, and model_animation_graph can show an Import button.",
-                    "Import runs the matching editing-kit tool command from the kit root, so it needs a loaded editing-kit folder.",
-                    "For animation graphs, Baboon uses the model-animations-uncompressed tool command.",
-                ],
-            );
+        .show(ui, |ui| match docs {
+            HelpDocsState::Loaded(docs) => {
+                if let Some(tab) = docs.tab("doc") {
+                    for section in &tab.sections {
+                        doc_section(ui, section);
+                    }
+                } else {
+                    doc_load_error(ui, "Documentation failed to load: missing doc tab.");
+                }
+            }
+            HelpDocsState::Failed(error) => {
+                doc_load_error(ui, &format!("Documentation failed to load: {error}"));
+            }
         });
 }
 
-fn doc_section(ui: &mut Ui, title: &str, lines: &[&str]) {
+fn doc_section(ui: &mut Ui, section: &HelpDocSection) {
     ui.label(
-        RichText::new(title)
+        RichText::new(&section.title)
             .color(foundation_blue())
             .font(FontId::proportional(14.0))
             .strong(),
     );
     ui.add_space(4.0);
-    for line in lines {
-        ui.horizontal_top(|ui| {
-            ui.label(RichText::new("-").color(subtle_dark()));
-            ui.add(
-                egui::Label::new(RichText::new(*line).color(text_dark()))
-                    .wrap()
-                    .selectable(false),
-            );
-        });
+    for block in &section.blocks {
+        match block {
+            HelpDocBlock::Paragraph { text } => {
+                ui.add(
+                    egui::Label::new(RichText::new(text).color(text_dark()))
+                        .wrap()
+                        .selectable(false),
+                );
+                ui.add_space(4.0);
+            }
+            HelpDocBlock::Bullets { items } => {
+                for item in items {
+                    doc_bullet(ui, item);
+                }
+            }
+        }
     }
     ui.add_space(12.0);
+}
+
+fn doc_bullet(ui: &mut Ui, line: &str) {
+    ui.horizontal_top(|ui| {
+        ui.label(RichText::new("-").color(subtle_dark()));
+        ui.add(
+            egui::Label::new(RichText::new(line).color(text_dark()))
+                .wrap()
+                .selectable(false),
+        );
+    });
+}
+
+fn doc_load_error(ui: &mut Ui, message: &str) {
+    ui.add(
+        egui::Label::new(RichText::new(message).color(text_dark()))
+            .wrap()
+            .selectable(false),
+    );
 }
 
 impl eframe::App for Baboon {
@@ -2351,9 +2335,10 @@ impl eframe::App for Baboon {
                             let is_loose = self.source.as_ref().is_some_and(|source| {
                                 matches!(source.source, TagSource::LooseFolder { .. })
                             });
-                            let has_index = self.source.as_ref().is_some_and(|source| {
-                                source.reverse_dependencies.is_some()
-                            });
+                            let has_index = self
+                                .source
+                                .as_ref()
+                                .is_some_and(|source| source.reverse_dependencies.is_some());
                             let label = if self.building_reverse_dependencies {
                                 "Building Reference Index…"
                             } else if has_index {
@@ -2966,8 +2951,7 @@ impl eframe::App for Baboon {
                         let available_width = ui.available_width().max(120.0);
                         let row_gap = 3.0;
                         // (key, label, active, dirty, label_width, group_tag)
-                        let mut rows =
-                            Vec::<Vec<(String, String, bool, bool, f32, u32)>>::new();
+                        let mut rows = Vec::<Vec<(String, String, bool, bool, f32, u32)>>::new();
                         let mut row = Vec::new();
                         let mut row_width = 0.0;
 
@@ -3029,7 +3013,11 @@ impl eframe::App for Baboon {
                                     // Subtle amber tint flags tabs with unsaved edits
                                     // (on top of the ● marker in the label).
                                     let fill = if dirty {
-                                        tint_toward(base_fill, Color32::from_rgb(184, 134, 11), 0.20)
+                                        tint_toward(
+                                            base_fill,
+                                            Color32::from_rgb(184, 134, 11),
+                                            0.20,
+                                        )
                                     } else {
                                         base_fill
                                     };

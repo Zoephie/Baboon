@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::process::Command;
+use std::rc::Rc;
 
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
@@ -30,9 +30,9 @@ use serde_json::{Value, json};
 use crate::format::{TagNameIndex, format_value, group_label};
 use crate::source::{
     DependencyRef, EkFolderAlias, LoadedSourceData, ReverseDependencyIndex, SUPPORTED_EK_GAMES,
-    TagEntry, TagEntryLocation, TagSource, TagTree, TagTreeNode, load_folder, loose_file_entry,
-    load_folder_node_entries, load_monolithic_blob_index, load_single_file, read_entry,
-    resolve_folder_root, scan_folder_subtree_entries, supported_ek_game_id,
+    TagEntry, TagEntryLocation, TagSource, TagTree, TagTreeNode, load_folder,
+    load_folder_node_entries, load_monolithic_blob_index, load_single_file, loose_file_entry,
+    read_entry, resolve_folder_root, scan_folder_subtree_entries, supported_ek_game_id,
 };
 
 pub(super) const BABOON_GITHUB_URL: &str = "https://github.com/Zoephie/Baboon";
@@ -52,6 +52,8 @@ mod field_index;
 use field_index::*;
 mod field_docs;
 use field_docs::*;
+mod help_docs;
+use help_docs::*;
 mod prefs;
 use prefs::*;
 mod browser;
@@ -139,6 +141,7 @@ pub struct Baboon {
     new_tag_dialog: NewTagDialog,
     about_open: bool,
     help_panel_tab: HelpPanelTab,
+    help_docs: HelpDocsState,
     map_names_game_tab: MapNamesGameTab,
     tool_commands: ToolCommandsUiState,
     tool_commands_window_pos: Option<egui::Pos2>,
@@ -221,25 +224,24 @@ impl Baboon {
         let names = TagNameIndex::load_from_definitions(&locate_definitions_root());
         let (tx, rx) = mpsc::channel();
         let last_session = load_last_session().and_then(LastOpenedWindowsPrompt::from_session);
-        let (last_opened_windows, auto_restore_session) =
-            if prefs.auto_restore_last_session {
-                match last_session {
-                    Some(prompt) => {
-                        let tags = prompt.checked_tags();
-                        if tags.is_empty() {
-                            (None, None)
-                        } else {
-                            (
-                                None,
-                                Some((prompt.source_kind, prompt.source_path.clone(), tags)),
-                            )
-                        }
+        let (last_opened_windows, auto_restore_session) = if prefs.auto_restore_last_session {
+            match last_session {
+                Some(prompt) => {
+                    let tags = prompt.checked_tags();
+                    if tags.is_empty() {
+                        (None, None)
+                    } else {
+                        (
+                            None,
+                            Some((prompt.source_kind, prompt.source_path.clone(), tags)),
+                        )
                     }
-                    None => (None, None),
                 }
-            } else {
-                (last_session, None)
-            };
+                None => (None, None),
+            }
+        } else {
+            (last_session, None)
+        };
         let mut app = Self {
             default_names: names.clone(),
             names,
@@ -284,6 +286,7 @@ impl Baboon {
             new_tag_dialog: NewTagDialog::default(),
             about_open: false,
             help_panel_tab: HelpPanelTab::About,
+            help_docs: HelpDocsState::load(),
             map_names_game_tab: MapNamesGameTab::HaloCe,
             tool_commands: ToolCommandsUiState::default(),
             tool_commands_window_pos: prefs.tool_commands_window_pos,
@@ -424,6 +427,26 @@ pub(crate) fn definitions_missing_message(path: &Path) -> String {
         "Could not find definitions folder. Expected it at {} — ensure the definitions submodule is initialised with 'git submodule update --init'.",
         path.display()
     )
+}
+
+/// Locate the runtime help docs root. Release builds copy `docs/` next to
+/// `Baboon.exe`, matching the editable-on-disk contract used by `definitions/`.
+pub(super) fn locate_help_docs_root() -> PathBuf {
+    let mut expected = None;
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            let beside_exe = exe_dir.join("docs");
+            if beside_exe.is_dir() {
+                return beside_exe;
+            }
+            expected = Some(beside_exe);
+        }
+    }
+    let dev_at_manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("docs");
+    if dev_at_manifest.is_dir() {
+        return dev_at_manifest;
+    }
+    expected.unwrap_or(dev_at_manifest)
 }
 
 /// Decode an embedded `.ico` into an egui texture for a toolbar button.

@@ -26,6 +26,7 @@ fn main() {
     println!("cargo:rerun-if-changed=icon/baboon.ico");
 
     copy_definitions_for_build().expect("copy blam-tags definitions");
+    copy_docs_for_build().expect("copy Baboon docs");
 
     if env::var_os("CARGO_CFG_WINDOWS").is_none() {
         return;
@@ -53,6 +54,17 @@ fn copy_definitions_for_build() -> io::Result<()> {
     copy_dir_recursive(&definitions_root, &out_dir.join("definitions"))?;
     if let Some(profile_dir) = target_profile_dir(&out_dir) {
         copy_dir_recursive(&definitions_root, &profile_dir.join("definitions"))?;
+    }
+    Ok(())
+}
+
+fn copy_docs_for_build() -> io::Result<()> {
+    let out_dir = PathBuf::from(env::var_os("OUT_DIR").unwrap());
+    let docs_root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap()).join("docs");
+    println!("cargo:rerun-if-changed={}", docs_root.display());
+    copy_dir_recursive(&docs_root, &out_dir.join("docs"))?;
+    if let Some(profile_dir) = target_profile_dir(&out_dir) {
+        copy_dir_recursive(&docs_root, &profile_dir.join("docs"))?;
     }
     Ok(())
 }

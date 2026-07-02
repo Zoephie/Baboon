@@ -354,6 +354,7 @@ dependencies = [
  "image",
  "rfd",
  "rodio",
+ "serde",
  "serde_json",
  "walkdir",
 ]
