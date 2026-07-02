@@ -2123,11 +2123,12 @@ fn doc_section(ui: &mut Ui, title: &str, lines: &[&str]) {
 
 impl eframe::App for Baboon {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.process_worker_messages();
+        self.process_worker_messages(ctx);
         ctx.set_zoom_factor(self.ui_scale);
         set_dark_mode(self.dark_mode);
         ctx.set_visuals(foundation_visuals());
         set_combo_scroll_cycle_enabled(ctx, self.scroll_to_cycle_dropdowns);
+        self.handle_app_close_request(ctx);
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::S)) {
             self.save_current_tag();
         }
@@ -2222,7 +2223,7 @@ impl eframe::App for Baboon {
                             .clicked()
                         {
                             if let Some(key) = self.selected_key.clone() {
-                                self.close_tab(&key);
+                                self.request_close_action(PendingCloseAction::CloseTab(key), ctx);
                             }
                             ui.close_menu();
                         }
@@ -2233,7 +2234,7 @@ impl eframe::App for Baboon {
                             )
                             .clicked()
                         {
-                            self.close_all_tabs();
+                            self.request_close_action(PendingCloseAction::CloseAllTabs, ctx);
                             ui.close_menu();
                         }
                         ui.separator();
@@ -3094,11 +3095,11 @@ impl eframe::App for Baboon {
                         }
                     }
                     if close_all {
-                        self.close_all_tabs();
+                        self.request_close_action(PendingCloseAction::CloseAllTabs, ctx);
                     } else if let Some(key) = close_all_but {
-                        self.close_all_tabs_but(&key);
+                        self.request_close_action(PendingCloseAction::CloseAllButThis(key), ctx);
                     } else if let Some(key) = close_key {
-                        self.close_tab(&key);
+                        self.request_close_action(PendingCloseAction::CloseTab(key), ctx);
                     } else if let Some(key) = pop_key {
                         self.pop_tab(&key);
                     }
@@ -3419,6 +3420,8 @@ impl eframe::App for Baboon {
             }
         }
         self.handle_block_confirm(ctx);
+        self.handle_save_changes_prompt(ctx);
+        self.handle_last_opened_windows_prompt(ctx);
         self.process_pending_open(ctx);
         // Drain queued sound-player actions: resolve the permutation against the
         // FMOD banks, decode (cached), and play/stop. Runs every frame so voices

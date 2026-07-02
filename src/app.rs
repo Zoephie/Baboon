@@ -183,6 +183,9 @@ pub struct Baboon {
     saved_terminal_open_games: HashSet<String>,
     dragging_floating_tab: Option<String>,
     tab_rack_rect: Option<egui::Rect>,
+    save_changes_prompt: SaveChangesPrompt,
+    last_opened_windows: Option<LastOpenedWindowsPrompt>,
+    pending_session_restore: Option<PendingSessionRestore>,
     /// Pending destructive block op (delete / delete all) awaiting confirm.
     block_confirm: Option<BlockConfirm>,
     /// Sound-tag audition: FMOD bank playback (rodio output + bank cache).
@@ -212,6 +215,8 @@ impl Baboon {
         cc.egui_ctx.set_visuals(foundation_visuals());
         let names = TagNameIndex::load_from_definitions(&locate_definitions_root());
         let (tx, rx) = mpsc::channel();
+        let last_opened_windows =
+            load_last_session().and_then(LastOpenedWindowsPrompt::from_session);
         Self {
             default_names: names.clone(),
             names,
@@ -310,6 +315,9 @@ impl Baboon {
             terminal_open_games,
             dragging_floating_tab: None,
             tab_rack_rect: None,
+            save_changes_prompt: SaveChangesPrompt::default(),
+            last_opened_windows,
+            pending_session_restore: None,
             block_confirm: None,
             audio: audio::AudioState::default(),
             pending_open: None,

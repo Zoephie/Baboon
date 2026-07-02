@@ -321,6 +321,151 @@ impl TagDocument {
 }
 
 #[derive(Clone, Debug)]
+pub(super) enum PendingCloseAction {
+    CloseApp,
+    CloseTab(String),
+    CloseAllTabs,
+    CloseAllButThis(String),
+}
+
+pub(super) struct DirtyTagEntry {
+    pub(super) path: String,
+    pub(super) tag_id: String,
+    pub(super) checked: bool,
+}
+
+/// Foundation-style confirmation shown when a close action would discard
+/// edited tags. `allow_app_close_once` is set only after the user confirms an
+/// app exit; the next native close request is then allowed through instead of
+/// being vetoed and prompting again.
+pub(super) struct SaveChangesPrompt {
+    pub(super) visible: bool,
+    pub(super) dirty_tags: Vec<DirtyTagEntry>,
+    pub(super) pending_action: PendingCloseAction,
+    pub(super) error: Option<String>,
+    pub(super) allow_app_close_once: bool,
+}
+
+impl Default for SaveChangesPrompt {
+    fn default() -> Self {
+        Self {
+            visible: false,
+            dirty_tags: Vec::new(),
+            pending_action: PendingCloseAction::CloseApp,
+            error: None,
+            allow_app_close_once: false,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum LastSessionSourceKind {
+    SingleFile,
+    LooseFolder,
+    MonolithicCache,
+}
+
+impl LastSessionSourceKind {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            LastSessionSourceKind::SingleFile => "single_file",
+            LastSessionSourceKind::LooseFolder => "loose_folder",
+            LastSessionSourceKind::MonolithicCache => "monolithic_cache",
+        }
+    }
+
+    pub(super) fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "single_file" => Some(Self::SingleFile),
+            "loose_folder" => Some(Self::LooseFolder),
+            "monolithic_cache" => Some(Self::MonolithicCache),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct LastSessionTag {
+    pub(super) key: String,
+    pub(super) label: String,
+    pub(super) group_tag: u32,
+    pub(super) path: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct LastSessionState {
+    pub(super) source_kind: LastSessionSourceKind,
+    pub(super) source_path: PathBuf,
+    pub(super) game: Option<String>,
+    pub(super) tags: Vec<LastSessionTag>,
+}
+
+pub(super) struct LastOpenedWindowEntry {
+    pub(super) tag: LastSessionTag,
+    pub(super) checked: bool,
+    pub(super) available: bool,
+}
+
+/// Launch-time restore prompt backed by `last_session.json`. OK first reloads
+/// the saved source (loose folder, monolithic cache, or single file); once the
+/// async source load completes, the queued tag keys are reopened through the
+/// normal `select_entry` path.
+pub(super) struct LastOpenedWindowsPrompt {
+    pub(super) visible: bool,
+    pub(super) source_kind: LastSessionSourceKind,
+    pub(super) source_path: PathBuf,
+    pub(super) source_available: bool,
+    pub(super) entries: Vec<LastOpenedWindowEntry>,
+}
+
+impl LastOpenedWindowsPrompt {
+    pub(super) fn from_session(session: LastSessionState) -> Option<Self> {
+        let source_available = match session.source_kind {
+            LastSessionSourceKind::SingleFile => session.source_path.is_file(),
+            LastSessionSourceKind::LooseFolder => session.source_path.is_dir(),
+            LastSessionSourceKind::MonolithicCache => {
+                if session.source_path.is_dir() {
+                    session.source_path.join("blob_index.dat").is_file()
+                } else {
+                    session.source_path.is_file()
+                        && session
+                            .source_path
+                            .file_name()
+                            .is_some_and(|name| name.eq_ignore_ascii_case("blob_index.dat"))
+                }
+            }
+        };
+        let entries = session
+            .tags
+            .into_iter()
+            .map(|tag| {
+                let tag_available = tag.path.as_ref().map(|path| path.exists()).unwrap_or(true);
+                let available = source_available && tag_available;
+                LastOpenedWindowEntry {
+                    tag,
+                    checked: available,
+                    available,
+                }
+            })
+            .collect::<Vec<_>>();
+        if entries.is_empty() {
+            return None;
+        }
+        Some(Self {
+            visible: true,
+            source_kind: session.source_kind,
+            source_path: session.source_path,
+            source_available,
+            entries,
+        })
+    }
+}
+
+pub(super) struct PendingSessionRestore {
+    pub(super) tags: Vec<LastSessionTag>,
+}
+
+#[derive(Clone, Debug)]
 pub(super) struct NewTagGroup {
     pub(super) group_tag: u32,
     pub(super) name: String,

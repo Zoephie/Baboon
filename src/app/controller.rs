@@ -2,7 +2,7 @@ use super::*;
 use anyhow::Context as _;
 
 impl Baboon {
-    pub(super) fn process_worker_messages(&mut self) {
+    pub(super) fn process_worker_messages(&mut self, ctx: &egui::Context) {
         while let Ok(message) = self.rx.try_recv() {
             match message {
                 WorkerMessage::TerminalLine(line) => {
@@ -136,10 +136,12 @@ impl Baboon {
                     self.source = Some(loaded);
                     // New entry universe — invalidate any cached search results.
                     self.source_generation = self.source_generation.wrapping_add(1);
+                    self.finish_pending_session_restore(ctx.clone());
                 }
                 WorkerMessage::SourceLoaded {
                     result: Err(error), ..
                 } => {
+                    self.pending_session_restore = None;
                     self.status = error;
                 }
                 WorkerMessage::TagLoaded { key, result } => {
@@ -299,6 +301,10 @@ impl Baboon {
         let Some(path) = rfd::FileDialog::new().set_title("Load Tag").pick_file() else {
             return;
         };
+        self.begin_load_single_path(path, ctx);
+    }
+
+    pub(super) fn begin_load_single_path(&mut self, path: PathBuf, ctx: egui::Context) {
         let tx = self.tx.clone();
         let names = self.default_names.clone();
         self.status = format!("Loading {}", path.display());
@@ -915,6 +921,240 @@ impl Baboon {
         self.function_popup = None;
     }
 
+    pub(super) fn request_close_action(
+        &mut self,
+        action: PendingCloseAction,
+        ctx: &egui::Context,
+    ) {
+        if self.save_changes_prompt.visible {
+            return;
+        }
+        let dirty_tags = self.dirty_tags_for_close_action(&action);
+        if dirty_tags.is_empty() {
+            self.execute_close_action(action, ctx);
+            return;
+        }
+        self.save_changes_prompt = SaveChangesPrompt {
+            visible: true,
+            dirty_tags,
+            pending_action: action,
+            error: None,
+            allow_app_close_once: self.save_changes_prompt.allow_app_close_once,
+        };
+    }
+
+    /// Native app close is a two-step flow in eframe 0.29: when the OS close
+    /// request arrives, Baboon sends `CancelClose` to veto it, shows the shared
+    /// save prompt, then re-issues `ViewportCommand::Close` only after the user
+    /// chooses Save or Don't Save. `allow_app_close_once` lets that confirmed
+    /// second close request pass without opening the prompt again.
+    pub(super) fn handle_app_close_request(&mut self, ctx: &egui::Context) {
+        if !ctx.input(|input| input.viewport().close_requested()) {
+            return;
+        }
+        if self.save_changes_prompt.allow_app_close_once {
+            self.save_changes_prompt.allow_app_close_once = false;
+            return;
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        if self.save_changes_prompt.visible {
+            return;
+        }
+        self.request_close_action(PendingCloseAction::CloseApp, ctx);
+    }
+
+    fn dirty_tags_for_close_action(&self, action: &PendingCloseAction) -> Vec<DirtyTagEntry> {
+        self.close_action_tag_keys(action)
+            .into_iter()
+            .filter_map(|key| {
+                let doc = self.parsed_tags.get(&key)?;
+                if !doc.dirty {
+                    return None;
+                }
+                Some(DirtyTagEntry {
+                    path: self.tag_path_label(&key),
+                    tag_id: key,
+                    checked: true,
+                })
+            })
+            .collect()
+    }
+
+    fn close_action_tag_keys(&self, action: &PendingCloseAction) -> Vec<String> {
+        match action {
+            PendingCloseAction::CloseApp | PendingCloseAction::CloseAllTabs => {
+                ordered_unique_keys(self.open_tabs.iter().chain(self.floating_tabs.iter()))
+            }
+            PendingCloseAction::CloseTab(key) => vec![key.clone()],
+            PendingCloseAction::CloseAllButThis(kept_key) => ordered_unique_keys(
+                self.open_tabs
+                    .iter()
+                    .chain(self.floating_tabs.iter())
+                    .filter(|key| *key != kept_key),
+            ),
+        }
+    }
+
+    fn tag_path_label(&self, key: &str) -> String {
+        let Some(entry) = self.entry_for_key(key) else {
+            return key.to_owned();
+        };
+        match &entry.location {
+            TagEntryLocation::LooseFile(path) => path.display().to_string(),
+            TagEntryLocation::Monolithic { .. } => entry.display_path.clone(),
+        }
+    }
+
+    fn execute_close_action(&mut self, action: PendingCloseAction, ctx: &egui::Context) {
+        match action {
+            PendingCloseAction::CloseApp => {
+                if let Some(session) = self.current_session_state() {
+                    let _ = save_last_session(&session);
+                } else {
+                    clear_last_session();
+                }
+                self.save_changes_prompt.allow_app_close_once = true;
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+            PendingCloseAction::CloseTab(key) => self.close_tab(&key),
+            PendingCloseAction::CloseAllTabs => self.close_all_tabs(),
+            PendingCloseAction::CloseAllButThis(key) => self.close_all_tabs_but(&key),
+        }
+    }
+
+    fn current_session_state(&self) -> Option<LastSessionState> {
+        let source = self.source.as_ref()?;
+        let (source_kind, source_path) = match &source.source {
+            TagSource::SingleFile { path } => (LastSessionSourceKind::SingleFile, path.clone()),
+            TagSource::LooseFolder { root, .. } => (LastSessionSourceKind::LooseFolder, root.clone()),
+            TagSource::MonolithicCache { root, .. } => {
+                (LastSessionSourceKind::MonolithicCache, root.clone())
+            }
+        };
+        let mut tags = Vec::new();
+        for key in ordered_unique_keys(self.open_tabs.iter().chain(self.floating_tabs.iter())) {
+            let Some(entry) = self.entry_for_key(&key) else {
+                continue;
+            };
+            let path = match &entry.location {
+                TagEntryLocation::LooseFile(path) => Some(path.clone()),
+                TagEntryLocation::Monolithic { .. } => None,
+            };
+            tags.push(LastSessionTag {
+                key: entry.key.clone(),
+                label: format!("{} - {}", entry.display_path, group_label(&self.names, entry.group_tag)),
+                group_tag: entry.group_tag,
+                path,
+            });
+        }
+        if tags.is_empty() {
+            return None;
+        }
+        Some(LastSessionState {
+            source_kind,
+            source_path,
+            game: source.game.clone(),
+            tags,
+        })
+    }
+
+    pub(super) fn begin_last_session_restore(
+        &mut self,
+        source_kind: LastSessionSourceKind,
+        source_path: PathBuf,
+        tags: Vec<LastSessionTag>,
+        ctx: egui::Context,
+    ) {
+        if tags.is_empty() {
+            return;
+        }
+        self.pending_session_restore = Some(PendingSessionRestore { tags });
+        match source_kind {
+            LastSessionSourceKind::SingleFile => self.begin_load_single_path(source_path, ctx),
+            LastSessionSourceKind::LooseFolder => self.begin_load_folder_path(source_path, ctx),
+            LastSessionSourceKind::MonolithicCache => {
+                let blob_index = if source_path.is_dir() {
+                    source_path.join("blob_index.dat")
+                } else {
+                    source_path
+                };
+                self.begin_load_monolithic_path(blob_index, ctx);
+            }
+        }
+    }
+
+    fn finish_pending_session_restore(&mut self, ctx: egui::Context) {
+        let Some(restore) = self.pending_session_restore.take() else {
+            return;
+        };
+        let mut opened = 0usize;
+        let mut missing = 0usize;
+        for tag in restore.tags {
+            if self.ensure_restored_tag_entry(&tag) {
+                self.select_entry(tag.key, ctx.clone());
+                opened += 1;
+            } else {
+                missing += 1;
+            }
+        }
+        if opened > 0 {
+            self.status = if missing > 0 {
+                format!("Restored {opened} window(s); skipped {missing} missing item(s)")
+            } else {
+                format!("Restored {opened} window(s)")
+            };
+        } else if missing > 0 {
+            self.status = "No saved windows could be restored".to_owned();
+        }
+    }
+
+    fn ensure_restored_tag_entry(&mut self, tag: &LastSessionTag) -> bool {
+        if self.entry_for_key(&tag.key).is_some() {
+            return true;
+        }
+        let Some(path) = tag.path.as_ref() else {
+            return false;
+        };
+        if !path.is_file() {
+            return false;
+        }
+        let Some(source) = self.source.as_ref() else {
+            return false;
+        };
+        let TagSource::LooseFolder { root, .. } = &source.source else {
+            return false;
+        };
+        let Ok(root) = fs::canonicalize(root) else {
+            return false;
+        };
+        let Ok(path) = fs::canonicalize(path) else {
+            return false;
+        };
+        if !path.starts_with(&root) {
+            return false;
+        }
+        let Ok(entry) = loose_file_entry(&root, &path, &source.names) else {
+            return false;
+        };
+        let Some(entry) = entry else {
+            return false;
+        };
+        if let Some(source) = self.source.as_mut() {
+            source.entries.retain(|existing| existing.key != tag.key);
+            source.entries.push(entry.clone());
+            if !source.all_entries.is_empty() {
+                source.all_entries.retain(|existing| existing.key != tag.key);
+                source.all_entries.push(entry);
+                source
+                    .all_entries
+                    .sort_by(|a, b| a.display_path.cmp(&b.display_path));
+                source.group_tree = crate::source::build_group_tree(&source.all_entries);
+            }
+        }
+        self.source_generation = self.source_generation.wrapping_add(1);
+        true
+    }
+
     pub(super) fn pop_tab(&mut self, key: &str) {
         let removed_index = self.open_tabs.iter().position(|tab| tab == key);
         self.open_tabs.retain(|tab| tab != key);
@@ -1009,8 +1249,13 @@ impl Baboon {
             let removable = self
                 .open_tabs
                 .iter()
-                .position(|tab| Some(tab.as_str()) != self.selected_key.as_deref())
-                .unwrap_or(0);
+                .position(|tab| {
+                    Some(tab.as_str()) != self.selected_key.as_deref()
+                        && !self.parsed_tags.get(tab).map(|doc| doc.dirty).unwrap_or(false)
+                });
+            let Some(removable) = removable else {
+                break;
+            };
             let key = self.open_tabs.remove(removable);
             self.floating_tabs.remove(&key);
             self.unload_tag(&key);
@@ -1528,31 +1773,31 @@ impl Baboon {
             self.status = "No tag selected".to_owned();
             return;
         };
-        let Some(entry) = self.entry_for_key(&key).cloned() else {
-            self.status = "Selected tag is no longer in the source".to_owned();
-            return;
-        };
-        let Some(doc) = self.parsed_tags.get(&key) else {
-            self.status = "Load the selected tag before saving".to_owned();
-            return;
-        };
-        if doc.tag.classic_engine().is_none() && doc.tag.endian != Endian::Le {
-            self.status = "Only little-endian MCC tags can be saved".to_owned();
-            return;
-        }
-        let TagEntryLocation::LooseFile(path) = &entry.location else {
-            self.status = "Monolithic cache tags are read-only".to_owned();
-            return;
-        };
-        match doc.tag.write_atomic(path) {
-            Ok(()) => {
-                if let Some(doc) = self.parsed_tags.get_mut(&key) {
-                    doc.dirty = false;
-                }
-                self.status = format!("Saved {}", path.display());
-            }
+        match self.save_tag_by_key(&key) {
+            Ok(path) => self.status = format!("Saved {}", path.display()),
             Err(error) => self.status = format!("Save failed: {error}"),
         }
+    }
+
+    pub(super) fn save_tag_by_key(&mut self, key: &str) -> Result<PathBuf, String> {
+        let Some(entry) = self.entry_for_key(key).cloned() else {
+            return Err("Selected tag is no longer in the source".to_owned());
+        };
+        let Some(doc) = self.parsed_tags.get(key) else {
+            return Err("Load the selected tag before saving".to_owned());
+        };
+        if doc.tag.classic_engine().is_none() && doc.tag.endian != Endian::Le {
+            return Err("Only little-endian MCC tags can be saved".to_owned());
+        }
+        let TagEntryLocation::LooseFile(path) = &entry.location else {
+            return Err("Monolithic cache tags are read-only".to_owned());
+        };
+        let output = path.clone();
+        doc.tag.write_atomic(&output).map_err(|error| error.to_string())?;
+        if let Some(doc) = self.parsed_tags.get_mut(key) {
+            doc.dirty = false;
+        }
+        Ok(output)
     }
 
     pub(super) fn save_current_tag_as(&mut self) {
@@ -2801,6 +3046,75 @@ impl Baboon {
         }
     }
 
+    pub(super) fn handle_save_changes_prompt(&mut self, ctx: &egui::Context) {
+        let action = render_save_changes_prompt(ctx, &mut self.save_changes_prompt);
+        match action {
+            SaveChangesPromptAction::None => {}
+            SaveChangesPromptAction::Cancel => {
+                self.save_changes_prompt.visible = false;
+                self.save_changes_prompt.dirty_tags.clear();
+                self.save_changes_prompt.error = None;
+            }
+            SaveChangesPromptAction::DontSave => {
+                let action = self.save_changes_prompt.pending_action.clone();
+                self.save_changes_prompt.visible = false;
+                self.save_changes_prompt.dirty_tags.clear();
+                self.save_changes_prompt.error = None;
+                self.execute_close_action(action, ctx);
+            }
+            SaveChangesPromptAction::Save(tag_ids) => {
+                let mut saved = Vec::new();
+                let mut errors = Vec::new();
+                for tag_id in tag_ids {
+                    match self.save_tag_by_key(&tag_id) {
+                        Ok(path) => saved.push(path.display().to_string()),
+                        Err(error) => {
+                            let label = self.tag_path_label(&tag_id);
+                            errors.push(format!("{label}: {error}"));
+                        }
+                    }
+                }
+                if errors.is_empty() {
+                    let action = self.save_changes_prompt.pending_action.clone();
+                    self.save_changes_prompt.visible = false;
+                    self.save_changes_prompt.dirty_tags.clear();
+                    self.save_changes_prompt.error = None;
+                    self.status = if saved.is_empty() {
+                        "No files selected to save".to_owned()
+                    } else {
+                        format!("Saved {} file(s)", saved.len())
+                    };
+                    self.execute_close_action(action, ctx);
+                } else {
+                    let message = format!("Save failed: {}", errors.join("; "));
+                    let pending_action = self.save_changes_prompt.pending_action.clone();
+                    self.save_changes_prompt.dirty_tags =
+                        self.dirty_tags_for_close_action(&pending_action);
+                    self.status = message.clone();
+                    self.save_changes_prompt.error = Some(message);
+                }
+            }
+        }
+    }
+
+    pub(super) fn handle_last_opened_windows_prompt(&mut self, ctx: &egui::Context) {
+        let action = render_last_opened_windows_prompt(ctx, self.last_opened_windows.as_mut());
+        match action {
+            LastOpenedWindowsAction::None => {}
+            LastOpenedWindowsAction::Cancel => {
+                self.last_opened_windows = None;
+            }
+            LastOpenedWindowsAction::Restore {
+                source_kind,
+                source_path,
+                tags,
+            } => {
+                self.last_opened_windows = None;
+                self.begin_last_session_restore(source_kind, source_path, tags, ctx.clone());
+            }
+        }
+    }
+
     pub(super) fn persist_prefs_if_changed(&mut self) {
         let prefs = self.current_prefs();
         if prefs == self.saved_prefs && self.terminal_open_games == self.saved_terminal_open_games {
@@ -3078,9 +3392,20 @@ impl Baboon {
             }
         }
         for key in closed {
-            self.floating_tabs.remove(&key);
+            self.request_close_action(PendingCloseAction::CloseTab(key), ctx);
         }
     }
+}
+
+fn ordered_unique_keys<'a>(keys: impl Iterator<Item = &'a String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut ordered = Vec::new();
+    for key in keys {
+        if seen.insert(key.clone()) {
+            ordered.push(key.clone());
+        }
+    }
+    ordered
 }
 
 fn save_as_extension(app: &Baboon, entry: &TagEntry) -> Option<String> {
@@ -3089,6 +3414,166 @@ fn save_as_extension(app: &Baboon, entry: &TagEntry) -> Option<String> {
         .or_else(|| group_tag_to_extension(entry.group_tag))
         .map(|extension| extension.trim().to_owned())
         .filter(|extension| !extension.is_empty())
+}
+
+enum SaveChangesPromptAction {
+    None,
+    Save(Vec<String>),
+    DontSave,
+    Cancel,
+}
+
+fn render_save_changes_prompt(
+    ctx: &egui::Context,
+    prompt: &mut SaveChangesPrompt,
+) -> SaveChangesPromptAction {
+    if !prompt.visible {
+        return SaveChangesPromptAction::None;
+    }
+
+    let mut action = SaveChangesPromptAction::None;
+    egui::Window::new("Baboon - Save Changes?")
+        .collapsible(false)
+        .resizable(true)
+        .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+        .default_width(520.0)
+        .default_height(260.0)
+        .show(ctx, |ui| {
+            ui.label(
+                RichText::new("The following files have been modified. Select the files to save.")
+                    .color(text_dark()),
+            );
+            ui.add_space(8.0);
+            if let Some(error) = prompt.error.as_deref() {
+                ui.label(RichText::new(error).color(Color32::from_rgb(180, 48, 40)));
+                ui.add_space(6.0);
+            }
+            ScrollArea::both().max_height(150.0).show(ui, |ui| {
+                for dirty in &mut prompt.dirty_tags {
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut dirty.checked, "");
+                        ui.label(RichText::new(&dirty.path).color(text_dark()));
+                    });
+                }
+            });
+            ui.add_space(10.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add(egui::Button::new("Cancel").min_size(Vec2::new(78.0, 24.0)))
+                    .clicked()
+                {
+                    action = SaveChangesPromptAction::Cancel;
+                }
+                if ui
+                    .add(egui::Button::new("Don't Save").min_size(Vec2::new(78.0, 24.0)))
+                    .clicked()
+                {
+                    action = SaveChangesPromptAction::DontSave;
+                }
+                if ui
+                    .add(egui::Button::new("Save").min_size(Vec2::new(78.0, 24.0)))
+                    .clicked()
+                {
+                    let tag_ids = prompt
+                        .dirty_tags
+                        .iter()
+                        .filter(|dirty| dirty.checked)
+                        .map(|dirty| dirty.tag_id.clone())
+                        .collect();
+                    action = SaveChangesPromptAction::Save(tag_ids);
+                }
+            });
+        });
+    action
+}
+
+enum LastOpenedWindowsAction {
+    None,
+    Restore {
+        source_kind: LastSessionSourceKind,
+        source_path: PathBuf,
+        tags: Vec<LastSessionTag>,
+    },
+    Cancel,
+}
+
+fn render_last_opened_windows_prompt(
+    ctx: &egui::Context,
+    prompt: Option<&mut LastOpenedWindowsPrompt>,
+) -> LastOpenedWindowsAction {
+    let Some(prompt) = prompt else {
+        return LastOpenedWindowsAction::None;
+    };
+    if !prompt.visible {
+        return LastOpenedWindowsAction::None;
+    }
+
+    let mut action = LastOpenedWindowsAction::None;
+    egui::Window::new("Last Opened Windows")
+        .collapsible(false)
+        .resizable(true)
+        .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+        .default_width(520.0)
+        .default_height(300.0)
+        .show(ctx, |ui| {
+            ui.label(
+                RichText::new("These windows were opened the last time you used Baboon.")
+                    .color(text_dark()),
+            );
+            ui.label(RichText::new("Which of these would you like to reopen?").color(text_dark()));
+            if !prompt.source_available {
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(format!(
+                        "Missing source: {}",
+                        prompt.source_path.display()
+                    ))
+                    .color(Color32::from_rgb(180, 48, 40)),
+                );
+            }
+            ui.add_space(8.0);
+            ScrollArea::both().max_height(170.0).show(ui, |ui| {
+                for entry in &mut prompt.entries {
+                    ui.add_enabled_ui(entry.available, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.checkbox(&mut entry.checked, "");
+                            let label = if entry.available {
+                                entry.tag.label.clone()
+                            } else {
+                                format!("{} (missing)", entry.tag.label)
+                            };
+                            ui.label(RichText::new(label).color(text_dark()));
+                        });
+                    });
+                }
+            });
+            ui.add_space(10.0);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add(egui::Button::new("Cancel").min_size(Vec2::new(78.0, 24.0)))
+                    .clicked()
+                {
+                    action = LastOpenedWindowsAction::Cancel;
+                }
+                if ui
+                    .add(egui::Button::new("OK").min_size(Vec2::new(78.0, 24.0)))
+                    .clicked()
+                {
+                    let tags = prompt
+                        .entries
+                        .iter()
+                        .filter(|entry| entry.available && entry.checked)
+                        .map(|entry| entry.tag.clone())
+                        .collect();
+                    action = LastOpenedWindowsAction::Restore {
+                        source_kind: prompt.source_kind,
+                        source_path: prompt.source_path.clone(),
+                        tags,
+                    };
+                }
+            });
+        });
+    action
 }
 
 fn save_as_file_name(entry: &TagEntry, extension: Option<&str>) -> String {

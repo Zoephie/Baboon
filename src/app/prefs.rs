@@ -4,21 +4,34 @@ pub(super) fn prefs_path() -> PathBuf {
     app_prefs_path("Baboon", "baboon", ".baboon-prefs.json")
 }
 
+pub(super) fn last_session_path() -> PathBuf {
+    app_data_path("Baboon", "baboon", "last_session.json", ".baboon-last-session.json")
+}
+
 fn legacy_prefs_path() -> PathBuf {
     app_prefs_path("Genesis", "genesis", ".genesis-prefs.json")
 }
 
 fn app_prefs_path(windows_folder: &str, unix_folder: &str, fallback_name: &str) -> PathBuf {
+    app_data_path(windows_folder, unix_folder, "prefs.json", fallback_name)
+}
+
+fn app_data_path(
+    windows_folder: &str,
+    unix_folder: &str,
+    filename: &str,
+    fallback_name: &str,
+) -> PathBuf {
     if let Some(appdata) = std::env::var_os("APPDATA") {
         return PathBuf::from(appdata)
             .join(windows_folder)
-            .join("prefs.json");
+            .join(filename);
     }
     if let Some(home) = std::env::var_os("USERPROFILE") {
         return PathBuf::from(home)
             .join(".config")
             .join(unix_folder)
-            .join("prefs.json");
+            .join(filename);
     }
     PathBuf::from(fallback_name)
 }
@@ -315,6 +328,108 @@ pub(super) fn load_terminal_open_games() -> HashSet<String> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+pub(super) fn load_last_session() -> Option<LastSessionState> {
+    let text = fs::read_to_string(last_session_path()).ok()?;
+    let value = serde_json::from_str::<Value>(&text).ok()?;
+    if value.get("version").and_then(Value::as_u64)? != 1 {
+        return None;
+    }
+    let source = value.get("source")?;
+    let source_kind =
+        LastSessionSourceKind::from_str(source.get("kind")?.as_str()?.trim())?;
+    let source_path = source
+        .get("path")?
+        .as_str()
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)?;
+    let game = source
+        .get("game")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|game| !game.is_empty())
+        .map(str::to_owned);
+    let mut tags = Vec::new();
+    for item in value.get("tags")?.as_array()? {
+        let Some(key) = item
+            .get("key")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|key| !key.is_empty())
+        else {
+            continue;
+        };
+        let label = item
+            .get("label")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|label| !label.is_empty())
+            .unwrap_or(key)
+            .to_owned();
+        let group_tag = item.get("group_tag").and_then(Value::as_u64).unwrap_or(0) as u32;
+        let path = item
+            .get("path")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from);
+        tags.push(LastSessionTag {
+            key: key.to_owned(),
+            label,
+            group_tag,
+            path,
+        });
+    }
+    if tags.is_empty() {
+        return None;
+    }
+    Some(LastSessionState {
+        source_kind,
+        source_path,
+        game,
+        tags,
+    })
+}
+
+/// Persist the source and open tag keys used by the launch-time restore
+/// prompt. This is written only from the confirmed app-exit path, so a crash or
+/// canceled close leaves the previous successfully closed session intact.
+pub(super) fn save_last_session(session: &LastSessionState) -> Result<(), String> {
+    let path = last_session_path();
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("Could not create session folder: {error}"))?;
+    }
+    let tags = session
+        .tags
+        .iter()
+        .map(|tag| {
+            json!({
+                "key": tag.key,
+                "label": tag.label,
+                "group_tag": tag.group_tag,
+                "path": tag.path.as_ref().map(|path| path.display().to_string()),
+            })
+        })
+        .collect::<Vec<_>>();
+    let value = json!({
+        "version": 1,
+        "source": {
+            "kind": session.source_kind.as_str(),
+            "path": session.source_path.display().to_string(),
+            "game": session.game,
+        },
+        "tags": tags,
+    });
+    let text = serde_json::to_string_pretty(&value)
+        .map_err(|error| format!("Could not encode session: {error}"))?;
+    fs::write(path, text).map_err(|error| format!("Could not save session: {error}"))
+}
+
+pub(super) fn clear_last_session() {
+    let _ = fs::remove_file(last_session_path());
 }
 
 #[cfg(test)]
