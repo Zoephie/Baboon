@@ -27,3 +27,8 @@ rfd = "0.15"
 rodio = { version = "0.20", default-features = false }
 serde_json = "1"
 walkdir = "2"
+
+# Local dev against the working engine tree (per-language sound bank/pck APIs).
+# DROP this + bump the `rev` above when shipping (engine commit → new hash).
+[patch."https://github.com/camden-smallwood/blam-tags"]
+blam-tags = { path = "/Users/camden/Source/blam-tags/blam-tags" }

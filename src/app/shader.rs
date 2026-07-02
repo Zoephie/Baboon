@@ -5333,6 +5333,7 @@ pub(super) fn draw_shader_grid_row_readonly(
     let mut block_confirm = None;
     let mut open_request = None;
     let mut sound_play_request = None;
+    let mut sound_extract_request = None;
     let mut tool_import = None;
     let mut bitmap_reimport = None;
     let mut buffers = HashMap::new();
@@ -5360,6 +5361,8 @@ pub(super) fn draw_shader_grid_row_readonly(
         sound_play_request: &mut sound_play_request,
         sound_status: None,
         sound_volume: 1.0,
+        sound_extract_request: &mut sound_extract_request,
+        sound_language: None,
         tool_import: &mut tool_import,
         bitmap_reimport: &mut bitmap_reimport,
         shader_ops: &mut shader_ops,

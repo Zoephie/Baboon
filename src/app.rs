@@ -77,6 +77,8 @@ use tag_icons::*;
 mod editor;
 use editor::*;
 mod audio;
+mod sound_extract;
+use sound_extract::*;
 mod controller;
 mod ui;
 
@@ -187,6 +189,8 @@ pub struct Baboon {
     block_confirm: Option<BlockConfirm>,
     /// Sound-tag audition: FMOD bank playback (rodio output + bank cache).
     audio: audio::AudioState,
+    /// Pending sound-extraction batch (decode + write), drained by the audio layer.
+    pending_sound_extract: Option<ExtractRequest>,
     /// Pending "open referenced tag in a new tab" request.
     pending_open: Option<OpenTagRequest>,
     /// Pending "import geometry via tool" request from an Import button.
@@ -312,6 +316,7 @@ impl Baboon {
             tab_rack_rect: None,
             block_confirm: None,
             audio: audio::AudioState::default(),
+            pending_sound_extract: None,
             pending_open: None,
             pending_tool_import: None,
             blender_icon: load_ico_texture(
