@@ -2368,6 +2368,14 @@ impl eframe::App for Baboon {
                             ui.close_menu();
                             self.show_map_ids();
                         }
+                        if ui.button("List Sounds by Class...").clicked() {
+                            ui.close_menu();
+                            self.show_sounds_by_class();
+                        }
+                        if ui.button("List Uncompressed Sounds...").clicked() {
+                            ui.close_menu();
+                            self.show_uncompressed_sounds();
+                        }
                         if ui.button("Search Field Values...").clicked() {
                             ui.close_menu();
                             self.field_value_search_open = true;
@@ -3184,6 +3192,8 @@ impl eframe::App for Baboon {
                             sound_play_request: &mut self.audio.pending,
                             sound_status: self.audio.status.as_deref(),
                             sound_volume,
+                            sound_extract_request: &mut self.pending_sound_extract,
+                            sound_language: self.audio.language.as_deref(),
                             tool_import: &mut self.pending_tool_import,
                             bitmap_reimport: &mut bitmap_reimport,
                             shader_ops: &mut shader_ops,
@@ -3432,6 +3442,14 @@ impl eframe::App for Baboon {
             None
         };
         self.audio.process(sound_root.as_deref(), ctx);
+        // Drain a queued sound extraction (decode + write files off the render
+        // hot loop) and a reimport hand-off (opens the tool runner pre-filled).
+        if let Some(request) = self.pending_sound_extract.take() {
+            self.audio.run_extract(request);
+            if let Some(status) = self.audio.status.clone() {
+                self.status = status;
+            }
+        }
         // While the Wwise index builds off-thread, keep repainting so the drain
         // loop polls it (the worker also pings on completion, but this covers
         // the "loading…" status update).

@@ -754,6 +754,12 @@ pub(super) struct FieldEditContext<'a> {
     pub(super) sound_status: Option<&'a str>,
     /// Current playback volume (linear, 0.0..=1.0), for the sound-player slider.
     pub(super) sound_volume: f32,
+    /// Set when the user extracts sound audio to disk (per-perm or whole-tag);
+    /// the app drains it to decode + write the files.
+    pub(super) sound_extract_request: &'a mut Option<super::sound_extract::ExtractRequest>,
+    /// Selected localized sound language (`None` = default), for the player's
+    /// language selector + `data_<lang>\` extraction routing.
+    pub(super) sound_language: Option<&'a str>,
     /// Set when the user clicks "Import" on a geometry tag-reference row.
     pub(super) tool_import: &'a mut Option<ToolImportRequest>,
     /// Set when the user clicks "Reimport" on a bitmap tag.

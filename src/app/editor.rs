@@ -1,5 +1,9 @@
 use super::*;
 
+use super::sound_extract::{
+    ExtractItem, ExtractRequest, ExtractSource, reimport_base_dir_lang, sanitize_component,
+};
+
 pub(super) fn draw_entry_header(ui: &mut Ui, entry: &TagEntry, names: &TagNameIndex) {
     ui.heading(RichText::new(&entry.display_path).color(text_dark()));
     ui.horizontal(|ui| {
@@ -44,6 +48,9 @@ pub(super) fn draw_tag(
     }
     if is_dialogue_group(entry.group_tag) {
         draw_dialogue_summary(ui, tag, edit);
+    }
+    if is_sound_looping_group(entry.group_tag) {
+        draw_sound_looping_player(ui, tag, edit);
     }
     if is_material_effects_group(entry.group_tag) {
         draw_material_effects_summary(ui, tag, edit);
@@ -374,6 +381,85 @@ fn h2_blobs(tag: &TagFile, want: Option<usize>) -> (usize, Option<Vec<u8>>) {
     (count, got)
 }
 
+/// The per-chunk byte offsets of the `want`-th H2 inline blob, from its
+/// `sound_permutation_chunk_block` (each element's `file offset`). H2 splits a
+/// permutation's audio into ~1.36 s chunks, each an independent stream; these
+/// offsets let the decoder slice + concatenate them. Empty if unchunked.
+/// Mirrors [`h2_blobs`]'s traversal so ordinals line up.
+fn h2_blob_chunk_offsets(tag: &TagFile, want: usize) -> Vec<usize> {
+    let root = tag.root();
+    let mut count = 0usize;
+    for field in root.fields() {
+        let Some(block) = field.as_block() else {
+            continue;
+        };
+        for i in 0..block.len() {
+            let Some(el) = block.element(i) else {
+                continue;
+            };
+            let Some(lang_perm_info) = find_block_field(&el, "language permutation info") else {
+                continue;
+            };
+            for j in 0..lang_perm_info.len() {
+                let Some(lpi_el) = lang_perm_info.element(j) else {
+                    continue;
+                };
+                let Some(raw_info) = find_block_field(&lpi_el, "raw info block") else {
+                    continue;
+                };
+                for k in 0..raw_info.len() {
+                    let Some(raw_el) = raw_info.element(k) else {
+                        continue;
+                    };
+                    let has_samples = raw_el
+                        .fields()
+                        .any(|f| f.as_data().is_some_and(|d| !d.is_empty()));
+                    if !has_samples {
+                        continue;
+                    }
+                    if count == want {
+                        return chunk_offsets_of(&raw_el);
+                    }
+                    count += 1;
+                }
+            }
+        }
+    }
+    Vec::new()
+}
+
+/// Read the `file offset` of each `sound_permutation_chunk_block` element in a
+/// raw-info-block struct (the block whose elements carry a `file offset` field).
+fn chunk_offsets_of(raw_el: &TagStruct) -> Vec<usize> {
+    for field in raw_el.fields() {
+        let Some(block) = field.as_block() else {
+            continue;
+        };
+        if block.len() == 0 {
+            continue;
+        }
+        let Some(first) = block.element(0) else {
+            continue;
+        };
+        let Some(offset_field) = first
+            .field_names()
+            .find(|n| clean_field_name(n).to_ascii_lowercase().contains("file offset"))
+        else {
+            continue;
+        };
+        let mut offsets = Vec::with_capacity(block.len());
+        for m in 0..block.len() {
+            if let Some(el) = block.element(m) {
+                if let Some(v) = el.read_int_any(offset_field) {
+                    offsets.push(v.max(0) as usize);
+                }
+            }
+        }
+        return offsets;
+    }
+    Vec::new()
+}
+
 /// Read H2's tag-level inline codec parameters: `compression` → codec,
 /// `encoding` → channel count, `sample rate` → Hz (used only by ADPCM; Opus is
 /// always 48 kHz).
@@ -459,10 +545,25 @@ fn h4_event_names(tag: &TagFile) -> Vec<(&'static str, String)> {
     out
 }
 
-/// Shared transport row for every sound-player variant: Stop, a volume slider,
-/// and the current status line. Stop and volume changes queue a
-/// [`super::audio::SoundAction`] the app drains after rendering.
+/// Localized languages available for the current source, by game family (Wwise
+/// `.pck` subdirs for H4/H2A, FMOD `.fsb` for the rest). Empty ⇒ single-language.
+fn available_sound_languages(edit: &FieldEditContext<'_>) -> Vec<String> {
+    let Some(root) = edit.tags_root else {
+        return Vec::new();
+    };
+    match edit.game {
+        Some("halo4_mcc") | Some("halo2amp_mcc") => {
+            blam_tags::audio::WwiseBanks::available_languages(root)
+        }
+        _ => blam_tags::audio::SoundBanks::available_languages(root),
+    }
+}
+
+/// Shared transport row for every sound-player variant: Stop, a volume slider, a
+/// language selector (when the source is localized), and the status line. All
+/// changes queue a [`super::audio::SoundAction`] the app drains after rendering.
 fn draw_sound_transport(ui: &mut Ui, edit: &mut FieldEditContext<'_>) {
+    let languages = available_sound_languages(edit);
     ui.horizontal(|ui| {
         if ui
             .button(RichText::new("\u{25A0} Stop"))
@@ -484,65 +585,61 @@ fn draw_sound_transport(ui: &mut Ui, edit: &mut FieldEditContext<'_>) {
         {
             *edit.sound_play_request = Some(super::audio::SoundAction::SetVolume(volume));
         }
+        // Language selector — resolves banks/pcks (and routes extraction to
+        // `data_<lang>\`) for the chosen localized language.
+        if !languages.is_empty() {
+            let current = edit.sound_language.map(str::to_owned);
+            let mut selected = current.clone();
+            egui::ComboBox::from_id_salt("sound_language")
+                .selected_text(format!(
+                    "\u{1F310} {}",
+                    current.as_deref().unwrap_or("default")
+                ))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut selected, None, "default");
+                    for lang in &languages {
+                        ui.selectable_value(&mut selected, Some(lang.clone()), lang);
+                    }
+                });
+            if selected != current {
+                *edit.sound_play_request = Some(super::audio::SoundAction::SetLanguage(selected));
+            }
+        }
         if let Some(status) = edit.sound_status {
             ui.label(RichText::new(status).color(subtle_dark()));
         }
     });
 }
 
-/// Render the Halo 4 Wwise event player: a play button per named event that
-/// queues a [`super::audio::SoundAction::PlayEvent`] (resolved against the
-/// game's `.pck` banks by the audio layer).
-fn draw_wwise_event_player(
-    ui: &mut Ui,
-    events: &[(&'static str, String)],
-    edit: &mut FieldEditContext<'_>,
-) {
-    egui::CollapsingHeader::new(
-        RichText::new(format!("Sound \u{2014} Wwise event ({})", events.len())).color(text_dark()),
-    )
-    .default_open(true)
-    .show(ui, |ui| {
-        draw_sound_transport(ui, edit);
-        egui::Grid::new("wwise_events")
-            .striped(true)
-            .num_columns(3)
-            .show(ui, |ui| {
-                for (label, name) in events {
-                    if ui
-                        .small_button("\u{25B6}")
-                        .on_hover_text("Play this Wwise event from the sound banks")
-                        .clicked()
-                    {
-                        *edit.sound_play_request = Some(super::audio::SoundAction::PlayEvent {
-                            event_name: name.clone(),
-                            label: name.clone(),
-                        });
-                    }
-                    ui.label(RichText::new(*label).color(subtle_dark()));
-                    ui.label(RichText::new(name).color(text_dark()));
-                    ui.end_row();
-                }
-            });
-    });
-}
-
-pub(super) fn draw_sound_player(ui: &mut Ui, tag: &TagFile, edit: &mut FieldEditContext<'_>) {
+/// Build the audition/extraction rows for a `.sound` tag: every pitch-range
+/// permutation with its name and audio source, classified identically for the
+/// player and the extractor. Capped so a pathological tag can't stall the UI.
+fn sound_permutation_rows(tag: &TagFile) -> Vec<SoundPermRow> {
     let root = tag.root();
-    // Halo 4: Wwise event reference, no inline pitch-range audio.
-    let events = h4_event_names(tag);
-    if !events.is_empty() {
-        draw_wwise_event_player(ui, &events, edit);
-        return;
-    }
     let Some(pitch_ranges) = find_block_field(&root, "pitch range") else {
-        return;
+        return Vec::new();
     };
-
     const MAX_ROWS: usize = 400;
     // H2 stores audio in a parallel language-permutation-info block (not on the
     // permutation like CE); count its blobs so rows can map to them by order.
-    let h2_count = h2_blobs(tag, None).0;
+    // Gate strictly on an inline-decodable codec: H3/ODST use the SAME nested
+    // block but store XMA `samples` inline (undecodable here; the playable audio
+    // is FMOD-Vorbis in the bank), so treating them as inline-H2 would decode
+    // garbage. Only opus / xbox-adpcm / uncompressed are actually inline audio.
+    let comp = find_full_field_name(&root, "compression")
+        .and_then(|full| root.read_enum_name(full))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let inline_decodable = !comp.contains("xma")
+        && (comp.contains("opus")
+            || comp.contains("adpcm")
+            || comp.contains("none")
+            || comp.contains("pcm"));
+    let h2_count = if inline_decodable {
+        h2_blobs(tag, None).0
+    } else {
+        0
+    };
     let mut h2_ordinal = 0usize;
     let mut rows: Vec<SoundPermRow> = Vec::new();
     for pr_index in 0..pitch_ranges.len() {
@@ -589,11 +686,272 @@ pub(super) fn draw_sound_player(ui: &mut Ui, tag: &TagFile, edit: &mut FieldEdit
             });
         }
     }
+    rows
+}
+
+/// The play action for a permutation row (bank subsound / CE inline Ogg / H2
+/// inline blob). Returns `None` if the inline bytes can't be re-extracted.
+fn row_play_action(
+    tag: &TagFile,
+    row: &SoundPermRow,
+    h2_params: Option<(super::audio::InlineCodec, u16, u32)>,
+) -> Option<super::audio::SoundAction> {
+    use super::audio::{InlineCodec, SoundAction};
+    match &row.kind {
+        RowKind::Bank => Some(SoundAction::Play {
+            key: row.name.clone(),
+            label: row.name.clone(),
+        }),
+        RowKind::InlineOgg => {
+            let bytes = inline_permutation_samples(tag, row.pr_index, row.perm_index)?;
+            Some(SoundAction::PlayInline {
+                bytes,
+                codec: InlineCodec::OggVorbis,
+                channels: 2,
+                sample_rate: 44_100,
+                chunk_offsets: Vec::new(),
+                label: row.name.clone(),
+            })
+        }
+        RowKind::InlineH2 { blob } => {
+            let bytes = h2_blobs(tag, Some(*blob)).1?;
+            let (codec, channels, sample_rate) =
+                h2_params.unwrap_or((InlineCodec::Opus, 1, 48_000));
+            Some(SoundAction::PlayInline {
+                bytes,
+                codec,
+                channels,
+                sample_rate,
+                chunk_offsets: h2_blob_chunk_offsets(tag, *blob),
+                label: row.name.clone(),
+            })
+        }
+    }
+}
+
+/// Where a permutation row's audio comes from for extraction. Mirrors
+/// [`row_play_action`] but yields file-writing sources. `raw_ce` writes CE's
+/// self-contained inline Ogg verbatim (near-lossless) instead of decoding.
+fn row_extract_source(
+    tag: &TagFile,
+    row: &SoundPermRow,
+    h2_params: Option<(super::audio::InlineCodec, u16, u32)>,
+    raw_ce: bool,
+) -> Option<ExtractSource> {
+    use super::audio::InlineCodec;
+    match &row.kind {
+        RowKind::Bank => Some(ExtractSource::Bank {
+            key: row.name.clone(),
+        }),
+        RowKind::InlineOgg => {
+            let bytes = inline_permutation_samples(tag, row.pr_index, row.perm_index)?;
+            Some(if raw_ce {
+                ExtractSource::Raw(bytes)
+            } else {
+                ExtractSource::Inline {
+                    bytes,
+                    codec: InlineCodec::OggVorbis,
+                    channels: 2,
+                    sample_rate: 44_100,
+                    chunk_offsets: Vec::new(),
+                }
+            })
+        }
+        RowKind::InlineH2 { blob } => {
+            let bytes = h2_blobs(tag, Some(*blob)).1?;
+            let (codec, channels, sample_rate) =
+                h2_params.unwrap_or((InlineCodec::Opus, 1, 48_000));
+            Some(ExtractSource::Inline {
+                bytes,
+                codec,
+                channels,
+                sample_rate,
+                chunk_offsets: h2_blob_chunk_offsets(tag, *blob),
+            })
+        }
+    }
+}
+
+/// File extension for an extracted row: CE raw passthrough keeps `.ogg`;
+/// everything else decodes to `.wav`.
+fn row_extract_ext(kind: &RowKind, raw_ce: bool) -> &'static str {
+    if raw_ce && matches!(kind, RowKind::InlineOgg) {
+        "ogg"
+    } else {
+        "wav"
+    }
+}
+
+/// A compact `(sound class, codec)` readout for the player header.
+fn sound_class_and_compression(tag: &TagFile) -> (Option<String>, String) {
+    let root = tag.root();
+    let class = find_full_field_name(&root, "sound class")
+        .and_then(|full| root.read_enum_name(full))
+        .filter(|value| !value.is_empty());
+    let compression = find_full_field_name(&root, "compression")
+        .and_then(|full| root.read_enum_name(full))
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "FMOD Vorbis bank".to_owned());
+    (class, compression)
+}
+
+/// Whether a pitch-range name is the implicit default (tool writes those files
+/// flat, no subfolder). Covers the literal `|default|`, an empty name, and the
+/// `pitch range N` placeholder [`sound_permutation_rows`] synthesizes for an
+/// unnamed range.
+fn is_default_pitch_range(name: &str) -> bool {
+    let n = name.trim();
+    n.is_empty()
+        || n.eq_ignore_ascii_case("|default|")
+        || n.eq_ignore_ascii_case("default")
+        || n.strip_prefix("pitch range ")
+            .is_some_and(|rest| rest.chars().all(|c| c.is_ascii_digit()))
+}
+
+/// Whether the tag has more than one distinct pitch range (drives subfoldering).
+fn rows_span_multiple_pitch_ranges(rows: &[SoundPermRow]) -> bool {
+    let mut names: Vec<&str> = rows.iter().map(|row| row.pitch_range.as_str()).collect();
+    names.sort_unstable();
+    names.dedup();
+    names.len() > 1
+}
+
+/// The `[<pitch range>/]<permutation>.<ext>` path (relative to the tag's data
+/// dir) for a permutation — shared by extraction and reimport so they agree on
+/// filenames. A subfolder is used when there are multiple ranges or the single
+/// range is named (non-default); a lone default range stays flat.
+fn perm_relative_path(multi_pr: bool, row: &SoundPermRow, ext: &str) -> std::path::PathBuf {
+    let file = format!("{}.{ext}", sanitize_component(&row.name));
+    if multi_pr || !is_default_pitch_range(&row.pitch_range) {
+        std::path::PathBuf::from(sanitize_component(&row.pitch_range)).join(file)
+    } else {
+        std::path::PathBuf::from(file)
+    }
+}
+
+/// Lay each row out under `base` as `[<pitch range>/]<permutation>.<ext>` — the
+/// structure `tool.exe`'s sound import consumes (RE-verified from the tool's own
+/// exporter).
+fn build_extract_items(
+    tag: &TagFile,
+    rows: &[SoundPermRow],
+    h2_params: Option<(super::audio::InlineCodec, u16, u32)>,
+    base: &std::path::Path,
+    raw_ce: bool,
+) -> Vec<ExtractItem> {
+    let multi_pr = rows_span_multiple_pitch_ranges(rows);
+    rows.iter()
+        .filter_map(|row| {
+            let source = row_extract_source(tag, row, h2_params, raw_ce)?;
+            let rel = perm_relative_path(multi_pr, row, row_extract_ext(&row.kind, raw_ce));
+            Some(ExtractItem {
+                out_path: base.join(rel),
+                source,
+            })
+        })
+        .collect()
+}
+
+/// Per-game one-line note on the format `tool.exe` requires when reimporting the
+/// extracted files (RE-verified from each tool binary). Empty for Wwise games.
+fn sound_format_note(game: Option<&str>) -> &'static str {
+    match game {
+        Some("haloce_mcc") => "16-bit WAV, 22050 or 44100 Hz, mono/stereo",
+        Some("halo2_mcc") => "16-bit WAV, 22050/32000/44100/48000 Hz (resampled), mono/stereo",
+        Some("halo3_mcc") | Some("halo3odst_mcc") | Some("haloreach_mcc") => {
+            "16-bit WAV, 48000 Hz, mono/stereo"
+        }
+        _ => "",
+    }
+}
+
+
+/// Render the Halo 4 Wwise event player: a play button per named event that
+/// queues a [`super::audio::SoundAction::PlayEvent`] (resolved against the
+/// game's `.pck` banks by the audio layer).
+fn draw_wwise_event_player(
+    ui: &mut Ui,
+    events: &[(&'static str, String)],
+    edit: &mut FieldEditContext<'_>,
+) {
+    egui::CollapsingHeader::new(
+        RichText::new(format!("Sound \u{2014} Wwise event ({})", events.len())).color(text_dark()),
+    )
+    .default_open(true)
+    .show(ui, |ui| {
+        draw_sound_transport(ui, edit);
+        ui.label(
+            RichText::new(
+                "Wwise-authored \u{2014} audio lives in sound\\pc\\*.pck; \
+                 extract-only (no tool.exe reimport).",
+            )
+            .color(subtle_dark()),
+        );
+        egui::Grid::new("wwise_events")
+            .striped(true)
+            .num_columns(4)
+            .show(ui, |ui| {
+                for (label, name) in events {
+                    if ui
+                        .small_button("\u{25B6}")
+                        .on_hover_text("Play this Wwise event from the sound banks")
+                        .clicked()
+                    {
+                        *edit.sound_play_request = Some(super::audio::SoundAction::PlayEvent {
+                            event_name: name.clone(),
+                            label: name.clone(),
+                        });
+                    }
+                    if ui
+                        .small_button("\u{2B07}")
+                        .on_hover_text("Extract this event to WAV (play it once first to load the banks)")
+                        .clicked()
+                    {
+                        if let Some(path) = rfd::FileDialog::new()
+                            .set_title("Extract Wwise event")
+                            .set_file_name(format!("{}.wav", sanitize_component(name)))
+                            .save_file()
+                        {
+                            *edit.sound_extract_request = Some(ExtractRequest {
+                                items: vec![ExtractItem {
+                                    out_path: path,
+                                    source: ExtractSource::Event { name: name.clone() },
+                                }],
+                                tags_root: edit.tags_root.map(std::path::Path::to_path_buf),
+                                label: name.clone(),
+                            });
+                        }
+                    }
+                    ui.label(RichText::new(*label).color(subtle_dark()));
+                    ui.label(RichText::new(name).color(text_dark()));
+                    ui.end_row();
+                }
+            });
+    });
+}
+
+pub(super) fn draw_sound_player(ui: &mut Ui, tag: &TagFile, edit: &mut FieldEditContext<'_>) {
+    // Halo 4: Wwise event reference, no inline pitch-range audio.
+    let events = h4_event_names(tag);
+    if !events.is_empty() {
+        draw_wwise_event_player(ui, &events, edit);
+        return;
+    }
+    let rows = sound_permutation_rows(tag);
     if rows.is_empty() {
         return;
     }
     // H2 tag-level codec/channels/rate (read once; used by inline H2 rows).
-    let h2_params = (h2_count > 0).then(|| h2_codec_params(tag));
+    let is_h2 = rows
+        .iter()
+        .any(|row| matches!(row.kind, RowKind::InlineH2 { .. }));
+    let h2_params = is_h2.then(|| h2_codec_params(tag));
+    let has_inline_ogg = rows.iter().any(|row| matches!(row.kind, RowKind::InlineOgg));
+    // Loose `.sound` file path (for the reimport data\ layout + tool tag path).
+    let abs_tag_path = edit
+        .tag_key
+        .strip_prefix("file:")
+        .map(std::path::PathBuf::from);
 
     egui::CollapsingHeader::new(
         RichText::new(format!("Sound \u{2014} {} permutation(s)", rows.len())).color(text_dark()),
@@ -601,12 +959,76 @@ pub(super) fn draw_sound_player(ui: &mut Ui, tag: &TagFile, edit: &mut FieldEdit
     .default_open(true)
     .show(ui, |ui| {
         draw_sound_transport(ui, edit);
+
+        // Class / codec readout.
+        let (class, codec) = sound_class_and_compression(tag);
+        ui.horizontal(|ui| {
+            if let Some(class) = &class {
+                ui.label(RichText::new(format!("class: {class}")).color(subtle_dark()));
+                ui.label(RichText::new("\u{00B7}").color(subtle_dark()));
+            }
+            ui.label(RichText::new(format!("codec: {codec}")).color(subtle_dark()));
+        });
+
+        // Extract-all. The CE raw-ogg toggle persists per tag. (Reimport is left
+        // to the user via the game's tool.exe.)
+        let raw_ce_id = ui.make_persistent_id(("sound_raw_ce", edit.tag_key));
+        let mut raw_ce = ui.data(|d| d.get_temp::<bool>(raw_ce_id)).unwrap_or(false);
+        let extract_base = abs_tag_path
+            .as_deref()
+            .zip(edit.tags_root)
+            .and_then(|(tag_path, root)| {
+                reimport_base_dir_lang(root, tag_path, edit.sound_language)
+            });
+        let format_note = sound_format_note(edit.game);
+        ui.horizontal(|ui| {
+            let extract_hover = match &extract_base {
+                Some(dir) => format!("Extract every permutation to {}", dir.display()),
+                None => "Choose a folder and extract every permutation".to_owned(),
+            };
+            let extract_hover = if format_note.is_empty() {
+                extract_hover
+            } else {
+                format!("{extract_hover}\nFor tool.exe reimport: {format_note}")
+            };
+            if ui
+                .button(RichText::new("\u{2B07} Extract all"))
+                .on_hover_text(extract_hover)
+                .clicked()
+            {
+                let base = extract_base.clone().or_else(|| {
+                    rfd::FileDialog::new()
+                        .set_title("Extract sound permutations")
+                        .pick_folder()
+                });
+                if let Some(base) = base {
+                    let items = build_extract_items(tag, &rows, h2_params, &base, raw_ce);
+                    let label = base
+                        .file_name()
+                        .map(|name| name.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "sound".to_owned());
+                    *edit.sound_extract_request = Some(ExtractRequest {
+                        items,
+                        tags_root: edit.tags_root.map(std::path::Path::to_path_buf),
+                        label,
+                    });
+                }
+            }
+            if has_inline_ogg {
+                ui.checkbox(&mut raw_ce, "raw .ogg").on_hover_text(
+                    "Extract CE audio as the tag's original Ogg stream (lossless) \
+                     instead of decoding to WAV",
+                );
+            }
+        });
+        ui.data_mut(|d| d.insert_temp(raw_ce_id, raw_ce));
+
         egui::ScrollArea::vertical()
             .max_height(220.0)
             .show(ui, |ui| {
                 egui::Grid::new("sound_permutations")
                     .striped(true)
-                    .num_columns(3)
+                    .num_columns(4)
                     .show(ui, |ui| {
                         for row in &rows {
                             let hover = match row.kind {
@@ -614,37 +1036,37 @@ pub(super) fn draw_sound_player(ui: &mut Ui, tag: &TagFile, edit: &mut FieldEdit
                                 _ => "Play this permutation (inline tag audio)",
                             };
                             if ui.small_button("\u{25B6}").on_hover_text(hover).clicked() {
-                                *edit.sound_play_request = match &row.kind {
-                                    RowKind::Bank => Some(super::audio::SoundAction::Play {
-                                        key: row.name.clone(),
-                                        label: row.name.clone(),
-                                    }),
-                                    RowKind::InlineOgg => inline_permutation_samples(
-                                        tag,
-                                        row.pr_index,
-                                        row.perm_index,
-                                    )
-                                    .map(|bytes| super::audio::SoundAction::PlayInline {
-                                        bytes,
-                                        codec: super::audio::InlineCodec::OggVorbis,
-                                        channels: 2,
-                                        sample_rate: 44_100,
-                                        label: row.name.clone(),
-                                    }),
-                                    RowKind::InlineH2 { blob } => {
-                                        h2_blobs(tag, Some(*blob)).1.map(|bytes| {
-                                            let (codec, channels, sample_rate) = h2_params
-                                                .unwrap_or((super::audio::InlineCodec::Opus, 1, 48_000));
-                                            super::audio::SoundAction::PlayInline {
-                                                bytes,
-                                                codec,
-                                                channels,
-                                                sample_rate,
-                                                label: row.name.clone(),
-                                            }
-                                        })
+                                *edit.sound_play_request = row_play_action(tag, row, h2_params);
+                            }
+                            if ui
+                                .small_button("\u{2B07}")
+                                .on_hover_text("Extract this permutation to a file")
+                                .clicked()
+                            {
+                                let ext = row_extract_ext(&row.kind, raw_ce);
+                                if let Some(path) = rfd::FileDialog::new()
+                                    .set_title("Extract permutation")
+                                    .set_file_name(format!(
+                                        "{}.{ext}",
+                                        sanitize_component(&row.name)
+                                    ))
+                                    .save_file()
+                                {
+                                    if let Some(source) =
+                                        row_extract_source(tag, row, h2_params, raw_ce)
+                                    {
+                                        *edit.sound_extract_request = Some(ExtractRequest {
+                                            items: vec![ExtractItem {
+                                                out_path: path,
+                                                source,
+                                            }],
+                                            tags_root: edit
+                                                .tags_root
+                                                .map(std::path::Path::to_path_buf),
+                                            label: row.name.clone(),
+                                        });
                                     }
-                                };
+                                }
                             }
                             ui.label(RichText::new(&row.name).color(text_dark()));
                             ui.label(RichText::new(&row.pitch_range).color(subtle_dark()));
@@ -732,6 +1154,127 @@ fn draw_ref_cell(ui: &mut Ui, refs: &[(u32, String)]) -> Option<OpenTagRequest> 
 /// per-vocalization `stimuli` block (Reach/H4/H2A). Classic Halo CE has no
 /// vocalization block (fixed per-context fields), so we note that and defer to
 /// the field tree.
+/// Load a referenced `.sound` tag (from a dialogue or looping container) so its
+/// audio can be auditioned/extracted like the primary tag. Classic-aware.
+fn load_referenced_sound(
+    game: Option<&str>,
+    tags_root: Option<&std::path::Path>,
+    definitions_root: Option<&std::path::Path>,
+    rel_path: &str,
+    group: u32,
+) -> Option<(TagFile, std::path::PathBuf)> {
+    let tags_root = tags_root?;
+    let abs = blam_tags::paths::resolve_tag_path(tags_root, rel_path, "sound");
+    let tag = crate::source::read_tag_at_path(&abs, game, definitions_root, group).ok()?;
+    Some((tag, abs))
+}
+
+/// The play action for the first playable unit of a (referenced) sound tag:
+/// a Wwise event (H4) or the first pitch-range permutation.
+fn referenced_sound_play_action(tag: &TagFile) -> Option<super::audio::SoundAction> {
+    if let Some((_, name)) = h4_event_names(tag).into_iter().next() {
+        return Some(super::audio::SoundAction::PlayEvent {
+            event_name: name.clone(),
+            label: name,
+        });
+    }
+    let rows = sound_permutation_rows(tag);
+    let is_h2 = rows
+        .iter()
+        .any(|row| matches!(row.kind, RowKind::InlineH2 { .. }));
+    let h2_params = is_h2.then(|| h2_codec_params(tag));
+    rows.first()
+        .and_then(|row| row_play_action(tag, row, h2_params))
+}
+
+/// Extract items for a whole (referenced) sound tag under `base` — Wwise events
+/// or pitch-range permutations, matching the primary extractor's layout.
+fn referenced_sound_extract_items(tag: &TagFile, base: &std::path::Path) -> Vec<ExtractItem> {
+    let events = h4_event_names(tag);
+    if !events.is_empty() {
+        return events
+            .iter()
+            .map(|(_, name)| ExtractItem {
+                out_path: base.join(format!("{}.wav", sanitize_component(name))),
+                source: ExtractSource::Event { name: name.clone() },
+            })
+            .collect();
+    }
+    let rows = sound_permutation_rows(tag);
+    let is_h2 = rows
+        .iter()
+        .any(|row| matches!(row.kind, RowKind::InlineH2 { .. }));
+    let h2_params = is_h2.then(|| h2_codec_params(tag));
+    build_extract_items(tag, &rows, h2_params, base, false)
+}
+
+/// Render a set of `.sound` refs with a ▶ Play, ⬇ Extract, and the clickable
+/// open-label per ref. Shared by the dialogue and sound_looping players; kept out
+/// of `edit` so the grid closure needn't borrow it mutably.
+fn draw_referenced_sound_cell(
+    ui: &mut Ui,
+    refs: &[(u32, String)],
+    game: Option<&str>,
+    tags_root: Option<&std::path::Path>,
+    definitions_root: Option<&std::path::Path>,
+    language: Option<&str>,
+) -> (
+    Option<OpenTagRequest>,
+    Option<super::audio::SoundAction>,
+    Option<ExtractRequest>,
+) {
+    let (mut open, mut play, mut extract) = (None, None, None);
+    if refs.is_empty() {
+        ui.label(RichText::new("(none)").color(subtle_dark()));
+        return (open, play, extract);
+    }
+    ui.vertical(|ui| {
+        for (group, path) in refs {
+            ui.horizontal(|ui| {
+                let is_sound = &group.to_be_bytes() == b"snd!";
+                if is_sound
+                    && ui
+                        .small_button("\u{25B6}")
+                        .on_hover_text("Play this referenced sound")
+                        .clicked()
+                {
+                    if let Some((sound, _)) =
+                        load_referenced_sound(game, tags_root, definitions_root, path, *group)
+                    {
+                        play = referenced_sound_play_action(&sound);
+                    }
+                }
+                if is_sound
+                    && ui
+                        .small_button("\u{2B07}")
+                        .on_hover_text("Extract this referenced sound to its data\\ folder")
+                        .clicked()
+                {
+                    if let Some((sound, abs)) =
+                        load_referenced_sound(game, tags_root, definitions_root, path, *group)
+                    {
+                        if let Some(base) =
+                            tags_root.and_then(|root| reimport_base_dir_lang(root, &abs, language))
+                        {
+                            let items = referenced_sound_extract_items(&sound, &base);
+                            let label = path.rsplit(['\\', '/']).next().unwrap_or(path).to_owned();
+                            extract = Some(ExtractRequest {
+                                items,
+                                tags_root: tags_root.map(std::path::Path::to_path_buf),
+                                label,
+                            });
+                        }
+                    }
+                }
+                if let Some(request) = ref_open_label(ui, *group, path) {
+                    open = Some(request);
+                }
+            });
+        }
+    });
+    (open, play, extract)
+}
+
 pub(super) fn draw_dialogue_summary(ui: &mut Ui, tag: &TagFile, edit: &mut FieldEditContext<'_>) {
     let root = tag.root();
     let Some(vocalizations) = find_block_field(&root, "vocali") else {
@@ -784,6 +1327,13 @@ pub(super) fn draw_dialogue_summary(ui: &mut Ui, tag: &TagFile, edit: &mut Field
     }
 
     let mut to_open: Option<OpenTagRequest> = None;
+    let mut to_play: Option<super::audio::SoundAction> = None;
+    let mut to_extract: Option<ExtractRequest> = None;
+    // Copies so the grid closure needn't borrow `edit`.
+    let game = edit.game;
+    let tags_root = edit.tags_root;
+    let defs = edit.definitions_root;
+    let language = edit.sound_language;
     egui::CollapsingHeader::new(
         RichText::new(format!(
             "Dialogue Overview ({total} vocalizations, {total_sounds} sounds)"
@@ -794,6 +1344,7 @@ pub(super) fn draw_dialogue_summary(ui: &mut Ui, tag: &TagFile, edit: &mut Field
     .id_salt("dialogue_overview")
     .default_open(total <= 40)
     .show(ui, |ui| {
+        draw_sound_transport(ui, edit);
         if total == 0 {
             ui.label(RichText::new("(no vocalizations)").color(subtle_dark()));
             return;
@@ -812,8 +1363,17 @@ pub(super) fn draw_dialogue_summary(ui: &mut Ui, tag: &TagFile, edit: &mut Field
                         ui.end_row();
                         for row in &rows {
                             ui.label(RichText::new(&row.name).color(text_dark()));
-                            if let Some(request) = draw_ref_cell(ui, &row.sounds) {
-                                to_open = Some(request);
+                            let (open, play, extract) = draw_referenced_sound_cell(
+                                ui, &row.sounds, game, tags_root, defs, language,
+                            );
+                            if open.is_some() {
+                                to_open = open;
+                            }
+                            if play.is_some() {
+                                to_play = play;
+                            }
+                            if extract.is_some() {
+                                to_extract = extract;
                             }
                             ui.end_row();
                         }
@@ -831,6 +1391,120 @@ pub(super) fn draw_dialogue_summary(ui: &mut Ui, tag: &TagFile, edit: &mut Field
     });
     if to_open.is_some() {
         *edit.open_request = to_open;
+    }
+    if to_play.is_some() {
+        *edit.sound_play_request = to_play;
+    }
+    if to_extract.is_some() {
+        *edit.sound_extract_request = to_extract;
+    }
+    ui.add_space(6.0);
+}
+
+/// The `sound_looping` (`lsnd`) tag group — a container of `.sound` refs.
+pub(super) fn is_sound_looping_group(group_tag: u32) -> bool {
+    &group_tag.to_be_bytes() == b"lsnd"
+}
+
+/// Collect labeled `.sound` refs from a `sound_looping` (`lsnd`) tag: each
+/// track's in/loop/out/alt* references, plus each detail sound.
+fn sound_looping_refs(tag: &TagFile) -> Vec<(String, u32, String)> {
+    let root = tag.root();
+    let mut out = Vec::new();
+    if let Some(tracks) = find_block_field(&root, "track") {
+        for index in 0..tracks.len() {
+            let Some(track) = tracks.element(index) else {
+                continue;
+            };
+            let track_name = find_full_field_name(&track, "name")
+                .and_then(|full| track.read_string_id(full))
+                .filter(|name| !name.is_empty())
+                .unwrap_or_else(|| format!("track {index}"));
+            for (label, group, path) in struct_tag_refs_labeled(&track) {
+                if &group.to_be_bytes() == b"snd!" {
+                    out.push((format!("{track_name} \u{00B7} {label}"), group, path));
+                }
+            }
+        }
+    }
+    if let Some(details) = find_block_field(&root, "detail sound") {
+        for index in 0..details.len() {
+            let Some(detail) = details.element(index) else {
+                continue;
+            };
+            for (label, group, path) in struct_tag_refs_labeled(&detail) {
+                if &group.to_be_bytes() == b"snd!" {
+                    out.push((format!("detail {index} \u{00B7} {label}"), group, path));
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Audition/extract panel for a `sound_looping` (`lsnd`) tag: it carries no audio
+/// itself, only `.sound` refs, so we resolve each component sound and reuse the
+/// per-sound player (load-on-click, like the dialogue player).
+pub(super) fn draw_sound_looping_player(
+    ui: &mut Ui,
+    tag: &TagFile,
+    edit: &mut FieldEditContext<'_>,
+) {
+    let refs = sound_looping_refs(tag);
+    if refs.is_empty() {
+        return;
+    }
+    let mut to_open: Option<OpenTagRequest> = None;
+    let mut to_play: Option<super::audio::SoundAction> = None;
+    let mut to_extract: Option<ExtractRequest> = None;
+    let game = edit.game;
+    let tags_root = edit.tags_root;
+    let defs = edit.definitions_root;
+    let language = edit.sound_language;
+    egui::CollapsingHeader::new(
+        RichText::new(format!(
+            "Sound Looping \u{2014} {} component sound(s)",
+            refs.len()
+        ))
+        .color(text_dark()),
+    )
+    .default_open(true)
+    .show(ui, |ui| {
+        draw_sound_transport(ui, edit);
+        egui::ScrollArea::vertical()
+            .max_height(240.0)
+            .show(ui, |ui| {
+                egui::Grid::new("sound_looping_grid")
+                    .striped(true)
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        for (label, group, path) in &refs {
+                            ui.label(RichText::new(label).color(subtle_dark()));
+                            let one = [(*group, path.clone())];
+                            let (open, play, extract) =
+                                draw_referenced_sound_cell(ui, &one, game, tags_root, defs, language);
+                            if open.is_some() {
+                                to_open = open;
+                            }
+                            if play.is_some() {
+                                to_play = play;
+                            }
+                            if extract.is_some() {
+                                to_extract = extract;
+                            }
+                            ui.end_row();
+                        }
+                    });
+            });
+    });
+    if to_open.is_some() {
+        *edit.open_request = to_open;
+    }
+    if to_play.is_some() {
+        *edit.sound_play_request = to_play;
+    }
+    if to_extract.is_some() {
+        *edit.sound_extract_request = to_extract;
     }
     ui.add_space(6.0);
 }
@@ -861,6 +1535,21 @@ fn struct_tag_refs(element: &TagStruct) -> Vec<(u32, String)> {
         .field_names()
         .filter_map(|name| element.read_tag_ref_with_group(name))
         .filter(|(_, path)| !path.is_empty())
+        .collect()
+}
+
+/// Every set tag reference on a struct paired with its cleaned field-name label
+/// (`(label, group, path)`) — used to name a sound_looping track's in/loop/out
+/// components.
+fn struct_tag_refs_labeled(element: &TagStruct) -> Vec<(String, u32, String)> {
+    element
+        .field_names()
+        .filter_map(|name| {
+            element
+                .read_tag_ref_with_group(name)
+                .filter(|(_, path)| !path.is_empty())
+                .map(|(group, path)| (clean_field_name(name), group, path))
+        })
         .collect()
 }
 
@@ -3008,6 +3697,19 @@ pub(super) fn filtered_bitmap_rgba(
 mod tests {
     use super::*;
 
+    /// The extract-layout default-range detector matches the tool's `|default|`
+    /// rule plus our synthesized placeholder for unnamed ranges.
+    #[test]
+    fn default_pitch_range_detection() {
+        assert!(is_default_pitch_range(""));
+        assert!(is_default_pitch_range("|default|"));
+        assert!(is_default_pitch_range("default"));
+        assert!(is_default_pitch_range("pitch range 0"));
+        assert!(is_default_pitch_range("pitch range 12"));
+        assert!(!is_default_pitch_range("close"));
+        assert!(!is_default_pitch_range("pitch range x"));
+    }
+
     /// End-to-end validation of the sound-player glue against real H3 files
     /// (skip-if-absent): extract permutation names exactly as `draw_sound_player`
     /// does, then resolve each against the FMOD banks and decode — the same path
@@ -3242,6 +3944,378 @@ mod tests {
             pcm.sample_rate
         );
         assert!(pcm.frame_count() > 0);
+    }
+
+    /// End-to-end extraction (skip-if-absent): read a real CE `.sound`, build
+    /// the same rows the player builds, and run the actual
+    /// `AudioState::run_extract` for both WAV (decoded) and raw `.ogg`
+    /// (passthrough), validating each output.
+    #[test]
+    #[ignore]
+    fn ce_extract_writes_wav_and_raw_ogg() {
+        let defs = std::path::Path::new("/Users/camden/Source/blam-tags/definitions");
+        let tag_path = std::path::Path::new(
+            "/Users/camden/Halo/haloce_mcc/tags/sound/sinomatixx_music/b40_extraction_music.sound",
+        );
+        if !tag_path.exists() || !defs.exists() {
+            eprintln!("skip: no CE tag/defs");
+            return;
+        }
+        let group = u32::from_be_bytes(*b"snd!");
+        let tag = crate::source::read_tag_at_path(tag_path, Some("haloce_mcc"), Some(defs), group)
+            .expect("read CE sound tag");
+        let rows = sound_permutation_rows(&tag);
+        assert!(!rows.is_empty(), "CE tag should have permutations");
+
+        // Decoded WAV.
+        let wav_dir = std::env::temp_dir().join("baboon_ce_extract_wav");
+        let _ = std::fs::remove_dir_all(&wav_dir);
+        let items = build_extract_items(&tag, &rows, None, &wav_dir, false);
+        let mut audio = super::audio::AudioState::default();
+        audio.run_extract(ExtractRequest {
+            items,
+            tags_root: None,
+            label: "ce".to_owned(),
+        });
+        let wav = std::fs::read(wav_dir.join(format!("{}.wav", sanitize_component(&rows[0].name))))
+            .expect("wav written");
+        assert_eq!(&wav[0..4], b"RIFF");
+        assert_eq!(&wav[8..12], b"WAVE");
+        assert!(wav.len() > 44, "wav should carry samples");
+
+        // Raw .ogg passthrough should be byte-identical to the inline samples.
+        let ogg_dir = std::env::temp_dir().join("baboon_ce_extract_ogg");
+        let _ = std::fs::remove_dir_all(&ogg_dir);
+        let items = build_extract_items(&tag, &rows, None, &ogg_dir, true);
+        audio.run_extract(ExtractRequest {
+            items,
+            tags_root: None,
+            label: "ce".to_owned(),
+        });
+        let ogg = std::fs::read(ogg_dir.join(format!("{}.ogg", sanitize_component(&rows[0].name))))
+            .expect("ogg written");
+        assert!(ogg.starts_with(b"OggS"), "raw passthrough should be an Ogg");
+        let inline = inline_permutation_samples(&tag, rows[0].pr_index, rows[0].perm_index).unwrap();
+        assert_eq!(ogg, inline, "raw passthrough must be verbatim tag bytes");
+
+        let _ = std::fs::remove_dir_all(&wav_dir);
+        let _ = std::fs::remove_dir_all(&ogg_dir);
+    }
+
+    /// Whole-tag H2 extraction end-to-end (skip-if-absent): build the same rows
+    /// the player builds and run the real `AudioState::run_extract`, validating a
+    /// decoded WAV lands for the inline (Opus/ADPCM/PCM) path. `SND_TAG` overrides.
+    #[test]
+    #[ignore]
+    fn h2_extract_writes_wav() {
+        let defs = std::path::Path::new("/Users/camden/Source/blam-tags/definitions");
+        let rel =
+            std::env::var("SND_TAG").unwrap_or_else(|_| "sound/ui/pickup_health.sound".to_owned());
+        let tag_path = std::path::Path::new("/Users/camden/Halo/halo2_mcc/tags").join(&rel);
+        if !tag_path.exists() || !defs.exists() {
+            eprintln!("skip: no H2 tag/defs ({})", tag_path.display());
+            return;
+        }
+        let group = u32::from_be_bytes(*b"snd!");
+        let tag = crate::source::read_tag_at_path(&tag_path, Some("halo2_mcc"), Some(defs), group)
+            .expect("read H2 sound tag");
+        let rows = sound_permutation_rows(&tag);
+        assert!(!rows.is_empty(), "H2 tag should have permutations");
+        let h2_params = Some(h2_codec_params(&tag));
+        let dir = std::env::temp_dir().join("baboon_h2_extract");
+        let _ = std::fs::remove_dir_all(&dir);
+        let items = build_extract_items(&tag, &rows, h2_params, &dir, false);
+        let count = items.len();
+        let mut audio = super::audio::AudioState::default();
+        audio.run_extract(ExtractRequest {
+            items,
+            tags_root: None,
+            label: "h2".to_owned(),
+        });
+        // At least one WAV should have been written with a valid RIFF header.
+        let mut found = 0usize;
+        for entry in walkdir(&dir) {
+            let bytes = std::fs::read(&entry).unwrap();
+            assert_eq!(&bytes[0..4], b"RIFF");
+            assert_eq!(&bytes[8..12], b"WAVE");
+            found += 1;
+        }
+        assert!(found > 0 && found <= count, "wrote {found}/{count} wavs");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Whole-tag H3/Reach bank extraction end-to-end (skip-if-absent): run the
+    /// real `run_extract` Bank path (resolve subsound → decode → WAV) for every
+    /// permutation. `SND_TAGS_ROOT`/`SND_TAG` override for Reach/ODST.
+    #[test]
+    #[ignore]
+    fn bank_extract_writes_wav() {
+        let root = std::env::var("SND_TAGS_ROOT")
+            .unwrap_or_else(|_| "/Users/camden/Halo/halo3_mcc/tags".to_owned());
+        let rel = std::env::var("SND_TAG").unwrap_or_else(|_| {
+            "sound/visual_fx/ambient_vehicle_destroyed_large.sound".to_owned()
+        });
+        let tags_root = std::path::Path::new(&root);
+        let tag_path = tags_root.join(&rel);
+        if !tag_path.exists() {
+            eprintln!("skip: no bank tags at {}", tag_path.display());
+            return;
+        }
+        let tag = blam_tags::TagFile::read(&tag_path).expect("read sound tag");
+        let rows = sound_permutation_rows(&tag);
+        assert!(!rows.is_empty());
+        let dir = std::env::temp_dir().join("baboon_bank_extract");
+        let _ = std::fs::remove_dir_all(&dir);
+        let items = build_extract_items(&tag, &rows, None, &dir, false);
+        let mut audio = super::audio::AudioState::default();
+        audio.run_extract(ExtractRequest {
+            items,
+            tags_root: Some(tags_root.to_path_buf()),
+            label: "bank".to_owned(),
+        });
+        let mut found = 0usize;
+        for entry in walkdir(&dir) {
+            let bytes = std::fs::read(&entry).unwrap();
+            assert_eq!(&bytes[0..4], b"RIFF");
+            found += 1;
+        }
+        assert!(found > 0, "wrote no bank WAVs");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// DIAGNOSTIC (skip-if-absent): dump the full structure of a real H2 sound
+    /// tag — every block/element and each data field's size — plus h2_blobs and
+    /// decoded durations, to find why long sounds show short. Point via SND_TAG.
+    #[test]
+    #[ignore]
+    fn h2_dump_structure() {
+        let defs = std::path::Path::new("/Users/camden/Source/blam-tags/definitions");
+        let rel = std::env::var("SND_TAG").unwrap_or_else(|_| "sound/loop.sound".to_owned());
+        let tag_path = std::path::Path::new("/Users/camden/Halo/halo2_mcc/tags").join(&rel);
+        if !tag_path.exists() || !defs.exists() {
+            eprintln!("skip: no tag/defs ({})", tag_path.display());
+            return;
+        }
+        let group = u32::from_be_bytes(*b"snd!");
+        let tag = crate::source::read_tag_at_path(&tag_path, Some("halo2_mcc"), Some(defs), group)
+            .expect("read tag");
+        let (codec, channels, rate) = h2_codec_params(&tag);
+        eprintln!("codec={codec:?} channels={channels} rate={rate}");
+        let root = tag.root();
+
+        // Permutation names + count.
+        if let Some(prs) = find_block_field(&root, "pitch range") {
+            for p in 0..prs.len() {
+                let pr = prs.element(p).unwrap();
+                if let Some(perms) = find_block_field(&pr, "permutation") {
+                    eprintln!("pitch range {p}: {} permutations", perms.len());
+                    for pm in 0..perms.len() {
+                        let perm = perms.element(pm).unwrap();
+                        let name = find_full_field_name(&perm, "name")
+                            .and_then(|f| perm.read_string_id(f))
+                            .unwrap_or_default();
+                        // dump any int/enum fields that look like chunk/sample counts
+                        let fields: Vec<String> = perm
+                            .field_names()
+                            .filter(|n| {
+                                let c = clean_field_name(n).to_ascii_lowercase();
+                                c.contains("sample") || c.contains("count") || c.contains("chunk")
+                                    || c.contains("first") || c.contains("index")
+                            })
+                            .map(|n| {
+                                let v = perm.read_int_any(n).map(|x| x.to_string()).unwrap_or_default();
+                                format!("{}={v}", clean_field_name(n))
+                            })
+                            .collect();
+                        eprintln!("  perm {pm} '{name}': {}", fields.join(" "));
+                    }
+                }
+            }
+        }
+
+        // Walk extra-info → language perm info → raw info block, dumping data sizes
+        // AND any nested blocks (chunked samples live in a nested block).
+        for field in root.fields() {
+            let Some(block) = field.as_block() else { continue };
+            for i in 0..block.len() {
+                let el = block.element(i).unwrap();
+                let Some(lpi) = find_block_field(&el, "language permutation info") else { continue };
+                eprintln!("extra-info[{i}] '{}': lpi={}", clean_field_name(field.name()), lpi.len());
+                for j in 0..lpi.len() {
+                    let lel = lpi.element(j).unwrap();
+                    let Some(raw) = find_block_field(&lel, "raw info block") else { continue };
+                    eprintln!("  lpi[{j}]: raw info block={}", raw.len());
+                    for k in 0..raw.len() {
+                        let rel = raw.element(k).unwrap();
+                        let mut parts = Vec::new();
+                        for f in rel.fields() {
+                            if let Some(d) = f.as_data() {
+                                parts.push(format!("data'{}'={}B", clean_field_name(f.name()), d.len()));
+                            } else if let Some(b) = f.as_block() {
+                                parts.push(format!("block'{}'x{}", clean_field_name(f.name()), b.len()));
+                                // dump nested block element int values (chunk offsets/sizes)
+                                for m in 0..b.len().min(20) {
+                                    if let Some(be) = b.element(m) {
+                                        let ints: Vec<String> = be
+                                            .field_names()
+                                            .filter_map(|n| be.read_int_any(n).map(|v| v.to_string()))
+                                            .collect();
+                                        let datas: Vec<String> = be
+                                            .fields()
+                                            .filter_map(|bf| bf.as_data().map(|d| format!("data={}B", d.len())))
+                                            .collect();
+                                        if !ints.is_empty() || !datas.is_empty() {
+                                            parts.push(format!("[{m}:{} {}]", ints.join(","), datas.join(",")));
+                                        }
+                                    }
+                                }
+                            } else {
+                                let c = clean_field_name(f.name()).to_ascii_lowercase();
+                                if c.contains("sample") || c.contains("count") || c.contains("size") || c.contains("compression") || c.contains("index") {
+                                    if let Some(v) = rel.read_int_any(f.name()) {
+                                        parts.push(format!("{}={v}", clean_field_name(f.name())));
+                                    }
+                                }
+                            }
+                        }
+                        eprintln!("    raw[{k}]: {}", parts.join(" "));
+                    }
+                }
+            }
+        }
+
+        let (count, _) = h2_blobs(&tag, Some(0));
+        eprintln!("h2_blobs count={count}");
+        for idx in 0..count {
+            let (_, blob) = h2_blobs(&tag, Some(idx));
+            let offs = h2_blob_chunk_offsets(&tag, idx);
+            if let Some(b) = blob {
+                let old = super::audio::decode_inline(codec, &b, channels, rate)
+                    .map(|p| p.duration_secs())
+                    .unwrap_or(0.0);
+                match super::audio::decode_inline_chunked(codec, &b, &offs, channels, rate) {
+                    Ok(pcm) => eprintln!(
+                        "blob{idx}: {}B, {} chunks -> {:.2}s (was {:.2}s single-chunk)",
+                        b.len(), offs.len().max(1), pcm.duration_secs(), old
+                    ),
+                    Err(e) => eprintln!("blob{idx}: {}B decode err: {e}", b.len()),
+                }
+            }
+        }
+
+        // Verify: decode blob0's chunks independently by slicing at chunk offsets.
+        let (_, blob0) = h2_blobs(&tag, Some(0));
+        if let Some(b) = blob0 {
+            let offs = [0usize, 19234, 38487, b.len()];
+            let mut sum = 0.0f32;
+            for w in offs.windows(2) {
+                if w[1] <= b.len() && w[0] < w[1] {
+                    match super::audio::decode_inline(codec, &b[w[0]..w[1]], channels, rate) {
+                        Ok(p) => {
+                            sum += p.duration_secs();
+                            eprintln!("  chunk [{}..{}] {}B -> {} frames = {:.2}s", w[0], w[1], w[1]-w[0], p.frame_count(), p.duration_secs());
+                        }
+                        Err(e) => eprintln!("  chunk [{}..{}] err: {e}", w[0], w[1]),
+                    }
+                }
+            }
+            eprintln!("  blob0 all chunks summed = {sum:.2}s");
+        }
+    }
+
+    /// Regression (skip-if-absent): H2 splits inline audio into per-chunk streams
+    /// (`sound_permutation_chunk_block`); the decoder must concatenate all chunks,
+    /// not stop at the first. For any multi-chunk blob, the chunked decode must be
+    /// longer than the single-stream decode. Default tag = the custom `loop.sound`.
+    #[test]
+    #[ignore]
+    fn h2_chunked_decode_is_full_length() {
+        let defs = std::path::Path::new("/Users/camden/Source/blam-tags/definitions");
+        let rel = std::env::var("SND_TAG").unwrap_or_else(|_| "sound/loop.sound".to_owned());
+        let tag_path = std::path::Path::new("/Users/camden/Halo/halo2_mcc/tags").join(&rel);
+        if !tag_path.exists() || !defs.exists() {
+            eprintln!("skip: no tag/defs ({})", tag_path.display());
+            return;
+        }
+        let group = u32::from_be_bytes(*b"snd!");
+        let tag = crate::source::read_tag_at_path(&tag_path, Some("halo2_mcc"), Some(defs), group)
+            .expect("read tag");
+        let (codec, channels, rate) = h2_codec_params(&tag);
+        let (count, _) = h2_blobs(&tag, Some(0));
+        let mut checked_multichunk = false;
+        for idx in 0..count {
+            let (_, blob) = h2_blobs(&tag, Some(idx));
+            let offs = h2_blob_chunk_offsets(&tag, idx);
+            let Some(bytes) = blob else { continue };
+            if offs.len() <= 1 {
+                continue; // single-chunk: chunked == single, nothing to prove
+            }
+            checked_multichunk = true;
+            let single = super::audio::decode_inline(codec, &bytes, channels, rate)
+                .map(|p| p.frame_count())
+                .unwrap_or(0);
+            let full = super::audio::decode_inline_chunked(codec, &bytes, &offs, channels, rate)
+                .expect("chunked decode")
+                .frame_count();
+            assert!(
+                full > single,
+                "blob{idx}: chunked {full} !> single {single} ({} chunks)",
+                offs.len()
+            );
+        }
+        assert!(checked_multichunk, "expected at least one multi-chunk blob to test");
+    }
+
+    /// Per-language bank plumbing (skip-if-absent): the FMOD languages are
+    /// discovered from the `.fsb` names, and opening a specific language + the
+    /// shared sfx bank still resolves an SFX permutation (language bank first,
+    /// sfx fallback). Proves `open_pc_language` doesn't break default resolution.
+    #[test]
+    #[ignore]
+    fn fmod_language_selection_resolves() {
+        use blam_tags::audio::SoundBanks;
+        let tags_root = std::path::Path::new("/Users/camden/Halo/halo3_mcc/tags");
+        if !tags_root.join("../fmod/pc/sfx.fsb").exists() {
+            eprintln!("skip: no H3 fmod banks");
+            return;
+        }
+        let langs = SoundBanks::available_languages(tags_root);
+        eprintln!("H3 languages: {langs:?}");
+        assert!(
+            langs.iter().any(|l| l == "french"),
+            "expected localized .fsb languages, got {langs:?}"
+        );
+        assert!(!langs.iter().any(|l| l == "sfx"), "sfx must be excluded");
+        // Open a specific language + sfx; an SFX permutation still resolves.
+        let banks =
+            SoundBanks::open_pc_language(tags_root, Some("french")).expect("open french+sfx");
+        let tag = blam_tags::TagFile::read(
+            &tags_root.join("sound/visual_fx/ambient_vehicle_destroyed_large.sound"),
+        )
+        .expect("read sfx sound tag");
+        let rows = sound_permutation_rows(&tag);
+        let resolved = rows
+            .iter()
+            .filter(|r| banks.resolve(&r.name).is_some())
+            .count();
+        assert!(resolved > 0, "no permutations resolved in french+sfx banks");
+    }
+
+    /// Recursively collect files under `dir` (small test helper).
+    fn walkdir(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let mut out = Vec::new();
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return out;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                out.extend(walkdir(&path));
+            } else {
+                out.push(path);
+            }
+        }
+        out
     }
 
     /// Classic Halo 2 inline audio (skip-if-absent): read the tag, extract the

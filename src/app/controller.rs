@@ -2274,6 +2274,117 @@ impl Baboon {
         });
     }
 
+    /// Scan every `snd!` tag once, reading its `sound class` + `compression`
+    /// enum names. Shared by the class-listing and uncompressed-listing tools.
+    /// Returns `(class, compression, entry)` triples, or `None` if no source.
+    fn scan_sound_tags(&self) -> Option<Vec<(String, String, TagEntry)>> {
+        let source = self.source.as_ref()?;
+        let mut rows = Vec::new();
+        for entry in &source.all_entries {
+            if &entry.group_tag.to_be_bytes() != b"snd!" {
+                continue;
+            }
+            let Ok(tag) = crate::source::read_entry(&source.source, entry) else {
+                continue;
+            };
+            let root = tag.root();
+            let class = find_full_field_name(&root, "sound class")
+                .and_then(|full| root.read_enum_name(full))
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| "(none)".to_owned());
+            let compression = find_full_field_name(&root, "compression")
+                .and_then(|full| root.read_enum_name(full))
+                .unwrap_or_default();
+            rows.push((class, compression, entry.clone()));
+        }
+        Some(rows)
+    }
+
+    /// List every `snd!` tag annotated with its sound class + compression, with a
+    /// per-class count summary (mirrors `count-class-sounds` /
+    /// `count-all-class-sounds`).
+    pub(super) fn show_sounds_by_class(&mut self) {
+        let title = "Sounds by class";
+        let Some(mut rows) = self.scan_sound_tags() else {
+            self.query_results = Some(TagQueryResults {
+                title: title.to_owned(),
+                entries: Vec::new(),
+                annotations: Vec::new(),
+                note: Some("No source loaded.".to_owned()),
+            });
+            return;
+        };
+        rows.sort_by(|a, b| {
+            a.0.cmp(&b.0)
+                .then_with(|| a.2.display_path.cmp(&b.2.display_path))
+        });
+        let mut counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+        for (class, _, _) in &rows {
+            *counts.entry(class.as_str()).or_default() += 1;
+        }
+        let entries: Vec<TagEntry> = rows.iter().map(|(_, _, e)| e.clone()).collect();
+        let annotations: Vec<String> = rows
+            .iter()
+            .map(|(class, comp, _)| {
+                if comp.is_empty() {
+                    format!("[{class}]")
+                } else {
+                    format!("[{class}] {comp}")
+                }
+            })
+            .collect();
+        let note = if entries.is_empty() {
+            Some("No sound tags found.".to_owned())
+        } else {
+            let summary = counts
+                .iter()
+                .map(|(k, v)| format!("{k}: {v}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            Some(format!("{} class(es) \u{2014} {summary}", counts.len()))
+        };
+        self.query_results = Some(TagQueryResults {
+            title: format!("{title} ({})", entries.len()),
+            entries,
+            annotations,
+            note,
+        });
+    }
+
+    /// List `snd!` tags stored uncompressed (compression name contains "none"),
+    /// mirroring `dump-uncompressed-sounds`.
+    pub(super) fn show_uncompressed_sounds(&mut self) {
+        let title = "Uncompressed sounds";
+        let Some(rows) = self.scan_sound_tags() else {
+            self.query_results = Some(TagQueryResults {
+                title: title.to_owned(),
+                entries: Vec::new(),
+                annotations: Vec::new(),
+                note: Some("No source loaded.".to_owned()),
+            });
+            return;
+        };
+        let mut hits: Vec<(String, String, TagEntry)> = rows
+            .into_iter()
+            .filter(|(_, comp, _)| comp.to_ascii_lowercase().contains("none"))
+            .collect();
+        hits.sort_by(|a, b| a.2.display_path.cmp(&b.2.display_path));
+        let entries: Vec<TagEntry> = hits.iter().map(|(_, _, e)| e.clone()).collect();
+        let annotations: Vec<String> = hits
+            .iter()
+            .map(|(class, comp, _)| format!("{comp}  [{class}]"))
+            .collect();
+        let note = entries
+            .is_empty()
+            .then(|| "No uncompressed sound tags found.".to_owned());
+        self.query_results = Some(TagQueryResults {
+            title: format!("{title} ({})", entries.len()),
+            entries,
+            annotations,
+            note,
+        });
+    }
+
     /// Locate a tag in the browser tree: switch to Folders mode, clear the
     /// filter, select it, and request a one-shot force-open + scroll.
     pub(super) fn reveal_in_browser(&mut self, key: &str) {
@@ -3237,6 +3348,8 @@ impl Baboon {
                         sound_play_request: &mut self.audio.pending,
                         sound_status: self.audio.status.as_deref(),
                         sound_volume,
+                        sound_extract_request: &mut self.pending_sound_extract,
+                        sound_language: self.audio.language.as_deref(),
                         tool_import: &mut self.pending_tool_import,
                         bitmap_reimport: &mut bitmap_reimport,
                         shader_ops: &mut shader_ops,

@@ -211,10 +211,36 @@
     },
     {
       "name": "sounds",
-      "category": "Advanced / Unknown",
-      "description": "A 16-bit WAV file can be imported into a sound tag using the sounds verb:",
+      "category": "Sounds",
+      "description": "Imports 16-bit WAV/Ogg source files (per-permutation, in pitch-range subfolders) into a sound tag. Reimport = re-run over data\\.",
       "example": "tool sounds \"vehicles\\ghost\" ogg 1",
-      "args": []
+      "args": [
+        {
+          "name": "source-directory",
+          "type": "path_data",
+          "description": "The data\\ directory whose files become this sound's permutations.",
+          "required": true,
+          "values": []
+        },
+        {
+          "name": "platform",
+          "type": "enum",
+          "description": "Encoding platform for the imported audio.",
+          "required": true,
+          "values": [
+            "ogg",
+            "wav",
+            "xbox"
+          ]
+        },
+        {
+          "name": "ogg-quality",
+          "type": "optional_string",
+          "description": "Ogg only: quality (-0.1..1.0) or bitrate in kbps (>=16, default 64).",
+          "required": false,
+          "values": []
+        }
+      ]
     },
     {
       "name": "sounds_by_type",

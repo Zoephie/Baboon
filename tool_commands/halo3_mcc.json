@@ -1459,7 +1459,7 @@
       ]
     },
     {
-      "name": "reimport-sounds",
+      "name": "reimport-sounds-single",
       "category": "Sounds",
       "description": "Reimports the specified sound if sound data was found in the data folder.",
       "example": "tool reimport-sounds \"sound\\dialog\\combat\" default downmix unit_dialog english",
