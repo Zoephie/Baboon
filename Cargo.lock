@@ -403,6 +403,7 @@ checksum = "84d7ced0ae9557296835c32bf1b1e02b44c746701f898460fb000d7eaa84f00a"
 [[package]]
 name = "blam-tags"
 version = "0.1.0"
+source = "git+https://github.com/camden-smallwood/blam-tags?rev=5be44976fe1397453ed7d470483b9f69b58cefb4#5be44976fe1397453ed7d470483b9f69b58cefb4"
 dependencies = [
  "bcdec_rs",
  "flate2",
