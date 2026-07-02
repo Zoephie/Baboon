@@ -677,6 +677,22 @@ pub fn scan_folder_subtree_entries(
     Ok(entries)
 }
 
+pub fn loose_file_entry(root: &Path, path: &Path, names: &TagNameIndex) -> Result<Option<TagEntry>> {
+    let Some(group_tag) = probe_tag_group(path)? else {
+        return Ok(None);
+    };
+    let rel = path.strip_prefix(root).unwrap_or(path);
+    let group_name = names.name_for(group_tag).map(str::to_owned);
+    let display_path = display_path_with_friendly_extension(rel, group_tag, names);
+    Ok(Some(TagEntry {
+        key: format!("file:{}", path.display()),
+        display_path,
+        group_tag,
+        group_name,
+        location: TagEntryLocation::LooseFile(path.to_path_buf()),
+    }))
+}
+
 // ── Index persistence ─────────────────────────────────────────────────────────
 
 /// Derive a stable index filename from the game name stored in `FolderRootInfo`.
@@ -1310,6 +1326,31 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].display_path, "objects/characters/test.biped");
         assert_eq!(format_group_tag(entries[0].group_tag), "bipd");
+    }
+
+    #[test]
+    fn loose_file_entry_matches_scanned_folder_entry_metadata() {
+        let root = temp_dir("drop_entry");
+        fs::create_dir_all(root.join("objects/characters/brute")).unwrap();
+        let path = root
+            .join("objects")
+            .join("characters")
+            .join("brute")
+            .join("brute.shader");
+        write_fake_tag(&path, b"shdr");
+
+        let names = TagNameIndex::default();
+        let entry = loose_file_entry(&root, &path, &names)
+            .unwrap()
+            .expect("fake tag should probe as a tag");
+        let scanned = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(scanned.len(), 1);
+        assert_eq!(entry.key, scanned[0].key);
+        assert_eq!(entry.display_path, "objects/characters/brute/brute.shader");
+        assert_eq!(entry.display_path, scanned[0].display_path);
+        assert_eq!(entry.group_tag, scanned[0].group_tag);
     }
 
     #[test]

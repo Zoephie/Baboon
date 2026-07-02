@@ -2141,6 +2141,17 @@ impl eframe::App for Baboon {
         {
             self.redo_current_tag();
         }
+        let dropped_paths = ctx.input(|input| {
+            input
+                .raw
+                .dropped_files
+                .iter()
+                .filter_map(|file| file.path.clone())
+                .collect::<Vec<_>>()
+        });
+        if !dropped_paths.is_empty() {
+            self.open_dropped_files(dropped_paths, ctx.clone());
+        }
 
         egui::TopBottomPanel::top("menu")
             .frame(Frame::none().fill(menu_bar()).inner_margin(egui::Margin {

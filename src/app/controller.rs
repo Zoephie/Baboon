@@ -575,6 +575,106 @@ impl Baboon {
         Some(root.clone())
     }
 
+    pub(super) fn open_dropped_files(&mut self, paths: Vec<PathBuf>, ctx: egui::Context) {
+        if paths.is_empty() {
+            return;
+        }
+
+        let count = paths.len();
+        for path in paths {
+            match self.open_dropped_file(path, ctx.clone()) {
+                Ok(true) => return,
+                Ok(false) => {}
+                Err(error) => {
+                    self.status = error;
+                    return;
+                }
+            }
+        }
+
+        self.status = if count == 1 {
+            "Dropped file is not a supported tag".to_owned()
+        } else {
+            "No supported tag files were dropped".to_owned()
+        };
+    }
+
+    fn open_dropped_file(&mut self, path: PathBuf, ctx: egui::Context) -> Result<bool, String> {
+        if !path.is_file() {
+            return Ok(false);
+        }
+
+        let Some(source) = self.source.as_ref() else {
+            return Err("Load an editing-kit tags folder before dropping tag files".to_owned());
+        };
+        let TagSource::LooseFolder { root, .. } = &source.source else {
+            return Err("Drop-to-open requires a loaded loose tags folder".to_owned());
+        };
+
+        let root = fs::canonicalize(root)
+            .map_err(|error| format!("Could not resolve loaded tags folder: {error}"))?;
+        let path = fs::canonicalize(&path)
+            .map_err(|error| format!("Could not resolve dropped file: {error}"))?;
+        if !path.starts_with(&root) {
+            return Err(format!(
+                "Dropped tag must be inside the loaded tags folder: {}",
+                root.display()
+            ));
+        }
+
+        if let Some(key) = self.key_for_loose_path(&path) {
+            self.select_entry(key, ctx);
+            return Ok(true);
+        }
+
+        let Some(entry) = loose_file_entry(&root, &path, &source.names)
+            .map_err(|error| format!("Could not inspect dropped tag: {error:#}"))?
+        else {
+            return Ok(false);
+        };
+
+        let key = entry.key.clone();
+        if let Some(source) = self.source.as_mut() {
+            source.entries.retain(|existing| existing.key != key);
+            source.entries.push(entry.clone());
+
+            if !source.all_entries.is_empty() {
+                source.all_entries.retain(|existing| existing.key != key);
+                source.all_entries.push(entry.clone());
+                source
+                    .all_entries
+                    .sort_by(|a, b| a.display_path.cmp(&b.display_path));
+                source.group_tree = crate::source::build_group_tree(&source.all_entries);
+                if let (Some(game), TagSource::LooseFolder { root, .. }) =
+                    (source.game.as_deref(), &source.source)
+                {
+                    let _ = crate::source::save_entry_index(game, root, &source.all_entries);
+                }
+            }
+        }
+        self.source_generation = self.source_generation.wrapping_add(1);
+        self.select_entry(key, ctx);
+        Ok(true)
+    }
+
+    fn key_for_loose_path(&self, path: &Path) -> Option<String> {
+        let source = self.source.as_ref()?;
+        source
+            .entries
+            .iter()
+            .chain(source.all_entries.iter())
+            .find_map(|entry| {
+                let TagEntryLocation::LooseFile(existing) = &entry.location else {
+                    return None;
+                };
+                if existing == path || fs::canonicalize(existing).ok().as_deref() == Some(path) {
+                    Some(entry.key.clone())
+                } else {
+                    None
+                }
+            })
+    }
+
     pub(super) fn register_created_tag(&mut self, entry: TagEntry, tag: TagFile) {
         let key = entry.key.clone();
         if let Some(source) = self.source.as_mut() {

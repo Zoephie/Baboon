@@ -30,7 +30,7 @@ use serde_json::{Value, json};
 use crate::format::{TagNameIndex, format_value, group_label};
 use crate::source::{
     DependencyRef, EkFolderAlias, LoadedSourceData, ReverseDependencyIndex, SUPPORTED_EK_GAMES,
-    TagEntry, TagEntryLocation, TagSource, TagTree, TagTreeNode, load_folder,
+    TagEntry, TagEntryLocation, TagSource, TagTree, TagTreeNode, load_folder, loose_file_entry,
     load_folder_node_entries, load_monolithic_blob_index, load_single_file, read_entry,
     resolve_folder_root, scan_folder_subtree_entries, supported_ek_game_id,
 };
