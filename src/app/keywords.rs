@@ -106,10 +106,10 @@ mod tests {
         store.add("file:a", "wip");
         assert_eq!(store.keywords("file:a"), &["hero", "wip"]);
 
-        assert_eq!(store.all_keywords(), vec![
-            ("hero".to_owned(), 1),
-            ("wip".to_owned(), 1)
-        ]);
+        assert_eq!(
+            store.all_keywords(),
+            vec![("hero".to_owned(), 1), ("wip".to_owned(), 1)]
+        );
         assert_eq!(store.tags_with("wip"), vec!["file:a".to_owned()]);
 
         store.remove("file:a", "hero");

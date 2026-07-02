@@ -366,7 +366,9 @@ pub fn read_tag_at_path(
             definitions_root.context("classic tag requires a definitions root")?;
         let group_name = blam_tags::paths::group_tag_to_extension(group_tag)
             .context("unknown group for classic tag layout")?;
-        let def_path = definitions_root.join(game).join(format!("{group_name}.json"));
+        let def_path = definitions_root
+            .join(game)
+            .join(format!("{group_name}.json"));
         let layout = TagLayout::from_json(&def_path)
             .with_context(|| format!("failed to load classic layout {}", def_path.display()))?;
         return read_classic_tag_file(&bytes, layout)
@@ -392,9 +394,11 @@ pub fn read_tag_from_bytes(
         let game = game.context("classic tag requires a detected game profile")?;
         let definitions_root =
             definitions_root.context("classic tag requires a definitions root")?;
-        let group_name = group_tag_to_extension(group_tag)
-            .context("unknown group for classic tag layout")?;
-        let def_path = definitions_root.join(game).join(format!("{group_name}.json"));
+        let group_name =
+            group_tag_to_extension(group_tag).context("unknown group for classic tag layout")?;
+        let def_path = definitions_root
+            .join(game)
+            .join(format!("{group_name}.json"));
         let layout = TagLayout::from_json(&def_path)
             .with_context(|| format!("failed to load classic layout {}", def_path.display()))?;
         return read_classic_tag_file(bytes, layout)
@@ -677,7 +681,11 @@ pub fn scan_folder_subtree_entries(
     Ok(entries)
 }
 
-pub fn loose_file_entry(root: &Path, path: &Path, names: &TagNameIndex) -> Result<Option<TagEntry>> {
+pub fn loose_file_entry(
+    root: &Path,
+    path: &Path,
+    names: &TagNameIndex,
+) -> Result<Option<TagEntry>> {
     let Some(group_tag) = probe_tag_group(path)? else {
         return Ok(None);
     };

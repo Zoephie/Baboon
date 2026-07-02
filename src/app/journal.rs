@@ -77,10 +77,14 @@ impl EditJournal {
     pub(super) fn undo(&mut self, current: &TagFile) -> Option<(Vec<u8>, String)> {
         let snapshot = self.undo.pop()?;
         if let Ok(bytes) = current.write_to_bytes() {
-            push_capped_into(&mut self.redo, self.limit, Snapshot {
-                bytes,
-                label: snapshot.label.clone(),
-            });
+            push_capped_into(
+                &mut self.redo,
+                self.limit,
+                Snapshot {
+                    bytes,
+                    label: snapshot.label.clone(),
+                },
+            );
         }
         self.coalescing = false;
         Some((snapshot.bytes, snapshot.label))
@@ -90,10 +94,14 @@ impl EditJournal {
     pub(super) fn redo(&mut self, current: &TagFile) -> Option<(Vec<u8>, String)> {
         let snapshot = self.redo.pop()?;
         if let Ok(bytes) = current.write_to_bytes() {
-            push_capped_into(&mut self.undo, self.limit, Snapshot {
-                bytes,
-                label: snapshot.label.clone(),
-            });
+            push_capped_into(
+                &mut self.undo,
+                self.limit,
+                Snapshot {
+                    bytes,
+                    label: snapshot.label.clone(),
+                },
+            );
         }
         self.coalescing = false;
         Some((snapshot.bytes, snapshot.label))

@@ -46,7 +46,10 @@ impl FieldValueIndex {
         let mut out = Vec::new();
         for (key, blob) in &self.blobs {
             if let Some(byte_pos) = blob.find(query_lower) {
-                out.push((key.clone(), index_snippet(blob, byte_pos, query_lower.len())));
+                out.push((
+                    key.clone(),
+                    index_snippet(blob, byte_pos, query_lower.len()),
+                ));
                 if out.len() >= cap {
                     break;
                 }

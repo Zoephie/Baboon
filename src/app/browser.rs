@@ -614,9 +614,23 @@ pub(super) fn draw_entry_list(
             continue;
         }
         if clicked.is_none() {
-            clicked = draw_entry(ui, entry, selected, show_prefixes, double_click_to_open, reveal_key);
+            clicked = draw_entry(
+                ui,
+                entry,
+                selected,
+                show_prefixes,
+                double_click_to_open,
+                reveal_key,
+            );
         } else {
-            let _ = draw_entry(ui, entry, selected, show_prefixes, double_click_to_open, reveal_key);
+            let _ = draw_entry(
+                ui,
+                entry,
+                selected,
+                show_prefixes,
+                double_click_to_open,
+                reveal_key,
+            );
         }
     }
     clicked
@@ -1134,10 +1148,7 @@ mod tests {
         // Prefix anchor on filename.
         assert_eq!(compute_filter_matches(&entries, "^elite_"), vec![0]);
         // Suffix anchor on filename.
-        assert_eq!(
-            compute_filter_matches(&entries, "weapon$"),
-            vec![2]
-        );
+        assert_eq!(compute_filter_matches(&entries, "weapon$"), vec![2]);
         // Exact filename anchor.
         assert_eq!(compute_filter_matches(&entries, "^elite.model$"), vec![1]);
     }

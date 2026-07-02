@@ -193,7 +193,12 @@ mod tests {
             _ => panic!("expected explanation first"),
         }
         match &entries[1] {
-            DefEntry::Field { clean_name, help, unit, .. } => {
+            DefEntry::Field {
+                clean_name,
+                help,
+                unit,
+                ..
+            } => {
                 assert_eq!(clean_name, "minimum distance");
                 assert_eq!(unit.as_deref(), Some("world units"));
                 assert_eq!(help.as_deref(), Some("start attenuating at this distance"));
@@ -221,14 +226,22 @@ mod tests {
             "inherited object struct must resolve via the parent chain"
         );
         let has = |target: &str| {
-            entries.iter().any(|e| {
-                matches!(e, DefEntry::Field { clean_name, .. } if clean_name == target)
-            })
+            entries
+                .iter()
+                .any(|e| matches!(e, DefEntry::Field { clean_name, .. } if clean_name == target))
         };
-        assert!(has("acceleration scale"), "inherited unit field should resolve");
-        assert!(has("collision damage"), "inherited object field should resolve");
         assert!(
-            entries.iter().any(|e| matches!(e, DefEntry::Explanation { .. })),
+            has("acceleration scale"),
+            "inherited unit field should resolve"
+        );
+        assert!(
+            has("collision damage"),
+            "inherited object field should resolve"
+        );
+        assert!(
+            entries
+                .iter()
+                .any(|e| matches!(e, DefEntry::Explanation { .. })),
             "object struct should carry explanations"
         );
     }
@@ -237,8 +250,7 @@ mod tests {
     fn overlay_aligns_with_stripped_tag_by_guid_and_clean_name() {
         // End-to-end: a stripped tag's struct GUID + clean field names line up
         // with the parsed docs, so help/units + explanations can be overlaid.
-        let json =
-            std::fs::read_to_string("definitions/haloreach_mcc/sound_classes.json").unwrap();
+        let json = std::fs::read_to_string("definitions/haloreach_mcc/sound_classes.json").unwrap();
         let docs = parse_def_docs(&json);
         let mut tag = TagFile::new("definitions/haloreach_mcc/sound_classes.json").unwrap();
         add_block_element(&mut tag, "sound classes").unwrap();
@@ -277,4 +289,3 @@ mod tests {
         );
     }
 }
-

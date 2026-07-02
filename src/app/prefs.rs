@@ -5,7 +5,12 @@ pub(super) fn prefs_path() -> PathBuf {
 }
 
 pub(super) fn last_session_path() -> PathBuf {
-    app_data_path("Baboon", "baboon", "last_session.json", ".baboon-last-session.json")
+    app_data_path(
+        "Baboon",
+        "baboon",
+        "last_session.json",
+        ".baboon-last-session.json",
+    )
 }
 
 fn legacy_prefs_path() -> PathBuf {
@@ -23,9 +28,7 @@ fn app_data_path(
     fallback_name: &str,
 ) -> PathBuf {
     if let Some(appdata) = std::env::var_os("APPDATA") {
-        return PathBuf::from(appdata)
-            .join(windows_folder)
-            .join(filename);
+        return PathBuf::from(appdata).join(windows_folder).join(filename);
     }
     if let Some(home) = std::env::var_os("USERPROFILE") {
         return PathBuf::from(home)
@@ -342,8 +345,7 @@ pub(super) fn load_last_session() -> Option<LastSessionState> {
         return None;
     }
     let source = value.get("source")?;
-    let source_kind =
-        LastSessionSourceKind::from_str(source.get("kind")?.as_str()?.trim())?;
+    let source_kind = LastSessionSourceKind::from_str(source.get("kind")?.as_str()?.trim())?;
     let source_path = source
         .get("path")?
         .as_str()

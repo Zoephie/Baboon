@@ -331,13 +331,8 @@ impl AudioState {
                 },
                 ExtractSource::Event { name } => match self.wwise.as_ref() {
                     Some(banks) => banks.resolve(&name).and_then(|pcm| {
-                        write_wav_pcm16(
-                            &item.out_path,
-                            &pcm.samples,
-                            pcm.channels,
-                            pcm.sample_rate,
-                        )
-                        .map_err(|e| e.to_string())
+                        write_wav_pcm16(&item.out_path, &pcm.samples, pcm.channels, pcm.sample_rate)
+                            .map_err(|e| e.to_string())
                     }),
                     None => Err("play the event first to load Wwise banks".to_owned()),
                 },
@@ -388,8 +383,8 @@ impl AudioState {
         use std::sync::mpsc::TryRecvError;
         let banks = match self.wwise_loading.as_ref() {
             Some((_, _, rx)) => match rx.try_recv() {
-                Ok(banks) => banks,                    // finished (Some/None banks)
-                Err(TryRecvError::Empty) => return,    // still loading
+                Ok(banks) => banks,                      // finished (Some/None banks)
+                Err(TryRecvError::Empty) => return,      // still loading
                 Err(TryRecvError::Disconnected) => None, // worker died
             },
             None => return,
@@ -512,8 +507,7 @@ impl AudioState {
                     return;
                 };
                 // Banks already built for this source + language? Resolve now.
-                if self.wwise_root.as_deref() == Some(tags_root)
-                    && self.wwise_lang == self.language
+                if self.wwise_root.as_deref() == Some(tags_root) && self.wwise_lang == self.language
                 {
                     self.play_event(&event_name, &label);
                 } else {

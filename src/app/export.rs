@@ -666,7 +666,13 @@ mod material_shader_source_tests {
                 r"data\shaders\material_shaders\include\core\lighting.hlsli",
                 1
             ),
-            rel(&["shaders", "material_shaders", "include", "core", "lighting.hlsli"])
+            rel(&[
+                "shaders",
+                "material_shaders",
+                "include",
+                "core",
+                "lighting.hlsli"
+            ])
         );
     }
 

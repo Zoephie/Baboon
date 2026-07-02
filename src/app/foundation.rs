@@ -316,8 +316,15 @@ pub(super) fn draw_fields_with_docs(
         // the element dropdown; `None` falls back to the numeric editor.
         let root = edit.root;
         let block_index = block_index_target_options(tag_struct, &field, names, root, path_prefix);
-        let semantic_short_index =
-            semantic_short_index_target_options(ui, edit, tag_struct, &field, names, root, path_prefix);
+        let semantic_short_index = semantic_short_index_target_options(
+            ui,
+            edit,
+            tag_struct,
+            &field,
+            names,
+            root,
+            path_prefix,
+        );
         draw_field(
             ui,
             field,
@@ -381,7 +388,13 @@ pub(super) fn draw_field(
             // Note: shipped tags strip explanation fields from their layout, so
             // this rarely fires — explanations are normally injected from the
             // definition docs in `draw_fields_with_docs`.
-            draw_foundation_explanation_row(ui, field.name(), field.explanation(), depth, &field_path);
+            draw_foundation_explanation_row(
+                ui,
+                field.name(),
+                field.explanation(),
+                depth,
+                &field_path,
+            );
             return;
         }
         _ => {}
@@ -519,7 +532,16 @@ pub(super) fn draw_struct_fields_inline(
     path_prefix: &str,
     edit: &mut FieldEditContext<'_>,
 ) {
-    draw_fields_with_docs(ui, &tag_struct, names, depth, expert_mode, path_prefix, edit, None);
+    draw_fields_with_docs(
+        ui,
+        &tag_struct,
+        names,
+        depth,
+        expert_mode,
+        path_prefix,
+        edit,
+        None,
+    );
 }
 
 pub(super) fn draw_foundation_explanation_row(
@@ -556,7 +578,9 @@ pub(super) fn draw_foundation_explanation_row(
         // Full-width header bar (see draw_foundation_group), matching Foundation.
         ui.visuals_mut().collapsing_header_frame = true;
         let response = egui::CollapsingHeader::new(
-            RichText::new(header).color(text_dark()).font(bold_font(12.5)),
+            RichText::new(header)
+                .color(text_dark())
+                .font(bold_font(12.5)),
         )
         .id_salt(("foundation_explanation", id_salt))
         .default_open(true)
@@ -732,7 +756,9 @@ pub(super) fn draw_foundation_group(
         // width when this is set), matching Foundation's full-width header.
         ui.visuals_mut().collapsing_header_frame = true;
         let mut header = egui::CollapsingHeader::new(
-            RichText::new(title).color(text_dark()).font(bold_font(12.5)),
+            RichText::new(title)
+                .color(text_dark())
+                .font(bold_font(12.5)),
         )
         .id_salt(id_salt)
         .show_background(true);
@@ -1281,10 +1307,7 @@ pub(super) fn draw_foundation_array(
         if let Some(elements) = edit.block_clipboard.map(|clip| clip.elements.clone()) {
             edit.block_ops.push(BlockOp {
                 path: path_prefix.to_owned(),
-                kind: BlockOpKind::ReplaceElement {
-                    at: sel,
-                    elements,
-                },
+                kind: BlockOpKind::ReplaceElement { at: sel, elements },
             });
             set_block_selected_index(ui, edit, path_prefix, sel);
         }
@@ -1663,7 +1686,13 @@ pub(super) fn draw_foundation_block_control(
             .show(ui, |ui| {
                 if depth > 0 {
                     egui::ScrollArea::vertical()
-                        .id_salt(("foundation_block_body", view_scope, tag_key, path_salt, depth))
+                        .id_salt((
+                            "foundation_block_body",
+                            view_scope,
+                            tag_key,
+                            path_salt,
+                            depth,
+                        ))
                         .max_height(420.0)
                         .min_scrolled_height(160.0)
                         .auto_shrink([false, false])
@@ -1901,21 +1930,24 @@ pub(super) fn draw_foundation_bar(
         ui.visuals_mut().widgets.inactive.bg_fill = foundation_section_bar();
         ui.visuals_mut().widgets.hovered.bg_fill = Color32::from_rgb(205, 205, 201);
         ui.visuals_mut().widgets.active.bg_fill = Color32::from_rgb(196, 196, 192);
-        let response =
-            egui::CollapsingHeader::new(RichText::new(title).color(text_dark()).font(bold_font(12.5)))
-                .default_open(default_open)
-                .show_background(true)
-                .show(ui, |ui| {
-                    Frame::none()
-                        .fill(foundation_group_bg())
-                        .inner_margin(egui::Margin {
-                            left: 8.0 + depth as f32 * 6.0,
-                            right: 6.0,
-                            top: 5.0,
-                            bottom: 5.0,
-                        })
-                        .show(ui, add_contents);
-                });
+        let response = egui::CollapsingHeader::new(
+            RichText::new(title)
+                .color(text_dark())
+                .font(bold_font(12.5)),
+        )
+        .default_open(default_open)
+        .show_background(true)
+        .show(ui, |ui| {
+            Frame::none()
+                .fill(foundation_group_bg())
+                .inner_margin(egui::Margin {
+                    left: 8.0 + depth as f32 * 6.0,
+                    right: 6.0,
+                    top: 5.0,
+                    bottom: 5.0,
+                })
+                .show(ui, add_contents);
+        });
         if response.fully_open() {
             ui.add_space(2.0);
         }
@@ -2741,149 +2773,150 @@ pub(super) fn draw_foundation_tag_reference_row(
     }
 
     let droppable = edit.editable && !meta.read_only;
-    let row_response = ui.horizontal(|ui| {
-        ui.add_space(indent);
-        foundation_label_cell(ui, &meta.label, meta.help.as_deref());
-        let editable = edit.editable && !meta.read_only;
-        let has_ref = target.is_some();
-        // A non-empty reference whose target file is absent on disk.
-        let missing = target
-            .as_ref()
-            .is_some_and(|(group, rel)| reference_target_missing(edit.tags_root, *group, rel));
-        if editable {
-            let response = foundation_text_edit_cell(
-                ui,
-                buffer,
-                foundation_value_width(buffer, available_value_width),
-                id,
-            );
-            if response.lost_focus() && buffer.trim() != value.trim() {
-                let input = buffer.trim().to_owned();
-                if let Some(required_group) = target.as_ref().map(|(group, _)| *group) {
-                    match parse_tag_reference(&input) {
-                        Ok(parsed) if tag_reference_group_allowed(&parsed, required_group) => {
-                            edit.pending.push(PendingFieldEdit {
-                                path: path.to_owned(),
-                                input,
-                            });
-                        }
-                        Ok(_) => {
-                            if let Some(status) = edit.status.as_deref_mut() {
-                                *status = format!(
-                                    "Reference must be a {} tag",
-                                    tag_group_display_name(required_group)
-                                );
+    let row_response = ui
+        .horizontal(|ui| {
+            ui.add_space(indent);
+            foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+            let editable = edit.editable && !meta.read_only;
+            let has_ref = target.is_some();
+            // A non-empty reference whose target file is absent on disk.
+            let missing = target
+                .as_ref()
+                .is_some_and(|(group, rel)| reference_target_missing(edit.tags_root, *group, rel));
+            if editable {
+                let response = foundation_text_edit_cell(
+                    ui,
+                    buffer,
+                    foundation_value_width(buffer, available_value_width),
+                    id,
+                );
+                if response.lost_focus() && buffer.trim() != value.trim() {
+                    let input = buffer.trim().to_owned();
+                    if let Some(required_group) = target.as_ref().map(|(group, _)| *group) {
+                        match parse_tag_reference(&input) {
+                            Ok(parsed) if tag_reference_group_allowed(&parsed, required_group) => {
+                                edit.pending.push(PendingFieldEdit {
+                                    path: path.to_owned(),
+                                    input,
+                                });
+                            }
+                            Ok(_) => {
+                                if let Some(status) = edit.status.as_deref_mut() {
+                                    *status = format!(
+                                        "Reference must be a {} tag",
+                                        tag_group_display_name(required_group)
+                                    );
+                                }
+                            }
+                            Err(error) => {
+                                if let Some(status) = edit.status.as_deref_mut() {
+                                    *status = format!("Invalid tag reference: {error}");
+                                }
                             }
                         }
-                        Err(error) => {
-                            if let Some(status) = edit.status.as_deref_mut() {
-                                *status = format!("Invalid tag reference: {error}");
-                            }
-                        }
-                    }
-                } else {
-                    edit.pending.push(PendingFieldEdit {
-                        path: path.to_owned(),
-                        input,
-                    });
-                }
-            }
-        } else if !has_ref {
-            foundation_input_cell_colored(
-                ui,
-                "(no reference)",
-                foundation_value_width("(no reference)", available_value_width),
-                subtle_dark(),
-                Some("This reference is empty"),
-            );
-        } else if missing {
-            foundation_input_cell_colored(
-                ui,
-                value,
-                foundation_value_width(value, available_value_width),
-                REFERENCE_MISSING_COLOR,
-                Some("Referenced tag not found on disk"),
-            );
-        } else {
-            foundation_input_cell(
-                ui,
-                value,
-                foundation_value_width(value, available_value_width),
-            );
-        }
-        // Flag a broken reference even while the field is being edited.
-        if missing {
-            ui.label(
-                RichText::new("⚠ missing")
-                    .color(REFERENCE_MISSING_COLOR)
-                    .small(),
-            )
-            .on_hover_text("Referenced tag not found on disk");
-        }
-        let browse_clicked =
-            foundation_header_button_clicked(ui, "...", editable && edit.tags_root.is_some());
-        // Open: load the referenced tag in a new tab (resolved against the
-        // loose-folder tags root). Enabled only when the ref is non-empty.
-        if foundation_header_button_clicked(ui, "Open", target.is_some()) {
-            if let Some((group_tag, rel_path)) = target.clone() {
-                // Alt-click opens the referenced tag in a floating window.
-                let float = ui.input(|i| i.modifiers.alt);
-                *edit.open_request = Some(OpenTagRequest {
-                    group_tag,
-                    rel_path,
-                    float,
-                });
-            }
-        }
-        // Import: only for geometry references (render/collision/physics model,
-        // animation graph). Runs the matching `tool` command in the background.
-        if let (Some(verb), Some((_, rel_path))) = (import_verb, target.as_ref()) {
-            if foundation_header_button_clicked(ui, "Import", edit.tags_root.is_some()) {
-                *edit.tool_import = Some(ToolImportRequest {
-                    verb,
-                    source_dir: model_source_dir(rel_path),
-                });
-            }
-        }
-        if browse_clicked {
-            if let Some(tags_root) = edit.tags_root {
-                let start_ref = target.as_ref().map(|(_, rel_path)| rel_path.as_str());
-                let required_group = target.as_ref().map(|(group, _)| *group);
-                match choose_tag_reference_input(tags_root, start_ref, required_group) {
-                    Ok(Some(input)) => {
-                        *buffer = input.clone();
+                    } else {
                         edit.pending.push(PendingFieldEdit {
                             path: path.to_owned(),
                             input,
                         });
                     }
-                    Ok(None) => {}
-                    Err(error) => {
-                        if let Some(status) = edit.status.as_deref_mut() {
-                            *status = error;
+                }
+            } else if !has_ref {
+                foundation_input_cell_colored(
+                    ui,
+                    "(no reference)",
+                    foundation_value_width("(no reference)", available_value_width),
+                    subtle_dark(),
+                    Some("This reference is empty"),
+                );
+            } else if missing {
+                foundation_input_cell_colored(
+                    ui,
+                    value,
+                    foundation_value_width(value, available_value_width),
+                    REFERENCE_MISSING_COLOR,
+                    Some("Referenced tag not found on disk"),
+                );
+            } else {
+                foundation_input_cell(
+                    ui,
+                    value,
+                    foundation_value_width(value, available_value_width),
+                );
+            }
+            // Flag a broken reference even while the field is being edited.
+            if missing {
+                ui.label(
+                    RichText::new("⚠ missing")
+                        .color(REFERENCE_MISSING_COLOR)
+                        .small(),
+                )
+                .on_hover_text("Referenced tag not found on disk");
+            }
+            let browse_clicked =
+                foundation_header_button_clicked(ui, "...", editable && edit.tags_root.is_some());
+            // Open: load the referenced tag in a new tab (resolved against the
+            // loose-folder tags root). Enabled only when the ref is non-empty.
+            if foundation_header_button_clicked(ui, "Open", target.is_some()) {
+                if let Some((group_tag, rel_path)) = target.clone() {
+                    // Alt-click opens the referenced tag in a floating window.
+                    let float = ui.input(|i| i.modifiers.alt);
+                    *edit.open_request = Some(OpenTagRequest {
+                        group_tag,
+                        rel_path,
+                        float,
+                    });
+                }
+            }
+            // Import: only for geometry references (render/collision/physics model,
+            // animation graph). Runs the matching `tool` command in the background.
+            if let (Some(verb), Some((_, rel_path))) = (import_verb, target.as_ref()) {
+                if foundation_header_button_clicked(ui, "Import", edit.tags_root.is_some()) {
+                    *edit.tool_import = Some(ToolImportRequest {
+                        verb,
+                        source_dir: model_source_dir(rel_path),
+                    });
+                }
+            }
+            if browse_clicked {
+                if let Some(tags_root) = edit.tags_root {
+                    let start_ref = target.as_ref().map(|(_, rel_path)| rel_path.as_str());
+                    let required_group = target.as_ref().map(|(group, _)| *group);
+                    match choose_tag_reference_input(tags_root, start_ref, required_group) {
+                        Ok(Some(input)) => {
+                            *buffer = input.clone();
+                            edit.pending.push(PendingFieldEdit {
+                                path: path.to_owned(),
+                                input,
+                            });
+                        }
+                        Ok(None) => {}
+                        Err(error) => {
+                            if let Some(status) = edit.status.as_deref_mut() {
+                                *status = error;
+                            }
                         }
                     }
                 }
             }
-        }
-        if ui
-            .add_enabled(
-                editable,
-                egui::Button::new(RichText::new("Clear").color(text_dark()))
-                    .min_size(Vec2::new(54.0, 20.0)),
-            )
-            .clicked()
-        {
-            buffer.clear();
-            edit.pending.push(PendingFieldEdit {
-                path: path.to_owned(),
-                input: "NONE".to_owned(),
-            });
-        }
-        ui.label(RichText::new(suffix).color(subtle_dark()).small());
-        draw_field_help(ui, meta);
-    })
-    .response;
+            if ui
+                .add_enabled(
+                    editable,
+                    egui::Button::new(RichText::new("Clear").color(text_dark()))
+                        .min_size(Vec2::new(54.0, 20.0)),
+                )
+                .clicked()
+            {
+                buffer.clear();
+                edit.pending.push(PendingFieldEdit {
+                    path: path.to_owned(),
+                    input: "NONE".to_owned(),
+                });
+            }
+            ui.label(RichText::new(suffix).color(subtle_dark()).small());
+            draw_field_help(ui, meta);
+        })
+        .response;
 
     // Drag-and-drop: drop a tag from the browser onto this row to set the
     // reference. Accept only when the field is editable and the dropped group
@@ -2900,11 +2933,8 @@ pub(super) fn draw_foundation_tag_reference_row(
             } else {
                 REFERENCE_MISSING_COLOR
             };
-            ui.painter().rect_stroke(
-                row_response.rect,
-                3.0,
-                Stroke::new(1.5, color),
-            );
+            ui.painter()
+                .rect_stroke(row_response.rect, 3.0, Stroke::new(1.5, color));
         }
         if let Some(payload) = row_response.dnd_release_payload::<DraggedTagRef>() {
             if accepts(&payload) {
@@ -3637,8 +3667,7 @@ fn elements_to_tsv<'a>(
                 .filter(is_leaf)
                 .filter_map(|field| {
                     field.value().map(|value| {
-                        format_foundation_scalar_value(names, &value)
-                            .replace(['\t', '\n'], " ")
+                        format_foundation_scalar_value(names, &value).replace(['\t', '\n'], " ")
                     })
                 })
                 .collect();
@@ -3928,7 +3957,6 @@ mod tests {
             assert_eq!(semantic_short_index_target_key(field_name), expected);
         }
     }
-
 }
 
 pub(super) fn draw_resource(
@@ -4001,4 +4029,3 @@ pub(super) fn draw_resource(
         },
     );
 }
-

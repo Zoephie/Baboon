@@ -37,9 +37,9 @@ impl Baboon {
                                 matches.iter().map(|m| m.entry.clone()).collect();
                             let annotations: Vec<String> =
                                 matches.iter().map(|m| m.label.clone()).collect();
-                            let note = entries.is_empty().then(|| {
-                                format!("No tag field values contain \"{query}\".")
-                            });
+                            let note = entries
+                                .is_empty()
+                                .then(|| format!("No tag field values contain \"{query}\"."));
                             self.status = format!(
                                 "Field search for \"{query}\": {} match(es)",
                                 entries.len()
@@ -921,11 +921,7 @@ impl Baboon {
         self.function_popup = None;
     }
 
-    pub(super) fn request_close_action(
-        &mut self,
-        action: PendingCloseAction,
-        ctx: &egui::Context,
-    ) {
+    pub(super) fn request_close_action(&mut self, action: PendingCloseAction, ctx: &egui::Context) {
         if self.save_changes_prompt.visible {
             return;
         }
@@ -1026,7 +1022,9 @@ impl Baboon {
         let source = self.source.as_ref()?;
         let (source_kind, source_path) = match &source.source {
             TagSource::SingleFile { path } => (LastSessionSourceKind::SingleFile, path.clone()),
-            TagSource::LooseFolder { root, .. } => (LastSessionSourceKind::LooseFolder, root.clone()),
+            TagSource::LooseFolder { root, .. } => {
+                (LastSessionSourceKind::LooseFolder, root.clone())
+            }
             TagSource::MonolithicCache { root, .. } => {
                 (LastSessionSourceKind::MonolithicCache, root.clone())
             }
@@ -1042,7 +1040,11 @@ impl Baboon {
             };
             tags.push(LastSessionTag {
                 key: entry.key.clone(),
-                label: format!("{} - {}", entry.display_path, group_label(&self.names, entry.group_tag)),
+                label: format!(
+                    "{} - {}",
+                    entry.display_path,
+                    group_label(&self.names, entry.group_tag)
+                ),
                 group_tag: entry.group_tag,
                 path,
             });
@@ -1143,7 +1145,9 @@ impl Baboon {
             source.entries.retain(|existing| existing.key != tag.key);
             source.entries.push(entry.clone());
             if !source.all_entries.is_empty() {
-                source.all_entries.retain(|existing| existing.key != tag.key);
+                source
+                    .all_entries
+                    .retain(|existing| existing.key != tag.key);
                 source.all_entries.push(entry);
                 source
                     .all_entries
@@ -1246,13 +1250,14 @@ impl Baboon {
 
     pub(super) fn trim_open_tabs(&mut self) {
         while self.open_tabs.len() > MAX_OPEN_TABS {
-            let removable = self
-                .open_tabs
-                .iter()
-                .position(|tab| {
-                    Some(tab.as_str()) != self.selected_key.as_deref()
-                        && !self.parsed_tags.get(tab).map(|doc| doc.dirty).unwrap_or(false)
-                });
+            let removable = self.open_tabs.iter().position(|tab| {
+                Some(tab.as_str()) != self.selected_key.as_deref()
+                    && !self
+                        .parsed_tags
+                        .get(tab)
+                        .map(|doc| doc.dirty)
+                        .unwrap_or(false)
+            });
             let Some(removable) = removable else {
                 break;
             };
@@ -1793,7 +1798,9 @@ impl Baboon {
             return Err("Monolithic cache tags are read-only".to_owned());
         };
         let output = path.clone();
-        doc.tag.write_atomic(&output).map_err(|error| error.to_string())?;
+        doc.tag
+            .write_atomic(&output)
+            .map_err(|error| error.to_string())?;
         if let Some(doc) = self.parsed_tags.get_mut(key) {
             doc.dirty = false;
         }
@@ -2611,9 +2618,7 @@ impl Baboon {
         // Map each pasted column index → the full field name to write.
         let header_to_full = map_tsv_header_to_fields(header_line, &columns);
         if header_to_full.iter().all(Option::is_none) {
-            self.set_tsv_paste_status(
-                "No pasted column headers matched this block's fields.",
-            );
+            self.set_tsv_paste_status("No pasted column headers matched this block's fields.");
             return;
         }
 
@@ -2676,7 +2681,10 @@ impl Baboon {
             }) => definitions_root.clone(),
             _ => return None,
         };
-        let game = self.source.as_ref().and_then(|source| source.game.clone())?;
+        let game = self
+            .source
+            .as_ref()
+            .and_then(|source| source.game.clone())?;
         let group = self
             .names
             .name_for(entry.group_tag)
@@ -2761,28 +2769,30 @@ impl Baboon {
         let game = self.source_game().map(str::to_owned);
         let definitions_root = self.source_definitions_root().map(Path::to_owned);
         match restored {
-            Some((bytes, label)) => match group_tag
-                .context("no open tag to restore")
-                .and_then(|group_tag| {
-                    crate::source::read_tag_from_bytes(
-                        &bytes,
-                        game.as_deref(),
-                        definitions_root.as_deref(),
-                        group_tag,
-                    )
-                }) {
-                Ok(tag) => {
-                    if let Some(doc) = self.parsed_tags.get_mut(key) {
-                        doc.tag = tag;
-                        doc.dirty = true;
+            Some((bytes, label)) => {
+                match group_tag
+                    .context("no open tag to restore")
+                    .and_then(|group_tag| {
+                        crate::source::read_tag_from_bytes(
+                            &bytes,
+                            game.as_deref(),
+                            definitions_root.as_deref(),
+                            group_tag,
+                        )
+                    }) {
+                    Ok(tag) => {
+                        if let Some(doc) = self.parsed_tags.get_mut(key) {
+                            doc.tag = tag;
+                            doc.dirty = true;
+                        }
+                        self.invalidate_tag_caches(key);
+                        self.status = format!("{verb}: {label}");
                     }
-                    self.invalidate_tag_caches(key);
-                    self.status = format!("{verb}: {label}");
+                    Err(error) => {
+                        self.status = format!("{verb} failed: {error}");
+                    }
                 }
-                Err(error) => {
-                    self.status = format!("{verb} failed: {error}");
-                }
-            },
+            }
             None => {
                 self.status = format!("Nothing to {}", verb.to_ascii_lowercase());
             }
@@ -3643,11 +3653,8 @@ fn render_last_opened_windows_prompt(
             if !prompt.source_available {
                 ui.add_space(6.0);
                 ui.label(
-                    RichText::new(format!(
-                        "Missing source: {}",
-                        prompt.source_path.display()
-                    ))
-                    .color(Color32::from_rgb(180, 48, 40)),
+                    RichText::new(format!("Missing source: {}", prompt.source_path.display()))
+                        .color(Color32::from_rgb(180, 48, 40)),
                 );
             }
             ui.add_space(8.0);
@@ -4640,11 +4647,13 @@ fn run_tag_rename_job(
 
     // Compute the destination absolute path from the (extension-less) new rel.
     let new_rel_norm = new_rel.replace('\\', "/");
-    if new_rel_norm.split('/').any(|seg| seg.is_empty() || seg == "." || seg == "..") {
+    if new_rel_norm
+        .split('/')
+        .any(|seg| seg.is_empty() || seg == "." || seg == "..")
+    {
         return Err("Destination path is not a valid relative path".to_owned());
     }
-    let new_path =
-        lexical_normalize_path(&root.join(format!("{new_rel_norm}.{extension}")));
+    let new_path = lexical_normalize_path(&root.join(format!("{new_rel_norm}.{extension}")));
     if !new_path.starts_with(&root) {
         return Err("Destination escapes the tags folder".to_owned());
     }
@@ -4756,7 +4765,8 @@ fn run_tag_rename_job(
     // Rebuild browser tree + entry set + key map.
     send_folder_refactor_progress(tx, &label, "Refreshing browser", None);
     let tree = crate::source::build_folder_directory_tree(&root).map_err(|e| e.to_string())?;
-    let all_entries = merge_refactored_entries(all_entries_before, &old_entries, &new_entries, true);
+    let all_entries =
+        merge_refactored_entries(all_entries_before, &old_entries, &new_entries, true);
     let mut old_to_new_keys = HashMap::new();
     old_to_new_keys.insert(entry.key.clone(), new_entry.key.clone());
     if let Some(index) = reverse_dependencies.as_mut() {
@@ -4771,11 +4781,13 @@ fn run_tag_rename_job(
         );
     }
 
-    let status = format!(
-        "Renamed tag, updated {references_changed} reference(s) in {tags_changed} tag(s)"
-    );
+    let status =
+        format!("Renamed tag, updated {references_changed} reference(s) in {tags_changed} tag(s)");
     let lines = vec![
-        format!("Renamed: {} -> {}", entry.display_path, new_entry.display_path),
+        format!(
+            "Renamed: {} -> {}",
+            entry.display_path, new_entry.display_path
+        ),
         format!("Updated {references_changed} reference(s) in {tags_changed} tag(s)"),
     ];
     Ok(FolderRefactorFinished {
@@ -5583,7 +5595,10 @@ mod field_search_tests {
             Some("alert")
         );
         // Numbers / padding carry no searchable text.
-        assert_eq!(field_searchable_text(Some(TagFieldData::LongInteger(42))), None);
+        assert_eq!(
+            field_searchable_text(Some(TagFieldData::LongInteger(42))),
+            None
+        );
         assert_eq!(field_searchable_text(None), None);
     }
 

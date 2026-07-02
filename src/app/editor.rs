@@ -441,10 +441,11 @@ fn chunk_offsets_of(raw_el: &TagStruct) -> Vec<usize> {
         let Some(first) = block.element(0) else {
             continue;
         };
-        let Some(offset_field) = first
-            .field_names()
-            .find(|n| clean_field_name(n).to_ascii_lowercase().contains("file offset"))
-        else {
+        let Some(offset_field) = first.field_names().find(|n| {
+            clean_field_name(n)
+                .to_ascii_lowercase()
+                .contains("file offset")
+        }) else {
             continue;
         };
         let mut offsets = Vec::with_capacity(block.len());
@@ -865,7 +866,6 @@ fn sound_format_note(game: Option<&str>) -> &'static str {
     }
 }
 
-
 /// Render the Halo 4 Wwise event player: a play button per named event that
 /// queues a [`super::audio::SoundAction::PlayEvent`] (resolved against the
 /// game's `.pck` banks by the audio layer).
@@ -904,7 +904,9 @@ fn draw_wwise_event_player(
                     }
                     if ui
                         .small_button("\u{2B07}")
-                        .on_hover_text("Extract this event to WAV (play it once first to load the banks)")
+                        .on_hover_text(
+                            "Extract this event to WAV (play it once first to load the banks)",
+                        )
                         .clicked()
                     {
                         if let Some(path) = rfd::FileDialog::new()
@@ -946,7 +948,9 @@ pub(super) fn draw_sound_player(ui: &mut Ui, tag: &TagFile, edit: &mut FieldEdit
         .iter()
         .any(|row| matches!(row.kind, RowKind::InlineH2 { .. }));
     let h2_params = is_h2.then(|| h2_codec_params(tag));
-    let has_inline_ogg = rows.iter().any(|row| matches!(row.kind, RowKind::InlineOgg));
+    let has_inline_ogg = rows
+        .iter()
+        .any(|row| matches!(row.kind, RowKind::InlineOgg));
     // Loose `.sound` file path (for the reimport data\ layout + tool tag path).
     let abs_tag_path = edit
         .tag_key
@@ -974,12 +978,13 @@ pub(super) fn draw_sound_player(ui: &mut Ui, tag: &TagFile, edit: &mut FieldEdit
         // to the user via the game's tool.exe.)
         let raw_ce_id = ui.make_persistent_id(("sound_raw_ce", edit.tag_key));
         let mut raw_ce = ui.data(|d| d.get_temp::<bool>(raw_ce_id)).unwrap_or(false);
-        let extract_base = abs_tag_path
-            .as_deref()
-            .zip(edit.tags_root)
-            .and_then(|(tag_path, root)| {
-                reimport_base_dir_lang(root, tag_path, edit.sound_language)
-            });
+        let extract_base =
+            abs_tag_path
+                .as_deref()
+                .zip(edit.tags_root)
+                .and_then(|(tag_path, root)| {
+                    reimport_base_dir_lang(root, tag_path, edit.sound_language)
+                });
         let format_note = sound_format_note(edit.game);
         ui.horizontal(|ui| {
             let extract_hover = match &extract_base {
@@ -1139,9 +1144,7 @@ fn draw_ref_cell(ui: &mut Ui, refs: &[(u32, String)]) -> Option<OpenTagRequest> 
             }
         }
         if refs.len() > SHOWN {
-            ui.label(
-                RichText::new(format!("+{}", refs.len() - SHOWN)).color(subtle_dark()),
-            );
+            ui.label(RichText::new(format!("+{}", refs.len() - SHOWN)).color(subtle_dark()));
         }
     });
     open
@@ -1311,13 +1314,10 @@ pub(super) fn draw_dialogue_summary(ui: &mut Ui, tag: &TagFile, edit: &mut Field
         // Nested: each `stimuli` element carries its own `sound` reference.
         if let Some(stimuli) = find_block_field(&vocal, "stimul") {
             for stimulus_index in 0..stimuli.len() {
-                if let Some(reference) = stimuli
-                    .element(stimulus_index)
-                    .and_then(|stimulus| {
-                        find_full_field_name(&stimulus, "sound")
-                            .and_then(|full| stimulus.read_tag_ref_with_group(full))
-                    })
-                {
+                if let Some(reference) = stimuli.element(stimulus_index).and_then(|stimulus| {
+                    find_full_field_name(&stimulus, "sound")
+                        .and_then(|full| stimulus.read_tag_ref_with_group(full))
+                }) {
                     sounds.push(reference);
                 }
             }
@@ -1364,7 +1364,12 @@ pub(super) fn draw_dialogue_summary(ui: &mut Ui, tag: &TagFile, edit: &mut Field
                         for row in &rows {
                             ui.label(RichText::new(&row.name).color(text_dark()));
                             let (open, play, extract) = draw_referenced_sound_cell(
-                                ui, &row.sounds, game, tags_root, defs, language,
+                                ui,
+                                &row.sounds,
+                                game,
+                                tags_root,
+                                defs,
+                                language,
                             );
                             if open.is_some() {
                                 to_open = open;
@@ -1481,8 +1486,9 @@ pub(super) fn draw_sound_looping_player(
                         for (label, group, path) in &refs {
                             ui.label(RichText::new(label).color(subtle_dark()));
                             let one = [(*group, path.clone())];
-                            let (open, play, extract) =
-                                draw_referenced_sound_cell(ui, &one, game, tags_root, defs, language);
+                            let (open, play, extract) = draw_referenced_sound_cell(
+                                ui, &one, game, tags_root, defs, language,
+                            );
                             if open.is_some() {
                                 to_open = open;
                             }
@@ -1651,9 +1657,7 @@ pub(super) fn draw_material_effects_summary(
                         }
                     });
                 if truncated {
-                    ui.label(
-                        RichText::new("… more rows not shown").color(subtle_dark()),
-                    );
+                    ui.label(RichText::new("… more rows not shown").color(subtle_dark()));
                 }
             });
     });
@@ -2212,52 +2216,52 @@ pub(super) fn apply_one_block_op(tag: &mut TagFile, op: &BlockOp) -> Result<Stri
         .ok_or_else(|| "block path no longer resolves".to_owned())?;
     if let Some(mut block) = field.as_block_mut() {
         return match &op.kind {
-        BlockOpKind::Add => {
-            let idx = block.add_element();
-            Ok(format!("Added element {idx} to {}", op.path))
-        }
-        BlockOpKind::Insert(i) => {
-            block.insert_element(*i).map_err(|e| format!("{e:?}"))?;
-            Ok(format!("Inserted element at {i} in {}", op.path))
-        }
-        BlockOpKind::Duplicate(i) => {
-            let idx = block.duplicate_element(*i).map_err(|e| format!("{e:?}"))?;
-            Ok(format!("Duplicated element {i} → {idx} in {}", op.path))
-        }
-        BlockOpKind::Delete(i) => {
-            block.delete_element(*i).map_err(|e| format!("{e:?}"))?;
-            Ok(format!("Deleted element {i} from {}", op.path))
-        }
-        BlockOpKind::DeleteAll => {
-            block.clear();
-            Ok(format!("Cleared {}", op.path))
-        }
-        BlockOpKind::Paste { at, elements } => {
-            paste_elements(&mut block, *at, elements)?;
-            Ok(format!(
-                "Pasted {} element(s) into {}",
-                elements.len(),
-                op.path
-            ))
-        }
-        BlockOpKind::ReplaceElement { at, elements } => {
-            block.delete_element(*at).map_err(|e| format!("{e:?}"))?;
-            paste_elements(&mut block, *at, elements)?;
-            Ok(format!(
-                "Replaced element {at} with {} element(s) in {}",
-                elements.len(),
-                op.path
-            ))
-        }
-        BlockOpKind::ReplaceBlock { elements } => {
-            block.clear();
-            paste_elements(&mut block, 0, elements)?;
-            Ok(format!(
-                "Replaced {} with {} element(s)",
-                op.path,
-                elements.len()
-            ))
-        }
+            BlockOpKind::Add => {
+                let idx = block.add_element();
+                Ok(format!("Added element {idx} to {}", op.path))
+            }
+            BlockOpKind::Insert(i) => {
+                block.insert_element(*i).map_err(|e| format!("{e:?}"))?;
+                Ok(format!("Inserted element at {i} in {}", op.path))
+            }
+            BlockOpKind::Duplicate(i) => {
+                let idx = block.duplicate_element(*i).map_err(|e| format!("{e:?}"))?;
+                Ok(format!("Duplicated element {i} → {idx} in {}", op.path))
+            }
+            BlockOpKind::Delete(i) => {
+                block.delete_element(*i).map_err(|e| format!("{e:?}"))?;
+                Ok(format!("Deleted element {i} from {}", op.path))
+            }
+            BlockOpKind::DeleteAll => {
+                block.clear();
+                Ok(format!("Cleared {}", op.path))
+            }
+            BlockOpKind::Paste { at, elements } => {
+                paste_elements(&mut block, *at, elements)?;
+                Ok(format!(
+                    "Pasted {} element(s) into {}",
+                    elements.len(),
+                    op.path
+                ))
+            }
+            BlockOpKind::ReplaceElement { at, elements } => {
+                block.delete_element(*at).map_err(|e| format!("{e:?}"))?;
+                paste_elements(&mut block, *at, elements)?;
+                Ok(format!(
+                    "Replaced element {at} with {} element(s) in {}",
+                    elements.len(),
+                    op.path
+                ))
+            }
+            BlockOpKind::ReplaceBlock { elements } => {
+                block.clear();
+                paste_elements(&mut block, 0, elements)?;
+                Ok(format!(
+                    "Replaced {} with {} element(s)",
+                    op.path,
+                    elements.len()
+                ))
+            }
         };
     }
     // Arrays are fixed-count: insert/delete can't apply, but an element can be
@@ -3305,7 +3309,10 @@ pub(super) fn draw_bitmap_preview(
                     .color(text_dark()),
             );
             if ui
-                .add_enabled(preview.mip_index + 1 < data.mip_count, egui::Button::new("▶"))
+                .add_enabled(
+                    preview.mip_index + 1 < data.mip_count,
+                    egui::Button::new("▶"),
+                )
                 .clicked()
             {
                 preview.mip_index += 1;
@@ -3721,9 +3728,8 @@ mod tests {
         // Overridable so the same check runs against any game's tags + banks.
         let root = std::env::var("SND_TAGS_ROOT")
             .unwrap_or_else(|_| "/Users/camden/Halo/halo3_mcc/tags".to_owned());
-        let rel = std::env::var("SND_TAG").unwrap_or_else(|_| {
-            "sound/visual_fx/ambient_vehicle_destroyed_large.sound".to_owned()
-        });
+        let rel = std::env::var("SND_TAG")
+            .unwrap_or_else(|_| "sound/visual_fx/ambient_vehicle_destroyed_large.sound".to_owned());
         let tags_root = std::path::Path::new(&root);
         let tag_path = tags_root.join(&rel);
         if !tag_path.exists() {
@@ -3781,8 +3787,8 @@ mod tests {
         use blam_tags::audio::WwiseBanks;
         let root = std::env::var("H4_TAGS_ROOT")
             .unwrap_or_else(|_| "/Users/camden/Halo/halo4_mcc/tags".to_owned());
-        let rel =
-            std::env::var("H4_SND_TAG").unwrap_or_else(|_| "sound/ui/m30_a_60_sfx.sound".to_owned());
+        let rel = std::env::var("H4_SND_TAG")
+            .unwrap_or_else(|_| "sound/ui/m30_a_60_sfx.sound".to_owned());
         let tags_root = std::path::Path::new(&root);
         let tag_path = tags_root.join(&rel);
         if !tag_path.exists() {
@@ -3830,7 +3836,11 @@ mod tests {
             for field in st.fields() {
                 let seg = {
                     let n = field.name();
-                    if n.is_empty() { "?".to_owned() } else { n.to_owned() }
+                    if n.is_empty() {
+                        "?".to_owned()
+                    } else {
+                        n.to_owned()
+                    }
                 };
                 let p = format!("{path}/{seg}");
                 if let Some(data) = field.as_data() {
@@ -3868,10 +3878,20 @@ mod tests {
         walk(&tag.root(), "", &mut out, 0);
         eprintln!("=== {rel}: {} non-empty data field(s) ===", out.len());
         for (p, len, head) in &out {
-            let hex: String = head.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ");
+            let hex: String = head
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<Vec<_>>()
+                .join(" ");
             let ascii: String = head
                 .iter()
-                .map(|&b| if (0x20..0x7f).contains(&b) { b as char } else { '.' })
+                .map(|&b| {
+                    if (0x20..0x7f).contains(&b) {
+                        b as char
+                    } else {
+                        '.'
+                    }
+                })
                 .collect();
             eprintln!("  {len:>8}B  {p}\n            {hex}  |{ascii}|");
         }
@@ -3934,7 +3954,10 @@ mod tests {
         let tag = crate::source::read_tag_at_path(tag_path, Some("haloce_mcc"), Some(defs), group)
             .expect("read CE sound tag");
         let bytes = inline_permutation_samples(&tag, 0, 0).expect("inline samples present");
-        assert!(bytes.starts_with(b"OggS"), "CE samples should be an Ogg stream");
+        assert!(
+            bytes.starts_with(b"OggS"),
+            "CE samples should be an Ogg stream"
+        );
         let pcm = decode_ogg_vorbis(&bytes).expect("decode CE ogg");
         eprintln!(
             "CE inline: {} bytes -> {} frames {}ch {}Hz",
@@ -3995,7 +4018,8 @@ mod tests {
         let ogg = std::fs::read(ogg_dir.join(format!("{}.ogg", sanitize_component(&rows[0].name))))
             .expect("ogg written");
         assert!(ogg.starts_with(b"OggS"), "raw passthrough should be an Ogg");
-        let inline = inline_permutation_samples(&tag, rows[0].pr_index, rows[0].perm_index).unwrap();
+        let inline =
+            inline_permutation_samples(&tag, rows[0].pr_index, rows[0].perm_index).unwrap();
         assert_eq!(ogg, inline, "raw passthrough must be verbatim tag bytes");
 
         let _ = std::fs::remove_dir_all(&wav_dir);
@@ -4052,9 +4076,8 @@ mod tests {
     fn bank_extract_writes_wav() {
         let root = std::env::var("SND_TAGS_ROOT")
             .unwrap_or_else(|_| "/Users/camden/Halo/halo3_mcc/tags".to_owned());
-        let rel = std::env::var("SND_TAG").unwrap_or_else(|_| {
-            "sound/visual_fx/ambient_vehicle_destroyed_large.sound".to_owned()
-        });
+        let rel = std::env::var("SND_TAG")
+            .unwrap_or_else(|_| "sound/visual_fx/ambient_vehicle_destroyed_large.sound".to_owned());
         let tags_root = std::path::Path::new(&root);
         let tag_path = tags_root.join(&rel);
         if !tag_path.exists() {
@@ -4119,11 +4142,17 @@ mod tests {
                             .field_names()
                             .filter(|n| {
                                 let c = clean_field_name(n).to_ascii_lowercase();
-                                c.contains("sample") || c.contains("count") || c.contains("chunk")
-                                    || c.contains("first") || c.contains("index")
+                                c.contains("sample")
+                                    || c.contains("count")
+                                    || c.contains("chunk")
+                                    || c.contains("first")
+                                    || c.contains("index")
                             })
                             .map(|n| {
-                                let v = perm.read_int_any(n).map(|x| x.to_string()).unwrap_or_default();
+                                let v = perm
+                                    .read_int_any(n)
+                                    .map(|x| x.to_string())
+                                    .unwrap_or_default();
                                 format!("{}={v}", clean_field_name(n))
                             })
                             .collect();
@@ -4136,42 +4165,73 @@ mod tests {
         // Walk extra-info → language perm info → raw info block, dumping data sizes
         // AND any nested blocks (chunked samples live in a nested block).
         for field in root.fields() {
-            let Some(block) = field.as_block() else { continue };
+            let Some(block) = field.as_block() else {
+                continue;
+            };
             for i in 0..block.len() {
                 let el = block.element(i).unwrap();
-                let Some(lpi) = find_block_field(&el, "language permutation info") else { continue };
-                eprintln!("extra-info[{i}] '{}': lpi={}", clean_field_name(field.name()), lpi.len());
+                let Some(lpi) = find_block_field(&el, "language permutation info") else {
+                    continue;
+                };
+                eprintln!(
+                    "extra-info[{i}] '{}': lpi={}",
+                    clean_field_name(field.name()),
+                    lpi.len()
+                );
                 for j in 0..lpi.len() {
                     let lel = lpi.element(j).unwrap();
-                    let Some(raw) = find_block_field(&lel, "raw info block") else { continue };
+                    let Some(raw) = find_block_field(&lel, "raw info block") else {
+                        continue;
+                    };
                     eprintln!("  lpi[{j}]: raw info block={}", raw.len());
                     for k in 0..raw.len() {
                         let rel = raw.element(k).unwrap();
                         let mut parts = Vec::new();
                         for f in rel.fields() {
                             if let Some(d) = f.as_data() {
-                                parts.push(format!("data'{}'={}B", clean_field_name(f.name()), d.len()));
+                                parts.push(format!(
+                                    "data'{}'={}B",
+                                    clean_field_name(f.name()),
+                                    d.len()
+                                ));
                             } else if let Some(b) = f.as_block() {
-                                parts.push(format!("block'{}'x{}", clean_field_name(f.name()), b.len()));
+                                parts.push(format!(
+                                    "block'{}'x{}",
+                                    clean_field_name(f.name()),
+                                    b.len()
+                                ));
                                 // dump nested block element int values (chunk offsets/sizes)
                                 for m in 0..b.len().min(20) {
                                     if let Some(be) = b.element(m) {
                                         let ints: Vec<String> = be
                                             .field_names()
-                                            .filter_map(|n| be.read_int_any(n).map(|v| v.to_string()))
+                                            .filter_map(|n| {
+                                                be.read_int_any(n).map(|v| v.to_string())
+                                            })
                                             .collect();
                                         let datas: Vec<String> = be
                                             .fields()
-                                            .filter_map(|bf| bf.as_data().map(|d| format!("data={}B", d.len())))
+                                            .filter_map(|bf| {
+                                                bf.as_data().map(|d| format!("data={}B", d.len()))
+                                            })
                                             .collect();
                                         if !ints.is_empty() || !datas.is_empty() {
-                                            parts.push(format!("[{m}:{} {}]", ints.join(","), datas.join(",")));
+                                            parts.push(format!(
+                                                "[{m}:{} {}]",
+                                                ints.join(","),
+                                                datas.join(",")
+                                            ));
                                         }
                                     }
                                 }
                             } else {
                                 let c = clean_field_name(f.name()).to_ascii_lowercase();
-                                if c.contains("sample") || c.contains("count") || c.contains("size") || c.contains("compression") || c.contains("index") {
+                                if c.contains("sample")
+                                    || c.contains("count")
+                                    || c.contains("size")
+                                    || c.contains("compression")
+                                    || c.contains("index")
+                                {
                                     if let Some(v) = rel.read_int_any(f.name()) {
                                         parts.push(format!("{}={v}", clean_field_name(f.name())));
                                     }
@@ -4196,7 +4256,10 @@ mod tests {
                 match super::audio::decode_inline_chunked(codec, &b, &offs, channels, rate) {
                     Ok(pcm) => eprintln!(
                         "blob{idx}: {}B, {} chunks -> {:.2}s (was {:.2}s single-chunk)",
-                        b.len(), offs.len().max(1), pcm.duration_secs(), old
+                        b.len(),
+                        offs.len().max(1),
+                        pcm.duration_secs(),
+                        old
                     ),
                     Err(e) => eprintln!("blob{idx}: {}B decode err: {e}", b.len()),
                 }
@@ -4213,7 +4276,14 @@ mod tests {
                     match super::audio::decode_inline(codec, &b[w[0]..w[1]], channels, rate) {
                         Ok(p) => {
                             sum += p.duration_secs();
-                            eprintln!("  chunk [{}..{}] {}B -> {} frames = {:.2}s", w[0], w[1], w[1]-w[0], p.frame_count(), p.duration_secs());
+                            eprintln!(
+                                "  chunk [{}..{}] {}B -> {} frames = {:.2}s",
+                                w[0],
+                                w[1],
+                                w[1] - w[0],
+                                p.frame_count(),
+                                p.duration_secs()
+                            );
                         }
                         Err(e) => eprintln!("  chunk [{}..{}] err: {e}", w[0], w[1]),
                     }
@@ -4263,7 +4333,10 @@ mod tests {
                 offs.len()
             );
         }
-        assert!(checked_multichunk, "expected at least one multi-chunk blob to test");
+        assert!(
+            checked_multichunk,
+            "expected at least one multi-chunk blob to test"
+        );
     }
 
     /// Per-language bank plumbing (skip-if-absent): the FMOD languages are
@@ -4325,8 +4398,8 @@ mod tests {
     #[test]
     #[ignore]
     fn h2_inline_extracts_and_decodes() {
-        use blam_tags::audio::{decode_opus, decode_xbox_adpcm};
         use super::audio::InlineCodec;
+        use blam_tags::audio::{decode_opus, decode_xbox_adpcm};
         let defs = std::path::Path::new("/Users/camden/Source/blam-tags/definitions");
         let rel =
             std::env::var("SND_TAG").unwrap_or_else(|_| "sound/ui/pickup_health.sound".to_owned());
@@ -4344,9 +4417,10 @@ mod tests {
         let (codec, channels, sample_rate) = h2_codec_params(&tag);
         let (codec_name, pcm) = match codec {
             InlineCodec::Opus => ("opus", decode_opus(&bytes, channels)),
-            InlineCodec::XboxAdpcm => {
-                ("xbox-adpcm", decode_xbox_adpcm(&bytes, channels, sample_rate))
-            }
+            InlineCodec::XboxAdpcm => (
+                "xbox-adpcm",
+                decode_xbox_adpcm(&bytes, channels, sample_rate),
+            ),
             InlineCodec::Pcm { big_endian } => (
                 "pcm",
                 blam_tags::audio::decode_pcm(&bytes, channels, sample_rate, big_endian),
@@ -4544,8 +4618,14 @@ mod tests {
         let tag = TagFile::new("definitions/haloreach_mcc/sound_classes.json").unwrap();
         let bytes = tag.write_to_bytes().unwrap();
         let contains = |needle: &[u8]| bytes.windows(needle.len()).any(|w| w == needle);
-        assert!(!contains(b"attenuating"), "must not embed explanation/help text");
-        assert!(!contains(b"world units"), "must not embed `:units` annotations");
+        assert!(
+            !contains(b"attenuating"),
+            "must not embed explanation/help text"
+        );
+        assert!(
+            !contains(b"world units"),
+            "must not embed `:units` annotations"
+        );
         // And it must still round-trip cleanly.
         TagFile::read_from_bytes(&bytes).expect("stripped tag must parse");
     }
@@ -4764,12 +4844,6 @@ mod tests {
         );
     }
 }
-
-
-
-
-
-
 
 #[cfg(test)]
 mod tag_diff_tests {

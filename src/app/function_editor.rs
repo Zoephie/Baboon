@@ -140,9 +140,9 @@ pub(super) fn seeded_name_combo(ui: &mut Ui, id: &str, value: &mut String, edita
         ui,
         egui::ComboBox::from_id_salt(id)
             .selected_text(if value.is_empty() {
-            "none".to_owned()
-        } else {
-            value.clone()
+                "none".to_owned()
+            } else {
+                value.clone()
             })
             .width(120.0),
         |ui| {
@@ -421,7 +421,8 @@ pub(super) fn draw_function_editor_contents(
                     );
                     let (rect, resp) =
                         ui.allocate_exact_size(egui::Vec2::new(22.0, 18.0), egui::Sense::hover());
-                    ui.painter().rect_filled(rect, 2.0, Color32::from_rgb(r, g, b));
+                    ui.painter()
+                        .rect_filled(rect, 2.0, Color32::from_rgb(r, g, b));
                     ui.painter()
                         .rect_stroke(rect, 2.0, egui::Stroke::new(1.0, grid_line()));
                     resp.on_hover_text(format!("input {x:.0}: R{r} G{g} B{b}"));
@@ -1103,7 +1104,8 @@ fn h2_output_type_combo(ui: &mut Ui, value: &mut u8, editable: bool) -> bool {
             .iter()
             .position(|(_, name)| *name == label)
             .unwrap_or(0);
-        if let Some(next) = combo_scroll_next_index(current_index, H2_OUTPUT_TYPE_OPTIONS.len(), delta)
+        if let Some(next) =
+            combo_scroll_next_index(current_index, H2_OUTPUT_TYPE_OPTIONS.len(), delta)
         {
             let option_value = H2_OUTPUT_TYPE_OPTIONS[next].0;
             *value = option_value;
@@ -1300,7 +1302,11 @@ fn draw_h2_legacy_color_stop_editors(
                 }
             });
             if index > 0 {
-                ui.add_space(if h2.color_stop_count() <= 2 { 90.0 } else { 18.0 });
+                ui.add_space(if h2.color_stop_count() <= 2 {
+                    90.0
+                } else {
+                    18.0
+                });
             }
         }
     });
@@ -1727,7 +1733,8 @@ mod tests {
         raw[8..12].copy_from_slice(&[0x20, 0x21, 0x22, 0x23]);
         raw[12..16].copy_from_slice(&[0x30, 0x31, 0x32, 0x33]);
         raw[16..20].copy_from_slice(&[0x40, 0x41, 0x42, 0x43]);
-        let mut view = H2LegacyFunctionView::parse(raw.clone()).expect("color function should parse");
+        let mut view =
+            H2LegacyFunctionView::parse(raw.clone()).expect("color function should parse");
 
         assert_eq!(view.color_stop_count(), 4);
         assert_eq!(view.color_stop(3), Color32::from_rgb(0x42, 0x41, 0x40));
@@ -1779,7 +1786,8 @@ mod tests {
         raw[0] = 7;
         raw[1] = 0x40;
         raw[4..8].copy_from_slice(&[0x00, 0x00, 0xC6, 0x00]);
-        let mut view = H2LegacyFunctionView::parse(raw.clone()).expect("color function should parse");
+        let mut view =
+            H2LegacyFunctionView::parse(raw.clone()).expect("color function should parse");
 
         assert_eq!(view.color_stop_count(), 3);
         assert_eq!(view.color_stop(0), Color32::from_rgb(0xC6, 0x00, 0x00));
@@ -1810,7 +1818,10 @@ mod tests {
         assert_eq!(view.color_stop(0), Color32::from_rgb(0xC6, 0x00, 0x00));
         assert_eq!(view.color_stop(1), Color32::BLACK);
         assert_eq!(view.color_stop(2), Color32::from_rgb(0xC6, 0x00, 0x00));
-        assert_eq!(&view.to_bytes()[4..16], &[0x00, 0x00, 0xC6, 0x00, 0, 0, 0, 0, 0x00, 0x00, 0xC6, 0x00]);
+        assert_eq!(
+            &view.to_bytes()[4..16],
+            &[0x00, 0x00, 0xC6, 0x00, 0, 0, 0, 0, 0x00, 0x00, 0xC6, 0x00]
+        );
 
         view.set_output_type(0x80);
         assert_eq!(view.color_stop_count(), 4);

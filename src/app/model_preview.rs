@@ -67,8 +67,8 @@ pub(super) fn draw_model_preview_panel(
             // spinner, kick the (blocking) parse, and repaint so the decoded
             // model appears next frame instead of a blank panel. (A future
             // change can move the parse to a worker thread — see plan 1.9.)
-            let needs_load = state.loaded_key.as_deref() != Some(entry.key.as_str())
-                || state.data.is_none();
+            let needs_load =
+                state.loaded_key.as_deref() != Some(entry.key.as_str()) || state.data.is_none();
             if needs_load {
                 ui.horizontal(|ui| {
                     ui.spinner();
@@ -480,7 +480,12 @@ struct RawVariant {
 
 /// Resolve a region's effective permutation for variant `vi`, following the
 /// per-region `parent variant` chain when the variant doesn't set it directly.
-fn resolve_variant_region(raw: &[RawVariant], vi: usize, region: &str, depth: usize) -> Option<String> {
+fn resolve_variant_region(
+    raw: &[RawVariant],
+    vi: usize,
+    region: &str,
+    depth: usize,
+) -> Option<String> {
     if depth > raw.len() {
         return None; // cycle guard
     }
