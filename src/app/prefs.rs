@@ -69,6 +69,10 @@ pub(super) fn load_gui_prefs() -> GuiPrefs {
             .get("double_click_to_open_tags")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        auto_restore_last_session: value
+            .get("auto_restore_last_session")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         show_block_sizes: value
             .get("show_block_sizes")
             .and_then(Value::as_bool)
@@ -280,6 +284,7 @@ pub(super) fn save_gui_prefs(
         },
         "show_browser_prefixes": prefs.show_browser_prefixes,
         "double_click_to_open_tags": prefs.double_click_to_open_tags,
+        "auto_restore_last_session": prefs.auto_restore_last_session,
         "show_block_sizes": prefs.show_block_sizes,
         "scroll_to_cycle_dropdowns": prefs.scroll_to_cycle_dropdowns,
         "expert_mode": prefs.expert_mode,

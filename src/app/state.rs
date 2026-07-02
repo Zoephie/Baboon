@@ -285,6 +285,7 @@ pub(super) struct GuiPrefs {
     pub(super) browser_sort: BrowserSort,
     pub(super) show_browser_prefixes: bool,
     pub(super) double_click_to_open_tags: bool,
+    pub(super) auto_restore_last_session: bool,
     pub(super) show_block_sizes: bool,
     pub(super) scroll_to_cycle_dropdowns: bool,
     pub(super) expert_mode: bool,
@@ -458,6 +459,14 @@ impl LastOpenedWindowsPrompt {
             source_available,
             entries,
         })
+    }
+
+    pub(super) fn checked_tags(&self) -> Vec<LastSessionTag> {
+        self.entries
+            .iter()
+            .filter(|entry| entry.available && entry.checked)
+            .map(|entry| entry.tag.clone())
+            .collect()
     }
 }
 
@@ -884,6 +893,7 @@ impl Default for GuiPrefs {
             browser_sort: BrowserSort::Natural,
             show_browser_prefixes: false,
             double_click_to_open_tags: false,
+            auto_restore_last_session: false,
             show_block_sizes: false,
             scroll_to_cycle_dropdowns: true,
             expert_mode: false,

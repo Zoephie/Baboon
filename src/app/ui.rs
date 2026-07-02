@@ -1056,6 +1056,14 @@ impl Baboon {
             .open(&mut open)
             .default_width(560.0)
             .show(ctx, |ui| {
+                ui.label(RichText::new("Startup").color(text_dark()).strong());
+                ui.add_space(4.0);
+                ui.checkbox(
+                    &mut self.auto_restore_last_session,
+                    "Automatically reopen last session on startup",
+                );
+                ui.add_space(10.0);
+
                 ui.label(RichText::new("Browser").color(text_dark()).strong());
                 ui.add_space(4.0);
                 ui.checkbox(

@@ -2809,6 +2809,7 @@ impl Baboon {
             browser_sort: self.browser_sort,
             show_browser_prefixes: self.show_browser_prefixes,
             double_click_to_open_tags: self.double_click_to_open_tags,
+            auto_restore_last_session: self.auto_restore_last_session,
             show_block_sizes: self.show_block_sizes,
             scroll_to_cycle_dropdowns: self.scroll_to_cycle_dropdowns,
             expert_mode: self.expert_mode,
@@ -3212,6 +3213,10 @@ impl Baboon {
         let action = render_last_opened_windows_prompt(ctx, self.last_opened_windows.as_mut());
         match action {
             LastOpenedWindowsAction::None => {}
+            LastOpenedWindowsAction::OpenSettings => {
+                self.last_opened_windows = None;
+                self.settings_open = true;
+            }
             LastOpenedWindowsAction::Cancel => {
                 self.last_opened_windows = None;
             }
@@ -3602,6 +3607,7 @@ fn render_save_changes_prompt(
 
 enum LastOpenedWindowsAction {
     None,
+    OpenSettings,
     Restore {
         source_kind: LastSessionSourceKind,
         source_path: PathBuf,
@@ -3660,6 +3666,17 @@ fn render_last_opened_windows_prompt(
                     });
                 }
             });
+            ui.add_space(6.0);
+            ui.horizontal_wrapped(|ui| {
+                ui.label(
+                    RichText::new("Options for this window available in")
+                        .color(subtle_dark())
+                        .small(),
+                );
+                if ui.link("File > Settings").clicked() {
+                    action = LastOpenedWindowsAction::OpenSettings;
+                }
+            });
             ui.add_space(10.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
@@ -3672,12 +3689,7 @@ fn render_last_opened_windows_prompt(
                     .add(egui::Button::new("OK").min_size(Vec2::new(78.0, 24.0)))
                     .clicked()
                 {
-                    let tags = prompt
-                        .entries
-                        .iter()
-                        .filter(|entry| entry.available && entry.checked)
-                        .map(|entry| entry.tag.clone())
-                        .collect();
+                    let tags = prompt.checked_tags();
                     action = LastOpenedWindowsAction::Restore {
                         source_kind: prompt.source_kind,
                         source_path: prompt.source_path.clone(),

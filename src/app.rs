@@ -121,6 +121,7 @@ pub struct Baboon {
     browser_sort: BrowserSort,
     show_browser_prefixes: bool,
     double_click_to_open_tags: bool,
+    auto_restore_last_session: bool,
     show_block_sizes: bool,
     scroll_to_cycle_dropdowns: bool,
     expert_mode: bool,
@@ -219,9 +220,27 @@ impl Baboon {
         cc.egui_ctx.set_visuals(foundation_visuals());
         let names = TagNameIndex::load_from_definitions(&locate_definitions_root());
         let (tx, rx) = mpsc::channel();
-        let last_opened_windows =
-            load_last_session().and_then(LastOpenedWindowsPrompt::from_session);
-        Self {
+        let last_session = load_last_session().and_then(LastOpenedWindowsPrompt::from_session);
+        let (last_opened_windows, auto_restore_session) =
+            if prefs.auto_restore_last_session {
+                match last_session {
+                    Some(prompt) => {
+                        let tags = prompt.checked_tags();
+                        if tags.is_empty() {
+                            (None, None)
+                        } else {
+                            (
+                                None,
+                                Some((prompt.source_kind, prompt.source_path.clone(), tags)),
+                            )
+                        }
+                    }
+                    None => (None, None),
+                }
+            } else {
+                (last_session, None)
+            };
+        let mut app = Self {
             default_names: names.clone(),
             names,
             tx,
@@ -247,6 +266,7 @@ impl Baboon {
             browser_sort: prefs.browser_sort,
             show_browser_prefixes: prefs.show_browser_prefixes,
             double_click_to_open_tags: prefs.double_click_to_open_tags,
+            auto_restore_last_session: prefs.auto_restore_last_session,
             show_block_sizes: prefs.show_block_sizes,
             scroll_to_cycle_dropdowns: prefs.scroll_to_cycle_dropdowns,
             expert_mode: prefs.expert_mode,
@@ -349,7 +369,11 @@ impl Baboon {
             ),
             game_banner_textures: HashMap::new(),
             block_clipboard: None,
+        };
+        if let Some((source_kind, source_path, tags)) = auto_restore_session {
+            app.begin_last_session_restore(source_kind, source_path, tags, cc.egui_ctx.clone());
         }
+        app
     }
 
     fn game_banner_texture(
