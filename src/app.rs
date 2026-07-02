@@ -4,7 +4,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::rc::Rc;
 
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+    mpsc::{self, Receiver, Sender},
+};
 use std::thread;
 
 use blam_tags::bitmap::decode::decode_to_rgba8;
@@ -334,6 +338,10 @@ impl Baboon {
                 history_cursor: None,
                 refocus_input: false,
                 running: false,
+                running_id: None,
+                next_run_id: 1,
+                running_command: None,
+                process: None,
                 scroll_to_bottom: false,
             },
             terminal_open: false,

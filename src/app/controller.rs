@@ -9,8 +9,14 @@ impl Baboon {
                     self.terminal.lines.push(line);
                     self.terminal.scroll_to_bottom = true;
                 }
-                WorkerMessage::TerminalDone => {
+                WorkerMessage::TerminalDone { run_id } => {
+                    if self.terminal.running_id != Some(run_id) {
+                        continue;
+                    }
                     self.terminal.running = false;
+                    self.terminal.running_id = None;
+                    self.terminal.running_command = None;
+                    self.terminal.process = None;
                     self.terminal.scroll_to_bottom = true;
                     self.terminal.refocus_input = true;
                 }
@@ -167,6 +173,9 @@ impl Baboon {
                 }
                 WorkerMessage::BitmapReimportFinished { key, result } => {
                     self.terminal.running = false;
+                    self.terminal.running_id = None;
+                    self.terminal.running_command = None;
+                    self.terminal.process = None;
                     self.terminal.scroll_to_bottom = true;
                     self.terminal.refocus_input = true;
                     match result {
@@ -804,7 +813,17 @@ impl Baboon {
         self.terminal.scroll_to_bottom = true;
         self.terminal.refocus_input = true;
         self.terminal.running = true;
+        let run_id = self.terminal.next_run_id;
+        self.terminal.next_run_id = self.terminal.next_run_id.wrapping_add(1).max(1);
+        self.terminal.running_id = Some(run_id);
+        self.terminal.running_command = Some(command.clone());
         let tx = self.tx.clone();
+        let child_slot: Arc<Mutex<Option<std::process::Child>>> = Arc::new(Mutex::new(None));
+        let stop_requested = Arc::new(AtomicBool::new(false));
+        self.terminal.process = Some(TerminalProcess {
+            child: Arc::clone(&child_slot),
+            stop_requested: Arc::clone(&stop_requested),
+        });
         thread::spawn(move || {
             #[cfg(target_os = "windows")]
             let mut cmd = {
@@ -817,8 +836,12 @@ impl Baboon {
             };
             #[cfg(not(target_os = "windows"))]
             let mut cmd = {
+                #[cfg(unix)]
+                use std::os::unix::process::CommandExt;
                 let mut c = std::process::Command::new("sh");
                 c.args(["-c", &command]);
+                #[cfg(unix)]
+                c.process_group(0);
                 c
             };
             cmd.current_dir(&work_dir)
@@ -827,12 +850,26 @@ impl Baboon {
             match cmd.spawn() {
                 Err(e) => {
                     let _ = tx.send(WorkerMessage::TerminalLine(format!("[error] {e}")));
-                    let _ = tx.send(WorkerMessage::TerminalDone);
+                    let _ = tx.send(WorkerMessage::TerminalDone { run_id });
                     ctx.request_repaint();
                 }
-                Ok(mut child) => {
+                Ok(child) => {
                     use std::io::BufRead;
-                    if let Some(stdout) = child.stdout.take() {
+                    let stdout = match child_slot.lock() {
+                        Ok(mut slot) => {
+                            *slot = Some(child);
+                            slot.as_mut().and_then(|child| child.stdout.take())
+                        }
+                        Err(_) => {
+                            let _ = tx.send(WorkerMessage::TerminalLine(
+                                "[error] terminal process lock was poisoned".to_owned(),
+                            ));
+                            let _ = tx.send(WorkerMessage::TerminalDone { run_id });
+                            ctx.request_repaint();
+                            return;
+                        }
+                    };
+                    if let Some(stdout) = stdout {
                         let reader = std::io::BufReader::new(stdout);
                         for line in reader.lines() {
                             match line {
@@ -844,15 +881,78 @@ impl Baboon {
                             }
                         }
                     }
-                    let exit = child.wait().ok().and_then(|s| s.code());
-                    if let Some(code) = exit {
+                    let exit = match child_slot.lock() {
+                        Ok(mut slot) => {
+                            if let Some(mut child) = slot.take() {
+                                child.wait().ok()
+                            } else {
+                                None
+                            }
+                        }
+                        Err(_) => {
+                            let _ = tx.send(WorkerMessage::TerminalLine(
+                                "[error] terminal process lock was poisoned".to_owned(),
+                            ));
+                            None
+                        }
+                    };
+                    if let Some(code) = exit.and_then(|status| status.code())
+                        && !stop_requested.load(Ordering::SeqCst)
+                    {
                         let _ = tx.send(WorkerMessage::TerminalLine(format!("[exit {code}]")));
                     }
-                    let _ = tx.send(WorkerMessage::TerminalDone);
+                    let _ = tx.send(WorkerMessage::TerminalDone { run_id });
                     ctx.request_repaint();
                 }
             }
         });
+    }
+
+    pub(super) fn stop_terminal_command(&mut self) {
+        if !self.terminal.running {
+            self.status = "No terminal command is running".to_owned();
+            return;
+        }
+        let Some(process) = self.terminal.process.as_ref() else {
+            self.status = "No tracked terminal process to stop".to_owned();
+            return;
+        };
+
+        process.stop_requested.store(true, Ordering::SeqCst);
+        let command = self
+            .terminal
+            .running_command
+            .clone()
+            .unwrap_or_else(|| "command".to_owned());
+        match stop_terminal_process(process) {
+            Ok(TerminalStopResult::Stopped) => {
+                self.terminal
+                    .lines
+                    .push(format!("[stopped] {command} stopped by user"));
+                self.finish_stopped_terminal_command();
+                self.status = "Terminal command stopped".to_owned();
+            }
+            Ok(TerminalStopResult::AlreadyExited) => {
+                self.finish_stopped_terminal_command();
+                self.status = "Terminal command had already exited".to_owned();
+            }
+            Err(error) => {
+                self.terminal
+                    .lines
+                    .push(format!("[error] could not stop terminal command: {error}"));
+                self.terminal.scroll_to_bottom = true;
+                self.status = format!("Could not stop terminal command: {error}");
+            }
+        }
+    }
+
+    fn finish_stopped_terminal_command(&mut self) {
+        self.terminal.running = false;
+        self.terminal.running_id = None;
+        self.terminal.running_command = None;
+        self.terminal.process = None;
+        self.terminal.scroll_to_bottom = true;
+        self.terminal.refocus_input = true;
     }
 
     pub(super) fn select_entry(&mut self, key: String, ctx: egui::Context) {
@@ -3828,6 +3928,130 @@ fn run_terminal_command_for_reimport(
             .code()
             .map(|code| format!("tool exited with code {code}"))
             .unwrap_or_else(|| "tool exited without a status code".to_owned()))
+    }
+}
+
+enum TerminalStopResult {
+    Stopped,
+    AlreadyExited,
+}
+
+fn stop_terminal_process(process: &TerminalProcess) -> Result<TerminalStopResult, String> {
+    #[cfg(target_os = "windows")]
+    {
+        stop_terminal_process_windows(process)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        stop_terminal_process_unix(process)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn stop_terminal_process_windows(process: &TerminalProcess) -> Result<TerminalStopResult, String> {
+    let pid = {
+        let mut slot = process
+            .child
+            .lock()
+            .map_err(|_| "terminal process lock was poisoned".to_owned())?;
+        let Some(child) = slot.as_mut() else {
+            return Ok(TerminalStopResult::AlreadyExited);
+        };
+        match child
+            .try_wait()
+            .map_err(|error| format!("could not query terminal process: {error}"))?
+        {
+            Some(_) => {
+                *slot = None;
+                return Ok(TerminalStopResult::AlreadyExited);
+            }
+            None => child.id(),
+        }
+    };
+
+    let output = Command::new("taskkill")
+        .args(["/T", "/F", "/PID", &pid.to_string()])
+        .output()
+        .map_err(|error| format!("could not launch taskkill: {error}"))?;
+    if output.status.success() {
+        return Ok(TerminalStopResult::Stopped);
+    }
+
+    if terminal_process_already_exited(process)? {
+        return Ok(TerminalStopResult::AlreadyExited);
+    }
+
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    let detail = if !stderr.is_empty() {
+        stderr
+    } else if !stdout.is_empty() {
+        stdout
+    } else {
+        format!("taskkill exited with {}", output.status)
+    };
+    Err(detail)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn stop_terminal_process_unix(process: &TerminalProcess) -> Result<TerminalStopResult, String> {
+    let mut slot = process
+        .child
+        .lock()
+        .map_err(|_| "terminal process lock was poisoned".to_owned())?;
+    let Some(child) = slot.as_mut() else {
+        return Ok(TerminalStopResult::AlreadyExited);
+    };
+    match child
+        .try_wait()
+        .map_err(|error| format!("could not query terminal process: {error}"))?
+    {
+        Some(_) => {
+            *slot = None;
+            Ok(TerminalStopResult::AlreadyExited)
+        }
+        None => {
+            let pid = i32::try_from(child.id())
+                .map_err(|_| format!("terminal process id {} is out of range", child.id()))?;
+            let process_group = -pid;
+            // The shell was spawned with `process_group(0)`, so its children
+            // inherit the same process group. A negative pid targets the group.
+            let result = unsafe { libc::kill(process_group, libc::SIGKILL) };
+            if result == 0 {
+                return Ok(TerminalStopResult::Stopped);
+            }
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::ESRCH) {
+                if child.try_wait().ok().flatten().is_some() {
+                    *slot = None;
+                }
+                return Ok(TerminalStopResult::AlreadyExited);
+            }
+            Err(format!(
+                "could not kill terminal process group {pid}: {error}"
+            ))
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn terminal_process_already_exited(process: &TerminalProcess) -> Result<bool, String> {
+    let mut slot = process
+        .child
+        .lock()
+        .map_err(|_| "terminal process lock was poisoned".to_owned())?;
+    let Some(child) = slot.as_mut() else {
+        return Ok(true);
+    };
+    match child
+        .try_wait()
+        .map_err(|error| format!("could not query terminal process: {error}"))?
+    {
+        Some(_) => {
+            *slot = None;
+            Ok(true)
+        }
+        None => Ok(false),
     }
 }
 

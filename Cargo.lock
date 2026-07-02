@@ -352,6 +352,7 @@ dependencies = [
  "egui_extras",
  "flate2",
  "image",
+ "libc",
  "rfd",
  "rodio",
  "serde",

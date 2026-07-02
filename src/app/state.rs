@@ -21,7 +21,9 @@ pub(super) enum WorkerMessage {
     // One line of streamed terminal output.
     TerminalLine(String),
     // Terminal process finished.
-    TerminalDone,
+    TerminalDone {
+        run_id: u64,
+    },
     // GitHub latest-release lookup finished.
     UpdateCheckFinished(Result<UpdateCheckResult, String>),
     // Background field-value search finished. Carries the source generation it
@@ -86,7 +88,16 @@ pub(super) struct TerminalState {
     pub(super) history_cursor: Option<usize>,
     pub(super) refocus_input: bool,
     pub(super) running: bool,
+    pub(super) running_id: Option<u64>,
+    pub(super) next_run_id: u64,
+    pub(super) running_command: Option<String>,
+    pub(super) process: Option<TerminalProcess>,
     pub(super) scroll_to_bottom: bool,
+}
+
+pub(super) struct TerminalProcess {
+    pub(super) child: Arc<Mutex<Option<std::process::Child>>>,
+    pub(super) stop_requested: Arc<AtomicBool>,
 }
 
 pub(super) enum BrowserAction {

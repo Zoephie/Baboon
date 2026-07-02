@@ -2550,8 +2550,20 @@ impl eframe::App for Baboon {
                                             self.terminal.lines.clear();
                                         }
                                         if self.terminal.running {
+                                            if self.terminal.process.is_some()
+                                                && ui.small_button("Stop").clicked()
+                                            {
+                                                self.stop_terminal_command();
+                                            }
+                                            let running_label = self
+                                                .terminal
+                                                .running_command
+                                                .as_deref()
+                                                .unwrap_or("running...");
                                             ui.small(
-                                                RichText::new("running…").color(subtle_dark()),
+                                                RichText::new(running_label)
+                                                    .color(subtle_dark())
+                                                    .monospace(),
                                             );
                                         }
                                     },
