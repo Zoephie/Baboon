@@ -2783,6 +2783,7 @@ impl Baboon {
                     let mut function_request = None;
                     let mut block_clip_request = None;
                     let mut tsv_paste_request = None;
+                    let sound_volume = self.audio.volume();
                     let mut edit_context = FieldEditContext {
                         view_scope: "floating",
                         tag_key: &key,
@@ -2821,6 +2822,7 @@ impl Baboon {
                         open_request: &mut self.pending_open,
                         sound_play_request: &mut self.audio.pending,
                         sound_status: self.audio.status.as_deref(),
+                        sound_volume,
                         tool_import: &mut self.pending_tool_import,
                         bitmap_reimport: &mut bitmap_reimport,
                         shader_ops: &mut shader_ops,

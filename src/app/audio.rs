@@ -54,27 +54,52 @@ pub(super) enum SoundAction {
     /// Play a Wwise event by name (Halo 4). The audio lives in
     /// `<game>/sound/pc/*.pck`; the tag only carries the event name.
     PlayEvent { event_name: String, label: String },
+    /// Set the playback volume (linear amplitude, 0.0..=1.0). Applies to every
+    /// live voice immediately and to all subsequent plays.
+    SetVolume(f32),
     /// Stop everything currently playing.
     Stop,
+}
+
+/// Linear playback volume (amplitude multiplier). Wrapped so [`AudioState`] can
+/// keep `#[derive(Default)]` while defaulting to full volume, not silence.
+#[derive(Clone, Copy)]
+pub(super) struct Volume(f32);
+
+impl Default for Volume {
+    fn default() -> Self {
+        Self(1.0)
+    }
 }
 
 /// The rodio output device + its live voices. Field order matters: the sinks
 /// must drop before the stream.
 struct Engine {
     voices: Vec<Sink>,
+    /// Applied to every new voice, so playback honours the current volume.
+    volume: f32,
     handle: OutputStreamHandle,
     _stream: OutputStream,
 }
 
 impl Engine {
-    fn new() -> Option<Self> {
+    fn new(volume: f32) -> Option<Self> {
         match OutputStream::try_default() {
             Ok((stream, handle)) => Some(Self {
                 voices: Vec::new(),
+                volume,
                 handle,
                 _stream: stream,
             }),
             Err(_) => None,
+        }
+    }
+
+    /// Update the volume and apply it to everything currently playing.
+    fn set_volume(&mut self, volume: f32) {
+        self.volume = volume;
+        for voice in &self.voices {
+            voice.set_volume(volume);
         }
     }
 
@@ -91,6 +116,7 @@ impl Engine {
         let Ok(sink) = Sink::try_new(&self.handle) else {
             return;
         };
+        sink.set_volume(self.volume);
         let source = SamplesBuffer::new(channels, pcm.sample_rate, samples);
         sink.append(source.convert_samples::<f32>());
         self.voices.push(sink);
@@ -129,6 +155,9 @@ pub(super) struct AudioState {
     /// An event queued to play as soon as the in-flight load finishes.
     wwise_deferred: Option<(String, String)>,
     event_cache: HashMap<String, Arc<DecodedPcm>>,
+    /// Current playback volume (linear, 0.0..=1.0). Held here so it survives
+    /// before the engine is lazily created and seeds it on first play.
+    volume: Volume,
     /// Set by the sound-player UI; drained by [`AudioState::process`].
     pub(super) pending: Option<SoundAction>,
     /// Last user-facing status line (bank/resolve/playback result).
@@ -218,9 +247,14 @@ impl AudioState {
         self.wwise_loading.is_some()
     }
 
+    /// The current playback volume (linear, 0.0..=1.0), for the UI slider.
+    pub(super) fn volume(&self) -> f32 {
+        self.volume.0
+    }
+
     fn ensure_engine(&mut self) -> Option<&mut Engine> {
         if !self.engine_tried {
-            self.engine = Engine::new();
+            self.engine = Engine::new(self.volume.0);
             self.engine_tried = true;
         }
         self.engine.as_mut()
@@ -237,6 +271,14 @@ impl AudioState {
             return;
         };
         let (key, label) = match action {
+            SoundAction::SetVolume(v) => {
+                let v = v.clamp(0.0, 1.0);
+                self.volume = Volume(v);
+                if let Some(engine) = self.engine.as_mut() {
+                    engine.set_volume(v);
+                }
+                return;
+            }
             SoundAction::Stop => {
                 if let Some(engine) = self.engine.as_mut() {
                     engine.stop_all();

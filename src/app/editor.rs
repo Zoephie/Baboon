@@ -459,6 +459,37 @@ fn h4_event_names(tag: &TagFile) -> Vec<(&'static str, String)> {
     out
 }
 
+/// Shared transport row for every sound-player variant: Stop, a volume slider,
+/// and the current status line. Stop and volume changes queue a
+/// [`super::audio::SoundAction`] the app drains after rendering.
+fn draw_sound_transport(ui: &mut Ui, edit: &mut FieldEditContext<'_>) {
+    ui.horizontal(|ui| {
+        if ui
+            .button(RichText::new("\u{25A0} Stop"))
+            .on_hover_text("Stop playback")
+            .clicked()
+        {
+            *edit.sound_play_request = Some(super::audio::SoundAction::Stop);
+        }
+        let mut volume = edit.sound_volume;
+        ui.spacing_mut().slider_width = 90.0;
+        if ui
+            .add(
+                egui::Slider::new(&mut volume, 0.0..=1.0)
+                    .text(RichText::new("\u{1F50A}").color(subtle_dark()))
+                    .custom_formatter(|v, _| format!("{:.0}%", v * 100.0)),
+            )
+            .on_hover_text("Playback volume")
+            .changed()
+        {
+            *edit.sound_play_request = Some(super::audio::SoundAction::SetVolume(volume));
+        }
+        if let Some(status) = edit.sound_status {
+            ui.label(RichText::new(status).color(subtle_dark()));
+        }
+    });
+}
+
 /// Render the Halo 4 Wwise event player: a play button per named event that
 /// queues a [`super::audio::SoundAction::PlayEvent`] (resolved against the
 /// game's `.pck` banks by the audio layer).
@@ -472,18 +503,7 @@ fn draw_wwise_event_player(
     )
     .default_open(true)
     .show(ui, |ui| {
-        ui.horizontal(|ui| {
-            if ui
-                .button(RichText::new("\u{25A0} Stop"))
-                .on_hover_text("Stop playback")
-                .clicked()
-            {
-                *edit.sound_play_request = Some(super::audio::SoundAction::Stop);
-            }
-            if let Some(status) = edit.sound_status {
-                ui.label(RichText::new(status).color(subtle_dark()));
-            }
-        });
+        draw_sound_transport(ui, edit);
         egui::Grid::new("wwise_events")
             .striped(true)
             .num_columns(3)
@@ -580,18 +600,7 @@ pub(super) fn draw_sound_player(ui: &mut Ui, tag: &TagFile, edit: &mut FieldEdit
     )
     .default_open(true)
     .show(ui, |ui| {
-        ui.horizontal(|ui| {
-            if ui
-                .button(RichText::new("\u{25A0} Stop"))
-                .on_hover_text("Stop playback")
-                .clicked()
-            {
-                *edit.sound_play_request = Some(super::audio::SoundAction::Stop);
-            }
-            if let Some(status) = edit.sound_status {
-                ui.label(RichText::new(status).color(subtle_dark()));
-            }
-        });
+        draw_sound_transport(ui, edit);
         egui::ScrollArea::vertical()
             .max_height(220.0)
             .show(ui, |ui| {

@@ -607,6 +607,8 @@ pub(super) struct FieldEditContext<'a> {
     pub(super) sound_play_request: &'a mut Option<super::audio::SoundAction>,
     /// Last sound-player status line (bank/resolve/playback result), for display.
     pub(super) sound_status: Option<&'a str>,
+    /// Current playback volume (linear, 0.0..=1.0), for the sound-player slider.
+    pub(super) sound_volume: f32,
     /// Set when the user clicks "Import" on a geometry tag-reference row.
     pub(super) tool_import: &'a mut Option<ToolImportRequest>,
     /// Set when the user clicks "Reimport" on a bitmap tag.

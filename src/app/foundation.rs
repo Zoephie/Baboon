@@ -3789,6 +3789,7 @@ mod tests {
             open_request: &mut open_request,
             sound_play_request: &mut sound_play_request,
             sound_status: None,
+            sound_volume: 1.0,
             tool_import: &mut tool_import,
             bitmap_reimport: &mut bitmap_reimport,
             shader_ops: &mut shader_ops,
