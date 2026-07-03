@@ -18,6 +18,7 @@ pub(super) enum DefEntry {
         help: Option<String>,
         unit: Option<String>,
         range: Option<String>,
+        tag_reference_allowed: Vec<u32>,
     },
     /// An explanation block (stripped from shipped tags). `title` is the schema
     /// name (often a section header), `body` the `definition` text.
@@ -124,16 +125,37 @@ fn merge_structs_into(docs: &mut DefDocs, value: &serde_json::Value) {
                 }
             } else if !name.is_empty() {
                 let meta = field_display_meta(name); // help/unit/range from full name
+                let tag_reference_allowed = if ty == "tag_reference" {
+                    parse_tag_reference_allowed_groups(field)
+                } else {
+                    Vec::new()
+                };
                 entries.push(DefEntry::Field {
                     clean_name: clean_for_match(name),
                     help: meta.help,
                     unit: meta.unit,
                     range: meta.range,
+                    tag_reference_allowed,
                 });
             }
         }
         docs.by_guid.entry(guid).or_insert(entries);
     }
+}
+
+fn parse_tag_reference_allowed_groups(field: &serde_json::Value) -> Vec<u32> {
+    field
+        .get("definition")
+        .and_then(|definition| definition.get("allowed"))
+        .and_then(|allowed| allowed.as_array())
+        .map(|allowed| {
+            allowed
+                .iter()
+                .filter_map(|group| group.as_str())
+                .filter_map(parse_group_tag)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Reduce a schema field name to the engine's stripped form so it matches the
@@ -210,6 +232,54 @@ mod tests {
             DefEntry::Field { clean_name, .. } => assert_eq!(clean_name, "material name"),
             _ => panic!("expected field"),
         }
+    }
+
+    #[test]
+    fn parses_tag_reference_allowed_groups() {
+        let json = r#"{
+            "structs": {
+                "s": {
+                    "guid": "4015cede9c496f80bcd3fc8804062596",
+                    "fields": [
+                        {
+                            "type":"tag_reference",
+                            "name":"render model",
+                            "definition":{"flags":0,"allowed":["mode"]}
+                        },
+                        {
+                            "type":"tag_reference",
+                            "name":"object",
+                            "definition":{"flags":0,"allowed":["bipd","vehi"]}
+                        }
+                    ]
+                }
+            }
+        }"#;
+        let docs = parse_def_docs(json);
+        let guid = parse_guid_hex("4015cede9c496f80bcd3fc8804062596").unwrap();
+        let entries = docs.entries_for(&guid);
+        let render_model = parse_group_tag("mode").unwrap();
+        let biped = parse_group_tag("bipd").unwrap();
+        let vehicle = parse_group_tag("vehi").unwrap();
+
+        assert!(entries.iter().any(|entry| matches!(
+            entry,
+            DefEntry::Field {
+                clean_name,
+                tag_reference_allowed,
+                ..
+            } if clean_name == "render model"
+                && tag_reference_allowed.as_slice() == [render_model]
+        )));
+        assert!(entries.iter().any(|entry| matches!(
+            entry,
+            DefEntry::Field {
+                clean_name,
+                tag_reference_allowed,
+                ..
+            } if clean_name == "object"
+                && tag_reference_allowed.as_slice() == [biped, vehicle]
+        )));
     }
 
     #[test]

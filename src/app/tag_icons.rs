@@ -42,6 +42,14 @@ pub(super) fn get_icon_svg(group_tag: &str) -> &'static str {
 
 pub(super) fn draw_tag_icon(ui: &mut Ui, group_tag: u32, size: f32) {
     let group = format_group_tag(group_tag);
+    draw_tag_icon_svg(ui, &group, size);
+}
+
+pub(super) fn draw_default_tag_icon(ui: &mut Ui, size: f32) {
+    draw_tag_icon_svg(ui, "default", size);
+}
+
+fn draw_tag_icon_svg(ui: &mut Ui, group: &str, size: f32) {
     let uri = format!("bytes://baboon_tag_icons/{group}.svg");
     ui.add(
         egui::Image::from_bytes(uri, get_icon_svg(&group).as_bytes())

@@ -1709,6 +1709,7 @@ pub(super) fn draw_object_model_summary(
         unit: None,
         range: None,
         help: Some("Object model tag reference".to_owned()),
+        tag_reference_allowed: Vec::new(),
         read_only: false,
         advanced: false,
     };
@@ -3031,6 +3032,7 @@ pub(super) fn field_display_meta(name: &str) -> FieldDisplayMeta {
         unit: unit.filter(|unit| !unit.is_empty()),
         range,
         help: help.filter(|help| !help.is_empty()),
+        tag_reference_allowed: Vec::new(),
         read_only,
         advanced,
     }

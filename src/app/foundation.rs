@@ -300,13 +300,21 @@ pub(super) fn draw_fields_with_docs(
                         );
                     }
                 }
-                if let DefEntry::Field { help, unit, range, .. } = &entries[match_idx] {
+                if let DefEntry::Field {
+                    help,
+                    unit,
+                    range,
+                    tag_reference_allowed,
+                    ..
+                } = &entries[match_idx]
+                {
                     // The engine strips everything after `:` from the field name,
                     // so unit/range/help are recovered from the definition here.
                     let mut meta = field_display_meta(name);
                     meta.help = help.clone();
                     meta.unit = unit.clone();
                     meta.range = range.clone();
+                    meta.tag_reference_allowed = tag_reference_allowed.clone();
                     meta_override = Some(meta);
                 }
                 cursor = match_idx + 1;
@@ -2760,8 +2768,12 @@ pub(super) fn draw_foundation_tag_reference_row(
 ) {
     let suffix = "tag reference";
     let indent = depth as f32 * 12.0;
+    let icon_group = tag_reference_icon_group(meta, target.as_ref());
+    let icon_label_gap = 3.0;
+    let icon_reserve = 16.0 + icon_label_gap;
     let available_value_width =
-        (ui.available_width() - indent - FOUNDATION_LABEL_WIDTH - 260.0).clamp(220.0, 760.0);
+        (ui.available_width() - indent - icon_reserve - FOUNDATION_LABEL_WIDTH - 260.0)
+            .clamp(220.0, 760.0);
     let buffer_key = format!("{}|{}", edit.tag_key, path);
     let id = edit.widget_id(("tag_ref", &buffer_key));
     let buffer = edit
@@ -2776,7 +2788,19 @@ pub(super) fn draw_foundation_tag_reference_row(
     let row_response = ui
         .horizontal(|ui| {
             ui.add_space(indent);
-            foundation_label_cell(ui, &meta.label, meta.help.as_deref());
+            let previous_spacing = ui.spacing().item_spacing.x;
+            ui.spacing_mut().item_spacing.x = icon_label_gap;
+            match icon_group {
+                Some(group_tag) => draw_tag_icon(ui, group_tag, 16.0),
+                None => draw_default_tag_icon(ui, 16.0),
+            }
+            foundation_label_cell_with_empty_help_gutter(
+                ui,
+                &meta.label,
+                meta.help.as_deref(),
+                false,
+            );
+            ui.spacing_mut().item_spacing.x = previous_spacing;
             let editable = edit.editable && !meta.read_only;
             let has_ref = target.is_some();
             // A non-empty reference whose target file is absent on disk.
@@ -2945,6 +2969,17 @@ pub(super) fn draw_foundation_tag_reference_row(
                 });
             }
         }
+    }
+}
+
+fn tag_reference_icon_group(
+    meta: &FieldDisplayMeta,
+    target: Option<&(u32, String)>,
+) -> Option<u32> {
+    match meta.tag_reference_allowed.as_slice() {
+        [group] => Some(*group),
+        [] => target.map(|(group, _)| *group),
+        _ => target.map(|(group, _)| *group),
     }
 }
 
@@ -3389,13 +3424,26 @@ pub(super) fn draw_foundation_enum_row(
 }
 
 pub(super) fn foundation_label_cell(ui: &mut Ui, text: &str, help: Option<&str>) {
+    foundation_label_cell_with_empty_help_gutter(ui, text, help, true);
+}
+
+fn foundation_label_cell_with_empty_help_gutter(
+    ui: &mut Ui,
+    text: &str,
+    help: Option<&str>,
+    reserve_empty_help_gutter: bool,
+) {
     let width = FOUNDATION_LABEL_WIDTH;
     let height = 24.0;
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     // Reserve a gutter for the "?" documentation cue. Foundation always reserves
     // the space (the cue is Hidden, not Collapsed, when absent) so field names
     // stay aligned whether or not a field has a doc string.
-    let gutter = 11.0;
+    let gutter = if help.is_some() || reserve_empty_help_gutter {
+        11.0
+    } else {
+        2.0
+    };
     if help.is_some() {
         // The cue: a bold blue "?" left of the name (Foundation uses #3DA1CC).
         ui.painter().text(
@@ -3923,6 +3971,41 @@ mod tests {
         assert!(tag_reference_group_allowed(&empty, render_model));
         assert!(tag_reference_group_allowed(&matching, render_model));
         assert!(!tag_reference_group_allowed(&mismatched, render_model));
+    }
+
+    #[test]
+    fn tag_reference_icon_prefers_single_declared_group_then_value() {
+        let render_model = parse_group_tag("mode").unwrap();
+        let collision_model = parse_group_tag("coll").unwrap();
+        let biped = parse_group_tag("bipd").unwrap();
+        let vehicle = parse_group_tag("vehi").unwrap();
+        let target = (collision_model, r"objects\foo\foo".to_owned());
+        let meta = |allowed| FieldDisplayMeta {
+            label: "reference".to_owned(),
+            unit: None,
+            range: None,
+            help: None,
+            tag_reference_allowed: allowed,
+            read_only: false,
+            advanced: false,
+        };
+
+        assert_eq!(
+            tag_reference_icon_group(&meta(vec![render_model]), Some(&target)),
+            Some(render_model)
+        );
+        assert_eq!(
+            tag_reference_icon_group(&meta(Vec::new()), Some(&target)),
+            Some(collision_model)
+        );
+        assert_eq!(
+            tag_reference_icon_group(&meta(vec![biped, vehicle]), Some(&target)),
+            Some(collision_model)
+        );
+        assert_eq!(
+            tag_reference_icon_group(&meta(vec![biped, vehicle]), None),
+            None
+        );
     }
 
     #[test]

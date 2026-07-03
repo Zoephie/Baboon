@@ -893,6 +893,10 @@ pub(super) struct FieldDisplayMeta {
     /// `[0,+inf]`. Parsed out of the unit slot or the bare name.
     pub(super) range: Option<String>,
     pub(super) help: Option<String>,
+    /// Tag groups declared by the JSON definition for tag_reference fields.
+    /// The runtime blam-tags layout keeps only reference flags, so Baboon
+    /// carries this through the docs overlay for display-only affordances.
+    pub(super) tag_reference_allowed: Vec<u32>,
     pub(super) read_only: bool,
     pub(super) advanced: bool,
 }
