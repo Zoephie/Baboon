@@ -45,8 +45,14 @@ pub(super) fn draw_tag_icon(ui: &mut Ui, group_tag: u32, size: f32) {
     draw_tag_icon_svg(ui, &group, size);
 }
 
-pub(super) fn draw_default_tag_icon(ui: &mut Ui, size: f32) {
-    draw_tag_icon_svg(ui, "default", size);
+pub(super) fn paint_tag_icon_at(ui: &Ui, group_tag: Option<u32>, rect: egui::Rect) {
+    let group = group_tag
+        .map(format_group_tag)
+        .unwrap_or_else(|| "default".to_owned());
+    let uri = format!("bytes://baboon_tag_icons/{group}.svg");
+    egui::Image::from_bytes(uri, get_icon_svg(&group).as_bytes())
+        .fit_to_exact_size(rect.size())
+        .paint_at(ui, rect);
 }
 
 fn draw_tag_icon_svg(ui: &mut Ui, group: &str, size: f32) {

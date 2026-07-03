@@ -1724,6 +1724,7 @@ pub(super) fn draw_object_model_summary(
         0,
         &model.field_path,
         edit,
+        shared_tag_reference_value_width(ui, 0),
     );
 }
 

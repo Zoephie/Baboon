@@ -276,6 +276,7 @@ pub(super) fn draw_fields_with_docs(
     let guid = tag_struct.definition().guid();
     let entries: &[DefEntry] = edit.docs.map(|docs| docs.entries_for(&guid)).unwrap_or(&[]);
     let parent_raw = tag_struct.raw();
+    let reference_value_width = shared_tag_reference_value_width(ui, depth);
     let mut cursor = 0usize;
     for field in tag_struct.fields_all() {
         if skip_field == Some(field.name()) {
@@ -345,6 +346,7 @@ pub(super) fn draw_fields_with_docs(
             meta_override,
             block_index,
             semantic_short_index,
+            reference_value_width,
         );
     }
     // Any explanations after the last matched field.
@@ -373,6 +375,7 @@ pub(super) fn draw_field(
     meta_override: Option<FieldDisplayMeta>,
     block_index: Option<(Vec<String>, String)>,
     semantic_short_index: Option<(Vec<String>, String)>,
+    tag_reference_value_width: f32,
 ) {
     let field_path = append_field_path(path_prefix, field.name());
     // `meta_override` carries help/units recovered from the JSON definition
@@ -438,6 +441,7 @@ pub(super) fn draw_field(
                     edit,
                     block_index.as_ref(),
                     semantic_short_index.as_ref(),
+                    tag_reference_value_width,
                 );
             });
         } else {
@@ -453,6 +457,7 @@ pub(super) fn draw_field(
                 edit,
                 block_index.as_ref(),
                 semantic_short_index.as_ref(),
+                tag_reference_value_width,
             );
         }
         return;
@@ -2268,6 +2273,7 @@ pub(super) fn draw_foundation_value_row(
     // non-block-index fields and unresolvable (custom) indices → numeric editor.
     block_index: Option<&(Vec<String>, String)>,
     semantic_short_index: Option<&(Vec<String>, String)>,
+    tag_reference_value_width: f32,
 ) {
     if let (Some((labels, target_path)), Some(index)) = (block_index, block_index_value(value)) {
         draw_foundation_block_index_row(ui, meta, index, labels, target_path, depth, path, edit);
@@ -2309,6 +2315,7 @@ pub(super) fn draw_foundation_value_row(
             depth,
             path,
             edit,
+            tag_reference_value_width,
         );
         return;
     }
@@ -2765,15 +2772,10 @@ pub(super) fn draw_foundation_tag_reference_row(
     depth: usize,
     path: &str,
     edit: &mut FieldEditContext<'_>,
+    value_width: f32,
 ) {
     let suffix = "tag reference";
     let indent = depth as f32 * 12.0;
-    let icon_group = tag_reference_icon_group(meta, target.as_ref());
-    let icon_label_gap = 3.0;
-    let icon_reserve = 16.0 + icon_label_gap;
-    let available_value_width =
-        (ui.available_width() - indent - icon_reserve - FOUNDATION_LABEL_WIDTH - 260.0)
-            .clamp(220.0, 760.0);
     let buffer_key = format!("{}|{}", edit.tag_key, path);
     let id = edit.widget_id(("tag_ref", &buffer_key));
     let buffer = edit
@@ -2788,31 +2790,21 @@ pub(super) fn draw_foundation_tag_reference_row(
     let row_response = ui
         .horizontal(|ui| {
             ui.add_space(indent);
-            let previous_spacing = ui.spacing().item_spacing.x;
-            ui.spacing_mut().item_spacing.x = icon_label_gap;
-            match icon_group {
-                Some(group_tag) => draw_tag_icon(ui, group_tag, 16.0),
-                None => draw_default_tag_icon(ui, 16.0),
-            }
-            foundation_label_cell_with_empty_help_gutter(
-                ui,
-                &meta.label,
-                meta.help.as_deref(),
-                false,
-            );
-            ui.spacing_mut().item_spacing.x = previous_spacing;
+            foundation_label_cell(ui, &meta.label, meta.help.as_deref());
             let editable = edit.editable && !meta.read_only;
             let has_ref = target.is_some();
+            let icon_group = tag_reference_value_icon_group(meta, target.as_ref(), buffer);
             // A non-empty reference whose target file is absent on disk.
             let missing = target
                 .as_ref()
                 .is_some_and(|(group, rel)| reference_target_missing(edit.tags_root, *group, rel));
             if editable {
-                let response = foundation_text_edit_cell(
+                let response = foundation_tag_reference_text_edit_cell(
                     ui,
                     buffer,
-                    foundation_value_width(buffer, available_value_width),
+                    value_width,
                     id,
+                    icon_group,
                 );
                 if response.lost_focus() && buffer.trim() != value.trim() {
                     let input = buffer.trim().to_owned();
@@ -2846,26 +2838,31 @@ pub(super) fn draw_foundation_tag_reference_row(
                     }
                 }
             } else if !has_ref {
-                foundation_input_cell_colored(
+                foundation_tag_reference_input_cell_colored(
                     ui,
                     "(no reference)",
-                    foundation_value_width("(no reference)", available_value_width),
+                    value_width,
                     subtle_dark(),
                     Some("This reference is empty"),
+                    icon_group,
                 );
             } else if missing {
-                foundation_input_cell_colored(
+                foundation_tag_reference_input_cell_colored(
                     ui,
                     value,
-                    foundation_value_width(value, available_value_width),
+                    value_width,
                     REFERENCE_MISSING_COLOR,
                     Some("Referenced tag not found on disk"),
+                    icon_group,
                 );
             } else {
-                foundation_input_cell(
+                foundation_tag_reference_input_cell_colored(
                     ui,
                     value,
-                    foundation_value_width(value, available_value_width),
+                    value_width,
+                    text_dark(),
+                    None,
+                    icon_group,
                 );
             }
             // Flag a broken reference even while the field is being edited.
@@ -2901,6 +2898,8 @@ pub(super) fn draw_foundation_tag_reference_row(
                         source_dir: model_source_dir(rel_path),
                     });
                 }
+            } else {
+                let _ = foundation_header_button_clicked(ui, "Import", false);
             }
             if browse_clicked {
                 if let Some(tags_root) = edit.tags_root {
@@ -2972,14 +2971,25 @@ pub(super) fn draw_foundation_tag_reference_row(
     }
 }
 
-fn tag_reference_icon_group(
+fn tag_reference_value_icon_group(
     meta: &FieldDisplayMeta,
     target: Option<&(u32, String)>,
+    input: &str,
 ) -> Option<u32> {
-    match meta.tag_reference_allowed.as_slice() {
-        [group] => Some(*group),
-        [] => target.map(|(group, _)| *group),
-        _ => target.map(|(group, _)| *group),
+    if let Ok(parsed) = parse_tag_reference(input)
+        && let Some((group, _)) = parsed.group_tag_and_name
+    {
+        return Some(group);
+    }
+    if let Some((group, _)) = target {
+        return Some(*group);
+    }
+    match (
+        input.trim().is_empty() || input.eq_ignore_ascii_case("none"),
+        meta.tag_reference_allowed.as_slice(),
+    ) {
+        (true, [group]) => Some(*group),
+        _ => None,
     }
 }
 
@@ -3424,26 +3434,13 @@ pub(super) fn draw_foundation_enum_row(
 }
 
 pub(super) fn foundation_label_cell(ui: &mut Ui, text: &str, help: Option<&str>) {
-    foundation_label_cell_with_empty_help_gutter(ui, text, help, true);
-}
-
-fn foundation_label_cell_with_empty_help_gutter(
-    ui: &mut Ui,
-    text: &str,
-    help: Option<&str>,
-    reserve_empty_help_gutter: bool,
-) {
     let width = FOUNDATION_LABEL_WIDTH;
     let height = 24.0;
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     // Reserve a gutter for the "?" documentation cue. Foundation always reserves
     // the space (the cue is Hidden, not Collapsed, when absent) so field names
     // stay aligned whether or not a field has a doc string.
-    let gutter = if help.is_some() || reserve_empty_help_gutter {
-        11.0
-    } else {
-        2.0
-    };
+    let gutter = 11.0;
     if help.is_some() {
         // The cue: a bold blue "?" left of the name (Foundation uses #3DA1CC).
         ui.painter().text(
@@ -3504,6 +3501,105 @@ pub(super) fn foundation_input_cell_colored(
     if response.hovered() {
         response.on_hover_text(hover.unwrap_or(text));
     }
+}
+
+fn tag_reference_value_width(available: f32) -> f32 {
+    available.min(520.0).max(300.0)
+}
+
+pub(super) fn shared_tag_reference_value_width(ui: &Ui, depth: usize) -> f32 {
+    let indent = depth as f32 * 12.0;
+    let available =
+        (ui.available_width() - indent - FOUNDATION_LABEL_WIDTH - 260.0).clamp(220.0, 760.0);
+    tag_reference_value_width(available)
+}
+
+fn tag_reference_icon_footprint() -> f32 {
+    3.0 + 16.0 + 3.0
+}
+
+fn tag_reference_text_x(rect: egui::Rect) -> f32 {
+    rect.left() + tag_reference_icon_footprint()
+}
+
+fn paint_tag_reference_value_cell(ui: &Ui, rect: egui::Rect, icon_group: Option<u32>) {
+    ui.painter().rect_filled(rect, 0.0, foundation_input());
+    ui.painter()
+        .rect_stroke(rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
+    paint_tag_reference_icon(ui, rect, icon_group);
+}
+
+fn paint_tag_reference_icon(ui: &Ui, rect: egui::Rect, icon_group: Option<u32>) {
+    let icon_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + 3.0 + 8.0, rect.center().y),
+        Vec2::splat(16.0),
+    );
+    paint_tag_icon_at(ui, icon_group, icon_rect);
+}
+
+fn foundation_tag_reference_input_cell_colored(
+    ui: &mut Ui,
+    text: &str,
+    width: f32,
+    color: Color32,
+    hover: Option<&str>,
+    icon_group: Option<u32>,
+) {
+    let height = 24.0;
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
+    paint_tag_reference_value_cell(ui, rect, icon_group);
+    let text_left = tag_reference_text_x(rect);
+    let text_width = (rect.right() - text_left - 5.0).max(12.0);
+    ui.painter().text(
+        egui::pos2(text_left, rect.center().y),
+        Align2::LEFT_CENTER,
+        truncate_for_cell(text, text_width),
+        FontId::proportional(12.5),
+        color,
+    );
+    if response.hovered() {
+        response.on_hover_text(hover.unwrap_or(text));
+    }
+}
+
+fn foundation_tag_reference_text_edit_cell(
+    ui: &mut Ui,
+    text: &mut String,
+    width: f32,
+    id: egui::Id,
+    icon_group: Option<u32>,
+) -> egui::Response {
+    let size = Vec2::new(width, 24.0);
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let margin = egui::Margin {
+        left: tag_reference_icon_footprint(),
+        right: 4.0,
+        top: 2.0,
+        bottom: 2.0,
+    };
+    let response = ui
+        .scope(|ui| {
+            ui.visuals_mut().widgets.inactive.bg_fill = foundation_input();
+            ui.visuals_mut().widgets.hovered.bg_fill = foundation_input();
+            ui.visuals_mut().widgets.active.bg_fill = foundation_input();
+            ui.visuals_mut().widgets.inactive.fg_stroke = Stroke::new(1.0, text_dark());
+            ui.visuals_mut().widgets.hovered.fg_stroke = Stroke::new(1.0, text_dark());
+            ui.visuals_mut().widgets.active.fg_stroke = Stroke::new(1.0, text_dark());
+            ui.put(
+                rect,
+                egui::TextEdit::singleline(text)
+                    .id(id)
+                    .font(TextStyle::Monospace)
+                    .text_color(text_dark())
+                    .margin(margin)
+                    .desired_width(width)
+                    .clip_text(true),
+            )
+        })
+        .inner;
+    paint_tag_reference_icon(ui, response.rect + margin, icon_group);
+    text_edit_cursor_to_start_on_tab_focus(ui, &response);
+    response
 }
 
 pub(super) fn foundation_text_edit_cell(
@@ -3974,11 +4070,12 @@ mod tests {
     }
 
     #[test]
-    fn tag_reference_icon_prefers_single_declared_group_then_value() {
+    fn tag_reference_value_icon_prefers_typed_or_committed_group() {
         let render_model = parse_group_tag("mode").unwrap();
         let collision_model = parse_group_tag("coll").unwrap();
         let biped = parse_group_tag("bipd").unwrap();
         let vehicle = parse_group_tag("vehi").unwrap();
+        let bitmap = parse_group_tag("bitm").unwrap();
         let target = (collision_model, r"objects\foo\foo".to_owned());
         let meta = |allowed| FieldDisplayMeta {
             label: "reference".to_owned(),
@@ -3991,19 +4088,27 @@ mod tests {
         };
 
         assert_eq!(
-            tag_reference_icon_group(&meta(vec![render_model]), Some(&target)),
+            tag_reference_value_icon_group(
+                &meta(vec![render_model]),
+                Some(&target),
+                r"objects\foo\foo.bitmap"
+            ),
+            Some(bitmap)
+        );
+        assert_eq!(
+            tag_reference_value_icon_group(
+                &meta(vec![render_model]),
+                Some(&target),
+                r"objects\foo\foo"
+            ),
+            Some(collision_model)
+        );
+        assert_eq!(
+            tag_reference_value_icon_group(&meta(vec![render_model]), None, "NONE"),
             Some(render_model)
         );
         assert_eq!(
-            tag_reference_icon_group(&meta(Vec::new()), Some(&target)),
-            Some(collision_model)
-        );
-        assert_eq!(
-            tag_reference_icon_group(&meta(vec![biped, vehicle]), Some(&target)),
-            Some(collision_model)
-        );
-        assert_eq!(
-            tag_reference_icon_group(&meta(vec![biped, vehicle]), None),
+            tag_reference_value_icon_group(&meta(vec![biped, vehicle]), None, "NONE"),
             None
         );
     }
