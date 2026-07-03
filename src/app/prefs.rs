@@ -68,6 +68,10 @@ pub(super) fn load_gui_prefs() -> GuiPrefs {
             .get("show_browser_prefixes")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        folders_before_tags: value
+            .get("folders_before_tags")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
         double_click_to_open_tags: value
             .get("double_click_to_open_tags")
             .and_then(Value::as_bool)
@@ -286,6 +290,7 @@ pub(super) fn save_gui_prefs(
             BrowserSort::Type => "type",
         },
         "show_browser_prefixes": prefs.show_browser_prefixes,
+        "folders_before_tags": prefs.folders_before_tags,
         "double_click_to_open_tags": prefs.double_click_to_open_tags,
         "auto_restore_last_session": prefs.auto_restore_last_session,
         "show_block_sizes": prefs.show_block_sizes,

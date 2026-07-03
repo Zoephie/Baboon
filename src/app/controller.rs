@@ -2918,6 +2918,7 @@ impl Baboon {
             browser_mode: self.browser_mode,
             browser_sort: self.browser_sort,
             show_browser_prefixes: self.show_browser_prefixes,
+            folders_before_tags: self.folders_before_tags,
             double_click_to_open_tags: self.double_click_to_open_tags,
             auto_restore_last_session: self.auto_restore_last_session,
             show_block_sizes: self.show_block_sizes,

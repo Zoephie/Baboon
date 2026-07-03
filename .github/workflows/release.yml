@@ -65,6 +65,7 @@ jobs:
           mkdir -p staging/${{ matrix.artifact }}
           cp target/release/${{ matrix.binary }} staging/${{ matrix.artifact }}/
           cp -r definitions staging/${{ matrix.artifact }}/
+          cp -r docs staging/${{ matrix.artifact }}/
           cp README.md staging/${{ matrix.artifact }}/
 
       - name: Archive (tar.gz)

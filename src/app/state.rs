@@ -227,6 +227,15 @@ pub(super) enum HelpPanelTab {
     MapNames,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum SettingsTab {
+    Startup,
+    Browser,
+    EditingKitAliases,
+    Appearance,
+    Tools,
+}
+
 /// Memoized search results for the tag browser.
 ///
 /// Filtering the full tag set (100k+ entries) and lowercasing each name is far
@@ -295,6 +304,7 @@ pub(super) struct GuiPrefs {
     pub(super) browser_mode: BrowserMode,
     pub(super) browser_sort: BrowserSort,
     pub(super) show_browser_prefixes: bool,
+    pub(super) folders_before_tags: bool,
     pub(super) double_click_to_open_tags: bool,
     pub(super) auto_restore_last_session: bool,
     pub(super) show_block_sizes: bool,
@@ -907,6 +917,7 @@ impl Default for GuiPrefs {
             browser_mode: BrowserMode::Folders,
             browser_sort: BrowserSort::Natural,
             show_browser_prefixes: false,
+            folders_before_tags: false,
             double_click_to_open_tags: false,
             auto_restore_last_session: false,
             show_block_sizes: false,

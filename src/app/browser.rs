@@ -102,6 +102,19 @@ fn ordered_indices<'a>(
     }
 }
 
+fn ordered_child_indices(children: &[TagTreeNode], sort: BrowserSort) -> Vec<usize> {
+    let mut indices: Vec<usize> = (0..children.len()).collect();
+    if !matches!(sort, BrowserSort::Natural) {
+        indices.sort_by(|&a, &b| {
+            children[a]
+                .label
+                .to_ascii_lowercase()
+                .cmp(&children[b].label.to_ascii_lowercase())
+        });
+    }
+    indices
+}
+
 /// Folder-label ancestors of a tag's display path (filename removed).
 pub(super) fn ancestor_labels(display_path: &str) -> Vec<String> {
     let mut segments: Vec<String> = display_path
@@ -124,22 +137,31 @@ pub(super) fn draw_tree(
     groups_mode: bool,
     reveal: Option<Reveal>,
     sort: BrowserSort,
+    folders_before_tags: bool,
 ) -> Option<BrowserAction> {
     let mut clicked = None;
-    clicked = clicked.or_else(|| {
-        draw_entry_list(
-            ui,
-            &tree.entries,
-            entries,
-            selected,
-            filter,
-            show_prefixes,
-            double_click_to_open,
-            reveal.and_then(Reveal::leaf_key),
-            sort,
-        )
-    });
-    for node in &tree.children {
+    if !folders_before_tags {
+        clicked = clicked.or_else(|| {
+            draw_entry_list(
+                ui,
+                &tree.entries,
+                entries,
+                selected,
+                filter,
+                show_prefixes,
+                double_click_to_open,
+                reveal.and_then(Reveal::leaf_key),
+                sort,
+            )
+        });
+    }
+    let child_sort = if groups_mode {
+        BrowserSort::Natural
+    } else {
+        sort
+    };
+    for index in ordered_child_indices(&tree.children, child_sort) {
+        let node = &tree.children[index];
         clicked = clicked.or_else(|| {
             draw_tree_node(
                 ui,
@@ -151,6 +173,22 @@ pub(super) fn draw_tree(
                 double_click_to_open,
                 groups_mode,
                 reveal,
+                sort,
+                folders_before_tags,
+            )
+        });
+    }
+    if folders_before_tags {
+        clicked = clicked.or_else(|| {
+            draw_entry_list(
+                ui,
+                &tree.entries,
+                entries,
+                selected,
+                filter,
+                show_prefixes,
+                double_click_to_open,
+                reveal.and_then(Reveal::leaf_key),
                 sort,
             )
         });
@@ -172,22 +210,26 @@ pub(super) fn draw_tree_lazy(
     status_update: &mut Option<String>,
     reveal: Option<Reveal>,
     sort: BrowserSort,
+    folders_before_tags: bool,
 ) -> Option<BrowserAction> {
     let mut clicked = None;
-    clicked = clicked.or_else(|| {
-        draw_entry_list(
-            ui,
-            &tree.entries,
-            entries,
-            selected,
-            filter,
-            show_prefixes,
-            double_click_to_open,
-            reveal.and_then(Reveal::leaf_key),
-            sort,
-        )
-    });
-    for node in &mut tree.children {
+    if !folders_before_tags {
+        clicked = clicked.or_else(|| {
+            draw_entry_list(
+                ui,
+                &tree.entries,
+                entries,
+                selected,
+                filter,
+                show_prefixes,
+                double_click_to_open,
+                reveal.and_then(Reveal::leaf_key),
+                sort,
+            )
+        });
+    }
+    for index in ordered_child_indices(&tree.children, sort) {
+        let node = &mut tree.children[index];
         clicked = clicked.or_else(|| {
             draw_tree_node_lazy(
                 ui,
@@ -202,6 +244,22 @@ pub(super) fn draw_tree_lazy(
                 double_click_to_open,
                 status_update,
                 reveal,
+                sort,
+                folders_before_tags,
+            )
+        });
+    }
+    if folders_before_tags {
+        clicked = clicked.or_else(|| {
+            draw_entry_list(
+                ui,
+                &tree.entries,
+                entries,
+                selected,
+                filter,
+                show_prefixes,
+                double_click_to_open,
+                reveal.and_then(Reveal::leaf_key),
                 sort,
             )
         });
@@ -224,6 +282,7 @@ pub(super) fn draw_tree_node_lazy(
     status_update: &mut Option<String>,
     reveal: Option<Reveal>,
     sort: BrowserSort,
+    folders_before_tags: bool,
 ) -> Option<BrowserAction> {
     if !filter.is_empty() && !lazy_node_matches(node, entries, filter) {
         return None;
@@ -260,32 +319,35 @@ pub(super) fn draw_tree_node_lazy(
                 }
             }
             let leaf_key = inner_reveal.and_then(Reveal::leaf_key);
-            if clicked.is_none() {
-                clicked = draw_entry_list(
-                    ui,
-                    &node.entries,
-                    entries,
-                    selected,
-                    filter,
-                    show_prefixes,
-                    double_click_to_open,
-                    leaf_key,
-                    sort,
-                );
-            } else {
-                let _ = draw_entry_list(
-                    ui,
-                    &node.entries,
-                    entries,
-                    selected,
-                    filter,
-                    show_prefixes,
-                    double_click_to_open,
-                    leaf_key,
-                    sort,
-                );
+            if !folders_before_tags {
+                if clicked.is_none() {
+                    clicked = draw_entry_list(
+                        ui,
+                        &node.entries,
+                        entries,
+                        selected,
+                        filter,
+                        show_prefixes,
+                        double_click_to_open,
+                        leaf_key,
+                        sort,
+                    );
+                } else {
+                    let _ = draw_entry_list(
+                        ui,
+                        &node.entries,
+                        entries,
+                        selected,
+                        filter,
+                        show_prefixes,
+                        double_click_to_open,
+                        leaf_key,
+                        sort,
+                    );
+                }
             }
-            for child in &mut node.children {
+            for index in ordered_child_indices(&node.children, sort) {
+                let child = &mut node.children[index];
                 if clicked.is_none() {
                     clicked = draw_tree_node_lazy(
                         ui,
@@ -300,6 +362,34 @@ pub(super) fn draw_tree_node_lazy(
                         double_click_to_open,
                         status_update,
                         inner_reveal,
+                        sort,
+                        folders_before_tags,
+                    );
+                }
+            }
+            if folders_before_tags {
+                if clicked.is_none() {
+                    clicked = draw_entry_list(
+                        ui,
+                        &node.entries,
+                        entries,
+                        selected,
+                        filter,
+                        show_prefixes,
+                        double_click_to_open,
+                        leaf_key,
+                        sort,
+                    );
+                } else {
+                    let _ = draw_entry_list(
+                        ui,
+                        &node.entries,
+                        entries,
+                        selected,
+                        filter,
+                        show_prefixes,
+                        double_click_to_open,
+                        leaf_key,
                         sort,
                     );
                 }
@@ -383,6 +473,7 @@ pub(super) fn draw_tree_node(
     groups_mode: bool,
     reveal: Option<Reveal>,
     sort: BrowserSort,
+    folders_before_tags: bool,
 ) -> Option<BrowserAction> {
     if !filter.is_empty() && !node_matches(node, entries, filter) {
         return None;
@@ -403,32 +494,35 @@ pub(super) fn draw_tree_node(
         .open(on_path.then_some(true))
         .show(ui, |ui| {
             let leaf_key = inner_reveal.and_then(Reveal::leaf_key);
-            if clicked.is_none() {
-                clicked = draw_entry_list(
-                    ui,
-                    &node.entries,
-                    entries,
-                    selected,
-                    filter,
-                    show_prefixes,
-                    double_click_to_open,
-                    leaf_key,
-                    sort,
-                );
-            } else {
-                let _ = draw_entry_list(
-                    ui,
-                    &node.entries,
-                    entries,
-                    selected,
-                    filter,
-                    show_prefixes,
-                    double_click_to_open,
-                    leaf_key,
-                    sort,
-                );
+            if !folders_before_tags {
+                if clicked.is_none() {
+                    clicked = draw_entry_list(
+                        ui,
+                        &node.entries,
+                        entries,
+                        selected,
+                        filter,
+                        show_prefixes,
+                        double_click_to_open,
+                        leaf_key,
+                        sort,
+                    );
+                } else {
+                    let _ = draw_entry_list(
+                        ui,
+                        &node.entries,
+                        entries,
+                        selected,
+                        filter,
+                        show_prefixes,
+                        double_click_to_open,
+                        leaf_key,
+                        sort,
+                    );
+                }
             }
-            for child in &node.children {
+            for index in ordered_child_indices(&node.children, sort) {
+                let child = &node.children[index];
                 if clicked.is_none() {
                     clicked = draw_tree_node(
                         ui,
@@ -440,6 +534,34 @@ pub(super) fn draw_tree_node(
                         double_click_to_open,
                         groups_mode,
                         inner_reveal,
+                        sort,
+                        folders_before_tags,
+                    );
+                }
+            }
+            if folders_before_tags {
+                if clicked.is_none() {
+                    clicked = draw_entry_list(
+                        ui,
+                        &node.entries,
+                        entries,
+                        selected,
+                        filter,
+                        show_prefixes,
+                        double_click_to_open,
+                        leaf_key,
+                        sort,
+                    );
+                } else {
+                    let _ = draw_entry_list(
+                        ui,
+                        &node.entries,
+                        entries,
+                        selected,
+                        filter,
+                        show_prefixes,
+                        double_click_to_open,
+                        leaf_key,
                         sort,
                     );
                 }
