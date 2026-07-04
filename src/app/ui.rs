@@ -2232,6 +2232,26 @@ impl eframe::App for Baboon {
                             ui.close_menu();
                             self.begin_load_folder(ctx.clone());
                         }
+                        if ui.button("Load Monolithic blob_index.dat...").clicked() {
+                            ui.close_menu();
+                            self.begin_load_monolithic(ctx.clone());
+                        }
+                        ui.separator();
+                        let has_loaded_folder = self.loaded_tags_root().is_some();
+                        if ui
+                            .add_enabled(has_loaded_folder, egui::Button::new("Open Tags Folder"))
+                            .clicked()
+                        {
+                            ui.close_menu();
+                            self.open_loaded_tags_folder();
+                        }
+                        if ui
+                            .add_enabled(has_loaded_folder, egui::Button::new("Open Data Folder"))
+                            .clicked()
+                        {
+                            ui.close_menu();
+                            self.open_loaded_data_folder();
+                        }
                         ui.menu_button("Recent Folders", |ui| {
                             if self.recent_folders.is_empty() {
                                 ui.add_enabled(false, egui::Button::new("No recent folders"));
@@ -2251,10 +2271,6 @@ impl eframe::App for Baboon {
                                 }
                             }
                         });
-                        if ui.button("Load Monolithic blob_index.dat...").clicked() {
-                            ui.close_menu();
-                            self.begin_load_monolithic(ctx.clone());
-                        }
                         ui.separator();
                         if ui.button("Save Current Tag    Ctrl+S").clicked() {
                             ui.close_menu();

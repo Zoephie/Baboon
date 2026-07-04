@@ -1532,6 +1532,46 @@ impl Baboon {
         }
     }
 
+    pub(super) fn open_loaded_tags_folder(&mut self) {
+        let Some(path) = self.loaded_tags_root() else {
+            self.status = "Open Tags Folder requires a loaded editing-kit tags folder".to_owned();
+            return;
+        };
+        self.open_folder_in_explorer(path, "tags");
+    }
+
+    pub(super) fn open_loaded_data_folder(&mut self) {
+        let Some(path) = self.loaded_data_root() else {
+            self.status = "Open Data Folder requires a loaded editing-kit tags folder".to_owned();
+            return;
+        };
+        self.open_folder_in_explorer(path, "data");
+    }
+
+    fn loaded_data_root(&self) -> Option<PathBuf> {
+        Some(self.editing_kit_root()?.join("data"))
+    }
+
+    fn open_folder_in_explorer(&mut self, path: PathBuf, label: &str) {
+        if !path.is_dir() {
+            self.status = format!("{label} folder not found: {}", path.display());
+            return;
+        }
+
+        #[cfg(windows)]
+        {
+            match Command::new("explorer").arg(&path).spawn() {
+                Ok(_) => self.status = format!("Opened {} folder: {}", label, path.display()),
+                Err(error) => self.status = format!("Could not open File Explorer: {error}"),
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = path;
+            self.status = "Open folder is only available on Windows".to_owned();
+        }
+    }
+
     pub(super) fn begin_export_json(&mut self, key: String, ctx: egui::Context) {
         let Some((source, entry)) = self.export_context(&key) else {
             return;
