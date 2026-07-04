@@ -1790,6 +1790,11 @@ pub(super) fn is_model_group(group_tag: u32, names: &TagNameIndex) -> bool {
     group_tag == u32::from_be_bytes(*b"hlmt")
         || names.name_for(group_tag) == Some("model")
         || group_tag_to_extension(group_tag) == Some("model")
+        // Halo CE has no `.model` (hlmt) wrapper — objects reference a
+        // `.gbxmodel` (mod2) directly, which IS the render geometry, so
+        // treat it as previewable in its own right.
+        || group_tag == u32::from_be_bytes(*b"mod2")
+        || names.name_for(group_tag) == Some("gbxmodel")
 }
 
 pub(super) fn format_reference_path(names: &TagNameIndex, group_tag: u32, path: &str) -> String {

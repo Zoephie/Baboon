@@ -1029,7 +1029,7 @@ pub(super) fn is_hlsl_include_tag(entry: &TagEntry) -> bool {
 pub(super) fn supports_geometry_extraction(group_tag: u32) -> bool {
     matches!(
         group_tag.to_be_bytes().as_slice(),
-        b"hlmt" | b"scnr" | b"sbsp" | b"mode" | b"coll" | b"phmo"
+        b"hlmt" | b"scnr" | b"sbsp" | b"mode" | b"mod2" | b"coll" | b"phmo"
     )
 }
 
@@ -1046,6 +1046,7 @@ pub(super) fn geometry_extract_label(group_tag: u32) -> &'static str {
         b"scnr" => "Extract scenario BSP geometry...",
         b"sbsp" => "Extract BSP geometry...",
         b"mode" => "Extract render_model geometry...",
+        b"mod2" => "Extract gbxmodel geometry...",
         b"coll" => "Extract collision_model geometry...",
         b"phmo" => "Extract physics_model geometry...",
         _ => "Extract geometry...",
@@ -1053,7 +1054,7 @@ pub(super) fn geometry_extract_label(group_tag: u32) -> &'static str {
 }
 
 pub(super) fn supports_animation_extraction(group_tag: u32) -> bool {
-    matches!(group_tag.to_be_bytes().as_slice(), b"jmad" | b"hlmt")
+    matches!(group_tag.to_be_bytes().as_slice(), b"jmad" | b"hlmt" | b"antr")
 }
 
 pub(super) fn node_matches(node: &TagTreeNode, entries: &[TagEntry], filter: &str) -> bool {
