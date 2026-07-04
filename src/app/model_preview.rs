@@ -205,7 +205,7 @@ fn ensure_model_preview_loaded(
     state.loaded_key = Some(entry.key.clone());
     state.data = Some(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            load_model_preview(model_tag, names, source)
+            load_model_preview(model_tag, entry, names, source)
         }))
         .map_err(|_| "Render model preview crashed while parsing this tag.".to_owned())
         .and_then(|result| result)
@@ -222,9 +222,30 @@ fn ensure_model_preview_loaded(
 
 fn load_model_preview(
     model_tag: &TagFile,
+    entry: &TagEntry,
     names: &TagNameIndex,
     source: Option<&TagSource>,
 ) -> Result<ModelPreviewData, String> {
+    // Halo CE `gbxmodel` (mod2) and a bare `render_model` (mode) ARE the
+    // render geometry — there is no `.model` (hlmt) wrapper carrying a
+    // "render model" reference, so preview the tag itself.
+    let group = model_tag.header.group_tag.to_be_bytes();
+    if matches!(&group, b"mode" | b"mod2") {
+        let preview = build_render_preview(model_tag)?;
+        if preview.batches.is_empty() {
+            return Err("This render tag has no previewable draw batches.".to_owned());
+        }
+        let max_preview_edge = preview_edge_limit(preview.bounds_min, preview.bounds_max);
+        let draw_triangles = build_model_source_triangles(&preview, max_preview_edge);
+        return Ok(ModelPreviewData {
+            source_key: entry.key.clone(),
+            render_model_path: entry.display_path.clone(),
+            preview,
+            draw_triangles,
+            variants: Vec::new(),
+        });
+    }
+
     let Some((group_tag, rel_path)) = model_tag.root().read_tag_ref_with_group("render model")
     else {
         return Err("This model tag has no render model reference.".to_owned());
@@ -259,16 +280,7 @@ fn load_model_preview(
     };
     let render_tag =
         read_entry(source.unwrap(), &render_entry).map_err(|error| error.to_string())?;
-    let preview = if render_tag.classic_engine().is_some() {
-        let jms = render_jms_for_game(&render_tag).map_err(|error| error.to_string())?;
-        let region_perms = read_render_region_permutations(&render_tag);
-        preview_from_jms(&jms, &region_perms)
-    } else {
-        let render_model = RenderModel::from_tag(&render_tag).map_err(|error| error.to_string())?;
-        let render_meshes =
-            RenderModel::derive_render_meshes(&render_tag).map_err(|error| error.to_string())?;
-        render_model_to_preview(&render_model, &render_meshes)
-    };
+    let preview = build_render_preview(&render_tag)?;
     if preview.batches.is_empty() {
         return Err("Referenced render_model has no previewable draw batches.".to_owned());
     }
@@ -281,6 +293,23 @@ fn load_model_preview(
         draw_triangles,
         variants: read_model_variants(model_tag),
     })
+}
+
+/// Build preview geometry from a render-geometry tag — a `render_model`
+/// (`mode`), a Halo CE `gbxmodel` (`mod2`), or a Halo 2 `render_model`.
+/// Classic engines go through the JMS path; gen3 uses the render_model
+/// mesh path directly.
+fn build_render_preview(render_tag: &TagFile) -> Result<RenderModelPreview, String> {
+    if render_tag.classic_engine().is_some() {
+        let jms = render_jms_for_game(render_tag).map_err(|error| error.to_string())?;
+        let region_perms = read_render_region_permutations(render_tag);
+        Ok(preview_from_jms(&jms, &region_perms))
+    } else {
+        let render_model = RenderModel::from_tag(render_tag).map_err(|error| error.to_string())?;
+        let render_meshes =
+            RenderModel::derive_render_meshes(render_tag).map_err(|error| error.to_string())?;
+        Ok(render_model_to_preview(&render_model, &render_meshes))
+    }
 }
 
 fn preview_from_jms(
