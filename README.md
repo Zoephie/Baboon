@@ -260,9 +260,10 @@ All extraction runs on background threads and reports progress to the status bar
   - `render_model` (`mode`), `collision_model` (`coll`), `physics_model`
     (`phmo`) — direct JMS extraction.
   - `scenario_structure_bsp` (`sbsp`) — ASS extraction.
-  - `scenario` (`scnr`) — geometry extraction via the shell.
-- **Import info** and **animation extraction** via the companion
-  `blam-tag-shell` binary.
+  - `scenario` (`scnr`) — per-BSP geometry extraction (ASS for Halo 2/3,
+    render + collision JMS for Halo CE).
+- **Import info** and **animation extraction**, all run in-process via the
+  `blam-tags` library.
 
 ### Geometry import & integrated terminal
 
@@ -350,11 +351,9 @@ separately. The `definitions/` git submodule is required; initialise it with
 `git submodule update --init` after cloning. The build script copies that
 submodule folder next to the built executable under `target/<profile>/definitions`.
 
-Geometry/animation/import-info extraction additionally relies on the companion
-`blam-tag-shell` binary. The root workspace builds Baboon and `blam-tag-shell`
-together, placing them side by side in `target/debug/` or `target/release/`.
-Ship `Baboon.exe`, `blam-tag-shell.exe`, and the `definitions/` folder in
-releases.
+Geometry, animation, and import-info extraction all run in-process via the
+`blam-tags` library — Baboon no longer shells out to a companion binary.
+Ship `Baboon.exe` and the `definitions/` folder in releases.
 
 ---
 

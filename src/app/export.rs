@@ -171,7 +171,7 @@ pub(super) fn extract_geometry_for_entry(
 ) -> anyhow::Result<String> {
     match &entry.group_tag.to_be_bytes() {
         b"hlmt" => extract_model_geometry(source, entry, output),
-        b"scnr" => run_shell_extraction(source, entry, "extract-geometry", output),
+        b"scnr" => extract_scenario_geometry(source, entry, output),
         b"sbsp" => {
             let tag = read_entry(source, entry)?;
             let ass = AssFile::from_scenario_structure_bsp(&tag)?;
@@ -902,98 +902,73 @@ pub(super) fn render_model_prefers_ass(tag: &TagFile) -> bool {
     instance_mesh_index >= 0 && placements_len > 0
 }
 
-pub(super) fn run_shell_extraction(
+/// Adapts a [`TagSource`] into a [`blam_tags::extract::TagResolver`] so the
+/// shared extraction orchestration can resolve child tag references
+/// (jmad → render_model, scenario → structure_bsp/stli) through Baboon's
+/// cache- and classic-aware loader.
+struct SourceResolver<'a> {
+    source: &'a TagSource,
+}
+
+impl blam_tags::extract::TagResolver for SourceResolver<'_> {
+    fn resolve(
+        &self,
+        reference: &str,
+        group_ext: &str,
+        group_tag: u32,
+    ) -> Result<TagFile, blam_tags::extract::ExtractError> {
+        load_referenced_tag_from_source(self.source, reference, group_ext, &group_tag.to_be_bytes())
+            .map_err(|error| blam_tags::extract::ExtractError::resolve(error.to_string()))
+    }
+}
+
+/// Extract every animation in `entry` (a jmad, `.model`, object tag, or
+/// Halo CE `model_animations`) to JMA-family files under
+/// `<output>/<stem>/animations/`, in-process via `blam_tags::extract`.
+pub(super) fn extract_animations_for_entry(
     source: &TagSource,
     entry: &TagEntry,
-    command_name: &str,
     output: &Path,
 ) -> anyhow::Result<String> {
-    let shell = shell_binary_path()?;
-    let mut command = Command::new(&shell);
-    if let Some(definitions_parent) = locate_definitions_root().parent() {
-        command.current_dir(definitions_parent);
+    let tag = read_entry(source, entry)?;
+    let resolver = SourceResolver { source };
+    let stem = tag_file_stem(entry);
+    let summary = blam_tags::extract::animation::animations_to_dir(&tag, &resolver, output, &stem)?;
+    let mut message = format!(
+        "Extracted {} animation(s) from {} into {}",
+        summary.written,
+        entry.display_path,
+        output.display(),
+    );
+    if summary.skipped > 0 {
+        message.push_str(&format!(" ({} skipped)", summary.skipped));
     }
-    match source {
-        TagSource::MonolithicCache { root, .. } => {
-            command.arg("--cache").arg(root);
-        }
-        TagSource::LooseFolder {
-            game: Some(game), ..
-        } => {
-            command.arg("--game").arg(game);
-        }
-        _ => {}
-    }
-    command.arg(command_name);
-    command.arg(shell_entry_arg(entry)?);
-    if command_name == "extract-geometry" && entry.group_tag == u32::from_be_bytes(*b"hlmt") {
-        command.arg("all");
-    }
-    let output_arg = if output.is_absolute() {
-        output.to_path_buf()
-    } else {
-        std::env::current_dir()
-            .map(|cwd| cwd.join(output))
-            .unwrap_or_else(|_| output.to_path_buf())
-    };
-    command.arg("--output").arg(output_arg);
-    let output_data = command.output()?;
-    if !output_data.status.success() {
-        let stderr = String::from_utf8_lossy(&output_data.stderr);
-        let stdout = String::from_utf8_lossy(&output_data.stdout);
-        anyhow::bail!(
-            "{} failed: {}{}",
-            command_name,
-            stderr.trim(),
-            if stdout.trim().is_empty() {
-                String::new()
-            } else {
-                format!(" {}", stdout.trim())
-            }
-        );
-    }
-    let stdout = String::from_utf8_lossy(&output_data.stdout);
-    let message = stdout.lines().last().unwrap_or("").trim();
-    if message.is_empty() {
-        Ok(format!(
-            "{} completed into {}",
-            command_name,
-            output.display()
-        ))
-    } else {
-        Ok(format!("{command_name}: {message}"))
-    }
+    Ok(message)
 }
 
-pub(super) fn shell_binary_path() -> anyhow::Result<PathBuf> {
-    let exe = std::env::current_exe()?;
-    let file_name = if cfg!(windows) {
-        "blam-tag-shell.exe"
-    } else {
-        "blam-tag-shell"
-    };
-    if let Some(parent) = exe.parent() {
-        let sibling = parent.join(file_name);
-        if sibling.exists() {
-            return Ok(sibling);
-        }
+/// Extract per-BSP scenario geometry — one ASS (Halo 2 / Halo 3) or render +
+/// collision JMS (Halo CE) per structure BSP — under
+/// `<output>/<stem>/structure/`, in-process via `blam_tags::extract`.
+pub(super) fn extract_scenario_geometry(
+    source: &TagSource,
+    entry: &TagEntry,
+    output: &Path,
+) -> anyhow::Result<String> {
+    let tag = read_entry(source, entry)?;
+    let resolver = SourceResolver { source };
+    let stem = tag_file_stem(entry);
+    let summary =
+        blam_tags::extract::geometry::scenario_geometry_to_dir(&tag, &resolver, output, &stem)?;
+    let mut message = format!(
+        "Extracted {} geometry file(s) from {} into {}",
+        summary.emitted.len(),
+        entry.display_path,
+        output.display(),
+    );
+    if !summary.warnings.is_empty() {
+        message.push_str(&format!(" ({} warning(s))", summary.warnings.len()));
     }
-    let fallback = PathBuf::from("target").join("debug").join(file_name);
-    if fallback.exists() {
-        return Ok(fallback);
-    }
-    anyhow::bail!("could not find {file_name}; build the workspace with `cargo build --release`")
-}
-
-pub(super) fn shell_entry_arg(entry: &TagEntry) -> anyhow::Result<PathBuf> {
-    match &entry.location {
-        TagEntryLocation::LooseFile(path) => Ok(path.clone()),
-        TagEntryLocation::Monolithic { name, group_tag } => Ok(PathBuf::from(format!(
-            "{}.{}",
-            name,
-            format_group_tag(*group_tag)
-        ))),
-    }
+    Ok(message)
 }
 
 pub(super) fn tag_to_json(tag: &TagFile, entry: &TagEntry) -> Value {
