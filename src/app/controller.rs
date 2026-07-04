@@ -1,13 +1,24 @@
 use super::*;
 use anyhow::Context as _;
 
+const TERMINAL_VISIBLE_LINE_LIMIT: usize = 20_000;
+const TERMINAL_VISIBLE_LINE_TRIM_TARGET: usize = 18_000;
+
 impl Baboon {
+    fn push_terminal_line(&mut self, line: String) {
+        self.terminal.lines.push(TerminalLineEntry::new(line));
+        trim_terminal_lines(&mut self.terminal.lines);
+        self.terminal.scroll_to_bottom = true;
+    }
+
     pub(super) fn process_worker_messages(&mut self, ctx: &egui::Context) {
         while let Ok(message) = self.rx.try_recv() {
             match message {
                 WorkerMessage::TerminalLine(line) => {
-                    self.terminal.lines.push(line);
-                    self.terminal.scroll_to_bottom = true;
+                    self.push_terminal_line(line);
+                }
+                WorkerMessage::TerminalLogError(error) => {
+                    self.status = error;
                 }
                 WorkerMessage::TerminalDone { run_id } => {
                     if self.terminal.running_id != Some(run_id) {
@@ -163,9 +174,10 @@ impl Baboon {
                             self.trim_tag_memory();
                         }
                         Err(error) => {
-                            self.terminal
-                                .lines
-                                .push(format!("Folder refactor failed: {error}"));
+                            self.terminal.lines.push(TerminalLineEntry::new(format!(
+                                "Folder refactor failed: {error}"
+                            )));
+                            trim_terminal_lines(&mut self.terminal.lines);
                             self.terminal.scroll_to_bottom = true;
                             self.status = error;
                         }
@@ -259,7 +271,10 @@ impl Baboon {
                             self.field_search.clear();
                             self.field_search_applied.clear();
                             self.source_generation = self.source_generation.wrapping_add(1);
-                            self.terminal.lines.extend(done.lines);
+                            self.terminal
+                                .lines
+                                .extend(done.lines.into_iter().map(TerminalLineEntry::new));
+                            trim_terminal_lines(&mut self.terminal.lines);
                             self.terminal.scroll_to_bottom = true;
                             self.status = done.status;
                         }
@@ -809,7 +824,10 @@ impl Baboon {
             return;
         };
         self.terminal_open = true;
-        self.terminal.lines.push(format!("> {command}"));
+        self.terminal
+            .lines
+            .push(TerminalLineEntry::new(format!("> {command}")));
+        trim_terminal_lines(&mut self.terminal.lines);
         self.terminal.scroll_to_bottom = true;
         self.terminal.refocus_input = true;
         self.terminal.running = true;
@@ -817,6 +835,17 @@ impl Baboon {
         self.terminal.next_run_id = self.terminal.next_run_id.wrapping_add(1).max(1);
         self.terminal.running_id = Some(run_id);
         self.terminal.running_command = Some(command.clone());
+        let mut log_file = match create_terminal_log_file(run_id, &command) {
+            Ok((path, file)) => {
+                self.terminal.last_log_path = Some(path);
+                Some(file)
+            }
+            Err(error) => {
+                self.status = format!("Terminal full log unavailable: {error}");
+                self.terminal.last_log_path = None;
+                None
+            }
+        };
         let tx = self.tx.clone();
         let child_slot: Arc<Mutex<Option<std::process::Child>>> = Arc::new(Mutex::new(None));
         let stop_requested = Arc::new(AtomicBool::new(false));
@@ -825,6 +854,7 @@ impl Baboon {
             stop_requested: Arc::clone(&stop_requested),
         });
         thread::spawn(move || {
+            let mut log_error_reported = false;
             #[cfg(target_os = "windows")]
             let mut cmd = {
                 use std::os::windows::process::CommandExt;
@@ -849,37 +879,43 @@ impl Baboon {
                 .stdin(std::process::Stdio::null());
             match cmd.spawn() {
                 Err(e) => {
-                    let _ = tx.send(WorkerMessage::TerminalLine(format!("[error] {e}")));
+                    send_terminal_line(
+                        &tx,
+                        &ctx,
+                        &mut log_file,
+                        &mut log_error_reported,
+                        format!("[error] {e}"),
+                    );
                     let _ = tx.send(WorkerMessage::TerminalDone { run_id });
                     ctx.request_repaint();
                 }
                 Ok(child) => {
-                    use std::io::BufRead;
                     let stdout = match child_slot.lock() {
                         Ok(mut slot) => {
                             *slot = Some(child);
                             slot.as_mut().and_then(|child| child.stdout.take())
                         }
                         Err(_) => {
-                            let _ = tx.send(WorkerMessage::TerminalLine(
+                            send_terminal_line(
+                                &tx,
+                                &ctx,
+                                &mut log_file,
+                                &mut log_error_reported,
                                 "[error] terminal process lock was poisoned".to_owned(),
-                            ));
+                            );
                             let _ = tx.send(WorkerMessage::TerminalDone { run_id });
                             ctx.request_repaint();
                             return;
                         }
                     };
                     if let Some(stdout) = stdout {
-                        let reader = std::io::BufReader::new(stdout);
-                        for line in reader.lines() {
-                            match line {
-                                Ok(l) => {
-                                    let _ = tx.send(WorkerMessage::TerminalLine(l));
-                                    ctx.request_repaint();
-                                }
-                                Err(_) => break,
-                            }
-                        }
+                        let _ = stream_terminal_output(
+                            stdout,
+                            &tx,
+                            &ctx,
+                            &mut log_file,
+                            &mut log_error_reported,
+                        );
                     }
                     let exit = match child_slot.lock() {
                         Ok(mut slot) => {
@@ -890,16 +926,26 @@ impl Baboon {
                             }
                         }
                         Err(_) => {
-                            let _ = tx.send(WorkerMessage::TerminalLine(
+                            send_terminal_line(
+                                &tx,
+                                &ctx,
+                                &mut log_file,
+                                &mut log_error_reported,
                                 "[error] terminal process lock was poisoned".to_owned(),
-                            ));
+                            );
                             None
                         }
                     };
                     if let Some(code) = exit.and_then(|status| status.code())
                         && !stop_requested.load(Ordering::SeqCst)
                     {
-                        let _ = tx.send(WorkerMessage::TerminalLine(format!("[exit {code}]")));
+                        send_terminal_line(
+                            &tx,
+                            &ctx,
+                            &mut log_file,
+                            &mut log_error_reported,
+                            format!("[exit {code}]"),
+                        );
                     }
                     let _ = tx.send(WorkerMessage::TerminalDone { run_id });
                     ctx.request_repaint();
@@ -926,22 +972,35 @@ impl Baboon {
             .unwrap_or_else(|| "command".to_owned());
         match stop_terminal_process(process) {
             Ok(TerminalStopResult::Stopped) => {
-                self.terminal
-                    .lines
-                    .push(format!("[stopped] {command} stopped by user"));
+                let line = format!("[stopped] {command} stopped by user");
+                let mut log_status = None;
+                if let Some(path) = self.terminal.last_log_path.as_ref()
+                    && let Err(error) = append_terminal_log_path(path, &line)
+                {
+                    log_status = Some(error);
+                }
+                self.terminal.lines.push(TerminalLineEntry::new(line));
+                trim_terminal_lines(&mut self.terminal.lines);
                 self.finish_stopped_terminal_command();
-                self.status = "Terminal command stopped".to_owned();
+                self.status = log_status.unwrap_or_else(|| "Terminal command stopped".to_owned());
             }
             Ok(TerminalStopResult::AlreadyExited) => {
                 self.finish_stopped_terminal_command();
                 self.status = "Terminal command had already exited".to_owned();
             }
             Err(error) => {
-                self.terminal
-                    .lines
-                    .push(format!("[error] could not stop terminal command: {error}"));
+                let line = format!("[error] could not stop terminal command: {error}");
+                let mut log_status = None;
+                if let Some(path) = self.terminal.last_log_path.as_ref()
+                    && let Err(log_error) = append_terminal_log_path(path, &line)
+                {
+                    log_status = Some(log_error);
+                }
+                self.terminal.lines.push(TerminalLineEntry::new(line));
+                trim_terminal_lines(&mut self.terminal.lines);
                 self.terminal.scroll_to_bottom = true;
-                self.status = format!("Could not stop terminal command: {error}");
+                self.status = log_status
+                    .unwrap_or_else(|| format!("Could not stop terminal command: {error}"));
             }
         }
     }
@@ -1993,7 +2052,10 @@ impl Baboon {
             doc.dirty = true;
         }
         let status = report.status();
-        self.terminal.lines.extend(report.lines);
+        self.terminal
+            .lines
+            .extend(report.lines.into_iter().map(TerminalLineEntry::new));
+        trim_terminal_lines(&mut self.terminal.lines);
         self.terminal.scroll_to_bottom = true;
         self.status = status;
     }
@@ -3196,16 +3258,33 @@ impl Baboon {
         };
         let command = format!("tool bitmaps \"{data_path}\"");
         self.terminal_open = true;
-        self.terminal.lines.push(format!("> {command}"));
+        self.terminal
+            .lines
+            .push(TerminalLineEntry::new(format!("> {command}")));
+        trim_terminal_lines(&mut self.terminal.lines);
         self.terminal.scroll_to_bottom = true;
         self.terminal.refocus_input = true;
         self.terminal.running = true;
         self.status = format!("Reimporting bitmap {}", entry.display_path);
+        let run_id = self.terminal.next_run_id;
+        self.terminal.next_run_id = self.terminal.next_run_id.wrapping_add(1).max(1);
+        let log_file = match create_terminal_log_file(run_id, &command) {
+            Ok((path, file)) => {
+                self.terminal.last_log_path = Some(path);
+                Some(file)
+            }
+            Err(error) => {
+                self.status = format!("Terminal full log unavailable: {error}");
+                self.terminal.last_log_path = None;
+                None
+            }
+        };
 
         let tx = self.tx.clone();
         thread::spawn(move || {
-            let result = run_terminal_command_for_reimport(&command, &work_dir, &tx, &ctx)
-                .and_then(|_| read_entry(&source, &entry).map_err(|error| error.to_string()));
+            let result =
+                run_terminal_command_for_reimport(&command, &work_dir, &tx, &ctx, log_file)
+                    .and_then(|_| read_entry(&source, &entry).map_err(|error| error.to_string()));
             let _ = tx.send(WorkerMessage::BitmapReimportFinished { key, result });
             ctx.request_repaint();
         });
@@ -3874,7 +3953,9 @@ fn run_terminal_command_for_reimport(
     work_dir: &Path,
     tx: &Sender<WorkerMessage>,
     ctx: &egui::Context,
+    mut log_file: Option<std::fs::File>,
 ) -> Result<(), String> {
+    let mut log_error_reported = false;
     #[cfg(target_os = "windows")]
     let mut cmd = {
         use std::os::windows::process::CommandExt;
@@ -3895,32 +3976,41 @@ fn run_terminal_command_for_reimport(
         .stdin(std::process::Stdio::null());
     let mut child = cmd.spawn().map_err(|error| {
         let message = format!("[error] {error}");
-        let _ = tx.send(WorkerMessage::TerminalLine(message.clone()));
-        ctx.request_repaint();
+        send_terminal_line(
+            tx,
+            ctx,
+            &mut log_file,
+            &mut log_error_reported,
+            message.clone(),
+        );
         message
     })?;
-    use std::io::BufRead;
     if let Some(stdout) = child.stdout.take() {
-        let reader = std::io::BufReader::new(stdout);
-        for line in reader.lines() {
-            match line {
-                Ok(line) => {
-                    let _ = tx.send(WorkerMessage::TerminalLine(line));
-                    ctx.request_repaint();
-                }
-                Err(error) => {
-                    let message = format!("Could not read tool output: {error}");
-                    let _ = tx.send(WorkerMessage::TerminalLine(format!("[error] {message}")));
-                    return Err(message);
-                }
-            }
+        if let Err(error) =
+            stream_terminal_output(stdout, tx, ctx, &mut log_file, &mut log_error_reported)
+        {
+            let message = format!("Could not read tool output: {error}");
+            send_terminal_line(
+                tx,
+                ctx,
+                &mut log_file,
+                &mut log_error_reported,
+                format!("[error] {message}"),
+            );
+            return Err(message);
         }
     }
     let status = child
         .wait()
         .map_err(|error| format!("Could not wait for tool: {error}"))?;
     if let Some(code) = status.code() {
-        let _ = tx.send(WorkerMessage::TerminalLine(format!("[exit {code}]")));
+        send_terminal_line(
+            tx,
+            ctx,
+            &mut log_file,
+            &mut log_error_reported,
+            format!("[exit {code}]"),
+        );
     }
     if status.success() {
         Ok(())
@@ -3929,6 +4019,362 @@ fn run_terminal_command_for_reimport(
             .code()
             .map(|code| format!("tool exited with code {code}"))
             .unwrap_or_else(|| "tool exited without a status code".to_owned()))
+    }
+}
+
+fn stream_terminal_output<R: std::io::Read>(
+    mut reader: R,
+    tx: &Sender<WorkerMessage>,
+    ctx: &egui::Context,
+    log_file: &mut Option<std::fs::File>,
+    log_error_reported: &mut bool,
+) -> std::io::Result<()> {
+    let mut buffer = [0_u8; 4096];
+    let mut line = Vec::new();
+    let mut pending_cr = false;
+
+    loop {
+        let read = reader.read(&mut buffer)?;
+        if read == 0 {
+            break;
+        }
+
+        for &byte in &buffer[..read] {
+            if pending_cr {
+                if byte == b'\n' {
+                    emit_terminal_output_line(&line, tx, ctx, log_file, log_error_reported);
+                    line.clear();
+                    pending_cr = false;
+                    continue;
+                }
+
+                emit_terminal_output_line(&line, tx, ctx, log_file, log_error_reported);
+                line.clear();
+                pending_cr = false;
+            }
+
+            match byte {
+                b'\r' => pending_cr = true,
+                b'\n' => {
+                    emit_terminal_output_line(&line, tx, ctx, log_file, log_error_reported);
+                    line.clear();
+                }
+                _ => line.push(byte),
+            }
+        }
+    }
+
+    if pending_cr {
+        emit_terminal_output_line(&line, tx, ctx, log_file, log_error_reported);
+        line.clear();
+    }
+
+    if !line.is_empty() {
+        emit_terminal_output_line(&line, tx, ctx, log_file, log_error_reported);
+    }
+
+    Ok(())
+}
+
+fn emit_terminal_output_line(
+    line: &[u8],
+    tx: &Sender<WorkerMessage>,
+    ctx: &egui::Context,
+    log_file: &mut Option<std::fs::File>,
+    log_error_reported: &mut bool,
+) {
+    let line = String::from_utf8_lossy(line).into_owned();
+    write_terminal_log_line(log_file, tx, line.as_str(), log_error_reported);
+    let _ = tx.send(WorkerMessage::TerminalLine(line));
+    ctx.request_repaint();
+}
+
+fn send_terminal_line(
+    tx: &Sender<WorkerMessage>,
+    ctx: &egui::Context,
+    log_file: &mut Option<std::fs::File>,
+    log_error_reported: &mut bool,
+    line: String,
+) {
+    write_terminal_log_line(log_file, tx, &line, log_error_reported);
+    let _ = tx.send(WorkerMessage::TerminalLine(line));
+    ctx.request_repaint();
+}
+
+fn trim_terminal_lines(lines: &mut Vec<TerminalLineEntry>) {
+    if lines.len() > TERMINAL_VISIBLE_LINE_LIMIT {
+        let remove = lines.len() - TERMINAL_VISIBLE_LINE_TRIM_TARGET;
+        lines.drain(..remove);
+    }
+}
+
+fn create_terminal_log_file(
+    run_id: u64,
+    command: &str,
+) -> Result<(PathBuf, std::fs::File), String> {
+    use std::io::Write as _;
+
+    let dir = terminal_logs_dir();
+    std::fs::create_dir_all(&dir)
+        .map_err(|error| format!("could not create {}: {error}", dir.display()))?;
+    let path = dir.join(format!(
+        "terminal-run-{}-{run_id}.log",
+        terminal_log_timestamp()
+    ));
+    let mut file = std::fs::File::create(&path)
+        .map_err(|error| format!("could not create {}: {error}", path.display()))?;
+    writeln!(file, "> {command}")
+        .map_err(|error| format!("could not write {}: {error}", path.display()))?;
+    Ok((path, file))
+}
+
+fn write_terminal_log_line(
+    log_file: &mut Option<std::fs::File>,
+    tx: &Sender<WorkerMessage>,
+    line: &str,
+    log_error_reported: &mut bool,
+) {
+    use std::io::Write as _;
+
+    let Some(file) = log_file.as_mut() else {
+        return;
+    };
+    if let Err(error) = writeln!(file, "{line}") {
+        *log_file = None;
+        if !*log_error_reported {
+            *log_error_reported = true;
+            let _ = tx.send(WorkerMessage::TerminalLogError(format!(
+                "Terminal full log disabled: {error}"
+            )));
+        }
+    }
+}
+
+fn append_terminal_log_path(path: &Path, line: &str) -> Result<(), String> {
+    use std::io::Write as _;
+
+    let mut file = std::fs::OpenOptions::new()
+        .append(true)
+        .open(path)
+        .map_err(|error| format!("Could not open terminal log {}: {error}", path.display()))?;
+    writeln!(file, "{line}")
+        .map_err(|error| format!("Could not write terminal log {}: {error}", path.display()))
+}
+
+fn terminal_log_timestamp() -> String {
+    let seconds = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
+        Ok(duration) => duration.as_secs(),
+        Err(_) => 0,
+    };
+    let days = (seconds / 86_400) as i64;
+    let day_seconds = seconds % 86_400;
+    let (year, month, day) = civil_from_days(days);
+    let hour = day_seconds / 3_600;
+    let minute = (day_seconds % 3_600) / 60;
+    let second = day_seconds % 60;
+    format!("{year:04}{month:02}{day:02}-{hour:02}{minute:02}{second:02}")
+}
+
+fn civil_from_days(days_since_unix_epoch: i64) -> (i32, u32, u32) {
+    let z = days_since_unix_epoch + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = mp + if mp < 10 { 3 } else { -9 };
+    let year = y + if m <= 2 { 1 } else { 0 };
+    (year as i32, m as u32, d as u32)
+}
+
+pub(super) fn open_terminal_log(path: &Path) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = std::process::Command::new("cmd");
+        command.arg("/C").arg("start").arg("").arg(path);
+        command
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = std::process::Command::new("open");
+        command.arg(path);
+        command
+    };
+    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+    let mut command = {
+        let mut command = std::process::Command::new("xdg-open");
+        command.arg(path);
+        command
+    };
+
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("Could not open terminal log {}: {error}", path.display()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn collect_terminal_output(input: &[u8]) -> Vec<(&'static str, String)> {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ctx = egui::Context::default();
+        let mut log_file = None;
+        let mut log_error_reported = false;
+        let result = stream_terminal_output(
+            std::io::Cursor::new(input),
+            &tx,
+            &ctx,
+            &mut log_file,
+            &mut log_error_reported,
+        );
+        assert!(result.is_ok());
+        drop(tx);
+
+        rx.try_iter()
+            .filter_map(|message| match message {
+                WorkerMessage::TerminalLine(line) => Some(("line", line)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn terminal_output_appends_carriage_return_progress() {
+        let output = collect_terminal_output(
+            b"building bsp3d children... 10%\rbuilding bsp3d children... 70%\rbuilding bsp3d children... 100%\nnext\n",
+        );
+
+        assert_eq!(
+            output,
+            vec![
+                ("line", "building bsp3d children... 10%".to_owned()),
+                ("line", "building bsp3d children... 70%".to_owned()),
+                ("line", "building bsp3d children... 100%".to_owned()),
+                ("line", "next".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
+    fn terminal_output_treats_crlf_as_newline() {
+        let output = collect_terminal_output(b"done\r\nnext");
+
+        assert_eq!(
+            output,
+            vec![("line", "done".to_owned()), ("line", "next".to_owned()),]
+        );
+    }
+
+    #[test]
+    fn terminal_output_full_log_keeps_carriage_return_progress() {
+        let path = std::env::temp_dir().join(format!(
+            "baboon-terminal-test-{}.log",
+            terminal_log_timestamp()
+        ));
+        let file = std::fs::File::create(&path);
+        assert!(file.is_ok());
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ctx = egui::Context::default();
+        let mut log_file = file.ok();
+        let mut log_error_reported = false;
+        let result = stream_terminal_output(
+            std::io::Cursor::new(b"building... 10%\rbuilding... 60%\rbuilding... 100%\n"),
+            &tx,
+            &ctx,
+            &mut log_file,
+            &mut log_error_reported,
+        );
+        assert!(result.is_ok());
+        drop(log_file);
+        drop(tx);
+
+        let output: Vec<_> = rx
+            .try_iter()
+            .filter_map(|message| match message {
+                WorkerMessage::TerminalLine(line) => Some(("line", line)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            output,
+            vec![
+                ("line", "building... 10%".to_owned()),
+                ("line", "building... 60%".to_owned()),
+                ("line", "building... 100%".to_owned()),
+            ]
+        );
+
+        let text = std::fs::read_to_string(&path);
+        assert!(text.is_ok());
+        if let Ok(text) = text {
+            assert!(text.contains("building... 10%\n"));
+            assert!(text.contains("building... 60%\n"));
+            assert!(text.contains("building... 100%\n"));
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn terminal_output_handles_heavy_carriage_return_progress() {
+        let mut input = Vec::new();
+        for index in 0..25_000 {
+            input.extend_from_slice(format!("building bsp3d children... {index}%\r").as_bytes());
+        }
+        input.extend_from_slice(b"done\n");
+
+        let output = collect_terminal_output(&input);
+
+        assert_eq!(output.len(), 25_001);
+        assert_eq!(
+            output.first(),
+            Some(&("line", "building bsp3d children... 0%".to_owned()))
+        );
+        assert_eq!(output.last(), Some(&("line", "done".to_owned())));
+    }
+
+    #[test]
+    fn terminal_line_severity_classifies_tool_markers() {
+        assert!(matches!(
+            TerminalLineEntry::new("-ERROR- bad connection".to_owned()).severity,
+            TerminalLineSeverity::Error
+        ));
+        assert!(matches!(
+            TerminalLineEntry::new("WARNING overlapping surfaces".to_owned()).severity,
+            TerminalLineSeverity::Warning
+        ));
+        assert!(matches!(
+            TerminalLineEntry::new("[exit 0]".to_owned()).severity,
+            TerminalLineSeverity::Success
+        ));
+        assert!(matches!(
+            TerminalLineEntry::new("[exit 2]".to_owned()).severity,
+            TerminalLineSeverity::Error
+        ));
+        assert!(matches!(
+            TerminalLineEntry::new("=== summary".to_owned()).severity,
+            TerminalLineSeverity::Summary
+        ));
+    }
+
+    #[test]
+    fn terminal_visible_lines_are_trimmed_to_limit() {
+        let mut lines = Vec::new();
+        for index in 0..(TERMINAL_VISIBLE_LINE_LIMIT + 10) {
+            lines.push(TerminalLineEntry::new(format!("line {index}")));
+        }
+
+        trim_terminal_lines(&mut lines);
+
+        assert_eq!(lines.len(), TERMINAL_VISIBLE_LINE_TRIM_TARGET);
+        assert_eq!(
+            lines.first().map(|line| line.text.as_str()),
+            Some("line 2010")
+        );
     }
 }
 

@@ -345,6 +345,7 @@ impl Baboon {
                 running_id: None,
                 next_run_id: 1,
                 running_command: None,
+                last_log_path: None,
                 process: None,
                 scroll_to_bottom: false,
             },

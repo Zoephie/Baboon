@@ -20,6 +20,8 @@ pub(super) enum WorkerMessage {
     AllEntriesScanned(Result<Vec<TagEntry>, String>),
     // One line of streamed terminal output.
     TerminalLine(String),
+    // Non-fatal terminal log failure.
+    TerminalLogError(String),
     // Terminal process finished.
     TerminalDone {
         run_id: u64,
@@ -83,7 +85,7 @@ pub(super) struct UpdateCheckResult {
 
 pub(super) struct TerminalState {
     pub(super) input: String,
-    pub(super) lines: Vec<String>,
+    pub(super) lines: Vec<TerminalLineEntry>,
     pub(super) history: Vec<String>,
     pub(super) history_cursor: Option<usize>,
     pub(super) refocus_input: bool,
@@ -91,8 +93,57 @@ pub(super) struct TerminalState {
     pub(super) running_id: Option<u64>,
     pub(super) next_run_id: u64,
     pub(super) running_command: Option<String>,
+    pub(super) last_log_path: Option<PathBuf>,
     pub(super) process: Option<TerminalProcess>,
     pub(super) scroll_to_bottom: bool,
+}
+
+pub(super) struct TerminalLineEntry {
+    pub(super) text: String,
+    pub(super) severity: TerminalLineSeverity,
+}
+
+impl TerminalLineEntry {
+    pub(super) fn new(text: String) -> Self {
+        let severity = TerminalLineSeverity::classify(&text);
+        Self { text, severity }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum TerminalLineSeverity {
+    Normal,
+    Warning,
+    Error,
+    Success,
+    Summary,
+}
+
+impl TerminalLineSeverity {
+    fn classify(line: &str) -> Self {
+        let trimmed = line.trim_start();
+        let lower = line.to_ascii_lowercase();
+        if line.contains("-ERROR-")
+            || lower.contains("[error]")
+            || (trimmed.starts_with("[exit ")
+                && !trimmed.starts_with("[exit 0]")
+                && trimmed
+                    .strip_prefix("[exit ")
+                    .and_then(|rest| rest.strip_suffix(']'))
+                    .and_then(|code| code.parse::<i32>().ok())
+                    .is_some())
+        {
+            Self::Error
+        } else if lower.contains("warning") {
+            Self::Warning
+        } else if trimmed.starts_with("[exit 0]") {
+            Self::Success
+        } else if trimmed.starts_with("===") {
+            Self::Summary
+        } else {
+            Self::Normal
+        }
+    }
 }
 
 pub(super) struct TerminalProcess {

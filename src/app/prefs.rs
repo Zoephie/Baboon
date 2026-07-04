@@ -13,6 +13,13 @@ pub(super) fn last_session_path() -> PathBuf {
     )
 }
 
+pub(super) fn terminal_logs_dir() -> PathBuf {
+    if let Some(dir) = app_data_dir("Baboon", "baboon") {
+        return dir.join("terminal-logs");
+    }
+    PathBuf::from("terminal-logs")
+}
+
 fn legacy_prefs_path() -> PathBuf {
     app_prefs_path("Genesis", "genesis", ".genesis-prefs.json")
 }
@@ -27,16 +34,20 @@ fn app_data_path(
     filename: &str,
     fallback_name: &str,
 ) -> PathBuf {
-    if let Some(appdata) = std::env::var_os("APPDATA") {
-        return PathBuf::from(appdata).join(windows_folder).join(filename);
-    }
-    if let Some(home) = std::env::var_os("USERPROFILE") {
-        return PathBuf::from(home)
-            .join(".config")
-            .join(unix_folder)
-            .join(filename);
+    if let Some(dir) = app_data_dir(windows_folder, unix_folder) {
+        return dir.join(filename);
     }
     PathBuf::from(fallback_name)
+}
+
+fn app_data_dir(windows_folder: &str, unix_folder: &str) -> Option<PathBuf> {
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        return Some(PathBuf::from(appdata).join(windows_folder));
+    }
+    if let Some(home) = std::env::var_os("USERPROFILE") {
+        return Some(PathBuf::from(home).join(".config").join(unix_folder));
+    }
+    None
 }
 
 fn read_prefs_text() -> Option<String> {

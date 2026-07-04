@@ -1,3 +1,4 @@
+use super::controller::open_terminal_log;
 use super::*;
 
 /// A toolbar launcher button: shows the decoded `.ico` icon when available,
@@ -22,6 +23,24 @@ fn launcher_button(
             egui::Button::new(fallback).min_size(Vec2::splat(22.0)),
         ),
     }
+}
+
+fn terminal_line_color(severity: TerminalLineSeverity) -> Color32 {
+    match severity {
+        TerminalLineSeverity::Normal | TerminalLineSeverity::Summary => {
+            Color32::from_rgb(232, 232, 228)
+        }
+        TerminalLineSeverity::Warning => Color32::from_rgb(238, 196, 91),
+        TerminalLineSeverity::Error => Color32::from_rgb(244, 105, 105),
+        TerminalLineSeverity::Success => Color32::from_rgb(123, 184, 137),
+    }
+}
+
+fn terminal_line_is_strong(severity: TerminalLineSeverity) -> bool {
+    matches!(
+        severity,
+        TerminalLineSeverity::Error | TerminalLineSeverity::Summary
+    )
 }
 
 fn draw_game_banner_header(ui: &mut Ui, app: &mut Baboon, game: &str, path_label: &str) {
@@ -133,6 +152,21 @@ fn monitor_commands_for_game(game: Option<&str>) -> &'static [&'static str] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_line_visuals_are_distinct_by_severity() {
+        let normal = terminal_line_color(TerminalLineSeverity::Normal);
+        assert_eq!(terminal_line_color(TerminalLineSeverity::Summary), normal);
+        assert_ne!(terminal_line_color(TerminalLineSeverity::Warning), normal);
+        assert_ne!(terminal_line_color(TerminalLineSeverity::Error), normal);
+        assert_ne!(terminal_line_color(TerminalLineSeverity::Success), normal);
+
+        assert!(terminal_line_is_strong(TerminalLineSeverity::Summary));
+        assert!(terminal_line_is_strong(TerminalLineSeverity::Error));
+        assert!(!terminal_line_is_strong(TerminalLineSeverity::Warning));
+        assert!(!terminal_line_is_strong(TerminalLineSeverity::Success));
+        assert!(!terminal_line_is_strong(TerminalLineSeverity::Normal));
+    }
 
     #[test]
     fn monitor_commands_are_game_specific() {
@@ -2579,6 +2613,24 @@ impl eframe::App for Baboon {
                                         if ui.small_button("Clear").clicked() {
                                             self.terminal.lines.clear();
                                         }
+                                        let open_log_enabled =
+                                            self.terminal.last_log_path.is_some();
+                                        let mut open_log_button = ui.add_enabled(
+                                            open_log_enabled,
+                                            egui::Button::new(
+                                                RichText::new("Open full log").small(),
+                                            ),
+                                        );
+                                        if let Some(path) = self.terminal.last_log_path.as_ref() {
+                                            open_log_button = open_log_button
+                                                .on_hover_text(path.display().to_string());
+                                        }
+                                        if open_log_button.clicked()
+                                            && let Some(path) = self.terminal.last_log_path.clone()
+                                            && let Err(error) = open_terminal_log(&path)
+                                        {
+                                            self.status = error;
+                                        }
                                         if self.terminal.running {
                                             if self.terminal.process.is_some()
                                                 && ui.small_button("Stop").clicked()
@@ -2676,17 +2728,17 @@ impl eframe::App for Baboon {
                                 .id_salt("terminal_output")
                                 .auto_shrink([false, false])
                                 .show(ui, |ui| {
+                                    ui.visuals_mut().override_text_color = None;
                                     ui.set_min_width(ui.available_width());
                                     for line in &self.terminal.lines {
-                                        ui.add(
-                                            egui::Label::new(
-                                                RichText::new(line)
-                                                    .monospace()
-                                                    .font(FontId::monospace(13.0))
-                                                    .color(Color32::from_rgb(232, 232, 228)),
-                                            )
-                                            .wrap(),
-                                        );
+                                        let mut text = RichText::new(&line.text)
+                                            .color(terminal_line_color(line.severity));
+                                        if terminal_line_is_strong(line.severity) {
+                                            text = text.font(bold_font(13.0)).strong();
+                                        } else {
+                                            text = text.monospace().font(FontId::monospace(13.0));
+                                        }
+                                        ui.add(egui::Label::new(text).wrap());
                                     }
                                     if want_scroll_bottom {
                                         ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
