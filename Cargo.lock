@@ -405,7 +405,7 @@ checksum = "84d7ced0ae9557296835c32bf1b1e02b44c746701f898460fb000d7eaa84f00a"
 [[package]]
 name = "blam-tags"
 version = "0.1.0"
-source = "git+https://github.com/camden-smallwood/blam-tags?rev=d36e917e88428bed566a98c12c045c478d105e43#d36e917e88428bed566a98c12c045c478d105e43"
+source = "git+https://github.com/camden-smallwood/blam-tags?rev=ab8cf27c824dcfbabab530d6af8eb885a9743bd8#ab8cf27c824dcfbabab530d6af8eb885a9743bd8"
 dependencies = [
  "bcdec_rs",
  "flate2",
@@ -2760,7 +2760,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
