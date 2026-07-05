@@ -817,6 +817,7 @@ pub(super) struct FieldEditContext<'a> {
     pub(super) root: Option<blam_tags::TagStruct<'a>>,
     pub(super) game: Option<&'a str>,
     pub(super) definitions_root: Option<&'a Path>,
+    pub(super) names: Option<&'a TagNameIndex>,
     pub(super) definition_group_name: Option<&'a str>,
     pub(super) tags_root: Option<&'a Path>,
     pub(super) status: Option<&'a mut String>,

@@ -3561,6 +3561,7 @@ impl Baboon {
                                 _ => None,
                             }
                         }),
+                        names: Some(&self.names),
                         definition_group_name: self
                             .names
                             .name_for(entry.group_tag)

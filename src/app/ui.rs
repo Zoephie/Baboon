@@ -3282,6 +3282,7 @@ impl eframe::App for Baboon {
                                 } => Some(definitions_root.as_path()),
                                 _ => None,
                             }),
+                            names: Some(&self.names),
                             definition_group_name: self
                                 .names
                                 .name_for(entry.group_tag)

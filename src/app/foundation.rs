@@ -2736,6 +2736,7 @@ pub(super) const REFERENCE_MISSING_COLOR: Color32 = Color32::from_rgb(216, 92, 9
 /// visible fields of one tag, so the per-frame cost is small; R3 will replace
 /// this with a generation-invalidated cache shared with the bitmap-row checks.
 pub(super) fn reference_target_missing(
+    names: Option<&TagNameIndex>,
     tags_root: Option<&Path>,
     group_tag: u32,
     rel_path: &str,
@@ -2743,7 +2744,10 @@ pub(super) fn reference_target_missing(
     let Some(root) = tags_root else {
         return false;
     };
-    let Some(ext) = blam_tags::paths::group_tag_to_extension(group_tag) else {
+    let Some(ext) = names
+        .and_then(|names| names.name_for(group_tag))
+        .or_else(|| blam_tags::paths::group_tag_to_extension(group_tag))
+    else {
         return false;
     };
     let mut rel = rel_path.replace('/', "\\");
@@ -2795,9 +2799,9 @@ pub(super) fn draw_foundation_tag_reference_row(
             let has_ref = target.is_some();
             let icon_group = tag_reference_value_icon_group(meta, target.as_ref(), buffer);
             // A non-empty reference whose target file is absent on disk.
-            let missing = target
-                .as_ref()
-                .is_some_and(|(group, rel)| reference_target_missing(edit.tags_root, *group, rel));
+            let missing = target.as_ref().is_some_and(|(group, rel)| {
+                reference_target_missing(edit.names, edit.tags_root, *group, rel)
+            });
             if editable {
                 let response = foundation_tag_reference_text_edit_cell(
                     ui,
@@ -3924,6 +3928,57 @@ mod tests {
         assert_eq!(breadcrumb_for_path("variants"), "variants");
     }
 
+    #[test]
+    fn ce_collision_geometry_reference_uses_loaded_game_extension() {
+        let definitions_root = locate_definitions_root();
+        let ce_names = TagNameIndex::load_game(&definitions_root, "haloce_mcc").unwrap();
+        let h3_names = TagNameIndex::load_game(&definitions_root, "halo3_mcc").unwrap();
+        let coll = parse_group_tag("coll").unwrap();
+        let root = std::env::temp_dir().join(format!(
+            "baboon_ce_collision_reference_test_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("weapons").join("assault rifle")).unwrap();
+        let rel = "weapons\\assault rifle\\assault rifle";
+        std::fs::write(
+            root.join("weapons")
+                .join("assault rifle")
+                .join("assault rifle.model_collision_geometry"),
+            [],
+        )
+        .unwrap();
+
+        assert!(!reference_target_missing(
+            Some(&ce_names),
+            Some(&root),
+            coll,
+            rel
+        ));
+        assert!(reference_target_missing(
+            Some(&h3_names),
+            Some(&root),
+            coll,
+            rel
+        ));
+        assert!(reference_target_missing(None, Some(&root), coll, rel));
+        std::fs::write(
+            root.join("weapons")
+                .join("assault rifle")
+                .join("assault rifle.collision_model"),
+            [],
+        )
+        .unwrap();
+        assert!(!reference_target_missing(
+            Some(&h3_names),
+            Some(&root),
+            coll,
+            rel
+        ));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     fn with_test_edit_context(assertion: impl FnOnce(&FieldEditContext<'_>)) {
         let definitions_root = locate_definitions_root();
         let mut buffers = HashMap::new();
@@ -3951,6 +4006,7 @@ mod tests {
             root: None,
             game: Some("halo3_mcc"),
             definitions_root: Some(definitions_root.as_path()),
+            names: None,
             definition_group_name: Some("damage_effect"),
             tags_root: None,
             status: None,

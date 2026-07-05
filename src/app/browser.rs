@@ -1054,7 +1054,10 @@ pub(super) fn geometry_extract_label(group_tag: u32) -> &'static str {
 }
 
 pub(super) fn supports_animation_extraction(group_tag: u32) -> bool {
-    matches!(group_tag.to_be_bytes().as_slice(), b"jmad" | b"hlmt" | b"antr")
+    matches!(
+        group_tag.to_be_bytes().as_slice(),
+        b"jmad" | b"hlmt" | b"antr"
+    )
 }
 
 pub(super) fn node_matches(node: &TagTreeNode, entries: &[TagEntry], filter: &str) -> bool {
