@@ -17,14 +17,12 @@ pub(super) fn strip_node_indices(path: &str) -> String {
     out
 }
 
-/// Whether a tag offers the "Search fields" box. Shader/material tags use the
-/// dedicated grid surface and sound tags have no meaningful block tree, so they
-/// are excluded.
+/// Whether a tag offers the "Search fields" box. Shader/material tags are
+/// excluded because they use the dedicated grid surface rather than the block
+/// tree; every other tag (including sound tags, which have a full field tree
+/// below their audition surface) supports it.
 pub(super) fn supports_field_search(entry: &TagEntry) -> bool {
-    !(is_material_tag(entry)
-        || is_material_shader_tag(entry)
-        || is_shader_tag(entry)
-        || &entry.group_tag.to_be_bytes() == b"snd!")
+    !(is_material_tag(entry) || is_material_shader_tag(entry) || is_shader_tag(entry))
 }
 
 /// Resolve the field-filter action to apply *this* frame. Returns `Some` only
@@ -34,7 +32,6 @@ pub(super) fn supports_field_search(entry: &TagEntry) -> bool {
 pub(super) fn compute_pending_field_filter(
     tag: &TagFile,
     supports: bool,
-    passive: bool,
     tag_key: &str,
     field_search: &HashMap<String, String>,
     field_search_applied: &mut HashMap<String, String>,
@@ -52,49 +49,36 @@ pub(super) fn compute_pending_field_filter(
             .remove(tag_key)
             .map(|_| FieldFilterAction::RestoreDefaults);
     }
-    if passive {
-        // Passive mode highlights + keeps matches open every frame (it never
-        // collapses), so re-apply continuously rather than one-shot.
-        field_search_applied.insert(tag_key.to_owned(), query.clone());
-        return Some(FieldFilterAction::Apply(compute_field_filter(
-            tag, &query, true,
-        )));
-    }
-    if field_search_applied.get(tag_key).map(String::as_str) == Some(query.as_str()) {
-        // Already applied; leave the user's manual expand/collapse intact.
-        return None;
-    }
+    // Apply every frame while a query is present. Hiding non-matches is a
+    // per-frame render decision (not a one-shot collapse), so the filter must
+    // stay live.
     field_search_applied.insert(tag_key.to_owned(), query.clone());
-    Some(FieldFilterAction::Apply(compute_field_filter(
-        tag, &query, false,
-    )))
+    Some(FieldFilterAction::Apply(compute_field_filter(tag, &query)))
 }
 
 /// Build the set of collapsible nodes to open for a "Search fields" query:
 /// every struct / block / array whose (display) name contains `query`, plus
 /// all of their ancestor nodes, plus the ancestors of any matching leaf field.
 /// `query` must already be lowercased and non-empty.
-pub(super) fn compute_field_filter(tag: &TagFile, query: &str, passive: bool) -> FieldFilter {
-    let mut open_paths = std::collections::HashSet::new();
-    let mut highlight_paths = std::collections::HashSet::new();
-    collect_open_paths(tag.root(), "", query, &mut open_paths, &mut highlight_paths);
-    FieldFilter {
-        open_paths,
-        highlight_paths,
-        passive,
-    }
+pub(super) fn compute_field_filter(tag: &TagFile, query: &str) -> FieldFilter {
+    let mut visible_paths = std::collections::HashSet::new();
+    collect_visible_paths(tag.root(), "", query, false, &mut visible_paths);
+    FieldFilter { visible_paths }
 }
 
-/// Returns whether `tag_struct` (or anything beneath it) matched, so the
-/// caller can mark the containing node open. Records every node on a match path
-/// in `open_paths`, and every field (leaf or node) whose own name matched in
-/// `highlight_paths`.
-fn collect_open_paths(
+/// Records, in `visible_paths`, every field that should render while searching:
+/// a name match, an ancestor container of a match, or anything inside a
+/// name-matched container. Anything else is omitted, so a container with no
+/// match beneath it is hidden entirely. Returns whether this subtree had a
+/// match, so the caller can mark itself an ancestor-of-match.
+fn collect_visible_paths(
     tag_struct: TagStruct<'_>,
     canon_prefix: &str,
     query: &str,
-    open_paths: &mut std::collections::HashSet<String>,
-    highlight_paths: &mut std::collections::HashSet<String>,
+    // True when an ancestor container's *own name* matched — its whole subtree is
+    // part of that match, so everything under it stays visible.
+    under_matched: bool,
+    visible_paths: &mut std::collections::HashSet<String>,
 ) -> bool {
     let mut any = false;
     for field in tag_struct.fields() {
@@ -108,31 +92,28 @@ fn collect_open_paths(
             format!("{canon_prefix}/{}", field.name())
         };
 
-        if name_matches {
-            highlight_paths.insert(canon.clone());
-        }
-
+        let child_under = under_matched || name_matches;
         let child_matched = if let Some(nested) = field.as_struct() {
-            collect_open_paths(nested, &canon, query, open_paths, highlight_paths)
+            collect_visible_paths(nested, &canon, query, child_under, visible_paths)
         } else if let Some(block) = field.as_block() {
             block
                 .element(0)
-                .map(|el| collect_open_paths(el, &canon, query, open_paths, highlight_paths))
+                .map(|el| collect_visible_paths(el, &canon, query, child_under, visible_paths))
                 .unwrap_or(false)
         } else if let Some(array) = field.as_array() {
             array
                 .element(0)
-                .map(|el| collect_open_paths(el, &canon, query, open_paths, highlight_paths))
+                .map(|el| collect_visible_paths(el, &canon, query, child_under, visible_paths))
                 .unwrap_or(false)
         } else {
-            // Leaf field: a name match opens its ancestors but adds no node.
             false
         };
 
-        let is_node =
-            field.as_struct().is_some() || field.as_block().is_some() || field.as_array().is_some();
-        if is_node && (name_matches || child_matched) {
-            open_paths.insert(canon);
+        // A field renders only if it matched, is an ancestor of a match, or lives
+        // inside a name-matched container. A container with no match anywhere
+        // beneath it never enters the set, so it is hidden entirely.
+        if name_matches || child_matched || under_matched {
+            visible_paths.insert(canon);
         }
         any |= name_matches || child_matched;
     }
@@ -162,7 +143,9 @@ pub(super) fn draw_struct_fields(
     draw_foundation_group(
         ui,
         title,
-        ("struct", path_prefix, depth),
+        // Index-stripped so the struct's open state survives paging through a
+        // parent block/array's element indices (see `strip_node_indices`).
+        ("struct", strip_node_indices(path_prefix), depth),
         depth,
         depth <= 1,
         open_override,
@@ -200,7 +183,7 @@ pub(super) fn draw_inherited_object_fields(
         draw_foundation_group(
             ui,
             title,
-            ("inherited_struct", path_prefix.as_str()),
+            ("inherited_struct", strip_node_indices(path_prefix)),
             0,
             true,
             open_override,
@@ -277,6 +260,9 @@ pub(super) fn draw_fields_with_docs(
     let entries: &[DefEntry] = edit.docs.map(|docs| docs.entries_for(&guid)).unwrap_or(&[]);
     let parent_raw = tag_struct.raw();
     let reference_value_width = shared_tag_reference_value_width(ui, depth);
+    // In active filter mode, injected explanation/section headers are suppressed
+    // so a filtered view shows only matches and their containers (no orphans).
+    let show_explanations = !edit.is_active_filter();
     let mut cursor = 0usize;
     for field in tag_struct.fields_all() {
         if skip_field == Some(field.name()) {
@@ -292,13 +278,15 @@ pub(super) fn draw_fields_with_docs(
             }) {
                 for (offset, entry) in entries[cursor..match_idx].iter().enumerate() {
                     if let DefEntry::Explanation { title, body } = entry {
-                        draw_foundation_explanation_row(
-                            ui,
-                            title,
-                            Some(body),
-                            depth,
-                            (path_prefix, cursor + offset),
-                        );
+                        if show_explanations {
+                            draw_foundation_explanation_row(
+                                ui,
+                                title,
+                                Some(body),
+                                depth,
+                                (path_prefix, cursor + offset),
+                            );
+                        }
                     }
                 }
                 if let DefEntry::Field {
@@ -352,13 +340,15 @@ pub(super) fn draw_fields_with_docs(
     // Any explanations after the last matched field.
     for (offset, entry) in entries[cursor..].iter().enumerate() {
         if let DefEntry::Explanation { title, body } = entry {
-            draw_foundation_explanation_row(
-                ui,
-                title,
-                Some(body),
-                depth,
-                (path_prefix, cursor + offset),
-            );
+            if show_explanations {
+                draw_foundation_explanation_row(
+                    ui,
+                    title,
+                    Some(body),
+                    depth,
+                    (path_prefix, cursor + offset),
+                );
+            }
         }
     }
 }
@@ -378,6 +368,11 @@ pub(super) fn draw_field(
     tag_reference_value_width: f32,
 ) {
     let field_path = append_field_path(path_prefix, field.name());
+    // Active (filter) field-search: hide everything that isn't a match, an
+    // ancestor container of one, or inside a name-matched container.
+    if !edit.field_visible(&field_path) {
+        return;
+    }
     // `meta_override` carries help/units recovered from the JSON definition
     // (shipped tags strip them); fall back to parsing the tag's own field name.
     let meta = meta_override.unwrap_or_else(|| field_display_meta(field.name()));
@@ -410,12 +405,21 @@ pub(super) fn draw_field(
         }
         _ => {}
     }
-    // Passive field-search: tint rows whose name matched the query.
-    let highlight = edit.field_highlighted(&field_path);
-    let highlight_fill = egui::Color32::from_rgba_unmultiplied(255, 214, 0, 38);
+    // Reference-jump glow/scroll: pulse and scroll to the field a "References to"
+    // jump landed on. The input clock and temp-data are only touched while a nav
+    // is actually in flight.
+    let glow = edit
+        .field_nav
+        .is_some_and(|_| edit.field_nav_glow(&field_path, ui.input(|i| i.time)));
+    let scroll_here = edit.field_nav.is_some()
+        && ui
+            .data(|d| d.get_temp::<String>(field_jump_target_id()))
+            .as_deref()
+            == Some(field_path.as_str());
+    let glow_fill = egui::Color32::from_rgba_unmultiplied(255, 214, 0, 38);
     if let Some(function) = field.as_function() {
-        if highlight {
-            egui::Frame::none().fill(highlight_fill).show(ui, |ui| {
+        if glow {
+            egui::Frame::none().fill(glow_fill).show(ui, |ui| {
                 draw_foundation_function_row(ui, &meta, &function, depth, &field_path, edit);
             });
         } else {
@@ -427,8 +431,13 @@ pub(super) fn draw_field(
         if is_hidden_non_expert_value(&value, expert_mode) {
             return;
         }
-        if highlight {
-            egui::Frame::none().fill(highlight_fill).show(ui, |ui| {
+        if glow || scroll_here {
+            let fill = if glow {
+                glow_fill
+            } else {
+                egui::Color32::TRANSPARENT
+            };
+            let framed = egui::Frame::none().fill(fill).show(ui, |ui| {
                 draw_foundation_value_row(
                     ui,
                     field,
@@ -444,6 +453,11 @@ pub(super) fn draw_field(
                     tag_reference_value_width,
                 );
             });
+            if scroll_here {
+                ui.scroll_to_rect(framed.response.rect, Some(egui::Align::Center));
+                ui.data_mut(|d| d.remove::<String>(field_jump_target_id()));
+                ui.ctx().request_repaint();
+            }
         } else {
             draw_foundation_value_row(
                 ui,
@@ -477,12 +491,16 @@ pub(super) fn draw_field(
             );
             return;
         }
-        let nested_default_open = depth == 0 || is_priority_section(field.name());
+        // A struct is a single fixed sub-structure (not a paginated collection
+        // like a block/array), so show it expanded by default — matching
+        // Foundation/Guerilla. The user can still collapse it, and that choice
+        // persists (collapse state is keyed index-free; see `strip_node_indices`).
+        let nested_default_open = true;
         let open_override = edit.resolve_open(&field_path, nested_default_open);
         draw_foundation_group(
             ui,
             visible_container_title(field.name(), path_prefix),
-            ("field_struct", &field_path),
+            ("field_struct", strip_node_indices(&field_path)),
             depth + 1,
             nested_default_open,
             open_override,
@@ -1336,7 +1354,7 @@ pub(super) fn draw_foundation_array(
 /// The parent block/array path for a block path, for "jump to parent". Strips
 /// the last `/segment` and a trailing element index, e.g.
 /// `regions[0]/permutations` → `regions`. `None` for a top-level block.
-fn parent_block_path(path: &str) -> Option<String> {
+pub(super) fn parent_block_path(path: &str) -> Option<String> {
     let cut = path.rfind('/')?;
     let mut parent = path[..cut].to_string();
     if parent.ends_with(']') {
@@ -1359,8 +1377,15 @@ fn breadcrumb_for_path(path: &str) -> String {
 
 /// egui-memory key holding the block path that a pending "jump to parent" should
 /// scroll into view on the next frame.
-fn jump_target_id() -> egui::Id {
+pub(super) fn jump_target_id() -> egui::Id {
     egui::Id::new("foundation_jump_to_block")
+}
+
+/// egui-memory key holding the exact (indexed) field path that a pending
+/// reference-jump should scroll into view and pulse on the next frame. Consumed
+/// by [`draw_field`] when it draws the matching leaf.
+pub(super) fn field_jump_target_id() -> egui::Id {
+    egui::Id::new("foundation_jump_to_field")
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1390,11 +1415,16 @@ pub(super) fn draw_foundation_block_control(
     add_contents: impl FnOnce(&mut Ui),
 ) -> BlockHeaderActions {
     let mut actions = BlockHeaderActions::default();
+    // Key collapse state on the index-stripped path so a nested block/array
+    // stays open/closed as the user pages through a parent element's indices
+    // (matching resolve_open / search-highlight, which also ignore indices).
+    // `path_salt` keeps its indexed form for the jump-to-block scroll below.
+    let canonical_path = strip_node_indices(path_salt);
     let id = ui.make_persistent_id((
         "foundation_block_control",
         view_scope,
         tag_key,
-        path_salt,
+        canonical_path.as_str(),
         depth,
         name,
     ));
@@ -1696,24 +1726,11 @@ pub(super) fn draw_foundation_block_control(
                 top: 8.0,
                 bottom: 8.0,
             })
-            .show(ui, |ui| {
-                if depth > 0 {
-                    egui::ScrollArea::vertical()
-                        .id_salt((
-                            "foundation_block_body",
-                            view_scope,
-                            tag_key,
-                            path_salt,
-                            depth,
-                        ))
-                        .max_height(420.0)
-                        .min_scrolled_height(160.0)
-                        .auto_shrink([false, false])
-                        .show(ui, add_contents);
-                } else {
-                    add_contents(ui);
-                }
-            });
+            // Render the body inline — no nested ScrollArea. The single outer
+            // ScrollArea in `draw_tag_fields_scroll` owns all scrolling, so a
+            // block element expands to its full height instead of growing an
+            // inner scrollbar (which also let cross-boundary scroll-to fail).
+            .show(ui, add_contents);
     });
 
     actions
@@ -4036,6 +4053,7 @@ mod tests {
             tsv_paste_request: &mut tsv_paste_request,
             block_clip_request: &mut block_clip_request,
             field_filter: None,
+            field_nav: None,
         };
         assertion(&edit);
     }

@@ -128,11 +128,10 @@ pub struct Baboon {
     show_browser_prefixes: bool,
     folders_before_tags: bool,
     double_click_to_open_tags: bool,
-    auto_restore_last_session: bool,
+    session_restore: SessionRestore,
     show_block_sizes: bool,
     scroll_to_cycle_dropdowns: bool,
     expert_mode: bool,
-    field_search_passive: bool,
     dark_mode: bool,
     ui_scale: f32,
     pending_ui_scale: f32,
@@ -216,6 +215,19 @@ pub struct Baboon {
     game_banner_textures: HashMap<String, egui::TextureHandle>,
     /// Clipboard for copy/paste of a block element between identical tags.
     block_clipboard: Option<BlockClipboard>,
+    /// A reference-jump awaiting its referrer tag to finish loading before we
+    /// can walk it to locate the exact referencing field. Set from the
+    /// "References to X" popup; drained by `apply_field_nav`.
+    pending_ref_jump: Option<PendingRefJump>,
+    /// Active reference-jump navigation: force ancestor blocks open and glow the
+    /// exact referencing field until its glow window expires.
+    field_nav: Option<FieldNav>,
+    /// Which referrer rows in the "References to X" popup are expanded to show
+    /// their per-occurrence list. Keyed by row index; reset per references query.
+    ref_jump_expanded: HashSet<usize>,
+    /// Lazily-computed occurrences per expanded referrer row. A present-but-empty
+    /// vec means "walked, none found"; absence means "not yet walked (loading)".
+    ref_jump_occurrences: HashMap<usize, Vec<RefOccurrence>>,
 }
 
 impl Baboon {
@@ -230,8 +242,8 @@ impl Baboon {
         let names = TagNameIndex::load_from_definitions(&locate_definitions_root());
         let (tx, rx) = mpsc::channel();
         let last_session = load_last_session().and_then(LastOpenedWindowsPrompt::from_session);
-        let (last_opened_windows, auto_restore_session) = if prefs.auto_restore_last_session {
-            match last_session {
+        let (last_opened_windows, auto_restore_session) = match prefs.session_restore {
+            SessionRestore::Always => match last_session {
                 Some(prompt) => {
                     let tags = prompt.checked_tags();
                     if tags.is_empty() {
@@ -244,9 +256,11 @@ impl Baboon {
                     }
                 }
                 None => (None, None),
-            }
-        } else {
-            (last_session, None)
+            },
+            // Show the prompt.
+            SessionRestore::Ask => (last_session, None),
+            // Start fresh — never reopen, never ask.
+            SessionRestore::Never => (None, None),
         };
         let mut app = Self {
             default_names: names.clone(),
@@ -275,11 +289,10 @@ impl Baboon {
             show_browser_prefixes: prefs.show_browser_prefixes,
             folders_before_tags: prefs.folders_before_tags,
             double_click_to_open_tags: prefs.double_click_to_open_tags,
-            auto_restore_last_session: prefs.auto_restore_last_session,
+            session_restore: prefs.session_restore,
             show_block_sizes: prefs.show_block_sizes,
             scroll_to_cycle_dropdowns: prefs.scroll_to_cycle_dropdowns,
             expert_mode: prefs.expert_mode,
-            field_search_passive: prefs.field_search_passive,
             dark_mode: prefs.dark_mode,
             ui_scale: prefs.ui_scale,
             pending_ui_scale: prefs.ui_scale,
@@ -317,6 +330,10 @@ impl Baboon {
             palette_last_dir: prefs.palette_last_dir.clone(),
             function_popup: None,
             query_results: None,
+            pending_ref_jump: None,
+            field_nav: None,
+            ref_jump_expanded: HashSet::new(),
+            ref_jump_occurrences: HashMap::new(),
             tag_diff: None,
             content_explorer: None,
             keywords: KeywordStore::default(),

@@ -5378,6 +5378,7 @@ pub(super) fn draw_shader_grid_row_readonly(
         tsv_paste_request: &mut tsv_paste_request,
         block_clip_request: &mut block_clip_request,
         field_filter: None,
+        field_nav: None,
     };
     draw_shader_grid_row(ui, row, depth, color_popup, function_popup, &mut ctx);
 }
