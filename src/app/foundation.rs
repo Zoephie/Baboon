@@ -2735,15 +2735,31 @@ pub(super) const REFERENCE_MISSING_COLOR: Color32 = Color32::from_rgb(216, 92, 9
 /// NOTE: this stats the filesystem per call. Reference rows are bounded by the
 /// visible fields of one tag, so the per-frame cost is small; R3 will replace
 /// this with a generation-invalidated cache shared with the bitmap-row checks.
+/// The on-disk file extension for a tag reference's group. Prefers the active
+/// game's definitions (the same source the display value uses), falling back to
+/// the engine's global table. The global table picks one extension per FOURCC
+/// with H3 priority, so it returns the wrong one for classic-only groups — e.g.
+/// `coll` -> "collision_model" instead of Halo CE's "model_collision_geometry".
+pub(super) fn reference_file_extension(
+    names: Option<&TagNameIndex>,
+    group_tag: u32,
+) -> Option<&str> {
+    names
+        .and_then(|names| names.name_for(group_tag))
+        .or_else(|| blam_tags::paths::group_tag_to_extension(group_tag))
+}
+
 pub(super) fn reference_target_missing(
     tags_root: Option<&Path>,
+    names: Option<&TagNameIndex>,
     group_tag: u32,
     rel_path: &str,
 ) -> bool {
     let Some(root) = tags_root else {
         return false;
     };
-    let Some(ext) = blam_tags::paths::group_tag_to_extension(group_tag) else {
+    // Resolving with the wrong extension flagged present classic tags missing.
+    let Some(ext) = reference_file_extension(names, group_tag) else {
         return false;
     };
     let mut rel = rel_path.replace('/', "\\");
@@ -2797,7 +2813,9 @@ pub(super) fn draw_foundation_tag_reference_row(
             // A non-empty reference whose target file is absent on disk.
             let missing = target
                 .as_ref()
-                .is_some_and(|(group, rel)| reference_target_missing(edit.tags_root, *group, rel));
+                .is_some_and(|(group, rel)| {
+                    reference_target_missing(edit.tags_root, edit.names, *group, rel)
+                });
             if editable {
                 let response = foundation_tag_reference_text_edit_cell(
                     ui,
@@ -3947,6 +3965,7 @@ mod tests {
         let edit = FieldEditContext {
             view_scope: "test",
             tag_key: "test",
+            names: None,
             group_tag: parse_group_tag("jpt!").unwrap(),
             root: None,
             game: Some("halo3_mcc"),
@@ -4047,6 +4066,28 @@ mod tests {
         assert_eq!(
             tag_reference_relative_path_with_extension(&outside, &tags_root).unwrap_err(),
             "Selected file must be inside the tags folder"
+        );
+    }
+
+    // Halo CE's `coll` group is `model_collision_geometry` on disk, but the
+    // engine's global table resolves the cross-game `coll` FOURCC with H3
+    // priority to `collision_model`. The missing-on-disk check must use the
+    // active game's definitions (as the display value does) so a present
+    // collision model isn't falsely flagged "⚠ missing".
+    #[test]
+    fn reference_extension_prefers_game_definitions_over_global_table() {
+        let coll = parse_group_tag("coll").unwrap();
+        // No game context -> engine's H3-priority global table (the old bug).
+        assert_eq!(
+            reference_file_extension(None, coll),
+            Some("collision_model")
+        );
+        // With the Halo CE definitions loaded, the per-game extension wins.
+        let names =
+            TagNameIndex::load_meta(&test_definition_path("haloce_mcc/_meta.json")).unwrap();
+        assert_eq!(
+            reference_file_extension(Some(&names), coll),
+            Some("model_collision_geometry")
         );
     }
 

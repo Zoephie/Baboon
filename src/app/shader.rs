@@ -5344,6 +5344,7 @@ pub(super) fn draw_shader_grid_row_readonly(
     let mut ctx = FieldEditContext {
         view_scope: "readonly",
         tag_key: "",
+        names: None,
         group_tag: 0,
         root: None,
         game: None,
@@ -6805,7 +6806,8 @@ pub(super) fn draw_shader_editable_value(
             }
             // Flag a referenced bitmap that is missing on disk (red text).
             let missing =
-                open_enabled && reference_target_missing(edit.tags_root, *group_tag, &open_ref);
+                open_enabled
+                    && reference_target_missing(edit.tags_root, edit.names, *group_tag, &open_ref);
             let text_color = if missing {
                 REFERENCE_MISSING_COLOR
             } else {

@@ -3507,6 +3507,7 @@ impl Baboon {
                     let mut edit_context = FieldEditContext {
                         view_scope: "floating",
                         tag_key: &key,
+                        names: Some(&self.names),
                         group_tag: entry.group_tag,
                         root: Some(doc.tag.root()),
                         game: self

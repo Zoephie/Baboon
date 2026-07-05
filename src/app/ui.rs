@@ -3252,6 +3252,7 @@ impl eframe::App for Baboon {
                         let mut edit_context = FieldEditContext {
                             view_scope: "docked",
                             tag_key: &selected_key,
+                            names: Some(&self.names),
                             group_tag: entry.group_tag,
                             root: Some(doc.tag.root()),
                             game: self
