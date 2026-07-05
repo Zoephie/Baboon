@@ -817,15 +817,9 @@ pub(super) struct FieldEditContext<'a> {
     pub(super) root: Option<blam_tags::TagStruct<'a>>,
     pub(super) game: Option<&'a str>,
     pub(super) definitions_root: Option<&'a Path>,
+    pub(super) names: Option<&'a TagNameIndex>,
     pub(super) definition_group_name: Option<&'a str>,
     pub(super) tags_root: Option<&'a Path>,
-    /// The active game's tag-name index (group FOURCC -> on-disk extension).
-    /// Used to resolve a reference's file extension per-game for the on-disk
-    /// "missing" check — the engine's global `group_tag_to_extension` resolves
-    /// cross-game FOURCC collisions with H3 priority and so returns the wrong
-    /// extension for classic-only groups (e.g. Halo CE `coll`). `None` in
-    /// read-only/test contexts, which then fall back to the global table.
-    pub(super) names: Option<&'a TagNameIndex>,
     pub(super) status: Option<&'a mut String>,
     pub(super) editable: bool,
     pub(super) show_block_sizes: bool,

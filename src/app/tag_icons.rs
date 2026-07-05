@@ -2,6 +2,9 @@ use super::*;
 
 pub(super) fn get_icon_svg(group_tag: &str) -> &'static str {
     match group_tag {
+        "actr" => include_str!("../../assets/icons/actor.svg"),
+        "actv" => include_str!("../../assets/icons/actor_variant.svg"),
+        "antr" => include_str!("../../assets/icons/model_animations.svg"),
         "jmad" => include_str!("../../assets/icons/animation_graph.svg"),
         "bipd" => include_str!("../../assets/icons/biped.svg"),
         "bitm" => include_str!("../../assets/icons/bitmap.svg"),
@@ -22,6 +25,7 @@ pub(super) fn get_icon_svg(group_tag: &str) -> &'static str {
         "lens" => include_str!("../../assets/icons/lens_flare.svg"),
         "ligh" => include_str!("../../assets/icons/light.svg"),
         "hlmt" => include_str!("../../assets/icons/model.svg"),
+        "mod2" => include_str!("../../assets/icons/gbxmodel.svg"),
         "phys" => include_str!("../../assets/icons/physics_model.svg"),
         "phmo" => include_str!("../../assets/icons/physics_model.svg"),
         "proj" => include_str!("../../assets/icons/projectile.svg"),
@@ -71,6 +75,10 @@ mod tests {
     #[test]
     fn tag_icon_lookup_uses_expected_group_mappings() {
         assert!(get_icon_svg("bipd").contains("<svg"));
+        assert!(get_icon_svg("actr").contains("<svg"));
+        assert!(get_icon_svg("actv").contains("<svg"));
+        assert!(get_icon_svg("antr").contains("<svg"));
+        assert!(get_icon_svg("mod2").contains("<svg"));
         assert!(get_icon_svg("shad").contains("<svg"));
         assert!(get_icon_svg("rmsh").contains("<svg"));
         assert!(get_icon_svg("char").contains("<svg"));

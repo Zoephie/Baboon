@@ -2232,6 +2232,26 @@ impl eframe::App for Baboon {
                             ui.close_menu();
                             self.begin_load_folder(ctx.clone());
                         }
+                        if ui.button("Load Monolithic blob_index.dat...").clicked() {
+                            ui.close_menu();
+                            self.begin_load_monolithic(ctx.clone());
+                        }
+                        ui.separator();
+                        let has_loaded_folder = self.loaded_tags_root().is_some();
+                        if ui
+                            .add_enabled(has_loaded_folder, egui::Button::new("Open Tags Folder"))
+                            .clicked()
+                        {
+                            ui.close_menu();
+                            self.open_loaded_tags_folder();
+                        }
+                        if ui
+                            .add_enabled(has_loaded_folder, egui::Button::new("Open Data Folder"))
+                            .clicked()
+                        {
+                            ui.close_menu();
+                            self.open_loaded_data_folder();
+                        }
                         ui.menu_button("Recent Folders", |ui| {
                             if self.recent_folders.is_empty() {
                                 ui.add_enabled(false, egui::Button::new("No recent folders"));
@@ -2251,10 +2271,6 @@ impl eframe::App for Baboon {
                                 }
                             }
                         });
-                        if ui.button("Load Monolithic blob_index.dat...").clicked() {
-                            ui.close_menu();
-                            self.begin_load_monolithic(ctx.clone());
-                        }
                         ui.separator();
                         if ui.button("Save Current Tag    Ctrl+S").clicked() {
                             ui.close_menu();
@@ -3252,7 +3268,6 @@ impl eframe::App for Baboon {
                         let mut edit_context = FieldEditContext {
                             view_scope: "docked",
                             tag_key: &selected_key,
-                            names: Some(&self.names),
                             group_tag: entry.group_tag,
                             root: Some(doc.tag.root()),
                             game: self
@@ -3267,6 +3282,7 @@ impl eframe::App for Baboon {
                                 } => Some(definitions_root.as_path()),
                                 _ => None,
                             }),
+                            names: Some(&self.names),
                             definition_group_name: self
                                 .names
                                 .name_for(entry.group_tag)
