@@ -66,6 +66,7 @@ impl Baboon {
                                 entries,
                                 annotations,
                                 note,
+                                ref_target: None,
                             });
                         }
                         Err(error) => {
@@ -2373,7 +2374,14 @@ impl Baboon {
         let Some(entry) = self.entry_for_key(key).cloned() else {
             return;
         };
+        // Fresh query — drop any expander state from a previous references popup.
+        self.ref_jump_expanded.clear();
+        self.ref_jump_occurrences.clear();
         let title = format!("References to {}", entry.display_path.replace('\\', "/"));
+        // The referenced tag's dependency path, so a clicked row can jump to the
+        // exact field that points here.
+        let ref_target = dependency_entry_reference_path(&entry, &self.names)
+            .map(|rel| (entry.group_tag, rel));
         match self.references_to_entry(&entry) {
             Some(entries) => {
                 let note = entries
@@ -2384,6 +2392,7 @@ impl Baboon {
                     entries,
                     annotations: Vec::new(),
                     note,
+                    ref_target,
                 });
             }
             None => {
@@ -2392,7 +2401,136 @@ impl Baboon {
                     entries: Vec::new(),
                     annotations: Vec::new(),
                     note: Some(self.reference_index_unavailable_note()),
+                    ref_target: None,
                 });
+            }
+        }
+    }
+
+    /// Once-per-frame driver for reference-jumps. Expires a finished glow, and —
+    /// when a pending jump's referrer tag has become the focused, parsed tab —
+    /// walks it for the exact field referencing the target and navigates there.
+    pub(super) fn apply_field_nav(&mut self, ctx: &egui::Context) {
+        let now = ctx.input(|input| input.time);
+        if let Some(nav) = &self.field_nav {
+            if now >= nav.glow_until {
+                self.field_nav = None;
+            } else {
+                // Keep frames coming so the glow expires on time even when idle.
+                ctx.request_repaint();
+            }
+        }
+        let Some(jump) = self.pending_ref_jump.clone() else {
+            return;
+        };
+        // Wait until the referrer is the focused tab and finished loading.
+        if self.selected_key.as_deref() != Some(jump.tag_key.as_str()) {
+            return;
+        }
+        let Some(doc) = self.parsed_tags.get(&jump.tag_key) else {
+            return; // still loading — retry next frame
+        };
+        let mut refs = Vec::new();
+        collect_tag_references(doc.tag.root(), "", &mut refs);
+        let target = normalize_ref(&jump.rel_path);
+        let hit = refs.into_iter().find(|reference| {
+            reference.group_tag == jump.group_tag && normalize_ref(&reference.rel_path) == target
+        });
+        self.pending_ref_jump = None;
+        match hit {
+            Some(reference) => self.navigate_to_field(ctx, &jump.tag_key, &reference.field_path),
+            None => {
+                self.status = format!(
+                    "Could not locate the referencing field in {}",
+                    jump.tag_key.replace('\\', "/")
+                );
+            }
+        }
+    }
+
+    /// Drive the editor to reveal `field_path` in the tag `tag_key`: select the
+    /// element index at every ancestor block, scroll the exact leaf into view,
+    /// and glow it briefly. Element selection and scroll targets are written once
+    /// via egui temp-data; the glow/force-open persist via `self.field_nav`.
+    pub(super) fn navigate_to_field(
+        &mut self,
+        ctx: &egui::Context,
+        tag_key: &str,
+        field_path: &str,
+    ) {
+        // Select the referenced element at each ancestor block level. The block's
+        // selection is keyed by view-scope; write both so it lands whether the tab
+        // is docked or floating.
+        for (block_path, index) in ancestor_block_indices(field_path) {
+            for scope in ["docked", "floating"] {
+                let id = egui::Id::new(("field_edit", scope, tag_key, ("block_sel", block_path.as_str())));
+                ctx.data_mut(|data| data.insert_temp(id, index));
+            }
+        }
+        // Scroll the exact leaf field into view next frame, plus the enclosing
+        // block header as a fallback for non-value leaves.
+        ctx.data_mut(|data| data.insert_temp(field_jump_target_id(), field_path.to_owned()));
+        if let Some(block) = parent_block_path(field_path) {
+            ctx.data_mut(|data| data.insert_temp(jump_target_id(), block));
+        }
+        self.field_nav = Some(FieldNav {
+            tag_key: tag_key.to_owned(),
+            field_path: field_path.to_owned(),
+            glow_until: ctx.input(|input| input.time) + 2.5,
+        });
+        ctx.request_repaint();
+    }
+
+    /// Populate `ref_jump_occurrences` for any expanded, uncached referrer row in
+    /// the current "References to X" popup. Parsed referrers are walked in place;
+    /// unparsed ones trigger a background load and stay uncached ("loading…").
+    pub(super) fn refresh_ref_jump_occurrences(&mut self, ctx: &egui::Context) {
+        let Some((group_tag, rel_path)) = self
+            .query_results
+            .as_ref()
+            .and_then(|results| results.ref_target.clone())
+        else {
+            return;
+        };
+        // Snapshot (row, key) for expanded-but-uncached rows before borrowing
+        // `parsed_tags` / triggering loads.
+        let pending: Vec<(usize, String)> = self
+            .query_results
+            .as_ref()
+            .map(|results| {
+                self.ref_jump_expanded
+                    .iter()
+                    .filter(|index| !self.ref_jump_occurrences.contains_key(index))
+                    .filter_map(|&index| {
+                        results
+                            .entries
+                            .get(index)
+                            .map(|entry| (index, entry.key.clone()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        let target = normalize_ref(&rel_path);
+        for (index, key) in pending {
+            match self.parsed_tags.get(&key) {
+                Some(doc) => {
+                    let mut refs = Vec::new();
+                    collect_tag_references(doc.tag.root(), "", &mut refs);
+                    let occurrences = refs
+                        .into_iter()
+                        .filter(|reference| {
+                            reference.group_tag == group_tag
+                                && normalize_ref(&reference.rel_path) == target
+                        })
+                        .map(|reference| RefOccurrence {
+                            label: occurrence_label(&reference.field_path),
+                            field_path: reference.field_path,
+                        })
+                        .collect();
+                    self.ref_jump_occurrences.insert(index, occurrences);
+                }
+                None => self.ensure_tag_loading(key.clone(), ctx.clone()),
             }
         }
     }
@@ -2421,6 +2559,7 @@ impl Baboon {
                     entries,
                     annotations: Vec::new(),
                     note,
+                    ref_target: None,
                 });
             }
             None => {
@@ -2429,6 +2568,7 @@ impl Baboon {
                     entries: Vec::new(),
                     annotations: Vec::new(),
                     note: Some(self.reference_index_unavailable_note()),
+                    ref_target: None,
                 });
             }
         }
@@ -2444,6 +2584,7 @@ impl Baboon {
                 entries: Vec::new(),
                 annotations: Vec::new(),
                 note: Some("No source loaded.".to_owned()),
+                ref_target: None,
             });
             return;
         };
@@ -2480,6 +2621,7 @@ impl Baboon {
             entries,
             annotations,
             note,
+            ref_target: None,
         });
     }
 
@@ -2520,6 +2662,7 @@ impl Baboon {
                 entries: Vec::new(),
                 annotations: Vec::new(),
                 note: Some("No source loaded.".to_owned()),
+                ref_target: None,
             });
             return;
         };
@@ -2557,6 +2700,7 @@ impl Baboon {
             entries,
             annotations,
             note,
+            ref_target: None,
         });
     }
 
@@ -2570,6 +2714,7 @@ impl Baboon {
                 entries: Vec::new(),
                 annotations: Vec::new(),
                 note: Some("No source loaded.".to_owned()),
+                ref_target: None,
             });
             return;
         };
@@ -2591,6 +2736,7 @@ impl Baboon {
             entries,
             annotations,
             note,
+            ref_target: None,
         });
     }
 
@@ -2654,6 +2800,7 @@ impl Baboon {
                 entries,
                 annotations,
                 note,
+                ref_target: None,
             });
             return;
         }
@@ -2918,6 +3065,7 @@ impl Baboon {
             entries,
             annotations: Vec::new(),
             note,
+            ref_target: None,
         });
     }
 
@@ -3022,11 +3170,10 @@ impl Baboon {
             show_browser_prefixes: self.show_browser_prefixes,
             folders_before_tags: self.folders_before_tags,
             double_click_to_open_tags: self.double_click_to_open_tags,
-            auto_restore_last_session: self.auto_restore_last_session,
+            session_restore: self.session_restore,
             show_block_sizes: self.show_block_sizes,
             scroll_to_cycle_dropdowns: self.scroll_to_cycle_dropdowns,
             expert_mode: self.expert_mode,
-            field_search_passive: self.field_search_passive,
             dark_mode: self.dark_mode,
             ui_scale: self.ui_scale,
             model_preview_size: self.model_preview_size,
@@ -3447,14 +3594,21 @@ impl Baboon {
                 self.last_opened_windows = None;
                 self.settings_open = true;
             }
-            LastOpenedWindowsAction::Cancel => {
+            LastOpenedWindowsAction::Cancel { remember } => {
+                if remember {
+                    self.session_restore = SessionRestore::Never;
+                }
                 self.last_opened_windows = None;
             }
             LastOpenedWindowsAction::Restore {
                 source_kind,
                 source_path,
                 tags,
+                remember,
             } => {
+                if remember {
+                    self.session_restore = SessionRestore::Always;
+                }
                 self.last_opened_windows = None;
                 self.begin_last_session_restore(source_kind, source_path, tags, ctx.clone());
             }
@@ -3534,7 +3688,6 @@ impl Baboon {
                     let field_filter = compute_pending_field_filter(
                         &doc.tag,
                         supports_field_search,
-                        self.field_search_passive,
                         &key,
                         &self.field_search,
                         &mut self.field_search_applied,
@@ -3600,6 +3753,7 @@ impl Baboon {
                         block_clipboard: self.block_clipboard.as_ref(),
                         block_clip_request: &mut block_clip_request,
                         field_filter: field_filter.as_ref(),
+                        field_nav: self.field_nav.as_ref(),
                     };
                     if is_bitmap_tag(&entry) {
                         let preview = self.bitmap_previews.entry(key.clone()).or_default();
@@ -3843,8 +3997,13 @@ enum LastOpenedWindowsAction {
         source_kind: LastSessionSourceKind,
         source_path: PathBuf,
         tags: Vec<LastSessionTag>,
+        /// "Don't ask again" was ticked — remember this as `Always`.
+        remember: bool,
     },
-    Cancel,
+    Cancel {
+        /// "Don't ask again" was ticked — remember this as `Never`.
+        remember: bool,
+    },
 }
 
 fn render_last_opened_windows_prompt(
@@ -3895,6 +4054,12 @@ fn render_last_opened_windows_prompt(
                 }
             });
             ui.add_space(6.0);
+            ui.checkbox(&mut prompt.dont_ask_again, "Don't ask again")
+                .on_hover_text(
+                    "Remember this choice: OK always reopens the last session, \
+                     Cancel never does. Change it later in File > Settings.",
+                );
+            ui.add_space(4.0);
             ui.horizontal_wrapped(|ui| {
                 ui.label(
                     RichText::new("Options for this window available in")
@@ -3911,7 +4076,9 @@ fn render_last_opened_windows_prompt(
                     .add(egui::Button::new("Cancel").min_size(Vec2::new(78.0, 24.0)))
                     .clicked()
                 {
-                    action = LastOpenedWindowsAction::Cancel;
+                    action = LastOpenedWindowsAction::Cancel {
+                        remember: prompt.dont_ask_again,
+                    };
                 }
                 if ui
                     .add(egui::Button::new("OK").min_size(Vec2::new(78.0, 24.0)))
@@ -3922,6 +4089,7 @@ fn render_last_opened_windows_prompt(
                         source_kind: prompt.source_kind,
                         source_path: prompt.source_path.clone(),
                         tags,
+                        remember: prompt.dont_ask_again,
                     };
                 }
             });
@@ -4259,6 +4427,46 @@ pub(super) fn open_terminal_log(path: &Path) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ancestor_block_indices_splits_indexed_path() {
+        // Nested blocks: each pair's path is the drawn `path_prefix` (parent
+        // indices kept, own index dropped).
+        assert_eq!(
+            ancestor_block_indices("custom references[3]/sounds[1]/melee sound"),
+            vec![
+                ("custom references".to_owned(), 3),
+                ("custom references[3]/sounds".to_owned(), 1),
+            ],
+        );
+        // A plain struct segment between blocks carries no selection.
+        assert_eq!(
+            ancestor_block_indices("weapon[2]/melee/damage sound"),
+            vec![("weapon".to_owned(), 2)],
+        );
+        // A top-level (unindexed) reference field has no ancestor blocks.
+        assert_eq!(
+            ancestor_block_indices("havok cleanup resources"),
+            Vec::<(String, usize)>::new(),
+        );
+    }
+
+    #[test]
+    fn occurrence_label_keeps_indices_and_cleans_names() {
+        assert_eq!(
+            occurrence_label("custom references[3]/melee sound"),
+            "custom references[3] › melee sound",
+        );
+        assert_eq!(occurrence_label("havok cleanup resources"), "havok cleanup resources");
+    }
+
+    #[test]
+    fn normalize_ref_matches_dependency_key_form() {
+        assert_eq!(
+            normalize_ref("Sound/Materials/Hard/Human_Weap_Melee"),
+            normalize_ref("sound\\materials\\hard\\human_weap_melee"),
+        );
+    }
 
     fn collect_terminal_output(input: &[u8]) -> Vec<(&'static str, String)> {
         let (tx, rx) = std::sync::mpsc::channel();
@@ -5049,6 +5257,57 @@ fn fix_tag_dependencies_in_tag(
 
     report.lines.push(report.status());
     report
+}
+
+/// Canonical form of a dependency reference path for comparison: backslash
+/// separators, lowercased. Mirrors [`dependency_key`]'s normalization so a
+/// target path and a `collect_tag_references` hit compare equal.
+fn normalize_ref(rel_path: &str) -> String {
+    rel_path.replace('/', "\\").to_ascii_lowercase()
+}
+
+/// Break an indexed field path into the `(block_path, element_index)` pairs for
+/// every block/array element on the way to the leaf, so each can be selected.
+/// e.g. `custom references[3]/sounds[1]/melee sound`
+///   → `[("custom references", 3), ("custom references[3]/sounds", 1)]`.
+/// The `block_path` for each pair is exactly the `path_prefix` that block is
+/// drawn with (parent indices included, its own index excluded).
+fn ancestor_block_indices(field_path: &str) -> Vec<(String, usize)> {
+    let mut out = Vec::new();
+    let mut acc = String::new();
+    for segment in field_path.split('/') {
+        let (name, index) = match segment.strip_suffix(']').and_then(|s| s.rsplit_once('[')) {
+            Some((name, idx)) => (name, idx.parse::<usize>().ok()),
+            None => (segment, None),
+        };
+        let node_path = if acc.is_empty() {
+            name.to_owned()
+        } else {
+            format!("{acc}/{name}")
+        };
+        match index {
+            Some(index) => {
+                out.push((node_path.clone(), index));
+                acc = format!("{node_path}[{index}]");
+            }
+            None => acc = node_path,
+        }
+    }
+    out
+}
+
+/// Human breadcrumb for a reference occurrence, keeping element indices so
+/// sibling elements are distinguishable:
+/// `custom references[3]/melee sound` → `custom references[3] › melee sound`.
+fn occurrence_label(field_path: &str) -> String {
+    field_path
+        .split('/')
+        .map(|segment| match segment.split_once('[') {
+            Some((name, rest)) => format!("{}[{rest}", clean_field_name(name)),
+            None => clean_field_name(segment).to_string(),
+        })
+        .collect::<Vec<_>>()
+        .join(" › ")
 }
 
 fn collect_tag_references(

@@ -87,10 +87,17 @@ pub(super) fn load_gui_prefs() -> GuiPrefs {
             .get("double_click_to_open_tags")
             .and_then(Value::as_bool)
             .unwrap_or(false),
-        auto_restore_last_session: value
-            .get("auto_restore_last_session")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
+        session_restore: value
+            .get("session_restore")
+            .and_then(Value::as_str)
+            .and_then(SessionRestore::from_str)
+            .unwrap_or_else(|| {
+                // Migrate the old boolean: true → Always, absent/false → Ask.
+                match value.get("auto_restore_last_session").and_then(Value::as_bool) {
+                    Some(true) => SessionRestore::Always,
+                    _ => SessionRestore::Ask,
+                }
+            }),
         show_block_sizes: value
             .get("show_block_sizes")
             .and_then(Value::as_bool)
@@ -101,10 +108,6 @@ pub(super) fn load_gui_prefs() -> GuiPrefs {
             .unwrap_or(true),
         expert_mode: value
             .get("expert_mode")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-        field_search_passive: value
-            .get("field_search_passive")
             .and_then(Value::as_bool)
             .unwrap_or(false),
         dark_mode: value
@@ -303,11 +306,10 @@ pub(super) fn save_gui_prefs(
         "show_browser_prefixes": prefs.show_browser_prefixes,
         "folders_before_tags": prefs.folders_before_tags,
         "double_click_to_open_tags": prefs.double_click_to_open_tags,
-        "auto_restore_last_session": prefs.auto_restore_last_session,
+        "session_restore": prefs.session_restore.as_str(),
         "show_block_sizes": prefs.show_block_sizes,
         "scroll_to_cycle_dropdowns": prefs.scroll_to_cycle_dropdowns,
         "expert_mode": prefs.expert_mode,
-        "field_search_passive": prefs.field_search_passive,
         "dark_mode": prefs.dark_mode,
         "ui_scale": prefs.ui_scale,
         "model_preview_size": prefs.model_preview_size,

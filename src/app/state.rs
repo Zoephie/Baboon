@@ -203,6 +203,39 @@ pub(super) struct TagQueryResults {
     pub(super) annotations: Vec<String>,
     /// Optional explanatory note (e.g. when the reference index is unavailable).
     pub(super) note: Option<String>,
+    /// For a "References to X" query: the referenced tag's `(group_tag, rel_path)`
+    /// so a clicked row can jump to the exact referencing field. `None` for other
+    /// query kinds (unreferenced, map-id, …), which only open the tag.
+    pub(super) ref_target: Option<(u32, String)>,
+}
+
+/// One place a referrer tag points at the "References to X" target, shown in the
+/// popup's per-referrer expander. `field_path` is the exact indexed path handed
+/// to `navigate_to_field`; `label` is its human breadcrumb.
+pub(super) struct RefOccurrence {
+    pub(super) field_path: String,
+    pub(super) label: String,
+}
+
+/// A reference-jump awaiting its referrer tag to finish loading. Once that tag
+/// is the focused tab and parsed, the controller walks it for the exact field
+/// referencing `(group_tag, rel_path)` and hands off to a [`FieldNav`].
+#[derive(Clone)]
+pub(super) struct PendingRefJump {
+    pub(super) tag_key: String,
+    pub(super) group_tag: u32,
+    pub(super) rel_path: String,
+}
+
+/// Active "jump to a referencing field" navigation: force the target field's
+/// ancestor blocks open and glow the field until `glow_until` (egui time,
+/// seconds). Element selection along the path and the scroll target are set once
+/// via egui temp-data when the nav is created.
+pub(super) struct FieldNav {
+    pub(super) tag_key: String,
+    /// Exact indexed field path, e.g. `custom references[3]/sounds[1]/melee sound`.
+    pub(super) field_path: String,
+    pub(super) glow_until: f64,
 }
 
 /// Drag-and-drop payload carried when dragging a tag from the browser onto a
@@ -287,6 +320,36 @@ pub(super) enum SettingsTab {
     Tools,
 }
 
+/// What Baboon does with the previous session's open windows on startup.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(super) enum SessionRestore {
+    /// Ask which windows to reopen (shows the "Last Opened Windows" prompt).
+    Ask,
+    /// Silently reopen the last session.
+    Always,
+    /// Start fresh — never reopen and never ask.
+    Never,
+}
+
+impl SessionRestore {
+    pub(super) fn as_str(self) -> &'static str {
+        match self {
+            SessionRestore::Ask => "ask",
+            SessionRestore::Always => "always",
+            SessionRestore::Never => "never",
+        }
+    }
+
+    pub(super) fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "ask" => Some(SessionRestore::Ask),
+            "always" => Some(SessionRestore::Always),
+            "never" => Some(SessionRestore::Never),
+            _ => None,
+        }
+    }
+}
+
 /// Memoized search results for the tag browser.
 ///
 /// Filtering the full tag set (100k+ entries) and lowercasing each name is far
@@ -357,7 +420,7 @@ pub(super) struct GuiPrefs {
     pub(super) show_browser_prefixes: bool,
     pub(super) folders_before_tags: bool,
     pub(super) double_click_to_open_tags: bool,
-    pub(super) auto_restore_last_session: bool,
+    pub(super) session_restore: SessionRestore,
     pub(super) show_block_sizes: bool,
     pub(super) scroll_to_cycle_dropdowns: bool,
     pub(super) expert_mode: bool,
@@ -365,8 +428,6 @@ pub(super) struct GuiPrefs {
     pub(super) ui_scale: f32,
     pub(super) model_preview_size: f32,
     pub(super) blender_path: Option<PathBuf>,
-    /// Field search: passive (highlight matches) vs active (collapse to matches).
-    pub(super) field_search_passive: bool,
     pub(super) ek_folder_aliases: Vec<EkFolderAlias>,
     pub(super) tool_commands_window_pos: Option<egui::Pos2>,
     pub(super) tool_commands_window_size: Option<Vec2>,
@@ -489,6 +550,8 @@ pub(super) struct LastOpenedWindowsPrompt {
     pub(super) source_path: PathBuf,
     pub(super) source_available: bool,
     pub(super) entries: Vec<LastOpenedWindowEntry>,
+    /// "Don't ask again": on OK, remember as Always; on Cancel, as Never.
+    pub(super) dont_ask_again: bool,
 }
 
 impl LastOpenedWindowsPrompt {
@@ -530,6 +593,7 @@ impl LastOpenedWindowsPrompt {
             source_path: session.source_path,
             source_available,
             entries,
+            dont_ask_again: false,
         })
     }
 
@@ -881,6 +945,9 @@ pub(super) struct FieldEditContext<'a> {
     /// rest closed, or restored to defaults when the query is cleared), then
     /// later frames leave `None` so the user can expand/collapse freely again.
     pub(super) field_filter: Option<&'a FieldFilterAction>,
+    /// Active reference-jump navigation. When set for this tag, its target
+    /// field's ancestor blocks are force-opened and the field is glowed.
+    pub(super) field_nav: Option<&'a FieldNav>,
 }
 
 impl FieldEditContext<'_> {
@@ -893,42 +960,82 @@ impl FieldEditContext<'_> {
     /// stored state alone" (no filter applied this frame); `Some(open)` forces
     /// it this frame.
     pub(super) fn resolve_open(&self, node_path: &str, default_open: bool) -> Option<bool> {
+        // A reference-jump forces every ancestor of its target field open so the
+        // field can be scrolled into view. Takes precedence over the search filter.
+        if let Some(nav) = self.field_nav {
+            if nav.tag_key == self.tag_key
+                && path_is_ancestor(
+                    &strip_node_indices(node_path),
+                    &strip_node_indices(&nav.field_path),
+                )
+            {
+                return Some(true);
+            }
+        }
         match self.field_filter? {
             // Query cleared: snap every node back to its normal default.
             FieldFilterAction::RestoreDefaults => Some(default_open),
             FieldFilterAction::Apply(filter) => {
                 let canon = strip_node_indices(node_path);
-                // The implicit root group has no path — always keep it visible
-                // so the matched nodes inside it can be reached.
-                if canon.is_empty() || filter.open_paths.contains(&canon) {
+                // Every rendered container is on a match path (others are hidden
+                // by `field_visible`), so expand it to reveal the match in
+                // context. The implicit root group has no path — always open.
+                if canon.is_empty() || filter.visible_paths.contains(&canon) {
                     Some(true)
-                } else if filter.passive {
-                    // Passive (highlight) mode: open matches' ancestors but leave
-                    // everything else as the user left it — never force-collapse.
-                    None
                 } else {
-                    // Active mode: collapse everything that isn't on a match path.
                     Some(false)
                 }
             }
         }
     }
 
-    /// Whether `path`'s field should be highlighted as a search match. Only true
-    /// in passive (highlight) mode for fields whose own name matched the query.
-    pub(super) fn field_highlighted(&self, path: &str) -> bool {
-        matches!(
-            self.field_filter,
-            Some(FieldFilterAction::Apply(filter)) if filter.passive
-                && filter.highlight_paths.contains(&strip_node_indices(path))
-        )
+    /// Whether a "Search fields" filter is applied this frame — i.e. the editor
+    /// is hiding non-matches. Used to also suppress injected section/explanation
+    /// rows so no orphan headers remain.
+    pub(super) fn is_active_filter(&self) -> bool {
+        matches!(self.field_filter, Some(FieldFilterAction::Apply(_)))
     }
+
+    /// Whether `path`'s field should render at all. While a query is active only
+    /// matches, their ancestor containers, and name-matched containers' contents
+    /// are shown; everything else is hidden. Always visible with no query.
+    pub(super) fn field_visible(&self, path: &str) -> bool {
+        match self.field_filter {
+            Some(FieldFilterAction::Apply(filter)) => {
+                filter.visible_paths.contains(&strip_node_indices(path))
+            }
+            _ => true,
+        }
+    }
+
+    /// Whether the exact `indexed_path` field is the live reference-jump target
+    /// and still within its glow window — used to pulse the landed-on field.
+    pub(super) fn field_nav_glow(&self, indexed_path: &str, now: f64) -> bool {
+        self.field_nav.is_some_and(|nav| {
+            nav.tag_key == self.tag_key && nav.field_path == indexed_path && now < nav.glow_until
+        })
+    }
+}
+
+/// Whether `ancestor` is `target` itself or an ancestor of it, compared
+/// segment-wise so `"custom references"` is an ancestor of
+/// `"custom references/sounds"` but not of `"custom references extra"`. Both
+/// paths must already be index-stripped (see [`strip_node_indices`]).
+fn path_is_ancestor(ancestor: &str, target: &str) -> bool {
+    if ancestor.is_empty() {
+        return true;
+    }
+    target == ancestor
+        || (target.len() > ancestor.len()
+            && target.as_bytes()[ancestor.len()] == b'/'
+            && target.starts_with(ancestor))
 }
 
 /// What a "Search fields" change should do to the editor's collapse state on
 /// the frame it is applied.
 pub(super) enum FieldFilterAction {
-    /// Collapse to the matched nodes (+ ancestors); everything else closed.
+    /// Hide everything except matches and their ancestor containers; expand the
+    /// containers that remain.
     Apply(FieldFilter),
     /// Re-expand every node to its normal default (query was cleared).
     RestoreDefaults,
@@ -938,13 +1045,10 @@ pub(super) enum FieldFilterAction {
 /// canonical field paths with element indices (`[3]`) stripped, so they're
 /// independent of which block element happens to be selected.
 pub(super) struct FieldFilter {
-    pub(super) open_paths: std::collections::HashSet<String>,
-    /// Canonical paths of fields whose own name matched the query — tinted in
-    /// passive (highlight) mode. Empty/unused in active (collapse) mode.
-    pub(super) highlight_paths: std::collections::HashSet<String>,
-    /// Passive = highlight matches without collapsing the rest; active = collapse
-    /// to matches (the original behaviour).
-    pub(super) passive: bool,
+    /// Canonical paths of every field that should render while searching:
+    /// matches, their ancestor containers, and the contents of name-matched
+    /// containers. Fields absent from this set are hidden.
+    pub(super) visible_paths: std::collections::HashSet<String>,
 }
 
 #[derive(Clone)]
@@ -971,7 +1075,6 @@ impl Default for GuiPrefs {
             show_browser_prefixes: false,
             folders_before_tags: false,
             double_click_to_open_tags: false,
-            auto_restore_last_session: false,
             show_block_sizes: false,
             scroll_to_cycle_dropdowns: true,
             expert_mode: false,
@@ -979,7 +1082,7 @@ impl Default for GuiPrefs {
             ui_scale: DEFAULT_UI_SCALE,
             model_preview_size: DEFAULT_MODEL_PREVIEW_SIZE,
             blender_path: None,
-            field_search_passive: false,
+            session_restore: SessionRestore::Ask,
             ek_folder_aliases: Vec::new(),
             tool_commands_window_pos: None,
             tool_commands_window_size: None,

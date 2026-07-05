@@ -93,7 +93,11 @@ silently skipped.
 - **Field-value search** — search across tags' *field values* (not just names),
   run on a background worker against an in-memory field index and optionally
   scoped to a tag group; results open in a clickable window.
-- **Find references** — list every tag that references the current tag.
+- **Find references** — list every tag that references the current tag; click a
+  result to open it and **jump straight to the exact field** where the reference
+  lives (ancestor blocks expanded, the field scrolled into view and briefly
+  glowed). When a tag references the target in more than one place, an expander
+  under its row lists every occurrence, each individually clickable.
 - **Content Explorer** — a reference-graph navigator centred on one tag: who
   references it (parents) and what it references (children), with back/forward
   history and a filter box.
@@ -111,6 +115,8 @@ silently skipped.
   amber tint + ● marker when it has unsaved edits.
 - **Tear off** any tab into a floating, resizable window — and drag it back onto
   the rack (or click *dock*) to re-dock it.
+- **Right-click a tab** to reveal that tag in the browser tree, or to close all
+  tabs / all tabs but this one.
 - An LRU cache bounds how many parsed tags and tabs are kept in memory at once,
   trimming least-recently-used documents automatically.
 
@@ -134,8 +140,11 @@ pageable resources — with inline editing for loose little-endian tags:
   style **explanation blocks** inline.
 - **Undo / redo** — every edit (field, block, structural) is journaled;
   `Ctrl+Z` / `Ctrl+Y` and the Edit menu step through the history.
-- **Guerilla-style "Search fields"** — type a block or field name to collapse the
-  editor down to just the matching node(s) and their ancestors.
+- **Guerilla-style "Search fields"** — type a block or field name to filter the
+  editor down to just the matching fields and the blocks/structs/arrays that
+  contain them; everything else is hidden. Available on every field-tree tag,
+  including sound tags. Blocks and structs keep their expand state as you page
+  through a block's elements, and structs are expanded by default.
 - **Expert mode** toggle to reveal advanced/normally-hidden fields.
 - Monolithic-cache and big-endian tags are opened **read-only**; only
   little-endian loose tags can be saved back to disk.
@@ -297,6 +306,12 @@ Browser mode, prefix display, expert mode, dark/light theme, the Blender path,
 custom editing-kit folder names, recent folders, keyword and palette sidecars,
 and per-kit terminal state are persisted to `%APPDATA%\Baboon` and restored on
 launch.
+
+On launch Baboon can reopen the windows from your previous session. The startup
+behaviour is a three-way choice in *File → Settings* — **Ask** which windows to
+reopen (a prompt lists them), **Always** reopen automatically, or **Never** — and
+the reopen prompt itself carries a *Don't ask again* option (OK remembers
+*Always*, Cancel remembers *Never*).
 
 ---
 

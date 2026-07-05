@@ -232,12 +232,13 @@ impl Baboon {
             {
                 query.clear();
             }
-            ui.separator();
-            ui.checkbox(&mut self.field_search_passive, "Highlight")
-                .on_hover_text(
-                    "Passive: highlight matches and keep them open without \
-                     collapsing the rest. Off: collapse to matches only.",
-                );
+            ui.label(
+                RichText::new(
+                    "shows only matches and the blocks/structs that contain them",
+                )
+                .color(subtle_dark())
+                .small(),
+            );
         });
         ui.add_space(4.0);
     }
@@ -1005,12 +1006,19 @@ impl Baboon {
     }
 
     fn draw_query_results_window(&mut self, ctx: &egui::Context) {
+        // Walk any expanded-but-uncached referrer rows before we take the results
+        // (this reads `self.query_results`).
+        self.refresh_ref_jump_occurrences(ctx);
         let Some(results) = self.query_results.take() else {
             return;
         };
         let mut open = true;
         let mut to_open: Option<String> = None;
         let mut to_reveal: Option<String> = None;
+        let mut to_toggle: Vec<usize> = Vec::new();
+        let mut to_jump: Option<(String, String)> = None;
+        let expanded = &self.ref_jump_expanded;
+        let occurrences = &self.ref_jump_occurrences;
         egui::Window::new(&results.title)
             .id(egui::Id::new("tag_query_results"))
             .open(&mut open)
@@ -1041,6 +1049,9 @@ impl Baboon {
                         }
                     });
                     ui.separator();
+                    // A references popup lets each row expand to its per-occurrence
+                    // list; other query kinds render a plain clickable row.
+                    let expandable = results.ref_target.is_some();
                     egui::ScrollArea::vertical()
                         .max_height(460.0)
                         .show(ui, |ui| {
@@ -1050,12 +1061,35 @@ impl Baboon {
                                     Some(annotation) => format!("{annotation}  —  {path}"),
                                     None => path,
                                 };
-                                let row = ui
-                                    .add(
-                                        egui::Label::new(RichText::new(label).color(text_dark()))
+                                let is_expanded = expanded.contains(&index);
+                                let make_row = |ui: &mut egui::Ui| {
+                                    ui.add(
+                                        egui::Label::new(RichText::new(&label).color(text_dark()))
                                             .sense(Sense::click()),
                                     )
-                                    .on_hover_text("Click to open · right-click to reveal");
+                                    .on_hover_text(
+                                        "Click to jump to the first reference · right-click to reveal",
+                                    )
+                                };
+                                let row = if expandable {
+                                    ui.horizontal(|ui| {
+                                        let arrow = if is_expanded { "▼" } else { "▶" };
+                                        if ui
+                                            .add(
+                                                egui::Button::new(RichText::new(arrow).small())
+                                                    .frame(false),
+                                            )
+                                            .on_hover_text("Show every field that references this tag")
+                                            .clicked()
+                                        {
+                                            to_toggle.push(index);
+                                        }
+                                        make_row(ui)
+                                    })
+                                    .inner
+                                } else {
+                                    make_row(ui)
+                                };
                                 if row.clicked() {
                                     to_open = Some(entry.key.clone());
                                 }
@@ -1069,11 +1103,83 @@ impl Baboon {
                                         ui.close_menu();
                                     }
                                 });
+                                if expandable && is_expanded {
+                                    match occurrences.get(&index) {
+                                        Some(list) if !list.is_empty() => {
+                                            for occ in list {
+                                                ui.horizontal(|ui| {
+                                                    ui.add_space(22.0);
+                                                    if ui
+                                                        .add(
+                                                            egui::Label::new(
+                                                                RichText::new(format!("↳ {}", occ.label))
+                                                                    .color(subtle_dark()),
+                                                            )
+                                                            .sense(Sense::click()),
+                                                        )
+                                                        .on_hover_text("Jump to this field")
+                                                        .clicked()
+                                                    {
+                                                        to_jump = Some((
+                                                            entry.key.clone(),
+                                                            occ.field_path.clone(),
+                                                        ));
+                                                    }
+                                                });
+                                            }
+                                        }
+                                        Some(_) => {
+                                            ui.horizontal(|ui| {
+                                                ui.add_space(22.0);
+                                                ui.label(
+                                                    RichText::new("no direct field found")
+                                                        .italics()
+                                                        .color(subtle_dark())
+                                                        .small(),
+                                                );
+                                            });
+                                        }
+                                        None => {
+                                            ui.horizontal(|ui| {
+                                                ui.add_space(22.0);
+                                                ui.label(
+                                                    RichText::new("loading…")
+                                                        .italics()
+                                                        .color(subtle_dark())
+                                                        .small(),
+                                                );
+                                            });
+                                        }
+                                    }
+                                }
                             }
                         });
                 }
             });
+        for index in to_toggle {
+            if self.ref_jump_expanded.remove(&index) {
+                // Collapsed — drop the cache so a re-expand re-reads fresh.
+                self.ref_jump_occurrences.remove(&index);
+            } else {
+                self.ref_jump_expanded.insert(index);
+            }
+        }
+        if let Some((key, field_path)) = to_jump {
+            // The referrer is already loaded (we walked it for occurrences), so
+            // focus it and navigate to the exact field directly.
+            self.select_entry(key.clone(), ctx.clone());
+            self.navigate_to_field(ctx, &key, &field_path);
+        }
         if let Some(key) = to_open {
+            // For a "References to X" result, queue a jump to the exact field in
+            // the referrer that points at X (resolved once the tag loads).
+            if let Some((group_tag, rel_path)) = &results.ref_target {
+                self.pending_ref_jump = Some(PendingRefJump {
+                    tag_key: key.clone(),
+                    group_tag: *group_tag,
+                    rel_path: rel_path.clone(),
+                });
+            }
             self.select_entry(key, ctx.clone());
         }
         if let Some(key) = to_reveal {
@@ -1132,9 +1238,24 @@ impl Baboon {
     fn draw_settings_startup_tab(&mut self, ui: &mut Ui) {
         ui.label(RichText::new("Startup").color(text_dark()).strong());
         ui.add_space(4.0);
-        ui.checkbox(
-            &mut self.auto_restore_last_session,
-            "Automatically reopen last session on startup",
+        ui.label(
+            RichText::new("When reopening Baboon with a previous session:").color(text_dark()),
+        );
+        ui.add_space(2.0);
+        ui.radio_value(
+            &mut self.session_restore,
+            SessionRestore::Ask,
+            "Ask which windows to reopen",
+        );
+        ui.radio_value(
+            &mut self.session_restore,
+            SessionRestore::Always,
+            "Reopen the last session automatically",
+        );
+        ui.radio_value(
+            &mut self.session_restore,
+            SessionRestore::Never,
+            "Start fresh (never reopen)",
         );
     }
 
@@ -3048,6 +3169,7 @@ impl eframe::App for Baboon {
                     let mut pop_key = None;
                     let mut close_all = false;
                     let mut close_all_but = None;
+                    let mut reveal_key = None;
                     let mut rack_rect = None;
                     if self.open_tabs.is_empty() {
                         let response = ui.label(
@@ -3171,6 +3293,11 @@ impl eframe::App for Baboon {
                                                     close_key = Some(key.clone());
                                                 }
                                                 label_response.context_menu(|ui| {
+                                                    if ui.button("Reveal in browser").clicked() {
+                                                        reveal_key = Some(key.clone());
+                                                        ui.close_menu();
+                                                    }
+                                                    ui.separator();
                                                     if ui.button("Close all").clicked() {
                                                         close_all = true;
                                                         ui.close_menu();
@@ -3222,6 +3349,9 @@ impl eframe::App for Baboon {
                     } else if let Some(key) = pop_key {
                         self.pop_tab(&key);
                     }
+                    if let Some(key) = reveal_key {
+                        self.reveal_in_browser(&key);
+                    }
                     self.tab_rack_rect = rack_rect;
                     ui.add_space(6.0);
                 } else {
@@ -3259,7 +3389,6 @@ impl eframe::App for Baboon {
                         let field_filter = compute_pending_field_filter(
                             &doc.tag,
                             supports_field_search,
-                            self.field_search_passive,
                             &selected_key,
                             &self.field_search,
                             &mut self.field_search_applied,
@@ -3320,6 +3449,7 @@ impl eframe::App for Baboon {
                             block_clipboard: self.block_clipboard.as_ref(),
                             block_clip_request: &mut block_clip_request,
                             field_filter: field_filter.as_ref(),
+                            field_nav: self.field_nav.as_ref(),
                         };
                         if is_bitmap_tag(&entry) {
                             let preview = self
@@ -3545,6 +3675,7 @@ impl eframe::App for Baboon {
         self.handle_save_changes_prompt(ctx);
         self.handle_last_opened_windows_prompt(ctx);
         self.process_pending_open(ctx);
+        self.apply_field_nav(ctx);
         // Drain queued sound-player actions: resolve the permutation against the
         // FMOD banks, decode (cached), and play/stop. Runs every frame so voices
         // are reaped even when idle; the tags root is only cloned when acting.
