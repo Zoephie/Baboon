@@ -3194,27 +3194,56 @@ impl Baboon {
         }
         self.status = "Building reference index…".to_owned();
         thread::spawn(move || {
-            let mut index = ReverseDependencyIndex::default();
             let total = entries.len();
             let _ = tx.send(WorkerMessage::ReferenceIndexProgress {
                 generation,
                 processed: 0,
                 total,
             });
-            for (i, entry) in entries.iter().enumerate() {
-                if let Ok(deps) = read_entry_dependencies(&tag_source, entry) {
-                    index.set_tag_dependencies(entry.key.clone(), deps);
+            let worker_count = std::thread::available_parallelism()
+                .map(|count| count.get())
+                .unwrap_or(1)
+                .clamp(1, total.max(1));
+            let chunk_size = total.div_ceil(worker_count).max(1);
+            let processed = std::sync::atomic::AtomicUsize::new(0);
+
+            let mut index = ReverseDependencyIndex::default();
+            std::thread::scope(|scope| {
+                let mut handles = Vec::new();
+                for chunk in entries.chunks(chunk_size) {
+                    let tag_source = &tag_source;
+                    let progress_tx = tx.clone();
+                    let progress_ctx = ctx.clone();
+                    let processed = &processed;
+                    handles.push(scope.spawn(move || {
+                        let mut chunk_results = Vec::new();
+                        for entry in chunk {
+                            if let Ok(deps) = read_entry_dependencies(tag_source, entry) {
+                                chunk_results.push((entry.key.clone(), deps));
+                            }
+                            let processed_now =
+                                processed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                            if processed_now == total || processed_now % 32 == 0 {
+                                let _ = progress_tx.send(WorkerMessage::ReferenceIndexProgress {
+                                    generation,
+                                    processed: processed_now,
+                                    total,
+                                });
+                                progress_ctx.request_repaint();
+                            }
+                        }
+                        chunk_results
+                    }));
                 }
-                let processed = i + 1;
-                if processed == total || processed % 32 == 0 {
-                    let _ = tx.send(WorkerMessage::ReferenceIndexProgress {
-                        generation,
-                        processed,
-                        total,
-                    });
-                    ctx.request_repaint();
+
+                for handle in handles {
+                    if let Ok(chunk_results) = handle.join() {
+                        for (key, deps) in chunk_results {
+                            index.set_tag_dependencies(key, deps);
+                        }
+                    }
                 }
-            }
+            });
             let _ = tx.send(WorkerMessage::ReverseDependenciesBuilt { generation, index });
             ctx.request_repaint();
         });
