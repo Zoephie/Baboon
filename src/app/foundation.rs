@@ -1766,7 +1766,13 @@ pub(super) fn combo_box_with_scroll<R>(
     combo: egui::ComboBox,
     add_contents: impl FnOnce(&mut Ui) -> R,
 ) -> (egui::InnerResponse<Option<R>>, Option<i32>) {
-    let response = combo.show_ui(ui, add_contents);
+    let response = ui
+        .scope(|ui| {
+            ui.spacing_mut().interact_size.y = 20.0;
+            ui.spacing_mut().button_padding.y = 2.0;
+            combo.show_ui(ui, add_contents)
+        })
+        .inner;
     let popup_open = response.inner.is_some();
     let delta = dropdown_wheel_delta(ui, &response.response, popup_open);
     (response, delta)
@@ -3655,6 +3661,7 @@ pub(super) fn foundation_text_edit_cell(
                     .id(id)
                     .font(TextStyle::Monospace)
                     .text_color(text_dark())
+                    .vertical_align(egui::Align::Center)
                     .margin(Vec2::new(4.0, 2.0)),
             )
         })
