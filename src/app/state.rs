@@ -17,7 +17,34 @@ pub(super) enum WorkerMessage {
     FolderRefactorProgress(FolderRefactorProgress),
     FolderRefactorFinished(Result<FolderRefactorFinished, String>),
     // Full recursive entry scan finished for a loose-folder source.
-    AllEntriesScanned(Result<Vec<TagEntry>, String>),
+    AllEntriesScanned {
+        generation: u64,
+        result: Result<Vec<TagEntry>, String>,
+    },
+    // Full recursive entry scan progress for a loose-folder source.
+    EntryIndexScanProgress {
+        generation: u64,
+        processed: usize,
+        total: usize,
+        matched: usize,
+    },
+    // Reverse-dependency reference index progress.
+    ReferenceIndexProgress {
+        generation: u64,
+        processed: usize,
+        total: usize,
+    },
+    // Incremental metadata-backed index refresh finished for a loose-folder source.
+    EntryIndexRefreshed {
+        generation: u64,
+        result: Result<EntryIndexRefresh, String>,
+    },
+    // Entry index cache save finished after a full scan or incremental refresh.
+    EntryIndexSaved {
+        generation: u64,
+        path: std::path::PathBuf,
+        result: Result<(), String>,
+    },
     // One line of streamed terminal output.
     TerminalLine(String),
     // Non-fatal terminal log failure.
@@ -319,6 +346,21 @@ pub(super) enum SettingsTab {
     EditingKitAliases,
     Appearance,
     Tools,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct EntryIndexProgressState {
+    pub(super) label: String,
+    pub(super) processed: usize,
+    pub(super) total: usize,
+    pub(super) matched: usize,
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct ReferenceIndexProgressState {
+    pub(super) label: String,
+    pub(super) processed: usize,
+    pub(super) total: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

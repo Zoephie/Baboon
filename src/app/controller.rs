@@ -3,6 +3,7 @@ use anyhow::Context as _;
 
 const TERMINAL_VISIBLE_LINE_LIMIT: usize = 20_000;
 const TERMINAL_VISIBLE_LINE_TRIM_TARGET: usize = 18_000;
+const ENTRY_INDEX_REFRESH_INTERVAL_SECS: f64 = 30.0;
 
 impl Baboon {
     fn push_terminal_line(&mut self, line: String) {
@@ -85,6 +86,10 @@ impl Baboon {
                     if generation != self.source_generation {
                         continue;
                     }
+                    self.reference_index_progress = None;
+                    let paired_entry_index_build = self.building_reference_for_entry_index;
+                    self.building_reference_for_entry_index = false;
+                    self.show_entry_index_wait_notice = false;
                     if let Some(source) = self.source.as_mut() {
                         let n = index.len();
                         // Persist so the next launch skips the rebuild entirely.
@@ -102,8 +107,26 @@ impl Baboon {
                             });
                         }
                         source.reverse_dependencies = Some(index);
-                        self.status = format!("Reference index complete: {n} tags");
+                        self.status = if paired_entry_index_build {
+                            format!("Tag and reference indexes complete: {n} tags")
+                        } else {
+                            format!("Reference index complete: {n} tags")
+                        };
                     }
+                }
+                WorkerMessage::ReferenceIndexProgress {
+                    generation,
+                    processed,
+                    total,
+                } => {
+                    if generation != self.source_generation || !self.building_reverse_dependencies {
+                        continue;
+                    }
+                    if let Some(progress) = self.reference_index_progress.as_mut() {
+                        progress.processed = processed;
+                        progress.total = total;
+                    }
+                    ctx.request_repaint();
                 }
                 WorkerMessage::SourceLoaded {
                     result: Ok(mut loaded),
@@ -154,6 +177,28 @@ impl Baboon {
                     self.source = Some(loaded);
                     // New entry universe — invalidate any cached search results.
                     self.source_generation = self.source_generation.wrapping_add(1);
+                    self.refreshing_entry_index = false;
+                    self.building_reverse_dependencies = false;
+                    self.building_reference_for_entry_index = false;
+                    self.reference_index_progress = None;
+                    self.next_entry_index_refresh_at = 0.0;
+                    let loose_folder_source = self.source.as_ref().is_some_and(|source| {
+                        source.game.is_some()
+                            && matches!(source.source, TagSource::LooseFolder { .. })
+                    });
+                    let has_cached_entries = self
+                        .source
+                        .as_ref()
+                        .is_some_and(|source| !source.all_entries.is_empty());
+                    if loose_folder_source {
+                        if has_cached_entries {
+                            self.begin_refresh_entry_index(ctx.clone());
+                        } else {
+                            self.begin_scan_all_entries(ctx.clone());
+                        }
+                    } else {
+                        self.schedule_next_entry_index_refresh(ctx);
+                    }
                     self.finish_pending_session_restore(ctx.clone());
                 }
                 WorkerMessage::SourceLoaded {
@@ -284,18 +329,25 @@ impl Baboon {
                         }
                     }
                 }
-                WorkerMessage::AllEntriesScanned(result) => {
+                WorkerMessage::AllEntriesScanned { generation, result } => {
+                    if generation != self.source_generation {
+                        continue;
+                    }
                     self.scanning_entries = false;
+                    self.entry_index_progress = None;
                     match result {
                         Ok(scanned) => {
+                            let mut build_reference_index = false;
                             if let Some(source) = self.source.as_mut() {
                                 let n = scanned.len();
                                 source.group_tree = crate::source::build_group_tree(&scanned);
                                 source.all_entries = scanned;
-                                // The full index just landed — cached search
-                                // results were built against the partial set.
-                                self.source_generation = self.source_generation.wrapping_add(1);
-                                self.status = format!("Index complete: {n} tags");
+                                source.reverse_dependencies = None;
+                                self.field_index.invalidate();
+                                self.status = format!(
+                                    "Tag index complete: {n} tags; building reference index..."
+                                );
+                                build_reference_index = true;
                                 // Persist the index in the background so the
                                 // next launch can skip the scan entirely.
                                 if let (Some(game), TagSource::LooseFolder { root, .. }) =
@@ -303,18 +355,86 @@ impl Baboon {
                                 {
                                     let root = root.clone();
                                     let entries = source.all_entries.clone();
+                                    let tx = self.tx.clone();
+                                    let ctx = ctx.clone();
+                                    let generation = self.source_generation;
+                                    let path = crate::source::index_path(&game);
                                     thread::spawn(move || {
-                                        if let Err(e) =
+                                        let result =
                                             crate::source::save_entry_index(&game, &root, &entries)
-                                        {
-                                            eprintln!("index save failed: {e}");
-                                        }
+                                                .map_err(|error| error.to_string());
+                                        let _ = tx.send(WorkerMessage::EntryIndexSaved {
+                                            generation,
+                                            path,
+                                            result,
+                                        });
+                                        ctx.request_repaint();
                                     });
                                 }
                             }
+                            self.schedule_next_entry_index_refresh(ctx);
+                            if build_reference_index {
+                                self.begin_build_reverse_dependencies_for_entry_index(ctx.clone());
+                            } else {
+                                self.show_entry_index_wait_notice = false;
+                            }
                         }
                         Err(e) => {
+                            self.show_entry_index_wait_notice = false;
                             self.status = format!("Scan failed: {e}");
+                        }
+                    }
+                }
+                WorkerMessage::EntryIndexScanProgress {
+                    generation,
+                    processed,
+                    total,
+                    matched,
+                } => {
+                    if generation != self.source_generation || !self.scanning_entries {
+                        continue;
+                    }
+                    if let Some(progress) = self.entry_index_progress.as_mut() {
+                        progress.processed = processed;
+                        progress.total = total;
+                        progress.matched = matched;
+                    }
+                    ctx.request_repaint();
+                }
+                WorkerMessage::EntryIndexRefreshed { generation, result } => {
+                    self.refreshing_entry_index = false;
+                    if generation != self.source_generation {
+                        continue;
+                    }
+                    self.schedule_next_entry_index_refresh(ctx);
+                    match result {
+                        Ok(refresh) => {
+                            if refresh.changed {
+                                self.apply_entry_index_refresh(refresh, ctx.clone());
+                            }
+                        }
+                        Err(error) => {
+                            self.status = format!("Index refresh failed: {error}");
+                        }
+                    }
+                }
+                WorkerMessage::EntryIndexSaved {
+                    generation,
+                    path,
+                    result,
+                } => {
+                    if generation != self.source_generation {
+                        continue;
+                    }
+                    match result {
+                        Ok(()) => {
+                            if !self.building_reference_for_entry_index {
+                                self.status = format!("Index saved: {}", path.display());
+                            }
+                        }
+                        Err(error) => {
+                            self.status =
+                                format!("Index save failed: {} ({error})", path.display());
                         }
                     }
                 }
@@ -738,6 +858,14 @@ impl Baboon {
     /// that Groups mode and search work without needing to expand every tree
     /// node first. No-op if already scanning or source is not a LooseFolder.
     pub(super) fn begin_scan_all_entries(&mut self, ctx: egui::Context) {
+        self.begin_scan_all_entries_with_label(ctx, "Indexing tags...");
+    }
+
+    pub(super) fn begin_scan_all_entries_with_label(
+        &mut self,
+        ctx: egui::Context,
+        label: impl Into<String>,
+    ) {
         if self.scanning_entries {
             return;
         }
@@ -750,14 +878,132 @@ impl Baboon {
         let root = root.clone();
         let names = source.names.clone();
         let tx = self.tx.clone();
+        self.refreshing_entry_index = false;
+        self.source_generation = self.source_generation.wrapping_add(1);
+        self.field_index.invalidate();
+        let generation = self.source_generation;
+        let label = label.into();
         self.scanning_entries = true;
-        self.status = "Indexing tags…".to_owned();
+        self.show_entry_index_wait_notice = true;
+        self.entry_index_progress = Some(EntryIndexProgressState {
+            label: label.clone(),
+            processed: 0,
+            total: 0,
+            matched: 0,
+        });
+        self.status = label;
         thread::spawn(move || {
-            let result = scan_folder_subtree_entries(&root, std::path::Path::new(""), &names)
-                .map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::AllEntriesScanned(result));
+            let progress_tx = tx.clone();
+            let progress_ctx = ctx.clone();
+            let result = scan_folder_subtree_entries_with_progress(
+                &root,
+                std::path::Path::new(""),
+                &names,
+                move |progress| {
+                    let _ = progress_tx.send(WorkerMessage::EntryIndexScanProgress {
+                        generation,
+                        processed: progress.processed,
+                        total: progress.total,
+                        matched: progress.matched,
+                    });
+                    progress_ctx.request_repaint();
+                },
+            )
+            .map_err(|e| e.to_string());
+            let _ = tx.send(WorkerMessage::AllEntriesScanned { generation, result });
             ctx.request_repaint();
         });
+    }
+
+    pub(super) fn maybe_refresh_entry_index(&mut self, ctx: egui::Context) {
+        if self.scanning_entries
+            || self.refreshing_entry_index
+            || self.building_reverse_dependencies
+        {
+            return;
+        }
+        let now = ctx.input(|input| input.time);
+        if now < self.next_entry_index_refresh_at {
+            return;
+        }
+        let should_refresh = self.source.as_ref().is_some_and(|source| {
+            source.game.is_some()
+                && !source.all_entries.is_empty()
+                && matches!(source.source, TagSource::LooseFolder { .. })
+        });
+        if should_refresh {
+            self.begin_refresh_entry_index(ctx);
+        } else {
+            self.schedule_next_entry_index_refresh(&ctx);
+        }
+    }
+
+    fn begin_refresh_entry_index(&mut self, ctx: egui::Context) {
+        if self.scanning_entries || self.refreshing_entry_index {
+            return;
+        }
+        let Some(source) = self.source.as_ref() else {
+            return;
+        };
+        let TagSource::LooseFolder { root, .. } = &source.source else {
+            return;
+        };
+        let Some(game) = source.game.clone() else {
+            return;
+        };
+        let root = root.clone();
+        let names = source.names.clone();
+        let tx = self.tx.clone();
+        let generation = self.source_generation;
+        self.refreshing_entry_index = true;
+        thread::spawn(move || {
+            let result =
+                crate::source::refresh_entry_index(&game, &root, &names).map_err(|e| e.to_string());
+            let _ = tx.send(WorkerMessage::EntryIndexRefreshed { generation, result });
+            ctx.request_repaint();
+        });
+    }
+
+    fn schedule_next_entry_index_refresh(&mut self, ctx: &egui::Context) {
+        let now = ctx.input(|input| input.time);
+        self.next_entry_index_refresh_at = now + ENTRY_INDEX_REFRESH_INTERVAL_SECS;
+    }
+
+    fn apply_entry_index_refresh(&mut self, refresh: EntryIndexRefresh, ctx: egui::Context) {
+        let Some(source) = self.source.as_mut() else {
+            return;
+        };
+        let n = refresh.entries.len();
+        source.group_tree = crate::source::build_group_tree(&refresh.entries);
+        source.all_entries = refresh.entries;
+        source.reverse_dependencies = None;
+        self.field_index.invalidate();
+        self.source_generation = self.source_generation.wrapping_add(1);
+        self.status = format!(
+            "Index updated: {n} tags ({} added, {} changed, {} removed)",
+            refresh.added, refresh.updated, refresh.removed
+        );
+
+        if let (Some(game), TagSource::LooseFolder { root, .. }) =
+            (source.game.clone(), &source.source)
+        {
+            let root = root.clone();
+            let entries = source.all_entries.clone();
+            let tx = self.tx.clone();
+            let ctx = ctx.clone();
+            let generation = self.source_generation;
+            let path = crate::source::index_path(&game);
+            thread::spawn(move || {
+                let result = crate::source::save_entry_index(&game, &root, &entries)
+                    .map_err(|error| error.to_string());
+                let _ = tx.send(WorkerMessage::EntryIndexSaved {
+                    generation,
+                    path,
+                    result,
+                });
+                ctx.request_repaint();
+            });
+        }
     }
 
     pub(super) fn begin_check_for_updates(&mut self, ctx: egui::Context) {
@@ -2547,9 +2793,7 @@ impl Baboon {
         if self.building_reverse_dependencies || self.scanning_entries {
             "Reference index is building — try again in a moment.".to_owned()
         } else {
-            "Reference index unavailable — it builds automatically for loose-folder sources, or \
-             run Tools → Build Reference Index."
-                .to_owned()
+            "Reference index unavailable — run Tools → Build Reference Index.".to_owned()
         }
     }
 
@@ -2893,7 +3137,20 @@ impl Baboon {
     /// Rebuild). Loose-folder sources only; the result is persisted to disk so
     /// future launches load it instantly.
     pub(super) fn begin_build_reverse_dependencies(&mut self, ctx: egui::Context, force: bool) {
-        if self.building_reverse_dependencies {
+        self.begin_build_reverse_dependencies_inner(ctx, force, false);
+    }
+
+    fn begin_build_reverse_dependencies_for_entry_index(&mut self, ctx: egui::Context) {
+        self.begin_build_reverse_dependencies_inner(ctx, false, true);
+    }
+
+    fn begin_build_reverse_dependencies_inner(
+        &mut self,
+        ctx: egui::Context,
+        force: bool,
+        paired_entry_index_build: bool,
+    ) {
+        if self.building_reverse_dependencies || self.scanning_entries {
             return;
         }
         let Some(source) = self.source.as_ref() else {
@@ -2916,19 +3173,46 @@ impl Baboon {
             if !self.scanning_entries {
                 self.status = "Indexing tags, then building reference index…".to_owned();
             }
-            self.begin_scan_all_entries(ctx);
+            self.begin_scan_all_entries_with_label(
+                ctx,
+                "Indexing tags, then building reference index...",
+            );
             return;
         }
         let tag_source = source.source.clone();
         let generation = self.source_generation;
         let tx = self.tx.clone();
         self.building_reverse_dependencies = true;
+        self.building_reference_for_entry_index = paired_entry_index_build;
+        self.reference_index_progress = Some(ReferenceIndexProgressState {
+            label: "Building reference index...".to_owned(),
+            processed: 0,
+            total: entries.len(),
+        });
+        if paired_entry_index_build {
+            self.show_entry_index_wait_notice = true;
+        }
         self.status = "Building reference index…".to_owned();
         thread::spawn(move || {
             let mut index = ReverseDependencyIndex::default();
-            for entry in &entries {
+            let total = entries.len();
+            let _ = tx.send(WorkerMessage::ReferenceIndexProgress {
+                generation,
+                processed: 0,
+                total,
+            });
+            for (i, entry) in entries.iter().enumerate() {
                 if let Ok(deps) = read_entry_dependencies(&tag_source, entry) {
                     index.set_tag_dependencies(entry.key.clone(), deps);
+                }
+                let processed = i + 1;
+                if processed == total || processed % 32 == 0 {
+                    let _ = tx.send(WorkerMessage::ReferenceIndexProgress {
+                        generation,
+                        processed,
+                        total,
+                    });
+                    ctx.request_repaint();
                 }
             }
             let _ = tx.send(WorkerMessage::ReverseDependenciesBuilt { generation, index });

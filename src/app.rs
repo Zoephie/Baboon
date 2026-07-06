@@ -33,10 +33,11 @@ use serde_json::{Value, json};
 
 use crate::format::{TagNameIndex, format_value, group_label};
 use crate::source::{
-    DependencyRef, EkFolderAlias, LoadedSourceData, ReverseDependencyIndex, SUPPORTED_EK_GAMES,
-    TagEntry, TagEntryLocation, TagSource, TagTree, TagTreeNode, load_folder,
+    DependencyRef, EkFolderAlias, EntryIndexRefresh, LoadedSourceData, ReverseDependencyIndex,
+    SUPPORTED_EK_GAMES, TagEntry, TagEntryLocation, TagSource, TagTree, TagTreeNode, load_folder,
     load_folder_node_entries, load_monolithic_blob_index, load_single_file, loose_file_entry,
-    read_entry, resolve_folder_root, scan_folder_subtree_entries, supported_ek_game_id,
+    read_entry, resolve_folder_root, scan_folder_subtree_entries,
+    scan_folder_subtree_entries_with_progress, supported_ek_game_id,
 };
 
 pub(super) const BABOON_GITHUB_URL: &str = "https://github.com/Zoephie/Baboon";
@@ -187,8 +188,15 @@ pub struct Baboon {
     folder_refactor: Option<FolderRefactorUiState>,
     /// True while a background full-scan of a loose-folder source is running.
     scanning_entries: bool,
+    entry_index_progress: Option<EntryIndexProgressState>,
+    show_entry_index_wait_notice: bool,
+    /// True while checking a cached loose-folder index for file changes.
+    refreshing_entry_index: bool,
+    next_entry_index_refresh_at: f64,
     /// True while a background reverse-dependency index build is running.
     building_reverse_dependencies: bool,
+    building_reference_for_entry_index: bool,
+    reference_index_progress: Option<ReferenceIndexProgressState>,
     terminal: TerminalState,
     terminal_open: bool,
     /// Working directory for terminal commands (game kit root, parent of tags/).
@@ -360,7 +368,13 @@ impl Baboon {
             status: "Ready".to_owned(),
             folder_refactor: None,
             scanning_entries: false,
+            entry_index_progress: None,
+            show_entry_index_wait_notice: false,
+            refreshing_entry_index: false,
+            next_entry_index_refresh_at: 0.0,
             building_reverse_dependencies: false,
+            building_reference_for_entry_index: false,
+            reference_index_progress: None,
             terminal: TerminalState {
                 input: String::new(),
                 lines: Vec::new(),

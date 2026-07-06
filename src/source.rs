@@ -1,10 +1,14 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
+use std::time::UNIX_EPOCH;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use blam_tags::classic::{ClassicHeader, read_classic_tag_file};
 use blam_tags::monolithic::MonolithicCache;
 use blam_tags::paths::group_tag_to_extension;
@@ -13,6 +17,13 @@ use serde_json;
 use walkdir::WalkDir;
 
 use crate::format::TagNameIndex;
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct EntryIndexScanProgress {
+    pub processed: usize,
+    pub total: usize,
+    pub matched: usize,
+}
 
 #[derive(Clone)]
 pub struct TagEntry {
@@ -78,6 +89,21 @@ pub struct LoadedSourceData {
     /// folder moves so future refactors can touch only dependent tags.
     pub reverse_dependencies: Option<ReverseDependencyIndex>,
     pub initial_tag: Option<(String, TagFile)>,
+}
+
+pub struct EntryIndexRefresh {
+    pub entries: Vec<TagEntry>,
+    pub changed: bool,
+    pub added: usize,
+    pub updated: usize,
+    pub removed: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct EntryFingerprint {
+    size: u64,
+    modified_secs: u64,
+    modified_nanos: u32,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -655,17 +681,86 @@ pub fn scan_folder_subtree_entries(
     rel_path: &Path,
     names: &TagNameIndex,
 ) -> Result<Vec<TagEntry>> {
+    scan_folder_subtree_entries_with_progress(root, rel_path, names, |_| {})
+}
+
+pub fn scan_folder_subtree_entries_with_progress<F>(
+    root: &Path,
+    rel_path: &Path,
+    names: &TagNameIndex,
+    progress: F,
+) -> Result<Vec<TagEntry>>
+where
+    F: Fn(EntryIndexScanProgress) + Sync,
+{
     let folder = root.join(rel_path);
-    let mut entries = Vec::new();
+    let mut paths = Vec::new();
     for item in WalkDir::new(&folder).follow_links(false) {
         let item = item?;
         if !item.file_type().is_file() {
             continue;
         }
-        let path = item.into_path();
-        let Some(group_tag) = probe_tag_group(&path)? else {
-            continue;
-        };
+        paths.push(item.into_path());
+    }
+
+    let total = paths.len();
+    progress(EntryIndexScanProgress {
+        processed: 0,
+        total,
+        matched: 0,
+    });
+
+    let worker_count = std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(1)
+        .clamp(1, paths.len().max(1));
+    let chunk_size = paths.len().div_ceil(worker_count).max(1);
+    let mut probed = Vec::new();
+    let processed = AtomicUsize::new(0);
+    let matched = AtomicUsize::new(0);
+
+    std::thread::scope(|scope| -> Result<()> {
+        let mut handles = Vec::new();
+        for chunk in paths.chunks(chunk_size) {
+            let progress = &progress;
+            let processed = &processed;
+            let matched = &matched;
+            handles.push(scope.spawn(move || -> Result<Vec<(PathBuf, u32)>> {
+                let mut chunk_entries = Vec::new();
+                for path in chunk {
+                    if let Some(group_tag) = probe_tag_group(path)? {
+                        matched.fetch_add(1, Ordering::Relaxed);
+                        chunk_entries.push((path.clone(), group_tag));
+                    }
+                    let processed_now = processed.fetch_add(1, Ordering::Relaxed) + 1;
+                    if processed_now == total || processed_now % 256 == 0 {
+                        progress(EntryIndexScanProgress {
+                            processed: processed_now,
+                            total,
+                            matched: matched.load(Ordering::Relaxed),
+                        });
+                    }
+                }
+                Ok(chunk_entries)
+            }));
+        }
+
+        for handle in handles {
+            let chunk_entries = handle
+                .join()
+                .map_err(|_| anyhow!("tag index worker panicked"))??;
+            probed.extend(chunk_entries);
+        }
+        Ok(())
+    })?;
+    progress(EntryIndexScanProgress {
+        processed: total,
+        total,
+        matched: matched.load(Ordering::Relaxed),
+    });
+
+    let mut entries = Vec::with_capacity(probed.len());
+    for (path, group_tag) in probed {
         let rel = path.strip_prefix(root).unwrap_or(path.as_path());
         let group_name = names.name_for(group_tag).map(str::to_owned);
         let display_path = display_path_with_friendly_extension(rel, group_tag, names);
@@ -727,6 +822,23 @@ fn legacy_index_path(game: &str) -> PathBuf {
     app_cache_path(&format!("{game}_index.json"), "Genesis", "genesis")
 }
 
+fn cache_root_key(root: &Path) -> String {
+    let canonical = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let key = canonical.display().to_string();
+    #[cfg(windows)]
+    {
+        key.replace('/', "\\").to_ascii_lowercase()
+    }
+    #[cfg(not(windows))]
+    {
+        key
+    }
+}
+
+fn cache_root_str_key(root: &str) -> String {
+    cache_root_key(Path::new(root))
+}
+
 fn app_cache_path(filename: &str, windows_folder: &str, unix_folder: &str) -> PathBuf {
     if let Some(appdata) = std::env::var_os("APPDATA") {
         return PathBuf::from(appdata).join(windows_folder).join(filename);
@@ -752,16 +864,26 @@ pub fn save_entry_index(game: &str, root: &Path, entries: &[TagEntry]) -> Result
     let items: Vec<serde_json::Value> = entries
         .iter()
         .map(|e| {
+            let rel_path = entry_relative_path(root, e)
+                .map(|path| path_to_display(&path))
+                .unwrap_or_default();
+            let fingerprint =
+                entry_file_path(e).and_then(|path| file_fingerprint(path).ok().flatten());
             serde_json::json!({
+                "rel_path": rel_path,
                 "key": &e.key,
                 "display_path": &e.display_path,
                 "group_tag": e.group_tag,
                 "group_name": e.group_name,
+                "size": fingerprint.map(|fp| fp.size),
+                "modified_secs": fingerprint.map(|fp| fp.modified_secs),
+                "modified_nanos": fingerprint.map(|fp| fp.modified_nanos),
             })
         })
         .collect();
-    let text = serde_json::to_string(&serde_json::json!({
-        "root": root.display().to_string(),
+    let text = serde_json::to_string_pretty(&serde_json::json!({
+        "version": 2,
+        "root": cache_root_key(root),
         "entries": items,
     }))
     .context("serialize index")?;
@@ -773,44 +895,206 @@ pub fn save_entry_index(game: &str, root: &Path, entries: &[TagEntry]) -> Result
 /// it can't be parsed, or it was saved for a different `root` folder (the keys
 /// are absolute paths, so the index is only valid for its original root).
 pub fn load_entry_index(game: &str, root: &Path) -> Option<Vec<TagEntry>> {
+    let value = load_entry_index_value(game)?;
+    let (entries, _) = parse_entry_index(root, &value)?;
+    (!entries.is_empty()).then_some(entries)
+}
+
+pub fn refresh_entry_index(
+    game: &str,
+    root: &Path,
+    names: &TagNameIndex,
+) -> Result<EntryIndexRefresh> {
+    let value = load_entry_index_value(game);
+    let (cached_entries, cached_fingerprints) = value
+        .as_ref()
+        .and_then(|value| parse_entry_index(root, value))
+        .unwrap_or_default();
+    refresh_entry_index_from_cache(root, names, &cached_entries, &cached_fingerprints)
+}
+
+fn load_entry_index_value(game: &str) -> Option<serde_json::Value> {
     let text = std::fs::read_to_string(index_path(game))
         .or_else(|_| std::fs::read_to_string(legacy_index_path(game)))
         .ok()?;
-    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
-    // Reject an index saved for a different root folder.
+    serde_json::from_str(&text).ok()
+}
+
+fn parse_entry_index(
+    root: &Path,
+    value: &serde_json::Value,
+) -> Option<(Vec<TagEntry>, HashMap<PathBuf, EntryFingerprint>)> {
     let saved_root = value.get("root").and_then(|v| v.as_str())?;
-    if saved_root != root.display().to_string() {
+    if cache_root_str_key(saved_root) != cache_root_key(root) {
         return None;
     }
+
     let items = value.get("entries")?.as_array()?;
     let mut entries = Vec::with_capacity(items.len());
+    let mut fingerprints = HashMap::new();
     for item in items {
-        let key = item.get("key")?.as_str()?.to_owned();
-        let display_path = item.get("display_path")?.as_str()?.to_owned();
-        let group_tag = item.get("group_tag")?.as_u64()? as u32;
-        let group_name = item
-            .get("group_name")
-            .and_then(|v| v.as_str())
-            .map(str::to_owned);
-        // Reconstruct the file path from the key ("file:{absolute_path}").
-        let location = if let Some(abs) = key.strip_prefix("file:") {
-            TagEntryLocation::LooseFile(PathBuf::from(abs))
-        } else {
-            continue; // unknown location kind — skip
-        };
-        entries.push(TagEntry {
-            key,
-            display_path,
-            group_tag,
-            group_name,
-            location,
-        });
+        let entry = entry_from_index_item(item)?;
+        if let Some(rel_path) = index_item_relative_path(root, item, &entry)
+            && let Some(fingerprint) = fingerprint_from_index_item(item)
+        {
+            fingerprints.insert(normalize_rel_path(&rel_path), fingerprint);
+        }
+        entries.push(entry);
     }
-    if entries.is_empty() {
-        None
+    Some((entries, fingerprints))
+}
+
+fn entry_from_index_item(item: &serde_json::Value) -> Option<TagEntry> {
+    let key = item.get("key")?.as_str()?.to_owned();
+    let display_path = item.get("display_path")?.as_str()?.to_owned();
+    let group_tag = item.get("group_tag")?.as_u64()? as u32;
+    let group_name = item
+        .get("group_name")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned);
+    let location = if let Some(abs) = key.strip_prefix("file:") {
+        TagEntryLocation::LooseFile(PathBuf::from(abs))
     } else {
-        Some(entries)
+        return None;
+    };
+    Some(TagEntry {
+        key,
+        display_path,
+        group_tag,
+        group_name,
+        location,
+    })
+}
+
+fn fingerprint_from_index_item(item: &serde_json::Value) -> Option<EntryFingerprint> {
+    Some(EntryFingerprint {
+        size: item.get("size")?.as_u64()?,
+        modified_secs: item.get("modified_secs")?.as_u64()?,
+        modified_nanos: item.get("modified_nanos")?.as_u64()? as u32,
+    })
+}
+
+fn index_item_relative_path(
+    root: &Path,
+    item: &serde_json::Value,
+    entry: &TagEntry,
+) -> Option<PathBuf> {
+    item.get("rel_path")
+        .and_then(|value| value.as_str())
+        .filter(|rel| !rel.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| entry_relative_path(root, entry))
+}
+
+fn refresh_entry_index_from_cache(
+    root: &Path,
+    names: &TagNameIndex,
+    cached_entries: &[TagEntry],
+    cached_fingerprints: &HashMap<PathBuf, EntryFingerprint>,
+) -> Result<EntryIndexRefresh> {
+    let cached_by_rel = cached_entries
+        .iter()
+        .filter_map(|entry| {
+            Some((
+                normalize_rel_path(&entry_relative_path(root, entry)?),
+                entry.clone(),
+            ))
+        })
+        .collect::<HashMap<_, _>>();
+
+    let mut seen = HashSet::new();
+    let mut entries = Vec::new();
+    let mut added = 0;
+    let mut updated = 0;
+    for item in WalkDir::new(root).follow_links(false) {
+        let item = item?;
+        if !item.file_type().is_file() {
+            continue;
+        }
+        let path = item.into_path();
+        let rel = path
+            .strip_prefix(root)
+            .unwrap_or(path.as_path())
+            .to_path_buf();
+        let rel_key = normalize_rel_path(&rel);
+        seen.insert(rel_key.clone());
+        let fingerprint = file_fingerprint(&path)?;
+
+        if let (Some(cached), Some(current)) = (cached_by_rel.get(&rel_key), fingerprint.as_ref())
+            && cached_fingerprints
+                .get(&rel_key)
+                .is_some_and(|cached_fp| cached_fp == current)
+        {
+            entries.push(cached.clone());
+            continue;
+        }
+
+        if let Some(entry) = loose_file_entry(root, &path, names)? {
+            if cached_by_rel.contains_key(&rel_key) {
+                updated += 1;
+            } else {
+                added += 1;
+            }
+            entries.push(entry);
+        } else if cached_by_rel.contains_key(&rel_key) {
+            updated += 1;
+        }
     }
+
+    let removed = cached_by_rel
+        .keys()
+        .filter(|rel_path| !seen.contains(*rel_path))
+        .count();
+    entries.sort_by(|a, b| natural_key(&a.display_path).cmp(&natural_key(&b.display_path)));
+    let changed = added > 0
+        || updated > 0
+        || removed > 0
+        || entries.len() != cached_entries.len()
+        || entries
+            .iter()
+            .zip(cached_entries.iter())
+            .any(|(a, b)| a.key != b.key || a.group_tag != b.group_tag);
+
+    Ok(EntryIndexRefresh {
+        entries,
+        changed,
+        added,
+        updated,
+        removed,
+    })
+}
+
+fn entry_file_path(entry: &TagEntry) -> Option<&Path> {
+    match &entry.location {
+        TagEntryLocation::LooseFile(path) => Some(path.as_path()),
+        TagEntryLocation::Monolithic { .. } => None,
+    }
+}
+
+fn entry_relative_path(root: &Path, entry: &TagEntry) -> Option<PathBuf> {
+    entry_file_path(entry)?
+        .strip_prefix(root)
+        .ok()
+        .map(Path::to_path_buf)
+}
+
+fn normalize_rel_path(path: &Path) -> PathBuf {
+    PathBuf::from(path_to_display(path).to_ascii_lowercase())
+}
+
+fn file_fingerprint(path: &Path) -> Result<Option<EntryFingerprint>> {
+    let metadata = std::fs::metadata(path)?;
+    let Ok(modified) = metadata.modified() else {
+        return Ok(None);
+    };
+    let Ok(duration) = modified.duration_since(UNIX_EPOCH) else {
+        return Ok(None);
+    };
+    Ok(Some(EntryFingerprint {
+        size: metadata.len(),
+        modified_secs: duration.as_secs(),
+        modified_nanos: duration.subsec_nanos(),
+    }))
 }
 
 pub fn save_reverse_dependency_index(
@@ -841,9 +1125,9 @@ pub fn save_reverse_dependency_index(
             })
         })
         .collect::<Vec<_>>();
-    let text = serde_json::to_string(&serde_json::json!({
+    let text = serde_json::to_string_pretty(&serde_json::json!({
         "version": 1,
-        "root": root.display().to_string(),
+        "root": cache_root_key(root),
         "tags": tags,
     }))
     .context("serialize reverse dependency index")?;
@@ -858,7 +1142,7 @@ pub fn load_reverse_dependency_index(game: &str, root: &Path) -> Option<ReverseD
         return None;
     }
     let saved_root = value.get("root").and_then(|v| v.as_str())?;
-    if saved_root != root.display().to_string() {
+    if cache_root_str_key(saved_root) != cache_root_key(root) {
         return None;
     }
     let mut index = ReverseDependencyIndex::default();
@@ -1359,6 +1643,118 @@ mod tests {
         assert_eq!(entry.display_path, "objects/characters/brute/brute.shader");
         assert_eq!(entry.display_path, scanned[0].display_path);
         assert_eq!(entry.group_tag, scanned[0].group_tag);
+    }
+
+    fn unique_game(name: &str) -> String {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        format!("{name}_{stamp}")
+    }
+
+    fn remove_test_index(game: &str) {
+        let _ = fs::remove_file(index_path(game));
+        let _ = fs::remove_file(reverse_dependency_index_path(game));
+    }
+
+    fn write_fake_tag_with_padding(path: &Path, group: &[u8; 4], padding: usize) {
+        let mut bytes = vec![0u8; 64 + padding];
+        let group_tag = u32::from_be_bytes(*group);
+        bytes[48..52].copy_from_slice(&group_tag.to_le_bytes());
+        bytes[60..64].copy_from_slice(b"MALB");
+        fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn entry_index_refresh_reuses_unchanged_metadata() {
+        let root = temp_dir("index_refresh_unchanged");
+        let game = unique_game("index_refresh_unchanged");
+        fs::create_dir_all(root.join("objects")).unwrap();
+        write_fake_tag(&root.join("objects/a.model"), b"hlmt");
+        write_fake_tag(&root.join("objects/b.shader"), b"shdr");
+        let names = TagNameIndex::default();
+        let entries = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        save_entry_index(&game, &root, &entries).unwrap();
+
+        let refresh = refresh_entry_index(&game, &root, &names).unwrap();
+
+        remove_test_index(&game);
+        fs::remove_dir_all(&root).unwrap();
+
+        assert!(!refresh.changed);
+        assert_eq!(refresh.added, 0);
+        assert_eq!(refresh.updated, 0);
+        assert_eq!(refresh.removed, 0);
+        assert_eq!(refresh.entries.len(), 2);
+    }
+
+    #[test]
+    fn entry_index_refresh_reprobes_changed_files_and_drops_deleted_files() {
+        let root = temp_dir("index_refresh_changed");
+        let game = unique_game("index_refresh_changed");
+        fs::create_dir_all(root.join("objects")).unwrap();
+        let changed = root.join("objects/a.model");
+        let removed = root.join("objects/b.shader");
+        let added = root.join("objects/c.biped");
+        write_fake_tag(&changed, b"hlmt");
+        write_fake_tag(&removed, b"shdr");
+        let names = TagNameIndex::default();
+        let entries = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        save_entry_index(&game, &root, &entries).unwrap();
+
+        write_fake_tag_with_padding(&changed, b"bipd", 1);
+        fs::remove_file(&removed).unwrap();
+        write_fake_tag(&added, b"bipd");
+        let refresh = refresh_entry_index(&game, &root, &names).unwrap();
+
+        remove_test_index(&game);
+        fs::remove_dir_all(&root).unwrap();
+
+        assert!(refresh.changed);
+        assert_eq!(refresh.added, 1);
+        assert_eq!(refresh.updated, 1);
+        assert_eq!(refresh.removed, 1);
+        let paths = refresh
+            .entries
+            .iter()
+            .map(|entry| entry.display_path.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(paths, vec!["objects/a.biped", "objects/c.biped"]);
+    }
+
+    #[test]
+    fn load_entry_index_accepts_legacy_cache_without_metadata() {
+        let root = temp_dir("legacy_index");
+        let game = unique_game("legacy_index");
+        fs::create_dir_all(root.join("objects")).unwrap();
+        let path = root.join("objects/a.model");
+        write_fake_tag(&path, b"hlmt");
+        let text = serde_json::to_string(&serde_json::json!({
+            "root": root.display().to_string(),
+            "entries": [{
+                "key": format!("file:{}", path.display()),
+                "display_path": "objects/a.model",
+                "group_tag": u32::from_be_bytes(*b"hlmt"),
+                "group_name": null
+            }]
+        }))
+        .unwrap();
+        if let Some(parent) = index_path(&game).parent() {
+            fs::create_dir_all(parent).unwrap();
+        }
+        fs::write(index_path(&game), text).unwrap();
+
+        let entries = load_entry_index(&game, &root).unwrap();
+        let refresh = refresh_entry_index(&game, &root, &TagNameIndex::default()).unwrap();
+
+        remove_test_index(&game);
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(entries.len(), 1);
+        assert!(refresh.changed);
+        assert_eq!(refresh.updated, 1);
+        assert_eq!(refresh.entries.len(), 1);
     }
 
     #[test]

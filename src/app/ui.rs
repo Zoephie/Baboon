@@ -67,6 +67,40 @@ fn terminal_line_is_strong(severity: TerminalLineSeverity) -> bool {
     )
 }
 
+fn draw_index_progress_bar(ui: &mut Ui, width: f32, fraction: Option<f32>, text: &str) {
+    let size = egui::vec2(width, 18.0);
+    let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
+    let radius = 6.0;
+    let bg = if is_dark_mode() {
+        Color32::from_rgb(31, 31, 30)
+    } else {
+        Color32::from_rgb(215, 215, 210)
+    };
+    let fill = if is_dark_mode() {
+        Color32::from_rgb(69, 111, 132)
+    } else {
+        Color32::from_rgb(91, 146, 172)
+    };
+    ui.painter().rect_filled(rect, radius, bg);
+    if let Some(fraction) = fraction {
+        let fill_width = rect.width() * fraction.clamp(0.0, 1.0);
+        if fill_width > 0.0 {
+            let fill_rect = egui::Rect::from_min_max(
+                rect.left_top(),
+                egui::pos2(rect.left() + fill_width, rect.bottom()),
+            );
+            ui.painter().rect_filled(fill_rect, radius, fill);
+        }
+    }
+    ui.painter().text(
+        rect.center(),
+        egui::Align2::CENTER_CENTER,
+        text,
+        egui::TextStyle::Small.resolve(ui.style()),
+        text_dark(),
+    );
+}
+
 fn draw_game_banner_header(ui: &mut Ui, app: &mut Baboon, game: &str, path_label: &str) {
     let texture = app.game_banner_texture(ui.ctx(), game).cloned();
     Frame::none()
@@ -747,8 +781,7 @@ impl Baboon {
                         let note = if self.building_reverse_dependencies || self.scanning_entries {
                             "Reference index is building — reopen this in a moment."
                         } else {
-                            "Reference index unavailable — it builds automatically for \
-                             loose-folder sources, or run Tools → Build Reference Index."
+                            "Reference index unavailable — run Tools → Build Reference Index."
                         };
                         ui.label(RichText::new(note).color(subtle_dark()));
                     }
@@ -2464,6 +2497,7 @@ impl eframe::App for Baboon {
         self.process_worker_messages(ctx);
         ctx.set_zoom_factor(self.ui_scale);
         self.handle_pixels_per_point_change(ctx);
+        self.maybe_refresh_entry_index(ctx.clone());
         set_dark_mode(self.dark_mode);
         ctx.set_visuals(foundation_visuals());
         set_combo_scroll_cycle_enabled(ctx, self.scroll_to_cycle_dropdowns);
@@ -2629,8 +2663,13 @@ impl eframe::App for Baboon {
                             if let Some(s) = self.source.as_mut() {
                                 s.all_entries.clear();
                                 s.group_tree = crate::source::build_group_tree(&[]);
+                                s.reverse_dependencies = None;
                             }
-                            self.begin_scan_all_entries(ctx.clone());
+                            self.field_index.invalidate();
+                            self.begin_scan_all_entries_with_label(
+                                ctx.clone(),
+                                "Rebuilding index...",
+                            );
                         }
                         ui.separator();
                         if ui.button("Settings...").clicked() {
@@ -2847,7 +2886,46 @@ impl eframe::App for Baboon {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Status").strong());
                     ui.separator();
-                    ui.label(&self.status);
+                    if self.scanning_entries {
+                        let progress = self.entry_index_progress.as_ref();
+                        let label = progress
+                            .map(|progress| progress.label.as_str())
+                            .unwrap_or("Indexing tags...");
+                        ui.label(RichText::new(label).strong());
+                        if let Some(progress) = progress {
+                            let fraction = if progress.total == 0 {
+                                0.0
+                            } else {
+                                progress.processed as f32 / progress.total as f32
+                            };
+                            let text = if progress.total == 0 {
+                                "Discovering files...".to_owned()
+                            } else {
+                                format!(
+                                    "{} / {} files, {} tags",
+                                    progress.processed, progress.total, progress.matched
+                                )
+                            };
+                            draw_index_progress_bar(ui, 260.0, Some(fraction), &text);
+                        }
+                    } else if self.building_reverse_dependencies {
+                        let progress = self.reference_index_progress.as_ref();
+                        let label = progress
+                            .map(|progress| progress.label.as_str())
+                            .unwrap_or("Building reference index...");
+                        ui.label(RichText::new(label).strong());
+                        if let Some(progress) = progress {
+                            let fraction = if progress.total == 0 {
+                                0.0
+                            } else {
+                                progress.processed as f32 / progress.total as f32
+                            };
+                            let text = format!("{} / {} tags", progress.processed, progress.total);
+                            draw_index_progress_bar(ui, 260.0, Some(fraction), &text);
+                        }
+                    } else {
+                        ui.label(&self.status);
+                    }
                     if let Some(progress) = &self.folder_refactor {
                         ui.separator();
                         ui.label(RichText::new(&progress.label).strong());
@@ -2864,6 +2942,69 @@ impl eframe::App for Baboon {
                     }
                 });
             });
+
+        if self.show_entry_index_wait_notice
+            && (self.scanning_entries || self.building_reference_for_entry_index)
+        {
+            let mut open = self.show_entry_index_wait_notice;
+            let mut hide_notice = false;
+            egui::Window::new("Indexing")
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+                .open(&mut open)
+                .show(ctx, |ui| {
+                    ui.set_min_width(360.0);
+                    ui.label("Please wait until indexing is completed for best compatibility.");
+                    ui.add_space(8.0);
+                    if self.scanning_entries {
+                        let progress = self.entry_index_progress.as_ref();
+                        let label = progress
+                            .map(|progress| progress.label.as_str())
+                            .unwrap_or("Indexing tags...");
+                        ui.label(RichText::new(label).strong());
+                        if let Some(progress) = progress {
+                            let fraction = if progress.total == 0 {
+                                0.0
+                            } else {
+                                progress.processed as f32 / progress.total as f32
+                            };
+                            let text = if progress.total == 0 {
+                                "Discovering files...".to_owned()
+                            } else {
+                                format!(
+                                    "{} / {} files, {} tags",
+                                    progress.processed, progress.total, progress.matched
+                                )
+                            };
+                            draw_index_progress_bar(ui, 330.0, Some(fraction), &text);
+                        }
+                    } else if self.building_reference_for_entry_index {
+                        ui.label(RichText::new("Building reference index...").strong());
+                        if let Some(progress) = self.reference_index_progress.as_ref() {
+                            let fraction = if progress.total == 0 {
+                                0.0
+                            } else {
+                                progress.processed as f32 / progress.total as f32
+                            };
+                            let text = format!("{} / {} tags", progress.processed, progress.total);
+                            draw_index_progress_bar(ui, 330.0, Some(fraction), &text);
+                        } else {
+                            draw_index_progress_bar(
+                                ui,
+                                330.0,
+                                None,
+                                "Scanning tag dependencies...",
+                            );
+                        }
+                    }
+                    ui.add_space(8.0);
+                    if ui.button("Hide").clicked() {
+                        hide_notice = true;
+                    }
+                });
+            self.show_entry_index_wait_notice = open && !hide_notice;
+        }
 
         // Terminal panel — rendered AFTER status so it sits above it.
         if self.terminal_open {
@@ -3308,19 +3449,6 @@ impl eframe::App for Baboon {
                     // it must be called after the `source` borrow ends.
                     if need_scan {
                         self.begin_scan_all_entries(ctx.clone());
-                    }
-                    // Auto-build the reverse-dependency index so find-references
-                    // / unreferenced / Content Explorer work without first
-                    // running a move/rename. If the full entry list isn't in
-                    // yet this kicks the scan first, then builds when it lands.
-                    // Idempotent and self-gating (see the method + scan guard).
-                    if !self.building_reverse_dependencies
-                        && self.source.as_ref().is_some_and(|source| {
-                            matches!(source.source, TagSource::LooseFolder { .. })
-                                && source.reverse_dependencies.is_none()
-                        })
-                    {
-                        self.begin_build_reverse_dependencies(ctx.clone(), false);
                     }
                 } else {
                     ui.label("Use File to load a tag, folder, or monolithic cache.");
