@@ -158,6 +158,9 @@ pub struct Baboon {
     recent_folders: Vec<PathBuf>,
     blender_path: Option<PathBuf>,
     blender_path_input: String,
+    editing_kit_paths: HashMap<String, PathBuf>,
+    editing_kit_path_inputs: HashMap<String, String>,
+    editing_kit_path_attention: Option<String>,
     color_popup: Option<MaterialColorPopup>,
     custom_color_swatches: Vec<Option<[u8; 4]>>,
     palette_last_dir: Option<PathBuf>,
@@ -321,6 +324,9 @@ impl Baboon {
                 .max(MIN_TOOL_COMMANDS_LEFT_WIDTH),
             tool_commands_collapsed_categories: prefs.tool_commands_collapsed_categories.clone(),
             recent_folders: prefs.recent_folders.clone(),
+            editing_kit_path_inputs: editing_kit_path_inputs(&prefs.editing_kit_paths),
+            editing_kit_paths: prefs.editing_kit_paths.clone(),
+            editing_kit_path_attention: None,
             blender_path_input: prefs
                 .blender_path
                 .as_ref()
@@ -498,10 +504,26 @@ fn load_png_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egu
     Some(ctx.load_texture(name, color, egui::TextureOptions::LINEAR))
 }
 
+fn editing_kit_path_inputs(paths: &HashMap<String, PathBuf>) -> HashMap<String, String> {
+    EDITING_KIT_SHORTCUTS
+        .into_iter()
+        .map(|shortcut| {
+            (
+                shortcut.game.to_owned(),
+                paths
+                    .get(shortcut.game)
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_default(),
+            )
+        })
+        .collect()
+}
+
 pub(super) fn get_game_banner_bytes(game: &str) -> &'static [u8] {
     match game {
         "haloce_mcc" => include_bytes!("../assets/Game Icons/ce.png"),
         "halo2_mcc" => include_bytes!("../assets/Game Icons/h2.png"),
+        "halo2amp_mcc" => include_bytes!("../assets/Game Icons/h2amp.png"),
         "halo3_mcc" => include_bytes!("../assets/Game Icons/h3.png"),
         "halo3odst_mcc" => include_bytes!("../assets/Game Icons/h3odst.png"),
         "haloreach_mcc" => include_bytes!("../assets/Game Icons/reach.png"),
@@ -514,6 +536,7 @@ pub(super) fn game_display_name(game: &str) -> &'static str {
     match game {
         "haloce_mcc" => "Halo: Combat Evolved",
         "halo2_mcc" => "Halo 2",
+        "halo2amp_mcc" => "Halo 2 Anniversary Multiplayer",
         "halo3_mcc" => "Halo 3",
         "halo3odst_mcc" => "Halo 3: ODST",
         "haloreach_mcc" => "Halo: Reach",

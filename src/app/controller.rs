@@ -3183,6 +3183,7 @@ impl Baboon {
             ui_scale: self.ui_scale,
             model_preview_size: self.model_preview_size,
             blender_path: self.blender_path.clone(),
+            editing_kit_paths: self.editing_kit_paths.clone(),
             ek_folder_aliases: self.ek_folder_aliases.clone(),
             tool_commands_window_pos: self.tool_commands_window_pos,
             tool_commands_window_size: Some(self.tool_commands_window_size),
@@ -3299,6 +3300,75 @@ impl Baboon {
             self.blender_path_input = path.display().to_string();
             self.status = format!("Blender path set to {}", path.display());
         }
+    }
+
+    pub(super) fn load_editing_kit_shortcut(
+        &mut self,
+        shortcut: EditingKitShortcut,
+        ctx: egui::Context,
+    ) {
+        let Some(path) = self.editing_kit_paths.get(shortcut.game).cloned() else {
+            self.prompt_for_editing_kit_path(
+                shortcut,
+                format!("Set the {} path in Settings first", shortcut.label),
+            );
+            return;
+        };
+        if !path.is_dir() {
+            self.prompt_for_editing_kit_path(
+                shortcut,
+                format!("{} folder not found: {}", shortcut.label, path.display()),
+            );
+            return;
+        }
+        self.begin_load_folder_path(path, ctx);
+    }
+
+    pub(super) fn choose_editing_kit_path(&mut self, shortcut: EditingKitShortcut) {
+        let mut dialog = rfd::FileDialog::new()
+            .set_title(format!("Select {} Editing Kit Folder", shortcut.label));
+        if let Some(path) = self.editing_kit_paths.get(shortcut.game) {
+            if path.is_dir() {
+                dialog = dialog.set_directory(path);
+            } else if let Some(parent) = path.parent().filter(|parent| parent.is_dir()) {
+                dialog = dialog.set_directory(parent);
+            }
+        }
+        if let Some(path) = dialog.pick_folder() {
+            self.editing_kit_paths
+                .insert(shortcut.game.to_owned(), path.clone());
+            self.editing_kit_path_inputs
+                .insert(shortcut.game.to_owned(), path.display().to_string());
+            if self.editing_kit_path_attention.as_deref() == Some(shortcut.game) {
+                self.editing_kit_path_attention = None;
+            }
+            self.status = format!("{} path set to {}", shortcut.label, path.display());
+        }
+    }
+
+    pub(super) fn auto_detect_editing_kit_paths(&mut self) {
+        let detected = detect_editing_kit_paths();
+        let added = apply_detected_editing_kit_paths(
+            &mut self.editing_kit_paths,
+            &mut self.editing_kit_path_inputs,
+            &mut self.editing_kit_path_attention,
+            &detected,
+        );
+        self.status = if added == 0 {
+            "No new editing kit paths detected".to_owned()
+        } else {
+            format!("Detected {added} editing kit path(s)")
+        };
+    }
+
+    fn prompt_for_editing_kit_path(&mut self, shortcut: EditingKitShortcut, status: String) {
+        self.settings_open = true;
+        self.settings_tab = SettingsTab::EditingKits;
+        self.editing_kit_path_attention = Some(shortcut.game.to_owned());
+        self.editing_kit_path_inputs
+            .entry(shortcut.game.to_owned())
+            .or_default();
+        self.status = status;
     }
 
     fn launch_kit_tool(&mut self, label: &str, executable_name: &str) {
@@ -4429,9 +4499,235 @@ pub(super) fn open_terminal_log(path: &Path) -> Result<(), String> {
         .map_err(|error| format!("Could not open terminal log {}: {error}", path.display()))
 }
 
+fn detect_editing_kit_paths() -> HashMap<String, PathBuf> {
+    detect_editing_kit_paths_in_common_roots(steam_common_roots())
+}
+
+fn detect_editing_kit_paths_in_common_roots<I>(common_roots: I) -> HashMap<String, PathBuf>
+where
+    I: IntoIterator<Item = PathBuf>,
+{
+    let mut detected = HashMap::new();
+    for common_root in common_roots {
+        for shortcut in EDITING_KIT_SHORTCUTS {
+            if detected.contains_key(shortcut.game) {
+                continue;
+            }
+            let candidate = common_root.join(shortcut.label);
+            if candidate.is_dir() && candidate.join("tags").is_dir() {
+                detected.insert(shortcut.game.to_owned(), candidate);
+            }
+        }
+    }
+    detected
+}
+
+fn apply_detected_editing_kit_paths(
+    editing_kit_paths: &mut HashMap<String, PathBuf>,
+    editing_kit_path_inputs: &mut HashMap<String, String>,
+    editing_kit_path_attention: &mut Option<String>,
+    detected: &HashMap<String, PathBuf>,
+) -> usize {
+    let mut added = 0;
+    for shortcut in EDITING_KIT_SHORTCUTS {
+        let has_existing = editing_kit_paths
+            .get(shortcut.game)
+            .is_some_and(|path| !path.as_os_str().is_empty());
+        if has_existing {
+            continue;
+        }
+        let Some(path) = detected.get(shortcut.game) else {
+            continue;
+        };
+        editing_kit_paths.insert(shortcut.game.to_owned(), path.clone());
+        editing_kit_path_inputs.insert(shortcut.game.to_owned(), path.display().to_string());
+        if editing_kit_path_attention.as_deref() == Some(shortcut.game) {
+            *editing_kit_path_attention = None;
+        }
+        added += 1;
+    }
+    added
+}
+
+fn steam_common_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    for steam_root in default_steam_roots() {
+        push_unique_path(&mut roots, steam_root.join("steamapps").join("common"));
+        let library_file = steam_root.join("steamapps").join("libraryfolders.vdf");
+        if let Ok(text) = std::fs::read_to_string(library_file) {
+            for library_root in parse_steam_library_paths(&text) {
+                push_unique_path(&mut roots, library_root.join("steamapps").join("common"));
+            }
+        }
+    }
+    roots
+}
+
+fn default_steam_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    for var in ["ProgramFiles(x86)", "ProgramFiles"] {
+        if let Some(root) = std::env::var_os(var) {
+            push_unique_path(&mut roots, PathBuf::from(root).join("Steam"));
+        }
+    }
+    push_unique_path(&mut roots, PathBuf::from(r"C:\Program Files (x86)\Steam"));
+    roots
+}
+
+fn parse_steam_library_paths(text: &str) -> Vec<PathBuf> {
+    let mut paths = Vec::new();
+    for line in text.lines() {
+        let tokens = quoted_vdf_tokens(line);
+        if tokens.len() >= 2 && tokens[0].eq_ignore_ascii_case("path") {
+            push_unique_path(&mut paths, PathBuf::from(&tokens[1]));
+        }
+    }
+    paths
+}
+
+fn quoted_vdf_tokens(line: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut token = String::new();
+    let mut in_quote = false;
+    let mut escape = false;
+
+    for ch in line.chars() {
+        if !in_quote {
+            if ch == '"' {
+                in_quote = true;
+                token.clear();
+            }
+            continue;
+        }
+        if escape {
+            token.push(ch);
+            escape = false;
+            continue;
+        }
+        match ch {
+            '\\' => escape = true,
+            '"' => {
+                tokens.push(token.clone());
+                token.clear();
+                in_quote = false;
+            }
+            _ => token.push(ch),
+        }
+    }
+    tokens
+}
+
+fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
+    if !paths.iter().any(|existing| same_path_text(existing, &path)) {
+        paths.push(path);
+    }
+}
+
+fn same_path_text(a: &Path, b: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        a.to_string_lossy()
+            .eq_ignore_ascii_case(&b.to_string_lossy())
+    }
+    #[cfg(not(windows))]
+    {
+        a == b
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn unique_test_dir(name: &str) -> PathBuf {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("baboon-{name}-{}-{nanos}", std::process::id()))
+    }
+
+    #[test]
+    fn detect_editing_kit_paths_finds_all_known_common_folder_names() {
+        let common = unique_test_dir("ek-detect-all");
+        for shortcut in EDITING_KIT_SHORTCUTS {
+            std::fs::create_dir_all(common.join(shortcut.label).join("tags")).unwrap();
+        }
+
+        let detected = detect_editing_kit_paths_in_common_roots(vec![common.clone()]);
+
+        for shortcut in EDITING_KIT_SHORTCUTS {
+            assert_eq!(
+                detected.get(shortcut.game),
+                Some(&common.join(shortcut.label))
+            );
+        }
+        let _ = std::fs::remove_dir_all(common);
+    }
+
+    #[test]
+    fn detect_editing_kit_paths_ignores_folder_without_tags_child() {
+        let common = unique_test_dir("ek-detect-tags-required");
+        std::fs::create_dir_all(common.join("H3EK")).unwrap();
+        std::fs::create_dir_all(common.join("H4EK").join("tags")).unwrap();
+
+        let detected = detect_editing_kit_paths_in_common_roots(vec![common.clone()]);
+
+        assert!(!detected.contains_key("halo3_mcc"));
+        assert_eq!(detected.get("halo4_mcc"), Some(&common.join("H4EK")));
+        let _ = std::fs::remove_dir_all(common);
+    }
+
+    #[test]
+    fn apply_detected_editing_kit_paths_fills_blanks_only() {
+        let mut paths = HashMap::from([("halo3_mcc".to_owned(), PathBuf::from("C:/Custom/H3EK"))]);
+        let mut inputs = HashMap::from([("halo3_mcc".to_owned(), "C:/Custom/H3EK".to_owned())]);
+        let mut attention = Some("halo4_mcc".to_owned());
+        let detected = HashMap::from([
+            ("halo3_mcc".to_owned(), PathBuf::from("C:/Steam/H3EK")),
+            ("halo4_mcc".to_owned(), PathBuf::from("C:/Steam/H4EK")),
+        ]);
+
+        let added =
+            apply_detected_editing_kit_paths(&mut paths, &mut inputs, &mut attention, &detected);
+
+        assert_eq!(added, 1);
+        assert_eq!(
+            paths.get("halo3_mcc"),
+            Some(&PathBuf::from("C:/Custom/H3EK"))
+        );
+        assert_eq!(
+            paths.get("halo4_mcc"),
+            Some(&PathBuf::from("C:/Steam/H4EK"))
+        );
+        assert_eq!(
+            inputs.get("halo4_mcc").map(String::as_str),
+            Some("C:/Steam/H4EK")
+        );
+        assert_eq!(attention, None);
+    }
+
+    #[test]
+    fn parse_steam_library_paths_reads_libraryfolders_vdf_paths() {
+        let text = r#"
+            "libraryfolders"
+            {
+                "0"
+                {
+                    "path"      "C:\\Program Files (x86)\\Steam"
+                }
+                "1"
+                {
+                    "path"      "D:\\SteamLibrary"
+                }
+            }
+        "#;
+
+        let paths = parse_steam_library_paths(text);
+
+        assert!(paths.contains(&PathBuf::from(r"C:\Program Files (x86)\Steam")));
+        assert!(paths.contains(&PathBuf::from(r"D:\SteamLibrary")));
+    }
 
     #[test]
     fn ancestor_block_indices_splits_indexed_path() {

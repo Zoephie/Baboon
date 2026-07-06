@@ -315,10 +315,56 @@ pub(super) enum HelpPanelTab {
 pub(super) enum SettingsTab {
     Startup,
     Browser,
+    EditingKits,
     EditingKitAliases,
     Appearance,
     Tools,
 }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct EditingKitShortcut {
+    pub(super) label: &'static str,
+    pub(super) game: &'static str,
+    pub(super) fallback: &'static str,
+}
+
+pub(super) const EDITING_KIT_SHORTCUTS: [EditingKitShortcut; 7] = [
+    EditingKitShortcut {
+        label: "HCEEK",
+        game: "haloce_mcc",
+        fallback: "CE",
+    },
+    EditingKitShortcut {
+        label: "H2EK",
+        game: "halo2_mcc",
+        fallback: "H2",
+    },
+    EditingKitShortcut {
+        label: "H3EK",
+        game: "halo3_mcc",
+        fallback: "H3",
+    },
+    EditingKitShortcut {
+        label: "H3ODSTEK",
+        game: "halo3odst_mcc",
+        fallback: "ODST",
+    },
+    EditingKitShortcut {
+        label: "HREK",
+        game: "haloreach_mcc",
+        fallback: "R",
+    },
+    EditingKitShortcut {
+        label: "H4EK",
+        game: "halo4_mcc",
+        fallback: "H4",
+    },
+    EditingKitShortcut {
+        label: "H2AMPEK",
+        game: "halo2amp_mcc",
+        fallback: "H2A",
+    },
+];
 
 /// What Baboon does with the previous session's open windows on startup.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -428,6 +474,7 @@ pub(super) struct GuiPrefs {
     pub(super) ui_scale: f32,
     pub(super) model_preview_size: f32,
     pub(super) blender_path: Option<PathBuf>,
+    pub(super) editing_kit_paths: HashMap<String, PathBuf>,
     pub(super) ek_folder_aliases: Vec<EkFolderAlias>,
     pub(super) tool_commands_window_pos: Option<egui::Pos2>,
     pub(super) tool_commands_window_size: Option<Vec2>,
@@ -1082,6 +1129,7 @@ impl Default for GuiPrefs {
             ui_scale: DEFAULT_UI_SCALE,
             model_preview_size: DEFAULT_MODEL_PREVIEW_SIZE,
             blender_path: None,
+            editing_kit_paths: HashMap::new(),
             session_restore: SessionRestore::Ask,
             ek_folder_aliases: Vec::new(),
             tool_commands_window_pos: None,
@@ -1098,6 +1146,32 @@ impl Default for GuiPrefs {
 pub(super) const DEFAULT_UI_SCALE: f32 = 1.0;
 pub(super) const MIN_UI_SCALE: f32 = 0.6;
 pub(super) const MAX_UI_SCALE: f32 = 1.5;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn editing_kit_shortcuts_include_expected_profiles() {
+        let pairs: Vec<(&str, &str)> = EDITING_KIT_SHORTCUTS
+            .iter()
+            .map(|shortcut| (shortcut.label, shortcut.game))
+            .collect();
+
+        assert_eq!(
+            pairs,
+            vec![
+                ("HCEEK", "haloce_mcc"),
+                ("H2EK", "halo2_mcc"),
+                ("H3EK", "halo3_mcc"),
+                ("H3ODSTEK", "halo3odst_mcc"),
+                ("HREK", "haloreach_mcc"),
+                ("H4EK", "halo4_mcc"),
+                ("H2AMPEK", "halo2amp_mcc"),
+            ]
+        );
+    }
+}
 
 pub(super) const DEFAULT_MODEL_PREVIEW_SIZE: f32 = 1.0;
 pub(super) const MIN_MODEL_PREVIEW_SIZE: f32 = 0.8;

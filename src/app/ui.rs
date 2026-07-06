@@ -1,6 +1,12 @@
 use super::controller::open_terminal_log;
 use super::*;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LauncherButtonVisual {
+    Normal,
+    Muted,
+}
+
 /// A toolbar launcher button: shows the decoded `.ico` icon when available,
 /// otherwise falls back to a single-letter label. Returns the response so the
 /// caller can attach a hover tooltip and read `.clicked()`.
@@ -10,17 +16,35 @@ fn launcher_button(
     fallback: &str,
     enabled: bool,
 ) -> egui::Response {
+    launcher_button_with_visual(ui, icon, fallback, enabled, LauncherButtonVisual::Normal)
+}
+
+fn launcher_button_with_visual(
+    ui: &mut Ui,
+    icon: Option<&egui::TextureHandle>,
+    fallback: &str,
+    enabled: bool,
+    visual: LauncherButtonVisual,
+) -> egui::Response {
+    let tint = match visual {
+        LauncherButtonVisual::Normal => Color32::WHITE,
+        LauncherButtonVisual::Muted => ui.visuals().weak_text_color(),
+    };
+
     match icon {
         Some(texture) => ui.add_enabled(
             enabled,
-            egui::ImageButton::new(egui::load::SizedTexture::new(
-                texture.id(),
-                Vec2::splat(20.0),
-            )),
+            egui::ImageButton::new(
+                egui::Image::new(egui::load::SizedTexture::new(
+                    texture.id(),
+                    Vec2::splat(20.0),
+                ))
+                .tint(tint),
+            ),
         ),
         None => ui.add_enabled(
             enabled,
-            egui::Button::new(fallback).min_size(Vec2::splat(22.0)),
+            egui::Button::new(RichText::new(fallback).color(tint)).min_size(Vec2::splat(22.0)),
         ),
     }
 }
@@ -276,7 +300,31 @@ impl Baboon {
             {
                 self.launch_sapien();
             }
+
+            ui.separator();
+            self.draw_editing_kit_shortcut_buttons(ui);
         });
+    }
+
+    fn draw_editing_kit_shortcut_buttons(&mut self, ui: &mut Ui) {
+        for shortcut in EDITING_KIT_SHORTCUTS.into_iter().rev() {
+            let texture = self.game_banner_texture(ui.ctx(), shortcut.game).cloned();
+            let configured_path = self.editing_kit_paths.get(shortcut.game);
+            let tooltip = configured_path
+                .map(|path| format!("Load {} from {}", shortcut.label, path.display()))
+                .unwrap_or_else(|| format!("Set {} path in Settings", shortcut.label));
+            let visual = if configured_path.is_some() {
+                LauncherButtonVisual::Normal
+            } else {
+                LauncherButtonVisual::Muted
+            };
+            if launcher_button_with_visual(ui, texture.as_ref(), shortcut.fallback, true, visual)
+                .on_hover_text(tooltip)
+                .clicked()
+            {
+                self.load_editing_kit_shortcut(shortcut, ui.ctx().clone());
+            }
+        }
     }
 
     fn draw_monitor_menu_button(&mut self, ui: &mut Ui) {
@@ -1205,11 +1253,16 @@ impl Baboon {
             .collapsible(false)
             .resizable(false)
             .open(&mut open)
-            .default_width(560.0)
+            .default_width(760.0)
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut self.settings_tab, SettingsTab::Startup, "Startup");
                     ui.selectable_value(&mut self.settings_tab, SettingsTab::Browser, "Browser");
+                    ui.selectable_value(
+                        &mut self.settings_tab,
+                        SettingsTab::EditingKits,
+                        "Editing Kits",
+                    );
                     ui.selectable_value(
                         &mut self.settings_tab,
                         SettingsTab::EditingKitAliases,
@@ -1227,6 +1280,7 @@ impl Baboon {
                 match self.settings_tab {
                     SettingsTab::Startup => self.draw_settings_startup_tab(ui),
                     SettingsTab::Browser => self.draw_settings_browser_tab(ui),
+                    SettingsTab::EditingKits => self.draw_settings_editing_kits_tab(ui),
                     SettingsTab::EditingKitAliases => self.draw_settings_aliases_tab(ui),
                     SettingsTab::Appearance => self.draw_settings_appearance_tab(ui),
                     SettingsTab::Tools => self.draw_settings_tools_tab(ui),
@@ -1236,6 +1290,22 @@ impl Baboon {
             self.pending_ui_scale = self.ui_scale;
         }
         self.settings_open = open;
+    }
+
+    fn set_editing_kit_path_input(&mut self, shortcut: EditingKitShortcut, input: String) {
+        let trimmed = input.trim().to_owned();
+        if trimmed.is_empty() {
+            self.editing_kit_paths.remove(shortcut.game);
+        } else {
+            self.editing_kit_paths
+                .insert(shortcut.game.to_owned(), PathBuf::from(&trimmed));
+        }
+        self.editing_kit_path_inputs
+            .insert(shortcut.game.to_owned(), input);
+        if self.editing_kit_path_attention.as_deref() == Some(shortcut.game) && !trimmed.is_empty()
+        {
+            self.editing_kit_path_attention = None;
+        }
     }
 
     fn draw_settings_startup_tab(&mut self, ui: &mut Ui) {
@@ -1273,6 +1343,94 @@ impl Baboon {
             &mut self.folders_before_tags,
             "List subfolders before tags in browser",
         );
+    }
+
+    fn draw_settings_editing_kits_tab(&mut self, ui: &mut Ui) {
+        ui.label(RichText::new("Editing Kits").color(text_dark()).strong());
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new("Configure each editing-kit root or its tags folder for quick loading.")
+                .color(subtle_dark()),
+        );
+        if ui.button("Auto Detect").clicked() {
+            self.auto_detect_editing_kit_paths();
+        }
+        ui.add_space(6.0);
+
+        for shortcut in EDITING_KIT_SHORTCUTS {
+            let attention = self.editing_kit_path_attention.as_deref() == Some(shortcut.game);
+            let fill = if attention {
+                if is_dark_mode() {
+                    Color32::from_rgb(62, 45, 39)
+                } else {
+                    Color32::from_rgb(255, 226, 212)
+                }
+            } else {
+                Color32::TRANSPARENT
+            };
+            let texture = self.game_banner_texture(ui.ctx(), shortcut.game).cloned();
+            let mut input = self
+                .editing_kit_path_inputs
+                .get(shortcut.game)
+                .cloned()
+                .unwrap_or_default();
+            let mut changed = false;
+            let mut browse = false;
+            let mut load = false;
+            let mut clear = false;
+
+            Frame::none()
+                .fill(fill)
+                .inner_margin(egui::Margin::same(4.0))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        if let Some(texture) = &texture {
+                            ui.add(
+                                egui::Image::new(egui::load::SizedTexture::new(
+                                    texture.id(),
+                                    Vec2::splat(20.0),
+                                ))
+                                .fit_to_exact_size(Vec2::splat(20.0)),
+                            );
+                        } else {
+                            ui.label(RichText::new(shortcut.fallback).color(text_dark()).strong());
+                        }
+                        ui.add_sized(
+                            Vec2::new(72.0, 20.0),
+                            egui::Label::new(RichText::new(shortcut.label).color(text_dark())),
+                        );
+                        changed = ui
+                            .add(
+                                egui::TextEdit::singleline(&mut input)
+                                    .hint_text("editing-kit root or tags folder")
+                                    .desired_width(360.0),
+                            )
+                            .changed();
+                        browse = ui.button("Browse...").clicked();
+                        load = ui.button("Load").clicked();
+                        clear = ui.button("Clear").clicked();
+                    });
+                });
+
+            if changed {
+                self.set_editing_kit_path_input(shortcut, input);
+            }
+            if browse {
+                self.choose_editing_kit_path(shortcut);
+            }
+            if load {
+                self.load_editing_kit_shortcut(shortcut, ui.ctx().clone());
+            }
+            if clear {
+                self.editing_kit_paths.remove(shortcut.game);
+                self.editing_kit_path_inputs
+                    .insert(shortcut.game.to_owned(), String::new());
+                if self.editing_kit_path_attention.as_deref() == Some(shortcut.game) {
+                    self.editing_kit_path_attention = None;
+                }
+                self.status = format!("{} path cleared", shortcut.label);
+            }
+        }
     }
 
     fn draw_settings_aliases_tab(&mut self, ui: &mut Ui) {

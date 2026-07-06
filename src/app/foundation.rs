@@ -3623,6 +3623,7 @@ fn foundation_tag_reference_text_edit_cell(
                     .id(id)
                     .font(TextStyle::Monospace)
                     .text_color(text_dark())
+                    .vertical_align(egui::Align::Center)
                     .margin(margin)
                     .desired_width(width)
                     .clip_text(true),

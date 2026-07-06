@@ -134,6 +134,7 @@ pub(super) fn load_gui_prefs() -> GuiPrefs {
             .and_then(Value::as_str)
             .filter(|path| !path.trim().is_empty())
             .map(PathBuf::from),
+        editing_kit_paths: load_editing_kit_paths(&value),
         ek_folder_aliases: load_ek_folder_aliases(&value),
         tool_commands_window_pos: load_pos2(&value, "tool_commands_window_pos"),
         tool_commands_window_size: load_vec2(&value, "tool_commands_window_size"),
@@ -208,6 +209,25 @@ fn load_path_list(value: &Value, key: &str) -> Vec<PathBuf> {
                 break;
             }
         }
+    }
+    paths
+}
+
+fn load_editing_kit_paths(value: &Value) -> HashMap<String, PathBuf> {
+    let mut paths = HashMap::new();
+    let Some(entries) = value.get("editing_kit_paths").and_then(Value::as_object) else {
+        return paths;
+    };
+    for shortcut in EDITING_KIT_SHORTCUTS {
+        let Some(path) = entries
+            .get(shortcut.game)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|path| !path.is_empty())
+        else {
+            continue;
+        };
+        paths.insert(shortcut.game.to_owned(), PathBuf::from(path));
     }
     paths
 }
@@ -296,6 +316,15 @@ pub(super) fn save_gui_prefs(
     let mut collapsed_tool_categories: Vec<&String> =
         prefs.tool_commands_collapsed_categories.iter().collect();
     collapsed_tool_categories.sort();
+    let mut editing_kit_paths = serde_json::Map::new();
+    for shortcut in EDITING_KIT_SHORTCUTS {
+        if let Some(path) = prefs.editing_kit_paths.get(shortcut.game) {
+            let text = path.display().to_string();
+            if !text.trim().is_empty() {
+                editing_kit_paths.insert(shortcut.game.to_owned(), json!(text));
+            }
+        }
+    }
     let value = json!({
         "browser_mode": match prefs.browser_mode {
             BrowserMode::Folders => "folders",
@@ -317,6 +346,7 @@ pub(super) fn save_gui_prefs(
         "ui_scale": prefs.ui_scale,
         "model_preview_size": prefs.model_preview_size,
         "blender_path": prefs.blender_path.as_ref().map(|path| path.display().to_string()),
+        "editing_kit_paths": editing_kit_paths,
         "ek_folder_aliases": prefs.ek_folder_aliases.iter().map(|alias| {
             json!({
                 "folder_name": alias.folder_name,
@@ -481,5 +511,26 @@ mod tests {
         assert_eq!(swatches[1], None);
         assert_eq!(swatches[2], Some([51, 102, 153, 128]));
         assert_eq!(swatches[3], None);
+    }
+
+    #[test]
+    fn load_editing_kit_paths_ignores_empty_and_unknown_entries() {
+        let value = json!({
+            "editing_kit_paths": {
+                "halo3_mcc": "C:/Games/H3EK",
+                "halo4_mcc": "",
+                "unknown": "C:/Games/Unknown"
+            }
+        });
+
+        let paths = load_editing_kit_paths(&value);
+
+        assert_eq!(paths.len(), 1);
+        assert_eq!(
+            paths.get("halo3_mcc"),
+            Some(&PathBuf::from("C:/Games/H3EK"))
+        );
+        assert!(!paths.contains_key("halo4_mcc"));
+        assert!(!paths.contains_key("unknown"));
     }
 }
