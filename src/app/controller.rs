@@ -1853,8 +1853,8 @@ impl Baboon {
         self.status = format!("Extracting animations from {}", entry.display_path);
         let tx = self.tx.clone();
         thread::spawn(move || {
-            let result = extract_animations_for_entry(&source, &entry, &output)
-                .map_err(|e| e.to_string());
+            let result =
+                extract_animations_for_entry(&source, &entry, &output).map_err(|e| e.to_string());
             let _ = tx.send(WorkerMessage::ExportFinished(result));
             ctx.request_repaint();
         });
@@ -2380,8 +2380,8 @@ impl Baboon {
         let title = format!("References to {}", entry.display_path.replace('\\', "/"));
         // The referenced tag's dependency path, so a clicked row can jump to the
         // exact field that points here.
-        let ref_target = dependency_entry_reference_path(&entry, &self.names)
-            .map(|rel| (entry.group_tag, rel));
+        let ref_target =
+            dependency_entry_reference_path(&entry, &self.names).map(|rel| (entry.group_tag, rel));
         match self.references_to_entry(&entry) {
             Some(entries) => {
                 let note = entries
@@ -2463,7 +2463,12 @@ impl Baboon {
         // is docked or floating.
         for (block_path, index) in ancestor_block_indices(field_path) {
             for scope in ["docked", "floating"] {
-                let id = egui::Id::new(("field_edit", scope, tag_key, ("block_sel", block_path.as_str())));
+                let id = egui::Id::new((
+                    "field_edit",
+                    scope,
+                    tag_key,
+                    ("block_sel", block_path.as_str()),
+                ));
                 ctx.data_mut(|data| data.insert_temp(id, index));
             }
         }
@@ -4457,7 +4462,10 @@ mod tests {
             occurrence_label("custom references[3]/melee sound"),
             "custom references[3] › melee sound",
         );
-        assert_eq!(occurrence_label("havok cleanup resources"), "havok cleanup resources");
+        assert_eq!(
+            occurrence_label("havok cleanup resources"),
+            "havok cleanup resources"
+        );
     }
 
     #[test]

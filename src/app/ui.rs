@@ -225,19 +225,22 @@ impl Baboon {
                     .hint_text("block or field name")
                     .desired_width(220.0),
             );
-            if ui
-                .add(egui::Button::new("x").min_size(Vec2::new(22.0, 22.0)))
-                .on_hover_text("Clear search")
-                .clicked()
+            if icon_button(
+                ui,
+                ButtonIcon::Clear,
+                "Clear search",
+                true,
+                Vec2::new(22.0, 22.0),
+                text_dark(),
+            )
+            .clicked()
             {
                 query.clear();
             }
             ui.label(
-                RichText::new(
-                    "shows only matches and the blocks/structs that contain them",
-                )
-                .color(subtle_dark())
-                .small(),
+                RichText::new("shows only matches and the blocks/structs that contain them")
+                    .color(subtle_dark())
+                    .small(),
             );
         });
         ui.add_space(4.0);
@@ -2747,7 +2750,16 @@ impl eframe::App for Baboon {
                                             self.terminal_open = false;
                                             self.remember_terminal_open_for_game();
                                         }
-                                        if ui.small_button("Clear").clicked() {
+                                        if icon_button(
+                                            ui,
+                                            ButtonIcon::Clear,
+                                            "Clear terminal",
+                                            true,
+                                            Vec2::new(22.0, 20.0),
+                                            text_dark(),
+                                        )
+                                        .clicked()
+                                        {
                                             self.terminal.lines.clear();
                                         }
                                         let open_log_enabled =

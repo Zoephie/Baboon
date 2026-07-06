@@ -5970,13 +5970,8 @@ pub(super) fn draw_shader_grid_row(
         ui.painter().rect_filled(button_rect, 0.0, material_input());
         ui.painter()
             .rect_stroke(button_rect, 0.0, Stroke::new(1.0, material_input_edge()));
-        ui.painter().text(
-            button_rect.center(),
-            Align2::CENTER_CENTER,
-            shader_function_button_text(function),
-            FontId::proportional(12.0),
-            material_text(),
-        );
+        let icon_rect = egui::Rect::from_center_size(button_rect.center(), Vec2::splat(16.0));
+        paint_button_icon_at(ui, ButtonIcon::Function, icon_rect, material_text());
 
         let click_response = ui
             .interact(
@@ -6036,13 +6031,8 @@ pub(super) fn draw_shader_grid_row(
         ui.painter().rect_filled(f_rect, 0.0, material_input());
         ui.painter()
             .rect_stroke(f_rect, 0.0, Stroke::new(1.0, material_input_edge()));
-        ui.painter().text(
-            f_rect.center(),
-            Align2::CENTER_CENTER,
-            shader_function_button_text(func_view),
-            FontId::proportional(11.0),
-            material_text(),
-        );
+        let icon_rect = egui::Rect::from_center_size(f_rect.center(), Vec2::splat(16.0));
+        paint_button_icon_at(ui, ButtonIcon::Function, icon_rect, material_text());
         if ui
             .interact(
                 f_rect,
@@ -6175,14 +6165,6 @@ fn is_h2_function_view(function: &FunctionView) -> bool {
         .edit
         .as_ref()
         .is_some_and(|edit| matches!(edit.data, FunctionDataStorage::Halo2ByteBlock(_)))
-}
-
-fn shader_function_button_text(function: &FunctionView) -> &'static str {
-    if is_h2_function_view(function) {
-        "f0"
-    } else {
-        "f()"
-    }
 }
 
 fn shader_grid_row_height(row: &ShaderGridRow) -> f32 {
@@ -6773,13 +6755,13 @@ pub(super) fn draw_shader_editable_value(
             );
             ui.painter()
                 .rect_stroke(open_rect, 0.0, Stroke::new(1.0, material_input_edge()));
-            ui.painter().text(
-                open_rect.center(),
-                Align2::CENTER_CENTER,
-                "Open",
-                FontId::proportional(11.0),
-                material_text(),
-            );
+            let icon_rect = egui::Rect::from_center_size(open_rect.center(), Vec2::splat(16.0));
+            let icon_color = if open_enabled {
+                material_text()
+            } else {
+                material_muted_text()
+            };
+            paint_button_icon_at(ui, ButtonIcon::Open, icon_rect, icon_color);
             if open_enabled
                 && ui
                     .interact(
@@ -6943,13 +6925,13 @@ pub(super) fn draw_shader_editable_value(
             );
             ui.painter()
                 .rect_stroke(open_rect, 0.0, Stroke::new(1.0, material_input_edge()));
-            ui.painter().text(
-                open_rect.center(),
-                Align2::CENTER_CENTER,
-                "Open",
-                FontId::proportional(11.0),
-                material_text(),
-            );
+            let icon_rect = egui::Rect::from_center_size(open_rect.center(), Vec2::splat(16.0));
+            let icon_color = if open_enabled {
+                material_text()
+            } else {
+                material_muted_text()
+            };
+            paint_button_icon_at(ui, ButtonIcon::Open, icon_rect, icon_color);
             if open_enabled
                 && ui
                     .interact(

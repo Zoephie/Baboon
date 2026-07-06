@@ -318,7 +318,7 @@ pub(super) const MATERIAL_FUNCTION_ROW: Color32 = Color32::from_rgb(239, 205, 13
 pub(super) const MATERIAL_SECTION_HEADER: Color32 = Color32::from_rgb(255, 255, 224);
 
 pub(super) fn disclosure_triangle_green() -> Color32 {
-    Color32::from_rgb(28, 143, 66)
+    Color32::from_rgb(34, 205, 84)
 }
 
 pub(super) fn disclosure_triangle_blue() -> Color32 {

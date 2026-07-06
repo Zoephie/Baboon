@@ -915,12 +915,14 @@ pub(super) fn is_monolithic_entry(entry: &TagEntry) -> bool {
 }
 
 pub(super) fn folder_arrow_icon(ui: &mut Ui, openness: f32, response: &egui::Response) {
-    let color = if openness > 0.5 {
-        disclosure_triangle_green()
+    let open = openness > 0.5;
+    let (icon, color) = if open {
+        (ButtonIcon::FolderOpen, disclosure_triangle_green())
     } else {
-        disclosure_triangle_blue()
+        (ButtonIcon::FolderClosed, disclosure_triangle_blue())
     };
-    disclosure_triangle_icon(ui, openness > 0.5, response.rect.center(), color);
+    let rect = egui::Rect::from_center_size(response.rect.center(), Vec2::splat(16.0));
+    paint_button_icon_at(ui, icon, rect, color);
 }
 
 pub(super) fn disclosure_triangle_icon(

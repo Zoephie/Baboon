@@ -93,7 +93,10 @@ pub(super) fn load_gui_prefs() -> GuiPrefs {
             .and_then(SessionRestore::from_str)
             .unwrap_or_else(|| {
                 // Migrate the old boolean: true → Always, absent/false → Ask.
-                match value.get("auto_restore_last_session").and_then(Value::as_bool) {
+                match value
+                    .get("auto_restore_last_session")
+                    .and_then(Value::as_bool)
+                {
                     Some(true) => SessionRestore::Always,
                     _ => SessionRestore::Ask,
                 }

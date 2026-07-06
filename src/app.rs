@@ -80,6 +80,8 @@ mod tool_commands;
 use tool_commands::*;
 mod tag_icons;
 use tag_icons::*;
+mod button_icons;
+use button_icons::*;
 mod editor;
 use editor::*;
 mod audio;

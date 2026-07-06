@@ -1913,13 +1913,36 @@ pub(super) fn foundation_header_button_clicked_hint(
     enabled: bool,
     disabled_hint: Option<&str>,
 ) -> bool {
-    let response = ui.add_enabled(
-        enabled,
-        egui::Button::new(RichText::new(label).color(text_dark())).min_size(Vec2::new(54.0, 20.0)),
-    );
+    let response = if let Some(icon) = icon_for_foundation_button(label) {
+        icon_button(
+            ui,
+            icon,
+            foundation_icon_button_tooltip(label),
+            enabled,
+            Vec2::new(24.0, 20.0),
+            text_dark(),
+        )
+    } else {
+        ui.add_enabled(
+            enabled,
+            egui::Button::new(RichText::new(label).color(text_dark()))
+                .min_size(Vec2::new(54.0, 20.0)),
+        )
+    };
     match disabled_hint {
         Some(hint) if !enabled => response.on_disabled_hover_text(hint).clicked(),
         _ => response.clicked(),
+    }
+}
+
+fn foundation_icon_button_tooltip(label: &str) -> &str {
+    match label {
+        "..." => "Browse",
+        "f()" => "Open function graph editor",
+        "Open" => "Open",
+        "Import" => "Import",
+        "Clear" => "Clear",
+        _ => label,
     }
 }
 
@@ -2943,14 +2966,7 @@ pub(super) fn draw_foundation_tag_reference_row(
                     }
                 }
             }
-            if ui
-                .add_enabled(
-                    editable,
-                    egui::Button::new(RichText::new("Clear").color(text_dark()))
-                        .min_size(Vec2::new(54.0, 20.0)),
-                )
-                .clicked()
-            {
+            if foundation_header_button_clicked(ui, "Clear", editable) {
                 buffer.clear();
                 edit.pending.push(PendingFieldEdit {
                     path: path.to_owned(),
@@ -3315,18 +3331,13 @@ pub(super) fn draw_foundation_function_row(
                     ui.horizontal(|ui| {
                         foundation_input_cell(ui, &shader_function_grid_text(function), 520.0);
                         let can_edit = edit.editable && !meta.read_only;
-                        if ui
-                            .add_enabled(
-                                can_edit,
-                                egui::Button::new("f()").min_size(Vec2::new(30.0, 20.0)),
-                            )
-                            .on_hover_text(if can_edit {
-                                "Open function graph editor"
-                            } else {
-                                "Function is read-only"
-                            })
-                            .clicked()
-                        {
+                        let function_button = foundation_header_button_clicked_hint(
+                            ui,
+                            "f()",
+                            can_edit,
+                            Some("Function is read-only"),
+                        );
+                        if function_button {
                             *edit.function_request = Some(FunctionPopup::new(
                                 edit.tag_key.to_owned(),
                                 clean_field_name(path),
