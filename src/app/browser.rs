@@ -904,7 +904,7 @@ pub(super) fn draw_entry(
 
 fn paint_tag_icon_at(ui: &Ui, group_tag: u32, rect: egui::Rect) {
     let group = format_group_tag(group_tag);
-    let uri = format!("bytes://baboon_tag_icons/{group}.svg");
+    let uri = tag_icon_uri(ui.ctx(), &group);
     egui::Image::from_bytes(uri, get_icon_svg(&group).as_bytes())
         .fit_to_exact_size(rect.size())
         .paint_at(ui, rect);

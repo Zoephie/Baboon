@@ -30,7 +30,7 @@ pub(super) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
 
 pub(super) fn paint_button_icon_at(ui: &Ui, icon: ButtonIcon, rect: egui::Rect, color: Color32) {
     let svg = colorized_icon_svg(icon, color);
-    let uri = button_icon_uri(icon, color);
+    let uri = button_icon_uri(ui.ctx(), icon, color);
     egui::Image::from_bytes(uri, svg.into_bytes())
         .fit_to_exact_size(rect.size())
         .tint(Color32::WHITE)
@@ -78,9 +78,10 @@ fn colorized_icon_svg(icon: ButtonIcon, color: Color32) -> String {
     button_icon_svg(icon).replace("currentColor", &svg_color(color))
 }
 
-fn button_icon_uri(icon: ButtonIcon, color: Color32) -> String {
+fn button_icon_uri(ctx: &egui::Context, icon: ButtonIcon, color: Color32) -> String {
+    let dpi = icon_dpi_bucket(ctx);
     format!(
-        "bytes://baboon_button_icons/{:?}-{:02x}{:02x}{:02x}{:02x}.svg",
+        "bytes://baboon_button_icons/{:?}-{:02x}{:02x}{:02x}{:02x}-dpi{dpi}.svg",
         icon,
         color.r(),
         color.g(),
@@ -91,6 +92,10 @@ fn button_icon_uri(icon: ButtonIcon, color: Color32) -> String {
 
 fn svg_color(color: Color32) -> String {
     format!("#{:02x}{:02x}{:02x}", color.r(), color.g(), color.b())
+}
+
+fn icon_dpi_bucket(ctx: &egui::Context) -> u32 {
+    (ctx.pixels_per_point() * 100.0).round().max(1.0) as u32
 }
 
 #[cfg(test)]
@@ -115,5 +120,18 @@ mod tests {
         let svg = colorized_icon_svg(ButtonIcon::Clear, Color32::from_rgb(1, 2, 3));
         assert!(svg.contains("#010203"));
         assert!(!svg.contains("currentColor"));
+    }
+
+    #[test]
+    fn button_icon_uri_changes_with_pixels_per_point() {
+        let ctx = egui::Context::default();
+        ctx.set_pixels_per_point(1.0);
+        let low = button_icon_uri(&ctx, ButtonIcon::Open, Color32::WHITE);
+        ctx.set_pixels_per_point(2.0);
+        let high = button_icon_uri(&ctx, ButtonIcon::Open, Color32::WHITE);
+
+        assert_ne!(low, high);
+        assert!(low.contains("dpi100"));
+        assert!(high.contains("dpi200"));
     }
 }

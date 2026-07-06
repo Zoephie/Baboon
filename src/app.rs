@@ -218,6 +218,7 @@ pub struct Baboon {
     sapien_icon: Option<egui::TextureHandle>,
     tag_test_icon: Option<egui::TextureHandle>,
     game_banner_textures: HashMap<String, egui::TextureHandle>,
+    last_pixels_per_point: f32,
     /// Clipboard for copy/paste of a block element between identical tags.
     block_clipboard: Option<BlockClipboard>,
     /// A reference-jump awaiting its referrer tag to finish loading before we
@@ -409,6 +410,7 @@ impl Baboon {
                 include_bytes!("../assets/Quick access/tag_test.ico"),
             ),
             game_banner_textures: HashMap::new(),
+            last_pixels_per_point: cc.egui_ctx.pixels_per_point(),
             block_clipboard: None,
         };
         if let Some((source_kind, source_path, tags)) = auto_restore_session {
@@ -431,6 +433,36 @@ impl Baboon {
             self.game_banner_textures.insert(game.to_owned(), texture);
         }
         self.game_banner_textures.get(game)
+    }
+
+    fn handle_pixels_per_point_change(&mut self, ctx: &egui::Context) {
+        let pixels_per_point = ctx.pixels_per_point();
+        if (pixels_per_point - self.last_pixels_per_point).abs() < 0.01 {
+            return;
+        }
+        self.last_pixels_per_point = pixels_per_point;
+        self.blender_icon = load_ico_texture(
+            ctx,
+            "blender_icon",
+            include_bytes!("../assets/Quick access/blender.ico"),
+        );
+        self.monitor_icon = load_ico_texture(
+            ctx,
+            "monitor_icon",
+            include_bytes!("../assets/Quick access/monitor.ico"),
+        );
+        self.sapien_icon = load_ico_texture(
+            ctx,
+            "sapien_icon",
+            include_bytes!("../assets/Quick access/sapien.ico"),
+        );
+        self.tag_test_icon = load_ico_texture(
+            ctx,
+            "tag_test_icon",
+            include_bytes!("../assets/Quick access/tag_test.ico"),
+        );
+        self.game_banner_textures.clear();
+        ctx.request_repaint();
     }
 }
 

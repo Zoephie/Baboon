@@ -2463,6 +2463,7 @@ impl eframe::App for Baboon {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.process_worker_messages(ctx);
         ctx.set_zoom_factor(self.ui_scale);
+        self.handle_pixels_per_point_change(ctx);
         set_dark_mode(self.dark_mode);
         ctx.set_visuals(foundation_visuals());
         set_combo_scroll_cycle_enabled(ctx, self.scroll_to_cycle_dropdowns);

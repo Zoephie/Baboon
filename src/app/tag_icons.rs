@@ -53,19 +53,24 @@ pub(super) fn paint_tag_icon_at(ui: &Ui, group_tag: Option<u32>, rect: egui::Rec
     let group = group_tag
         .map(format_group_tag)
         .unwrap_or_else(|| "default".to_owned());
-    let uri = format!("bytes://baboon_tag_icons/{group}.svg");
+    let uri = tag_icon_uri(ui.ctx(), &group);
     egui::Image::from_bytes(uri, get_icon_svg(&group).as_bytes())
         .fit_to_exact_size(rect.size())
         .paint_at(ui, rect);
 }
 
 fn draw_tag_icon_svg(ui: &mut Ui, group: &str, size: f32) {
-    let uri = format!("bytes://baboon_tag_icons/{group}.svg");
+    let uri = tag_icon_uri(ui.ctx(), group);
     ui.add(
         egui::Image::from_bytes(uri, get_icon_svg(&group).as_bytes())
             .fit_to_exact_size(Vec2::splat(size))
             .sense(Sense::hover()),
     );
+}
+
+pub(super) fn tag_icon_uri(ctx: &egui::Context, group: &str) -> String {
+    let dpi = (ctx.pixels_per_point() * 100.0).round().max(1.0) as u32;
+    format!("bytes://baboon_tag_icons/{group}-dpi{dpi}.svg")
 }
 
 #[cfg(test)]
@@ -88,5 +93,18 @@ mod tests {
         assert!(get_icon_svg("matg").contains("<svg"));
         assert!(get_icon_svg("styl").contains("<svg"));
         assert!(get_icon_svg("unknown").contains("<svg"));
+    }
+
+    #[test]
+    fn tag_icon_uri_changes_with_pixels_per_point() {
+        let ctx = egui::Context::default();
+        ctx.set_pixels_per_point(1.0);
+        let low = tag_icon_uri(&ctx, "bipd");
+        ctx.set_pixels_per_point(2.0);
+        let high = tag_icon_uri(&ctx, "bipd");
+
+        assert_ne!(low, high);
+        assert!(low.contains("dpi100"));
+        assert!(high.contains("dpi200"));
     }
 }
