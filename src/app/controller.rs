@@ -358,7 +358,7 @@ impl Baboon {
                                     let tx = self.tx.clone();
                                     let ctx = ctx.clone();
                                     let generation = self.source_generation;
-                                    let path = crate::source::index_path(&game);
+                                    let path = crate::source::index_db_path();
                                     thread::spawn(move || {
                                         let result =
                                             crate::source::save_entry_index(&game, &root, &entries)
@@ -992,7 +992,7 @@ impl Baboon {
             let tx = self.tx.clone();
             let ctx = ctx.clone();
             let generation = self.source_generation;
-            let path = crate::source::index_path(&game);
+            let path = crate::source::index_db_path();
             thread::spawn(move || {
                 let result = crate::source::save_entry_index(&game, &root, &entries)
                     .map_err(|error| error.to_string());
