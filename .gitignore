@@ -5,5 +5,6 @@ guerilla_tag_save/
 *_index.json
 *_reverse_dependencies.json
 *_keywords.json
+indexes.sqlite3
 baboon_log.txt
 AGENTS.md
