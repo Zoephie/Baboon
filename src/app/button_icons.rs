@@ -79,7 +79,15 @@ fn colorized_icon_svg(icon: ButtonIcon, color: Color32) -> String {
 }
 
 fn button_icon_uri(ctx: &egui::Context, icon: ButtonIcon, color: Color32) -> String {
-    let dpi = icon_dpi_bucket(ctx);
+    button_icon_uri_for_pixels_per_point(icon, color, ctx.pixels_per_point())
+}
+
+fn button_icon_uri_for_pixels_per_point(
+    icon: ButtonIcon,
+    color: Color32,
+    pixels_per_point: f32,
+) -> String {
+    let dpi = icon_dpi_bucket(pixels_per_point);
     format!(
         "bytes://baboon_button_icons/{:?}-{:02x}{:02x}{:02x}{:02x}-dpi{dpi}.svg",
         icon,
@@ -94,8 +102,8 @@ fn svg_color(color: Color32) -> String {
     format!("#{:02x}{:02x}{:02x}", color.r(), color.g(), color.b())
 }
 
-fn icon_dpi_bucket(ctx: &egui::Context) -> u32 {
-    (ctx.pixels_per_point() * 100.0).round().max(1.0) as u32
+fn icon_dpi_bucket(pixels_per_point: f32) -> u32 {
+    (pixels_per_point * 100.0).round().max(1.0) as u32
 }
 
 #[cfg(test)]
@@ -124,11 +132,8 @@ mod tests {
 
     #[test]
     fn button_icon_uri_changes_with_pixels_per_point() {
-        let ctx = egui::Context::default();
-        ctx.set_pixels_per_point(1.0);
-        let low = button_icon_uri(&ctx, ButtonIcon::Open, Color32::WHITE);
-        ctx.set_pixels_per_point(2.0);
-        let high = button_icon_uri(&ctx, ButtonIcon::Open, Color32::WHITE);
+        let low = button_icon_uri_for_pixels_per_point(ButtonIcon::Open, Color32::WHITE, 1.0);
+        let high = button_icon_uri_for_pixels_per_point(ButtonIcon::Open, Color32::WHITE, 2.0);
 
         assert_ne!(low, high);
         assert!(low.contains("dpi100"));

@@ -69,7 +69,11 @@ fn draw_tag_icon_svg(ui: &mut Ui, group: &str, size: f32) {
 }
 
 pub(super) fn tag_icon_uri(ctx: &egui::Context, group: &str) -> String {
-    let dpi = (ctx.pixels_per_point() * 100.0).round().max(1.0) as u32;
+    tag_icon_uri_for_pixels_per_point(group, ctx.pixels_per_point())
+}
+
+fn tag_icon_uri_for_pixels_per_point(group: &str, pixels_per_point: f32) -> String {
+    let dpi = (pixels_per_point * 100.0).round().max(1.0) as u32;
     format!("bytes://baboon_tag_icons/{group}-dpi{dpi}.svg")
 }
 
@@ -97,11 +101,8 @@ mod tests {
 
     #[test]
     fn tag_icon_uri_changes_with_pixels_per_point() {
-        let ctx = egui::Context::default();
-        ctx.set_pixels_per_point(1.0);
-        let low = tag_icon_uri(&ctx, "bipd");
-        ctx.set_pixels_per_point(2.0);
-        let high = tag_icon_uri(&ctx, "bipd");
+        let low = tag_icon_uri_for_pixels_per_point("bipd", 1.0);
+        let high = tag_icon_uri_for_pixels_per_point("bipd", 2.0);
 
         assert_ne!(low, high);
         assert!(low.contains("dpi100"));
