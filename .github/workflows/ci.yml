@@ -39,4 +39,16 @@ jobs:
           # libopus is NOT needed — it's vendored + statically compiled.
           sudo apt-get install -y libxkbcommon-dev libasound2-dev
 
-      - run: cargo test --all-targets
+      - name: Install Windows CMake generator
+        if: runner.os == 'Windows'
+        run: choco install ninja --no-progress -y
+
+      - name: Test
+        if: runner.os != 'Windows'
+        run: cargo test --all-targets
+
+      - name: Test
+        if: runner.os == 'Windows'
+        run: cargo test --all-targets
+        env:
+          CMAKE_GENERATOR: Ninja
