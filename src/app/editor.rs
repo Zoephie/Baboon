@@ -299,13 +299,22 @@ pub(super) fn is_sound_group(group_tag: u32) -> bool {
     &group_tag.to_be_bytes() == b"snd!"
 }
 
-/// How a permutation row sources its audio: an FMOD bank subsound (Halo 3+), a
-/// self-contained inline Ogg blob on the permutation (CE), or an inline
-/// Opus/Xbox-ADPCM blob in H2's parallel language-permutation-info block.
+/// How a permutation row sources its audio: an FMOD bank subsound (Halo 3+), an
+/// inline blob on the permutation (CE), or an inline Opus/Xbox-ADPCM blob in
+/// H2's parallel language-permutation-info block. CE stores the whole
+/// per-permutation `samples` stream in one of four formats (PCM / Xbox-ADPCM /
+/// IMA-ADPCM / Ogg Vorbis), so its codec/channels/rate are read from the tag
+/// rather than assumed to be Ogg.
 enum RowKind {
     Bank,
-    InlineOgg,
-    InlineH2 { blob: usize },
+    InlineCe {
+        codec: super::audio::InlineCodec,
+        channels: u16,
+        sample_rate: u32,
+    },
+    InlineH2 {
+        blob: usize,
+    },
 }
 
 /// One audition row: a permutation's name (which for the bank path is the
@@ -519,6 +528,39 @@ fn h2_codec_params(tag: &TagFile) -> (super::audio::InlineCodec, u16, u32) {
     (codec, channels, sample_rate)
 }
 
+/// Read CE's tag-level inline codec parameters: `format` → codec, `channel
+/// count` → channels, `sample rate` → Hz. Unlike H2, CE stores the whole stream
+/// per permutation and can use any of four formats — Ogg Vorbis is common but
+/// weapon/effect sounds are frequently Xbox-ADPCM, so the format must be read
+/// (not assumed) or the Ogg decoder chokes on the ADPCM bytes.
+fn ce_codec_params(tag: &TagFile) -> (super::audio::InlineCodec, u16, u32) {
+    use super::audio::InlineCodec;
+    let root = tag.root();
+    let format = find_full_field_name(&root, "format")
+        .and_then(|full| root.read_enum_name(full))
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let codec = if format.contains("ogg") || format.contains("vorbis") {
+        InlineCodec::OggVorbis
+    } else if format.contains("xbox") || format.contains("ima") {
+        // "xbox adpcm" and "ima adpcm" are both IMA-family; the Xbox 0x0069
+        // decoder handles CE's 36-byte-block layout.
+        InlineCodec::XboxAdpcm
+    } else {
+        // "pcm" — uncompressed interleaved 16-bit PCM, little-endian on CE.
+        InlineCodec::Pcm { big_endian: false }
+    };
+    let channels = find_full_field_name(&root, "channel count")
+        .and_then(|full| root.read_enum_name(full))
+        .map(|name| if name.to_ascii_lowercase().contains("mono") { 1 } else { 2 })
+        .unwrap_or(1);
+    let sample_rate = find_full_field_name(&root, "sample rate")
+        .and_then(|full| root.read_enum_name(full))
+        .map(|name| if name.contains("44") { 44_100 } else { 22_050 })
+        .unwrap_or(22_050);
+    (codec, channels, sample_rate)
+}
+
 /// Audition panel for a `sound` (`snd!`) tag. Halo 3+ page the actual samples
 /// out to the FMOD bank (`<game>/fmod/pc/*.fsb`) — the tag itself carries only
 /// zeroed placeholder buffers — so we list the tag's pitch-range/permutation
@@ -642,6 +684,9 @@ fn sound_permutation_rows(tag: &TagFile) -> Vec<SoundPermRow> {
         0
     };
     let mut h2_ordinal = 0usize;
+    // CE codec/channels/rate (read once, lazily — only CE tags have inline
+    // per-permutation `samples`).
+    let mut ce_params: Option<(super::audio::InlineCodec, u16, u32)> = None;
     let mut rows: Vec<SoundPermRow> = Vec::new();
     for pr_index in 0..pitch_ranges.len() {
         let Some(pitch_range) = pitch_ranges.element(pr_index) else {
@@ -670,7 +715,13 @@ fn sound_permutation_rows(tag: &TagFile) -> Vec<SoundPermRow> {
                 .and_then(|field| field.as_data())
                 .is_some_and(|data| !data.is_empty());
             let kind = if has_inline_samples {
-                RowKind::InlineOgg
+                let (codec, channels, sample_rate) =
+                    *ce_params.get_or_insert_with(|| ce_codec_params(tag));
+                RowKind::InlineCe {
+                    codec,
+                    channels,
+                    sample_rate,
+                }
             } else if h2_count > 0 {
                 let blob = h2_ordinal.min(h2_count - 1);
                 h2_ordinal += 1;
@@ -703,13 +754,17 @@ fn row_play_action(
             key: row.name.clone(),
             label: row.name.clone(),
         }),
-        RowKind::InlineOgg => {
+        RowKind::InlineCe {
+            codec,
+            channels,
+            sample_rate,
+        } => {
             let bytes = inline_permutation_samples(tag, row.pr_index, row.perm_index)?;
             Some(SoundAction::PlayInline {
                 bytes,
-                codec: InlineCodec::OggVorbis,
-                channels: 2,
-                sample_rate: 44_100,
+                codec: *codec,
+                channels: *channels,
+                sample_rate: *sample_rate,
                 chunk_offsets: Vec::new(),
                 label: row.name.clone(),
             })
@@ -744,16 +799,23 @@ fn row_extract_source(
         RowKind::Bank => Some(ExtractSource::Bank {
             key: row.name.clone(),
         }),
-        RowKind::InlineOgg => {
+        RowKind::InlineCe {
+            codec,
+            channels,
+            sample_rate,
+        } => {
             let bytes = inline_permutation_samples(tag, row.pr_index, row.perm_index)?;
-            Some(if raw_ce {
+            // Raw passthrough writes the stream verbatim — only meaningful (and
+            // only a valid `.ogg`) when the CE format actually is Ogg Vorbis.
+            let raw_ogg = raw_ce && matches!(codec, InlineCodec::OggVorbis);
+            Some(if raw_ogg {
                 ExtractSource::Raw(bytes)
             } else {
                 ExtractSource::Inline {
                     bytes,
-                    codec: InlineCodec::OggVorbis,
-                    channels: 2,
-                    sample_rate: 44_100,
+                    codec: *codec,
+                    channels: *channels,
+                    sample_rate: *sample_rate,
                     chunk_offsets: Vec::new(),
                 }
             })
@@ -776,7 +838,15 @@ fn row_extract_source(
 /// File extension for an extracted row: CE raw passthrough keeps `.ogg`;
 /// everything else decodes to `.wav`.
 fn row_extract_ext(kind: &RowKind, raw_ce: bool) -> &'static str {
-    if raw_ce && matches!(kind, RowKind::InlineOgg) {
+    if raw_ce
+        && matches!(
+            kind,
+            RowKind::InlineCe {
+                codec: super::audio::InlineCodec::OggVorbis,
+                ..
+            }
+        )
+    {
         "ogg"
     } else {
         "wav"
@@ -948,9 +1018,17 @@ pub(super) fn draw_sound_player(ui: &mut Ui, tag: &TagFile, edit: &mut FieldEdit
         .iter()
         .any(|row| matches!(row.kind, RowKind::InlineH2 { .. }));
     let h2_params = is_h2.then(|| h2_codec_params(tag));
-    let has_inline_ogg = rows
-        .iter()
-        .any(|row| matches!(row.kind, RowKind::InlineOgg));
+    // The raw-passthrough toggle is only meaningful for CE Ogg-format tags
+    // (writing the verbatim stream as `.ogg`); ADPCM/PCM tags must decode to WAV.
+    let has_inline_ogg = rows.iter().any(|row| {
+        matches!(
+            row.kind,
+            RowKind::InlineCe {
+                codec: super::audio::InlineCodec::OggVorbis,
+                ..
+            }
+        )
+    });
     // Loose `.sound` file path (for the reimport data\ layout + tool tag path).
     let abs_tag_path = edit
         .tag_key
@@ -3969,6 +4047,59 @@ mod tests {
         let pcm = decode_ogg_vorbis(&bytes).expect("decode CE ogg");
         eprintln!(
             "CE inline: {} bytes -> {} frames {}ch {}Hz",
+            bytes.len(),
+            pcm.frame_count(),
+            pcm.channels,
+            pcm.sample_rate
+        );
+        assert!(pcm.frame_count() > 0);
+    }
+
+    /// Classic Halo CE Xbox-ADPCM weapon sound (skip-if-absent). CE `.sound`
+    /// tags aren't always Ogg — weapon/effect sounds are frequently
+    /// `format = xbox adpcm`, which has no `OggS` header. Regression for the
+    /// `ogg header: NoCapturePatternFound` failure: the codec must come from the
+    /// tag's `format` field, and the row must decode via the ADPCM path.
+    #[test]
+    #[ignore]
+    fn ce_inline_xbox_adpcm_extracts_and_decodes() {
+        use super::audio::InlineCodec;
+        let defs = std::path::Path::new("/Users/camden/Source/blam-tags/definitions");
+        let tag_path = std::path::Path::new(
+            "/Users/camden/Halo/haloce_mcc/tags/sound/sfx/weapons/sniper rifle/fire.sound",
+        );
+        if !tag_path.exists() || !defs.exists() {
+            eprintln!("skip: no CE tag/defs");
+            return;
+        }
+        let group = u32::from_be_bytes(*b"snd!");
+        let tag = crate::source::read_tag_at_path(tag_path, Some("haloce_mcc"), Some(defs), group)
+            .expect("read CE sound tag");
+
+        // The tag reports Xbox-ADPCM, mono, 22050 Hz — and carries no Ogg stream.
+        let (codec, channels, sample_rate) = ce_codec_params(&tag);
+        assert!(
+            matches!(codec, InlineCodec::XboxAdpcm),
+            "sniper fire.sound is xbox adpcm, got {codec:?}"
+        );
+        assert_eq!((channels, sample_rate), (1, 22_050));
+
+        // The player's row must inherit that codec (not assume Ogg).
+        let rows = sound_permutation_rows(&tag);
+        assert!(matches!(
+            rows.first().map(|r| &r.kind),
+            Some(RowKind::InlineCe {
+                codec: InlineCodec::XboxAdpcm,
+                ..
+            })
+        ));
+
+        let bytes = inline_permutation_samples(&tag, 0, 0).expect("inline samples present");
+        assert!(!bytes.starts_with(b"OggS"), "adpcm stream, not Ogg");
+        let pcm = super::audio::decode_inline(codec, &bytes, channels, sample_rate)
+            .expect("decode CE xbox adpcm");
+        eprintln!(
+            "CE xbox-adpcm: {} bytes -> {} frames {}ch {}Hz",
             bytes.len(),
             pcm.frame_count(),
             pcm.channels,
