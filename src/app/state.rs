@@ -180,6 +180,7 @@ pub(super) struct TerminalProcess {
 
 pub(super) enum BrowserAction {
     Select(String),
+    ToggleFavorite(String),
     CopyTagName(String),
     DumpJson(String),
     OpenInExplorer(String),
@@ -346,6 +347,12 @@ pub(super) enum SettingsTab {
     EditingKitAliases,
     Appearance,
     Tools,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct EditingKitFavorites {
+    pub(super) tags_root: PathBuf,
+    pub(super) tags: Vec<PathBuf>,
 }
 
 #[derive(Clone, Debug)]
@@ -523,6 +530,7 @@ pub(super) struct GuiPrefs {
     pub(super) tool_commands_left_width: f32,
     pub(super) tool_commands_collapsed_categories: HashSet<String>,
     pub(super) recent_folders: Vec<PathBuf>,
+    pub(super) editing_kit_favorites: Vec<EditingKitFavorites>,
     pub(super) custom_color_swatches: Vec<Option<[u8; 4]>>,
     pub(super) palette_last_dir: Option<PathBuf>,
 }
@@ -1179,6 +1187,7 @@ impl Default for GuiPrefs {
             tool_commands_left_width: DEFAULT_TOOL_COMMANDS_LEFT_WIDTH,
             tool_commands_collapsed_categories: HashSet::new(),
             recent_folders: Vec::new(),
+            editing_kit_favorites: Vec::new(),
             custom_color_swatches: vec![None; CUSTOM_COLOR_SWATCH_COUNT],
             palette_last_dir: None,
         }

@@ -149,6 +149,7 @@ pub(super) fn load_gui_prefs() -> GuiPrefs {
             "tool_commands_collapsed_categories",
         ),
         recent_folders: load_path_list(&value, "recent_folders"),
+        editing_kit_favorites: load_editing_kit_favorites(&value),
         custom_color_swatches: load_custom_color_swatches(&value),
         palette_last_dir: value
             .get("palette_last_dir")
@@ -230,6 +231,79 @@ fn load_editing_kit_paths(value: &Value) -> HashMap<String, PathBuf> {
         paths.insert(shortcut.game.to_owned(), PathBuf::from(path));
     }
     paths
+}
+
+fn load_editing_kit_favorites(value: &Value) -> Vec<EditingKitFavorites> {
+    let Some(kits) = value.get("editing_kit_favorites").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut favorites: Vec<EditingKitFavorites> = Vec::new();
+    for kit in kits {
+        let Some(root) = kit
+            .get("tags_root")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|root| !root.is_empty())
+        else {
+            continue;
+        };
+        let root = clean_recent_path(PathBuf::from(root));
+        let Some(tags) = kit.get("tags").and_then(Value::as_array) else {
+            continue;
+        };
+        let mut relative_paths: Vec<PathBuf> = Vec::new();
+        for tag in tags {
+            let Some(path) = tag
+                .as_str()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .and_then(|path| clean_favorite_relative_path(PathBuf::from(path)))
+            else {
+                continue;
+            };
+            if !relative_paths
+                .iter()
+                .any(|existing| same_recent_path(existing, &path))
+            {
+                relative_paths.push(path);
+            }
+        }
+        if relative_paths.is_empty() {
+            continue;
+        }
+        if let Some(existing) = favorites
+            .iter_mut()
+            .find(|existing| same_recent_path(&existing.tags_root, &root))
+        {
+            for path in relative_paths {
+                if !existing
+                    .tags
+                    .iter()
+                    .any(|current| same_recent_path(current, &path))
+                {
+                    existing.tags.push(path);
+                }
+            }
+        } else {
+            favorites.push(EditingKitFavorites {
+                tags_root: root,
+                tags: relative_paths,
+            });
+        }
+    }
+    favorites
+}
+
+pub(super) fn clean_favorite_relative_path(path: PathBuf) -> Option<PathBuf> {
+    if path.as_os_str().is_empty()
+        || path.is_absolute()
+        || path
+            .components()
+            .any(|component| !matches!(component, std::path::Component::Normal(_)))
+    {
+        return None;
+    }
+    Some(path)
 }
 
 fn load_custom_color_swatches(value: &Value) -> Vec<Option<[u8; 4]>> {
@@ -358,6 +432,12 @@ pub(super) fn save_gui_prefs(
         "tool_commands_left_width": prefs.tool_commands_left_width,
         "tool_commands_collapsed_categories": collapsed_tool_categories,
         "recent_folders": prefs.recent_folders.iter().map(|path| path.display().to_string()).collect::<Vec<_>>(),
+        "editing_kit_favorites": prefs.editing_kit_favorites.iter().filter(|kit| !kit.tags.is_empty()).map(|kit| {
+            json!({
+                "tags_root": kit.tags_root.display().to_string(),
+                "tags": kit.tags.iter().map(|path| path.display().to_string()).collect::<Vec<_>>(),
+            })
+        }).collect::<Vec<_>>(),
         "custom_color_swatches": prefs.custom_color_swatches.iter().map(|swatch| {
             swatch.map(|rgba| format!("#{:02X}{:02X}{:02X}{:02X}", rgba[0], rgba[1], rgba[2], rgba[3]))
         }).collect::<Vec<_>>(),
@@ -532,5 +612,50 @@ mod tests {
         );
         assert!(!paths.contains_key("halo4_mcc"));
         assert!(!paths.contains_key("unknown"));
+    }
+
+    #[test]
+    fn editing_kit_favorites_are_scoped_by_tags_root() {
+        let value = json!({
+            "editing_kit_favorites": [
+                {
+                    "tags_root": "C:/Games/H2EK/tags",
+                    "tags": [
+                        "objects/brute.model",
+                        "objects/brute.model",
+                        "../outside.model"
+                    ]
+                },
+                {
+                    "tags_root": "C:/Games/H3EK/tags",
+                    "tags": ["objects/brute.model"]
+                }
+            ]
+        });
+
+        let favorites = load_editing_kit_favorites(&value);
+
+        assert_eq!(favorites.len(), 2);
+        assert_eq!(favorites[0].tags_root, PathBuf::from("C:/Games/H2EK/tags"));
+        assert_eq!(
+            favorites[0].tags,
+            vec![PathBuf::from("objects/brute.model")]
+        );
+        assert_eq!(favorites[1].tags_root, PathBuf::from("C:/Games/H3EK/tags"));
+        assert_eq!(
+            favorites[1].tags,
+            vec![PathBuf::from("objects/brute.model")]
+        );
+    }
+
+    #[test]
+    fn favorite_paths_must_be_relative_and_normalized() {
+        assert_eq!(
+            clean_favorite_relative_path(PathBuf::from("objects/brute.model")),
+            Some(PathBuf::from("objects/brute.model"))
+        );
+        assert!(clean_favorite_relative_path(PathBuf::from("../brute.model")).is_none());
+        assert!(clean_favorite_relative_path(PathBuf::from("./brute.model")).is_none());
+        assert!(clean_favorite_relative_path(PathBuf::new()).is_none());
     }
 }

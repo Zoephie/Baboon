@@ -138,6 +138,7 @@ pub(super) fn draw_tree(
     reveal: Option<Reveal>,
     sort: BrowserSort,
     folders_before_tags: bool,
+    favorite_keys: Option<&HashSet<String>>,
 ) -> Option<BrowserAction> {
     let mut clicked = None;
     if !folders_before_tags {
@@ -152,6 +153,7 @@ pub(super) fn draw_tree(
                 double_click_to_open,
                 reveal.and_then(Reveal::leaf_key),
                 sort,
+                favorite_keys,
             )
         });
     }
@@ -175,6 +177,7 @@ pub(super) fn draw_tree(
                 reveal,
                 sort,
                 folders_before_tags,
+                favorite_keys,
             )
         });
     }
@@ -190,6 +193,7 @@ pub(super) fn draw_tree(
                 double_click_to_open,
                 reveal.and_then(Reveal::leaf_key),
                 sort,
+                favorite_keys,
             )
         });
     }
@@ -211,6 +215,7 @@ pub(super) fn draw_tree_lazy(
     reveal: Option<Reveal>,
     sort: BrowserSort,
     folders_before_tags: bool,
+    favorite_keys: Option<&HashSet<String>>,
 ) -> Option<BrowserAction> {
     let mut clicked = None;
     if !folders_before_tags {
@@ -225,6 +230,7 @@ pub(super) fn draw_tree_lazy(
                 double_click_to_open,
                 reveal.and_then(Reveal::leaf_key),
                 sort,
+                favorite_keys,
             )
         });
     }
@@ -246,6 +252,7 @@ pub(super) fn draw_tree_lazy(
                 reveal,
                 sort,
                 folders_before_tags,
+                favorite_keys,
             )
         });
     }
@@ -261,6 +268,7 @@ pub(super) fn draw_tree_lazy(
                 double_click_to_open,
                 reveal.and_then(Reveal::leaf_key),
                 sort,
+                favorite_keys,
             )
         });
     }
@@ -283,6 +291,7 @@ pub(super) fn draw_tree_node_lazy(
     reveal: Option<Reveal>,
     sort: BrowserSort,
     folders_before_tags: bool,
+    favorite_keys: Option<&HashSet<String>>,
 ) -> Option<BrowserAction> {
     if !filter.is_empty() && !lazy_node_matches(node, entries, filter) {
         return None;
@@ -331,6 +340,7 @@ pub(super) fn draw_tree_node_lazy(
                         double_click_to_open,
                         leaf_key,
                         sort,
+                        favorite_keys,
                     );
                 } else {
                     let _ = draw_entry_list(
@@ -343,6 +353,7 @@ pub(super) fn draw_tree_node_lazy(
                         double_click_to_open,
                         leaf_key,
                         sort,
+                        favorite_keys,
                     );
                 }
             }
@@ -364,6 +375,7 @@ pub(super) fn draw_tree_node_lazy(
                         inner_reveal,
                         sort,
                         folders_before_tags,
+                        favorite_keys,
                     );
                 }
             }
@@ -379,6 +391,7 @@ pub(super) fn draw_tree_node_lazy(
                         double_click_to_open,
                         leaf_key,
                         sort,
+                        favorite_keys,
                     );
                 } else {
                     let _ = draw_entry_list(
@@ -391,6 +404,7 @@ pub(super) fn draw_tree_node_lazy(
                         double_click_to_open,
                         leaf_key,
                         sort,
+                        favorite_keys,
                     );
                 }
             }
@@ -474,6 +488,7 @@ pub(super) fn draw_tree_node(
     reveal: Option<Reveal>,
     sort: BrowserSort,
     folders_before_tags: bool,
+    favorite_keys: Option<&HashSet<String>>,
 ) -> Option<BrowserAction> {
     if !filter.is_empty() && !node_matches(node, entries, filter) {
         return None;
@@ -506,6 +521,7 @@ pub(super) fn draw_tree_node(
                         double_click_to_open,
                         leaf_key,
                         sort,
+                        favorite_keys,
                     );
                 } else {
                     let _ = draw_entry_list(
@@ -518,6 +534,7 @@ pub(super) fn draw_tree_node(
                         double_click_to_open,
                         leaf_key,
                         sort,
+                        favorite_keys,
                     );
                 }
             }
@@ -536,6 +553,7 @@ pub(super) fn draw_tree_node(
                         inner_reveal,
                         sort,
                         folders_before_tags,
+                        favorite_keys,
                     );
                 }
             }
@@ -551,6 +569,7 @@ pub(super) fn draw_tree_node(
                         double_click_to_open,
                         leaf_key,
                         sort,
+                        favorite_keys,
                     );
                 } else {
                     let _ = draw_entry_list(
@@ -563,6 +582,7 @@ pub(super) fn draw_tree_node(
                         double_click_to_open,
                         leaf_key,
                         sort,
+                        favorite_keys,
                     );
                 }
             }
@@ -726,6 +746,7 @@ pub(super) fn draw_entry_list(
     double_click_to_open: bool,
     reveal_key: Option<&str>,
     sort: BrowserSort,
+    favorite_keys: Option<&HashSet<String>>,
 ) -> Option<BrowserAction> {
     let ordered = ordered_indices(entry_indices, entries, sort);
     let entry_indices: &[usize] = ordered.as_ref();
@@ -743,6 +764,7 @@ pub(super) fn draw_entry_list(
                 show_prefixes,
                 double_click_to_open,
                 reveal_key,
+                favorite_keys,
             );
         } else {
             let _ = draw_entry(
@@ -752,6 +774,7 @@ pub(super) fn draw_entry_list(
                 show_prefixes,
                 double_click_to_open,
                 reveal_key,
+                favorite_keys,
             );
         }
     }
@@ -765,6 +788,7 @@ pub(super) fn draw_entry(
     show_prefixes: bool,
     double_click_to_open: bool,
     reveal_key: Option<&str>,
+    favorite_keys: Option<&HashSet<String>>,
 ) -> Option<BrowserAction> {
     let leaf_label = entry
         .display_path
@@ -834,6 +858,18 @@ pub(super) fn draw_entry(
     };
     let mut action = open_requested.then(|| BrowserAction::Select(entry.key.clone()));
     response.context_menu(|ui| {
+        if let Some(favorite_keys) = favorite_keys {
+            let label = if favorite_keys.contains(&entry.key) {
+                "Remove from Favorites"
+            } else {
+                "Add to Favorites"
+            };
+            if ui.button(label).clicked() {
+                action = Some(BrowserAction::ToggleFavorite(entry.key.clone()));
+                ui.close_menu();
+            }
+            ui.separator();
+        }
         if ui.button("Copy tag name").clicked() {
             action = Some(BrowserAction::CopyTagName(entry.key.clone()));
             ui.close_menu();
@@ -897,6 +933,45 @@ pub(super) fn draw_entry(
         {
             action = Some(BrowserAction::ExtractHlslIncludeSource(entry.key.clone()));
             ui.close_menu();
+        }
+    });
+    action
+}
+
+pub(super) fn draw_favorites(
+    ui: &mut Ui,
+    entries: &[TagEntry],
+    selected: Option<&str>,
+    filter: &str,
+    show_prefixes: bool,
+    double_click_to_open: bool,
+    favorite_keys: &HashSet<String>,
+) -> Option<BrowserAction> {
+    if entries.is_empty() || !entries.iter().any(|entry| entry_matches(entry, filter)) {
+        return None;
+    }
+    let mut action = None;
+    egui::CollapsingHeader::new(
+        RichText::new("★ Favorites").color(Color32::from_rgb(242, 196, 48)),
+    )
+    .default_open(true)
+    .show(ui, |ui| {
+        for entry in entries {
+            if !entry_matches(entry, filter) {
+                continue;
+            }
+            let row_action = draw_entry(
+                ui,
+                entry,
+                selected,
+                show_prefixes,
+                double_click_to_open,
+                None,
+                Some(favorite_keys),
+            );
+            if action.is_none() {
+                action = row_action;
+            }
         }
     });
     action

@@ -3224,6 +3224,11 @@ impl eframe::App for Baboon {
                     }
                 }
 
+                let active_favorite_entries = self.active_favorite_entries.clone();
+                let favorite_keys: HashSet<String> = active_favorite_entries
+                    .iter()
+                    .map(|entry| entry.key.clone())
+                    .collect();
                 if let Some(source) = &mut self.source {
                     ui.add_space(8.0);
                     let scanning = self.scanning_entries;
@@ -3300,6 +3305,8 @@ impl eframe::App for Baboon {
                     // scan) so every tag is visible, not just visited folders.
                     let has_all = !source.all_entries.is_empty();
                     let groups_mode = matches!(mode, BrowserMode::Groups);
+                    let favorite_context = matches!(source.source, TagSource::LooseFolder { .. })
+                        .then_some(&favorite_keys);
                     // One-shot "reveal in tree" request (force-open ancestors +
                     // scroll). Borrowed into the Copy `Reveal` for the draw.
                     let reveal_owned = self.reveal_target.take();
@@ -3324,12 +3331,21 @@ impl eframe::App for Baboon {
                             ScrollArea::vertical()
                                 .auto_shrink([false, false])
                                 .show(ui, |ui| {
+                                    let favorite_action = draw_favorites(
+                                        ui,
+                                        &active_favorite_entries,
+                                        selected.as_deref(),
+                                        &filter,
+                                        show_prefixes,
+                                        double_click_to_open,
+                                        &favorite_keys,
+                                    );
                                     ui.label(
                                         RichText::new("Indexing tags…")
                                             .color(subtle_dark())
                                             .small(),
                                     );
-                                    None
+                                    favorite_action
                                 })
                                 .inner
                         } else {
@@ -3344,15 +3360,24 @@ impl eframe::App for Baboon {
                             ScrollArea::vertical()
                                 .auto_shrink([false, false])
                                 .show(ui, |ui| {
+                                    let favorite_action = draw_favorites(
+                                        ui,
+                                        &active_favorite_entries,
+                                        selected.as_deref(),
+                                        &filter,
+                                        show_prefixes,
+                                        double_click_to_open,
+                                        &favorite_keys,
+                                    );
                                     if cache.entries.is_empty() {
                                         ui.label(
                                             RichText::new("No matching tags").color(subtle_dark()),
                                         );
-                                        return None;
+                                        return favorite_action;
                                     }
                                     // Empty filter → tree renders every (already
                                     // pruned) entry with folders collapsed.
-                                    draw_tree(
+                                    let tree_action = draw_tree(
                                         ui,
                                         &cache.tree,
                                         &cache.entries,
@@ -3364,78 +3389,96 @@ impl eframe::App for Baboon {
                                         reveal,
                                         sort,
                                         !groups_mode && folders_before_tags,
-                                    )
+                                        favorite_context,
+                                    );
+                                    favorite_action.or(tree_action)
                                 })
                                 .inner
                         }
                     } else {
                         ScrollArea::vertical()
                             .auto_shrink([false, false])
-                            .show(ui, |ui| match mode {
-                                BrowserMode::Folders => {
-                                    if let TagSource::LooseFolder { root, .. } = &source.source {
-                                        let root = root.clone();
-                                        draw_tree_lazy(
-                                            ui,
-                                            &mut source.tree,
-                                            &mut source.entries,
-                                            &mut source.group_tree,
-                                            &root,
-                                            &source.names,
-                                            selected.as_deref(),
-                                            &filter,
-                                            show_prefixes,
-                                            double_click_to_open,
-                                            &mut status_update,
-                                            reveal,
-                                            sort,
-                                            folders_before_tags,
-                                        )
-                                    } else {
-                                        draw_tree(
-                                            ui,
-                                            &source.tree,
-                                            &source.entries,
-                                            selected.as_deref(),
-                                            &filter,
-                                            show_prefixes,
-                                            double_click_to_open,
-                                            false,
-                                            reveal,
-                                            sort,
-                                            folders_before_tags,
-                                        )
-                                    }
-                                }
-                                BrowserMode::Groups => {
-                                    if scanning && !has_all {
-                                        ui.label(
-                                            RichText::new("Indexing tags…")
-                                                .color(subtle_dark())
-                                                .small(),
-                                        );
-                                        None
-                                    } else {
-                                        let entries = if has_all {
-                                            &source.all_entries[..]
+                            .show(ui, |ui| {
+                                let favorite_action = draw_favorites(
+                                    ui,
+                                    &active_favorite_entries,
+                                    selected.as_deref(),
+                                    &filter,
+                                    show_prefixes,
+                                    double_click_to_open,
+                                    &favorite_keys,
+                                );
+                                let tree_action = match mode {
+                                    BrowserMode::Folders => {
+                                        if let TagSource::LooseFolder { root, .. } = &source.source
+                                        {
+                                            let root = root.clone();
+                                            draw_tree_lazy(
+                                                ui,
+                                                &mut source.tree,
+                                                &mut source.entries,
+                                                &mut source.group_tree,
+                                                &root,
+                                                &source.names,
+                                                selected.as_deref(),
+                                                &filter,
+                                                show_prefixes,
+                                                double_click_to_open,
+                                                &mut status_update,
+                                                reveal,
+                                                sort,
+                                                folders_before_tags,
+                                                favorite_context,
+                                            )
                                         } else {
-                                            &source.entries[..]
-                                        };
-                                        draw_tree(
-                                            ui,
-                                            &source.group_tree,
-                                            entries,
-                                            selected.as_deref(),
-                                            &filter,
-                                            show_prefixes,
-                                            double_click_to_open,
-                                            true,
-                                            reveal,
-                                            sort,
-                                            false,
-                                        )
+                                            draw_tree(
+                                                ui,
+                                                &source.tree,
+                                                &source.entries,
+                                                selected.as_deref(),
+                                                &filter,
+                                                show_prefixes,
+                                                double_click_to_open,
+                                                false,
+                                                reveal,
+                                                sort,
+                                                folders_before_tags,
+                                                None,
+                                            )
+                                        }
                                     }
-                                }
+                                    BrowserMode::Groups => {
+                                        if scanning && !has_all {
+                                            ui.label(
+                                                RichText::new("Indexing tags…")
+                                                    .color(subtle_dark())
+                                                    .small(),
+                                            );
+                                            None
+                                        } else {
+                                            let entries = if has_all {
+                                                &source.all_entries[..]
+                                            } else {
+                                                &source.entries[..]
+                                            };
+                                            draw_tree(
+                                                ui,
+                                                &source.group_tree,
+                                                entries,
+                                                selected.as_deref(),
+                                                &filter,
+                                                show_prefixes,
+                                                double_click_to_open,
+                                                true,
+                                                reveal,
+                                                sort,
+                                                false,
+                                                favorite_context,
+                                            )
+                                        }
+                                    }
+                                };
+                                favorite_action.or(tree_action)
                             })
                             .inner
                     };

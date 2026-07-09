@@ -175,6 +175,7 @@ impl Baboon {
                     // The field-value index is bound to the old entry set.
                     self.field_index.invalidate();
                     self.source = Some(loaded);
+                    self.refresh_active_favorite_entries();
                     // New entry universe — invalidate any cached search results.
                     self.source_generation = self.source_generation.wrapping_add(1);
                     self.refreshing_entry_index = false;
@@ -300,6 +301,7 @@ impl Baboon {
                                 }
                             }
                             if done.moved {
+                                self.remap_current_favorites(&done.old_to_new_keys);
                                 remap_open_tag_keys(&mut self.open_tabs, &done.old_to_new_keys);
                                 remap_hashset_keys(&mut self.floating_tabs, &done.old_to_new_keys);
                                 if let Some(selected) = self.selected_key.clone()
@@ -726,6 +728,125 @@ impl Baboon {
         Some(root.clone())
     }
 
+    fn favorite_kit_index(&self, root: &Path) -> Option<usize> {
+        self.editing_kit_favorites
+            .iter()
+            .position(|kit| same_recent_path(&kit.tags_root, root))
+    }
+
+    fn refresh_active_favorite_entries(&mut self) {
+        self.active_favorite_entries.clear();
+        let Some(root) = self.loaded_tags_root() else {
+            return;
+        };
+        let Some(index) = self.favorite_kit_index(&root) else {
+            return;
+        };
+        let names = self
+            .source
+            .as_ref()
+            .map(|source| source.names.clone())
+            .unwrap_or_else(|| self.names.clone());
+        let saved_paths = self.editing_kit_favorites[index].tags.clone();
+        let mut missing = Vec::new();
+        for relative_path in saved_paths {
+            let path = root.join(&relative_path);
+            if !path.is_file() {
+                missing.push(relative_path);
+                continue;
+            }
+            if let Ok(Some(entry)) = loose_file_entry(&root, &path, &names) {
+                self.active_favorite_entries.push(entry);
+            }
+        }
+        if !missing.is_empty() {
+            self.editing_kit_favorites[index].tags.retain(|path| {
+                !missing
+                    .iter()
+                    .any(|missing| same_recent_path(missing, path))
+            });
+            if self.editing_kit_favorites[index].tags.is_empty() {
+                self.editing_kit_favorites.remove(index);
+            }
+        }
+    }
+
+    fn toggle_favorite(&mut self, key: &str) {
+        let Some(root) = self.loaded_tags_root() else {
+            self.status = "Favorites are only available for editing-kit tag folders".to_owned();
+            return;
+        };
+        let Some(entry) = self.entry_for_key(key).cloned() else {
+            self.status = "Tag is no longer available".to_owned();
+            return;
+        };
+        let TagEntryLocation::LooseFile(path) = &entry.location else {
+            self.status = "Only loose tags can be favorited".to_owned();
+            return;
+        };
+        let Some(relative_path) = path
+            .strip_prefix(&root)
+            .ok()
+            .map(Path::to_path_buf)
+            .and_then(clean_favorite_relative_path)
+        else {
+            self.status = "Could not resolve tag relative to the loaded tags folder".to_owned();
+            return;
+        };
+        let index = self.favorite_kit_index(&root).unwrap_or_else(|| {
+            self.editing_kit_favorites.push(EditingKitFavorites {
+                tags_root: clean_recent_path(root.clone()),
+                tags: Vec::new(),
+            });
+            self.editing_kit_favorites.len() - 1
+        });
+        let kit = &mut self.editing_kit_favorites[index];
+        if let Some(position) = kit
+            .tags
+            .iter()
+            .position(|current| same_recent_path(current, &relative_path))
+        {
+            kit.tags.remove(position);
+            self.active_favorite_entries
+                .retain(|favorite| favorite.key != entry.key);
+            if kit.tags.is_empty() {
+                self.editing_kit_favorites.remove(index);
+            }
+            self.status = format!("Removed {} from Favorites", entry.display_path);
+        } else {
+            kit.tags.push(relative_path);
+            self.active_favorite_entries.push(entry.clone());
+            self.status = format!("Added {} to Favorites", entry.display_path);
+        }
+    }
+
+    fn remap_current_favorites(&mut self, old_to_new_keys: &HashMap<String, String>) {
+        let Some(root) = self.loaded_tags_root() else {
+            return;
+        };
+        let Some(index) = self.favorite_kit_index(&root) else {
+            return;
+        };
+        remap_favorite_paths(
+            &root,
+            &mut self.editing_kit_favorites[index].tags,
+            old_to_new_keys,
+        );
+        let mut unique: Vec<PathBuf> = Vec::new();
+        self.editing_kit_favorites[index].tags.retain(|path| {
+            if unique
+                .iter()
+                .any(|existing| same_recent_path(existing, path))
+            {
+                false
+            } else {
+                unique.push(path.clone());
+                true
+            }
+        });
+        self.refresh_active_favorite_entries();
+    }
+
     pub(super) fn open_dropped_files(&mut self, paths: Vec<PathBuf>, ctx: egui::Context) {
         if paths.is_empty() {
             return;
@@ -852,6 +973,17 @@ impl Baboon {
         self.selected_key = Some(key.clone());
         self.remember_tag_use(&key);
         self.trim_open_tabs();
+    }
+
+    fn register_saved_copy_if_in_loaded_folder(&mut self, path: &Path) -> Result<bool, String> {
+        let Some(source) = self.source.as_mut() else {
+            return Ok(false);
+        };
+        let registered = register_saved_copy_in_loaded_source(source, path)?;
+        if registered {
+            self.source_generation = self.source_generation.wrapping_add(1);
+        }
+        Ok(registered)
     }
 
     /// Trigger a background full recursive scan of a LooseFolder source so
@@ -1285,6 +1417,7 @@ impl Baboon {
             .entries
             .iter()
             .chain(source.all_entries.iter())
+            .chain(self.active_favorite_entries.iter())
             .find(|e| e.key == key)
             .cloned()
         else {
@@ -1312,6 +1445,7 @@ impl Baboon {
             .entries
             .iter()
             .chain(source.all_entries.iter())
+            .chain(self.active_favorite_entries.iter())
             .find(|entry| entry.key == key)
     }
 
@@ -1696,6 +1830,7 @@ impl Baboon {
     pub(super) fn handle_browser_action(&mut self, action: BrowserAction, ctx: egui::Context) {
         match action {
             BrowserAction::Select(key) => self.select_entry(key, ctx),
+            BrowserAction::ToggleFavorite(key) => self.toggle_favorite(&key),
             BrowserAction::CopyTagName(key) => self.copy_tag_name(&key, &ctx),
             BrowserAction::DumpJson(key) => self.begin_export_json(key, ctx),
             BrowserAction::OpenInExplorer(key) => self.open_entry_in_explorer(&key),
@@ -2292,7 +2427,13 @@ impl Baboon {
 
         match doc.tag.write_atomic(&output) {
             Ok(()) => {
-                self.status = format!("Saved copy to {}", output.display());
+                self.status = match self.register_saved_copy_if_in_loaded_folder(&output) {
+                    Ok(_) => format!("Saved copy to {}", output.display()),
+                    Err(error) => format!(
+                        "Saved copy to {}, but did not update browser: {error}",
+                        output.display()
+                    ),
+                };
             }
             Err(error) => self.status = format!("Save As failed: {error}"),
         }
@@ -3503,6 +3644,7 @@ impl Baboon {
             tool_commands_left_width: self.tool_commands_left_width,
             tool_commands_collapsed_categories: self.tool_commands_collapsed_categories.clone(),
             recent_folders: self.recent_folders.clone(),
+            editing_kit_favorites: self.editing_kit_favorites.clone(),
             custom_color_swatches: self.custom_color_swatches.clone(),
             palette_last_dir: self.palette_last_dir.clone(),
         }
@@ -4307,6 +4449,60 @@ fn save_as_extension(app: &Baboon, entry: &TagEntry) -> Option<String> {
         .filter(|extension| !extension.is_empty())
 }
 
+fn register_saved_copy_in_loaded_source(
+    source: &mut LoadedSourceData,
+    path: &Path,
+) -> Result<bool, String> {
+    let TagSource::LooseFolder { root, .. } = &source.source else {
+        return Ok(false);
+    };
+
+    let canonical_root = fs::canonicalize(root)
+        .map_err(|error| format!("Could not resolve loaded tags folder: {error}"))?;
+    let canonical_path = fs::canonicalize(path)
+        .map_err(|error| format!("Could not resolve saved tag path: {error}"))?;
+    if !canonical_path.starts_with(&canonical_root) {
+        return Ok(false);
+    }
+
+    let Some(entry) = loose_file_entry(&canonical_root, &canonical_path, &source.names)
+        .map_err(|error| format!("Could not inspect saved tag: {error:#}"))?
+    else {
+        return Ok(false);
+    };
+    let key = entry.key.clone();
+
+    source.entries.retain(|existing| existing.key != key);
+    source.entries.push(entry.clone());
+    source
+        .entries
+        .sort_by(|a, b| a.display_path.cmp(&b.display_path));
+
+    if !source.all_entries.is_empty() {
+        source.all_entries.retain(|existing| existing.key != key);
+        source.all_entries.push(entry);
+        source
+            .all_entries
+            .sort_by(|a, b| a.display_path.cmp(&b.display_path));
+        source.group_tree = crate::source::build_group_tree(&source.all_entries);
+        if let (Some(game), TagSource::LooseFolder { root, .. }) =
+            (source.game.as_deref(), &source.source)
+        {
+            let _ = crate::source::save_entry_index(game, root, &source.all_entries);
+        }
+    } else {
+        source.group_tree = crate::source::build_group_tree(&source.entries);
+    }
+
+    if let TagSource::LooseFolder { root, .. } = &source.source
+        && let Ok(tree) = crate::source::build_folder_directory_tree(root)
+    {
+        source.tree = tree;
+    }
+
+    Ok(true)
+}
+
 enum SaveChangesPromptAction {
     None,
     Save(Vec<String>),
@@ -4960,6 +5156,16 @@ mod tests {
         std::env::temp_dir().join(format!("baboon-{name}-{}-{nanos}", std::process::id()))
     }
 
+    fn write_classic_ce_tag(path: &Path, group: &[u8; 4]) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).unwrap();
+        }
+        let mut bytes = [0u8; 64];
+        bytes[36..40].copy_from_slice(group);
+        bytes[60..64].copy_from_slice(b"blam");
+        std::fs::write(path, bytes).unwrap();
+    }
+
     #[test]
     fn detect_editing_kit_paths_finds_all_known_common_folder_names() {
         let common = unique_test_dir("ek-detect-all");
@@ -5018,6 +5224,82 @@ mod tests {
             Some("C:/Steam/H4EK")
         );
         assert_eq!(attention, None);
+    }
+
+    #[test]
+    fn save_as_registers_classic_ce_copy_in_loaded_folder() {
+        let root = unique_test_dir("save-as-register-ce");
+        let old_path = root.join("objects").join("old").join("old.gbxmodel");
+        write_classic_ce_tag(&old_path, b"mod2");
+        std::fs::create_dir_all(root.join("objects")).unwrap();
+
+        let names = TagNameIndex::default();
+        let old_entry = loose_file_entry(&root, &old_path, &names)
+            .unwrap()
+            .expect("old CE tag should probe");
+        let entries = vec![old_entry.clone()];
+        let mut source = LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::LooseFolder {
+                root: root.clone(),
+                game: None,
+                definitions_root: PathBuf::new(),
+            },
+            names,
+            game: None,
+            entries: entries.clone(),
+            tree: crate::source::build_folder_directory_tree(&root).unwrap(),
+            group_tree: crate::source::build_group_tree(&entries),
+            all_entries: entries,
+            reverse_dependencies: None,
+            initial_tag: None,
+        };
+
+        let saved_path = root.join("saved").join("cyborg.gbxmodel");
+        write_classic_ce_tag(&saved_path, b"mod2");
+
+        let registered = register_saved_copy_in_loaded_source(&mut source, &saved_path).unwrap();
+
+        let _ = std::fs::remove_dir_all(root);
+        assert!(registered);
+        assert!(
+            source
+                .tree
+                .children
+                .iter()
+                .any(|node| node.label == "saved")
+        );
+        assert!(source.entries.iter().any(|entry| {
+            entry.display_path == "saved/cyborg.gbxmodel"
+                && entry.group_tag == u32::from_be_bytes(*b"mod2")
+        }));
+        assert!(source.all_entries.iter().any(|entry| {
+            entry.display_path == "saved/cyborg.gbxmodel"
+                && entry.group_tag == u32::from_be_bytes(*b"mod2")
+        }));
+        assert!(source.group_tree.children.iter().any(|node| {
+            node.entries
+                .iter()
+                .any(|&index| source.all_entries[index].display_path == "saved/cyborg.gbxmodel")
+        }));
+    }
+
+    #[test]
+    fn moved_tags_remap_favorite_relative_paths() {
+        let root = PathBuf::from("C:/Games/H2EK/tags");
+        let old_relative = PathBuf::from("objects/old/brute.model");
+        let new_relative = PathBuf::from("objects/characters/brute/brute.model");
+        let mut favorites = vec![old_relative.clone(), PathBuf::from("sound/brute.sound")];
+        let mut remap = HashMap::new();
+        remap.insert(
+            format!("file:{}", root.join(&old_relative).display()),
+            format!("file:{}", root.join(&new_relative).display()),
+        );
+
+        remap_favorite_paths(&root, &mut favorites, &remap);
+
+        assert_eq!(favorites[0], new_relative);
+        assert_eq!(favorites[1], PathBuf::from("sound/brute.sound"));
     }
 
     #[test]
@@ -7094,6 +7376,44 @@ fn remap_open_tag_keys(keys: &mut Vec<String>, map: &HashMap<String, String>) {
     }
     let mut seen = HashSet::new();
     keys.retain(|key| seen.insert(key.clone()));
+}
+
+fn same_entry_key(a: &str, b: &str) -> bool {
+    #[cfg(windows)]
+    {
+        a.eq_ignore_ascii_case(b)
+    }
+    #[cfg(not(windows))]
+    {
+        a == b
+    }
+}
+
+fn remap_favorite_paths(
+    root: &Path,
+    relative_paths: &mut [PathBuf],
+    old_to_new_keys: &HashMap<String, String>,
+) {
+    for relative_path in relative_paths {
+        let old_key = format!("file:{}", root.join(&*relative_path).display());
+        let Some(new_key) = old_to_new_keys
+            .iter()
+            .find_map(|(old, new)| same_entry_key(old, &old_key).then_some(new))
+        else {
+            continue;
+        };
+        let Some(new_path) = new_key.strip_prefix("file:").map(PathBuf::from) else {
+            continue;
+        };
+        if let Some(new_relative) = new_path
+            .strip_prefix(root)
+            .ok()
+            .map(Path::to_path_buf)
+            .and_then(clean_favorite_relative_path)
+        {
+            *relative_path = new_relative;
+        }
+    }
 }
 
 fn remap_hashset_keys(keys: &mut HashSet<String>, map: &HashMap<String, String>) {
