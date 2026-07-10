@@ -4020,6 +4020,72 @@ mod tests {
         }
     }
 
+    /// Regression (skip-if-absent): clearing a classic Halo CE tag_reference to
+    /// NONE — or saving a freshly-created reference — must reset the inline
+    /// group + path-length words. When the reference's sub-chunk payload is
+    /// emptied (`TagReferenceData::to_bytes(None)` yields no bytes), the classic
+    /// encoder used to leave the stale on-disk path length in place while
+    /// writing no trailing path, so re-decoding hit "unexpected EOF reading
+    /// tag_reference path: need N bytes, have M" and `write_atomic` failed
+    /// verification — corrupting Save As / new-tag saves. This drives the exact
+    /// Baboon load→edit→save path (read_tag_at_path → apply_field_edit →
+    /// write_atomic) that the field reported.
+    #[test]
+    #[ignore]
+    fn ce_shader_model_clear_reference_saves() {
+        let defs = std::path::Path::new("/Users/camden/Source/blam-tags/definitions");
+        let tag_path = std::path::Path::new(
+            "/Users/camden/Halo/haloce_mcc/tags/characters/crewman/shaders/crewman_body.shader_model",
+        );
+        if !tag_path.exists() || !defs.exists() {
+            eprintln!("skip: no CE tag/defs");
+            return;
+        }
+        let group = u32::from_be_bytes(*b"soso");
+        let out = std::env::temp_dir().join("baboon_ce_clear_ref.shader_model");
+        let load = || {
+            crate::source::read_tag_at_path(tag_path, Some("haloce_mcc"), Some(defs), group)
+                .expect("read CE shader_model tag")
+        };
+
+        // Save As of the unmodified tag round-trips.
+        load().write_atomic(&out).expect("Save As of unmodified tag");
+
+        // Setting a reference to a new path round-trips (the pre-existing path).
+        let mut edited = load();
+        apply_field_edit(&mut edited, "maps/base map", "weapons\\smg\\bitmaps\\smg.bitmap")
+            .expect("set base map");
+        edited.write_atomic(&out).expect("save after set");
+
+        // Clearing a long-path reference to NONE round-trips (the regression).
+        let mut cleared = load();
+        apply_field_edit(&mut cleared, "maps/base map", "none").expect("clear base map");
+        cleared
+            .write_atomic(&out)
+            .expect("save after clear-to-none must verify");
+
+        // The cleared reference reads back as a null reference — an empty path,
+        // the same shape a genuine stock null (e.g. the detail map) decodes to,
+        // which Baboon renders as NONE.
+        let reread = crate::source::read_tag_at_path(&out, Some("haloce_mcc"), Some(defs), group)
+            .expect("reread cleared tag");
+        let root = reread.root();
+        let base = root
+            .field_path("maps/base map")
+            .and_then(|f| f.value())
+            .expect("base map field present");
+        match base {
+            TagFieldData::TagReference(r) => {
+                let path = r.group_tag_and_name.as_ref().map(|(_, p)| p.as_str());
+                assert!(
+                    path.is_none_or(str::is_empty),
+                    "cleared ref should have no path, got {path:?}"
+                );
+            }
+            other => panic!("expected tag reference, got {other:?}"),
+        }
+    }
+
     /// Classic Halo CE inline audio (skip-if-absent): read the classic `.sound`
     /// tag, extract the permutation's inline `samples` exactly as the player
     /// does, and decode the Ogg Vorbis — the path `AudioState` takes for a
