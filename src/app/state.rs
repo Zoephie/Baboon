@@ -347,6 +347,7 @@ pub(super) enum SettingsTab {
     EditingKitAliases,
     Appearance,
     Tools,
+    Developer,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -533,6 +534,9 @@ pub(super) struct GuiPrefs {
     pub(super) editing_kit_favorites: Vec<EditingKitFavorites>,
     pub(super) custom_color_swatches: Vec<Option<[u8; 4]>>,
     pub(super) palette_last_dir: Option<PathBuf>,
+    /// Enables the experimental Foundation-style H3+ function editor for new
+    /// popups. H2 always retains its separate legacy editor.
+    pub(super) use_new_h3_function_editor: bool,
 }
 
 pub(super) struct TagDocument {
@@ -1190,6 +1194,7 @@ impl Default for GuiPrefs {
             editing_kit_favorites: Vec::new(),
             custom_color_swatches: vec![None; CUSTOM_COLOR_SWATCH_COUNT],
             palette_last_dir: None,
+            use_new_h3_function_editor: false,
         }
     }
 }

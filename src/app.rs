@@ -167,6 +167,7 @@ pub struct Baboon {
     color_popup: Option<MaterialColorPopup>,
     custom_color_swatches: Vec<Option<[u8; 4]>>,
     palette_last_dir: Option<PathBuf>,
+    use_new_h3_function_editor: bool,
     function_popup: Option<FunctionPopup>,
     query_results: Option<TagQueryResults>,
     /// "Compare Tags" (Tag Diff) window state.
@@ -349,6 +350,7 @@ impl Baboon {
             color_popup: None,
             custom_color_swatches: prefs.custom_color_swatches.clone(),
             palette_last_dir: prefs.palette_last_dir.clone(),
+            use_new_h3_function_editor: prefs.use_new_h3_function_editor,
             function_popup: None,
             query_results: None,
             pending_ref_jump: None,

@@ -156,6 +156,10 @@ pub(super) fn load_gui_prefs() -> GuiPrefs {
             .and_then(Value::as_str)
             .filter(|path| !path.trim().is_empty())
             .map(PathBuf::from),
+        use_new_h3_function_editor: value
+            .get("use_new_h3_function_editor")
+            .and_then(Value::as_bool)
+            .unwrap_or(false),
     }
 }
 
@@ -442,6 +446,7 @@ pub(super) fn save_gui_prefs(
             swatch.map(|rgba| format!("#{:02X}{:02X}{:02X}{:02X}", rgba[0], rgba[1], rgba[2], rgba[3]))
         }).collect::<Vec<_>>(),
         "palette_last_dir": prefs.palette_last_dir.as_ref().map(|path| path.display().to_string()),
+        "use_new_h3_function_editor": prefs.use_new_h3_function_editor,
         "terminal_open_games": games,
     });
     let text = serde_json::to_string_pretty(&value)
