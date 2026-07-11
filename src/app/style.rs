@@ -67,6 +67,47 @@ pub(super) fn foundation_fonts() -> FontDefinitions {
         }
     }
 
+    // Symbol/technical-glyph fallback. The UI uses box-drawing (─), arrows
+    // (→ ← ↑ ↳ ⇒ ⇱), geometric shapes (▸ ▾ ▼ ●), and math operators
+    // (× · − ≤ ≥ Σ) that egui's *proportional* text font (Ubuntu-Light) does
+    // not cover — so they render as tofu (□). egui's own bundled monospace
+    // font ("Hack") covers them but is only in the Monospace family; add it as
+    // a proportional fallback (always present, cross-platform). When a nicer
+    // broad-coverage system symbol font is available, prefer it. Appended
+    // LAST so glyphs already covered by earlier fonts are unaffected.
+    let mut symbol_fallbacks: Vec<String> = Vec::new();
+    let system_symbol = [
+        r"C:\Windows\Fonts\seguisym.ttf", // Segoe UI Symbol
+        r"C:\Windows\Fonts\arialuni.ttf",
+        "/System/Library/Fonts/Apple Symbols.ttf",
+        "/Library/Fonts/Arial Unicode.ttf",
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
+    ]
+    .iter()
+    .find_map(|path| std::fs::read(path).ok());
+    if let Some(bytes) = system_symbol {
+        const SYMBOLS: &str = "foundation_symbols";
+        fonts
+            .font_data
+            .insert(SYMBOLS.to_owned(), FontData::from_owned(bytes));
+        symbol_fallbacks.push(SYMBOLS.to_owned());
+    }
+    // egui's bundled "Hack" (present with the `default_fonts` feature) has
+    // broad symbol coverage and guarantees no tofu even with no system font.
+    if fonts.font_data.contains_key("Hack") {
+        symbol_fallbacks.push("Hack".to_owned());
+    }
+    for family in [FontFamily::Proportional, FontFamily::Monospace] {
+        let list = fonts.families.entry(family).or_default();
+        for key in &symbol_fallbacks {
+            if !list.contains(key) {
+                list.push(key.clone());
+            }
+        }
+    }
+
     // Bold face for headers (Foundation uses FontWeight=Bold). Try common
     // system bold fonts across platforms; gracefully degrade to the regular
     // family if none are present so the named family is always valid.
@@ -577,3 +618,33 @@ mod tests {
     }
 }
 pub(super) const FOUNDATION_LABEL_WIDTH: f32 = 280.0;
+
+#[cfg(test)]
+mod symbol_font_tests {
+    use super::foundation_fonts;
+    use eframe::egui::{self, FontId};
+
+    /// The UI uses box-drawing, arrows, geometric shapes and math operators
+    /// that egui's proportional text font (Ubuntu-Light) lacks. After the
+    /// symbol-fallback wiring, the Proportional family must resolve them all
+    /// (else they render as tofu). This would fail before the fallback.
+    #[test]
+    fn proportional_family_covers_ui_symbol_glyphs() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(foundation_fonts());
+        let _ = ctx.run(egui::RawInput::default(), |_| {});
+        let fid = FontId::proportional(14.0);
+        // Technical glyphs that were tofu in proportional text (Hack covers
+        // these), plus ones from Ubuntu/emoji fonts as a sanity check.
+        for c in [
+            '→', '─', '●', '↑', '↳', '▾', '▸', '←', '▼', '⇱', '⇒', '◀', '▶',
+            '×', '·', '−', '≤', '≥', 'Σ', '★', '…', '›', '‹', '⚠', '⬇',
+        ] {
+            assert!(
+                ctx.fonts(|f| f.has_glyph(&fid, c)),
+                "proportional family has no glyph for {c:?} (U+{:04X})",
+                c as u32
+            );
+        }
+    }
+}
