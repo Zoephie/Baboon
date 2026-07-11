@@ -2655,6 +2655,21 @@ pub(super) fn append_field_path(prefix: &str, field_name: &str) -> String {
     }
 }
 
+/// Like [`append_field_path`] but appends the field's positional `#ordinal`
+/// token (`name#N`), so the path resolves to this EXACT field even when a
+/// sibling shares its name/type — Foundation-style positional addressing (see
+/// `blam_tags::TagField::ordinal`). Use for RESOLVABLE paths (edits, block ops,
+/// function data). Canonical/display paths use the plain-name form and strip
+/// the ordinal via `strip_node_indices`.
+pub(super) fn append_field_path_for(prefix: &str, field: &TagField) -> String {
+    let segment = format!("{}#{}", field.name(), field.ordinal());
+    if prefix.is_empty() {
+        segment
+    } else {
+        format!("{prefix}/{segment}")
+    }
+}
+
 pub(super) fn escape_field_path_segment(field_name: &str) -> String {
     field_name.replace('\\', "\\\\").replace('/', "\\/")
 }

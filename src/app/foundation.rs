@@ -1,17 +1,24 @@
 use super::*;
 
-/// Remove `[index]` segments from a rendered field path so it can be matched
-/// against the index-independent paths in a [`FieldFilter`].
-/// e.g. `"contact points[0]/markers[2]"` → `"contact points/markers"`.
+/// Canonicalize a rendered field path to plain names — dropping both the
+/// `[index]` element selectors AND the `#ordinal` positional tokens — so it can
+/// be matched against the index/ordinal-independent paths in a [`FieldFilter`],
+/// collapse-state keys, and nav comparisons.
+/// e.g. `"contact points#3[0]/markers#7[2]"` → `"contact points/markers"`.
 pub(super) fn strip_node_indices(path: &str) -> String {
     let mut out = String::with_capacity(path.len());
-    let mut in_bracket = false;
+    // Skip everything from a `#` (ordinal) or `[` (element index) up to the
+    // next `/` segment boundary.
+    let mut skipping = false;
     for ch in path.chars() {
         match ch {
-            '[' => in_bracket = true,
-            ']' => in_bracket = false,
-            _ if !in_bracket => out.push(ch),
-            _ => {}
+            '/' => {
+                skipping = false;
+                out.push('/');
+            }
+            '#' | '[' => skipping = true,
+            _ if skipping => {}
+            _ => out.push(ch),
         }
     }
     out
@@ -367,7 +374,11 @@ pub(super) fn draw_field(
     semantic_short_index: Option<(Vec<String>, String)>,
     tag_reference_value_width: f32,
 ) {
-    let field_path = append_field_path(path_prefix, field.name());
+    // RESOLVABLE path: carries the field's `#ordinal` so edits target the exact
+    // field even when a sibling shares its name (e.g. the H2 particle "Mapping"
+    // custom-vs-struct pair). Canonical consumers (filter, collapse, nav) strip
+    // the ordinal via `strip_node_indices`.
+    let field_path = append_field_path_for(path_prefix, &field);
     // Active (filter) field-search: hide everything that isn't a match, an
     // ancestor container of one, or inside a name-matched container.
     if !edit.field_visible(&field_path) {
@@ -1419,7 +1430,11 @@ pub(super) fn parent_block_path(path: &str) -> Option<String> {
 /// dropped) joined with ` › `, e.g. `regions[0]/permutations` → `regions › permutations`.
 fn breadcrumb_for_path(path: &str) -> String {
     path.split('/')
-        .map(|segment| clean_field_name(segment.split('[').next().unwrap_or(segment)))
+        .map(|segment| {
+            // Strip both the `[index]` and `#ordinal` tokens for display.
+            let base = segment.split('[').next().unwrap_or(segment);
+            clean_field_name(base.split('#').next().unwrap_or(base))
+        })
         .filter(|segment| !segment.is_empty())
         .collect::<Vec<_>>()
         .join(" › ")

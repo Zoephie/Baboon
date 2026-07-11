@@ -5434,6 +5434,16 @@ mod tests {
             ancestor_block_indices("havok cleanup resources"),
             Vec::<(String, usize)>::new(),
         );
+        // Positional `#ordinal` tokens are kept in the block paths (they stay
+        // resolvable and must match the render-walk's `path_prefix`), while the
+        // element index is still extracted from `[N]`.
+        assert_eq!(
+            ancestor_block_indices("custom references#5[3]/sounds#2[1]/melee sound#4"),
+            vec![
+                ("custom references#5".to_owned(), 3),
+                ("custom references#5[3]/sounds#2".to_owned(), 1),
+            ],
+        );
     }
 
     #[test]
@@ -5445,6 +5455,11 @@ mod tests {
         assert_eq!(
             occurrence_label("havok cleanup resources"),
             "havok cleanup resources"
+        );
+        // `#ordinal` tokens are stripped for display; `[index]` is kept.
+        assert_eq!(
+            occurrence_label("custom references#5[3]/melee sound#4"),
+            "custom references[3] › melee sound",
         );
     }
 
@@ -6291,11 +6306,20 @@ fn occurrence_label(field_path: &str) -> String {
     field_path
         .split('/')
         .map(|segment| match segment.split_once('[') {
-            Some((name, rest)) => format!("{}[{rest}", clean_field_name(name)),
-            None => clean_field_name(segment).to_string(),
+            // Keep the `[index]` element selector; drop the `#ordinal` token.
+            Some((name, rest)) => {
+                format!("{}[{rest}", clean_field_name(strip_ordinal_token(name)))
+            }
+            None => clean_field_name(strip_ordinal_token(segment)).to_string(),
         })
         .collect::<Vec<_>>()
         .join(" › ")
+}
+
+/// Drop a trailing `#ordinal` positional token from a path segment's name
+/// part, leaving the display name (`Mapping#5` → `Mapping`).
+fn strip_ordinal_token(name: &str) -> &str {
+    name.split('#').next().unwrap_or(name)
 }
 
 fn collect_tag_references(
@@ -6304,7 +6328,10 @@ fn collect_tag_references(
     refs: &mut Vec<TagReferenceUse>,
 ) {
     for field in tag_struct.fields() {
-        let field_path = append_field_path(path_prefix, field.name());
+        // Emit the positional `#ordinal` form so the collected path matches the
+        // render walk's field_path exactly (reference-jump keys on it) and so
+        // the write targets the exact field. Display helpers strip the ordinal.
+        let field_path = append_field_path_for(path_prefix, &field);
         if let Some(value) = field.value() {
             if let TagFieldData::TagReference(reference) = value
                 && let Some((group_tag, rel_path)) = reference.group_tag_and_name
