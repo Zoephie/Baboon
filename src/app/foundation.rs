@@ -607,47 +607,44 @@ pub(super) fn draw_foundation_explanation_row(
     ui.scope(|ui| {
         ui.add_space(2.0);
         // Full-width header bar (see draw_foundation_group), matching Foundation.
-        ui.visuals_mut().collapsing_header_frame = true;
-        let response = egui::CollapsingHeader::new(
-            RichText::new(header)
-                .color(text_dark())
-                .font(bold_font(12.5)),
-        )
-        .id_salt(("foundation_explanation", id_salt))
-        .default_open(true)
-        .show_background(true)
-        .show(ui, |ui| {
-            if has_body {
-                Frame::none()
-                    .fill(foundation_group_bg())
-                    .stroke(Stroke::new(1.0, foundation_group_edge()))
-                    .inner_margin(egui::Margin {
-                        left: 8.0 + depth as f32 * 4.0,
-                        right: 8.0,
-                        top: 6.0,
-                        bottom: 6.0,
-                    })
-                    .show(ui, |ui| {
-                        // The box spans the full parent width (Foundation's
-                        // border is Width=Auto in a stretch StackPanel); only the
-                        // text itself is capped (~650px) and left-aligned.
-                        ui.set_min_width(ui.available_width());
-                        let text_width = ui.available_width().min(650.0);
-                        ui.scope(|ui| {
-                            ui.set_max_width(text_width);
-                            ui.label(
-                                RichText::new(body.trim_end())
-                                    .color(text_dark())
-                                    .monospace()
-                                    .size(12.0),
-                            );
+        draw_foundation_collapsing_header(
+            ui,
+            header,
+            ("foundation_explanation", id_salt),
+            depth,
+            true,
+            None,
+            foundation_section_bar(),
+            |ui| {
+                if has_body {
+                    Frame::none()
+                        .fill(foundation_group_bg())
+                        .stroke(Stroke::new(1.0, foundation_group_edge()))
+                        .inner_margin(egui::Margin {
+                            left: 8.0 + depth as f32 * 4.0,
+                            right: 8.0,
+                            top: 6.0,
+                            bottom: 6.0,
+                        })
+                        .show(ui, |ui| {
+                            // The box spans the full parent width (Foundation's
+                            // border is Width=Auto in a stretch StackPanel); only the
+                            // text itself is capped (~650px) and left-aligned.
+                            ui.set_min_width(ui.available_width());
+                            let text_width = ui.available_width().min(650.0);
+                            ui.scope(|ui| {
+                                ui.set_max_width(text_width);
+                                ui.label(
+                                    RichText::new(body.trim_end())
+                                        .color(text_dark())
+                                        .monospace()
+                                        .size(12.0),
+                                );
+                            });
                         });
-                    });
-            }
-        });
-        if response.fully_open() {
-            ui.add_space(3.0);
-        }
+                }
+            },
+        );
     });
 }
 
@@ -783,37 +780,90 @@ pub(super) fn draw_foundation_group(
 ) {
     ui.scope(|ui| {
         ui.add_space(2.0);
-        // Make the header bar span the full container width (egui only fills
-        // width when this is set), matching Foundation's full-width header.
-        ui.visuals_mut().collapsing_header_frame = true;
-        let mut header = egui::CollapsingHeader::new(
-            RichText::new(title)
-                .color(text_dark())
-                .font(bold_font(12.5)),
-        )
-        .id_salt(id_salt)
-        .show_background(true);
-        header = match open_override {
-            // `open` and `default_open` are mutually exclusive in egui.
-            Some(_) => header.open(open_override),
-            None => header.default_open(default_open),
-        };
-        let response = header.show(ui, |ui| {
-            Frame::none()
-                .fill(foundation_group_bg())
-                .stroke(Stroke::new(1.0, foundation_group_edge()))
-                .inner_margin(egui::Margin {
-                    left: 8.0 + depth as f32 * 4.0,
-                    right: 8.0,
-                    top: 6.0,
-                    bottom: 6.0,
-                })
-                .show(ui, add_contents);
-        });
-        if response.fully_open() {
-            ui.add_space(3.0);
-        }
+        draw_foundation_collapsing_header(
+            ui,
+            title,
+            id_salt,
+            depth,
+            default_open,
+            open_override,
+            foundation_section_bar(),
+            |ui| {
+                Frame::none()
+                    .fill(foundation_group_bg())
+                    .stroke(Stroke::new(1.0, foundation_group_edge()))
+                    .inner_margin(egui::Margin {
+                        left: 8.0 + depth as f32 * 4.0,
+                        right: 8.0,
+                        top: 6.0,
+                        bottom: 6.0,
+                    })
+                    .show(ui, add_contents);
+            },
+        );
     });
+}
+
+/// Draw a full-width modern collapsing header with the same rounded chevron
+/// control used by block headers. Keeping this in one helper ensures groups,
+/// explanations, and section bars share the same affordance.
+#[allow(clippy::too_many_arguments)]
+fn draw_foundation_collapsing_header(
+    ui: &mut Ui,
+    title: String,
+    id_salt: impl std::hash::Hash,
+    depth: usize,
+    default_open: bool,
+    open_override: Option<bool>,
+    bar_fill: Color32,
+    add_contents: impl FnOnce(&mut Ui),
+) -> bool {
+    let id = ui.make_persistent_id(("foundation_collapsing_header", id_salt));
+    let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
+        ui.ctx(),
+        id,
+        default_open,
+    );
+    if let Some(open) = open_override {
+        state.set_open(open);
+    }
+
+    let row_width = ui.available_width();
+    let (row_rect, _) = ui.allocate_exact_size(Vec2::new(row_width, 28.0), Sense::hover());
+    ui.painter().rect_filled(row_rect, 5.0, bar_fill);
+    ui.painter()
+        .rect_stroke(row_rect, 5.0, Stroke::new(1.0, foundation_block_edge()));
+    ui.allocate_new_ui(
+        egui::UiBuilder::new().max_rect(row_rect.shrink2(Vec2::new(6.0, 3.0))),
+        |ui| {
+            ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
+            ui.horizontal_centered(|ui| {
+                ui.add_space(depth as f32 * 4.0);
+                let toggle = foundation_header_toggle_cell(ui, state.is_open(), true);
+                if toggle.clicked() {
+                    state.toggle(ui);
+                }
+                let label = ui.add(
+                    egui::Label::new(
+                        RichText::new(title)
+                            .color(foundation_block_text())
+                            .font(bold_font(12.5)),
+                    )
+                    .sense(Sense::click()),
+                );
+                if label.clicked() {
+                    state.toggle(ui);
+                }
+            });
+        },
+    );
+    state.store(ui.ctx());
+    let open = state.is_open();
+    if open {
+        state.show_body_unindented(ui, add_contents);
+        ui.add_space(3.0);
+    }
+    open
 }
 
 pub(super) fn draw_foundation_block(
@@ -1443,10 +1493,20 @@ pub(super) fn draw_foundation_block_control(
     }
 
     let row_width = ui.available_width();
-    let row_height = 26.0;
+    let row_height = 30.0;
     let (row_rect, _) = ui.allocate_exact_size(Vec2::new(row_width, row_height), Sense::hover());
+    let row_hovered = ui.rect_contains_pointer(row_rect);
+    ui.painter().rect_filled(
+        row_rect,
+        5.0,
+        if row_hovered {
+            foundation_block_bar_hover()
+        } else {
+            foundation_block_bar()
+        },
+    );
     ui.painter()
-        .rect_filled(row_rect, 0.0, foundation_block_bar());
+        .rect_stroke(row_rect, 5.0, Stroke::new(1.0, foundation_block_edge()));
 
     // 3.4 jump-to-parent: if a child's "↑" targeted this block last frame, bring
     // its header into view (and clear the pending target).
@@ -1471,7 +1531,7 @@ pub(super) fn draw_foundation_block_control(
     let mut selector_active = false;
 
     ui.allocate_new_ui(
-        egui::UiBuilder::new().max_rect(row_rect.shrink2(Vec2::new(4.0, 3.0))),
+        egui::UiBuilder::new().max_rect(row_rect.shrink2(Vec2::new(6.0, 4.0))),
         |ui| {
             ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
             ui.horizontal_centered(|ui| {
@@ -1583,6 +1643,12 @@ pub(super) fn draw_foundation_block_control(
                     });
                 foundation_header_icon_cell(ui, "[]");
 
+                // Keep the previous arrow directly beside the selected
+                // reference, with the next arrow following it.
+                if foundation_header_stepper_clicked(ui, "<", has_sel && selected_index > 0) {
+                    actions.new_selection = Some(selected_index.saturating_sub(1));
+                }
+
                 // Instance selector dropdown — built lazily (only when open).
                 let combo_width = foundation_selected_width(row_width);
                 if has_sel {
@@ -1620,11 +1686,8 @@ pub(super) fn draw_foundation_block_control(
                     foundation_header_value_cell(ui, "NONE", combo_width);
                 }
 
-                // Prev / next steppers.
-                if foundation_header_button_clicked(ui, "<", has_sel && selected_index > 0) {
-                    actions.new_selection = Some(selected_index.saturating_sub(1));
-                }
-                if foundation_header_button_clicked(ui, ">", has_sel && selected_index + 1 < count)
+                // Next stepper follows the selected reference string.
+                if foundation_header_stepper_clicked(ui, ">", has_sel && selected_index + 1 < count)
                 {
                     actions.new_selection = Some(selected_index + 1);
                 }
@@ -1850,35 +1913,37 @@ pub(super) fn foundation_header_toggle_cell(
     open: bool,
     enabled: bool,
 ) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(22.0, 20.0), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(24.0, 22.0), Sense::click());
     let fill = if enabled {
-        foundation_input()
+        foundation_disclosure_bg()
+    } else if is_dark_mode() {
+        Color32::from_rgb(52, 52, 52)
     } else {
         Color32::from_rgb(222, 222, 220)
     };
-    ui.painter().rect_filled(rect, 1.0, fill);
+    ui.painter().rect_filled(rect, 4.0, fill);
     ui.painter()
-        .rect_stroke(rect, 1.0, Stroke::new(1.0, foundation_input_edge()));
-    let glyph = if open { "-" } else { "+" };
+        .rect_stroke(rect, 4.0, Stroke::new(1.0, foundation_input_edge()));
+    let glyph = if open { "▾" } else { "▸" };
     ui.painter().text(
         rect.center(),
         Align2::CENTER_CENTER,
         glyph,
-        FontId::proportional(18.0),
+        FontId::proportional(14.0),
         if enabled { text_dark() } else { subtle_dark() },
     );
     response
 }
 
 pub(super) fn foundation_selected_width(row_width: f32) -> f32 {
-    (row_width - 190.0 - 22.0 * 4.0 - 54.0 * 5.0 - 92.0).clamp(120.0, 420.0)
+    (row_width - 190.0 - 24.0 * 4.0 - 54.0 * 5.0 - 92.0).clamp(120.0, 420.0)
 }
 
 pub(super) fn foundation_header_icon_cell(ui: &mut Ui, text: &str) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(22.0, 20.0), Sense::hover());
-    ui.painter().rect_filled(rect, 1.0, foundation_input());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(24.0, 22.0), Sense::hover());
+    ui.painter().rect_filled(rect, 4.0, foundation_input());
     ui.painter()
-        .rect_stroke(rect, 1.0, Stroke::new(1.0, foundation_input_edge()));
+        .rect_stroke(rect, 4.0, Stroke::new(1.0, foundation_input_edge()));
     ui.painter().text(
         rect.center(),
         Align2::CENTER_CENTER,
@@ -1890,10 +1955,10 @@ pub(super) fn foundation_header_icon_cell(ui: &mut Ui, text: &str) {
 
 pub(super) fn foundation_header_value_cell(ui: &mut Ui, text: &str, max_width: f32) {
     let width = ui.available_width().min(max_width).max(180.0);
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 20.0), Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, foundation_input());
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 22.0), Sense::hover());
+    ui.painter().rect_filled(rect, 4.0, foundation_input());
     ui.painter()
-        .rect_stroke(rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
+        .rect_stroke(rect, 4.0, Stroke::new(1.0, foundation_input_edge()));
     ui.painter().text(
         rect.left_center() + Vec2::new(5.0, 0.0),
         Align2::LEFT_CENTER,
@@ -1911,6 +1976,24 @@ pub(super) fn foundation_header_button_clicked(ui: &mut Ui, label: &str, enabled
     foundation_header_button_clicked_hint(ui, label, enabled, None)
 }
 
+pub(super) fn foundation_header_stepper_clicked(ui: &mut Ui, label: &str, enabled: bool) -> bool {
+    let glyph = match label {
+        "<" => "‹",
+        ">" => "›",
+        _ => label,
+    };
+    ui.add_enabled(
+        enabled,
+        egui::Button::new(
+            RichText::new(glyph)
+                .color(if enabled { text_dark() } else { subtle_dark() })
+                .size(16.0),
+        )
+        .min_size(Vec2::new(24.0, 22.0)),
+    )
+    .clicked()
+}
+
 /// Like [`foundation_header_button_clicked`] but shows `disabled_hint` as a
 /// hover tooltip while the button is disabled (e.g. block at capacity).
 pub(super) fn foundation_header_button_clicked_hint(
@@ -1925,14 +2008,14 @@ pub(super) fn foundation_header_button_clicked_hint(
             icon,
             foundation_icon_button_tooltip(label),
             enabled,
-            Vec2::new(24.0, 20.0),
+            Vec2::new(24.0, 22.0),
             text_dark(),
         )
     } else {
         ui.add_enabled(
             enabled,
             egui::Button::new(RichText::new(label).color(text_dark()))
-                .min_size(Vec2::new(54.0, 20.0)),
+                .min_size(Vec2::new(54.0, 22.0)),
         )
     };
     match disabled_hint {
@@ -1986,30 +2069,26 @@ pub(super) fn draw_foundation_bar(
     add_contents: impl FnOnce(&mut Ui),
 ) {
     ui.scope(|ui| {
-        ui.visuals_mut().widgets.inactive.bg_fill = foundation_section_bar();
-        ui.visuals_mut().widgets.hovered.bg_fill = Color32::from_rgb(205, 205, 201);
-        ui.visuals_mut().widgets.active.bg_fill = Color32::from_rgb(196, 196, 192);
-        let response = egui::CollapsingHeader::new(
-            RichText::new(title)
-                .color(text_dark())
-                .font(bold_font(12.5)),
-        )
-        .default_open(default_open)
-        .show_background(true)
-        .show(ui, |ui| {
-            Frame::none()
-                .fill(foundation_group_bg())
-                .inner_margin(egui::Margin {
-                    left: 8.0 + depth as f32 * 6.0,
-                    right: 6.0,
-                    top: 5.0,
-                    bottom: 5.0,
-                })
-                .show(ui, add_contents);
-        });
-        if response.fully_open() {
-            ui.add_space(2.0);
-        }
+        draw_foundation_collapsing_header(
+            ui,
+            title.clone(),
+            ("foundation_bar", title, depth),
+            depth,
+            default_open,
+            None,
+            foundation_section_bar(),
+            |ui| {
+                Frame::none()
+                    .fill(foundation_group_bg())
+                    .inner_margin(egui::Margin {
+                        left: 8.0 + depth as f32 * 6.0,
+                        right: 6.0,
+                        top: 5.0,
+                        bottom: 5.0,
+                    })
+                    .show(ui, add_contents);
+            },
+        );
     });
 }
 

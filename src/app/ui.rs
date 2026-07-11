@@ -342,7 +342,7 @@ impl Baboon {
 
     fn draw_editing_kit_shortcut_buttons(&mut self, ui: &mut Ui) {
         for shortcut in EDITING_KIT_SHORTCUTS.into_iter().rev() {
-            let texture = self.game_banner_texture(ui.ctx(), shortcut.game).cloned();
+            let texture = self.game_emblem_texture(ui.ctx(), shortcut.game).cloned();
             let configured_path = self.editing_kit_paths.get(shortcut.game);
             let tooltip = configured_path
                 .map(|path| format!("Load {} from {}", shortcut.label, path.display()))
@@ -444,7 +444,7 @@ impl Baboon {
         let mut cancel = false;
         {
             let state = self.rename_tag.as_mut().expect("checked above");
-            egui::Window::new("Rename / Move Tag")
+            egui::Window::new("Rename Tag")
                 .id(egui::Id::new("rename_tag"))
                 .open(&mut open)
                 .default_width(560.0)
@@ -457,7 +457,7 @@ impl Baboon {
                     );
                     ui.add_space(6.0);
                     ui.label(
-                        RichText::new("New path (relative, no extension)")
+                        RichText::new("New name (extension is fixed)")
                             .color(subtle_dark())
                             .small(),
                     );
@@ -471,6 +471,27 @@ impl Baboon {
                             RichText::new(format!(".{}", state.extension)).color(subtle_dark()),
                         );
                     });
+                    let preview_parent = state
+                        .old_display
+                        .rsplit_once('/')
+                        .map(|(parent, _)| parent)
+                        .unwrap_or("");
+                    let preview_name = state.new_path_input.trim();
+                    let preview = if preview_name.is_empty() {
+                        "(enter a new name)".to_owned()
+                    } else if preview_parent.is_empty() {
+                        format!("{preview_name}.{}", state.extension)
+                    } else {
+                        format!("{preview_parent}/{preview_name}.{}", state.extension)
+                    };
+                    ui.add_space(3.0);
+                    ui.label(RichText::new("Preview").color(subtle_dark()).small());
+                    ui.label(
+                        RichText::new(preview)
+                            .color(text_dark())
+                            .monospace()
+                            .small(),
+                    );
                     ui.add_space(8.0);
                     if state.referrers_unavailable {
                         ui.label(
@@ -3254,44 +3275,13 @@ impl eframe::App for Baboon {
                     let scanning = self.scanning_entries;
                     // Collect deferred scan-trigger here; execute after borrow ends.
                     let mut need_scan = false;
-                    ui.horizontal(|ui| {
-                        ui.selectable_value(
-                            &mut self.browser_mode,
-                            BrowserMode::Folders,
-                            "Folders",
-                        );
-                        let groups_btn = ui.selectable_value(
-                            &mut self.browser_mode,
-                            BrowserMode::Groups,
-                            "Groups",
-                        );
-                        if groups_btn.clicked()
-                            && matches!(source.source, TagSource::LooseFolder { .. })
-                            && source.all_entries.is_empty()
-                            && !scanning
-                        {
-                            need_scan = true;
-                        }
-                    });
-                    ui.checkbox(&mut self.show_browser_prefixes, "Show prefixes");
-                    ui.add_space(6.0);
                     let prev_filter_empty = self.filter.is_empty();
                     ui.scope(|ui| {
                         ui.visuals_mut().override_text_color = Some(text_dark());
-                        let search_bg = if is_dark_mode() {
-                            Color32::from_rgb(48, 48, 46)
-                        } else {
-                            Color32::from_rgb(246, 246, 244)
-                        };
-                        let search_hover = if is_dark_mode() {
-                            Color32::from_rgb(58, 58, 55)
-                        } else {
-                            Color32::from_rgb(255, 255, 252)
-                        };
-                        ui.visuals_mut().extreme_bg_color = search_bg;
-                        ui.visuals_mut().widgets.inactive.bg_fill = search_bg;
-                        ui.visuals_mut().widgets.hovered.bg_fill = search_hover;
-                        ui.visuals_mut().widgets.active.bg_fill = search_hover;
+                        ui.visuals_mut().extreme_bg_color = browser_search_bg();
+                        ui.visuals_mut().widgets.inactive.bg_fill = browser_search_bg();
+                        ui.visuals_mut().widgets.hovered.bg_fill = browser_search_hover();
+                        ui.visuals_mut().widgets.active.bg_fill = browser_search_hover();
                         ui.add(
                             egui::TextEdit::singleline(&mut self.filter)
                                 .hint_text("search tags")
@@ -3305,6 +3295,59 @@ impl eframe::App for Baboon {
                                 .color(Color32::from_rgb(184, 134, 11)),
                         );
                     }
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 4.0;
+                        let groups_btn = ui.scope(|ui| {
+                            ui.visuals_mut().widgets.inactive.bg_fill = browser_toolbar_bg();
+                            ui.visuals_mut().widgets.hovered.bg_fill = browser_toolbar_active();
+                            ui.visuals_mut().widgets.active.bg_fill = browser_toolbar_active();
+                            ui.selectable_value(
+                                &mut self.browser_mode,
+                                BrowserMode::Folders,
+                                "Folders",
+                            );
+                            ui.selectable_value(
+                                &mut self.browser_mode,
+                                BrowserMode::Groups,
+                                "Groups",
+                            )
+                        });
+                        let groups_btn = groups_btn.inner;
+                        if groups_btn.clicked()
+                            && matches!(source.source, TagSource::LooseFolder { .. })
+                            && source.all_entries.is_empty()
+                            && !scanning
+                        {
+                            need_scan = true;
+                        }
+                        ui.add_space(4.0);
+                        ui.scope(|ui| {
+                            ui.visuals_mut().widgets.inactive.bg_fill = browser_toolbar_bg();
+                            ui.visuals_mut().widgets.hovered.bg_fill = browser_toolbar_active();
+                            ui.visuals_mut().widgets.active.bg_fill = browser_toolbar_active();
+                            ui.menu_button("Sort", |ui| {
+                                for option in BrowserSort::ALL {
+                                    if ui
+                                        .selectable_label(
+                                            self.browser_sort == option,
+                                            option.label(),
+                                        )
+                                        .clicked()
+                                    {
+                                        self.browser_sort = option;
+                                        ui.close_menu();
+                                    }
+                                }
+                            });
+                            ui.menu_button("Filter", |ui| {
+                                ui.checkbox(&mut self.show_browser_prefixes, "Show prefixes");
+                            });
+                            ui.menu_button("…", |ui| {
+                                ui.checkbox(&mut self.folders_before_tags, "Folders before tags");
+                            });
+                        });
+                    });
                     if prev_filter_empty
                         && !self.filter.is_empty()
                         && matches!(source.source, TagSource::LooseFolder { .. })

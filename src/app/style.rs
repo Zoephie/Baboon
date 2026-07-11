@@ -12,7 +12,7 @@ pub(super) fn foundation_visuals() -> egui::Visuals {
     visuals.window_fill = editor_bg();
     visuals.faint_bg_color = row_type();
     visuals.extreme_bg_color = if is_dark_mode() {
-        Color32::from_rgb(30, 30, 29)
+        Color32::from_rgb(23, 23, 23)
     } else {
         foundation_input()
     };
@@ -24,20 +24,22 @@ pub(super) fn foundation_visuals() -> egui::Visuals {
     visuals.selection.stroke = Stroke::new(1.0, Color32::from_rgb(120, 170, 198));
     visuals.widgets.noninteractive.bg_fill = row_type();
     visuals.widgets.inactive.bg_fill = if is_dark_mode() {
-        Color32::from_rgb(56, 56, 54)
+        Color32::from_rgb(68, 68, 68)
     } else {
         Color32::from_rgb(218, 218, 214)
     };
     visuals.widgets.hovered.bg_fill = if is_dark_mode() {
-        Color32::from_rgb(70, 76, 78)
+        Color32::from_rgb(82, 82, 82)
     } else {
         Color32::from_rgb(201, 215, 221)
     };
     visuals.widgets.active.bg_fill = if is_dark_mode() {
-        Color32::from_rgb(78, 86, 90)
+        Color32::from_rgb(92, 92, 92)
     } else {
         Color32::from_rgb(188, 207, 216)
     };
+    visuals.menu_rounding = egui::Rounding::same(5.0);
+    visuals.window_stroke = Stroke::new(1.0, foundation_group_edge());
     visuals
 }
 
@@ -146,7 +148,7 @@ pub(super) fn is_dark_mode() -> bool {
 
 pub(super) fn menu_bar() -> Color32 {
     if is_dark_mode() {
-        Color32::from_rgb(50, 50, 48)
+        Color32::from_rgb(50, 50, 50)
     } else {
         Color32::from_rgb(161, 161, 157)
     }
@@ -162,7 +164,7 @@ pub(super) fn foundation_blue() -> Color32 {
 
 pub(super) fn left_panel() -> Color32 {
     if is_dark_mode() {
-        Color32::from_rgb(34, 34, 34)
+        Color32::from_rgb(31, 31, 31)
     } else {
         Color32::from_rgb(238, 238, 234)
     }
@@ -170,7 +172,7 @@ pub(super) fn left_panel() -> Color32 {
 
 pub(super) fn editor_bg() -> Color32 {
     if is_dark_mode() {
-        Color32::from_rgb(42, 42, 40)
+        Color32::from_rgb(40, 40, 40)
     } else {
         Color32::from_rgb(224, 224, 220)
     }
@@ -178,7 +180,7 @@ pub(super) fn editor_bg() -> Color32 {
 
 pub(super) fn row_type() -> Color32 {
     if is_dark_mode() {
-        Color32::from_rgb(58, 58, 56)
+        Color32::from_rgb(55, 55, 55)
     } else {
         Color32::from_rgb(219, 219, 216)
     }
@@ -186,7 +188,7 @@ pub(super) fn row_type() -> Color32 {
 
 pub(super) fn grid_line() -> Color32 {
     if is_dark_mode() {
-        Color32::from_rgb(96, 96, 92)
+        Color32::from_rgb(82, 82, 82)
     } else {
         Color32::from_rgb(180, 180, 174)
     }
@@ -194,7 +196,7 @@ pub(super) fn grid_line() -> Color32 {
 
 pub(super) fn foundation_group_bg() -> Color32 {
     if is_dark_mode() {
-        Color32::from_rgb(45, 45, 43)
+        Color32::from_rgb(43, 43, 43)
     } else {
         Color32::from_rgb(236, 236, 234)
     }
@@ -202,7 +204,7 @@ pub(super) fn foundation_group_bg() -> Color32 {
 
 pub(super) fn foundation_group_edge() -> Color32 {
     if is_dark_mode() {
-        Color32::from_rgb(96, 96, 92)
+        Color32::from_rgb(82, 82, 82)
     } else {
         Color32::from_rgb(152, 152, 148)
     }
@@ -210,7 +212,7 @@ pub(super) fn foundation_group_edge() -> Color32 {
 
 pub(super) fn foundation_section_bar() -> Color32 {
     if is_dark_mode() {
-        Color32::from_rgb(68, 68, 65)
+        Color32::from_rgb(68, 68, 68)
     } else {
         Color32::from_rgb(214, 214, 210)
     }
@@ -218,19 +220,19 @@ pub(super) fn foundation_section_bar() -> Color32 {
 
 pub(super) fn foundation_block_bar() -> Color32 {
     if is_dark_mode() {
-        Color32::from_rgb(92, 92, 88)
+        Color32::from_rgb(72, 72, 72)
     } else {
         Color32::from_rgb(98, 98, 96)
     }
 }
 
 pub(super) fn foundation_block_text() -> Color32 {
-    Color32::from_rgb(248, 248, 246)
+    Color32::from_rgb(245, 245, 245)
 }
 
 pub(super) fn foundation_input() -> Color32 {
     if is_dark_mode() {
-        Color32::from_rgb(55, 55, 53)
+        Color32::from_rgb(31, 31, 31)
     } else {
         Color32::from_rgb(248, 248, 247)
     }
@@ -238,7 +240,7 @@ pub(super) fn foundation_input() -> Color32 {
 
 pub(super) fn foundation_input_edge() -> Color32 {
     if is_dark_mode() {
-        Color32::from_rgb(156, 156, 150)
+        Color32::from_rgb(84, 84, 84)
     } else {
         Color32::from_rgb(112, 112, 108)
     }
@@ -246,7 +248,7 @@ pub(super) fn foundation_input_edge() -> Color32 {
 
 pub(super) fn text_dark() -> Color32 {
     if is_dark_mode() {
-        Color32::from_rgb(236, 236, 232)
+        Color32::from_rgb(242, 242, 242)
     } else {
         Color32::from_rgb(25, 25, 24)
     }
@@ -254,7 +256,7 @@ pub(super) fn text_dark() -> Color32 {
 
 pub(super) fn subtle_dark() -> Color32 {
     if is_dark_mode() {
-        Color32::from_rgb(184, 184, 178)
+        Color32::from_rgb(164, 164, 164)
     } else {
         Color32::from_rgb(82, 82, 78)
     }
@@ -262,7 +264,7 @@ pub(super) fn subtle_dark() -> Color32 {
 
 pub(super) fn placeholder_text() -> Color32 {
     if is_dark_mode() {
-        Color32::from_rgb(125, 125, 120)
+        Color32::from_rgb(128, 128, 128)
     } else {
         Color32::from_rgb(145, 145, 138)
     }
@@ -319,6 +321,70 @@ pub(super) const MATERIAL_SECTION_HEADER: Color32 = Color32::from_rgb(255, 255, 
 
 pub(super) fn disclosure_triangle_green() -> Color32 {
     Color32::from_rgb(34, 205, 84)
+}
+
+pub(super) fn foundation_block_bar_hover() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(82, 82, 82)
+    } else {
+        Color32::from_rgb(112, 112, 108)
+    }
+}
+
+pub(super) fn foundation_block_edge() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(94, 94, 94)
+    } else {
+        Color32::from_rgb(154, 154, 149)
+    }
+}
+
+pub(super) fn foundation_disclosure_bg() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(84, 84, 84)
+    } else {
+        Color32::from_rgb(232, 232, 228)
+    }
+}
+
+pub(super) fn browser_search_bg() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(23, 23, 23)
+    } else {
+        Color32::from_rgb(246, 246, 244)
+    }
+}
+
+pub(super) fn browser_search_hover() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(35, 35, 35)
+    } else {
+        Color32::from_rgb(255, 255, 252)
+    }
+}
+
+pub(super) fn browser_toolbar_bg() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(68, 68, 68)
+    } else {
+        Color32::from_rgb(226, 226, 222)
+    }
+}
+
+pub(super) fn browser_toolbar_active() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(73, 112, 136)
+    } else {
+        Color32::from_rgb(93, 137, 158)
+    }
+}
+
+pub(super) fn context_menu_hover() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(70, 70, 70)
+    } else {
+        Color32::from_rgb(220, 232, 238)
+    }
 }
 
 pub(super) fn disclosure_triangle_blue() -> Color32 {

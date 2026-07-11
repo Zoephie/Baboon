@@ -201,6 +201,7 @@ pub(super) enum BrowserAction {
     FindReferences(String),
     ExploreReferences(String),
     RenameTag(String),
+    MoveTag(String),
 }
 
 /// The "Rename / Move tag (fix references)" dialog. Shows the referrers that

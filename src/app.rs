@@ -229,6 +229,7 @@ pub struct Baboon {
     sapien_icon: Option<egui::TextureHandle>,
     tag_test_icon: Option<egui::TextureHandle>,
     game_banner_textures: HashMap<String, egui::TextureHandle>,
+    game_emblem_textures: HashMap<String, egui::TextureHandle>,
     last_pixels_per_point: f32,
     /// Clipboard for copy/paste of a block element between identical tags.
     block_clipboard: Option<BlockClipboard>,
@@ -430,6 +431,7 @@ impl Baboon {
                 include_bytes!("../assets/Quick access/tag_test.ico"),
             ),
             game_banner_textures: HashMap::new(),
+            game_emblem_textures: HashMap::new(),
             last_pixels_per_point: cc.egui_ctx.pixels_per_point(),
             block_clipboard: None,
         };
@@ -453,6 +455,19 @@ impl Baboon {
             self.game_banner_textures.insert(game.to_owned(), texture);
         }
         self.game_banner_textures.get(game)
+    }
+
+    fn game_emblem_texture(
+        &mut self,
+        ctx: &egui::Context,
+        game: &str,
+    ) -> Option<&egui::TextureHandle> {
+        if !self.game_emblem_textures.contains_key(game) {
+            let bytes = get_game_emblem_bytes(game)?;
+            let texture = load_png_texture(ctx, &format!("game_emblem_{game}"), bytes)?;
+            self.game_emblem_textures.insert(game.to_owned(), texture);
+        }
+        self.game_emblem_textures.get(game)
     }
 
     fn handle_pixels_per_point_change(&mut self, ctx: &egui::Context) {
@@ -482,6 +497,7 @@ impl Baboon {
             include_bytes!("../assets/Quick access/tag_test.ico"),
         );
         self.game_banner_textures.clear();
+        self.game_emblem_textures.clear();
         ctx.request_repaint();
     }
 }
@@ -584,6 +600,21 @@ pub(super) fn get_game_banner_bytes(game: &str) -> &'static [u8] {
     }
 }
 
+/// Engine emblems used only by the compact top-toolbar editing-kit shortcuts.
+/// These intentionally remain separate from the larger game banner artwork.
+fn get_game_emblem_bytes(game: &str) -> Option<&'static [u8]> {
+    match game {
+        "haloce_mcc" => Some(include_bytes!("../assets/Game Icons/emblems/h1.png")),
+        "halo2_mcc" => Some(include_bytes!("../assets/Game Icons/emblems/h2.png")),
+        "halo2amp_mcc" => Some(include_bytes!("../assets/Game Icons/emblems/h2a.png")),
+        "halo3_mcc" => Some(include_bytes!("../assets/Game Icons/emblems/h3.png")),
+        "halo3odst_mcc" => Some(include_bytes!("../assets/Game Icons/emblems/h3odst.png")),
+        "haloreach_mcc" => Some(include_bytes!("../assets/Game Icons/emblems/hreach.png")),
+        "halo4_mcc" => Some(include_bytes!("../assets/Game Icons/emblems/h4.png")),
+        _ => None,
+    }
+}
+
 pub(super) fn game_display_name(game: &str) -> &'static str {
     match game {
         "haloce_mcc" => "Halo: Combat Evolved",
@@ -628,6 +659,21 @@ mod tests {
             "objects\\characters\\masterchief"
         );
         assert_eq!(model_source_dir("solo"), "solo");
+    }
+
+    #[test]
+    fn engine_emblems_are_separate_from_game_banners() {
+        assert!(get_game_emblem_bytes("haloce_mcc").is_some());
+        assert!(get_game_emblem_bytes("halo2_mcc").is_some());
+        assert_ne!(
+            get_game_emblem_bytes("halo2_mcc"),
+            get_game_emblem_bytes("halo2amp_mcc")
+        );
+        assert!(get_game_emblem_bytes("unknown").is_none());
+        assert_ne!(
+            get_game_emblem_bytes("haloce_mcc"),
+            Some(get_game_banner_bytes("haloce_mcc"))
+        );
     }
 
     #[test]

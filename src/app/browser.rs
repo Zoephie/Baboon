@@ -58,6 +58,37 @@ fn entry_rel_path(entry: &TagEntry) -> String {
     without_ext.replace('\\', "/")
 }
 
+fn context_menu_button(ui: &mut Ui, label: &str) -> egui::Response {
+    ui.add_sized(
+        [ui.available_width().max(280.0), 28.0],
+        egui::Button::new(RichText::new(label).color(text_dark())),
+    )
+}
+
+fn context_menu_primary_button(ui: &mut Ui, label: &str, enabled: bool) -> egui::Response {
+    ui.add_enabled(
+        enabled,
+        egui::Button::new(RichText::new(label).color(text_dark())).min_size(Vec2::new(92.0, 44.0)),
+    )
+}
+
+fn context_menu_separator(ui: &mut Ui) {
+    ui.add_space(3.0);
+    ui.separator();
+    ui.add_space(3.0);
+}
+
+fn style_tag_context_menu(ui: &mut Ui) {
+    ui.set_min_width(300.0);
+    ui.spacing_mut().item_spacing = Vec2::new(0.0, 1.0);
+    ui.spacing_mut().button_padding = Vec2::new(8.0, 4.0);
+    ui.spacing_mut().interact_size.y = 28.0;
+    ui.visuals_mut().override_text_color = Some(text_dark());
+    ui.visuals_mut().widgets.inactive.bg_fill = Color32::TRANSPARENT;
+    ui.visuals_mut().widgets.hovered.bg_fill = context_menu_hover();
+    ui.visuals_mut().widgets.active.bg_fill = context_menu_hover();
+}
+
 fn entry_filename_lower(entry: &TagEntry) -> String {
     entry
         .display_path
@@ -858,80 +889,114 @@ pub(super) fn draw_entry(
     };
     let mut action = open_requested.then(|| BrowserAction::Select(entry.key.clone()));
     response.context_menu(|ui| {
+        style_tag_context_menu(ui);
+
+        let rename_enabled = matches!(entry.location, TagEntryLocation::LooseFile(_));
+        let extract_enabled = supports_tag_extract_menu(entry.group_tag);
+        ui.horizontal(|ui| {
+            if context_menu_primary_button(ui, "Rename", rename_enabled).clicked() {
+                action = Some(BrowserAction::RenameTag(entry.key.clone()));
+                ui.close_menu();
+            }
+            if context_menu_primary_button(ui, "Move", rename_enabled).clicked() {
+                action = Some(BrowserAction::MoveTag(entry.key.clone()));
+                ui.close_menu();
+            }
+            ui.add_enabled_ui(extract_enabled, |ui| {
+                ui.allocate_ui(Vec2::new(92.0, 44.0), |ui| {
+                    ui.set_min_width(92.0);
+                    ui.menu_button("Extract", |ui| {
+                        ui.set_min_width(280.0);
+                        if supports_tag_geometry_extraction(entry.group_tag)
+                            && context_menu_button(ui, "Extract model geometry").clicked()
+                        {
+                            action = Some(BrowserAction::ExtractGeometry(entry.key.clone()));
+                            ui.close_menu();
+                        }
+                        if supports_animation_extraction(entry.group_tag)
+                            && context_menu_button(ui, "Extract animations").clicked()
+                        {
+                            action = Some(BrowserAction::ExtractAnimation(entry.key.clone()));
+                            ui.close_menu();
+                        }
+                        if supports_tag_import_info_extraction(entry.group_tag)
+                            && context_menu_button(ui, "Extract import-info").clicked()
+                        {
+                            action = Some(BrowserAction::ExtractImportInfo(entry.key.clone()));
+                            ui.close_menu();
+                        }
+                    });
+                });
+            });
+        });
+
+        context_menu_separator(ui);
+        let has_extra_extract = is_monolithic_entry(entry)
+            || is_bitmap_group(entry.group_tag)
+            || is_material_shader_group(entry.group_tag)
+            || is_hlsl_include_group(entry.group_tag);
+        if has_extra_extract {
+            ui.menu_button("More extraction tools", |ui| {
+                ui.set_min_width(280.0);
+                if is_monolithic_entry(entry)
+                    && context_menu_button(ui, "Extract raw tag...").clicked()
+                {
+                    action = Some(BrowserAction::ExtractRaw(entry.key.clone()));
+                    ui.close_menu();
+                }
+                if is_bitmap_group(entry.group_tag)
+                    && context_menu_button(ui, "Extract bitmap images...").clicked()
+                {
+                    action = Some(BrowserAction::ExtractBitmap(entry.key.clone()));
+                    ui.close_menu();
+                }
+                if is_material_shader_group(entry.group_tag)
+                    && context_menu_button(ui, "Extract source shaders...").clicked()
+                {
+                    action = Some(BrowserAction::ExtractMaterialShaderSources(
+                        entry.key.clone(),
+                    ));
+                    ui.close_menu();
+                }
+                if is_hlsl_include_group(entry.group_tag)
+                    && context_menu_button(ui, "Extract HLSL include...").clicked()
+                {
+                    action = Some(BrowserAction::ExtractHlslIncludeSource(entry.key.clone()));
+                    ui.close_menu();
+                }
+            });
+        }
+        if context_menu_button(ui, "Open with File Explorer").clicked() {
+            action = Some(BrowserAction::OpenInExplorer(entry.key.clone()));
+            ui.close_menu();
+        }
         if let Some(favorite_keys) = favorite_keys {
             let label = if favorite_keys.contains(&entry.key) {
                 "Remove from Favorites"
             } else {
                 "Add to Favorites"
             };
-            if ui.button(label).clicked() {
+            if context_menu_button(ui, label).clicked() {
                 action = Some(BrowserAction::ToggleFavorite(entry.key.clone()));
                 ui.close_menu();
             }
-            ui.separator();
         }
-        if ui.button("Copy tag name").clicked() {
+        if context_menu_button(ui, "Copy Tag Path").clicked() {
             action = Some(BrowserAction::CopyTagName(entry.key.clone()));
             ui.close_menu();
         }
-        if ui.button("Open with File Explorer").clicked() {
-            action = Some(BrowserAction::OpenInExplorer(entry.key.clone()));
-            ui.close_menu();
-        }
-        if ui.button("Find references").clicked() {
+        if context_menu_button(ui, "Find Tag References...").clicked() {
             action = Some(BrowserAction::FindReferences(entry.key.clone()));
             ui.close_menu();
         }
-        if ui.button("Explore references...").clicked() {
+        if context_menu_button(ui, "Explore references...").clicked() {
             action = Some(BrowserAction::ExploreReferences(entry.key.clone()));
             ui.close_menu();
         }
-        if ui.button("Rename / Move (fix references)...").clicked() {
-            action = Some(BrowserAction::RenameTag(entry.key.clone()));
-            ui.close_menu();
-        }
-        ui.separator();
-        if ui.button("Dump tag to JSON...").clicked() {
+
+        context_menu_separator(ui);
+        if context_menu_button(ui, "Dump Tag to JSON...").clicked() {
             action = Some(BrowserAction::DumpJson(entry.key.clone()));
-            ui.close_menu();
-        }
-        if is_monolithic_entry(entry) && ui.button("Extract raw tag...").clicked() {
-            action = Some(BrowserAction::ExtractRaw(entry.key.clone()));
-            ui.close_menu();
-        }
-        if is_bitmap_group(entry.group_tag) && ui.button("Extract bitmap images...").clicked() {
-            action = Some(BrowserAction::ExtractBitmap(entry.key.clone()));
-            ui.close_menu();
-        }
-        if supports_geometry_extraction(entry.group_tag)
-            && ui.button(geometry_extract_label(entry.group_tag)).clicked()
-        {
-            action = Some(BrowserAction::ExtractGeometry(entry.key.clone()));
-            ui.close_menu();
-        }
-        if supports_import_info_extraction(entry.group_tag)
-            && ui.button("Extract import info...").clicked()
-        {
-            action = Some(BrowserAction::ExtractImportInfo(entry.key.clone()));
-            ui.close_menu();
-        }
-        if supports_animation_extraction(entry.group_tag)
-            && ui.button("Extract animations...").clicked()
-        {
-            action = Some(BrowserAction::ExtractAnimation(entry.key.clone()));
-            ui.close_menu();
-        }
-        if is_material_shader_group(entry.group_tag)
-            && ui.button("Extract source shaders...").clicked()
-        {
-            action = Some(BrowserAction::ExtractMaterialShaderSources(
-                entry.key.clone(),
-            ));
-            ui.close_menu();
-        }
-        if is_hlsl_include_group(entry.group_tag) && ui.button("Extract HLSL include...").clicked()
-        {
-            action = Some(BrowserAction::ExtractHlslIncludeSource(entry.key.clone()));
             ui.close_menu();
         }
     });
@@ -1103,37 +1168,30 @@ pub(super) fn is_hlsl_include_tag(entry: &TagEntry) -> bool {
             .ends_with(".hlsl_include")
 }
 
-pub(super) fn supports_geometry_extraction(group_tag: u32) -> bool {
-    matches!(
-        group_tag.to_be_bytes().as_slice(),
-        b"hlmt" | b"scnr" | b"sbsp" | b"mode" | b"mod2" | b"coll" | b"phmo"
-    )
-}
-
-pub(super) fn supports_import_info_extraction(group_tag: u32) -> bool {
-    matches!(
-        group_tag.to_be_bytes().as_slice(),
-        b"mode" | b"coll" | b"phmo" | b"sbsp"
-    )
-}
-
-pub(super) fn geometry_extract_label(group_tag: u32) -> &'static str {
-    match &group_tag.to_be_bytes() {
-        b"hlmt" => "Extract model geometry...",
-        b"scnr" => "Extract scenario BSP geometry...",
-        b"sbsp" => "Extract BSP geometry...",
-        b"mode" => "Extract render_model geometry...",
-        b"mod2" => "Extract gbxmodel geometry...",
-        b"coll" => "Extract collision_model geometry...",
-        b"phmo" => "Extract physics_model geometry...",
-        _ => "Extract geometry...",
-    }
-}
-
 pub(super) fn supports_animation_extraction(group_tag: u32) -> bool {
     matches!(
         group_tag.to_be_bytes().as_slice(),
-        b"jmad" | b"hlmt" | b"antr"
+        b"jmad" | b"hlmt" | b"antr" | b"mode"
+    )
+}
+
+pub(super) fn supports_tag_extract_menu(group_tag: u32) -> bool {
+    supports_tag_geometry_extraction(group_tag)
+        || supports_animation_extraction(group_tag)
+        || supports_tag_import_info_extraction(group_tag)
+}
+
+fn supports_tag_geometry_extraction(group_tag: u32) -> bool {
+    matches!(
+        group_tag.to_be_bytes().as_slice(),
+        b"hlmt" | b"mode" | b"phmo" | b"coll" | b"mod2"
+    )
+}
+
+fn supports_tag_import_info_extraction(group_tag: u32) -> bool {
+    matches!(
+        group_tag.to_be_bytes().as_slice(),
+        b"hlmt" | b"mode" | b"phmo" | b"coll" | b"mod2"
     )
 }
 
@@ -1406,5 +1464,18 @@ mod tests {
                 "shaders/material_shaders/decals/palette/palette.material_shader".to_owned(),
             ]
         );
+    }
+
+    #[test]
+    fn tag_extract_menu_is_limited_to_model_and_animation_groups() {
+        assert!(supports_tag_extract_menu(u32::from_be_bytes(*b"hlmt")));
+        assert!(supports_tag_extract_menu(u32::from_be_bytes(*b"mode")));
+        assert!(supports_tag_extract_menu(u32::from_be_bytes(*b"mod2")));
+        assert!(supports_tag_extract_menu(u32::from_be_bytes(*b"coll")));
+        assert!(supports_tag_extract_menu(u32::from_be_bytes(*b"phmo")));
+        assert!(supports_tag_extract_menu(u32::from_be_bytes(*b"jmad")));
+        assert!(supports_tag_extract_menu(u32::from_be_bytes(*b"antr")));
+        assert!(!supports_tag_extract_menu(u32::from_be_bytes(*b"scnr")));
+        assert!(!supports_tag_extract_menu(u32::from_be_bytes(*b"weap")));
     }
 }

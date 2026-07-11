@@ -1867,6 +1867,7 @@ impl Baboon {
             BrowserAction::RenameTag(key) => self.open_rename_tag(&key),
             BrowserAction::FindReferences(key) => self.show_references_for(&key),
             BrowserAction::ExploreReferences(key) => self.open_content_explorer(&key),
+            BrowserAction::MoveTag(key) => self.begin_move_tag(&key),
         }
     }
 
@@ -2213,9 +2214,14 @@ impl Baboon {
         };
         self.status = format!("Extracting import info from {}", entry.display_path);
         let tx = self.tx.clone();
+        let is_model = entry.group_tag == u32::from_be_bytes(*b"hlmt");
         thread::spawn(move || {
-            let result =
-                extract_import_info_for_entry(&source, &entry, &output).map_err(|e| e.to_string());
+            let result = if is_model {
+                extract_import_info_for_model_entry(&source, &entry, &output)
+            } else {
+                extract_import_info_for_entry(&source, &entry, &output)
+            }
+            .map_err(|e| e.to_string());
             let _ = tx.send(WorkerMessage::ExportFinished(result));
             ctx.request_repaint();
         });
@@ -2523,6 +2529,7 @@ impl Baboon {
             Some((stem, ext)) => (stem.to_owned(), ext.to_owned()),
             None => (display.clone(), String::new()),
         };
+        let name = stem.rsplit(['/', '\\']).next().unwrap_or(&stem).to_owned();
         let (referrers, referrers_unavailable) = match self.references_to_entry(&entry) {
             Some(list) => (
                 list.iter()
@@ -2537,7 +2544,7 @@ impl Baboon {
             group_tag: entry.group_tag,
             old_display: display,
             extension,
-            new_path_input: stem,
+            new_path_input: name,
             referrers,
             referrers_unavailable,
         });
@@ -2561,19 +2568,99 @@ impl Baboon {
             self.status = "Rename requires a loaded tags folder".to_owned();
             return;
         };
-        let new_rel = state
-            .new_path_input
-            .trim()
-            .trim_matches(['/', '\\'])
-            .to_owned();
-        if new_rel.is_empty() {
-            self.status = "Enter a destination path".to_owned();
+        let new_name = state.new_path_input.trim().to_owned();
+        if new_name.is_empty() {
+            self.status = "Enter a new tag name".to_owned();
             return;
         }
+        if new_name.contains(['/', '\\']) {
+            self.status = "Rename accepts a name only; use Move to choose a folder".to_owned();
+            return;
+        }
+        if new_name.contains('.') {
+            self.status = "Enter a name without an extension".to_owned();
+            return;
+        }
+        let parent = state
+            .old_display
+            .rsplit_once('/')
+            .map(|(parent, _)| parent)
+            .unwrap_or("");
+        let new_rel = if parent.is_empty() {
+            new_name
+        } else {
+            format!("{parent}/{new_name}")
+        };
         let Some(entry) = self.entry_for_key(&state.key).cloned() else {
             self.status = "Tag no longer exists".to_owned();
             return;
         };
+        self.rename_tag = None;
+        self.start_tag_rename_job(root, entry, new_rel, "Renaming tag");
+    }
+
+    pub(super) fn begin_move_tag(&mut self, key: &str) {
+        if self.folder_refactor.is_some() {
+            self.status = "A move/rename is already running".to_owned();
+            return;
+        }
+        if self.parsed_tags.values().any(|doc| doc.dirty) {
+            self.status = "Save or close dirty tags before moving".to_owned();
+            return;
+        }
+        let Some(root) = self.loaded_tags_root() else {
+            self.status = "Move requires a loaded tags folder".to_owned();
+            return;
+        };
+        let Some(entry) = self.entry_for_key(key).cloned() else {
+            self.status = "Tag no longer exists".to_owned();
+            return;
+        };
+        if !matches!(entry.location, TagEntryLocation::LooseFile(_)) {
+            self.status = "Only loose-folder tags can be moved".to_owned();
+            return;
+        }
+        let Some(destination_parent) = rfd::FileDialog::new()
+            .set_title("Move Tag To")
+            .set_directory(&root)
+            .pick_folder()
+        else {
+            return;
+        };
+        let root = lexical_normalize_path(&root);
+        let destination_parent = lexical_normalize_path(&destination_parent);
+        if !destination_parent.starts_with(&root) {
+            self.status = "Choose a destination inside the loaded tags folder".to_owned();
+            return;
+        }
+        let folder_rel = destination_parent
+            .strip_prefix(&root)
+            .unwrap_or(Path::new(""))
+            .to_string_lossy()
+            .replace('\\', "/");
+        let stem = entry
+            .display_path
+            .replace('\\', "/")
+            .rsplit('/')
+            .next()
+            .and_then(|name| name.rsplit_once('.').map(|(stem, _)| stem))
+            .unwrap_or(&entry.display_path)
+            .to_owned();
+        let new_rel = if folder_rel.is_empty() {
+            stem
+        } else {
+            format!("{folder_rel}/{stem}")
+        };
+        self.start_tag_rename_job(root, entry, new_rel, "Moving tag");
+    }
+
+    fn start_tag_rename_job(
+        &mut self,
+        root: PathBuf,
+        entry: TagEntry,
+        new_rel: String,
+        job_label: &str,
+    ) {
         let names = self.names.clone();
         let game = self.source.as_ref().and_then(|source| source.game.clone());
         let all_entries = self
@@ -2586,19 +2673,20 @@ impl Baboon {
             .as_ref()
             .and_then(|source| source.reverse_dependencies.clone());
         let tx = self.tx.clone();
+        let job_label = job_label.to_owned();
         self.folder_refactor = Some(FolderRefactorUiState {
-            label: "Renaming tag".to_owned(),
+            label: job_label.clone(),
             phase: "Preparing".to_owned(),
             progress: None,
         });
-        self.status = "Renaming tag: Preparing".to_owned();
-        self.rename_tag = None;
+        self.status = format!("{job_label}: Preparing");
         thread::spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 run_tag_rename_job(
                     root,
                     entry,
                     new_rel,
+                    job_label,
                     names,
                     game,
                     all_entries,
@@ -2606,7 +2694,7 @@ impl Baboon {
                     &tx,
                 )
             }))
-            .unwrap_or_else(|_| Err("Rename worker crashed".to_owned()));
+            .unwrap_or_else(|_| Err("Tag move worker crashed".to_owned()));
             let _ = tx.send(WorkerMessage::FolderRefactorFinished(result));
         });
     }
@@ -6493,13 +6581,14 @@ fn run_tag_rename_job(
     root: PathBuf,
     entry: TagEntry,
     new_rel: String,
+    job_label: String,
     names: TagNameIndex,
     game: Option<String>,
     all_entries_before: Vec<TagEntry>,
     existing_reverse_dependencies: Option<ReverseDependencyIndex>,
     tx: &Sender<WorkerMessage>,
 ) -> Result<FolderRefactorFinished, String> {
-    let label = "Renaming tag".to_owned();
+    let label = job_label;
     send_folder_refactor_progress(tx, &label, "Preparing", None);
     let root = lexical_normalize_path(&root);
 
@@ -6652,11 +6741,16 @@ fn run_tag_rename_job(
         );
     }
 
+    let verb = if label.starts_with("Moving") {
+        "Moved"
+    } else {
+        "Renamed"
+    };
     let status =
-        format!("Renamed tag, updated {references_changed} reference(s) in {tags_changed} tag(s)");
+        format!("{verb} tag, updated {references_changed} reference(s) in {tags_changed} tag(s)");
     let lines = vec![
         format!(
-            "Renamed: {} -> {}",
+            "{verb}: {} -> {}",
             entry.display_path, new_entry.display_path
         ),
         format!("Updated {references_changed} reference(s) in {tags_changed} tag(s)"),

@@ -233,6 +233,82 @@ pub(super) fn extract_import_info_for_entry(
     output: &Path,
 ) -> anyhow::Result<String> {
     let tag = read_entry(source, entry)?;
+    extract_import_info_from_tag(&tag, &entry.display_path, output)
+}
+
+/// Extract import-info streams from the render, physics, and collision tags
+/// referenced by a Halo model (hlmt) tag.
+pub(super) fn extract_import_info_for_model_entry(
+    source: &TagSource,
+    entry: &TagEntry,
+    output: &Path,
+) -> anyhow::Result<String> {
+    let model = read_entry(source, entry)?;
+    let root = model.root();
+    let references = [
+        (
+            "render_model",
+            tag_ref_path(&root, "render model"),
+            "render_model",
+            *b"mode",
+        ),
+        (
+            "physics_model",
+            tag_ref_path(&root, "physics_model").or_else(|| tag_ref_path(&root, "physics model")),
+            "physics_model",
+            *b"phmo",
+        ),
+        (
+            "collision_model",
+            tag_ref_path(&root, "collision model"),
+            "collision_model",
+            *b"coll",
+        ),
+    ];
+    let mut extracted = 0usize;
+    let mut failures = Vec::new();
+
+    for (folder, reference, extension, group_tag) in references {
+        let Some(reference) = reference else {
+            failures.push(format!("{folder}: no reference"));
+            continue;
+        };
+        let target_output = output.join(folder);
+        match load_referenced_tag_from_source(source, &reference, extension, &group_tag).and_then(
+            |tag| {
+                extract_import_info_from_tag(
+                    &tag,
+                    &format!("{reference}.{extension}"),
+                    &target_output,
+                )
+            },
+        ) {
+            Ok(_) => extracted += 1,
+            Err(error) => failures.push(format!("{folder}: {error}")),
+        }
+    }
+
+    if extracted == 0 {
+        anyhow::bail!(
+            "no referenced model import-info streams were extracted: {}",
+            failures.join("; ")
+        );
+    }
+    let mut message = format!(
+        "Extracted import info from {extracted} referenced model tag(s) to {}",
+        output.display()
+    );
+    if !failures.is_empty() {
+        message.push_str(&format!("; skipped {}", failures.join("; ")));
+    }
+    Ok(message)
+}
+
+fn extract_import_info_from_tag(
+    tag: &TagFile,
+    _display_path: &str,
+    output: &Path,
+) -> anyhow::Result<String> {
     let root = tag.root();
     let import_info = resolve_import_info_struct(&tag, root).ok_or_else(|| {
         anyhow::anyhow!(
