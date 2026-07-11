@@ -407,7 +407,7 @@ impl Baboon {
             let mut remove: Option<String> = None;
             for keyword in &existing {
                 if ui
-                    .small_button(format!("{keyword}  ✕"))
+                    .small_button(format!("{keyword}  ×"))
                     .on_hover_text("Remove keyword")
                     .clicked()
                 {

@@ -21,9 +21,10 @@ use blam_tags::render_method::{
 };
 use blam_tags::{
     AssFile, Bitmap, ColorGraphType, Endian, FunctionFlags, FunctionKind, FunctionType, JmsFile,
-    RenderModel, StringIdData, TagBlock, TagField, TagFieldData, TagFieldType, TagFile,
-    TagFunction, TagReferenceData, TagResource, TagResourceKind, TagStruct, format_group_tag,
-    parse_group_tag,
+    RenderModel, StringIdData, TagBlock, TagField, TagFieldData, TagFieldType, TagFile, TagFunction,
+    TagFunctionEditor, TagReferenceData, TagResource, TagResourceKind, TagStruct,
+    FoundationMasterType as EngineMasterType, PERIODIC_FUNCTIONS, TRANSITION_FUNCTIONS,
+    format_group_tag, parse_group_tag,
 };
 use eframe::egui::{
     self, Align2, Color32, FontData, FontDefinitions, FontFamily, FontId, Frame, RichText,
@@ -644,6 +645,15 @@ mod tests {
             "contact points/markers"
         );
         assert_eq!(strip_node_indices("unit/object"), "unit/object");
+        // Positional `#ordinal` tokens are stripped too, alongside `[index]`.
+        assert_eq!(
+            strip_node_indices("color#10/Mapping#5/Function Type#1"),
+            "color/Mapping/Function Type"
+        );
+        assert_eq!(
+            strip_node_indices("regions#3[0]/permutations#7[2]"),
+            "regions/permutations"
+        );
     }
 
     #[test]
@@ -2473,6 +2483,62 @@ mod tests {
             .unwrap();
         assert_eq!(halo2_function_bytes_from_struct(mapping).unwrap(), bytes);
         assert_h2_write_atomic_verifies(&tag, "h2_function_empty_create");
+    }
+
+    /// The reported bug: editing a field inside an H2 particle's `Mapping`
+    /// struct failed because the schema has a `custom` placeholder named
+    /// "Mapping" *before* the real `Mapping: struct`. With positional
+    /// (`name#ordinal`) paths the edit targets the exact struct field.
+    #[test]
+    fn h2_particle_mapping_field_edit_targets_exact_field() {
+        // Loads a real H2 particle; skipped when the tag isn't present (CI).
+        let tag_path =
+            "/Users/camden/Halo/halo2_mcc/tags/effects/generic/smoke/steam.particle";
+        let def = test_definition_path("halo2_mcc/particle.json");
+        if !std::path::Path::new(tag_path).exists() || !std::path::Path::new(&def).exists() {
+            eprintln!("skipping: H2 particle/definition not present");
+            return;
+        }
+        let bytes = std::fs::read(tag_path).unwrap();
+        let layout = blam_tags::layout::TagLayout::from_json(&def).unwrap();
+        let mut tag = blam_tags::classic::read_classic_tag_file(&bytes, layout).unwrap();
+
+        // Build the resolvable path exactly as the render walk does, via
+        // `append_field_path_for` (which appends each field's `#ordinal`).
+        let path = {
+            let root = tag.root();
+            let color_field = root
+                .fields_all()
+                .find(|f| f.name() == "color" && f.as_struct().is_some())
+                .expect("color struct");
+            let color = color_field.as_struct().unwrap();
+            // The FIRST "Mapping" is the custom leaf; select the struct one.
+            assert!(
+                color.field("Mapping").and_then(|f| f.as_struct()).is_none(),
+                "first 'Mapping' should be the non-struct custom placeholder"
+            );
+            let mapping_field = color
+                .fields_all()
+                .find(|f| f.name() == "Mapping" && f.as_struct().is_some())
+                .expect("Mapping struct");
+            let mapping = mapping_field.as_struct().unwrap();
+            let ft = mapping
+                .fields_all()
+                .find(|f| f.name() == "Function Type")
+                .expect("Function Type");
+            let p = append_field_path_for("", &color_field);
+            let p = append_field_path_for(&p, &mapping_field);
+            append_field_path_for(&p, &ft)
+        };
+        assert!(path.contains("Mapping#"), "path should carry ordinals: {path}");
+
+        // Edit through the positional path; it must resolve and set the field.
+        apply_field_edit(&mut tag, &path, "4").unwrap();
+        let value = tag.root().field_path(&path).and_then(|f| f.value());
+        assert!(
+            matches!(value, Some(TagFieldData::CharInteger(4))),
+            "Function Type not set via positional path: {value:?}"
+        );
     }
 
     fn h2_classic_shader_tag() -> TagFile {
