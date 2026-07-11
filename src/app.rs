@@ -21,9 +21,10 @@ use blam_tags::render_method::{
 };
 use blam_tags::{
     AssFile, Bitmap, ColorGraphType, Endian, FunctionFlags, FunctionKind, FunctionType, JmsFile,
-    RenderModel, StringIdData, TagBlock, TagField, TagFieldData, TagFieldType, TagFile,
-    TagFunction, TagReferenceData, TagResource, TagResourceKind, TagStruct, format_group_tag,
-    parse_group_tag,
+    RenderModel, StringIdData, TagBlock, TagField, TagFieldData, TagFieldType, TagFile, TagFunction,
+    TagFunctionEditor, TagReferenceData, TagResource, TagResourceKind, TagStruct,
+    FoundationMasterType as EngineMasterType, PERIODIC_FUNCTIONS, TRANSITION_FUNCTIONS,
+    format_group_tag, parse_group_tag,
 };
 use eframe::egui::{
     self, Align2, Color32, FontData, FontDefinitions, FontFamily, FontId, Frame, RichText,

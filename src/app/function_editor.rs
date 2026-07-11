@@ -336,26 +336,16 @@ impl FoundationMasterType {
         }
     }
 
-    fn target_function_type(self) -> Option<FunctionType> {
-        match self {
-            Self::Basic => Some(FunctionType::Constant),
-            // Creating a valid MultiSpline needs the compact constructors and
-            // derived-data rebuild support requested from blam-tags.
-            Self::Curve => None,
-            Self::Periodic => Some(FunctionType::Periodic),
-            Self::Exponent => Some(FunctionType::Exponent),
-            Self::Transition => Some(FunctionType::Transition),
-        }
-    }
 }
 
-fn foundation_master_type_combo(ui: &mut Ui, function: &mut TagFunction, editable: bool) -> bool {
-    let current = FoundationMasterType::from_function_type(function.function_type());
+fn foundation_master_type_combo(ui: &mut Ui, view: &mut FunctionView, editable: bool) -> bool {
+    let current = FoundationMasterType::from_function_type(view.function.function_type());
     if !editable {
         foundation_input_cell(ui, current.label(), 130.0);
         return false;
     }
     let mut changed = false;
+    let mut pick = None;
     egui::ComboBox::from_id_salt("foundation_fn_type")
         .selected_text(current.label())
         .width(130.0)
@@ -367,32 +357,49 @@ fn foundation_master_type_combo(ui: &mut Ui, function: &mut TagFunction, editabl
                 FoundationMasterType::Exponent,
                 FoundationMasterType::Transition,
             ] {
-                let response = ui.add_enabled(
-                    master.target_function_type().is_some() || master == current,
-                    egui::SelectableLabel::new(master == current, master.label()),
-                );
-                let response = if master == FoundationMasterType::Curve && master != current {
-                    response.on_hover_text(
-                        "Creating a curve is disabled until blam-tags can create a valid MultiSpline compact.",
-                    )
-                } else {
-                    response
-                };
-                if response.clicked() && master != current {
-                    if let Some(kind) = master.target_function_type() {
-                        function.set_function_type(kind);
-                        changed = true;
-                    }
+                if ui
+                    .selectable_label(master == current, master.label())
+                    .clicked()
+                    && master != current
+                {
+                    pick = Some(master);
                 }
             }
         });
+    if let Some(master) = pick {
+        // The engine converts to a valid target — including a real identity
+        // MultiSpline for `curve` — preserving the header and range state.
+        changed |= edit_function(view, |ed| ed.set_master_type(engine_master_type(master)).is_ok());
+    }
     changed
 }
 
-/// The H3+ Foundation presentation.  It deliberately avoids raw compact-byte
-/// mutation: controls which need the pending blam-tags compact API are shown
-/// as read-only, while header, color, wrapper, and existing LinearKey edits
-/// remain safe and update the preview live.
+/// Apply a `TagFunctionEditor` operation to the view's function, writing the
+/// result back on success. The editor owns the compact/editor-trailer
+/// serialization so the UI never patches bytes itself.
+fn edit_function(view: &mut FunctionView, op: impl FnOnce(&mut TagFunctionEditor) -> bool) -> bool {
+    let mut editor = TagFunctionEditor::from_function(view.function.clone());
+    if op(&mut editor) {
+        view.function = editor.into_function();
+        true
+    } else {
+        false
+    }
+}
+
+fn engine_master_type(master: FoundationMasterType) -> EngineMasterType {
+    match master {
+        FoundationMasterType::Basic => EngineMasterType::Basic,
+        FoundationMasterType::Curve => EngineMasterType::Curve,
+        FoundationMasterType::Periodic => EngineMasterType::Periodic,
+        FoundationMasterType::Exponent => EngineMasterType::Exponent,
+        FoundationMasterType::Transition => EngineMasterType::Transition,
+    }
+}
+
+/// The H3+ Foundation presentation.  Structural + compact edits go through
+/// [`TagFunctionEditor`] (blam-tags), which regenerates a valid blob with its
+/// editor-data trailer; the UI never patches compact bytes itself.
 pub(super) fn draw_foundation_h3_function_editor_contents(
     ui: &mut Ui,
     view: &mut FunctionView,
@@ -429,15 +436,16 @@ pub(super) fn draw_foundation_h3_function_editor_contents(
             &mut view.input_name,
             input_editable,
         );
-        let mut ranged = view.function.flags().is_ranged();
+        let mut ranged = view.function.is_ranged();
         if ui
-            .add_enabled(false, egui::Checkbox::new(&mut ranged, "Range:"))
-            .on_hover_text("Ranged compact creation requires the pending blam-tags editing API.")
+            .add_enabled(editable, egui::Checkbox::new(&mut ranged, "Range:"))
             .changed()
         {
-            unreachable!("disabled range checkbox cannot change");
+            // The engine builds/removes a valid second graph (mirrors the
+            // primary kind) and keeps the compact sizes + trailer consistent.
+            changed |= edit_function(view, |ed| ed.set_ranged(ranged).is_ok());
         }
-        if ranged {
+        if view.function.is_ranged() {
             changed |= seeded_name_combo(
                 ui,
                 "foundation_fn_range",
@@ -450,7 +458,7 @@ pub(super) fn draw_foundation_h3_function_editor_contents(
         ui.label(RichText::new("Output:").color(text_dark()).small());
         changed |= output_type_combo(ui, &mut view.output_index, output_editable);
         ui.label(RichText::new("Function type:").color(text_dark()).small());
-        changed |= foundation_master_type_combo(ui, &mut view.function, editable);
+        changed |= foundation_master_type_combo(ui, view, editable);
     });
 
     let master = FoundationMasterType::from_function_type(view.function.function_type());
@@ -500,56 +508,173 @@ pub(super) fn draw_foundation_h3_function_editor_contents(
     });
 
     ui.add_space(8.0);
+    let graphs = view.function.graph_count();
     match master {
         FoundationMasterType::Curve => {
             ui.label(RichText::new("Curve").color(text_dark()).strong());
-            if view.function.linear_key_points().is_some() {
-                ui.label(
-                    RichText::new("Drag/select points in the graph. Multi-segment controls are pending blam-tags compact editing support.")
-                        .color(subtle_dark())
-                        .small(),
-                );
-            } else {
-                ui.label(
-                    RichText::new("This curve form is displayed without conversion; segment editing is pending blam-tags compact editing support.")
-                        .color(subtle_dark())
-                        .small(),
-                );
+            ui.label(
+                RichText::new("Drag points in the graph. Add points by clicking an empty area; Delete removes the selected point.")
+                    .color(subtle_dark())
+                    .small(),
+            );
+        }
+        FoundationMasterType::Periodic => {
+            for slot in 0..graphs {
+                changed |= draw_periodic_panel(ui, view, slot, editable);
             }
         }
-        FoundationMasterType::Periodic => draw_pending_compact_panel(
-            ui,
-            "Periodic",
-            &["Function", "Frequency", "Max", "Phase", "Min"],
-        ),
         FoundationMasterType::Exponent => {
-            draw_pending_compact_panel(ui, "Exponent", &["Exponent", "Max", "Min"])
+            for slot in 0..graphs {
+                changed |= draw_exponent_panel(ui, view, slot, editable);
+            }
         }
         FoundationMasterType::Transition => {
-            draw_pending_compact_panel(ui, "Transition", &["Function", "Max", "Min"])
+            for slot in 0..graphs {
+                changed |= draw_transition_panel(ui, view, slot, editable);
+            }
         }
         FoundationMasterType::Basic => unreachable!(),
     }
     changed
 }
 
-fn draw_pending_compact_panel(ui: &mut Ui, title: &str, fields: &[&str]) {
-    ui.label(RichText::new(title).color(text_dark()).strong());
-    ui.horizontal_wrapped(|ui| {
-        for field in fields {
-            ui.label(
-                RichText::new(format!("{field}:"))
-                    .color(subtle_dark())
-                    .small(),
+/// Label for a graph slot ("graph"/"range graph" when the function is ranged).
+fn graph_slot_label(slot: usize, graphs: usize) -> String {
+    if graphs < 2 {
+        "Graph".to_owned()
+    } else if slot == 0 {
+        "Graph 0".to_owned()
+    } else {
+        "Graph 1 (range)".to_owned()
+    }
+}
+
+/// Editable combo over a numeric option table (index → label).
+fn function_index_combo(
+    ui: &mut Ui,
+    id: &str,
+    value: &mut u8,
+    options: &[&str],
+    editable: bool,
+) -> bool {
+    let label = options
+        .get(*value as usize)
+        .copied()
+        .unwrap_or("(unknown)");
+    if !editable {
+        foundation_input_cell(ui, label, 160.0);
+        return false;
+    }
+    let mut changed = false;
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(label)
+        .width(160.0)
+        .show_ui(ui, |ui| {
+            for (i, name) in options.iter().enumerate() {
+                if ui.selectable_label(*value as usize == i, *name).clicked() && *value as usize != i {
+                    *value = i as u8;
+                    changed = true;
+                }
+            }
+        });
+    changed
+}
+
+fn param_drag(ui: &mut Ui, label: &str, value: &mut f32, speed: f32, editable: bool) -> bool {
+    ui.label(RichText::new(label).color(subtle_dark()).small());
+    ui.add_enabled(editable, egui::DragValue::new(value).speed(speed))
+        .changed()
+}
+
+fn draw_periodic_panel(ui: &mut Ui, view: &mut FunctionView, slot: usize, editable: bool) -> bool {
+    let editor = TagFunctionEditor::from_function(view.function.clone());
+    let Some(mut p) = editor.periodic_params(slot) else {
+        return false;
+    };
+    let graphs = view.function.graph_count();
+    let mut changed = false;
+    ui.group(|ui| {
+        ui.label(
+            RichText::new(format!("Periodic — {}", graph_slot_label(slot, graphs)))
+                .color(text_dark())
+                .strong(),
+        );
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new("Function:").color(subtle_dark()).small());
+            changed |= function_index_combo(
+                ui,
+                &format!("periodic_fn_{slot}"),
+                &mut p.function_index,
+                &PERIODIC_FUNCTIONS,
+                editable,
             );
-            foundation_input_cell(ui, "—", 72.0);
-        }
+            changed |= param_drag(ui, "Frequency:", &mut p.frequency, 0.05, editable);
+            changed |= param_drag(ui, "Phase:", &mut p.phase, 0.05, editable);
+            changed |= param_drag(ui, "Min:", &mut p.amplitude_min, 0.01, editable);
+            changed |= param_drag(ui, "Max:", &mut p.amplitude_max, 0.01, editable);
+        });
     });
-    ui.label(
-        RichText::new("Compact parameter editing (including the ranged second graph) awaits the required blam-tags API.")
-            .color(subtle_dark())
-            .small(),
-    );
+    if changed {
+        edit_function(view, |ed| ed.set_periodic_params(slot, p).is_ok());
+    }
+    changed
+}
+
+fn draw_exponent_panel(ui: &mut Ui, view: &mut FunctionView, slot: usize, editable: bool) -> bool {
+    let editor = TagFunctionEditor::from_function(view.function.clone());
+    let Some(mut p) = editor.exponent_params(slot) else {
+        return false;
+    };
+    let graphs = view.function.graph_count();
+    let mut changed = false;
+    ui.group(|ui| {
+        ui.label(
+            RichText::new(format!("Exponent — {}", graph_slot_label(slot, graphs)))
+                .color(text_dark())
+                .strong(),
+        );
+        ui.horizontal_wrapped(|ui| {
+            changed |= param_drag(ui, "Exponent:", &mut p.exponent, 0.05, editable);
+            changed |= param_drag(ui, "Min:", &mut p.amplitude_min, 0.01, editable);
+            changed |= param_drag(ui, "Max:", &mut p.amplitude_max, 0.01, editable);
+        });
+    });
+    if changed {
+        edit_function(view, |ed| ed.set_exponent_params(slot, p).is_ok());
+    }
+    changed
+}
+
+fn draw_transition_panel(ui: &mut Ui, view: &mut FunctionView, slot: usize, editable: bool) -> bool {
+    let editor = TagFunctionEditor::from_function(view.function.clone());
+    let Some(mut p) = editor.transition_params(slot) else {
+        return false;
+    };
+    let graphs = view.function.graph_count();
+    let mut changed = false;
+    ui.group(|ui| {
+        ui.label(
+            RichText::new(format!("Transition — {}", graph_slot_label(slot, graphs)))
+                .color(text_dark())
+                .strong(),
+        );
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new("Function:").color(subtle_dark()).small());
+            changed |= function_index_combo(
+                ui,
+                &format!("transition_fn_{slot}"),
+                &mut p.function_index,
+                &TRANSITION_FUNCTIONS,
+                editable,
+            );
+            changed |= param_drag(ui, "Min:", &mut p.amplitude_min, 0.01, editable);
+            changed |= param_drag(ui, "Max:", &mut p.amplitude_max, 0.01, editable);
+        });
+    });
+    if changed {
+        edit_function(view, |ed| ed.set_transition_params(slot, p).is_ok());
+    }
+    changed
 }
 
 /// The interactive function editor body. When `editable` is false every
@@ -1933,7 +2058,9 @@ mod tests {
                 "{kind:?} should retain the curve presentation"
             );
         }
-        assert_eq!(FoundationMasterType::Curve.target_function_type(), None);
+        // Curve now maps to a real engine conversion target (a valid identity
+        // MultiSpline), no longer gated off.
+        assert_eq!(engine_master_type(FoundationMasterType::Curve), EngineMasterType::Curve);
     }
 
     #[test]
