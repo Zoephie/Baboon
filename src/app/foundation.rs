@@ -1641,7 +1641,6 @@ pub(super) fn draw_foundation_block_control(
                             }
                         }
                     });
-                foundation_header_icon_cell(ui, "[]");
 
                 // Keep the previous arrow directly beside the selected
                 // reference, with the next arrow following it.
@@ -1937,20 +1936,6 @@ pub(super) fn foundation_header_toggle_cell(
 
 pub(super) fn foundation_selected_width(row_width: f32) -> f32 {
     (row_width - 190.0 - 24.0 * 4.0 - 54.0 * 5.0 - 92.0).clamp(120.0, 420.0)
-}
-
-pub(super) fn foundation_header_icon_cell(ui: &mut Ui, text: &str) {
-    let (rect, _) = ui.allocate_exact_size(Vec2::new(24.0, 22.0), Sense::hover());
-    ui.painter().rect_filled(rect, 4.0, foundation_input());
-    ui.painter()
-        .rect_stroke(rect, 4.0, Stroke::new(1.0, foundation_input_edge()));
-    ui.painter().text(
-        rect.center(),
-        Align2::CENTER_CENTER,
-        text,
-        FontId::proportional(11.0),
-        subtle_dark(),
-    );
 }
 
 pub(super) fn foundation_header_value_cell(ui: &mut Ui, text: &str, max_width: f32) {
