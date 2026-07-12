@@ -1,3 +1,6 @@
+//! Preferences and last-session persistence, including legacy migration.
+//! It owns preference/session serialization and migration; interactive settings presentation belongs to the UI layer.
+
 use super::*;
 
 pub(super) fn prefs_path() -> PathBuf {

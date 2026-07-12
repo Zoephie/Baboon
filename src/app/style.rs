@@ -1,3 +1,6 @@
+//! Baboon colors, typography, spacing, and reusable egui style helpers.
+//! It owns this focused support concern; application workflow coordination and unrelated UI behavior belong elsewhere.
+
 use super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
@@ -561,19 +564,6 @@ pub(super) const MAX_OPEN_TABS: usize = 32;
 pub(super) const MAX_PARSED_TAGS: usize = 24;
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn material_text_for_bg_chooses_contrasting_foreground() {
-        assert_eq!(
-            material_text_for_bg(Color32::from_rgb(42, 43, 41)),
-            Color32::from_gray(232)
-        );
-        assert_eq!(
-            material_text_for_bg(Color32::from_rgb(232, 191, 171)),
-            Color32::from_gray(20)
-        );
-    }
-}
+#[path = "tests/style.rs"]
+mod tests;
 pub(super) const FOUNDATION_LABEL_WIDTH: f32 = 280.0;

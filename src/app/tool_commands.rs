@@ -1,3 +1,6 @@
+//! Editing-kit command parsing, argument state, and command-line construction.
+//! It owns this focused support concern; application workflow coordination and unrelated UI behavior belong elsewhere.
+
 use super::*;
 
 #[derive(Clone, Debug)]

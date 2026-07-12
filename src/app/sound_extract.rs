@@ -1,4 +1,5 @@
 //! Sound-tag audio *extraction*: dump a `.sound` tag's permutations to disk in
+//! It owns this focused support concern; application workflow coordination and unrelated UI behavior belong elsewhere.
 //! a layout the game's `tool.exe` can reimport, closing the audition→edit→
 //! reimport loop. No tool has a first-class audio export verb, so this fills
 //! that gap by reusing the same decoders the audition path uses.

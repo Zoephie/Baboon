@@ -1,4 +1,5 @@
 //! Documentation overlay parsed from the JSON tag definitions. Shipped tags
+//! It owns this focused support concern; application workflow coordination and unrelated UI behavior belong elsewhere.
 //! embed a *stripped* layout (clean field names, no explanation fields — see the
 //! `blam-tags` schema builder), so the help/units text and explanation blocks
 //! live only in the definitions. We parse them once per group, keyed by struct

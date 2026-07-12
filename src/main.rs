@@ -1,3 +1,6 @@
+//! Baboon desktop application entry point and process-level startup wiring.
+//! It owns process startup only; application state and feature behavior belong under `app`.
+
 // Release builds run as a Windows GUI app (no console window). Debug builds
 // keep the console so logs/diagnostics remain visible.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]

@@ -1,3 +1,6 @@
+//! Human-readable formatting for tag groups, fields, and schema-backed values.
+//! It owns deterministic display formatting and name lookup; source I/O and UI state belong elsewhere.
+
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -6,12 +9,16 @@ use blam_tags::{StringIdData, TagFieldData, TagReferenceData, format_group_tag, 
 use serde_json::Value;
 
 #[derive(Clone, Debug, Default)]
+/// Bidirectional group-tag/name lookup assembled from definition metadata.
+/// Merging keeps the first observed mapping so the default cross-game index is
+/// deterministic even when several games define the same group tag.
 pub struct TagNameIndex {
     name_for_group_tag: BTreeMap<u32, String>,
     group_tag_for_name: BTreeMap<String, u32>,
 }
 
 impl TagNameIndex {
+    /// Builds a best-effort cross-game index, skipping unreadable game folders.
     pub fn load_from_definitions(definitions_root: &Path) -> Self {
         let mut index = TagNameIndex::default();
         let Ok(games) = std::fs::read_dir(definitions_root) else {
@@ -33,10 +40,12 @@ impl TagNameIndex {
         index
     }
 
+    /// Loads the exact metadata index for one definition game.
     pub fn load_game(definitions_root: &Path, game: &str) -> Result<Self> {
         TagNameIndex::load_meta(&definitions_root.join(game).join("_meta.json"))
     }
 
+    /// Loads one `_meta.json`, retaining path context in parse errors.
     pub fn load_meta(meta_path: &Path) -> Result<Self> {
         let bytes = std::fs::read(meta_path)
             .with_context(|| format!("failed to read {}", meta_path.display()))?;
@@ -66,6 +75,7 @@ impl TagNameIndex {
         Ok(index)
     }
 
+    /// Returns the definition name without inventing a fallback label.
     pub fn name_for(&self, group_tag: u32) -> Option<&str> {
         self.name_for_group_tag.get(&group_tag).map(String::as_str)
     }
@@ -75,6 +85,7 @@ impl TagNameIndex {
         self.group_tag_for_name.get(name).copied()
     }
 
+    /// Adds only unknown mappings, preserving the receiver's precedence.
     pub fn merge_missing(&mut self, other: TagNameIndex) {
         for (group_tag, name) in other.name_for_group_tag {
             self.name_for_group_tag
@@ -85,6 +96,10 @@ impl TagNameIndex {
     }
 }
 
+/// Formats a field value for reports and read-only UI text.
+///
+/// `hex_mode` affects integer presentation only; references, strings, colors,
+/// and compound values retain their established user-facing formats.
 pub fn format_value(index: &TagNameIndex, value: &TagFieldData, hex_mode: bool) -> String {
     let mut s = String::new();
     write_value(index, &mut s, value, hex_mode);
@@ -196,6 +211,7 @@ fn write_value(index: &TagNameIndex, out: &mut String, value: &TagFieldData, hex
     }
 }
 
+/// Formats a four-character group tag with its definition name when known.
 pub fn group_label(index: &TagNameIndex, group_tag: u32) -> String {
     match index.name_for(group_tag) {
         Some(name) => format!("{} ({})", format_group_tag(group_tag), name),

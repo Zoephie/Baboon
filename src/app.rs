@@ -1,3 +1,6 @@
+//! Application state, subsystem composition, and top-level eframe integration.
+//! It owns composition of long-lived application state; subsystem-specific behavior and widget implementation belong in child modules.
+
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -20,10 +23,11 @@ use blam_tags::render_method::{
     compile_real_constant,
 };
 use blam_tags::{
-    AssFile, Bitmap, ColorGraphType, Endian, FunctionFlags, FunctionKind, FunctionType, JmsFile,
-    RenderModel, StringIdData, TagBlock, TagField, TagFieldData, TagFieldType, TagFile,
-    TagFunction, TagReferenceData, TagResource, TagResourceKind, TagStruct, format_group_tag,
-    parse_group_tag,
+    AssFile, Bitmap, ColorGraphType, Endian, FoundationMasterType as EngineMasterType,
+    FunctionFlags, FunctionKind, FunctionType, JmsFile, PERIODIC_FUNCTIONS, RenderModel,
+    StringIdData, TRANSITION_FUNCTIONS, TagBlock, TagField, TagFieldData, TagFieldType, TagFile,
+    TagFunction, TagFunctionEditor, TagReferenceData, TagResource, TagResourceKind, TagStruct,
+    format_group_tag, parse_group_tag,
 };
 use eframe::egui::{
     self, Align2, Color32, FontData, FontDefinitions, FontFamily, FontId, Frame, RichText,
@@ -45,6 +49,8 @@ pub(super) const BABOON_LATEST_RELEASE_API: &str =
     "https://api.github.com/repos/Zoephie/Baboon/releases/latest";
 pub(super) const BABOON_RELEASES_URL: &str = "https://github.com/Zoephie/Baboon/releases";
 
+mod game_assets;
+use game_assets::*;
 mod style;
 use style::*;
 mod state;
@@ -96,22 +102,44 @@ pub(super) fn test_definition_path(rel: &str) -> PathBuf {
     locate_definitions_root().join(rel)
 }
 
+/// Long-lived application state shared by Baboon's immediate-mode UI.
+///
+/// Subsystem modules implement focused operations on this state; this type is
+/// intentionally the composition root rather than a domain model.
 pub struct Baboon {
     default_names: TagNameIndex,
     names: TagNameIndex,
+    /// Cloneable sender given to background jobs; every completion is funneled
+    /// back through the receive loop so UI state mutates only on the UI thread.
     tx: Sender<WorkerMessage>,
+    /// Single UI-thread receiver. Messages are applied in arrival order and
+    /// generation-tagged results are discarded when their source is stale.
     rx: Receiver<WorkerMessage>,
+    /// Active source and its source-relative browser/index state.
     source: Option<LoadedSourceData>,
+    /// Parsed documents keyed by the stable [`TagEntry::key`] identity.
     parsed_tags: HashMap<String, TagDocument>,
+    /// Least-recently-used ordering for parsed documents not pinned by a tab.
     tag_cache_order: VecDeque<String>,
+    /// Keys with an outstanding background load, preventing duplicate jobs.
     loading_tags: HashSet<String>,
+    /// Active document key. Selection may temporarily precede parsing while a
+    /// matching key is present in `loading_tags`.
     selected_key: Option<String>,
+    /// Docked and floating tabs share this ordered set of open document keys.
     open_tabs: Vec<String>,
+    /// Subset of `open_tabs` currently rendered as independent windows.
     floating_tabs: HashSet<String>,
+    /// Per-document preview state, keyed identically to `parsed_tags` so cached
+    /// textures cannot migrate between tags after selection changes.
     bitmap_previews: HashMap<String, BitmapPreviewState>,
+    /// Per-document model view/camera state retained while the document is cached.
     model_previews: HashMap<String, ModelPreviewState>,
+    /// Transient text-entry buffers keyed by stable widget/edit identifiers.
     edit_buffers: HashMap<String, String>,
+    /// Source-local render-method definition cache; `None` is a cached miss.
     rmdf_cache: HashMap<String, Option<RenderMethodDefinition>>,
+    /// Source-local render-method option cache; `None` is a cached miss.
     rmop_cache: HashMap<String, Option<RenderMethodOption>>,
     filter: String,
     /// Per-tag "Search fields" query (keyed by tag key). Collapses the tag
@@ -131,6 +159,8 @@ pub struct Baboon {
     show_browser_prefixes: bool,
     folders_before_tags: bool,
     double_click_to_open_tags: bool,
+    /// Persisted policy controlling whether prior windows are restored, asked
+    /// about, or deliberately ignored at startup.
     session_restore: SessionRestore,
     show_block_sizes: bool,
     scroll_to_cycle_dropdowns: bool,
@@ -164,10 +194,13 @@ pub struct Baboon {
     editing_kit_paths: HashMap<String, PathBuf>,
     editing_kit_path_inputs: HashMap<String, String>,
     editing_kit_path_attention: Option<String>,
+    /// One cross-frame edit popup at a time; its embedded tag/path identity
+    /// prevents applying a delayed confirmation to the newly selected tag.
     color_popup: Option<MaterialColorPopup>,
     custom_color_swatches: Vec<Option<[u8; 4]>>,
     palette_last_dir: Option<PathBuf>,
     use_new_h3_function_editor: bool,
+    /// Function editor snapshot and write targets captured when the popup opens.
     function_popup: Option<FunctionPopup>,
     query_results: Option<TagQueryResults>,
     /// "Compare Tags" (Tag Diff) window state.
@@ -210,8 +243,12 @@ pub struct Baboon {
     saved_terminal_open_games: HashSet<String>,
     dragging_floating_tab: Option<String>,
     tab_rack_rect: Option<egui::Rect>,
+    /// Modal close transaction; the pending action is executed only after every
+    /// selected dirty document has been saved or discard is confirmed.
     save_changes_prompt: SaveChangesPrompt,
+    /// Startup-only prompt reconstructed from the prior session file.
     last_opened_windows: Option<LastOpenedWindowsPrompt>,
+    /// Restore request held until its source load completes and keys can resolve.
     pending_session_restore: Option<PendingSessionRestore>,
     /// Pending destructive block op (delete / delete all) awaiting confirm.
     block_confirm: Option<BlockConfirm>,
@@ -587,52 +624,14 @@ fn editing_kit_path_inputs(paths: &HashMap<String, PathBuf>) -> HashMap<String, 
         .collect()
 }
 
-pub(super) fn get_game_banner_bytes(game: &str) -> &'static [u8] {
-    match game {
-        "haloce_mcc" => include_bytes!("../assets/Game Icons/ce.png"),
-        "halo2_mcc" => include_bytes!("../assets/Game Icons/h2.png"),
-        "halo2amp_mcc" => include_bytes!("../assets/Game Icons/h2amp.png"),
-        "halo3_mcc" => include_bytes!("../assets/Game Icons/h3.png"),
-        "halo3odst_mcc" => include_bytes!("../assets/Game Icons/h3odst.png"),
-        "haloreach_mcc" => include_bytes!("../assets/Game Icons/reach.png"),
-        "halo4_mcc" => include_bytes!("../assets/Game Icons/h4.png"),
-        _ => include_bytes!("../assets/Game Icons/ce.png"),
-    }
-}
-
-/// Engine emblems used only by the compact top-toolbar editing-kit shortcuts.
-/// These intentionally remain separate from the larger game banner artwork.
-fn get_game_emblem_bytes(game: &str) -> Option<&'static [u8]> {
-    match game {
-        "haloce_mcc" => Some(include_bytes!("../assets/Game Icons/emblems/h1.png")),
-        "halo2_mcc" => Some(include_bytes!("../assets/Game Icons/emblems/h2.png")),
-        "halo2amp_mcc" => Some(include_bytes!("../assets/Game Icons/emblems/h2a.png")),
-        "halo3_mcc" => Some(include_bytes!("../assets/Game Icons/emblems/h3.png")),
-        "halo3odst_mcc" => Some(include_bytes!("../assets/Game Icons/emblems/h3odst.png")),
-        "haloreach_mcc" => Some(include_bytes!("../assets/Game Icons/emblems/hreach.png")),
-        "halo4_mcc" => Some(include_bytes!("../assets/Game Icons/emblems/h4.png")),
-        _ => None,
-    }
-}
-
-pub(super) fn game_display_name(game: &str) -> &'static str {
-    match game {
-        "haloce_mcc" => "Halo: Combat Evolved",
-        "halo2_mcc" => "Halo 2",
-        "halo2amp_mcc" => "Halo 2 Anniversary Multiplayer",
-        "halo3_mcc" => "Halo 3",
-        "halo3odst_mcc" => "Halo 3: ODST",
-        "haloreach_mcc" => "Halo: Reach",
-        "halo4_mcc" => "Halo 4",
-        _ => "Unknown Game",
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::app::controller::{new_tag_output_path, new_tag_output_path_from_dialog};
+    use crate::app::controller::new_tag_output_path_from_dialog;
 
     use super::*;
+
+    #[path = "classic_h2.rs"]
+    mod classic_h2;
 
     #[test]
     fn strip_node_indices_drops_element_subscripts() {
@@ -644,6 +643,14 @@ mod tests {
             "contact points/markers"
         );
         assert_eq!(strip_node_indices("unit/object"), "unit/object");
+        assert_eq!(
+            strip_node_indices("color#10/Mapping#5/Function Type#1"),
+            "color/Mapping/Function Type"
+        );
+        assert_eq!(
+            strip_node_indices("regions#3[0]/permutations#7[2]"),
+            "regions/permutations"
+        );
     }
 
     #[test]
@@ -1057,7 +1064,9 @@ mod tests {
             &bytes,
         );
 
-        let model = build_classic_shader_editor_model(&tag, &TagNameIndex::default()).unwrap();
+        let entry = h2_shader_entry(u32::from_be_bytes(*b"shad"));
+        let model =
+            build_h2ek_shader_editor_model(&tag, &entry, &TagNameIndex::default(), None).unwrap();
         let (function_bytes, path) = first_halo2_byte_block_function_row(&model).unwrap();
 
         assert_eq!(function_bytes, bytes);
@@ -2597,22 +2606,6 @@ mod tests {
     }
 
     #[test]
-    fn new_tag_output_path_stays_under_tags_root() {
-        let root = Path::new("tags");
-
-        assert_eq!(
-            new_tag_output_path(root, "objects/test/example.shader", "shader").unwrap(),
-            PathBuf::from("tags/objects/test/example.shader")
-        );
-        assert_eq!(
-            new_tag_output_path(root, "objects\\test\\example", "shader").unwrap(),
-            PathBuf::from("tags/objects/test/example.shader")
-        );
-        assert!(new_tag_output_path(root, "../escape", "shader").is_err());
-        assert!(new_tag_output_path(root, "C:/escape", "shader").is_err());
-    }
-
-    #[test]
     fn new_tag_dialog_path_uses_selected_file_name_inside_tags_root() {
         let root = Path::new("C:/kit/tags");
 
@@ -2634,6 +2627,14 @@ mod tests {
         assert!(
             new_tag_output_path_from_dialog(root, Path::new("C:/other/foo.shader"), "shader")
                 .is_err()
+        );
+        assert!(
+            new_tag_output_path_from_dialog(
+                root,
+                Path::new("C:/kit/tags/../other/foo.shader"),
+                "shader",
+            )
+            .is_err()
         );
     }
 }

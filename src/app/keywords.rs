@@ -1,4 +1,5 @@
 //! User keyword tags, stored in a per-game sidecar JSON (outside the tag
+//! It owns this focused support concern; application workflow coordination and unrelated UI behavior belong elsewhere.
 //! binaries). Keyed by tag entry key → sorted, unique, lowercased keywords.
 
 use std::collections::BTreeMap;
@@ -16,13 +17,16 @@ impl KeywordStore {
         self.by_tag.clear();
         self.dirty = false;
         self.game = game.map(str::to_owned);
-        if let Some(game) = game {
-            if let Ok(text) = std::fs::read_to_string(crate::source::keywords_path(game)) {
-                if let Ok(map) = serde_json::from_str::<BTreeMap<String, Vec<String>>>(&text) {
-                    self.by_tag = map;
-                }
-            }
-        }
+        let Some(game) = game else {
+            return;
+        };
+        let Ok(text) = std::fs::read_to_string(crate::source::keywords_path(game)) else {
+            return;
+        };
+        let Ok(map) = serde_json::from_str::<BTreeMap<String, Vec<String>>>(&text) else {
+            return;
+        };
+        self.by_tag = map;
     }
 
     pub(super) fn keywords(&self, tag_key: &str) -> &[String] {
@@ -95,26 +99,5 @@ impl KeywordStore {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn add_dedupes_and_remove_clears() {
-        let mut store = KeywordStore::default();
-        store.add("file:a", "Hero");
-        store.add("file:a", "hero"); // case-insensitive dedupe
-        store.add("file:a", "wip");
-        assert_eq!(store.keywords("file:a"), &["hero", "wip"]);
-
-        assert_eq!(
-            store.all_keywords(),
-            vec![("hero".to_owned(), 1), ("wip".to_owned(), 1)]
-        );
-        assert_eq!(store.tags_with("wip"), vec!["file:a".to_owned()]);
-
-        store.remove("file:a", "hero");
-        assert_eq!(store.keywords("file:a"), &["wip"]);
-        store.remove("file:a", "wip");
-        assert!(store.keywords("file:a").is_empty());
-    }
-}
+#[path = "tests/keywords.rs"]
+mod tests;

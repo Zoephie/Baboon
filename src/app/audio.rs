@@ -1,4 +1,5 @@
 //! Sound-tag audition: decode-and-play across every game via rodio.
+//! It owns this focused support concern; application workflow coordination and unrelated UI behavior belong elsewhere.
 //!
 //! Where a `.sound` tag's audio lives depends on the game, and the engine
 //! (`blam_tags::audio`) turns each into interleaved PCM:

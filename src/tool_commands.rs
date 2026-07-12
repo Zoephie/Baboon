@@ -1,3 +1,6 @@
+//! Compile-time access to the generated editing-kit command catalogs.
+//! It owns this focused support concern; application workflow coordination and unrelated UI behavior belong elsewhere.
+
 pub fn get_tool_commands_json(game: &str) -> Option<&'static str> {
     match game {
         "haloce_mcc" => Some(include_str!("../tool_commands/haloce_mcc.json")),

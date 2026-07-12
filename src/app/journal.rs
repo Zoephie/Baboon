@@ -1,4 +1,5 @@
 //! Per-tag undo/redo journal.
+//! It owns this focused support concern; application workflow coordination and unrelated UI behavior belong elsewhere.
 //!
 //! `TagFile` is not `Clone`, so snapshots are taken by serializing the tag to
 //! bytes (`write_to_bytes`) and restored by re-parsing (`read_from_bytes`). A

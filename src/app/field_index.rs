@@ -1,4 +1,5 @@
 //! In-memory cache of every tag's searchable text, so repeat field-value
+//! It owns this focused support concern; application workflow coordination and unrelated UI behavior belong elsewhere.
 //! searches are instant (no per-query tag reads). Built once per session in the
 //! background and invalidated whenever the source changes (generation bump).
 //! Not persisted to disk yet — that's a safe follow-up.
@@ -60,49 +61,8 @@ impl FieldValueIndex {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn install_query_and_generation_invalidation() {
-        let mut index = FieldValueIndex::default();
-        assert!(!index.is_ready_for(1));
-        index.install(
-            1,
-            vec![
-                ("a".to_owned(), "weapons · objects\\rifle".to_owned()),
-                ("b".to_owned(), "bipeds · masterchief".to_owned()),
-            ],
-        );
-        assert!(index.is_ready_for(1));
-        // Wrong generation → treated as not ready.
-        assert!(!index.is_ready_for(2));
-
-        let hits = index.query("rifle", 10);
-        assert_eq!(hits.len(), 1);
-        assert_eq!(hits[0].0, "a");
-        assert!(hits[0].1.contains("rifle"));
-
-        assert_eq!(index.query("chief", 10).len(), 1);
-        assert!(index.query("nonexistent", 10).is_empty());
-
-        index.invalidate();
-        assert!(!index.is_ready_for(1));
-        assert!(index.query("rifle", 10).is_empty());
-    }
-
-    #[test]
-    fn query_respects_cap() {
-        let mut index = FieldValueIndex::default();
-        index.install(
-            1,
-            (0..50)
-                .map(|i| (format!("k{i}"), "shared token".to_owned()))
-                .collect(),
-        );
-        assert_eq!(index.query("token", 10).len(), 10);
-    }
-}
+#[path = "tests/field_index.rs"]
+mod tests;
 
 /// A short context window around a match for display as a result annotation.
 fn index_snippet(blob: &str, byte_pos: usize, query_byte_len: usize) -> String {

@@ -1,5 +1,39 @@
+//! Application actions and asynchronous workflow coordination for [`Baboon`].
+//! It owns application actions and workflow coordination; widget layout and persistent state definitions belong elsewhere.
+
 use super::*;
+
+mod updates;
+use updates::*;
+mod terminal;
+pub(super) use terminal::open_terminal_log;
+#[cfg(test)]
+use terminal::terminal_log_timestamp;
+use terminal::{
+    TerminalStopResult, append_terminal_log_path, create_terminal_log_file,
+    run_terminal_command_for_reimport, send_terminal_line, stop_terminal_process,
+    stream_terminal_output, trim_terminal_lines,
+};
+mod tools;
+use tools::*;
+mod queries;
+use queries::*;
+mod saving;
+pub(super) use saving::{
+    available_definition_games, load_new_tag_groups, new_tag_output_path_from_dialog,
+};
+use saving::{
+    entries_for_keys, lexical_normalize_path, ordered_unique_keys,
+    register_saved_copy_in_loaded_source, save_as_extension, save_as_file_name, save_as_start_dir,
+};
+mod documents;
+mod loading;
+use documents::selected_tab_after_removal;
+#[cfg(test)]
+use loading::loaded_source_status;
+mod references;
 use anyhow::Context as _;
+use references::*;
 
 const TERMINAL_VISIBLE_LINE_LIMIT: usize = 20_000;
 const TERMINAL_VISIBLE_LINE_TRIM_TARGET: usize = 18_000;
@@ -14,432 +48,65 @@ impl Baboon {
 
     pub(super) fn process_worker_messages(&mut self, ctx: &egui::Context) {
         while let Ok(message) = self.rx.try_recv() {
-            match message {
-                WorkerMessage::TerminalLine(line) => {
-                    self.push_terminal_line(line);
-                }
-                WorkerMessage::TerminalLogError(error) => {
-                    self.status = error;
-                }
-                WorkerMessage::TerminalDone { run_id } => {
-                    if self.terminal.running_id != Some(run_id) {
-                        continue;
-                    }
-                    self.terminal.running = false;
-                    self.terminal.running_id = None;
-                    self.terminal.running_command = None;
-                    self.terminal.process = None;
-                    self.terminal.scroll_to_bottom = true;
-                    self.terminal.refocus_input = true;
-                }
+            let stale = match message {
+                WorkerMessage::TerminalLine(line) => self.handle_terminal_line(line),
+                WorkerMessage::TerminalLogError(error) => self.handle_terminal_log_error(error),
+                WorkerMessage::TerminalDone { run_id } => self.handle_terminal_done(run_id),
                 WorkerMessage::UpdateCheckFinished(result) => {
-                    self.status = match result {
-                        Ok(result) => update_check_status(&result),
-                        Err(error) if error == NO_PUBLIC_RELEASE_MESSAGE => error,
-                        Err(error) => format!("Update check failed: {error}"),
-                    };
+                    self.handle_update_check_finished(result)
                 }
                 WorkerMessage::FieldValueSearchFinished {
                     generation,
                     query,
                     result,
-                } => {
-                    self.field_value_searching = false;
-                    // Discard results from a source that has since been reloaded.
-                    if generation != self.source_generation {
-                        continue;
-                    }
-                    match result {
-                        Ok(matches) => {
-                            let entries: Vec<TagEntry> =
-                                matches.iter().map(|m| m.entry.clone()).collect();
-                            let annotations: Vec<String> =
-                                matches.iter().map(|m| m.label.clone()).collect();
-                            let note = entries
-                                .is_empty()
-                                .then(|| format!("No tag field values contain \"{query}\"."));
-                            self.status = format!(
-                                "Field search for \"{query}\": {} match(es)",
-                                entries.len()
-                            );
-                            self.query_results = Some(TagQueryResults {
-                                title: format!("Field value '{query}' ({})", entries.len()),
-                                entries,
-                                annotations,
-                                note,
-                                ref_target: None,
-                            });
-                        }
-                        Err(error) => {
-                            self.status = format!("Field search failed: {error}");
-                        }
-                    }
-                }
+                } => self.handle_field_value_search_finished(generation, query, result),
                 WorkerMessage::FieldIndexBuilt { generation, blobs } => {
-                    if generation == self.source_generation {
-                        self.field_index.install(generation, blobs);
-                    }
+                    self.handle_field_index_built(generation, blobs)
                 }
                 WorkerMessage::ReverseDependenciesBuilt { generation, index } => {
-                    self.building_reverse_dependencies = false;
-                    // Discard a build that finished against a now-stale source.
-                    if generation != self.source_generation {
-                        continue;
-                    }
-                    self.reference_index_progress = None;
-                    let paired_entry_index_build = self.building_reference_for_entry_index;
-                    self.building_reference_for_entry_index = false;
-                    self.show_entry_index_wait_notice = false;
-                    if let Some(source) = self.source.as_mut() {
-                        let n = index.len();
-                        // Persist so the next launch skips the rebuild entirely.
-                        if let (Some(game), TagSource::LooseFolder { root, .. }) =
-                            (source.game.clone(), &source.source)
-                        {
-                            let root = root.clone();
-                            let to_save = index.clone();
-                            thread::spawn(move || {
-                                if let Err(e) = crate::source::save_reverse_dependency_index(
-                                    &game, &root, &to_save,
-                                ) {
-                                    eprintln!("reverse-dependency index save failed: {e}");
-                                }
-                            });
-                        }
-                        source.reverse_dependencies = Some(index);
-                        self.status = if paired_entry_index_build {
-                            format!("Tag and reference indexes complete: {n} tags")
-                        } else {
-                            format!("Reference index complete: {n} tags")
-                        };
-                    }
+                    self.handle_reverse_dependencies_built(generation, index)
                 }
                 WorkerMessage::ReferenceIndexProgress {
                     generation,
                     processed,
                     total,
-                } => {
-                    if generation != self.source_generation || !self.building_reverse_dependencies {
-                        continue;
-                    }
-                    if let Some(progress) = self.reference_index_progress.as_mut() {
-                        progress.processed = processed;
-                        progress.total = total;
-                    }
-                    ctx.request_repaint();
-                }
+                } => self.handle_reference_index_progress(generation, processed, total, ctx),
                 WorkerMessage::SourceLoaded {
-                    result: Ok(mut loaded),
+                    result,
                     recent_path,
-                } => {
-                    if let Some(path) = recent_path {
-                        self.remember_recent_folder(path);
-                    }
-                    // Set terminal work dir to the game kit root (parent of tags/).
-                    self.terminal_work_dir =
-                        if let TagSource::LooseFolder { root, .. } = &loaded.source {
-                            root.parent().map(|p| p.to_owned())
-                        } else {
-                            None
-                        };
-                    // Restore the per-kit terminal-open preference for this game.
-                    self.terminal_open = loaded
-                        .game
-                        .as_deref()
-                        .map(|g| self.terminal_open_games.contains(g))
-                        .unwrap_or(false);
-                    self.names = loaded.names.clone();
-                    // Backfill any groups the source's game index lacks (and
-                    // cover the case where definitions failed to load on disk).
-                    self.names.merge_missing(self.default_names.clone());
-                    self.parsed_tags.clear();
-                    self.tag_cache_order.clear();
-                    self.loading_tags.clear();
-                    self.bitmap_previews.clear();
-                    self.rmdf_cache.clear();
-                    self.rmop_cache.clear();
-                    self.color_popup = None;
-                    self.function_popup = None;
-                    self.selected_key = None;
-                    self.open_tabs.clear();
-                    self.floating_tabs.clear();
-                    if let Some((key, tag)) = loaded.initial_tag.take() {
-                        self.selected_key = Some(key.clone());
-                        self.open_tabs.push(key.clone());
-                        self.remember_tag_use(&key);
-                        self.parsed_tags.insert(key, TagDocument::clean(tag));
-                    }
-                    self.status = loaded_source_status(&loaded);
-                    // Load this game's keyword sidecar (external to the tags).
-                    self.keywords.load_for_game(loaded.game.as_deref());
-                    // The field-value index is bound to the old entry set.
-                    self.field_index.invalidate();
-                    self.source = Some(loaded);
-                    self.refresh_active_favorite_entries();
-                    // New entry universe — invalidate any cached search results.
-                    self.source_generation = self.source_generation.wrapping_add(1);
-                    self.refreshing_entry_index = false;
-                    self.building_reverse_dependencies = false;
-                    self.building_reference_for_entry_index = false;
-                    self.reference_index_progress = None;
-                    self.next_entry_index_refresh_at = 0.0;
-                    let loose_folder_source = self.source.as_ref().is_some_and(|source| {
-                        source.game.is_some()
-                            && matches!(source.source, TagSource::LooseFolder { .. })
-                    });
-                    let has_cached_entries = self
-                        .source
-                        .as_ref()
-                        .is_some_and(|source| !source.all_entries.is_empty());
-                    if loose_folder_source {
-                        if has_cached_entries {
-                            self.begin_refresh_entry_index(ctx.clone());
-                        } else {
-                            self.begin_scan_all_entries(ctx.clone());
-                        }
-                    } else {
-                        self.schedule_next_entry_index_refresh(ctx);
-                    }
-                    self.finish_pending_session_restore(ctx.clone());
-                }
-                WorkerMessage::SourceLoaded {
-                    result: Err(error), ..
-                } => {
-                    self.pending_session_restore = None;
-                    self.status = error;
-                }
-                WorkerMessage::TagLoaded { key, result } => {
-                    self.loading_tags.remove(&key);
-                    if !self.open_tabs.iter().any(|tab| tab == &key) {
-                        continue;
-                    }
-                    match result {
-                        Ok(tag) => {
-                            self.status = "Tag loaded".to_owned();
-                            self.remember_tag_use(&key);
-                            self.parsed_tags.insert(key, TagDocument::clean(tag));
-                            self.trim_tag_memory();
-                        }
-                        Err(error) => {
-                            self.terminal.lines.push(TerminalLineEntry::new(format!(
-                                "Folder refactor failed: {error}"
-                            )));
-                            trim_terminal_lines(&mut self.terminal.lines);
-                            self.terminal.scroll_to_bottom = true;
-                            self.status = error;
-                        }
-                    }
-                }
+                } => self.handle_source_loaded(result, recent_path, ctx),
+                WorkerMessage::TagLoaded { key, result } => self.handle_tag_loaded(key, result),
                 WorkerMessage::BitmapReimportFinished { key, result } => {
-                    self.terminal.running = false;
-                    self.terminal.running_id = None;
-                    self.terminal.running_command = None;
-                    self.terminal.process = None;
-                    self.terminal.scroll_to_bottom = true;
-                    self.terminal.refocus_input = true;
-                    match result {
-                        Ok(tag) => {
-                            if self.open_tabs.iter().any(|tab| tab == &key) {
-                                self.parsed_tags
-                                    .insert(key.clone(), TagDocument::clean(tag));
-                                self.bitmap_previews.remove(&key);
-                                self.remember_tag_use(&key);
-                                self.trim_tag_memory();
-                            }
-                            self.status = "Bitmap reimported and reloaded".to_owned();
-                        }
-                        Err(error) => {
-                            self.status = format!("Bitmap reimport failed: {error}");
-                        }
-                    }
+                    self.handle_bitmap_reimport_finished(key, result)
                 }
-                WorkerMessage::ExportFinished(result) => {
-                    self.status = match result {
-                        Ok(message) => message,
-                        Err(error) => error,
-                    };
-                }
+                WorkerMessage::ExportFinished(result) => self.handle_export_finished(result),
                 WorkerMessage::FolderRefactorProgress(progress) => {
-                    self.folder_refactor = Some(FolderRefactorUiState {
-                        label: progress.label.clone(),
-                        phase: progress.phase.clone(),
-                        progress: progress.progress,
-                    });
-                    self.status = format!("{}: {}", progress.label, progress.phase);
+                    self.handle_folder_refactor_progress(progress)
                 }
                 WorkerMessage::FolderRefactorFinished(result) => {
-                    self.folder_refactor = None;
-                    match result {
-                        Ok(done) => {
-                            if let Some(source) = self.source.as_mut() {
-                                source.entries.clear();
-                                source.all_entries = done.all_entries;
-                                source.tree = done.tree;
-                                source.group_tree =
-                                    crate::source::build_group_tree(&source.all_entries);
-                                source.reverse_dependencies = done.reverse_dependencies;
-                                if let TagSource::LooseFolder { root, .. } = &source.source {
-                                    if !source.all_entries.is_empty()
-                                        && let Some(game) = source.game.as_deref()
-                                    {
-                                        let _ = crate::source::save_entry_index(
-                                            game,
-                                            root,
-                                            &source.all_entries,
-                                        );
-                                    }
-                                    if let (Some(game), Some(reverse_dependencies)) = (
-                                        source.game.as_deref(),
-                                        source.reverse_dependencies.as_ref(),
-                                    ) {
-                                        let _ = crate::source::save_reverse_dependency_index(
-                                            game,
-                                            root,
-                                            reverse_dependencies,
-                                        );
-                                    }
-                                }
-                            }
-                            if done.moved {
-                                self.remap_current_favorites(&done.old_to_new_keys);
-                                remap_open_tag_keys(&mut self.open_tabs, &done.old_to_new_keys);
-                                remap_hashset_keys(&mut self.floating_tabs, &done.old_to_new_keys);
-                                if let Some(selected) = self.selected_key.clone()
-                                    && let Some(new_key) = done.old_to_new_keys.get(&selected)
-                                {
-                                    self.selected_key = Some(new_key.clone());
-                                }
-                            }
-                            self.parsed_tags.clear();
-                            self.loading_tags.clear();
-                            self.tag_cache_order.clear();
-                            self.bitmap_previews.clear();
-                            self.model_previews.clear();
-                            self.edit_buffers.clear();
-                            self.field_search.clear();
-                            self.field_search_applied.clear();
-                            self.source_generation = self.source_generation.wrapping_add(1);
-                            self.terminal
-                                .lines
-                                .extend(done.lines.into_iter().map(TerminalLineEntry::new));
-                            trim_terminal_lines(&mut self.terminal.lines);
-                            self.terminal.scroll_to_bottom = true;
-                            self.status = done.status;
-                        }
-                        Err(error) => {
-                            self.status = error;
-                        }
-                    }
+                    self.handle_folder_refactor_finished(result)
                 }
                 WorkerMessage::AllEntriesScanned { generation, result } => {
-                    if generation != self.source_generation {
-                        continue;
-                    }
-                    self.scanning_entries = false;
-                    self.entry_index_progress = None;
-                    match result {
-                        Ok(scanned) => {
-                            let mut build_reference_index = false;
-                            if let Some(source) = self.source.as_mut() {
-                                let n = scanned.len();
-                                source.group_tree = crate::source::build_group_tree(&scanned);
-                                source.all_entries = scanned;
-                                source.reverse_dependencies = None;
-                                self.field_index.invalidate();
-                                self.status = format!(
-                                    "Tag index complete: {n} tags; building reference index..."
-                                );
-                                build_reference_index = true;
-                                // Persist the index in the background so the
-                                // next launch can skip the scan entirely.
-                                if let (Some(game), TagSource::LooseFolder { root, .. }) =
-                                    (source.game.clone(), &source.source)
-                                {
-                                    let root = root.clone();
-                                    let entries = source.all_entries.clone();
-                                    let tx = self.tx.clone();
-                                    let ctx = ctx.clone();
-                                    let generation = self.source_generation;
-                                    let path = crate::source::index_db_path();
-                                    thread::spawn(move || {
-                                        let result =
-                                            crate::source::save_entry_index(&game, &root, &entries)
-                                                .map_err(|error| error.to_string());
-                                        let _ = tx.send(WorkerMessage::EntryIndexSaved {
-                                            generation,
-                                            path,
-                                            result,
-                                        });
-                                        ctx.request_repaint();
-                                    });
-                                }
-                            }
-                            self.schedule_next_entry_index_refresh(ctx);
-                            if build_reference_index {
-                                self.begin_build_reverse_dependencies_for_entry_index(ctx.clone());
-                            } else {
-                                self.show_entry_index_wait_notice = false;
-                            }
-                        }
-                        Err(e) => {
-                            self.show_entry_index_wait_notice = false;
-                            self.status = format!("Scan failed: {e}");
-                        }
-                    }
+                    self.handle_all_entries_scanned(generation, result, ctx)
                 }
                 WorkerMessage::EntryIndexScanProgress {
                     generation,
                     processed,
                     total,
                     matched,
-                } => {
-                    if generation != self.source_generation || !self.scanning_entries {
-                        continue;
-                    }
-                    if let Some(progress) = self.entry_index_progress.as_mut() {
-                        progress.processed = processed;
-                        progress.total = total;
-                        progress.matched = matched;
-                    }
-                    ctx.request_repaint();
-                }
+                } => self
+                    .handle_entry_index_scan_progress(generation, processed, total, matched, ctx),
                 WorkerMessage::EntryIndexRefreshed { generation, result } => {
-                    self.refreshing_entry_index = false;
-                    if generation != self.source_generation {
-                        continue;
-                    }
-                    self.schedule_next_entry_index_refresh(ctx);
-                    match result {
-                        Ok(refresh) => {
-                            if refresh.changed {
-                                self.apply_entry_index_refresh(refresh, ctx.clone());
-                            }
-                        }
-                        Err(error) => {
-                            self.status = format!("Index refresh failed: {error}");
-                        }
-                    }
+                    self.handle_entry_index_refreshed(generation, result, ctx)
                 }
                 WorkerMessage::EntryIndexSaved {
                     generation,
                     path,
                     result,
-                } => {
-                    if generation != self.source_generation {
-                        continue;
-                    }
-                    match result {
-                        Ok(()) => {
-                            if !self.building_reference_for_entry_index {
-                                self.status = format!("Index saved: {}", path.display());
-                            }
-                        }
-                        Err(error) => {
-                            self.status =
-                                format!("Index save failed: {} ({error})", path.display());
-                        }
-                    }
-                }
+                } => self.handle_entry_index_saved(generation, path, result),
+            };
+            if stale {
+                continue;
             }
         }
     }
@@ -451,6 +118,8 @@ impl Baboon {
         self.begin_load_single_path(path, ctx);
     }
 
+    /// Starts source work off the UI thread and reports completion through `WorkerMessage`.
+    /// Captured source identity prevents stale results from replacing newer state.
     pub(super) fn begin_load_single_path(&mut self, path: PathBuf, ctx: egui::Context) {
         let tx = self.tx.clone();
         let names = self.default_names.clone();
@@ -475,6 +144,8 @@ impl Baboon {
         self.begin_load_folder_path(path, ctx);
     }
 
+    /// Starts source work off the UI thread and reports completion through `WorkerMessage`.
+    /// Captured source identity prevents stale results from replacing newer state.
     pub(super) fn begin_load_folder_path(&mut self, path: PathBuf, ctx: egui::Context) {
         let tx = self.tx.clone();
         let names = self.default_names.clone();
@@ -514,6 +185,8 @@ impl Baboon {
         self.begin_load_monolithic_path(path, ctx);
     }
 
+    /// Starts source work off the UI thread and reports completion through `WorkerMessage`.
+    /// Captured source identity prevents stale results from replacing newer state.
     pub(super) fn begin_load_monolithic_path(&mut self, path: PathBuf, ctx: egui::Context) {
         let tx = self.tx.clone();
         let names = self.default_names.clone();
@@ -993,6 +666,8 @@ impl Baboon {
         self.begin_scan_all_entries_with_label(ctx, "Indexing tags...");
     }
 
+    /// Starts source work off the UI thread and reports completion through `WorkerMessage`.
+    /// Captured source identity prevents stale results from replacing newer state.
     pub(super) fn begin_scan_all_entries_with_label(
         &mut self,
         ctx: egui::Context,
@@ -1047,6 +722,8 @@ impl Baboon {
         });
     }
 
+    /// Starts source work off the UI thread and reports completion through `WorkerMessage`.
+    /// Captured source identity prevents stale results from replacing newer state.
     pub(super) fn maybe_refresh_entry_index(&mut self, ctx: egui::Context) {
         if self.scanning_entries
             || self.refreshing_entry_index
@@ -1138,6 +815,7 @@ impl Baboon {
         }
     }
 
+    /// Starts the non-blocking release lookup and returns its result through `WorkerMessage`.
     pub(super) fn begin_check_for_updates(&mut self, ctx: egui::Context) {
         self.status = "Checking for updates...".to_owned();
         let tx = self.tx.clone();
@@ -1193,6 +871,8 @@ impl Baboon {
 
     /// Run `command` in the editing-kit root, streaming output to the terminal
     /// panel. Shared by the terminal input and the geometry Import button.
+    /// Starts the configured command without blocking frame rendering.
+    /// Output and completion return through ordered worker messages for the active run id.
     pub(super) fn spawn_terminal_command(&mut self, command: String, ctx: egui::Context) {
         if self.terminal.running {
             self.status = "A command is already running".to_owned();
@@ -1403,6 +1083,8 @@ impl Baboon {
         self.ensure_tag_loading(key, ctx);
     }
 
+    /// Starts potentially expensive source or export work off the UI thread.
+    /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(super) fn ensure_tag_loading(&mut self, key: String, ctx: egui::Context) {
         if self.parsed_tags.contains_key(&key) || self.loading_tags.contains(&key) {
             self.remember_tag_use(&key);
@@ -1955,6 +1637,8 @@ impl Baboon {
         }
     }
 
+    /// Starts potentially expensive source or export work off the UI thread.
+    /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(super) fn begin_export_json(&mut self, key: String, ctx: egui::Context) {
         let Some((source, entry)) = self.export_context(&key) else {
             return;
@@ -1976,6 +1660,8 @@ impl Baboon {
         });
     }
 
+    /// Starts potentially expensive source or export work off the UI thread.
+    /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(super) fn begin_export_loaded_folder_json(
         &mut self,
         keys: Vec<String>,
@@ -2010,6 +1696,8 @@ impl Baboon {
         });
     }
 
+    /// Starts potentially expensive source or export work off the UI thread.
+    /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(super) fn begin_export_loose_folder_json(
         &mut self,
         rel_path: PathBuf,
@@ -2040,6 +1728,8 @@ impl Baboon {
         });
     }
 
+    /// Starts a filesystem refactoring transaction from a captured source snapshot.
+    /// Progress and the final replacement tree are applied only through worker messages.
     pub(super) fn begin_refactor_loose_folder(
         &mut self,
         rel_path: PathBuf,
@@ -2113,6 +1803,8 @@ impl Baboon {
         });
     }
 
+    /// Starts potentially expensive source or export work off the UI thread.
+    /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(super) fn begin_extract_raw(&mut self, key: String, ctx: egui::Context) {
         let Some((source, entry)) = self.export_context(&key) else {
             return;
@@ -2133,6 +1825,8 @@ impl Baboon {
         });
     }
 
+    /// Starts potentially expensive source or export work off the UI thread.
+    /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(super) fn begin_extract_bitmap(&mut self, key: String, ctx: egui::Context) {
         let Some((source, entry)) = self.export_context(&key) else {
             return;
@@ -2152,6 +1846,8 @@ impl Baboon {
         });
     }
 
+    /// Starts potentially expensive source or export work off the UI thread.
+    /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(super) fn begin_extract_bitmap_folder(&mut self, keys: Vec<String>, ctx: egui::Context) {
         let Some(source_data) = self.source.as_ref() else {
             return;
@@ -2182,6 +1878,8 @@ impl Baboon {
         });
     }
 
+    /// Starts potentially expensive source or export work off the UI thread.
+    /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(super) fn begin_extract_geometry(&mut self, key: String, ctx: egui::Context) {
         let Some((source, entry)) = self.export_context(&key) else {
             return;
@@ -2202,6 +1900,8 @@ impl Baboon {
         });
     }
 
+    /// Starts potentially expensive source or export work off the UI thread.
+    /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(super) fn begin_extract_import_info(&mut self, key: String, ctx: egui::Context) {
         let Some((source, entry)) = self.export_context(&key) else {
             return;
@@ -2227,6 +1927,8 @@ impl Baboon {
         });
     }
 
+    /// Starts potentially expensive source or export work off the UI thread.
+    /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(super) fn begin_extract_animation(&mut self, key: String, ctx: egui::Context) {
         let Some((source, entry)) = self.export_context(&key) else {
             return;
@@ -2247,6 +1949,8 @@ impl Baboon {
         });
     }
 
+    /// Starts potentially expensive source or export work off the UI thread.
+    /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(super) fn begin_extract_material_shader_sources(
         &mut self,
         key: String,
@@ -2271,6 +1975,8 @@ impl Baboon {
         });
     }
 
+    /// Starts potentially expensive source or export work off the UI thread.
+    /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(super) fn begin_extract_material_shader_source_folder(
         &mut self,
         keys: Vec<String>,
@@ -2304,6 +2010,8 @@ impl Baboon {
         });
     }
 
+    /// Starts potentially expensive source or export work off the UI thread.
+    /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(super) fn begin_extract_hlsl_include_source(&mut self, key: String, ctx: egui::Context) {
         let Some((source, entry)) = self.export_context(&key) else {
             return;
@@ -2324,6 +2032,8 @@ impl Baboon {
         });
     }
 
+    /// Starts potentially expensive source or export work off the UI thread.
+    /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(super) fn begin_extract_hlsl_include_folder(
         &mut self,
         keys: Vec<String>,
@@ -2541,7 +2251,6 @@ impl Baboon {
         };
         self.rename_tag = Some(RenameTagState {
             key: entry.key.clone(),
-            group_tag: entry.group_tag,
             old_display: display,
             extension,
             new_path_input: name,
@@ -2599,6 +2308,8 @@ impl Baboon {
         self.start_tag_rename_job(root, entry, new_rel, "Renaming tag");
     }
 
+    /// Starts a filesystem refactoring transaction from a captured source snapshot.
+    /// Progress and the final replacement tree are applied only through worker messages.
     pub(super) fn begin_move_tag(&mut self, key: &str) {
         if self.folder_refactor.is_some() {
             self.status = "A move/rename is already running".to_owned();
@@ -3236,6 +2947,8 @@ impl Baboon {
     /// Run a field-value search for the current query. If the in-memory index is
     /// ready it answers instantly from cache; otherwise it kicks off a live
     /// background scan (correct, slower) and builds the index for next time.
+    /// Starts source-scoped indexing or search work without blocking the UI thread.
+    /// Generation-tagged completion is ignored if the active source changes first.
     pub(super) fn begin_field_value_search(&mut self, ctx: egui::Context) {
         let display = self.field_value_query.trim().to_owned();
         if display.is_empty() {
@@ -3336,6 +3049,8 @@ impl Baboon {
 
     /// Build the in-memory searchable-text index in the background (idempotent —
     /// skips if already ready for this generation or already building).
+    /// Starts source-scoped indexing or search work without blocking the UI thread.
+    /// Generation-tagged completion is ignored if the active source changes first.
     pub(super) fn begin_build_field_index(&mut self, ctx: egui::Context) {
         let generation = self.source_generation;
         if self.field_index.is_ready_for(generation) || self.field_index.is_building() {
@@ -3365,6 +3080,8 @@ impl Baboon {
     /// and skips an already-present index unless `force` is set (Tools →
     /// Rebuild). Loose-folder sources only; the result is persisted to disk so
     /// future launches load it instantly.
+    /// Starts source-scoped indexing or search work without blocking the UI thread.
+    /// Generation-tagged completion is ignored if the active source changes first.
     pub(super) fn begin_build_reverse_dependencies(&mut self, ctx: egui::Context, force: bool) {
         self.begin_build_reverse_dependencies_inner(ctx, force, false);
     }
@@ -4034,6 +3751,8 @@ impl Baboon {
         self.spawn_terminal_command(command, ctx.clone());
     }
 
+    /// Starts potentially expensive source or export work off the UI thread.
+    /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(super) fn begin_reimport_bitmap(&mut self, key: String, ctx: egui::Context) {
         if self.terminal.running {
             self.status = "A command is already running".to_owned();
@@ -4334,10 +4053,6 @@ impl Baboon {
                             }
                         }),
                         names: Some(&self.names),
-                        definition_group_name: self
-                            .names
-                            .name_for(entry.group_tag)
-                            .or_else(|| group_tag_to_extension(entry.group_tag)),
                         tags_root: self
                             .source
                             .as_ref()
@@ -4519,79 +4234,6 @@ impl Baboon {
     }
 }
 
-fn ordered_unique_keys<'a>(keys: impl Iterator<Item = &'a String>) -> Vec<String> {
-    let mut seen = HashSet::new();
-    let mut ordered = Vec::new();
-    for key in keys {
-        if seen.insert(key.clone()) {
-            ordered.push(key.clone());
-        }
-    }
-    ordered
-}
-
-fn save_as_extension(app: &Baboon, entry: &TagEntry) -> Option<String> {
-    app.names
-        .name_for(entry.group_tag)
-        .or_else(|| group_tag_to_extension(entry.group_tag))
-        .map(|extension| extension.trim().to_owned())
-        .filter(|extension| !extension.is_empty())
-}
-
-fn register_saved_copy_in_loaded_source(
-    source: &mut LoadedSourceData,
-    path: &Path,
-) -> Result<bool, String> {
-    let TagSource::LooseFolder { root, .. } = &source.source else {
-        return Ok(false);
-    };
-
-    let canonical_root = fs::canonicalize(root)
-        .map_err(|error| format!("Could not resolve loaded tags folder: {error}"))?;
-    let canonical_path = fs::canonicalize(path)
-        .map_err(|error| format!("Could not resolve saved tag path: {error}"))?;
-    if !canonical_path.starts_with(&canonical_root) {
-        return Ok(false);
-    }
-
-    let Some(entry) = loose_file_entry(&canonical_root, &canonical_path, &source.names)
-        .map_err(|error| format!("Could not inspect saved tag: {error:#}"))?
-    else {
-        return Ok(false);
-    };
-    let key = entry.key.clone();
-
-    source.entries.retain(|existing| existing.key != key);
-    source.entries.push(entry.clone());
-    source
-        .entries
-        .sort_by(|a, b| a.display_path.cmp(&b.display_path));
-
-    if !source.all_entries.is_empty() {
-        source.all_entries.retain(|existing| existing.key != key);
-        source.all_entries.push(entry);
-        source
-            .all_entries
-            .sort_by(|a, b| a.display_path.cmp(&b.display_path));
-        source.group_tree = crate::source::build_group_tree(&source.all_entries);
-        if let (Some(game), TagSource::LooseFolder { root, .. }) =
-            (source.game.as_deref(), &source.source)
-        {
-            let _ = crate::source::save_entry_index(game, root, &source.all_entries);
-        }
-    } else {
-        source.group_tree = crate::source::build_group_tree(&source.entries);
-    }
-
-    if let TagSource::LooseFolder { root, .. } = &source.source
-        && let Ok(tree) = crate::source::build_folder_directory_tree(root)
-    {
-        source.tree = tree;
-    }
-
-    Ok(true)
-}
-
 enum SaveChangesPromptAction {
     None,
     Save(Vec<String>),
@@ -4768,469 +4410,6 @@ fn render_last_opened_windows_prompt(
             });
         });
     action
-}
-
-fn save_as_file_name(entry: &TagEntry, extension: Option<&str>) -> String {
-    let path = match &entry.location {
-        TagEntryLocation::LooseFile(path) => path,
-        TagEntryLocation::Monolithic { .. } => Path::new(&entry.display_path),
-    };
-    let mut file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .map(str::to_owned)
-        .or_else(|| {
-            Path::new(&entry.display_path)
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(str::to_owned)
-        })
-        .unwrap_or_else(|| clean_file_name(&entry.display_path));
-    if Path::new(&file_name).extension().is_none() {
-        if let Some(extension) = extension {
-            file_name.push('.');
-            file_name.push_str(extension);
-        }
-    }
-    file_name
-}
-
-fn save_as_start_dir(entry: &TagEntry) -> Option<PathBuf> {
-    match &entry.location {
-        TagEntryLocation::LooseFile(path) => path.parent().map(Path::to_path_buf),
-        TagEntryLocation::Monolithic { .. } => None,
-    }
-}
-
-fn entries_for_keys(source: &LoadedSourceData, keys: &[String]) -> Vec<TagEntry> {
-    let key_set = keys.iter().map(String::as_str).collect::<HashSet<_>>();
-    let mut seen = HashSet::new();
-    source
-        .entries
-        .iter()
-        .chain(source.all_entries.iter())
-        .filter(|entry| key_set.contains(entry.key.as_str()))
-        .filter(|entry| seen.insert(entry.key.as_str()))
-        .cloned()
-        .collect()
-}
-
-fn clean_file_name(value: &str) -> String {
-    let mut name = value
-        .rsplit(['/', '\\'])
-        .next()
-        .unwrap_or("tag")
-        .trim()
-        .to_owned();
-    name.retain(|ch| !matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'));
-    if name.is_empty() {
-        "tag".to_owned()
-    } else {
-        name
-    }
-}
-
-fn run_terminal_command_for_reimport(
-    command: &str,
-    work_dir: &Path,
-    tx: &Sender<WorkerMessage>,
-    ctx: &egui::Context,
-    mut log_file: Option<std::fs::File>,
-) -> Result<(), String> {
-    let mut log_error_reported = false;
-    #[cfg(target_os = "windows")]
-    let mut cmd = {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let mut c = std::process::Command::new("cmd");
-        c.creation_flags(CREATE_NO_WINDOW);
-        c.args(["/C", &format!("{command} 2>&1")]);
-        c
-    };
-    #[cfg(not(target_os = "windows"))]
-    let mut cmd = {
-        let mut c = std::process::Command::new("sh");
-        c.args(["-c", command]);
-        c
-    };
-    cmd.current_dir(work_dir)
-        .stdout(std::process::Stdio::piped())
-        .stdin(std::process::Stdio::null());
-    let mut child = cmd.spawn().map_err(|error| {
-        let message = format!("[error] {error}");
-        send_terminal_line(
-            tx,
-            ctx,
-            &mut log_file,
-            &mut log_error_reported,
-            message.clone(),
-        );
-        message
-    })?;
-    if let Some(stdout) = child.stdout.take() {
-        if let Err(error) =
-            stream_terminal_output(stdout, tx, ctx, &mut log_file, &mut log_error_reported)
-        {
-            let message = format!("Could not read tool output: {error}");
-            send_terminal_line(
-                tx,
-                ctx,
-                &mut log_file,
-                &mut log_error_reported,
-                format!("[error] {message}"),
-            );
-            return Err(message);
-        }
-    }
-    let status = child
-        .wait()
-        .map_err(|error| format!("Could not wait for tool: {error}"))?;
-    if let Some(code) = status.code() {
-        send_terminal_line(
-            tx,
-            ctx,
-            &mut log_file,
-            &mut log_error_reported,
-            format!("[exit {code}]"),
-        );
-    }
-    if status.success() {
-        Ok(())
-    } else {
-        Err(status
-            .code()
-            .map(|code| format!("tool exited with code {code}"))
-            .unwrap_or_else(|| "tool exited without a status code".to_owned()))
-    }
-}
-
-fn stream_terminal_output<R: std::io::Read>(
-    mut reader: R,
-    tx: &Sender<WorkerMessage>,
-    ctx: &egui::Context,
-    log_file: &mut Option<std::fs::File>,
-    log_error_reported: &mut bool,
-) -> std::io::Result<()> {
-    let mut buffer = [0_u8; 4096];
-    let mut line = Vec::new();
-    let mut pending_cr = false;
-
-    loop {
-        let read = reader.read(&mut buffer)?;
-        if read == 0 {
-            break;
-        }
-
-        for &byte in &buffer[..read] {
-            if pending_cr {
-                if byte == b'\n' {
-                    emit_terminal_output_line(&line, tx, ctx, log_file, log_error_reported);
-                    line.clear();
-                    pending_cr = false;
-                    continue;
-                }
-
-                emit_terminal_output_line(&line, tx, ctx, log_file, log_error_reported);
-                line.clear();
-                pending_cr = false;
-            }
-
-            match byte {
-                b'\r' => pending_cr = true,
-                b'\n' => {
-                    emit_terminal_output_line(&line, tx, ctx, log_file, log_error_reported);
-                    line.clear();
-                }
-                _ => line.push(byte),
-            }
-        }
-    }
-
-    if pending_cr {
-        emit_terminal_output_line(&line, tx, ctx, log_file, log_error_reported);
-        line.clear();
-    }
-
-    if !line.is_empty() {
-        emit_terminal_output_line(&line, tx, ctx, log_file, log_error_reported);
-    }
-
-    Ok(())
-}
-
-fn emit_terminal_output_line(
-    line: &[u8],
-    tx: &Sender<WorkerMessage>,
-    ctx: &egui::Context,
-    log_file: &mut Option<std::fs::File>,
-    log_error_reported: &mut bool,
-) {
-    let line = String::from_utf8_lossy(line).into_owned();
-    write_terminal_log_line(log_file, tx, line.as_str(), log_error_reported);
-    let _ = tx.send(WorkerMessage::TerminalLine(line));
-    ctx.request_repaint();
-}
-
-fn send_terminal_line(
-    tx: &Sender<WorkerMessage>,
-    ctx: &egui::Context,
-    log_file: &mut Option<std::fs::File>,
-    log_error_reported: &mut bool,
-    line: String,
-) {
-    write_terminal_log_line(log_file, tx, &line, log_error_reported);
-    let _ = tx.send(WorkerMessage::TerminalLine(line));
-    ctx.request_repaint();
-}
-
-fn trim_terminal_lines(lines: &mut Vec<TerminalLineEntry>) {
-    if lines.len() > TERMINAL_VISIBLE_LINE_LIMIT {
-        let remove = lines.len() - TERMINAL_VISIBLE_LINE_TRIM_TARGET;
-        lines.drain(..remove);
-    }
-}
-
-fn create_terminal_log_file(
-    run_id: u64,
-    command: &str,
-) -> Result<(PathBuf, std::fs::File), String> {
-    use std::io::Write as _;
-
-    let dir = terminal_logs_dir();
-    std::fs::create_dir_all(&dir)
-        .map_err(|error| format!("could not create {}: {error}", dir.display()))?;
-    let path = dir.join(format!(
-        "terminal-run-{}-{run_id}.log",
-        terminal_log_timestamp()
-    ));
-    let mut file = std::fs::File::create(&path)
-        .map_err(|error| format!("could not create {}: {error}", path.display()))?;
-    writeln!(file, "> {command}")
-        .map_err(|error| format!("could not write {}: {error}", path.display()))?;
-    Ok((path, file))
-}
-
-fn write_terminal_log_line(
-    log_file: &mut Option<std::fs::File>,
-    tx: &Sender<WorkerMessage>,
-    line: &str,
-    log_error_reported: &mut bool,
-) {
-    use std::io::Write as _;
-
-    let Some(file) = log_file.as_mut() else {
-        return;
-    };
-    if let Err(error) = writeln!(file, "{line}") {
-        *log_file = None;
-        if !*log_error_reported {
-            *log_error_reported = true;
-            let _ = tx.send(WorkerMessage::TerminalLogError(format!(
-                "Terminal full log disabled: {error}"
-            )));
-        }
-    }
-}
-
-fn append_terminal_log_path(path: &Path, line: &str) -> Result<(), String> {
-    use std::io::Write as _;
-
-    let mut file = std::fs::OpenOptions::new()
-        .append(true)
-        .open(path)
-        .map_err(|error| format!("Could not open terminal log {}: {error}", path.display()))?;
-    writeln!(file, "{line}")
-        .map_err(|error| format!("Could not write terminal log {}: {error}", path.display()))
-}
-
-fn terminal_log_timestamp() -> String {
-    let seconds = match std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH) {
-        Ok(duration) => duration.as_secs(),
-        Err(_) => 0,
-    };
-    let days = (seconds / 86_400) as i64;
-    let day_seconds = seconds % 86_400;
-    let (year, month, day) = civil_from_days(days);
-    let hour = day_seconds / 3_600;
-    let minute = (day_seconds % 3_600) / 60;
-    let second = day_seconds % 60;
-    format!("{year:04}{month:02}{day:02}-{hour:02}{minute:02}{second:02}")
-}
-
-fn civil_from_days(days_since_unix_epoch: i64) -> (i32, u32, u32) {
-    let z = days_since_unix_epoch + 719_468;
-    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
-    let doe = z - era * 146_097;
-    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
-    let y = yoe + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = mp + if mp < 10 { 3 } else { -9 };
-    let year = y + if m <= 2 { 1 } else { 0 };
-    (year as i32, m as u32, d as u32)
-}
-
-pub(super) fn open_terminal_log(path: &Path) -> Result<(), String> {
-    #[cfg(target_os = "windows")]
-    let mut command = {
-        let mut command = std::process::Command::new("cmd");
-        command.arg("/C").arg("start").arg("").arg(path);
-        command
-    };
-    #[cfg(target_os = "macos")]
-    let mut command = {
-        let mut command = std::process::Command::new("open");
-        command.arg(path);
-        command
-    };
-    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-    let mut command = {
-        let mut command = std::process::Command::new("xdg-open");
-        command.arg(path);
-        command
-    };
-
-    command
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| format!("Could not open terminal log {}: {error}", path.display()))
-}
-
-fn detect_editing_kit_paths() -> HashMap<String, PathBuf> {
-    detect_editing_kit_paths_in_common_roots(steam_common_roots())
-}
-
-fn detect_editing_kit_paths_in_common_roots<I>(common_roots: I) -> HashMap<String, PathBuf>
-where
-    I: IntoIterator<Item = PathBuf>,
-{
-    let mut detected = HashMap::new();
-    for common_root in common_roots {
-        for shortcut in EDITING_KIT_SHORTCUTS {
-            if detected.contains_key(shortcut.game) {
-                continue;
-            }
-            let candidate = common_root.join(shortcut.label);
-            if candidate.is_dir() && candidate.join("tags").is_dir() {
-                detected.insert(shortcut.game.to_owned(), candidate);
-            }
-        }
-    }
-    detected
-}
-
-fn apply_detected_editing_kit_paths(
-    editing_kit_paths: &mut HashMap<String, PathBuf>,
-    editing_kit_path_inputs: &mut HashMap<String, String>,
-    editing_kit_path_attention: &mut Option<String>,
-    detected: &HashMap<String, PathBuf>,
-) -> usize {
-    let mut added = 0;
-    for shortcut in EDITING_KIT_SHORTCUTS {
-        let has_existing = editing_kit_paths
-            .get(shortcut.game)
-            .is_some_and(|path| !path.as_os_str().is_empty());
-        if has_existing {
-            continue;
-        }
-        let Some(path) = detected.get(shortcut.game) else {
-            continue;
-        };
-        editing_kit_paths.insert(shortcut.game.to_owned(), path.clone());
-        editing_kit_path_inputs.insert(shortcut.game.to_owned(), path.display().to_string());
-        if editing_kit_path_attention.as_deref() == Some(shortcut.game) {
-            *editing_kit_path_attention = None;
-        }
-        added += 1;
-    }
-    added
-}
-
-fn steam_common_roots() -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    for steam_root in default_steam_roots() {
-        push_unique_path(&mut roots, steam_root.join("steamapps").join("common"));
-        let library_file = steam_root.join("steamapps").join("libraryfolders.vdf");
-        if let Ok(text) = std::fs::read_to_string(library_file) {
-            for library_root in parse_steam_library_paths(&text) {
-                push_unique_path(&mut roots, library_root.join("steamapps").join("common"));
-            }
-        }
-    }
-    roots
-}
-
-fn default_steam_roots() -> Vec<PathBuf> {
-    let mut roots = Vec::new();
-    for var in ["ProgramFiles(x86)", "ProgramFiles"] {
-        if let Some(root) = std::env::var_os(var) {
-            push_unique_path(&mut roots, PathBuf::from(root).join("Steam"));
-        }
-    }
-    push_unique_path(&mut roots, PathBuf::from(r"C:\Program Files (x86)\Steam"));
-    roots
-}
-
-fn parse_steam_library_paths(text: &str) -> Vec<PathBuf> {
-    let mut paths = Vec::new();
-    for line in text.lines() {
-        let tokens = quoted_vdf_tokens(line);
-        if tokens.len() >= 2 && tokens[0].eq_ignore_ascii_case("path") {
-            push_unique_path(&mut paths, PathBuf::from(&tokens[1]));
-        }
-    }
-    paths
-}
-
-fn quoted_vdf_tokens(line: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    let mut token = String::new();
-    let mut in_quote = false;
-    let mut escape = false;
-
-    for ch in line.chars() {
-        if !in_quote {
-            if ch == '"' {
-                in_quote = true;
-                token.clear();
-            }
-            continue;
-        }
-        if escape {
-            token.push(ch);
-            escape = false;
-            continue;
-        }
-        match ch {
-            '\\' => escape = true,
-            '"' => {
-                tokens.push(token.clone());
-                token.clear();
-                in_quote = false;
-            }
-            _ => token.push(ch),
-        }
-    }
-    tokens
-}
-
-fn push_unique_path(paths: &mut Vec<PathBuf>, path: PathBuf) {
-    if !paths.iter().any(|existing| same_path_text(existing, &path)) {
-        paths.push(path);
-    }
-}
-
-fn same_path_text(a: &Path, b: &Path) -> bool {
-    #[cfg(windows)]
-    {
-        a.to_string_lossy()
-            .eq_ignore_ascii_case(&b.to_string_lossy())
-    }
-    #[cfg(not(windows))]
-    {
-        a == b
-    }
 }
 
 #[cfg(test)]
@@ -5434,6 +4613,13 @@ mod tests {
             ancestor_block_indices("havok cleanup resources"),
             Vec::<(String, usize)>::new(),
         );
+        assert_eq!(
+            ancestor_block_indices("custom references#5[3]/sounds#2[1]/melee sound#4"),
+            vec![
+                ("custom references#5".to_owned(), 3),
+                ("custom references#5[3]/sounds#2".to_owned(), 1),
+            ],
+        );
     }
 
     #[test]
@@ -5445,6 +4631,10 @@ mod tests {
         assert_eq!(
             occurrence_label("havok cleanup resources"),
             "havok cleanup resources"
+        );
+        assert_eq!(
+            occurrence_label("custom references#5[3]/melee sound#4"),
+            "custom references[3] › melee sound",
         );
     }
 
@@ -5615,493 +4805,6 @@ mod tests {
     }
 }
 
-enum TerminalStopResult {
-    Stopped,
-    AlreadyExited,
-}
-
-fn stop_terminal_process(process: &TerminalProcess) -> Result<TerminalStopResult, String> {
-    #[cfg(target_os = "windows")]
-    {
-        stop_terminal_process_windows(process)
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        stop_terminal_process_unix(process)
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn stop_terminal_process_windows(process: &TerminalProcess) -> Result<TerminalStopResult, String> {
-    let pid = {
-        let mut slot = process
-            .child
-            .lock()
-            .map_err(|_| "terminal process lock was poisoned".to_owned())?;
-        let Some(child) = slot.as_mut() else {
-            return Ok(TerminalStopResult::AlreadyExited);
-        };
-        match child
-            .try_wait()
-            .map_err(|error| format!("could not query terminal process: {error}"))?
-        {
-            Some(_) => {
-                *slot = None;
-                return Ok(TerminalStopResult::AlreadyExited);
-            }
-            None => child.id(),
-        }
-    };
-
-    let output = Command::new("taskkill")
-        .args(["/T", "/F", "/PID", &pid.to_string()])
-        .output()
-        .map_err(|error| format!("could not launch taskkill: {error}"))?;
-    if output.status.success() {
-        return Ok(TerminalStopResult::Stopped);
-    }
-
-    if terminal_process_already_exited(process)? {
-        return Ok(TerminalStopResult::AlreadyExited);
-    }
-
-    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_owned();
-    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    let detail = if !stderr.is_empty() {
-        stderr
-    } else if !stdout.is_empty() {
-        stdout
-    } else {
-        format!("taskkill exited with {}", output.status)
-    };
-    Err(detail)
-}
-
-#[cfg(not(target_os = "windows"))]
-fn stop_terminal_process_unix(process: &TerminalProcess) -> Result<TerminalStopResult, String> {
-    let mut slot = process
-        .child
-        .lock()
-        .map_err(|_| "terminal process lock was poisoned".to_owned())?;
-    let Some(child) = slot.as_mut() else {
-        return Ok(TerminalStopResult::AlreadyExited);
-    };
-    match child
-        .try_wait()
-        .map_err(|error| format!("could not query terminal process: {error}"))?
-    {
-        Some(_) => {
-            *slot = None;
-            Ok(TerminalStopResult::AlreadyExited)
-        }
-        None => {
-            let pid = i32::try_from(child.id())
-                .map_err(|_| format!("terminal process id {} is out of range", child.id()))?;
-            let process_group = -pid;
-            // The shell was spawned with `process_group(0)`, so its children
-            // inherit the same process group. A negative pid targets the group.
-            let result = unsafe { libc::kill(process_group, libc::SIGKILL) };
-            if result == 0 {
-                return Ok(TerminalStopResult::Stopped);
-            }
-            let error = std::io::Error::last_os_error();
-            if error.raw_os_error() == Some(libc::ESRCH) {
-                if child.try_wait().ok().flatten().is_some() {
-                    *slot = None;
-                }
-                return Ok(TerminalStopResult::AlreadyExited);
-            }
-            Err(format!(
-                "could not kill terminal process group {pid}: {error}"
-            ))
-        }
-    }
-}
-
-#[cfg(target_os = "windows")]
-fn terminal_process_already_exited(process: &TerminalProcess) -> Result<bool, String> {
-    let mut slot = process
-        .child
-        .lock()
-        .map_err(|_| "terminal process lock was poisoned".to_owned())?;
-    let Some(child) = slot.as_mut() else {
-        return Ok(true);
-    };
-    match child
-        .try_wait()
-        .map_err(|error| format!("could not query terminal process: {error}"))?
-    {
-        Some(_) => {
-            *slot = None;
-            Ok(true)
-        }
-        None => Ok(false),
-    }
-}
-
-fn fetch_latest_release() -> Result<UpdateCheckResult, String> {
-    #[cfg(target_os = "windows")]
-    {
-        fetch_latest_release_powershell()
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        fetch_latest_release_curl()
-    }
-}
-
-const NO_PUBLIC_RELEASE_MESSAGE: &str = "No public Baboon releases found yet";
-
-#[cfg(target_os = "windows")]
-fn fetch_latest_release_powershell() -> Result<UpdateCheckResult, String> {
-    use std::os::windows::process::CommandExt;
-
-    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let script = format!(
-        "$ErrorActionPreference = 'Stop'; \
-         $headers = @{{ 'User-Agent' = 'Baboon' }}; \
-         try {{ \
-             $release = Invoke-RestMethod -UseBasicParsing -Headers $headers -Uri '{}'; \
-             [Console]::Out.WriteLine($release.tag_name); \
-             [Console]::Out.WriteLine($release.html_url); \
-         }} catch {{ \
-             $statusCode = $null; \
-             if ($_.Exception.Response -ne $null) {{ \
-                 $statusCode = [int]$_.Exception.Response.StatusCode; \
-             }} \
-             if ($statusCode -eq 404) {{ \
-                 [Console]::Out.WriteLine('__BABOON_NO_PUBLIC_RELEASE__'); \
-                 exit 0; \
-             }} \
-             [Console]::Error.WriteLine($_.Exception.Message); \
-             exit 1; \
-         }}",
-        BABOON_LATEST_RELEASE_API
-    );
-    let output = Command::new("powershell.exe")
-        .creation_flags(CREATE_NO_WINDOW)
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            &script,
-        ])
-        .output()
-        .map_err(|error| format!("Could not run PowerShell: {error}"))?;
-    parse_latest_release_lines(&output.stdout, &output.stderr, output.status.success())
-}
-
-#[cfg(not(target_os = "windows"))]
-fn fetch_latest_release_curl() -> Result<UpdateCheckResult, String> {
-    let output = Command::new("curl")
-        .args([
-            "-sSL",
-            "-w",
-            "\n%{http_code}",
-            "-H",
-            "User-Agent: Baboon",
-            BABOON_LATEST_RELEASE_API,
-        ])
-        .output()
-        .map_err(|error| format!("Could not run curl: {error}"))?;
-    if !output.status.success() {
-        return Err(command_error(&output.stderr));
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
-    let Some((body, status_code)) = text.rsplit_once('\n') else {
-        return Err("GitHub response did not include an HTTP status".to_owned());
-    };
-    if status_code.trim() == "404" {
-        return Err(NO_PUBLIC_RELEASE_MESSAGE.to_owned());
-    }
-    if status_code.trim() != "200" {
-        return Err(format!("GitHub returned HTTP {}", status_code.trim()));
-    }
-    let value: Value = serde_json::from_str(body)
-        .map_err(|error| format!("GitHub returned invalid JSON: {error}"))?;
-    let latest_tag = value
-        .get("tag_name")
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .trim()
-        .to_owned();
-    if latest_tag.is_empty() {
-        return Err("GitHub response did not include a release tag".to_owned());
-    }
-    let release_url = value
-        .get("html_url")
-        .and_then(Value::as_str)
-        .filter(|url| !url.trim().is_empty())
-        .unwrap_or(BABOON_RELEASES_URL)
-        .to_owned();
-    Ok(UpdateCheckResult {
-        latest_tag,
-        release_url,
-    })
-}
-
-#[cfg(target_os = "windows")]
-fn parse_latest_release_lines(
-    stdout: &[u8],
-    stderr: &[u8],
-    success: bool,
-) -> Result<UpdateCheckResult, String> {
-    if !success {
-        return Err(command_error(stderr));
-    }
-    let text = String::from_utf8_lossy(stdout);
-    let mut lines = text.lines().map(str::trim).filter(|line| !line.is_empty());
-    let latest_tag = lines.next().unwrap_or_default().to_owned();
-    if latest_tag == "__BABOON_NO_PUBLIC_RELEASE__" {
-        return Err(NO_PUBLIC_RELEASE_MESSAGE.to_owned());
-    }
-    if latest_tag.is_empty() {
-        return Err("GitHub response did not include a release tag".to_owned());
-    }
-    let release_url = lines
-        .next()
-        .filter(|url| !url.is_empty())
-        .unwrap_or(BABOON_RELEASES_URL)
-        .to_owned();
-    Ok(UpdateCheckResult {
-        latest_tag,
-        release_url,
-    })
-}
-
-fn command_error(stderr: &[u8]) -> String {
-    let message = String::from_utf8_lossy(stderr).trim().to_owned();
-    if message.is_empty() {
-        "command exited without an error message".to_owned()
-    } else {
-        message
-    }
-}
-
-fn loaded_source_status(source: &LoadedSourceData) -> String {
-    match &source.source {
-        TagSource::LooseFolder { .. } if source.all_entries.is_empty() => {
-            format!("Browsing tags from {}", source.label)
-        }
-        TagSource::LooseFolder { .. } => {
-            format!(
-                "Found {} tag(s) in {}",
-                source.all_entries.len(),
-                source.label
-            )
-        }
-        _ => format!(
-            "Loaded {} tag(s) from {}",
-            source.entries.len(),
-            source.label
-        ),
-    }
-}
-
-fn update_check_status(result: &UpdateCheckResult) -> String {
-    let current = env!("CARGO_PKG_VERSION");
-    if is_newer_release(&result.latest_tag, current) {
-        format!(
-            "Update available: {} (current {}). {}",
-            result.latest_tag, current, result.release_url
-        )
-    } else {
-        format!("Baboon is up to date ({current})")
-    }
-}
-
-fn is_newer_release(latest: &str, current: &str) -> bool {
-    let latest = version_numbers(latest);
-    let current = version_numbers(current);
-    let max_len = latest.len().max(current.len());
-    for index in 0..max_len {
-        let latest_part = latest.get(index).copied().unwrap_or(0);
-        let current_part = current.get(index).copied().unwrap_or(0);
-        if latest_part != current_part {
-            return latest_part > current_part;
-        }
-    }
-    false
-}
-
-fn version_numbers(version: &str) -> Vec<u64> {
-    version
-        .trim()
-        .trim_start_matches(['v', 'V'])
-        .split(|ch: char| !ch.is_ascii_digit())
-        .filter(|part| !part.is_empty())
-        .filter_map(|part| part.parse::<u64>().ok())
-        .collect()
-}
-
-fn selected_tab_after_removal(
-    open_tabs: &[String],
-    removed_index: Option<usize>,
-) -> Option<String> {
-    let removed_index = removed_index?;
-    if open_tabs.is_empty() {
-        None
-    } else {
-        open_tabs
-            .get(removed_index)
-            .or_else(|| {
-                removed_index
-                    .checked_sub(1)
-                    .and_then(|index| open_tabs.get(index))
-            })
-            .cloned()
-    }
-}
-
-pub(super) fn available_definition_games() -> Vec<String> {
-    let root = locate_definitions_root();
-    let mut games = fs::read_dir(root)
-        .ok()
-        .into_iter()
-        .flat_map(|entries| entries.flatten())
-        .filter_map(|entry| {
-            let path = entry.path();
-            path.join("_meta.json")
-                .is_file()
-                .then(|| entry.file_name().to_string_lossy().trim().to_owned())
-        })
-        .filter(|name| !name.is_empty())
-        .collect::<Vec<_>>();
-    games.sort();
-    games.dedup();
-    if games.is_empty() {
-        games.push("halo3_mcc".to_owned());
-    }
-    games
-}
-
-pub(super) fn load_new_tag_groups(game: &str) -> Result<Vec<NewTagGroup>, String> {
-    let game_dir = locate_definitions_root().join(game);
-    if !game_dir.parent().is_some_and(|root| root.is_dir()) {
-        return Err(definitions_missing_message(&locate_definitions_root()));
-    }
-    let meta_path = game_dir.join("_meta.json");
-    let bytes = fs::read(&meta_path).map_err(|error| {
-        if !locate_definitions_root().is_dir() {
-            definitions_missing_message(&locate_definitions_root())
-        } else {
-            format!("Could not read {}: {error}", meta_path.display())
-        }
-    })?;
-    let value: Value = serde_json::from_slice(&bytes)
-        .map_err(|error| format!("Could not parse {}: {error}", meta_path.display()))?;
-    let Some(tag_index) = value.get("tag_index").and_then(Value::as_object) else {
-        return Err(format!("{} is missing tag_index", meta_path.display()));
-    };
-    let mut groups = Vec::new();
-    for (fourcc, name_value) in tag_index {
-        let Some(name) = name_value.as_str() else {
-            continue;
-        };
-        let Some(group_tag) = parse_group_tag(fourcc) else {
-            continue;
-        };
-        let disk_schema_path = game_dir.join(format!("{name}.json"));
-        if !disk_schema_path.is_file() {
-            continue;
-        }
-        groups.push(NewTagGroup {
-            group_tag,
-            name: name.to_owned(),
-            schema_path: disk_schema_path,
-            extension: group_tag_to_extension(group_tag)
-                .unwrap_or(name)
-                .trim()
-                .to_owned(),
-        });
-    }
-    groups.sort_by(|a, b| {
-        a.name
-            .cmp(&b.name)
-            .then_with(|| a.group_tag.cmp(&b.group_tag))
-    });
-    Ok(groups)
-}
-
-pub(super) fn new_tag_output_path(
-    tags_root: &Path,
-    rel_path: &str,
-    extension: &str,
-) -> Result<PathBuf, String> {
-    let cleaned = rel_path.trim().replace('\\', "/");
-    let cleaned = cleaned.trim_matches('/');
-    if cleaned.is_empty() {
-        return Err("Enter a relative tag path".to_owned());
-    }
-    // Tag paths never contain a colon; reject drive prefixes (e.g. `C:/…`)
-    // explicitly since `Component::Prefix` is only produced on Windows.
-    if cleaned.contains(':') {
-        return Err("Tag path cannot contain a drive prefix or ':'".to_owned());
-    }
-    let rel = Path::new(cleaned);
-    if rel.is_absolute() {
-        return Err("Tag path must be relative to the tags folder".to_owned());
-    }
-    if rel.components().any(|component| {
-        matches!(
-            component,
-            std::path::Component::ParentDir | std::path::Component::Prefix(_)
-        )
-    }) {
-        return Err("Tag path cannot contain .. or a drive prefix".to_owned());
-    }
-    let mut output = tags_root.join(rel);
-    output.set_extension(extension.trim_start_matches('.'));
-    Ok(output)
-}
-
-pub(super) fn new_tag_output_path_from_dialog(
-    tags_root: &Path,
-    picked_path: &Path,
-    extension: &str,
-) -> Result<(PathBuf, String), String> {
-    let extension = extension.trim_start_matches('.');
-    let mut output = picked_path.to_path_buf();
-    output.set_extension(extension);
-
-    let root = lexical_normalize_path(tags_root);
-    let output = lexical_normalize_path(&output);
-    if !output.starts_with(&root) {
-        return Err("Choose a location inside the loaded tags folder".to_owned());
-    }
-
-    let rel = output
-        .strip_prefix(&root)
-        .map_err(|_| "Choose a location inside the loaded tags folder".to_owned())?;
-    if rel.as_os_str().is_empty()
-        || rel.components().any(|component| {
-            matches!(
-                component,
-                std::path::Component::ParentDir | std::path::Component::Prefix(_)
-            )
-        })
-    {
-        return Err("Choose a tag name inside the loaded tags folder".to_owned());
-    }
-    let display = rel.to_string_lossy().replace('\\', "/");
-    Ok((output, display))
-}
-
-fn lexical_normalize_path(path: &Path) -> PathBuf {
-    let mut normalized = PathBuf::new();
-    for component in path.components() {
-        match component {
-            std::path::Component::CurDir => {}
-            std::path::Component::ParentDir => {
-                normalized.pop();
-            }
-            _ => normalized.push(component.as_os_str()),
-        }
-    }
-    normalized
-}
-
 type DependencyCandidateIndex = HashMap<(u32, String), Vec<String>>;
 
 #[derive(Default)]
@@ -6247,78 +4950,31 @@ fn fix_tag_dependencies_in_tag(
     report
 }
 
-/// Canonical form of a dependency reference path for comparison: backslash
-/// separators, lowercased. Mirrors [`dependency_key`]'s normalization so a
-/// target path and a `collect_tag_references` hit compare equal.
-fn normalize_ref(rel_path: &str) -> String {
-    rel_path.replace('/', "\\").to_ascii_lowercase()
-}
-
-/// Break an indexed field path into the `(block_path, element_index)` pairs for
-/// every block/array element on the way to the leaf, so each can be selected.
-/// e.g. `custom references[3]/sounds[1]/melee sound`
-///   → `[("custom references", 3), ("custom references[3]/sounds", 1)]`.
-/// The `block_path` for each pair is exactly the `path_prefix` that block is
-/// drawn with (parent indices included, its own index excluded).
-fn ancestor_block_indices(field_path: &str) -> Vec<(String, usize)> {
-    let mut out = Vec::new();
-    let mut acc = String::new();
-    for segment in field_path.split('/') {
-        let (name, index) = match segment.strip_suffix(']').and_then(|s| s.rsplit_once('[')) {
-            Some((name, idx)) => (name, idx.parse::<usize>().ok()),
-            None => (segment, None),
-        };
-        let node_path = if acc.is_empty() {
-            name.to_owned()
-        } else {
-            format!("{acc}/{name}")
-        };
-        match index {
-            Some(index) => {
-                out.push((node_path.clone(), index));
-                acc = format!("{node_path}[{index}]");
-            }
-            None => acc = node_path,
-        }
-    }
-    out
-}
-
-/// Human breadcrumb for a reference occurrence, keeping element indices so
-/// sibling elements are distinguishable:
-/// `custom references[3]/melee sound` → `custom references[3] › melee sound`.
-fn occurrence_label(field_path: &str) -> String {
-    field_path
-        .split('/')
-        .map(|segment| match segment.split_once('[') {
-            Some((name, rest)) => format!("{}[{rest}", clean_field_name(name)),
-            None => clean_field_name(segment).to_string(),
-        })
-        .collect::<Vec<_>>()
-        .join(" › ")
-}
-
 fn collect_tag_references(
     tag_struct: TagStruct<'_>,
     path_prefix: &str,
     refs: &mut Vec<TagReferenceUse>,
 ) {
     for field in tag_struct.fields() {
-        let field_path = append_field_path(path_prefix, field.name());
-        if let Some(value) = field.value() {
-            if let TagFieldData::TagReference(reference) = value
-                && let Some((group_tag, rel_path)) = reference.group_tag_and_name
-            {
+        let field_path = append_field_path_for(path_prefix, &field);
+        match field.value() {
+            Some(TagFieldData::TagReference(reference)) => {
+                let Some((group_tag, rel_path)) = reference.group_tag_and_name else {
+                    continue;
+                };
                 let rel_path = sanitize_ref_path(&rel_path).replace('/', "\\");
-                if !rel_path.is_empty() && !rel_path.eq_ignore_ascii_case("none") {
-                    refs.push(TagReferenceUse {
-                        field_path,
-                        group_tag,
-                        rel_path,
-                    });
+                if rel_path.is_empty() || rel_path.eq_ignore_ascii_case("none") {
+                    continue;
                 }
+                refs.push(TagReferenceUse {
+                    field_path,
+                    group_tag,
+                    rel_path,
+                });
+                continue;
             }
-            continue;
+            Some(_) => continue,
+            None => {}
         }
         if let Some(nested) = field.as_struct() {
             collect_tag_references(nested, &field_path, refs);
@@ -6359,208 +5015,6 @@ fn build_dependency_candidate_index(
         candidates.sort();
     }
     index
-}
-
-/// Read each entry's tag and record the first field whose value contains
-/// `query_lower`. Capped to keep result sets (and runtime) bounded.
-fn run_field_value_search(
-    source: &TagSource,
-    entries: &[TagEntry],
-    query_lower: &str,
-) -> Result<Vec<FieldValueMatch>, String> {
-    const MATCH_CAP: usize = 1000;
-    let mut matches = Vec::new();
-    for entry in entries {
-        if matches.len() >= MATCH_CAP {
-            break;
-        }
-        let Ok(tag) = crate::source::read_entry(source, entry) else {
-            continue; // unreadable / unparseable tag — skip
-        };
-        if let Some((field_path, value)) = first_field_value_match(&tag.root(), query_lower, "") {
-            matches.push(FieldValueMatch {
-                entry: entry.clone(),
-                label: format!("{field_path} = {}", truncate_field_value(&value)),
-            });
-        }
-    }
-    Ok(matches)
-}
-
-/// Map each pasted TSV header column → the full stored field name to write
-/// (matched case-insensitively against the block's cleaned leaf-column names),
-/// or `None` for columns that don't correspond to a writable field.
-fn map_tsv_header_to_fields(
-    header_line: &str,
-    columns: &[(String, String)],
-) -> Vec<Option<String>> {
-    header_line
-        .split('\t')
-        .map(|raw| {
-            let clean = raw.trim();
-            columns
-                .iter()
-                .find(|(col_clean, _)| col_clean.eq_ignore_ascii_case(clean))
-                .map(|(_, full)| full.clone())
-        })
-        .collect()
-}
-
-/// Build the searchable-text index: for each tag, a lowercased blob of all its
-/// string / string_id / reference / enum values. Tags with no searchable text
-/// are omitted.
-fn build_field_value_index(source: &TagSource, entries: &[TagEntry]) -> Vec<(String, String)> {
-    let mut blobs = Vec::new();
-    for entry in entries {
-        let Ok(tag) = crate::source::read_entry(source, entry) else {
-            continue;
-        };
-        let mut blob = String::new();
-        collect_searchable_text(&tag.root(), &mut blob, 0);
-        if !blob.is_empty() {
-            blobs.push((entry.key.clone(), blob));
-        }
-    }
-    blobs
-}
-
-/// Append every leaf field's lowercased searchable text into `blob`, separated
-/// by " · ", bounded in size and recursion depth.
-fn collect_searchable_text(element: &TagStruct, blob: &mut String, depth: usize) {
-    const CAP: usize = 4000;
-    if blob.len() >= CAP || depth > 32 {
-        return;
-    }
-    for field in element.fields() {
-        if blob.len() >= CAP {
-            return;
-        }
-        if let Some(block) = field.as_block() {
-            for index in 0..block.len() {
-                if let Some(child) = block.element(index) {
-                    collect_searchable_text(&child, blob, depth + 1);
-                }
-                if blob.len() >= CAP {
-                    return;
-                }
-            }
-            continue;
-        }
-        if let Some(nested) = field.as_struct() {
-            collect_searchable_text(&nested, blob, depth + 1);
-            continue;
-        }
-        if let Some(text) = field_searchable_text(field.value()) {
-            if !text.is_empty() {
-                if !blob.is_empty() {
-                    blob.push_str(" · ");
-                }
-                blob.push_str(&text.to_ascii_lowercase());
-            }
-        }
-    }
-}
-
-/// Depth-first search for the first field whose searchable text contains
-/// `query_lower`. Returns the cleaned field path and the matched value.
-fn first_field_value_match(
-    element: &TagStruct,
-    query_lower: &str,
-    path: &str,
-) -> Option<(String, String)> {
-    for field in element.fields() {
-        let clean = clean_field_name(field.name());
-        let field_path = if path.is_empty() {
-            clean.clone()
-        } else {
-            format!("{path}/{clean}")
-        };
-        if let Some(block) = field.as_block() {
-            for index in 0..block.len() {
-                if let Some(child) = block.element(index) {
-                    if let Some(hit) = first_field_value_match(
-                        &child,
-                        query_lower,
-                        &format!("{field_path}[{index}]"),
-                    ) {
-                        return Some(hit);
-                    }
-                }
-            }
-            continue;
-        }
-        if let Some(nested) = field.as_struct() {
-            if let Some(hit) = first_field_value_match(&nested, query_lower, &field_path) {
-                return Some(hit);
-            }
-            continue;
-        }
-        if let Some(text) = field_searchable_text(field.value()) {
-            if !text.is_empty() && text.to_ascii_lowercase().contains(query_lower) {
-                return Some((field_path, text));
-            }
-        }
-    }
-    None
-}
-
-/// The user-visible text of a leaf field for searching, or `None` for fields
-/// with no meaningful text (raw numbers, padding, data blobs, …).
-fn field_searchable_text(value: Option<TagFieldData>) -> Option<String> {
-    match value? {
-        TagFieldData::String(s) | TagFieldData::LongString(s) => Some(s),
-        TagFieldData::StringId(d) | TagFieldData::OldStringId(d) => Some(d.string),
-        TagFieldData::TagReference(r) => r.group_tag_and_name.map(|(_, path)| path),
-        TagFieldData::CharEnum { name, .. }
-        | TagFieldData::ShortEnum { name, .. }
-        | TagFieldData::LongEnum { name, .. } => name,
-        _ => None,
-    }
-}
-
-fn truncate_field_value(value: &str) -> String {
-    const MAX: usize = 80;
-    if value.chars().count() > MAX {
-        let head: String = value.chars().take(MAX).collect();
-        format!("{head}…")
-    } else {
-        value.to_owned()
-    }
-}
-
-fn dependency_entry_reference_path(entry: &TagEntry, names: &TagNameIndex) -> Option<String> {
-    let extension = names
-        .name_for(entry.group_tag)
-        .or_else(|| group_tag_to_extension(entry.group_tag));
-    let mut path = entry.display_path.replace('/', "\\");
-    if let Some(extension) = extension {
-        let suffix = format!(".{extension}");
-        if path
-            .to_ascii_lowercase()
-            .ends_with(&suffix.to_ascii_lowercase())
-        {
-            let keep = path.len().saturating_sub(suffix.len());
-            path.truncate(keep);
-            return Some(path);
-        }
-    }
-    Path::new(&path)
-        .with_extension("")
-        .to_str()
-        .map(|path| path.replace('/', "\\"))
-}
-
-fn dependency_leaf_key(rel_path: &str) -> String {
-    rel_path
-        .replace('/', "\\")
-        .rsplit('\\')
-        .next()
-        .unwrap_or(rel_path)
-        .to_ascii_lowercase()
-}
-
-fn dependency_target_exists(tags_root: &Path, rel_path: &str, extension: &str) -> bool {
-    resolve_tag_path(tags_root, rel_path, extension).is_file()
 }
 
 #[derive(Default)]
@@ -7536,24 +5990,7 @@ fn reference_path_from_rel_file(
     group_tag: u32,
     names: &TagNameIndex,
 ) -> Option<String> {
-    let mut rel = rel_file.to_string_lossy().replace('/', "\\");
-    if let Some(extension) = names
-        .name_for(group_tag)
-        .or_else(|| group_tag_to_extension(group_tag))
-    {
-        let suffix = format!(".{extension}");
-        if rel
-            .to_ascii_lowercase()
-            .ends_with(&suffix.to_ascii_lowercase())
-        {
-            rel.truncate(rel.len().saturating_sub(suffix.len()));
-            return Some(rel);
-        }
-    }
-    Path::new(&rel)
-        .with_extension("")
-        .to_str()
-        .map(|path| path.replace('/', "\\"))
+    reference_path_without_group_extension(&rel_file.to_string_lossy(), group_tag, names)
 }
 
 #[cfg(test)]
@@ -7582,6 +6019,22 @@ mod tsv_paste_tests {
 #[cfg(test)]
 mod field_search_tests {
     use super::*;
+
+    #[test]
+    fn searchable_text_separator_only_appears_between_values() {
+        let mut blob = String::new();
+
+        append_searchable_text(&mut blob, "First");
+        assert_eq!(blob, "first");
+
+        append_searchable_text(&mut blob, "Second");
+        assert_eq!(blob, "first · second");
+
+        append_searchable_text(&mut blob, "Third");
+        assert_eq!(blob, "first · second · third");
+        assert!(!blob.starts_with(" · "));
+        assert!(!blob.contains(" ·  · "));
+    }
 
     #[test]
     fn searchable_text_extracts_text_kinds_only() {

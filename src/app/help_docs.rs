@@ -1,3 +1,6 @@
+//! Deserialization and state for Baboon's embedded help documentation.
+//! It owns this focused support concern; application workflow coordination and unrelated UI behavior belong elsewhere.
+
 use super::*;
 use serde::Deserialize;
 
@@ -20,7 +23,8 @@ impl HelpDocsState {
 
 #[derive(Clone, Deserialize)]
 pub(super) struct HelpDocs {
-    #[allow(dead_code)]
+    /// External document schema revision reserved for compatibility checks and
+    /// migrations when the help JSON shape changes.
     pub(super) version: u32,
     pub(super) tabs: Vec<HelpDocTab>,
 }
@@ -28,7 +32,8 @@ pub(super) struct HelpDocs {
 #[derive(Clone, Deserialize)]
 pub(super) struct HelpDocTab {
     pub(super) id: String,
-    #[allow(dead_code)]
+    /// Data-owned tab label retained for future multi-tab help navigation; the
+    /// current single Doc tab is still selected by its stable `id`.
     pub(super) title: String,
     pub(super) sections: Vec<HelpDocSection>,
 }

@@ -1,3 +1,6 @@
+//! Build-time asset copying and Windows icon-resource generation.
+//! It owns build-script side effects only; runtime asset behavior and application logic belong under `src`.
+
 use std::env;
 use std::fs;
 use std::io;
