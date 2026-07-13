@@ -27,8 +27,23 @@ pub(in crate::app) struct MaterialColorPopup {
     create_shader_param_op: Option<ShaderParamOp>,
     /// When Some, clicking OK creates/edits a classic H2 shader parameter.
     create_h2_shader_param_op: Option<H2ShaderParamOp>,
+    /// When Some, OK returns a color to the still-open function-editor draft
+    /// instead of writing directly to the tag document.
+    function_draft_color: Option<FunctionDraftColorWrite>,
     /// Tag key that owns the write_path. Used by draw_color_popup to route the edit.
     tag_key: String,
+}
+
+#[derive(Clone, Copy)]
+pub(in crate::app) enum FunctionDraftColorTarget {
+    H3Logical(usize),
+    H2Logical(usize),
+}
+
+#[derive(Clone, Copy)]
+struct FunctionDraftColorWrite {
+    target: FunctionDraftColorTarget,
+    original_alpha: u8,
 }
 
 /// Target for writing a picked color back into a plain color-valued field.
@@ -67,6 +82,7 @@ impl MaterialColorPopup {
             create_shader_op: None,
             create_shader_param_op: None,
             create_h2_shader_param_op: None,
+            function_draft_color: None,
             tag_key: String::new(),
         }
     }
@@ -124,6 +140,18 @@ impl MaterialColorPopup {
     ) -> Self {
         self.tag_key = tag_key.into();
         self.create_h2_shader_param_op = Some(op);
+        self
+    }
+
+    pub(in crate::app) fn with_function_draft_color(
+        mut self,
+        target: FunctionDraftColorTarget,
+        original_alpha: u8,
+    ) -> Self {
+        self.function_draft_color = Some(FunctionDraftColorWrite {
+            target,
+            original_alpha,
+        });
         self
     }
 
@@ -235,6 +263,10 @@ pub(in crate::app) enum ColorPopupResult {
         tag_key: String,
         op: H2ShaderParamOp,
     },
+    FunctionDraftColor {
+        target: FunctionDraftColorTarget,
+        argb: u32,
+    },
 }
 
 /// Draw the color inspector / editor popup.
@@ -253,7 +285,8 @@ pub(in crate::app) fn draw_color_popup(
         || color.write_color_field.is_some()
         || color.create_shader_op.is_some()
         || color.create_shader_param_op.is_some()
-        || color.create_h2_shader_param_op.is_some();
+        || color.create_h2_shader_param_op.is_some()
+        || color.function_draft_color.is_some();
     let mut result: Option<ColorPopupResult> = None;
     egui::Window::new(color.title.clone())
         .collapsible(false)
@@ -294,7 +327,16 @@ pub(in crate::app) fn draw_color_popup(
             ui.add_space(10.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button("OK").clicked() {
-                    if let Some(field) = color.write_color_field.clone() {
+                    if let Some(target) = color.function_draft_color {
+                        let argb = ((target.original_alpha as u32) << 24)
+                            | ((float_channel_to_u8(color.red) as u32) << 16)
+                            | ((float_channel_to_u8(color.green) as u32) << 8)
+                            | float_channel_to_u8(color.blue) as u32;
+                        result = Some(ColorPopupResult::FunctionDraftColor {
+                            target: target.target,
+                            argb,
+                        });
+                    } else if let Some(field) = color.write_color_field.clone() {
                         // Plain color value: emit the channel string the field
                         // parser expects (RGB = "r, g, b", ARGB = "a, r, g, b").
                         let input = if field.argb {

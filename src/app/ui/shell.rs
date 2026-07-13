@@ -1483,13 +1483,16 @@ impl Baboon {
                         doc.journal.end_edit_window();
                     }
                 }
+                ColorPopupResult::FunctionDraftColor { target, argb } => {
+                    if let Some(popup) = self.function_popup.as_mut() {
+                        popup.apply_draft_color(target, argb);
+                    }
+                }
             }
         }
-        if let Some(batch) = draw_function_popup(
-            ctx,
-            &mut self.function_popup,
-            self.use_new_h3_function_editor,
-        ) {
+        if let Some(batch) =
+            draw_function_popup(ctx, &mut self.function_popup, &mut self.color_popup)
+        {
             if let Some(doc) = self.parsed_tags.get_mut(&batch.tag_key) {
                 if !batch.edits.is_empty() || !batch.data_ops.is_empty() {
                     doc.journal.begin_edit(&doc.tag, "Edit function");

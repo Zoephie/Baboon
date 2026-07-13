@@ -51,7 +51,7 @@ pub(in crate::app) fn draw_foundation_function_row(
                         // editor lives in the f() popup.
                         let mut view = FunctionView::from_function(function.clone());
                         let mut selected = 0usize;
-                        draw_function_editor_contents(ui, &mut view, false, &mut selected);
+                        draw_function_editor_contents(ui, &mut view, false, &mut selected, None);
                     });
                 });
             });
@@ -81,9 +81,15 @@ pub(in crate::app) fn draw_foundation_inline_function_row(
                     let previous = FunctionSnapshot::from_view(&view);
                     let mut selected = 0usize;
                     let changed = if view.h2_legacy.is_some() {
-                        draw_h2_legacy_function_editor_contents(ui, &mut view, edit.editable)
+                        draw_h2_legacy_function_editor_contents(ui, &mut view, edit.editable, None)
                     } else {
-                        draw_function_editor_contents(ui, &mut view, edit.editable, &mut selected)
+                        draw_function_editor_contents(
+                            ui,
+                            &mut view,
+                            edit.editable,
+                            &mut selected,
+                            None,
+                        )
                     };
                     if changed {
                         let batch = push_function_edit(

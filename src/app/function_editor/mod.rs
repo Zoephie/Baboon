@@ -18,6 +18,7 @@ pub(in crate::app) fn draw_function_editor_contents(
     view: &mut FunctionView,
     editable: bool,
     selected_point: &mut usize,
+    mut color_popup: Option<&mut Option<MaterialColorPopup>>,
 ) -> bool {
     let mut changed = false;
     let ftype = view.function.function_type();
@@ -225,7 +226,12 @@ pub(in crate::app) fn draw_function_editor_contents(
         // (you can change stop colors even on a non-editable multispline).
         if view.function.color_graph_type() != ColorGraphType::Scalar {
             ui.add_space(8.0);
-            changed |= draw_function_color_stop_editors(ui, &mut view.function, editable);
+            changed |= draw_function_color_stop_editors(
+                ui,
+                &mut view.function,
+                editable,
+                color_popup.as_deref_mut(),
+            );
         }
     });
 
@@ -328,7 +334,7 @@ pub(in crate::app) fn push_function_edit(
 pub(in crate::app) fn draw_function_popup(
     ctx: &egui::Context,
     function_popup: &mut Option<FunctionPopup>,
-    use_new_h3_function_editor: bool,
+    color_popup: &mut Option<MaterialColorPopup>,
 ) -> Option<FunctionEditBatch> {
     let popup = function_popup.as_mut()?;
     let mut open = true;
@@ -349,34 +355,21 @@ pub(in crate::app) fn draw_function_popup(
                 );
             }
             if popup.view.h2_legacy.is_some() {
-                draw_h2_legacy_function_editor_contents(ui, &mut popup.view, editable);
+                draw_h2_legacy_function_editor_contents(
+                    ui,
+                    &mut popup.view,
+                    editable,
+                    Some(color_popup),
+                );
             } else {
-                let presentation =
-                    *popup
-                        .h3_presentation
-                        .get_or_insert(if use_new_h3_function_editor {
-                            H3FunctionEditorPresentation::Foundation
-                        } else {
-                            H3FunctionEditorPresentation::Legacy
-                        });
-                match presentation {
-                    H3FunctionEditorPresentation::Foundation => {
-                        draw_foundation_h3_function_editor_contents(
-                            ui,
-                            &mut popup.view,
-                            editable,
-                            &mut popup.selected_point,
-                        );
-                    }
-                    H3FunctionEditorPresentation::Legacy => {
-                        draw_function_editor_contents(
-                            ui,
-                            &mut popup.view,
-                            editable,
-                            &mut popup.selected_point,
-                        );
-                    }
-                }
+                draw_foundation_h3_function_editor_contents(
+                    ui,
+                    &mut popup.view,
+                    editable,
+                    &mut popup.selected_graph,
+                    &mut popup.selected_point,
+                    color_popup,
+                );
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {

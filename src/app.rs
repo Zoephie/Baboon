@@ -23,11 +23,12 @@ use blam_tags::render_method::{
     compile_real_constant,
 };
 use blam_tags::{
-    AssFile, Bitmap, ColorGraphType, Endian, FoundationMasterType as EngineMasterType,
-    FunctionFlags, FunctionKind, FunctionType, JmsFile, PERIODIC_FUNCTIONS, RenderModel,
-    StringIdData, TRANSITION_FUNCTIONS, TagBlock, TagField, TagFieldData, TagFieldType, TagFile,
-    TagFunction, TagFunctionEditor, TagReferenceData, TagResource, TagResourceKind, TagStruct,
-    format_group_tag, parse_group_tag,
+    AssFile, Bitmap, ColorGraphType, CurvePointMode, CurveSegmentType, Endian,
+    FoundationMasterType as EngineMasterType, FunctionFlags, FunctionKind, FunctionType, JmsFile,
+    PERIODIC_FUNCTIONS, PeriodicParams, RenderModel, StringIdData, TRANSITION_FUNCTIONS, TagBlock,
+    TagField, TagFieldData, TagFieldType, TagFile, TagFunction, TagFunctionEditor,
+    TagReferenceData, TagResource, TagResourceKind, TagStruct, TransitionParams, format_group_tag,
+    parse_group_tag,
 };
 use eframe::egui::{
     self, Align2, Color32, FontData, FontDefinitions, FontFamily, FontId, Frame, RichText,
@@ -199,7 +200,6 @@ pub struct Baboon {
     color_popup: Option<MaterialColorPopup>,
     custom_color_swatches: Vec<Option<[u8; 4]>>,
     palette_last_dir: Option<PathBuf>,
-    use_new_h3_function_editor: bool,
     /// Function editor snapshot and write targets captured when the popup opens.
     function_popup: Option<FunctionPopup>,
     query_results: Option<TagQueryResults>,
@@ -388,7 +388,6 @@ impl Baboon {
             color_popup: None,
             custom_color_swatches: prefs.custom_color_swatches.clone(),
             palette_last_dir: prefs.palette_last_dir.clone(),
-            use_new_h3_function_editor: prefs.use_new_h3_function_editor,
             function_popup: None,
             query_results: None,
             pending_ref_jump: None,

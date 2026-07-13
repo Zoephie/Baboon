@@ -106,6 +106,7 @@ pub(in crate::app) fn draw_h2_legacy_function_editor_contents(
     ui: &mut Ui,
     view: &mut FunctionView,
     editable: bool,
+    color_popup: Option<&mut Option<MaterialColorPopup>>,
 ) -> bool {
     let mut changed = false;
     let Some(h2) = view.h2_legacy.as_mut() else {
@@ -203,7 +204,7 @@ pub(in crate::app) fn draw_h2_legacy_function_editor_contents(
         draw_h2_legacy_graph_preview(ui, h2);
         if h2.is_color_output() {
             ui.add_space(8.0);
-            changed |= draw_h2_legacy_color_stop_editors(ui, h2, editable);
+            changed |= draw_h2_legacy_color_stop_editors(ui, h2, editable, color_popup);
         }
     });
     if h2.is_color_output() {
@@ -262,6 +263,7 @@ pub(super) fn draw_h2_legacy_color_stop_editors(
     ui: &mut Ui,
     h2: &mut H2LegacyFunctionView,
     editable: bool,
+    mut color_popup: Option<&mut Option<MaterialColorPopup>>,
 ) -> bool {
     let mut changed = false;
     ui.vertical(|ui| {
@@ -269,10 +271,18 @@ pub(super) fn draw_h2_legacy_color_stop_editors(
         for index in (0..h2.color_stop_count()).rev() {
             let mut color = h2.color_stop(index);
             ui.horizontal(|ui| {
-                let resp = if editable {
+                let dedicated = color_popup.as_deref_mut();
+                let resp = if dedicated.is_none() && editable {
                     ui.color_edit_button_srgba(&mut color)
                 } else {
-                    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::hover());
+                    let (rect, resp) = ui.allocate_exact_size(
+                        Vec2::splat(24.0),
+                        if editable {
+                            Sense::click()
+                        } else {
+                            Sense::hover()
+                        },
+                    );
                     ui.painter().rect_filled(rect, 0.0, color);
                     ui.painter()
                         .rect_stroke(rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
@@ -289,9 +299,27 @@ pub(super) fn draw_h2_legacy_color_stop_editors(
                     .small()
                     .monospace(),
                 );
-                if resp.changed() {
-                    h2.set_color_stop(index, color);
-                    changed = true;
+                match dedicated {
+                    Some(popup) if resp.clicked() => {
+                        *popup = Some(
+                            MaterialColorPopup::new(
+                                &format!("Function color {}", index + 1),
+                                color.r() as f32 / 255.0,
+                                color.g() as f32 / 255.0,
+                                color.b() as f32 / 255.0,
+                                1.0,
+                            )
+                            .with_function_draft_color(
+                                FunctionDraftColorTarget::H2Logical(index),
+                                0,
+                            ),
+                        );
+                    }
+                    None if resp.changed() => {
+                        h2.set_color_stop(index, color);
+                        changed = true;
+                    }
+                    _ => {}
                 }
             });
             if index > 0 {
@@ -621,329 +649,8 @@ pub(super) fn h2_transition_sample(exponent: u8, x: f32) -> f32 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn generic_function_type_combo_offers_every_supported_mapping_function_type() {
-        let expected = [
-            FunctionType::Identity,
-            FunctionType::Constant,
-            FunctionType::Transition,
-            FunctionType::Periodic,
-            FunctionType::Linear,
-            FunctionType::LinearKey,
-            FunctionType::MultiLinearKey,
-            FunctionType::Spline,
-            FunctionType::MultiSpline,
-            FunctionType::Exponent,
-            FunctionType::Spline2,
-        ];
-
-        assert_eq!(EDITABLE_FUNCTION_TYPES, expected);
-        for kind in expected {
-            assert!(
-                is_editable_function_type(kind),
-                "{kind:?} should be editable"
-            );
-            assert_eq!(FunctionType::from_byte(kind as u8), Some(kind));
-        }
-    }
-
-    #[test]
-    fn foundation_master_types_keep_all_curve_variants_in_curve_mode() {
-        assert_eq!(
-            FoundationMasterType::from_function_type(FunctionType::Constant),
-            FoundationMasterType::Basic
-        );
-        assert_eq!(
-            FoundationMasterType::from_function_type(FunctionType::Periodic),
-            FoundationMasterType::Periodic
-        );
-        assert_eq!(
-            FoundationMasterType::from_function_type(FunctionType::Exponent),
-            FoundationMasterType::Exponent
-        );
-        assert_eq!(
-            FoundationMasterType::from_function_type(FunctionType::Transition),
-            FoundationMasterType::Transition
-        );
-        for kind in [
-            FunctionType::Identity,
-            FunctionType::Linear,
-            FunctionType::LinearKey,
-            FunctionType::MultiLinearKey,
-            FunctionType::Spline,
-            FunctionType::MultiSpline,
-            FunctionType::Spline2,
-        ] {
-            assert_eq!(
-                FoundationMasterType::from_function_type(kind),
-                FoundationMasterType::Curve,
-                "{kind:?} should retain the curve presentation"
-            );
-        }
-        assert_eq!(FoundationMasterType::Curve.target_function_type(), None);
-    }
-
-    #[test]
-    fn foundation_color_stop_slots_match_engine_header_layout() {
-        assert_eq!(color_graph_slots(ColorGraphType::TwoColor), &[0, 3]);
-        assert_eq!(color_graph_slots(ColorGraphType::ThreeColor), &[0, 1, 3]);
-        assert_eq!(color_graph_slots(ColorGraphType::FourColor), &[0, 1, 2, 3]);
-    }
-
-    #[test]
-    fn h2_legacy_function_type_options_match_supported_mapping_function_types() {
-        assert_eq!(
-            H2_FUNCTION_TYPE_OPTIONS.len(),
-            EDITABLE_FUNCTION_TYPES.len()
-        );
-        for (value, _) in H2_FUNCTION_TYPE_OPTIONS {
-            let kind =
-                FunctionType::from_byte(value).expect("H2 option should map to function type");
-            assert!(
-                EDITABLE_FUNCTION_TYPES.contains(&kind),
-                "{kind:?} should be available in generic function editor too"
-            );
-        }
-    }
-
-    #[test]
-    fn h2_output_type_options_match_guerilla_color_counts() {
-        assert_eq!(
-            H2_OUTPUT_TYPE_OPTIONS,
-            [
-                (0, "scalar (intensity)"),
-                (1, "scalar (alpha)"),
-                (0x20, "2-color"),
-                (0x40, "3-color"),
-                (0x80, "4-color"),
-            ]
-        );
-        assert_eq!(h2_output_type_label(2), "2-color");
-        assert_eq!(h2_output_type_label(3), "3-color");
-        assert_eq!(h2_output_type_label(4), "4-color");
-    }
-
-    #[test]
-    fn h2_legacy_52_byte_periodic_function_reads_frequency_at_offset_20() {
-        let mut raw = vec![0; 52];
-        raw[0] = 3;
-        raw[2] = 6;
-        raw[8..12].copy_from_slice(&1.0f32.to_le_bytes());
-        raw[20..24].copy_from_slice(&0.25f32.to_le_bytes());
-        raw[32..36].copy_from_slice(&1.0f32.to_le_bytes());
-        raw[36..40].copy_from_slice(&1.0f32.to_le_bytes());
-
-        let view = H2LegacyFunctionView::parse(raw).expect("legacy function should parse");
-
-        assert_eq!(view.exponent, 6);
-        assert_eq!(view.min, 0.0);
-        assert_eq!(view.max, 1.0);
-        assert_eq!(view.frequency, 0.25);
-        assert_eq!(view.phase, 0.0);
-        assert_eq!(&view.to_bytes()[20..24], &0.25f32.to_le_bytes());
-    }
-
-    #[test]
-    fn h2_legacy_color_function_preserves_bgra_endpoints() {
-        let mut raw = vec![0; 28];
-        raw[0] = 3;
-        raw[1] = 0x20;
-        raw[2] = 2;
-        raw[4..8].copy_from_slice(&[0x10, 0x20, 0x30, 0x40]);
-        raw[8..12].copy_from_slice(&[0x50, 0x60, 0x70, 0x80]);
-        raw[12..16].copy_from_slice(&0.25f32.to_le_bytes());
-        raw[16..20].copy_from_slice(&0.5f32.to_le_bytes());
-
-        let view = H2LegacyFunctionView::parse(raw.clone()).expect("color function should parse");
-        let data = view.to_bytes();
-
-        assert!(view.is_color_output());
-        assert_eq!(&data[4..12], &raw[4..12]);
-        assert_eq!(&data[12..16], &0.25f32.to_le_bytes());
-        assert_eq!(&data[16..20], &0.5f32.to_le_bytes());
-    }
-
-    #[test]
-    fn h2_legacy_four_color_function_preserves_all_color_slots() {
-        let mut raw = vec![0; 28];
-        raw[0] = 7;
-        raw[1] = 0x80;
-        raw[4..8].copy_from_slice(&[0x10, 0x11, 0x12, 0x13]);
-        raw[8..12].copy_from_slice(&[0x20, 0x21, 0x22, 0x23]);
-        raw[12..16].copy_from_slice(&[0x30, 0x31, 0x32, 0x33]);
-        raw[16..20].copy_from_slice(&[0x40, 0x41, 0x42, 0x43]);
-        let mut view =
-            H2LegacyFunctionView::parse(raw.clone()).expect("color function should parse");
-
-        assert_eq!(view.color_stop_count(), 4);
-        assert_eq!(view.color_stop(3), Color32::from_rgb(0x42, 0x41, 0x40));
-        view.set_color_stop(2, Color32::from_rgb(0xAA, 0xBB, 0xCC));
-        let data = view.to_bytes();
-
-        assert_eq!(&data[4..12], &raw[4..12]);
-        assert_eq!(&data[12..16], &[0xCC, 0xBB, 0xAA, 0x33]);
-        assert_eq!(&data[16..20], &raw[16..20]);
-    }
-
-    #[test]
-    fn h2_legacy_color_stop_edit_writes_bgr_and_preserves_alpha() {
-        let mut raw = vec![0; 28];
-        raw[0] = 3;
-        raw[1] = 2;
-        raw[4..8].copy_from_slice(&[1, 2, 3, 4]);
-        raw[8..12].copy_from_slice(&[5, 6, 7, 8]);
-        let mut view = H2LegacyFunctionView::parse(raw).expect("color function should parse");
-
-        assert_eq!(view.color_stop(0), Color32::from_rgb(3, 2, 1));
-        view.set_color_stop(1, Color32::from_rgb(0xAA, 0xBB, 0xCC));
-        let data = view.to_bytes();
-
-        assert_eq!(&data[8..12], &[0xCC, 0xBB, 0xAA, 8]);
-    }
-
-    #[test]
-    fn h2_legacy_unset_second_color_displays_as_first_until_edited() {
-        let mut raw = vec![0; 28];
-        raw[0] = 3;
-        raw[1] = 2;
-        raw[4..8].copy_from_slice(&[0x00, 0x00, 0xC6, 0x00]);
-        let mut view = H2LegacyFunctionView::parse(raw).expect("color function should parse");
-
-        assert_eq!(view.color_stop(0), Color32::from_rgb(0xC6, 0x00, 0x00));
-        assert_eq!(view.color_stop(1), Color32::from_rgb(0xC6, 0x00, 0x00));
-
-        view.set_color_stop(1, Color32::from_rgb(0x80, 0x10, 0x20));
-        let data = view.to_bytes();
-
-        assert_eq!(&data[4..8], &[0x00, 0x00, 0xC6, 0x00]);
-        assert_eq!(&data[8..12], &[0x20, 0x10, 0x80, 0x00]);
-    }
-
-    #[test]
-    fn h2_legacy_three_and_four_color_show_real_black_unset_slots() {
-        let mut raw = vec![0; 28];
-        raw[0] = 7;
-        raw[1] = 0x40;
-        raw[4..8].copy_from_slice(&[0x00, 0x00, 0xC6, 0x00]);
-        let mut view =
-            H2LegacyFunctionView::parse(raw.clone()).expect("color function should parse");
-
-        assert_eq!(view.color_stop_count(), 3);
-        assert_eq!(view.color_stop(0), Color32::from_rgb(0xC6, 0x00, 0x00));
-        assert_eq!(view.color_stop(1), Color32::BLACK);
-        assert_eq!(view.color_stop(2), Color32::BLACK);
-
-        view.output_type = 0x80;
-        assert_eq!(view.color_stop_count(), 4);
-        assert_eq!(view.color_stop(0), Color32::from_rgb(0xC6, 0x00, 0x00));
-        assert_eq!(view.color_stop(1), Color32::BLACK);
-        assert_eq!(view.color_stop(2), Color32::BLACK);
-        assert_eq!(view.color_stop(3), Color32::BLACK);
-    }
-
-    #[test]
-    fn h2_legacy_color_output_conversion_preserves_endpoints_and_inserts_black() {
-        let mut raw = vec![0; 28];
-        raw[0] = 7;
-        raw[1] = 0x20;
-        raw[4..8].copy_from_slice(&[0x00, 0x00, 0xC6, 0x00]);
-        let mut view = H2LegacyFunctionView::parse(raw).expect("color function should parse");
-
-        assert_eq!(view.color_stop(0), Color32::from_rgb(0xC6, 0x00, 0x00));
-        assert_eq!(view.color_stop(1), Color32::from_rgb(0xC6, 0x00, 0x00));
-
-        view.set_output_type(0x40);
-        assert_eq!(view.color_stop_count(), 3);
-        assert_eq!(view.color_stop(0), Color32::from_rgb(0xC6, 0x00, 0x00));
-        assert_eq!(view.color_stop(1), Color32::BLACK);
-        assert_eq!(view.color_stop(2), Color32::from_rgb(0xC6, 0x00, 0x00));
-        assert_eq!(
-            &view.to_bytes()[4..16],
-            &[0x00, 0x00, 0xC6, 0x00, 0, 0, 0, 0, 0x00, 0x00, 0xC6, 0x00]
-        );
-
-        view.set_output_type(0x80);
-        assert_eq!(view.color_stop_count(), 4);
-        assert_eq!(view.color_stop(0), Color32::from_rgb(0xC6, 0x00, 0x00));
-        assert_eq!(view.color_stop(1), Color32::BLACK);
-        assert_eq!(view.color_stop(2), Color32::BLACK);
-        assert_eq!(view.color_stop(3), Color32::from_rgb(0xC6, 0x00, 0x00));
-        assert_eq!(
-            &view.to_bytes()[4..20],
-            &[
-                0x00, 0x00, 0xC6, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0x00, 0xC6, 0x00,
-            ]
-        );
-    }
-
-    #[test]
-    fn damage_effect_vibration_function_reads_transition_values_at_observed_offsets() {
-        let mut raw = vec![0; 36];
-        raw[0] = 2;
-        raw[1] = 0;
-        raw[2] = 1;
-        raw[20..24].copy_from_slice(&0.8f32.to_le_bytes());
-        raw[24..28].copy_from_slice(&0.4f32.to_le_bytes());
-        raw[32..36].copy_from_slice(&1.0f32.to_le_bytes());
-
-        let view = H2LegacyFunctionView::parse_damage_effect_vibration(raw)
-            .expect("damage effect vibration function should parse");
-
-        assert_eq!(view.function_type, 2);
-        assert_eq!(view.output_type, 0);
-        assert_eq!(view.exponent, 1);
-        assert_eq!(view.min, 0.8);
-        assert_eq!(view.max, 0.4);
-        assert_eq!(&view.to_bytes()[20..24], &0.8f32.to_le_bytes());
-        assert_eq!(&view.to_bytes()[24..28], &0.4f32.to_le_bytes());
-    }
-
-    #[test]
-    fn damage_effect_vibration_edit_emits_byte_block_op() {
-        let mut raw = vec![0; 36];
-        raw[0] = 2;
-        raw[1] = 0;
-        raw[2] = 1;
-        raw[20..24].copy_from_slice(&0.8f32.to_le_bytes());
-        raw[24..28].copy_from_slice(&0.4f32.to_le_bytes());
-        raw[32..36].copy_from_slice(&1.0f32.to_le_bytes());
-        let h2_legacy = H2LegacyFunctionView::parse_damage_effect_vibration(raw.clone())
-            .expect("damage effect vibration function should parse");
-        let function = TagFunction::parse(&decode_hex(&constant_function_hex(0.0)).unwrap())
-            .expect("placeholder function should parse");
-        let mut view = FunctionView::from_function(function).with_h2_legacy(h2_legacy);
-        let previous = FunctionSnapshot::from_view(&view);
-        let h2 = view.h2_legacy.as_mut().unwrap();
-        h2.exponent = 2;
-        h2.min = 1.0;
-        h2.max = 0.7;
-        let paths = FunctionEditPaths {
-            data: FunctionDataStorage::Halo2ByteBlock(
-                "player responses[1]/vibration/low frequency vibration/dirty whore/data".to_owned(),
-            ),
-            parameter_type: String::new(),
-            input_name: String::new(),
-            range_name: String::new(),
-            time_period: String::new(),
-            block_path: String::new(),
-            block_index: 0,
-        };
-
-        let batch = push_function_edit(&paths, &previous, &view);
-
-        assert!(batch.edits.is_empty());
-        assert_eq!(batch.data_ops.len(), 1);
-        let data = &batch.data_ops[0].data;
-        assert_eq!(data.len(), 36);
-        assert_eq!(data[2], 2);
-        assert_eq!(&data[20..24], &1.0f32.to_le_bytes());
-        assert_eq!(&data[24..28], &0.7f32.to_le_bytes());
-        assert_eq!(&data[32..36], &raw[32..36]);
-    }
-}
+#[path = "../tests/function_editor_h2.rs"]
+mod tests;
 
 impl FunctionView {
     pub(in crate::app) fn from_function(function: TagFunction) -> Self {
@@ -1021,15 +728,8 @@ pub(in crate::app) struct FunctionPopup {
     pub(super) last_applied: FunctionSnapshot,
     /// Currently selected LinearKey control point (drag/x-y target).
     pub(super) selected_point: usize,
-    /// Captured on the popup's first frame so toggling the developer setting
-    /// cannot change the presentation of an edit already in progress.
-    pub(super) h3_presentation: Option<H3FunctionEditorPresentation>,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum H3FunctionEditorPresentation {
-    Foundation,
-    Legacy,
+    /// Selected graph slot in the Foundation H3+ editor (green=0, red=1).
+    pub(super) selected_graph: usize,
 }
 
 impl FunctionPopup {
@@ -1047,7 +747,28 @@ impl FunctionPopup {
             editable,
             last_applied,
             selected_point: 0,
-            h3_presentation: None,
+            selected_graph: 0,
+        }
+    }
+
+    pub(in crate::app) fn apply_draft_color(
+        &mut self,
+        target: FunctionDraftColorTarget,
+        argb: u32,
+    ) {
+        match target {
+            FunctionDraftColorTarget::H3Logical(index) if self.view.h2_legacy.is_none() => {
+                let mut editor = TagFunctionEditor::from_function(self.view.function.clone());
+                if editor.set_color(index, argb).is_ok() {
+                    self.view.function = editor.into_function();
+                }
+            }
+            FunctionDraftColorTarget::H2Logical(index) => {
+                if let Some(h2) = self.view.h2_legacy.as_mut() {
+                    h2.set_color_stop(index, color32_from_argb(argb));
+                }
+            }
+            _ => {}
         }
     }
 }

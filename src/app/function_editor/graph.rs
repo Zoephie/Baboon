@@ -3,12 +3,267 @@
 
 use super::*;
 
+/// Foundation graph used by the new H3+ editor. It renders primary and ranged
+/// graphs independently and edits the rich MultiSpline control-point model.
+pub(super) fn draw_foundation_graph(
+    ui: &mut Ui,
+    editor: &mut TagFunctionEditor,
+    editable: bool,
+    selected_graph: &mut usize,
+    selected_point: &mut usize,
+) -> bool {
+    let size = Vec2::new(465.0, 225.0);
+    let sense = if editable && editor.master_type() == EngineMasterType::Curve {
+        Sense::click_and_drag()
+    } else {
+        Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(size, sense);
+    let plot = rect.shrink2(Vec2::new(30.0, 20.0));
+    let to_screen = |(x, y): (f32, f32)| {
+        egui::pos2(
+            egui::lerp(plot.left()..=plot.right(), x.clamp(0.0, 1.0)),
+            egui::lerp(plot.bottom()..=plot.top(), y.clamp(0.0, 1.0)),
+        )
+    };
+    let to_graph = |pos: egui::Pos2| {
+        (
+            egui::remap_clamp(pos.x, plot.left()..=plot.right(), 0.0..=1.0),
+            egui::remap_clamp(pos.y, plot.bottom()..=plot.top(), 0.0..=1.0),
+        )
+    };
+
+    let curve_points = |editor: &TagFunctionEditor| {
+        let mut points = Vec::new();
+        if editor.master_type() == EngineMasterType::Curve {
+            for graph in 0..editor.graph_count() {
+                for point in 0..editor.curve_control_point_count(graph).unwrap_or(0) {
+                    if let Some(value) = editor.curve_control_point(graph, point) {
+                        points.push((graph, point, value));
+                    }
+                }
+            }
+        }
+        points
+    };
+
+    let mut changed = false;
+    if editable && editor.master_type() == EngineMasterType::Curve {
+        let hit_points = curve_points(editor);
+        let nearest = |pos: egui::Pos2| {
+            hit_points
+                .iter()
+                .map(|&(graph, point, value)| (graph, point, to_screen(value).distance(pos)))
+                .min_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal))
+        };
+        if let Some(pos) = response.interact_pointer_pos() {
+            if response.drag_started() || response.clicked() {
+                if let Some((graph, point, distance)) = nearest(pos)
+                    && distance <= 13.0
+                {
+                    *selected_graph = graph;
+                    *selected_point = point;
+                } else {
+                    let (x, _) = to_graph(pos);
+                    if editor.insert_curve_point(*selected_graph, x).is_ok() {
+                        let count = editor
+                            .curve_control_point_count(*selected_graph)
+                            .unwrap_or(1);
+                        *selected_point = (0..count)
+                            .filter_map(|point| {
+                                editor
+                                    .curve_control_point(*selected_graph, point)
+                                    .map(|value| (point, (value.0 - x).abs()))
+                            })
+                            .min_by(|a, b| {
+                                a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)
+                            })
+                            .map(|(point, _)| point)
+                            .unwrap_or(0);
+                        changed = true;
+                    }
+                }
+            }
+            if response.dragged() {
+                let value = to_graph(pos);
+                if editor
+                    .set_curve_control_point(*selected_graph, *selected_point, value)
+                    .is_ok()
+                {
+                    changed = true;
+                }
+            }
+        }
+        if response.hovered()
+            && ui.input(|input| {
+                input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace)
+            })
+            && editor
+                .curve_is_graph_point(*selected_graph, *selected_point)
+                .unwrap_or(false)
+            && editor
+                .delete_curve_point(*selected_graph, *selected_point)
+                .is_ok()
+        {
+            let count = editor
+                .curve_control_point_count(*selected_graph)
+                .unwrap_or(1);
+            *selected_point = (*selected_point).min(count.saturating_sub(1));
+            changed = true;
+        }
+
+        let menu_position = response.interact_pointer_pos().unwrap_or(plot.center());
+        response.context_menu(|ui| {
+            let (x, _) = to_graph(menu_position);
+            if ui.button("Add point").clicked() {
+                if editor.insert_curve_point(*selected_graph, x).is_ok() {
+                    changed = true;
+                }
+                ui.close_menu();
+            }
+            let is_graph_point = editor
+                .curve_is_graph_point(*selected_graph, *selected_point)
+                .unwrap_or(false);
+            if ui
+                .add_enabled(is_graph_point, egui::Button::new("Delete point"))
+                .clicked()
+            {
+                if editor
+                    .delete_curve_point(*selected_graph, *selected_point)
+                    .is_ok()
+                {
+                    *selected_point = (*selected_point).saturating_sub(1);
+                    changed = true;
+                }
+                ui.close_menu();
+            }
+            ui.separator();
+            let segment_count = editor.curve_segment_count(*selected_graph).unwrap_or(0);
+            let mut start = 0usize;
+            let mut starts = Vec::with_capacity(segment_count);
+            for segment in 0..segment_count {
+                starts.push(start);
+                start += match editor.curve_segment_type(*selected_graph, segment) {
+                    Some(CurveSegmentType::Linear) => 1,
+                    Some(CurveSegmentType::Spline | CurveSegmentType::Spline2) => 3,
+                    None => 1,
+                };
+            }
+            let selected_segment = starts
+                .iter()
+                .rposition(|start| *start <= *selected_point)
+                .unwrap_or(0);
+            for (kind, label) in [
+                (CurveSegmentType::Linear, "Linear segment"),
+                (CurveSegmentType::Spline, "Spline segment"),
+                (CurveSegmentType::Spline2, "Spline2 segment"),
+            ] {
+                if ui.button(label).clicked() {
+                    if editor
+                        .set_curve_segment_type(*selected_graph, selected_segment, kind)
+                        .is_ok()
+                    {
+                        changed = true;
+                    }
+                    ui.close_menu();
+                }
+            }
+            if selected_segment > 0 {
+                ui.separator();
+                for (mode, label) in [
+                    (CurvePointMode::Corner, "Corner point"),
+                    (CurvePointMode::Smooth, "Smooth point"),
+                ] {
+                    if ui.button(label).clicked() {
+                        if editor
+                            .set_curve_join_mode(*selected_graph, selected_segment, mode)
+                            .is_ok()
+                        {
+                            changed = true;
+                        }
+                        ui.close_menu();
+                    }
+                }
+            }
+        });
+    }
+
+    let function = editor.function();
+    let painter = ui.painter();
+    painter.rect_filled(rect, 0.0, Color32::BLACK);
+    if function.color_graph_type() == ColorGraphType::Scalar {
+        painter.rect_filled(plot, 0.0, function_plot_bg());
+    } else {
+        draw_function_color_gradient_vertical(painter, plot, &function_color_stops(function));
+    }
+    painter.rect_stroke(plot, 0.0, Stroke::new(1.0, grid_line()));
+    for i in 1..10 {
+        let x = egui::lerp(plot.left()..=plot.right(), i as f32 / 10.0);
+        let y = egui::lerp(plot.bottom()..=plot.top(), i as f32 / 10.0);
+        painter.line_segment(
+            [egui::pos2(x, plot.top()), egui::pos2(x, plot.bottom())],
+            Stroke::new(1.0, function_grid_line()),
+        );
+        painter.line_segment(
+            [egui::pos2(plot.left(), y), egui::pos2(plot.right(), y)],
+            Stroke::new(1.0, function_grid_line()),
+        );
+    }
+    for graph in 0..editor.graph_count() {
+        let range = graph as f32;
+        let samples = (0..=128)
+            .map(|i| {
+                let x = i as f32 / 128.0;
+                to_screen((x, function.evaluate_shape(x, range).clamp(0.0, 1.0)))
+            })
+            .collect::<Vec<_>>();
+        let color = if graph == 0 {
+            Color32::from_rgb(42, 190, 72)
+        } else {
+            Color32::from_rgb(220, 55, 55)
+        };
+        painter.add(egui::Shape::line(samples, Stroke::new(2.0, color)));
+    }
+
+    for (graph, point, value) in curve_points(editor) {
+        let graph_point = editor.curve_is_graph_point(graph, point).unwrap_or(true);
+        let selected = graph == *selected_graph && point == *selected_point;
+        let center = to_screen(value);
+        let radius = if selected { 5.0 } else { 3.5 };
+        let fill = if graph == 0 {
+            Color32::from_rgb(80, 230, 105)
+        } else {
+            Color32::from_rgb(245, 90, 90)
+        };
+        if graph_point {
+            painter.rect_filled(
+                egui::Rect::from_center_size(center, Vec2::splat(radius * 2.0)),
+                0.0,
+                fill,
+            );
+        } else {
+            painter.circle_filled(center, radius, fill);
+        }
+        painter.circle_stroke(center, radius, Stroke::new(1.0, Color32::BLACK));
+    }
+
+    if function.color_graph_type() != ColorGraphType::Scalar {
+        let bar = egui::Rect::from_min_size(
+            rect.left_bottom() + Vec2::new(28.0, 7.0),
+            Vec2::new(390.0, 16.0),
+        );
+        draw_function_color_gradient_horizontal(painter, bar, &function_color_stops(function));
+    }
+    changed
+}
+
 /// Editable color swatches for the N populated color slots of a
 /// color-graph function. Returns whether any color changed.
 pub(super) fn draw_function_color_stop_editors(
     ui: &mut Ui,
     function: &mut TagFunction,
     editable: bool,
+    mut color_popup: Option<&mut Option<MaterialColorPopup>>,
 ) -> bool {
     let slots = color_graph_slots(function.color_graph_type());
     if slots.is_empty() {
@@ -18,17 +273,23 @@ pub(super) fn draw_function_color_stop_editors(
     ui.vertical(|ui| {
         // Render high-end color at top (last slot) and low-end at bottom
         // (first slot), matching Guerilla's layout (top = y=1, bottom = y=0).
-        for &slot in slots.iter().rev() {
+        for (logical_index, &slot) in slots.iter().enumerate().rev() {
             let argb = function.header().colors[slot];
             let orig_alpha = (argb >> 24) as u8;
             let mut color = color32_from_argb(argb);
             ui.horizontal(|ui| {
-                // Swatch: always use color_edit_button so it's clickable even
-                // for non-key curve types — color stops are always editable.
-                let resp = if editable {
+                let dedicated = color_popup.as_deref_mut();
+                let resp = if dedicated.is_none() && editable {
                     ui.color_edit_button_srgba(&mut color)
                 } else {
-                    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(24.0), Sense::hover());
+                    let (rect, resp) = ui.allocate_exact_size(
+                        Vec2::splat(24.0),
+                        if editable {
+                            Sense::click()
+                        } else {
+                            Sense::hover()
+                        },
+                    );
                     ui.painter().rect_filled(rect, 0.0, color);
                     ui.painter()
                         .rect_stroke(rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
@@ -46,15 +307,31 @@ pub(super) fn draw_function_color_stop_editors(
                     .small()
                     .monospace(),
                 );
-                if resp.changed() {
-                    // Preserve the original alpha byte; Halo function headers
-                    // store these as "opaque ARGB" with alpha=0 meaning unused.
-                    let new_argb = ((orig_alpha as u32) << 24)
-                        | ((color.r() as u32) << 16)
-                        | ((color.g() as u32) << 8)
-                        | color.b() as u32;
-                    function.set_color(slot, new_argb);
-                    changed = true;
+                match dedicated {
+                    Some(popup) if resp.clicked() => {
+                        *popup = Some(
+                            MaterialColorPopup::new(
+                                &format!("Function color {}", logical_index + 1),
+                                color.r() as f32 / 255.0,
+                                color.g() as f32 / 255.0,
+                                color.b() as f32 / 255.0,
+                                1.0,
+                            )
+                            .with_function_draft_color(
+                                FunctionDraftColorTarget::H3Logical(logical_index),
+                                orig_alpha,
+                            ),
+                        );
+                    }
+                    None if resp.changed() => {
+                        let new_argb = ((orig_alpha as u32) << 24)
+                            | ((color.r() as u32) << 16)
+                            | ((color.g() as u32) << 8)
+                            | color.b() as u32;
+                        function.set_color(slot, new_argb);
+                        changed = true;
+                    }
+                    _ => {}
                 }
             });
         }

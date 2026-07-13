@@ -36,11 +36,6 @@ impl Baboon {
                         "Appearance",
                     );
                     ui.selectable_value(&mut self.settings_tab, SettingsTab::Tools, "Tools");
-                    ui.selectable_value(
-                        &mut self.settings_tab,
-                        SettingsTab::Developer,
-                        "Developer",
-                    );
                 });
                 ui.separator();
                 ui.add_space(8.0);
@@ -51,7 +46,6 @@ impl Baboon {
                     SettingsTab::EditingKitAliases => self.draw_settings_aliases_tab(ui),
                     SettingsTab::Appearance => self.draw_settings_appearance_tab(ui),
                     SettingsTab::Tools => self.draw_settings_tools_tab(ui),
-                    SettingsTab::Developer => self.draw_settings_developer_tab(ui),
                 }
             });
         if !open {
@@ -427,20 +421,6 @@ impl Baboon {
                 self.status = "Blender path cleared".to_owned();
             }
         });
-    }
-
-    pub(super) fn draw_settings_developer_tab(&mut self, ui: &mut Ui) {
-        ui.label(RichText::new("Developer").color(text_dark()).strong());
-        ui.add_space(4.0);
-        ui.checkbox(
-            &mut self.use_new_h3_function_editor,
-            "Use new H3+ function editor",
-        );
-        ui.label(
-            RichText::new("Experimental Foundation-style presentation. Applies when a new H3+, ODST, Reach, or H4 function popup opens; Halo 2 retains its separate legacy editor.")
-                .color(subtle_dark())
-                .small(),
-        );
     }
 }
 

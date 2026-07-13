@@ -3452,7 +3452,6 @@ impl Baboon {
             editing_kit_favorites: self.editing_kit_favorites.clone(),
             custom_color_swatches: self.custom_color_swatches.clone(),
             palette_last_dir: self.palette_last_dir.clone(),
-            use_new_h3_function_editor: self.use_new_h3_function_editor,
         }
     }
 

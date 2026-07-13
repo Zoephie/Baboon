@@ -18,7 +18,6 @@ pub(in crate::app) enum SettingsTab {
     EditingKitAliases,
     Appearance,
     Tools,
-    Developer,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -140,9 +139,6 @@ pub(in crate::app) struct GuiPrefs {
     pub(in crate::app) editing_kit_favorites: Vec<EditingKitFavorites>,
     pub(in crate::app) custom_color_swatches: Vec<Option<[u8; 4]>>,
     pub(in crate::app) palette_last_dir: Option<PathBuf>,
-    /// Enables the experimental Foundation-style H3+ function editor for new
-    /// popups. H2 always retains its separate legacy editor.
-    pub(in crate::app) use_new_h3_function_editor: bool,
 }
 
 impl Default for GuiPrefs {
@@ -171,7 +167,6 @@ impl Default for GuiPrefs {
             editing_kit_favorites: Vec::new(),
             custom_color_swatches: vec![None; CUSTOM_COLOR_SWATCH_COUNT],
             palette_last_dir: None,
-            use_new_h3_function_editor: false,
         }
     }
 }
