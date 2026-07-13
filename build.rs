@@ -103,7 +103,12 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
         let target = dst.join(entry.file_name());
         if path.is_dir() {
             copy_dir_recursive(&path, &target)?;
-        } else if path.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("json") {
+        } else if path.is_file()
+            && matches!(
+                path.extension().and_then(|ext| ext.to_str()),
+                Some("json" | "sqlite3")
+            )
+        {
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent)?;
             }

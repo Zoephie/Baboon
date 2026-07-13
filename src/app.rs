@@ -66,6 +66,8 @@ mod field_docs;
 use field_docs::*;
 mod help_docs;
 use help_docs::*;
+mod script_docs;
+use script_docs::*;
 mod prefs;
 use prefs::*;
 mod browser;
@@ -182,6 +184,7 @@ pub struct Baboon {
     about_open: bool,
     help_panel_tab: HelpPanelTab,
     help_docs: HelpDocsState,
+    script_docs: ScriptDocsUiState,
     map_names_game_tab: MapNamesGameTab,
     tool_commands: ToolCommandsUiState,
     tool_commands_window_pos: Option<egui::Pos2>,
@@ -372,6 +375,7 @@ impl Baboon {
             about_open: false,
             help_panel_tab: HelpPanelTab::About,
             help_docs: HelpDocsState::load(),
+            script_docs: ScriptDocsUiState::default(),
             map_names_game_tab: MapNamesGameTab::HaloCe,
             tool_commands: ToolCommandsUiState::default(),
             tool_commands_window_pos: prefs.tool_commands_window_pos,
