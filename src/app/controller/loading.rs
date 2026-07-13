@@ -113,10 +113,19 @@ impl Baboon {
                     let n = scanned.len();
                     source.group_tree = crate::source::build_group_tree(&scanned);
                     source.all_entries = scanned;
+                    let browser_refresh_error = if let TagSource::LooseFolder { root, .. } =
+                        &source.source
+                    {
+                        reset_lazy_folder_browser(root, &mut source.tree, &mut source.entries).err()
+                    } else {
+                        None
+                    };
                     source.reverse_dependencies = None;
                     self.field_index.invalidate();
-                    self.status =
-                        format!("Tag index complete: {n} tags; building reference index...");
+                    self.status = browser_refresh_error.map_or_else(
+                        || format!("Tag index complete: {n} tags; building reference index..."),
+                        |error| format!("Tag index complete, but browser refresh failed: {error}"),
+                    );
                     build_reference_index = true;
                     if let (Some(game), TagSource::LooseFolder { root, .. }) =
                         (source.game.clone(), &source.source)

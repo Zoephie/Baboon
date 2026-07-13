@@ -747,7 +747,7 @@ impl Baboon {
         }
     }
 
-    fn begin_refresh_entry_index(&mut self, ctx: egui::Context) {
+    pub(super) fn begin_refresh_entry_index(&mut self, ctx: egui::Context) {
         if self.scanning_entries || self.refreshing_entry_index {
             return;
         }
@@ -773,6 +773,28 @@ impl Baboon {
         });
     }
 
+    pub(super) fn refresh_tag_browser(&mut self, ctx: egui::Context) {
+        let reset_result = self.source.as_mut().and_then(|source| {
+            let TagSource::LooseFolder { root, .. } = &source.source else {
+                return None;
+            };
+            Some(reset_lazy_folder_browser(
+                root,
+                &mut source.tree,
+                &mut source.entries,
+            ))
+        });
+        match reset_result {
+            Some(Ok(())) => {
+                self.source_generation = self.source_generation.wrapping_add(1);
+                self.status = "Tag browser refreshed; checking index...".to_owned();
+                self.begin_refresh_entry_index(ctx);
+            }
+            Some(Err(error)) => self.status = format!("Tag browser refresh failed: {error}"),
+            None => self.status = "No loose tag folder is loaded".to_owned(),
+        }
+    }
+
     fn schedule_next_entry_index_refresh(&mut self, ctx: &egui::Context) {
         let now = ctx.input(|input| input.time);
         self.next_entry_index_refresh_at = now + ENTRY_INDEX_REFRESH_INTERVAL_SECS;
@@ -785,12 +807,22 @@ impl Baboon {
         let n = refresh.entries.len();
         source.group_tree = crate::source::build_group_tree(&refresh.entries);
         source.all_entries = refresh.entries;
+        let browser_refresh_error = if let TagSource::LooseFolder { root, .. } = &source.source {
+            reset_lazy_folder_browser(root, &mut source.tree, &mut source.entries).err()
+        } else {
+            None
+        };
         source.reverse_dependencies = None;
         self.field_index.invalidate();
         self.source_generation = self.source_generation.wrapping_add(1);
-        self.status = format!(
-            "Index updated: {n} tags ({} added, {} changed, {} removed)",
-            refresh.added, refresh.updated, refresh.removed
+        self.status = browser_refresh_error.map_or_else(
+            || {
+                format!(
+                    "Index updated: {n} tags ({} added, {} changed, {} removed)",
+                    refresh.added, refresh.updated, refresh.removed
+                )
+            },
+            |error| format!("Index updated, but browser refresh failed: {error}"),
         );
 
         if let (Some(game), TagSource::LooseFolder { root, .. }) =
@@ -4232,6 +4264,20 @@ impl Baboon {
         }
     }
 }
+
+fn reset_lazy_folder_browser(
+    root: &Path,
+    tree: &mut TagTree,
+    entries: &mut Vec<TagEntry>,
+) -> Result<(), String> {
+    *tree = crate::source::build_folder_directory_tree(root).map_err(|error| error.to_string())?;
+    entries.clear();
+    Ok(())
+}
+
+#[cfg(test)]
+#[path = "tests/browser_refresh.rs"]
+mod browser_refresh_tests;
 
 enum SaveChangesPromptAction {
     None,

@@ -159,6 +159,22 @@ impl Baboon {
                                 "Rebuilding index...",
                             );
                         }
+                        let can_refresh_browser = self.source.as_ref().is_some_and(|source| {
+                            matches!(source.source, TagSource::LooseFolder { .. })
+                                && source.game.is_some()
+                        });
+                        if ui
+                            .add_enabled(
+                                can_refresh_browser
+                                    && !self.scanning_entries
+                                    && !self.refreshing_entry_index,
+                                egui::Button::new("Refresh Tag Browser"),
+                            )
+                            .clicked()
+                        {
+                            ui.close_menu();
+                            self.refresh_tag_browser(ctx.clone());
+                        }
                         ui.separator();
                         if ui.button("Settings...").clicked() {
                             self.settings_open = true;
