@@ -68,6 +68,17 @@ pub(in crate::app) fn draw_foundation_inline_function_row(
     edit: &mut FieldEditContext<'_>,
 ) {
     view = view.with_edit(foundation_function_edit_paths(data_path));
+
+    // H3+ mapping functions are commonly wrapped in a schema struct containing
+    // a `data` field (bipeds, particles, beams, contrails, and many others).
+    // Those wrappers used to fall through to the old inline editor even though
+    // direct function fields already opened the Foundation-compatible popup.
+    // Keep only the genuinely legacy H2 byte format inline.
+    if uses_foundation_function_popup(&view) {
+        draw_foundation_wrapped_function_row(ui, label, view, depth, edit);
+        return;
+    }
+
     ui.horizontal_top(|ui| {
         ui.add_space(depth as f32 * 12.0);
         foundation_label_cell(ui, &label, None);
@@ -105,6 +116,66 @@ pub(in crate::app) fn draw_foundation_inline_function_row(
     });
 }
 
+fn uses_foundation_function_popup(view: &FunctionView) -> bool {
+    view.h2_legacy.is_none()
+}
+
+fn draw_foundation_wrapped_function_row(
+    ui: &mut Ui,
+    label: String,
+    view: FunctionView,
+    depth: usize,
+    edit: &mut FieldEditContext<'_>,
+) {
+    ui.horizontal_top(|ui| {
+        ui.add_space(depth as f32 * 12.0);
+        foundation_label_cell(ui, &label, None);
+        Frame::none()
+            .fill(foundation_group_bg())
+            .stroke(Stroke::new(1.0, foundation_group_edge()))
+            .inner_margin(egui::Margin::same(6.0))
+            .show(ui, |ui| {
+                ui.vertical(|ui| {
+                    ui.set_min_width(640.0);
+                    ui.horizontal(|ui| {
+                        foundation_input_cell(
+                            ui,
+                            &shader_function_grid_text(&view.function),
+                            520.0,
+                        );
+                        let function_button = foundation_header_button_clicked_hint(
+                            ui,
+                            "f()",
+                            edit.editable,
+                            Some("Function is read-only"),
+                        );
+                        if function_button {
+                            *edit.function_request = Some(FunctionPopup::new(
+                                edit.tag_key.to_owned(),
+                                label.clone(),
+                                view.clone(),
+                                true,
+                            ));
+                        }
+                    });
+                    ui.add_space(4.0);
+                    ui.push_id(("wrapped_function", data_path_id(&view)), |ui| {
+                        let mut preview = FunctionView::from_function(view.function.clone());
+                        let mut selected = 0usize;
+                        draw_function_editor_contents(ui, &mut preview, false, &mut selected, None);
+                    });
+                });
+            });
+    });
+}
+
+fn data_path_id(view: &FunctionView) -> &str {
+    view.edit
+        .as_ref()
+        .and_then(|paths| paths.data.data_field_path())
+        .unwrap_or("function")
+}
+
 pub(in crate::app) fn foundation_function_edit_paths(data_path: &str) -> FunctionEditPaths {
     FunctionEditPaths {
         data: if is_vibration_function_data_path(data_path) {
@@ -124,6 +195,10 @@ pub(in crate::app) fn foundation_function_edit_paths(data_path: &str) -> Functio
 fn is_vibration_function_data_path(path: &str) -> bool {
     is_vibration_function_path(path)
 }
+
+#[cfg(test)]
+#[path = "../tests/function_editor_routing.rs"]
+mod function_editor_routing_tests;
 
 /// First-pass editable function types — others stay read-only (graph +
 /// controls disabled) but still round-trip on save.

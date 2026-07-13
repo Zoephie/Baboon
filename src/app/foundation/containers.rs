@@ -1844,20 +1844,36 @@ pub(in crate::app) fn foundation_header_toggle_cell(
     ui.painter().rect_filled(rect, 4.0, fill);
     ui.painter()
         .rect_stroke(rect, 4.0, Stroke::new(1.0, foundation_input_edge()));
-    let glyph = if open { "▾" } else { "▸" };
-    ui.painter().text(
-        rect.center(),
-        Align2::CENTER_CENTER,
-        glyph,
-        FontId::proportional(14.0),
-        if enabled {
-            text_dark()
-        } else {
-            // Empty blocks cannot expand, but the disabled disclosure glyph
-            // must remain distinguishable from an unlabelled placeholder cell.
-            Color32::from_rgb(176, 176, 176)
-        },
-    );
+    // Use egui's vector-painted disclosure triangle. The previous Unicode
+    // `▾`/`▸` glyph depended on the active proportional font containing those
+    // characters and rendered as an empty fallback square for some inherited
+    // struct headers.
+    let icon_color = if enabled {
+        text_dark()
+    } else {
+        // Empty blocks cannot expand, but the disabled disclosure icon must
+        // remain distinguishable from an unlabelled placeholder cell.
+        Color32::from_rgb(176, 176, 176)
+    };
+    // `paint_default_icon` fills the response rect. Give it a centered visual
+    // sub-rect while preserving `response` itself as the full 24x22 click
+    // target, so inherited-group and repeatable-block rows keep their existing
+    // spacing and hit area.
+    let mut icon_response = response.clone();
+    icon_response.rect = egui::Rect::from_center_size(rect.center(), rect.size() * 0.5);
+    ui.scope(|ui| {
+        let widgets = &mut ui.visuals_mut().widgets;
+        widgets.noninteractive.fg_stroke.color = icon_color;
+        widgets.inactive.fg_stroke.color = icon_color;
+        widgets.hovered.fg_stroke.color = icon_color;
+        widgets.active.fg_stroke.color = icon_color;
+        widgets.open.fg_stroke.color = icon_color;
+        egui::collapsing_header::paint_default_icon(
+            ui,
+            if open { 1.0 } else { 0.0 },
+            &icon_response,
+        );
+    });
     response
 }
 
