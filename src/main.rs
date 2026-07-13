@@ -8,6 +8,7 @@
 mod app;
 mod format;
 mod source;
+mod storage;
 mod tool_commands;
 
 use anyhow::Result;

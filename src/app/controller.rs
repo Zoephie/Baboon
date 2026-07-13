@@ -3957,7 +3957,7 @@ impl Baboon {
         if prefs == self.saved_prefs && self.terminal_open_games == self.saved_terminal_open_games {
             return;
         }
-        match save_gui_prefs(&prefs, &self.terminal_open_games) {
+        match save_gui_prefs(&prefs, &self.terminal_open_games, true) {
             Ok(()) => {
                 self.saved_prefs = prefs;
                 self.saved_terminal_open_games = self.terminal_open_games.clone();

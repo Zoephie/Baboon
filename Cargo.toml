@@ -34,3 +34,11 @@ walkdir = "2"
 [profile.test]
 opt-level = 1
 debug = false
+
+# audiopus_sys builds vendored Opus through CMake. A native Debug build uses
+# MSVCRTD, while Rust's MSVC target links the release CRT even for `cargo build`,
+# producing unresolved _CrtDbgReportW symbols. Keep only this native dependency
+# on its release-runtime path during development builds.
+[profile.dev.package.audiopus_sys]
+opt-level = 1
+debug = false

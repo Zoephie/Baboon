@@ -50,6 +50,9 @@ fn cache_root_str_key(root: &str) -> String {
 }
 
 fn app_cache_path(filename: &str, windows_folder: &str, unix_folder: &str) -> PathBuf {
+    if windows_folder == "Baboon" && unix_folder == "baboon" {
+        return crate::storage::data_path(filename);
+    }
     if let Some(appdata) = std::env::var_os("APPDATA") {
         return PathBuf::from(appdata).join(windows_folder).join(filename);
     }

@@ -5,6 +5,14 @@ use super::*;
 
 impl Baboon {
     pub(super) fn draw_root_ui(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.first_run_wizard.is_some() {
+            ctx.set_zoom_factor(self.ui_scale);
+            set_dark_mode(self.dark_mode);
+            ctx.set_visuals(foundation_visuals());
+            egui::CentralPanel::default().show(ctx, |_ui| {});
+            self.draw_first_run_wizard(ctx);
+            return;
+        }
         self.prepare_root_frame(ctx);
 
         egui::TopBottomPanel::top("menu")

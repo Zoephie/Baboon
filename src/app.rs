@@ -174,6 +174,7 @@ pub struct Baboon {
     new_ek_alias_name: String,
     new_ek_alias_game: String,
     saved_prefs: GuiPrefs,
+    first_run_wizard: Option<FirstRunWizardState>,
     settings_open: bool,
     settings_tab: SettingsTab,
     new_tag_open: bool,
@@ -287,16 +288,23 @@ pub struct Baboon {
 
 impl Baboon {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let storage = crate::storage::initialize();
         cc.egui_ctx.set_fonts(foundation_fonts());
         cc.egui_ctx.set_style(foundation_style());
         egui_extras::install_image_loaders(&cc.egui_ctx);
         let prefs = load_gui_prefs();
         let terminal_open_games = load_terminal_open_games();
+        let first_run_wizard =
+            (!load_first_run_complete()).then(|| FirstRunWizardState::new(storage.mode));
         set_dark_mode(prefs.dark_mode);
         cc.egui_ctx.set_visuals(foundation_visuals());
         let names = TagNameIndex::load_from_definitions(&locate_definitions_root());
         let (tx, rx) = mpsc::channel();
-        let last_session = load_last_session().and_then(LastOpenedWindowsPrompt::from_session);
+        let last_session = first_run_wizard
+            .is_none()
+            .then(load_last_session)
+            .flatten()
+            .and_then(LastOpenedWindowsPrompt::from_session);
         let (last_opened_windows, auto_restore_session) = match prefs.session_restore {
             SessionRestore::Always => match last_session {
                 Some(prompt) => {
@@ -356,6 +364,7 @@ impl Baboon {
             new_ek_alias_name: String::new(),
             new_ek_alias_game: "halo2_mcc".to_owned(),
             saved_prefs: prefs.clone(),
+            first_run_wizard,
             settings_open: false,
             settings_tab: SettingsTab::Startup,
             new_tag_open: false,

@@ -4,53 +4,19 @@
 use super::*;
 
 pub(super) fn prefs_path() -> PathBuf {
-    app_prefs_path("Baboon", "baboon", ".baboon-prefs.json")
+    crate::storage::data_path("prefs.json")
 }
 
 pub(super) fn last_session_path() -> PathBuf {
-    app_data_path(
-        "Baboon",
-        "baboon",
-        "last_session.json",
-        ".baboon-last-session.json",
-    )
+    crate::storage::data_path("last_session.json")
 }
 
 pub(super) fn terminal_logs_dir() -> PathBuf {
-    if let Some(dir) = app_data_dir("Baboon", "baboon") {
-        return dir.join("terminal-logs");
-    }
-    PathBuf::from("terminal-logs")
+    crate::storage::data_path("terminal-logs")
 }
 
 fn legacy_prefs_path() -> PathBuf {
-    app_prefs_path("Genesis", "genesis", ".genesis-prefs.json")
-}
-
-fn app_prefs_path(windows_folder: &str, unix_folder: &str, fallback_name: &str) -> PathBuf {
-    app_data_path(windows_folder, unix_folder, "prefs.json", fallback_name)
-}
-
-fn app_data_path(
-    windows_folder: &str,
-    unix_folder: &str,
-    filename: &str,
-    fallback_name: &str,
-) -> PathBuf {
-    if let Some(dir) = app_data_dir(windows_folder, unix_folder) {
-        return dir.join(filename);
-    }
-    PathBuf::from(fallback_name)
-}
-
-fn app_data_dir(windows_folder: &str, unix_folder: &str) -> Option<PathBuf> {
-    if let Some(appdata) = std::env::var_os("APPDATA") {
-        return Some(PathBuf::from(appdata).join(windows_folder));
-    }
-    if let Some(home) = std::env::var_os("USERPROFILE") {
-        return Some(PathBuf::from(home).join(".config").join(unix_folder));
-    }
-    None
+    crate::storage::legacy_installed_path("prefs.json")
 }
 
 fn read_prefs_text() -> Option<String> {
@@ -58,6 +24,29 @@ fn read_prefs_text() -> Option<String> {
         .or_else(|_| fs::read_to_string(legacy_prefs_path()))
         .ok()
 }
+
+pub(super) fn load_first_run_complete() -> bool {
+    first_run_complete_from_text(read_prefs_text().as_deref())
+}
+
+fn first_run_complete_from_text(text: Option<&str>) -> bool {
+    let Some(text) = text else {
+        return false;
+    };
+    let Ok(value) = serde_json::from_str::<Value>(text) else {
+        // A pre-existing but malformed preference file still means this is not
+        // the user's first launch; normal preference loading will use defaults.
+        return true;
+    };
+    value
+        .get("first_run_complete")
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
+}
+
+#[cfg(test)]
+#[path = "tests/prefs_first_run.rs"]
+mod first_run_tests;
 
 pub(super) fn load_gui_prefs() -> GuiPrefs {
     let Some(text) = read_prefs_text() else {
@@ -382,6 +371,7 @@ fn load_ek_folder_aliases(value: &Value) -> Vec<EkFolderAlias> {
 pub(super) fn save_gui_prefs(
     prefs: &GuiPrefs,
     terminal_open_games: &HashSet<String>,
+    first_run_complete: bool,
 ) -> Result<(), String> {
     let path = prefs_path();
     if let Some(parent) = path.parent() {
@@ -445,11 +435,22 @@ pub(super) fn save_gui_prefs(
             swatch.map(|rgba| format!("#{:02X}{:02X}{:02X}{:02X}", rgba[0], rgba[1], rgba[2], rgba[3]))
         }).collect::<Vec<_>>(),
         "palette_last_dir": prefs.palette_last_dir.as_ref().map(|path| path.display().to_string()),
+        "storage_mode": crate::storage::active_mode().map(crate::storage::StorageMode::as_str),
+        "first_run_complete": first_run_complete,
         "terminal_open_games": games,
     });
     let text = serde_json::to_string_pretty(&value)
         .map_err(|error| format!("Could not encode preferences: {error}"))?;
-    fs::write(path, text).map_err(|error| format!("Could not save preferences: {error}"))
+    write_text_atomic(&path, &text)
+}
+
+fn write_text_atomic(path: &Path, text: &str) -> Result<(), String> {
+    let temp = path.with_extension("json.tmp");
+    fs::write(&temp, text).map_err(|error| format!("Could not save preferences: {error}"))?;
+    if path.exists() {
+        fs::remove_file(path).map_err(|error| format!("Could not replace preferences: {error}"))?;
+    }
+    fs::rename(&temp, path).map_err(|error| format!("Could not install preferences: {error}"))
 }
 
 /// Load the set of game identifiers for which the terminal should auto-open.
