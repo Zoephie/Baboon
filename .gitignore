@@ -10,5 +10,4 @@ indexes.sqlite3
 baboon_log.txt
 AGENTS.md
 .codex
-conversion_mappings.json
 docs/tag-conversion-mappings.md

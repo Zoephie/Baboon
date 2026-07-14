@@ -18,7 +18,7 @@ pub(super) const CONVERSION_GAMES: &[&str] = &[
     "halo2amp_mcc",
 ];
 
-const CONVERSION_MAPPING_CATALOG: &str = include_str!("../../conversion_mappings.json");
+const CONVERSION_MAPPING_CATALOG: &str = include_str!("../../mappings/conversion_mappings.json");
 
 /// These groups contain layout features which `TagFile::new` cannot currently
 /// reconstruct closely enough for the native editing kits. Start from an

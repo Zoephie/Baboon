@@ -1,0 +1,470 @@
+{
+  "version": 1,
+  "coverage": "all_supported_groups",
+  "covered_groups": [
+    "ai_dialogue_globals",
+    "ai_mission_dialogue",
+    "antenna",
+    "area_screen_effect",
+    "asset_depot_storage",
+    "bink",
+    "biped",
+    "bitmap",
+    "breakable_surface",
+    "cache_file_resource_gestalt",
+    "cache_file_resource_layout_table",
+    "camera_fx_settings",
+    "camera_track",
+    "cellular_automata",
+    "cellular_automata2d",
+    "character",
+    "cinematic",
+    "cinematic_scene",
+    "cloth",
+    "collision_damage",
+    "collision_model",
+    "color_table",
+    "compute_shader",
+    "crate",
+    "creature",
+    "damage_effect",
+    "damage_response_definition",
+    "decal_system",
+    "decorator_set",
+    "detail_object_collection",
+    "device",
+    "device_control",
+    "device_machine",
+    "device_terminal",
+    "dialogue",
+    "effect",
+    "effect_globals",
+    "effect_scenery",
+    "equipment",
+    "flock",
+    "fluid_dynamics",
+    "game_engine_settings_definition",
+    "giant",
+    "global_pixel_shader",
+    "global_vertex_shader",
+    "globals",
+    "hlsl_include",
+    "item",
+    "leaf_system",
+    "lens_flare",
+    "light",
+    "light_volume_system",
+    "material_effects",
+    "meter",
+    "model",
+    "model_animation_graph",
+    "muffin",
+    "multilingual_unicode_string_list",
+    "multiplayer_globals",
+    "multiplayer_variant_settings_interface_definition",
+    "new_cinematic_lighting",
+    "object",
+    "particle",
+    "particle_model",
+    "particle_physics",
+    "performance_throttles",
+    "physics_model",
+    "pixel_shader",
+    "point_physics",
+    "projectile",
+    "rasterizer_cache_file_globals",
+    "rasterizer_globals",
+    "render_method",
+    "render_method_definition",
+    "render_method_option",
+    "render_method_template",
+    "render_model",
+    "render_water_ripple",
+    "sandbox_text_value_pair_definition",
+    "scenario",
+    "scenario_lightmap",
+    "scenario_lightmap_bsp_data",
+    "scenario_required_resource",
+    "scenario_structure_bsp",
+    "scenario_structure_lighting_info",
+    "scenery",
+    "shader",
+    "shader_cortana",
+    "shader_custom",
+    "shader_decal",
+    "shader_foliage",
+    "shader_halogram",
+    "shader_light_volume",
+    "shader_particle",
+    "shader_skin",
+    "shader_terrain",
+    "shader_water",
+    "shared_cache_file_layout",
+    "shield_impact",
+    "sound",
+    "sound_classes",
+    "sound_effect_collection",
+    "sound_effect_template",
+    "sound_environment",
+    "sound_global_propagation",
+    "sound_looping",
+    "sound_mix",
+    "sound_scenery",
+    "stereo_system",
+    "structure_design",
+    "structure_seams",
+    "style",
+    "tag_dependency_list",
+    "tag_import_information",
+    "tag_template_unit_test",
+    "test_tag",
+    "text_value_pair_definition",
+    "unit",
+    "user_interface_globals_definition",
+    "user_interface_shared_globals_definition",
+    "user_interface_sounds_definition",
+    "vehicle",
+    "vertex_shader",
+    "weapon",
+    "wind"
+  ],
+  "struct_mappings": [
+    {
+      "group": "light",
+      "source_games": ["halo3_mcc", "halo3odst_mcc", "haloreach_mcc"],
+      "target_games": ["halo4_mcc", "halo2amp_mcc"],
+      "source_path": "",
+      "target_path": "midnight_light_parameters"
+    },
+    {
+      "group": "sound_environment",
+      "source_games": ["halo3_mcc", "halo3odst_mcc"],
+      "target_games": ["haloreach_mcc"],
+      "source_path": "",
+      "target_path": "reverb settings"
+    }
+  ],
+  "incompatible_pairs": [
+    {
+      "group": "cui_screen",
+      "source_games": ["haloreach_mcc"],
+      "target_games": ["halo4_mcc", "halo2amp_mcc"],
+      "reason": "Reach stores editable component, overlay, binding, and expression tables; Halo 4 and H2A use string references plus a compiled logic/system representation."
+    },
+    {
+      "group": "contrail_system",
+      "source_games": ["halo3_mcc"],
+      "target_games": ["halo3odst_mcc"],
+      "reason": "The ODST definition exposes an invalid fixed-array layout for this pair; attempting structural conversion would index outside the declared element layout."
+    },
+    {
+      "group": "contrail_system",
+      "source_games": ["halo3_mcc", "halo3odst_mcc"],
+      "target_games": ["haloreach_mcc"],
+      "reason": "The legacy and Reach definitions expose incompatible fixed-array layouts; attempting structural conversion would index outside the declared element layout."
+    },
+    {
+      "group": "lightmapper_globals",
+      "source_games": ["haloreach_mcc"],
+      "target_games": ["halo4_mcc", "halo2amp_mcc"],
+      "reason": "Reach quality-setting blocks were replaced by separate global and local lightmapper setting structures with no direct authored-field equivalence."
+    },
+    {
+      "group": "scenario_structure_lighting_resource",
+      "source_games": ["halo3_mcc"],
+      "target_games": ["halo3odst_mcc"],
+      "reason": "This engine-generated lighting resource has no portable authored root fields; its resource payload conversion is intentionally unsupported."
+    },
+    {
+      "group": "scenario_structure_lighting_resource",
+      "source_games": ["halo3_mcc", "halo3odst_mcc"],
+      "target_games": ["haloreach_mcc"],
+      "reason": "This engine-generated lighting resource has no portable authored root fields; its resource payload conversion is intentionally unsupported."
+    },
+    {
+      "group": "sound_environment",
+      "source_games": ["halo3_mcc", "halo3odst_mcc"],
+      "target_games": ["halo4_mcc", "halo2amp_mcc"],
+      "reason": "Halo 3 uses authored room/reverb scalars while Halo 4 and H2A use a WWise environment name and wet-mix controls; there is no lossless semantic mapping."
+    },
+    {
+      "group": "vision_mode",
+      "source_games": ["halo3odst_mcc", "haloreach_mcc"],
+      "target_games": ["halo4_mcc", "halo2amp_mcc"],
+      "reason": "The legacy radius, ping, color, and mask fields were replaced by Halo 4's screen, environment, biped, vehicle, and crosshair pass blocks."
+    }
+  ],
+  "unusable_schemas": [
+    {
+      "group": "contrail_system",
+      "games": ["halo3odst_mcc", "haloreach_mcc"],
+      "reason": "The dumped definition contains an invalid fixed-array layout and panics while constructing the tag layout."
+    }
+  ],
+  "reference_drops": [
+    {
+      "group": "model",
+      "source_games": ["halo3_mcc", "halo3odst_mcc"],
+      "target_games": ["haloreach_mcc", "halo4_mcc", "halo2amp_mcc"],
+      "source_path": "lod_render_model",
+      "reason": "The target model schema removed Halo 3's separate legacy LOD render-model slot; native target model tags have no equivalent reference field."
+    },
+    {
+      "group": "particle",
+      "source_games": ["halo3_mcc", "halo3odst_mcc"],
+      "target_games": ["haloreach_mcc", "halo4_mcc", "halo2amp_mcc"],
+      "source_path": "shader",
+      "reason": "The target particle layout uses its actual shader/render-method fields and native target tags do not retain Halo 3's legacy custom shader reference."
+    }
+  ],
+  "field_aliases": [
+    {
+      "group": "cookie_purchase_globals",
+      "source_games": ["haloreach_mcc"],
+      "target_games": ["halo4_mcc", "halo2amp_mcc"],
+      "source_struct_guid": "dc383b79724b7afd27a284b487902ee2",
+      "target_struct_guid": "dc383b79724b7afd27a284b487902ee2",
+      "source": "helmet purchasable families",
+      "target": "helmet purchasable appearance families"
+    },
+    {
+      "group": "cookie_purchase_globals",
+      "source_games": ["haloreach_mcc"],
+      "target_games": ["halo4_mcc", "halo2amp_mcc"],
+      "source_struct_guid": "dc383b79724b7afd27a284b487902ee2",
+      "target_struct_guid": "dc383b79724b7afd27a284b487902ee2",
+      "source": "left shoulder purchasable families",
+      "target": "left shoulder purchasable appearance families"
+    },
+    {
+      "group": "cookie_purchase_globals",
+      "source_games": ["haloreach_mcc"],
+      "target_games": ["halo4_mcc", "halo2amp_mcc"],
+      "source_struct_guid": "dc383b79724b7afd27a284b487902ee2",
+      "target_struct_guid": "dc383b79724b7afd27a284b487902ee2",
+      "source": "right shoulder purchasable families",
+      "target": "right shoulder purchasable appearance families"
+    },
+    {
+      "group": "cookie_purchase_globals",
+      "source_games": ["haloreach_mcc"],
+      "target_games": ["halo4_mcc", "halo2amp_mcc"],
+      "source_struct_guid": "dc383b79724b7afd27a284b487902ee2",
+      "target_struct_guid": "dc383b79724b7afd27a284b487902ee2",
+      "source": "chest purchasable families",
+      "target": "chest purchasable appearance families"
+    },
+    {
+      "group": "cookie_purchase_globals",
+      "source_games": ["haloreach_mcc"],
+      "target_games": ["halo4_mcc", "halo2amp_mcc"],
+      "source_struct_guid": "dc383b79724b7afd27a284b487902ee2",
+      "target_struct_guid": "dc383b79724b7afd27a284b487902ee2",
+      "source": "visor tint purchasable families",
+      "target": "visor tint purchasable appearance families"
+    },
+    {
+      "group": "cookie_purchase_globals",
+      "source_games": ["haloreach_mcc"],
+      "target_games": ["halo4_mcc", "halo2amp_mcc"],
+      "source_struct_guid": "dc383b79724b7afd27a284b487902ee2",
+      "target_struct_guid": "dc383b79724b7afd27a284b487902ee2",
+      "source": "elite armor purchasable families",
+      "target": "elite armor purchasable appearance families"
+    },
+    {
+      "group": "cookie_purchase_globals",
+      "source_games": ["haloreach_mcc"],
+      "target_games": ["halo4_mcc", "halo2amp_mcc"],
+      "source_struct_guid": "dc383b79724b7afd27a284b487902ee2",
+      "target_struct_guid": "dc383b79724b7afd27a284b487902ee2",
+      "source": "primary emblem purchasable families",
+      "target": "primary emblem purchasable appearance families"
+    },
+    {
+      "group": "cookie_purchase_globals",
+      "source_games": ["haloreach_mcc"],
+      "target_games": ["halo4_mcc", "halo2amp_mcc"],
+      "source_struct_guid": "dc383b79724b7afd27a284b487902ee2",
+      "target_struct_guid": "dc383b79724b7afd27a284b487902ee2",
+      "source": "secondary emblem purchasable families",
+      "target": "secondary emblem purchasable appearance families"
+    },
+    {
+      "group": "light",
+      "source_games": ["halo3_mcc", "halo3odst_mcc", "haloreach_mcc"],
+      "target_games": ["halo4_mcc", "halo2amp_mcc"],
+      "source_struct_guid": "f2b91e672d48afb6250f2d90a165b6ed",
+      "target_struct_guid": "8e154bc7134600e0f6653d89a79de6e1",
+      "source": "type",
+      "target": "light type"
+    },
+    {
+      "group": "light",
+      "source_games": ["halo3_mcc", "halo3odst_mcc", "haloreach_mcc"],
+      "target_games": ["halo4_mcc", "halo2amp_mcc"],
+      "source_struct_guid": "f2b91e672d48afb6250f2d90a165b6ed",
+      "target_struct_guid": "8e154bc7134600e0f6653d89a79de6e1",
+      "source": "gel bitmap",
+      "target": "gobo tag path"
+    },
+    {
+      "group": "render_model",
+      "source_games": ["halo3_mcc", "halo3odst_mcc"],
+      "target_games": ["haloreach_mcc", "halo4_mcc", "halo2amp_mcc"],
+      "source_struct_guid": "411d27e578471259100c498a81d58751",
+      "target_struct_guid": "411d27e578471259100c498a81d58751",
+      "source": "coefficient",
+      "target": "spherical harmonic"
+    },
+    {
+      "group": "user_interface_sounds_definition",
+      "source_games": ["halo3_mcc", "halo3odst_mcc"],
+      "target_games": ["haloreach_mcc", "halo4_mcc", "halo2amp_mcc"],
+      "source_struct_guid": "55e8ff708543e72d04e6ba83b6e39715",
+      "target_struct_guid": "55e8ff708543e72d04e6ba83b6e39715",
+      "source": "error sound",
+      "target": "error"
+    },
+    {
+      "group": "user_interface_sounds_definition",
+      "source_games": ["halo3_mcc", "halo3odst_mcc"],
+      "target_games": ["haloreach_mcc", "halo4_mcc", "halo2amp_mcc"],
+      "source_struct_guid": "55e8ff708543e72d04e6ba83b6e39715",
+      "target_struct_guid": "55e8ff708543e72d04e6ba83b6e39715",
+      "source": "button a",
+      "target": "a button pressed"
+    },
+    {
+      "group": "user_interface_sounds_definition",
+      "source_games": ["halo3_mcc", "halo3odst_mcc"],
+      "target_games": ["haloreach_mcc", "halo4_mcc", "halo2amp_mcc"],
+      "source_struct_guid": "55e8ff708543e72d04e6ba83b6e39715",
+      "target_struct_guid": "55e8ff708543e72d04e6ba83b6e39715",
+      "source": "button b",
+      "target": "b button pressed"
+    },
+    {
+      "group": "user_interface_sounds_definition",
+      "source_games": ["halo3_mcc", "halo3odst_mcc"],
+      "target_games": ["haloreach_mcc", "halo4_mcc", "halo2amp_mcc"],
+      "source_struct_guid": "55e8ff708543e72d04e6ba83b6e39715",
+      "target_struct_guid": "55e8ff708543e72d04e6ba83b6e39715",
+      "source": "button x",
+      "target": "x button pressed"
+    },
+    {
+      "group": "user_interface_sounds_definition",
+      "source_games": ["halo3_mcc", "halo3odst_mcc"],
+      "target_games": ["haloreach_mcc", "halo4_mcc", "halo2amp_mcc"],
+      "source_struct_guid": "55e8ff708543e72d04e6ba83b6e39715",
+      "target_struct_guid": "55e8ff708543e72d04e6ba83b6e39715",
+      "source": "button y",
+      "target": "y button pressed"
+    },
+    {
+      "group": "user_interface_sounds_definition",
+      "source_games": ["halo3_mcc", "halo3odst_mcc"],
+      "target_games": ["haloreach_mcc", "halo4_mcc", "halo2amp_mcc"],
+      "source_struct_guid": "55e8ff708543e72d04e6ba83b6e39715",
+      "target_struct_guid": "55e8ff708543e72d04e6ba83b6e39715",
+      "source": "button start",
+      "target": "start button pressed"
+    },
+    {
+      "group": "user_interface_sounds_definition",
+      "source_games": ["halo3_mcc", "halo3odst_mcc"],
+      "target_games": ["haloreach_mcc", "halo4_mcc", "halo2amp_mcc"],
+      "source_struct_guid": "55e8ff708543e72d04e6ba83b6e39715",
+      "target_struct_guid": "55e8ff708543e72d04e6ba83b6e39715",
+      "source": "button back",
+      "target": "back button pressed"
+    },
+    {
+      "group": "user_interface_sounds_definition",
+      "source_games": ["halo3_mcc", "halo3odst_mcc"],
+      "target_games": ["haloreach_mcc", "halo4_mcc", "halo2amp_mcc"],
+      "source_struct_guid": "55e8ff708543e72d04e6ba83b6e39715",
+      "target_struct_guid": "55e8ff708543e72d04e6ba83b6e39715",
+      "source": "timer sound",
+      "target": "game start countdown timer tick"
+    },
+    {
+      "group": "user_interface_sounds_definition",
+      "source_games": ["halo3_mcc", "halo3odst_mcc"],
+      "target_games": ["haloreach_mcc", "halo4_mcc", "halo2amp_mcc"],
+      "source_struct_guid": "55e8ff708543e72d04e6ba83b6e39715",
+      "target_struct_guid": "55e8ff708543e72d04e6ba83b6e39715",
+      "source": "timer sound zero",
+      "target": "game start countdown timer final tick"
+    },
+    {
+      "group": "user_interface_sounds_definition",
+      "source_games": ["halo3_mcc", "halo3odst_mcc"],
+      "target_games": ["haloreach_mcc", "halo4_mcc", "halo2amp_mcc"],
+      "source_struct_guid": "55e8ff708543e72d04e6ba83b6e39715",
+      "target_struct_guid": "55e8ff708543e72d04e6ba83b6e39715",
+      "source": "alt timer sound",
+      "target": "alternate countdown timer tick"
+    },
+    {
+      "group": "user_interface_sounds_definition",
+      "source_games": ["halo3_mcc", "halo3odst_mcc"],
+      "target_games": ["haloreach_mcc", "halo4_mcc", "halo2amp_mcc"],
+      "source_struct_guid": "55e8ff708543e72d04e6ba83b6e39715",
+      "target_struct_guid": "55e8ff708543e72d04e6ba83b6e39715",
+      "source": "alt timer sound zero",
+      "target": "alternate countdown timer final tick"
+    }
+  ],
+  "option_aliases": [
+    {
+      "group": "bitmap",
+      "field": "bitmap curve",
+      "source_games": ["halo3_mcc", "halo3odst_mcc"],
+      "target_games": ["haloreach_mcc", "halo4_mcc", "halo2amp_mcc"],
+      "source": "sRGB",
+      "target": "sRGB (gamma 2.2)"
+    },
+    {
+      "group": "bitmap",
+      "field": "curve",
+      "source_games": ["halo3_mcc", "halo3odst_mcc"],
+      "target_games": ["haloreach_mcc", "halo4_mcc", "halo2amp_mcc"],
+      "source": "sRGB",
+      "target": "sRGB (gamma 2.2)"
+    },
+    {
+      "group": "effect",
+      "field": "flags",
+      "source_games": ["halo3_mcc", "halo3odst_mcc"],
+      "target_games": ["haloreach_mcc", "halo4_mcc", "halo2amp_mcc"],
+      "source": "collide with media",
+      "target": "collide with water"
+    },
+    {
+      "group": "particle",
+      "field": "main flags",
+      "source_games": ["halo3_mcc", "halo3odst_mcc"],
+      "target_games": ["haloreach_mcc", "halo4_mcc", "halo2amp_mcc"],
+      "source": "dies in media",
+      "target": "dies in water"
+    },
+    {
+      "group": "particle_physics",
+      "field": "flags",
+      "source_games": ["halo3_mcc", "halo3odst_mcc"],
+      "target_games": ["haloreach_mcc", "halo4_mcc", "halo2amp_mcc"],
+      "source": "collide with media",
+      "target": "collide with water"
+    },
+    {
+      "group": "weapon",
+      "field": "secondary flags",
+      "source_games": ["halo3_mcc", "halo3odst_mcc", "haloreach_mcc"],
+      "target_games": ["halo4_mcc", "halo2amp_mcc"],
+      "source": "magnitizes only when zoomed",
+      "target": "magnetizes only when zoomed"
+    }
+  ]
+}
