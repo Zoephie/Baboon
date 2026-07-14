@@ -77,7 +77,14 @@ impl Baboon {
                             }
                         });
                         ui.separator();
-                        if ui.button("Save Current Tag    Ctrl+S").clicked() {
+                        if icon_text_button(
+                            ui,
+                            ButtonIcon::Save,
+                            "Save Current Tag    Ctrl+S",
+                            true,
+                        )
+                        .clicked()
+                        {
                             ui.close_menu();
                             self.save_current_tag();
                         }
@@ -191,7 +198,8 @@ impl Baboon {
                             self.refresh_tag_browser(ctx.clone());
                         }
                         ui.separator();
-                        if ui.button("Settings...").clicked() {
+                        if icon_text_button(ui, ButtonIcon::Settings, "Settings...", true).clicked()
+                        {
                             self.settings_open = true;
                             ui.close_menu();
                         }
@@ -375,7 +383,7 @@ impl Baboon {
                             self.about_open = true;
                             ui.close_menu();
                         }
-                        if ui.button("Doc...").clicked() {
+                        if icon_text_button(ui, ButtonIcon::Doc, "Doc...", true).clicked() {
                             self.help_panel_tab = HelpPanelTab::Doc;
                             self.about_open = true;
                             ui.close_menu();
@@ -760,11 +768,18 @@ impl Baboon {
                         ui.visuals_mut().widgets.inactive.bg_fill = browser_search_bg();
                         ui.visuals_mut().widgets.hovered.bg_fill = browser_search_hover();
                         ui.visuals_mut().widgets.active.bg_fill = browser_search_hover();
-                        ui.add(
-                            egui::TextEdit::singleline(&mut self.filter)
-                                .hint_text("search tags")
-                                .desired_width(f32::INFINITY),
-                        );
+                        ui.horizontal(|ui| {
+                            let (icon_rect, _) =
+                                ui.allocate_exact_size(Vec2::new(18.0, 22.0), Sense::hover());
+                            let icon_rect =
+                                egui::Rect::from_center_size(icon_rect.center(), Vec2::splat(16.0));
+                            paint_button_icon_at(ui, ButtonIcon::SearchBar, icon_rect, text_dark());
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.filter)
+                                    .hint_text("search tags")
+                                    .desired_width(f32::INFINITY),
+                            );
+                        });
                     });
                     if let Some(warning) = browser::browser_filter_warning(&self.filter) {
                         ui.label(
@@ -780,16 +795,32 @@ impl Baboon {
                             ui.visuals_mut().widgets.inactive.bg_fill = browser_toolbar_bg();
                             ui.visuals_mut().widgets.hovered.bg_fill = browser_toolbar_active();
                             ui.visuals_mut().widgets.active.bg_fill = browser_toolbar_active();
-                            ui.selectable_value(
-                                &mut self.browser_mode,
-                                BrowserMode::Folders,
-                                "Folders",
+                            let folders = ui.add(
+                                egui::Button::image_and_text(
+                                    button_icon_image(
+                                        ui,
+                                        ButtonIcon::FolderOpen,
+                                        text_dark(),
+                                        16.0,
+                                    ),
+                                    "Folders",
+                                )
+                                .selected(self.browser_mode == BrowserMode::Folders),
                             );
-                            ui.selectable_value(
-                                &mut self.browser_mode,
-                                BrowserMode::Groups,
-                                "Groups",
-                            )
+                            if folders.clicked() {
+                                self.browser_mode = BrowserMode::Folders;
+                            }
+                            let groups = ui.add(
+                                egui::Button::image_and_text(
+                                    button_icon_image(ui, ButtonIcon::Group, text_dark(), 16.0),
+                                    "Groups",
+                                )
+                                .selected(self.browser_mode == BrowserMode::Groups),
+                            );
+                            if groups.clicked() {
+                                self.browser_mode = BrowserMode::Groups;
+                            }
+                            groups
                         });
                         let groups_btn = groups_btn.inner;
                         if groups_btn.clicked()
@@ -805,26 +836,44 @@ impl Baboon {
 
                             ui.visuals_mut().widgets.hovered.bg_fill = browser_toolbar_active();
                             ui.visuals_mut().widgets.active.bg_fill = browser_toolbar_active();
-                            ui.menu_button("Sort", |ui| {
-                                for option in BrowserSort::ALL {
-                                    if ui
-                                        .selectable_label(
-                                            self.browser_sort == option,
-                                            option.label(),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.browser_sort = option;
-                                        ui.close_menu();
+                            ui.menu_image_button(
+                                button_icon_image(ui, ButtonIcon::Sort, text_dark(), 16.0),
+                                |ui| {
+                                    for option in BrowserSort::ALL {
+                                        if ui
+                                            .selectable_label(
+                                                self.browser_sort == option,
+                                                option.label(),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.browser_sort = option;
+                                            ui.close_menu();
+                                        }
                                     }
-                                }
-                            });
-                            ui.menu_button("Filter", |ui| {
-                                ui.checkbox(&mut self.show_browser_prefixes, "Show prefixes");
-                            });
-                            ui.menu_button("…", |ui| {
-                                ui.checkbox(&mut self.folders_before_tags, "Folders before tags");
-                            });
+                                },
+                            )
+                            .response
+                            .on_hover_text("Sort");
+                            ui.menu_image_button(
+                                button_icon_image(ui, ButtonIcon::Filter, text_dark(), 16.0),
+                                |ui| {
+                                    ui.checkbox(&mut self.show_browser_prefixes, "Show prefixes");
+                                },
+                            )
+                            .response
+                            .on_hover_text("Filter");
+                            ui.menu_image_button(
+                                button_icon_image(ui, ButtonIcon::Other, text_dark(), 16.0),
+                                |ui| {
+                                    ui.checkbox(
+                                        &mut self.folders_before_tags,
+                                        "Folders before tags",
+                                    );
+                                },
+                            )
+                            .response
+                            .on_hover_text("Other browser options");
                         });
                     });
                     if prev_filter_empty
@@ -1192,13 +1241,15 @@ impl Baboon {
                                                         ui.close_menu();
                                                     }
                                                 });
-                                                if ui
-                                                    .add(
-                                                        egui::Button::new("⇱")
-                                                            .min_size(Vec2::splat(TAB_BUTTON_SIZE)),
-                                                    )
-                                                    .on_hover_text("Pop tab out")
-                                                    .clicked()
+                                                if icon_button(
+                                                    ui,
+                                                    ButtonIcon::WindowMode,
+                                                    "Pop tab out",
+                                                    true,
+                                                    Vec2::splat(TAB_BUTTON_SIZE),
+                                                    text_dark(),
+                                                )
+                                                .clicked()
                                                 {
                                                     pop_key = Some(key.clone());
                                                 }

@@ -289,8 +289,7 @@ impl Baboon {
                                 .color(subtle_dark())
                                 .small(),
                             );
-                            if ui
-                                .small_button("Copy")
+                            if icon_text_button(ui, ButtonIcon::Copy, "Copy", true)
                                 .on_hover_text("Copy the diff as tab-separated rows")
                                 .clicked()
                             {
@@ -481,7 +480,15 @@ impl Baboon {
                                             for occ in list {
                                                 ui.horizontal(|ui| {
                                                     ui.add_space(22.0);
-                                                    if ui
+                                                    let jump = icon_button(
+                                                        ui,
+                                                        ButtonIcon::JumpTo,
+                                                        "Jump to this field",
+                                                        true,
+                                                        Vec2::new(22.0, 22.0),
+                                                        text_dark(),
+                                                    );
+                                                    let label = ui
                                                         .add(
                                                             egui::Label::new(
                                                                 RichText::new(format!("↳ {}", occ.label))
@@ -489,9 +496,8 @@ impl Baboon {
                                                             )
                                                             .sense(Sense::click()),
                                                         )
-                                                        .on_hover_text("Jump to this field")
-                                                        .clicked()
-                                                    {
+                                                        .on_hover_text("Jump to this field");
+                                                    if jump.clicked() || label.clicked() {
                                                         to_jump = Some((
                                                             entry.key.clone(),
                                                             occ.field_path.clone(),
@@ -595,7 +601,9 @@ impl Baboon {
                     if self.field_value_searching {
                         ui.spinner();
                         ui.label(RichText::new("searching…").color(subtle_dark()));
-                    } else if ui.button("Search").clicked() || submitted {
+                    } else if icon_text_button(ui, ButtonIcon::Search, "Search", true).clicked()
+                        || submitted
+                    {
                         do_search = true;
                     }
                 });

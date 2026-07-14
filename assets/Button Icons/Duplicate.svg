@@ -1,0 +1,6 @@
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Duplicate">
+<path id="theme-fill" d="M11.5 4C11.7761 4 12 4.22386 12 4.5V14.5C12 14.7761 11.7761 15 11.5 15H1.5C1.22386 15 1 14.7761 1 14.5V4.5C1 4.22386 1.22386 4 1.5 4H11.5ZM2 14H11V5H2V14Z" fill="currentColor"/>
+<path id="highlight-fill" d="M14.5 1C14.7761 1 15 1.22386 15 1.5V11.5C15 11.7761 14.7761 12 14.5 12H13V11H14V2H5V3H4V1.5C4 1.22386 4.22386 1 4.5 1H14.5Z" fill="#47AEEB"/>
+</g>
+</svg>

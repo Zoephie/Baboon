@@ -4040,12 +4040,12 @@ impl Baboon {
                 .open(&mut open)
                 .show(ctx, |ui| {
                     ui.horizontal(|ui| {
-                        let dock = ui
-                            .add(
-                                egui::Label::new(RichText::new("dock").color(text_dark()).strong())
-                                    .sense(Sense::click_and_drag()),
-                            )
-                            .on_hover_text("Click to dock, or drag onto the tab rack");
+                        let (dock_rect, dock) =
+                            ui.allocate_exact_size(Vec2::splat(22.0), Sense::click_and_drag());
+                        let icon_rect =
+                            egui::Rect::from_center_size(dock_rect.center(), Vec2::splat(16.0));
+                        paint_button_icon_at(ui, ButtonIcon::WindowMode, icon_rect, text_dark());
+                        let dock = dock.on_hover_text("Click to dock, or drag onto the tab rack");
                         if dock.clicked() {
                             dock_requested = true;
                         }

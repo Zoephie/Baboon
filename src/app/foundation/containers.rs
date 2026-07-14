@@ -1432,14 +1432,18 @@ pub(in crate::app) fn draw_foundation_block_control(
                 ui.add_space(depth as f32 * 5.0);
                 // Jump-to-parent (nested blocks only); hover shows the breadcrumb.
                 if depth > 0 {
-                    let jump = ui
-                        .add(egui::Button::new(
-                            RichText::new("↑").color(foundation_block_text()),
-                        ))
-                        .on_hover_text(format!(
-                            "Jump to parent block\n{}",
-                            breadcrumb_for_path(path_salt)
-                        ));
+                    let jump = icon_button(
+                        ui,
+                        ButtonIcon::JumpUp,
+                        "Jump to parent block",
+                        true,
+                        Vec2::new(24.0, 22.0),
+                        foundation_block_text(),
+                    )
+                    .on_hover_text(format!(
+                        "Jump to parent block\n{}",
+                        breadcrumb_for_path(path_salt)
+                    ));
                     if jump.clicked() {
                         if let Some(parent) = parent_block_path(path_salt) {
                             ui.data_mut(|d| d.insert_temp(jump_target_id(), parent));
@@ -1844,10 +1848,6 @@ pub(in crate::app) fn foundation_header_toggle_cell(
     ui.painter().rect_filled(rect, 4.0, fill);
     ui.painter()
         .rect_stroke(rect, 4.0, Stroke::new(1.0, foundation_input_edge()));
-    // Use egui's vector-painted disclosure triangle. The previous Unicode
-    // `▾`/`▸` glyph depended on the active proportional font containing those
-    // characters and rendered as an empty fallback square for some inherited
-    // struct headers.
     let icon_color = if enabled {
         text_dark()
     } else {
@@ -1855,25 +1855,13 @@ pub(in crate::app) fn foundation_header_toggle_cell(
         // remain distinguishable from an unlabelled placeholder cell.
         Color32::from_rgb(176, 176, 176)
     };
-    // `paint_default_icon` fills the response rect. Give it a centered visual
-    // sub-rect while preserving `response` itself as the full 24x22 click
-    // target, so inherited-group and repeatable-block rows keep their existing
-    // spacing and hit area.
-    let mut icon_response = response.clone();
-    icon_response.rect = egui::Rect::from_center_size(rect.center(), rect.size() * 0.5);
-    ui.scope(|ui| {
-        let widgets = &mut ui.visuals_mut().widgets;
-        widgets.noninteractive.fg_stroke.color = icon_color;
-        widgets.inactive.fg_stroke.color = icon_color;
-        widgets.hovered.fg_stroke.color = icon_color;
-        widgets.active.fg_stroke.color = icon_color;
-        widgets.open.fg_stroke.color = icon_color;
-        egui::collapsing_header::paint_default_icon(
-            ui,
-            if open { 1.0 } else { 0.0 },
-            &icon_response,
-        );
-    });
+    let icon = if open {
+        ButtonIcon::Opened
+    } else {
+        ButtonIcon::Closed
+    };
+    let icon_rect = egui::Rect::from_center_size(rect.center(), Vec2::splat(16.0));
+    paint_button_icon_at(ui, icon, icon_rect, icon_color);
     response
 }
 
@@ -1913,23 +1901,18 @@ pub(in crate::app) fn foundation_header_stepper_clicked(
     label: &str,
     enabled: bool,
 ) -> bool {
-    let glyph = match label {
-        "<" => "‹",
-        ">" => "›",
-        _ => label,
+    let (icon, tooltip) = match label {
+        "<" => (ButtonIcon::Left, "Previous element"),
+        ">" => (ButtonIcon::Right, "Next element"),
+        _ => return false,
     };
-    ui.add_enabled(
+    icon_button(
+        ui,
+        icon,
+        tooltip,
         enabled,
-        egui::Button::new(
-            RichText::new(glyph)
-                .color(if enabled {
-                    text_dark()
-                } else {
-                    foundation_block_text()
-                })
-                .size(16.0),
-        )
-        .min_size(Vec2::new(24.0, 22.0)),
+        Vec2::new(24.0, 22.0),
+        text_dark(),
     )
     .clicked()
 }

@@ -1,3 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16">
-  <path d="M12.53 4.53 9.06 8l3.47 3.47-1.06 1.06L8 9.06l-3.47 3.47-1.06-1.06L6.94 8 3.47 4.53l1.06-1.06L8 6.94l3.47-3.47 1.06 1.06Z"/>
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Clear">
+<path id="highlight-fill" d="M13.3535 3.35352L8.70703 8L13.3535 12.6465L12.6465 13.3535L8 8.70703L3.35352 13.3535L2.64648 12.6465L7.29297 8L2.64648 3.35352L3.35352 2.64648L8 7.29297L12.6465 2.64648L13.3535 3.35352Z" fill="#EB4747"/>
+</g>
 </svg>

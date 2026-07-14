@@ -58,17 +58,38 @@ fn entry_rel_path(entry: &TagEntry) -> String {
 }
 
 fn context_menu_button(ui: &mut Ui, label: &str) -> egui::Response {
-    ui.add_sized(
-        [ui.available_width().max(280.0), 28.0],
-        egui::Button::new(RichText::new(label).color(text_dark())),
-    )
+    let text = RichText::new(label).color(text_dark());
+    let button = match context_menu_icon(label) {
+        Some(icon) => {
+            egui::Button::image_and_text(button_icon_image(ui, icon, text_dark(), 16.0), text)
+        }
+        None => egui::Button::new(text),
+    };
+    ui.add_sized([ui.available_width().max(280.0), 28.0], button)
 }
 
 fn context_menu_primary_button(ui: &mut Ui, label: &str, enabled: bool) -> egui::Response {
-    ui.add_enabled(
-        enabled,
-        egui::Button::new(RichText::new(label).color(text_dark())).min_size(Vec2::new(92.0, 44.0)),
-    )
+    let text = RichText::new(label).color(text_dark());
+    let button = match context_menu_icon(label) {
+        Some(icon) => {
+            egui::Button::image_and_text(button_icon_image(ui, icon, text_dark(), 16.0), text)
+        }
+        None => egui::Button::new(text),
+    };
+    ui.add_enabled(enabled, button.min_size(Vec2::new(92.0, 44.0)))
+}
+
+fn context_menu_icon(label: &str) -> Option<ButtonIcon> {
+    match label {
+        "Rename" => Some(ButtonIcon::Rename),
+        "Move" => Some(ButtonIcon::Move),
+        "Open with File Explorer" => Some(ButtonIcon::FileExplorer),
+        "Add to Favorites" | "Remove from Favorites" => Some(ButtonIcon::Favourite),
+        "Copy Tag Path" => Some(ButtonIcon::CopyPath),
+        "Find Tag References..." => Some(ButtonIcon::Find),
+        "Dump Tag to JSON..." => Some(ButtonIcon::Json),
+        _ => None,
+    }
 }
 
 fn context_menu_separator(ui: &mut Ui) {
@@ -1004,7 +1025,7 @@ pub(in crate::app) fn draw_entry(
             ui.add_enabled_ui(extract_enabled, |ui| {
                 ui.allocate_ui(Vec2::new(92.0, 44.0), |ui| {
                     ui.set_min_width(92.0);
-                    ui.menu_button("Extract", |ui| {
+                    let extract_menu = ui.menu_button("     Extract", |ui| {
                         ui.set_min_width(280.0);
                         if supports_tag_geometry_extraction(entry.group_tag)
                             && context_menu_button(ui, "Extract model geometry").clicked()
@@ -1025,6 +1046,14 @@ pub(in crate::app) fn draw_entry(
                             ui.close_menu();
                         }
                     });
+                    let icon_rect = egui::Rect::from_center_size(
+                        egui::pos2(
+                            extract_menu.response.rect.left() + 17.0,
+                            extract_menu.response.rect.center().y,
+                        ),
+                        Vec2::splat(16.0),
+                    );
+                    paint_button_icon_at(ui, ButtonIcon::Export, icon_rect, text_dark());
                 });
             });
         });

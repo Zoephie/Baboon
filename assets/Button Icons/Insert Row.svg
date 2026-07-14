@@ -1,0 +1,6 @@
+<svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+<g id="Insert Row">
+<path id="theme-fill" d="M16 14H0V13H16V14ZM1 10H15V7H6V6H15.5C15.7761 6 16 6.22386 16 6.5V10.5C16 10.7761 15.7761 11 15.5 11H0.5C0.223858 11 0 10.7761 0 10.5V6.5C0 6.22386 0.223858 6 0.5 6H1V10Z" fill="currentColor"/>
+<path id="highlight-fill" d="M4 3H7V4H4V7H3V4H0V3H3V0H4V3Z" fill="#7EEB47"/>
+</g>
+</svg>
