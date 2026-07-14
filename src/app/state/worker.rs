@@ -23,6 +23,8 @@ pub(in crate::app) enum WorkerMessage {
     ExportFinished(Result<String, String>),
     FolderRefactorProgress(FolderRefactorProgress),
     FolderRefactorFinished(Result<FolderRefactorFinished, String>),
+    FolderConversionProgress(FolderConversionProgress),
+    FolderConversionFinished(Result<FolderConversionReport, String>),
     // Full recursive entry scan finished for a loose-folder source.
     AllEntriesScanned {
         generation: u64,
@@ -110,6 +112,16 @@ pub(in crate::app) struct FolderRefactorUiState {
     pub(in crate::app) label: String,
     pub(in crate::app) phase: String,
     pub(in crate::app) progress: Option<f32>,
+}
+
+#[derive(Clone, Debug)]
+pub(in crate::app) struct FolderConversionProgress {
+    pub(in crate::app) phase: String,
+    pub(in crate::app) current: String,
+    pub(in crate::app) processed: usize,
+    pub(in crate::app) total: usize,
+    pub(in crate::app) converted: usize,
+    pub(in crate::app) failed: usize,
 }
 
 pub(in crate::app) struct UpdateCheckResult {

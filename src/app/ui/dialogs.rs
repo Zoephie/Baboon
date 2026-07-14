@@ -4,6 +4,447 @@
 use super::*;
 
 impl Baboon {
+    pub(super) fn draw_tag_conversion_window(&mut self, ctx: &egui::Context) {
+        if !self.expert_mode {
+            self.tag_conversion_dialog = None;
+            return;
+        }
+        if self.tag_conversion_dialog.is_none() {
+            return;
+        }
+
+        let mut open = true;
+        let mut analyze = false;
+        let mut choose_and_save = false;
+        let mut confirm_inside_source = false;
+        let mut cancel_inside_source = false;
+        {
+            let dialog = self.tag_conversion_dialog.as_mut().expect("checked above");
+            egui::Window::new("Save Tag for Another Game")
+                .id(egui::Id::new("tag_conversion"))
+                .open(&mut open)
+                .default_width(680.0)
+                .show(ctx, |ui| {
+                    ui.label(RichText::new("Source tag").color(subtle_dark()).small());
+                    ui.label(
+                        RichText::new(&dialog.source_label)
+                            .color(text_dark())
+                            .monospace(),
+                    );
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Source profile").color(subtle_dark()));
+                        ui.label(RichText::new(&dialog.source_game).color(text_dark()));
+                    });
+
+                    let previous_target = dialog.target_game.clone();
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Target profile").color(subtle_dark()));
+                        egui::ComboBox::from_id_salt("tag_conversion_target")
+                            .selected_text(&dialog.target_game)
+                            .width(220.0)
+                            .show_ui(ui, |ui| {
+                                for game in CONVERSION_GAMES {
+                                    if *game != dialog.source_game {
+                                        ui.selectable_value(
+                                            &mut dialog.target_game,
+                                            (*game).to_owned(),
+                                            *game,
+                                        );
+                                    }
+                                }
+                            });
+                    });
+                    if dialog.target_game != previous_target {
+                        dialog.draft = None;
+                        dialog.error = None;
+                        dialog.pending_source_destination = None;
+                    }
+
+                    ui.add_space(8.0);
+                    if ui.button("Analyze Conversion").clicked() {
+                        analyze = true;
+                    }
+
+                    if let Some(draft) = dialog.draft.as_ref() {
+                        let report = &draft.report;
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.label(
+                            RichText::new(format!(
+                                "Target: {} (.{}), group {}",
+                                dialog.target_game,
+                                draft.target_extension,
+                                draft.target_group_name
+                            ))
+                            .color(text_dark())
+                            .strong(),
+                        );
+                        egui::Grid::new("tag_conversion_summary")
+                            .num_columns(2)
+                            .spacing([20.0, 3.0])
+                            .show(ui, |ui| {
+                                ui.label("Copied exactly");
+                                ui.label(report.copied_exact.to_string());
+                                ui.end_row();
+                                ui.label("Converted semantically");
+                                ui.label(report.converted_semantic.to_string());
+                                ui.end_row();
+                                ui.label("Mapped through schema/catalog aliases");
+                                ui.label(report.mapped_aliases.to_string());
+                                ui.end_row();
+                                ui.label("Target fields left at defaults");
+                                ui.label(report.defaulted_target.to_string());
+                                ui.end_row();
+                                ui.label("Unsupported source values");
+                                ui.label(report.unsupported_source.to_string());
+                                ui.end_row();
+                                ui.label("Truncated elements");
+                                ui.label(report.truncated.to_string());
+                                ui.end_row();
+                            });
+
+                        if !report.issues.is_empty() {
+                            ui.add_space(6.0);
+                            ui.label(
+                                RichText::new("Conversion details")
+                                    .color(subtle_dark())
+                                    .small(),
+                            );
+                            egui::ScrollArea::vertical()
+                                .id_salt("tag_conversion_issues")
+                                .max_height(230.0)
+                                .show(ui, |ui| {
+                                    for issue in &report.issues {
+                                        let kind = match issue.kind {
+                                            ConversionIssueKind::Unsupported => "Unsupported",
+                                            ConversionIssueKind::Truncated => "Truncated",
+                                            ConversionIssueKind::Warning => "Warning",
+                                        };
+                                        ui.label(
+                                            RichText::new(format!(
+                                                "{kind}: {} — {}",
+                                                issue.path, issue.message
+                                            ))
+                                            .color(subtle_dark())
+                                            .small(),
+                                        );
+                                    }
+                                });
+                        }
+                    }
+
+                    if let Some(error) = dialog.error.as_ref() {
+                        ui.add_space(6.0);
+                        ui.label(RichText::new(error).color(material_delete_text()));
+                    }
+
+                    if let Some(output) = dialog.pending_source_destination.as_ref() {
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.label(
+                            RichText::new(
+                                "This destination is inside the currently loaded source tags folder. The converted tag uses a different profile and will not be added to the current browser.",
+                            )
+                            .color(material_delete_text()),
+                        );
+                        ui.label(
+                            RichText::new(output.display().to_string())
+                                .monospace()
+                                .small()
+                                .color(subtle_dark()),
+                        );
+                        ui.horizontal(|ui| {
+                            if ui.button("Save There Anyway").clicked() {
+                                confirm_inside_source = true;
+                            }
+                            if ui.button("Choose Another Location").clicked() {
+                                cancel_inside_source = true;
+                                choose_and_save = true;
+                            }
+                        });
+                    } else {
+                        ui.add_space(10.0);
+                        ui.with_layout(
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                if ui
+                                    .add_enabled(
+                                        dialog.draft.is_some(),
+                                        egui::Button::new("Choose Location and Save..."),
+                                    )
+                                    .clicked()
+                                {
+                                    choose_and_save = true;
+                                }
+                                ui.label(
+                                    RichText::new(
+                                        "Saving creates a new copy; the source tag is not modified.",
+                                    )
+                                    .color(subtle_dark())
+                                    .small(),
+                                );
+                            },
+                        );
+                    }
+                });
+        }
+
+        if analyze {
+            self.analyze_tag_conversion();
+        }
+        if cancel_inside_source {
+            if let Some(dialog) = self.tag_conversion_dialog.as_mut() {
+                dialog.pending_source_destination = None;
+            }
+        }
+        if confirm_inside_source {
+            self.confirm_tag_conversion_inside_source();
+        } else if choose_and_save {
+            self.choose_tag_conversion_destination();
+        }
+        if !open {
+            self.tag_conversion_dialog = None;
+        }
+    }
+
+    pub(super) fn draw_folder_conversion_window(&mut self, ctx: &egui::Context) {
+        if !self.expert_mode
+            && self
+                .folder_conversion_dialog
+                .as_ref()
+                .is_none_or(|dialog| !dialog.running)
+        {
+            self.folder_conversion_dialog = None;
+            return;
+        }
+        if self.folder_conversion_dialog.is_none() {
+            return;
+        }
+        let mut open = true;
+        let mut choose_destination = false;
+        let mut start = false;
+        let running;
+        {
+            let dialog = self
+                .folder_conversion_dialog
+                .as_mut()
+                .expect("checked above");
+            running = dialog.running;
+            egui::Window::new("Save Folder for Another Game")
+                .id(egui::Id::new("folder_conversion"))
+                .open(&mut open)
+                .default_width(760.0)
+                .show(ctx, |ui| {
+                    ui.label(RichText::new("Source folder").color(subtle_dark()).small());
+                    ui.label(RichText::new(&dialog.source_label).monospace().color(text_dark()));
+                    ui.horizontal(|ui| {
+                        ui.label(format!("Source profile: {}", dialog.source_game));
+                        ui.label("Target profile:");
+                        let previous = dialog.target_game.clone();
+                        ui.add_enabled_ui(!dialog.running, |ui| {
+                            egui::ComboBox::from_id_salt("folder_conversion_target")
+                                .selected_text(&dialog.target_game)
+                                .show_ui(ui, |ui| {
+                                    for game in CONVERSION_GAMES {
+                                        if *game != dialog.source_game {
+                                            ui.selectable_value(
+                                                &mut dialog.target_game,
+                                                (*game).to_owned(),
+                                                *game,
+                                            );
+                                        }
+                                    }
+                                });
+                        });
+                        if dialog.target_game != previous {
+                            dialog.destination_parent = None;
+                            dialog.report = None;
+                            dialog.error = None;
+                        }
+                    });
+                    ui.add_space(6.0);
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add_enabled(!dialog.running, egui::Button::new("Choose Destination..."))
+                            .clicked()
+                        {
+                            choose_destination = true;
+                        }
+                        if let Some(destination) = dialog.destination_parent.as_ref() {
+                            ui.label(
+                                RichText::new(format!(
+                                    "{}\\{}",
+                                    destination.display(),
+                                    dialog.source_label
+                                ))
+                                .monospace()
+                                .small()
+                                .color(subtle_dark()),
+                            );
+                        }
+                    });
+                    ui.label(
+                        RichText::new(
+                            "Existing destination tags are replaced atomically. Reference paths are not relocated.",
+                        )
+                        .small()
+                        .color(subtle_dark()),
+                    );
+
+                    if let Some(progress) = dialog.progress.as_ref() {
+                        ui.add_space(8.0);
+                        let fraction = if progress.total == 0 {
+                            0.0
+                        } else {
+                            progress.processed as f32 / progress.total as f32
+                        };
+                        ui.label(RichText::new(&progress.phase).strong());
+                        ui.add(
+                            egui::ProgressBar::new(fraction.clamp(0.0, 1.0))
+                                .animate(progress.total == 0)
+                                .text(format!(
+                                    "{} / {} — {} converted, {} failed",
+                                    progress.processed,
+                                    progress.total,
+                                    progress.converted,
+                                    progress.failed
+                                )),
+                        );
+                        if !progress.current.is_empty() {
+                            ui.label(
+                                RichText::new(&progress.current)
+                                    .monospace()
+                                    .small()
+                                    .color(subtle_dark()),
+                            );
+                        }
+                        ctx.request_repaint();
+                    }
+
+                    if let Some(report) = dialog.report.as_ref() {
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.label(
+                            RichText::new(format!(
+                                "Completed: {} native-layout, {} generated-layout, {} failed, {} ignored",
+                                report.native_count(),
+                                report.generated_count(),
+                                report.failed_count(),
+                                report.ignored_files.len()
+                            ))
+                            .strong(),
+                        );
+                        ui.label(
+                            RichText::new(format!(
+                                "{} -> {} | Destination: {}",
+                                report.source_label,
+                                report.target_game,
+                                report.destination_root.display()
+                            ))
+                            .monospace()
+                            .small(),
+                        );
+                        egui::ScrollArea::vertical()
+                            .id_salt("folder_conversion_results")
+                            .max_height(320.0)
+                            .show(ui, |ui| {
+                                for wanted in [
+                                    FolderConversionFileStatus::NativeLayout,
+                                    FolderConversionFileStatus::GeneratedLayout,
+                                    FolderConversionFileStatus::Failed,
+                                ] {
+                                    let (label, color) = match wanted {
+                                        FolderConversionFileStatus::NativeLayout => {
+                                            ("Native-layout verified", text_dark())
+                                        }
+                                        FolderConversionFileStatus::GeneratedLayout => (
+                                            "Generated layout — native compatibility unverified",
+                                            material_delete_text(),
+                                        ),
+                                        FolderConversionFileStatus::Failed => {
+                                            ("Failed / skipped", material_delete_text())
+                                        }
+                                    };
+                                    let matching = report
+                                        .files
+                                        .iter()
+                                        .filter(|file| file.status == wanted)
+                                        .collect::<Vec<_>>();
+                                    if matching.is_empty() {
+                                        continue;
+                                    }
+                                    ui.collapsing(
+                                        RichText::new(format!("{label} ({})", matching.len()))
+                                            .color(color),
+                                        |ui| {
+                                            for file in matching {
+                                                let replaced = if file.overwritten {
+                                                    " [replaced]"
+                                                } else {
+                                                    ""
+                                                };
+                                                let output = file
+                                                    .output
+                                                    .as_ref()
+                                                    .map(|path| format!(" -> {}", path.display()))
+                                                    .unwrap_or_default();
+                                                ui.label(
+                                                    RichText::new(format!(
+                                                        "{}{}{} — {}",
+                                                        file.source, output, replaced, file.detail
+                                                    ))
+                                                    .small()
+                                                    .color(color),
+                                                );
+                                            }
+                                        },
+                                    );
+                                }
+                                if !report.ignored_files.is_empty() {
+                                    ui.collapsing(
+                                        format!("Ignored non-tag files ({})", report.ignored_files.len()),
+                                        |ui| {
+                                            for path in &report.ignored_files {
+                                                ui.label(RichText::new(path).monospace().small());
+                                            }
+                                        },
+                                    );
+                                }
+                            });
+                    }
+                    if let Some(error) = dialog.error.as_ref() {
+                        ui.add_space(6.0);
+                        ui.label(RichText::new(error).color(material_delete_text()));
+                    }
+                    ui.add_space(8.0);
+                    ui.with_layout(
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            if ui
+                                .add_enabled(
+                                    !dialog.running && dialog.destination_parent.is_some(),
+                                    egui::Button::new("Convert Folder"),
+                                )
+                                .clicked()
+                            {
+                                start = true;
+                            }
+                        },
+                    );
+                });
+        }
+        if choose_destination {
+            self.choose_folder_conversion_destination();
+        }
+        if start {
+            self.begin_folder_conversion();
+        }
+        if !open && !running {
+            self.folder_conversion_dialog = None;
+        }
+    }
+
     pub(super) fn draw_rename_tag_window(&mut self, ctx: &egui::Context) {
         if self.rename_tag.is_none() {
             return;

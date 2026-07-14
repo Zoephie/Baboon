@@ -234,6 +234,44 @@ mod tests {
     }
 
     #[test]
+    fn empty_schema_constrained_reference_keeps_its_required_group() {
+        let structure_design = parse_group_tag("sddt").unwrap();
+        let meta = FieldDisplayMeta {
+            label: "structure design".to_owned(),
+            unit: None,
+            range: None,
+            help: None,
+            tag_reference_allowed: vec![structure_design],
+            read_only: false,
+            advanced: false,
+        };
+
+        assert_eq!(
+            tag_reference_required_group(&meta, None),
+            Some(structure_design)
+        );
+    }
+
+    #[test]
+    fn picker_resolves_structure_design_from_loaded_game_definitions() {
+        let definitions_root = locate_definitions_root();
+        for game in ["halo3_mcc", "halo3odst_mcc", "haloreach_mcc", "halo4_mcc"] {
+            let names = TagNameIndex::load_game(&definitions_root, game).unwrap();
+            let structure_design = parse_group_tag("sddt").unwrap();
+            assert_eq!(
+                tag_reference_group_for_extension(
+                    "structure_design",
+                    Some(structure_design),
+                    Some(&names),
+                )
+                .unwrap(),
+                structure_design,
+                "{game}"
+            );
+        }
+    }
+
+    #[test]
     fn tag_reference_value_icon_prefers_typed_or_committed_group() {
         let render_model = parse_group_tag("mode").unwrap();
         let collision_model = parse_group_tag("coll").unwrap();

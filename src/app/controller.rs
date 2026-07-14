@@ -86,6 +86,12 @@ impl Baboon {
                 WorkerMessage::FolderRefactorFinished(result) => {
                     self.handle_folder_refactor_finished(result)
                 }
+                WorkerMessage::FolderConversionProgress(progress) => {
+                    self.handle_folder_conversion_progress(progress)
+                }
+                WorkerMessage::FolderConversionFinished(report) => {
+                    self.handle_folder_conversion_finished(report)
+                }
                 WorkerMessage::AllEntriesScanned { generation, result } => {
                     self.handle_all_entries_scanned(generation, result, ctx)
                 }
@@ -357,7 +363,16 @@ impl Baboon {
             return;
         }
         let tag = match TagFile::new(&group.schema_path) {
-            Ok(tag) => tag,
+            Ok(mut tag) => {
+                if CONVERSION_GAMES.contains(&self.new_tag_dialog.game.as_str())
+                    && let Err(error) =
+                        apply_editing_kit_mcc_header(&mut tag, &self.new_tag_dialog.game)
+                {
+                    self.new_tag_dialog.error = Some(error);
+                    return;
+                }
+                tag
+            }
             Err(error) => {
                 self.new_tag_dialog.error = Some(format!("Could not create tag: {error}"));
                 return;
@@ -1559,6 +1574,9 @@ impl Baboon {
             }
             BrowserAction::CopyLooseFolder { rel_path, label } => {
                 self.begin_refactor_loose_folder(rel_path, label, false)
+            }
+            BrowserAction::ConvertLooseFolder { rel_path, label } => {
+                self.open_folder_conversion_dialog(rel_path, label)
             }
             BrowserAction::ExtractRaw(key) => self.begin_extract_raw(key, ctx),
             BrowserAction::ExtractBitmap(key) => self.begin_extract_bitmap(key, ctx),

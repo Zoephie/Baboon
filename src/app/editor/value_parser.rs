@@ -590,6 +590,7 @@ pub(in crate::app) fn extension_to_group_tag(extension: &str) -> Option<u32> {
         "crate" => "crat",
         "bitmap" => "bitm",
         "scenario_structure_bsp" => "sbsp",
+        "structure_design" => "sddt",
         "scenario" => "scnr",
         "projectile" => "proj",
         "effect" => "effe",

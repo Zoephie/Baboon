@@ -59,6 +59,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
     }
 
     let droppable = edit.editable && !meta.read_only;
+    let required_group = tag_reference_required_group(meta, target.as_ref());
     let row_response = ui
         .horizontal(|ui| {
             ui.add_space(indent);
@@ -86,7 +87,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                         edit.status.as_deref_mut(),
                         path,
                         input,
-                        target.as_ref().map(|(group, _)| *group),
+                        required_group,
                     );
                 }
             } else if !has_ref {
@@ -157,8 +158,12 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
             if browse_clicked {
                 if let Some(tags_root) = edit.tags_root {
                     let start_ref = target.as_ref().map(|(_, rel_path)| rel_path.as_str());
-                    let required_group = target.as_ref().map(|(group, _)| *group);
-                    match choose_tag_reference_input(tags_root, start_ref, required_group) {
+                    match choose_tag_reference_input(
+                        tags_root,
+                        start_ref,
+                        required_group,
+                        edit.names,
+                    ) {
                         Ok(Some(input)) => {
                             *buffer = input.clone();
                             edit.pending.push(PendingFieldEdit {
@@ -189,13 +194,10 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
 
     // Drag-and-drop: drop a tag from the browser onto this row to set the
     // reference. Accept only when the field is editable and the dropped group
-    // matches the current target's group (an empty reference accepts any group,
-    // mirroring free-form typing).
+    // matches either the current target or a single group required by schema.
     if droppable {
-        let accepts = |payload: &DraggedTagRef| match &target {
-            Some((group, _)) => *group == payload.group_tag,
-            None => true,
-        };
+        let accepts =
+            |payload: &DraggedTagRef| required_group.is_none_or(|group| group == payload.group_tag);
         if let Some(payload) = row_response.dnd_hover_payload::<DraggedTagRef>() {
             let color = if accepts(&payload) {
                 Color32::from_rgb(120, 170, 90)
@@ -215,6 +217,18 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
             }
         }
     }
+}
+
+pub(super) fn tag_reference_required_group(
+    meta: &FieldDisplayMeta,
+    target: Option<&(u32, String)>,
+) -> Option<u32> {
+    target
+        .map(|(group, _)| *group)
+        .or_else(|| match meta.tag_reference_allowed.as_slice() {
+            [group] => Some(*group),
+            _ => None,
+        })
 }
 
 fn commit_tag_reference_input(
@@ -332,6 +346,7 @@ pub(in crate::app) fn choose_tag_reference_input(
     tags_root: &Path,
     start_ref: Option<&str>,
     required_group: Option<u32>,
+    names: Option<&TagNameIndex>,
 ) -> Result<Option<String>, String> {
     let start_dir = start_ref
         .map(|rel_path| tag_reference_start_dir(tags_root, rel_path))
@@ -340,7 +355,9 @@ pub(in crate::app) fn choose_tag_reference_input(
         .set_title("Select Tag Reference")
         .set_directory(start_dir);
     if let Some(group_tag) = required_group
-        && let Some(extension) = blam_tags::paths::group_tag_to_extension(group_tag)
+        && let Some(extension) = names
+            .and_then(|names| names.name_for(group_tag))
+            .or_else(|| blam_tags::paths::group_tag_to_extension(group_tag))
     {
         dialog = dialog.add_filter(extension, &[extension]);
     }
@@ -353,10 +370,32 @@ pub(in crate::app) fn choose_tag_reference_input(
         .extension()
         .and_then(|ext| ext.to_str())
         .ok_or_else(|| "Selected tag file has no extension".to_owned())?;
-    let group_tag = extension_to_group_tag(extension)
-        .ok_or_else(|| format!("Unknown tag extension: {extension}"))?;
+    let group_tag = tag_reference_group_for_extension(extension, required_group, names)?;
     let path = rel.with_extension("").to_string_lossy().into_owned();
     Ok(Some(format_tag_reference_input(group_tag, &path)))
+}
+
+pub(super) fn tag_reference_group_for_extension(
+    extension: &str,
+    required_group: Option<u32>,
+    names: Option<&TagNameIndex>,
+) -> Result<u32, String> {
+    if let Some(required_group) = required_group {
+        let expected = names
+            .and_then(|names| names.name_for(required_group))
+            .or_else(|| blam_tags::paths::group_tag_to_extension(required_group));
+        if expected.is_some_and(|expected| expected.eq_ignore_ascii_case(extension)) {
+            return Ok(required_group);
+        }
+        if let Some(expected) = expected {
+            return Err(format!("Selected tag must be a .{expected} tag"));
+        }
+    }
+
+    names
+        .and_then(|names| names.group_tag_for(extension))
+        .or_else(|| extension_to_group_tag(extension))
+        .ok_or_else(|| format!("Unknown tag extension: {extension}"))
 }
 
 pub(in crate::app) fn format_tag_reference_input(group_tag: u32, path: &str) -> String {

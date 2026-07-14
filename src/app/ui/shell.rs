@@ -91,6 +91,21 @@ impl Baboon {
                             ui.close_menu();
                             self.save_current_tag_as();
                         }
+                        if self.expert_mode {
+                            if ui
+                                .add_enabled(
+                                    self.can_convert_current_tag(),
+                                    egui::Button::new("Save Current Tag for Another Game..."),
+                                )
+                                .on_hover_text(
+                                    "Expert feature: convert the selected MCC editing-kit tag using another game's definitions",
+                                )
+                                .clicked()
+                            {
+                                ui.close_menu();
+                                self.open_tag_conversion_dialog();
+                            }
+                        }
                         ui.separator();
                         if ui
                             .add_enabled(
@@ -956,6 +971,7 @@ impl Baboon {
                                                 sort,
                                                 folders_before_tags,
                                                 favorite_context,
+                                                self.expert_mode,
                                             )
                                         } else {
                                             draw_tree(
@@ -1603,6 +1619,8 @@ impl Baboon {
         self.draw_settings_window(ctx);
         self.draw_tool_commands_window(ctx);
         self.draw_new_tag_window(ctx);
+        self.draw_tag_conversion_window(ctx);
+        self.draw_folder_conversion_window(ctx);
         self.draw_about_window(ctx);
         self.draw_query_results_window(ctx);
         self.draw_tag_diff_window(ctx);

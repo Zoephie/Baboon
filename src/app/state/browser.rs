@@ -13,6 +13,7 @@ pub(in crate::app) enum BrowserAction {
     DumpLooseFolderJson { rel_path: PathBuf, label: String },
     MoveLooseFolder { rel_path: PathBuf, label: String },
     CopyLooseFolder { rel_path: PathBuf, label: String },
+    ConvertLooseFolder { rel_path: PathBuf, label: String },
     ExtractRaw(String),
     ExtractBitmap(String),
     ExtractBitmapFolder(Vec<String>),

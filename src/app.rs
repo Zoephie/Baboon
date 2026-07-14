@@ -82,6 +82,8 @@ mod shader;
 use shader::*;
 mod material;
 use material::*;
+mod conversion;
+use conversion::*;
 mod model_preview;
 use model_preview::*;
 mod map_names;
@@ -122,6 +124,8 @@ pub struct Baboon {
     source: Option<LoadedSourceData>,
     /// Parsed documents keyed by the stable [`TagEntry::key`] identity.
     parsed_tags: HashMap<String, TagDocument>,
+    tag_conversion_dialog: Option<TagConversionDialog>,
+    folder_conversion_dialog: Option<FolderConversionDialog>,
     /// Least-recently-used ordering for parsed documents not pinned by a tab.
     tag_cache_order: VecDeque<String>,
     /// Keys with an outstanding background load, preventing duplicate jobs.
@@ -335,6 +339,8 @@ impl Baboon {
             rx,
             source: None,
             parsed_tags: HashMap::new(),
+            tag_conversion_dialog: None,
+            folder_conversion_dialog: None,
             tag_cache_order: VecDeque::new(),
             loading_tags: HashSet::new(),
             selected_key: None,

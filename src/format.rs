@@ -80,7 +80,6 @@ impl TagNameIndex {
         self.name_for_group_tag.get(&group_tag).map(String::as_str)
     }
 
-    #[cfg(test)]
     pub fn group_tag_for(&self, name: &str) -> Option<u32> {
         self.group_tag_for_name.get(name).copied()
     }
