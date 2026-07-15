@@ -1640,6 +1640,11 @@ impl Baboon {
         ctx.set_visuals(foundation_visuals());
         set_combo_scroll_cycle_enabled(ctx, self.scroll_to_cycle_dropdowns);
         self.handle_app_close_request(ctx);
+        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::F)) {
+            self.find.open = true;
+            self.find.focus_query = true;
+        }
+        self.refresh_find(ctx);
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::S)) {
             self.save_current_tag();
         }
@@ -1678,6 +1683,7 @@ impl Baboon {
         self.draw_content_explorer_window(ctx);
         self.draw_keyword_chooser_window(ctx);
         self.draw_field_value_search_window(ctx);
+        self.draw_find_window(ctx);
         self.draw_tsv_paste_window(ctx);
         self.draw_rename_tag_window(ctx);
     }

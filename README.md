@@ -90,6 +90,10 @@ silently skipped.
 
 ### Search, navigation & cross-referencing
 
+- **Find in fields (`Ctrl+F`)** — search field values, labels, or both in the
+  current tag, all open tags, or the complete loaded source. Every matching
+  substring is highlighted, and previous/next navigation reveals the matching
+  field and selects the required nested block element.
 - **Field-value search** — search across tags' *field values* (not just names),
   run on a background worker against an in-memory field index and optionally
   scoped to a tag group; results open in a clickable window.

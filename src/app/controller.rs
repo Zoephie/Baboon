@@ -63,6 +63,35 @@ impl Baboon {
                 WorkerMessage::FieldIndexBuilt { generation, blobs } => {
                     self.handle_field_index_built(generation, blobs)
                 }
+                WorkerMessage::FindAllProgress {
+                    generation,
+                    request_id,
+                    processed,
+                    total,
+                } => {
+                    if generation == self.source_generation
+                        && request_id == self.find.all_request_id
+                    {
+                        self.find.progress = Some((processed, total));
+                    }
+                    false
+                }
+                WorkerMessage::FindAllFinished {
+                    generation,
+                    request_id,
+                    occurrences,
+                    unreadable,
+                } => {
+                    if generation == self.source_generation
+                        && request_id == self.find.all_request_id
+                    {
+                        self.find.all_closed_occurrences = occurrences;
+                        self.find.unreadable = unreadable;
+                        self.find.searching = false;
+                        self.find.progress = None;
+                    }
+                    false
+                }
                 WorkerMessage::ReverseDependenciesBuilt { generation, index } => {
                     self.handle_reverse_dependencies_built(generation, index)
                 }
@@ -2656,6 +2685,13 @@ impl Baboon {
                 ctx.request_repaint();
             }
         }
+        if let Some(hit) = self.pending_find_jump.clone() {
+            if self.selected_key.as_deref() == Some(hit.tag_key.as_str())
+                && self.parsed_tags.contains_key(&hit.tag_key)
+            {
+                self.activate_find_occurrence(ctx, hit);
+            }
+        }
         let Some(jump) = self.pending_ref_jump.clone() else {
             return;
         };
@@ -4682,6 +4718,18 @@ mod tests {
                 ("custom references#5".to_owned(), 3),
                 ("custom references#5[3]/sounds#2".to_owned(), 1),
             ],
+        );
+        // Foundation renders inherited wrappers without ordinals, so selector
+        // IDs beneath Unit/Object must preserve those plain wrapper segments.
+        assert_eq!(
+            ancestor_block_indices("unit/object/functions#25[2]/import name#3"),
+            vec![("unit/object/functions#25".to_owned(), 2)],
+        );
+        // Reference-jump paths may retain schema ordinals on inherited wrappers;
+        // normalize those to the same selector ID as canonical Find paths.
+        assert_eq!(
+            ancestor_block_indices("unit#0/object#0/functions#25[2]/import name#3"),
+            vec![("unit/object/functions#25".to_owned(), 2)],
         );
     }
 

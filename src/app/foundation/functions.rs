@@ -216,11 +216,20 @@ pub(in crate::app) fn draw_foundation_enum_row(
         ui.add_space(depth as f32 * 12.0);
         foundation_label_cell(ui, &meta.label, meta.help.as_deref());
         ui.add_enabled_ui(edit.editable && !meta.read_only, |ui| {
+            let selected_label = enum_option_label(options, selected);
+            let selected_text = highlighted_widget_text(
+                ui,
+                &selected_label,
+                TextStyle::Button,
+                text_dark(),
+                FindTargetKind::Value,
+            )
+            .unwrap_or_else(|| selected_label.clone().into());
             let (_, wheel_delta) = combo_box_with_scroll(
                 ui,
                 egui::ComboBox::from_id_salt((edit.view_scope, edit.tag_key, path, "enum"))
                     .width(240.0)
-                    .selected_text(enum_option_label(options, selected)),
+                    .selected_text(selected_text),
                 |ui| {
                     for (index, option) in options.iter().enumerate() {
                         ui.selectable_value(&mut selected, index as i64, *option);

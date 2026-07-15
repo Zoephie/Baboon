@@ -62,6 +62,8 @@ mod keywords;
 use keywords::*;
 mod field_index;
 use field_index::*;
+mod find;
+use find::*;
 mod field_docs;
 use field_docs::*;
 mod help_docs;
@@ -155,6 +157,8 @@ pub struct Baboon {
     /// The last query actually applied per tag, so the collapse is a one-shot
     /// on change rather than a per-frame override the user can't fight.
     field_search_applied: HashMap<String, String>,
+    /// Modeless find-in-tag dialog and its exact occurrence list.
+    find: FindDialogState,
     /// Cached search results, recomputed only when the query or the underlying
     /// entry set changes — never per frame. See [`FilterCache`].
     filter_cache: FilterCache,
@@ -282,6 +286,8 @@ pub struct Baboon {
     /// can walk it to locate the exact referencing field. Set from the
     /// "References to X" popup; drained by `apply_field_nav`.
     pending_ref_jump: Option<PendingRefJump>,
+    /// Find result waiting for its target open tab to finish parsing.
+    pending_find_jump: Option<FindOccurrence>,
     /// Active reference-jump navigation: force ancestor blocks open and glow the
     /// exact referencing field until its glow window expires.
     field_nav: Option<FieldNav>,
@@ -354,6 +360,7 @@ impl Baboon {
             filter: String::new(),
             field_search: HashMap::new(),
             field_search_applied: HashMap::new(),
+            find: FindDialogState::default(),
             filter_cache: FilterCache::default(),
             source_generation: 0,
             browser_mode: prefs.browser_mode,
@@ -410,6 +417,7 @@ impl Baboon {
             function_popup: None,
             query_results: None,
             pending_ref_jump: None,
+            pending_find_jump: None,
             field_nav: None,
             ref_jump_expanded: HashSet::new(),
             ref_jump_occurrences: HashMap::new(),

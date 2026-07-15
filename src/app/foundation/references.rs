@@ -487,12 +487,14 @@ pub(in crate::app) fn draw_foundation_flags_row(
         rect.left_top() + Vec2::new(indent + 4.0, 4.0),
         Vec2::new(FOUNDATION_LABEL_WIDTH - 8.0, 24.0),
     );
-    painter.text(
+    paint_findable_text(
+        ui,
         label_rect.left_center(),
         Align2::LEFT_CENTER,
-        truncate_for_cell(&meta.label, label_rect.width()),
+        &truncate_for_cell(&meta.label, label_rect.width()),
         FontId::proportional(12.5),
         text_dark(),
+        FindTargetKind::Label,
     );
 
     let flags_rect = egui::Rect::from_min_size(
@@ -503,12 +505,14 @@ pub(in crate::app) fn draw_foundation_flags_row(
     painter.rect_stroke(flags_rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
 
     if display_flags.is_empty() {
-        painter.text(
+        paint_findable_text(
+            ui,
             flags_rect.left_center() + Vec2::new(8.0, 0.0),
             Align2::LEFT_CENTER,
-            format!("0x{raw:04X} (none set)"),
+            &format!("0x{raw:04X} (none set)"),
             FontId::proportional(12.5),
             text_dark(),
+            FindTargetKind::Value,
         );
     } else {
         let mut next_mask = raw;
@@ -561,12 +565,14 @@ pub(in crate::app) fn draw_foundation_flags_row(
                 );
             }
 
-            painter.text(
+            paint_findable_text(
+                ui,
                 row_rect.left_center() + Vec2::new(20.0, 0.0),
                 Align2::LEFT_CENTER,
-                truncate_for_cell(label, row_rect.width() - 24.0),
+                &truncate_for_cell(label, row_rect.width() - 24.0),
                 FontId::proportional(12.5),
                 text_dark(),
+                FindTargetKind::Value,
             );
 
             if response.clicked() {
@@ -584,12 +590,14 @@ pub(in crate::app) fn draw_foundation_flags_row(
             }
         }
 
-        painter.text(
+        paint_findable_text(
+            ui,
             flags_rect.left_bottom() + Vec2::new(8.0, -5.0),
             Align2::LEFT_BOTTOM,
-            format!("0x{raw:04X}"),
+            &format!("0x{raw:04X}"),
             FontId::proportional(11.5),
             subtle_dark(),
+            FindTargetKind::Value,
         );
     }
 

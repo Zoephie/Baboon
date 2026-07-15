@@ -153,6 +153,14 @@ pub(super) fn ancestor_block_indices(field_path: &str) -> Vec<(String, usize)> {
             Some((name, idx)) => (name, idx.parse::<usize>().ok()),
             None => (segment, None),
         };
+        // Foundation omits ordinals from inherited Unit/Object wrapper IDs.
+        // Reference-jump paths can still arrive with those schema ordinals, so
+        // normalize them at this shared navigation boundary as well as accepting
+        // the canonical plain-wrapper paths produced by Find.
+        let name = name
+            .rsplit_once('#')
+            .filter(|(base, _)| is_inherited_parent_name(base))
+            .map_or(name, |(base, _)| base);
         let node_path = if acc.is_empty() {
             name.to_owned()
         } else {

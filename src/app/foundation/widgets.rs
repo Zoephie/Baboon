@@ -3,6 +3,151 @@
 
 use super::*;
 
+/// Paint text through the original painter path unless this cell has a Find match.
+pub(in crate::app) fn paint_findable_text(
+    ui: &Ui,
+    pos: egui::Pos2,
+    anchor: Align2,
+    text: &str,
+    font_id: FontId,
+    color: Color32,
+    kind: FindTargetKind,
+) {
+    if !findable_text_has_match(ui, text, kind) {
+        ui.painter().text(pos, anchor, text, font_id, color);
+        return;
+    }
+    let galley = findable_galley(ui, text, font_id, color, kind);
+    let rect = anchor.anchor_size(pos, galley.size());
+    ui.painter().galley(rect.min, galley, color);
+}
+
+fn findable_galley(
+    ui: &Ui,
+    text: &str,
+    font_id: FontId,
+    color: Color32,
+    kind: FindTargetKind,
+) -> std::sync::Arc<egui::Galley> {
+    let job = findable_layout_job(ui, text, font_id, color, kind);
+    ui.fonts(|fonts| fonts.layout_job(job))
+}
+
+/// Return whether the current Foundation cell has a rendered match of `kind`.
+pub(in crate::app) fn findable_text_has_match(ui: &Ui, text: &str, kind: FindTargetKind) -> bool {
+    findable_highlight_data(ui, text, kind).is_some()
+}
+
+/// Build highlighted widget text only when the current cell contains a Find match.
+pub(in crate::app) fn highlighted_widget_text(
+    ui: &Ui,
+    text: &str,
+    text_style: TextStyle,
+    color: Color32,
+    kind: FindTargetKind,
+) -> Option<egui::WidgetText> {
+    findable_text_has_match(ui, text, kind).then(|| {
+        let font_id = ui.style().text_styles[&text_style].clone();
+        findable_layout_job(ui, text, font_id, color, kind).into()
+    })
+}
+
+fn findable_highlight_data(
+    ui: &Ui,
+    text: &str,
+    kind: FindTargetKind,
+) -> Option<(Vec<std::ops::Range<usize>>, Option<std::ops::Range<usize>>)> {
+    let snapshot =
+        ui.data(|data| data.get_temp::<FindRenderSnapshot>(find_render_snapshot_id()))?;
+    let cell = ui.data(|data| data.get_temp::<FindRenderCell>(find_render_cell_id()))?;
+    if !snapshot
+        .matching_cells
+        .contains(&(cell.tag_key.clone(), cell.field_path.clone(), kind))
+    {
+        return None;
+    }
+    let ranges = find_text_ranges(
+        text,
+        &snapshot.query,
+        snapshot.match_case,
+        snapshot.whole_word,
+    );
+    if ranges.is_empty() {
+        return None;
+    }
+    let active = snapshot.active.as_ref().and_then(|active| {
+        (active.tag_key == cell.tag_key
+            && active.field_path == cell.field_path
+            && active.kind == kind)
+            .then_some(active.range.clone())
+    });
+    Some((ranges, active))
+}
+
+fn findable_layout_job(
+    ui: &Ui,
+    text: &str,
+    font_id: FontId,
+    color: Color32,
+    kind: FindTargetKind,
+) -> egui::text::LayoutJob {
+    let Some((ranges, active)) = findable_highlight_data(ui, text, kind) else {
+        let mut job = egui::text::LayoutJob::default();
+        job.append(
+            text,
+            0.0,
+            egui::TextFormat {
+                font_id,
+                color,
+                ..Default::default()
+            },
+        );
+        return job;
+    };
+    let mut job = egui::text::LayoutJob::default();
+    let mut cursor = 0;
+    for range in ranges {
+        if cursor < range.start {
+            job.append(
+                &text[cursor..range.start],
+                0.0,
+                egui::TextFormat {
+                    font_id: font_id.clone(),
+                    color,
+                    ..Default::default()
+                },
+            );
+        }
+        job.append(
+            &text[range.clone()],
+            0.0,
+            egui::TextFormat {
+                font_id: font_id.clone(),
+                color: Color32::BLACK,
+                background: if active.as_ref() == Some(&range) {
+                    Color32::from_rgb(255, 168, 38)
+                } else {
+                    Color32::from_rgb(255, 220, 70)
+                },
+                ..Default::default()
+            },
+        );
+        cursor = range.end;
+    }
+    if cursor < text.len() {
+        job.append(
+            &text[cursor..],
+            0.0,
+            egui::TextFormat {
+                font_id,
+                color,
+                ..Default::default()
+            },
+        );
+    }
+    job
+}
+
 pub(in crate::app) fn foundation_label_cell(ui: &mut Ui, text: &str, help: Option<&str>) {
     let width = FOUNDATION_LABEL_WIDTH;
     let height = 24.0;
@@ -23,12 +168,14 @@ pub(in crate::app) fn foundation_label_cell(ui: &mut Ui, text: &str, help: Optio
     }
     let shown = truncate_for_cell(text, width - gutter - 4.0);
     let truncated = shown != text;
-    ui.painter().text(
+    paint_findable_text(
+        ui,
         rect.left_center() + Vec2::new(gutter, 0.0),
         Align2::LEFT_CENTER,
-        shown,
+        &shown,
         FontId::proportional(12.5),
         text_dark(),
+        FindTargetKind::Label,
     );
     // Hovering the name (or the cue) shows the field documentation (prefixed with
     // the full name when the displayed label was truncated).
@@ -61,12 +208,14 @@ pub(in crate::app) fn foundation_input_cell_colored(
     ui.painter().rect_filled(rect, 0.0, foundation_input());
     ui.painter()
         .rect_stroke(rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
-    ui.painter().text(
+    paint_findable_text(
+        ui,
         rect.left_center() + Vec2::new(5.0, 0.0),
         Align2::LEFT_CENTER,
-        truncate_for_cell(text, width - 10.0),
+        &truncate_for_cell(text, width - 10.0),
         FontId::proportional(12.5),
         color,
+        FindTargetKind::Value,
     );
     if response.hovered() {
         response.on_hover_text(hover.unwrap_or(text));
@@ -120,12 +269,14 @@ pub(super) fn foundation_tag_reference_input_cell_colored(
     paint_tag_reference_value_cell(ui, rect, icon_group);
     let text_left = tag_reference_text_x(rect);
     let text_width = (rect.right() - text_left - 5.0).max(12.0);
-    ui.painter().text(
+    paint_findable_text(
+        ui,
         egui::pos2(text_left, rect.center().y),
         Align2::LEFT_CENTER,
-        truncate_for_cell(text, text_width),
+        &truncate_for_cell(text, text_width),
         FontId::proportional(12.5),
         color,
+        FindTargetKind::Value,
     );
     if response.hovered() {
         response.on_hover_text(hover.unwrap_or(text));
@@ -147,6 +298,7 @@ pub(super) fn foundation_tag_reference_text_edit_cell(
         top: 2.0,
         bottom: 2.0,
     };
+    let has_highlight = findable_text_has_match(ui, text, FindTargetKind::Value);
     let response = ui
         .scope(|ui| {
             ui.visuals_mut().widgets.inactive.bg_fill = foundation_input();
@@ -156,17 +308,29 @@ pub(super) fn foundation_tag_reference_text_edit_cell(
 
             ui.visuals_mut().widgets.hovered.fg_stroke = Stroke::new(1.0, text_dark());
             ui.visuals_mut().widgets.active.fg_stroke = Stroke::new(1.0, text_dark());
-            ui.put(
-                rect,
-                egui::TextEdit::singleline(text)
-                    .id(id)
-                    .font(TextStyle::Monospace)
-                    .text_color(text_dark())
-                    .vertical_align(egui::Align::Center)
-                    .margin(margin)
-                    .desired_width(width)
-                    .clip_text(true),
-            )
+            let edit = egui::TextEdit::singleline(text)
+                .id(id)
+                .font(TextStyle::Monospace)
+                .text_color(text_dark())
+                .vertical_align(egui::Align::Center)
+                .margin(margin)
+                .desired_width(width)
+                .clip_text(true);
+            if has_highlight {
+                let font_id = ui.style().text_styles[&TextStyle::Monospace].clone();
+                let mut layouter = |ui: &Ui, text: &str, _wrap_width: f32| {
+                    findable_galley(
+                        ui,
+                        text,
+                        font_id.clone(),
+                        text_dark(),
+                        FindTargetKind::Value,
+                    )
+                };
+                ui.put(rect, edit.layouter(&mut layouter))
+            } else {
+                ui.put(rect, edit)
+            }
         })
         .inner;
     paint_tag_reference_icon(ui, response.rect + margin, icon_group);
@@ -180,6 +344,7 @@ pub(in crate::app) fn foundation_text_edit_cell(
     width: f32,
     id: egui::Id,
 ) -> egui::Response {
+    let has_highlight = findable_text_has_match(ui, text, FindTargetKind::Value);
     let response = ui
         .scope(|ui| {
             ui.visuals_mut().widgets.inactive.bg_fill = foundation_input();
@@ -188,15 +353,27 @@ pub(in crate::app) fn foundation_text_edit_cell(
             ui.visuals_mut().widgets.inactive.fg_stroke = Stroke::new(1.0, text_dark());
             ui.visuals_mut().widgets.hovered.fg_stroke = Stroke::new(1.0, text_dark());
             ui.visuals_mut().widgets.active.fg_stroke = Stroke::new(1.0, text_dark());
-            ui.add_sized(
-                [width, 24.0],
-                egui::TextEdit::singleline(text)
-                    .id(id)
-                    .font(TextStyle::Monospace)
-                    .text_color(text_dark())
-                    .vertical_align(egui::Align::Center)
-                    .margin(Vec2::new(4.0, 2.0)),
-            )
+            let edit = egui::TextEdit::singleline(text)
+                .id(id)
+                .font(TextStyle::Monospace)
+                .text_color(text_dark())
+                .vertical_align(egui::Align::Center)
+                .margin(Vec2::new(4.0, 2.0));
+            if has_highlight {
+                let font_id = ui.style().text_styles[&TextStyle::Monospace].clone();
+                let mut layouter = |ui: &Ui, text: &str, _wrap_width: f32| {
+                    findable_galley(
+                        ui,
+                        text,
+                        font_id.clone(),
+                        text_dark(),
+                        FindTargetKind::Value,
+                    )
+                };
+                ui.add_sized([width, 24.0], edit.layouter(&mut layouter))
+            } else {
+                ui.add_sized([width, 24.0], edit)
+            }
         })
         .inner;
     text_edit_cursor_to_start_on_tab_focus(ui, &response);

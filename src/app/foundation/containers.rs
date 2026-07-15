@@ -254,6 +254,15 @@ pub(in crate::app) fn draw_field(
     tag_reference_value_width: f32,
 ) {
     let field_path = append_field_path_for(path_prefix, &field);
+    ui.data_mut(|data| {
+        data.insert_temp(
+            find_render_cell_id(),
+            FindRenderCell {
+                tag_key: edit.tag_key.to_owned(),
+                field_path: field_path.clone(),
+            },
+        )
+    });
     // Active (filter) field-search: hide everything that isn't a match, an
     // ancestor container of one, or inside a name-matched container.
     if !edit.field_visible(&field_path) {
@@ -267,6 +276,28 @@ pub(in crate::app) fn draw_field(
     }
     if is_internal_schema_marker_name(field.name()) {
         return;
+    }
+    // Field navigation is shared by reference jumps and Find. Consume the
+    // one-shot target before dispatching by field type so functions, explanation
+    // rows, and container headers scroll just as scalar value rows do.
+    let scroll_here = edit.field_nav.is_some()
+        && ui
+            .data(|d| d.get_temp::<String>(field_jump_target_id()))
+            .as_deref()
+            == Some(field_path.as_str());
+    if scroll_here {
+        let target = egui::Rect::from_min_size(
+            ui.cursor().min,
+            Vec2::new(ui.available_width().max(1.0), 24.0),
+        );
+        ui.scroll_to_rect(target, Some(egui::Align::Center));
+        ui.data_mut(|d| {
+            d.remove::<String>(field_jump_target_id());
+            if d.get_temp::<String>(jump_target_id()).as_deref() == Some(field_path.as_str()) {
+                d.remove::<String>(jump_target_id());
+            }
+        });
+        ui.ctx().request_repaint();
     }
     match field.field_type() {
         TagFieldType::Terminator
@@ -297,11 +328,6 @@ pub(in crate::app) fn draw_field(
     let glow = edit
         .field_nav
         .is_some_and(|_| edit.field_nav_glow(&field_path, ui.input(|i| i.time)));
-    let scroll_here = edit.field_nav.is_some()
-        && ui
-            .data(|d| d.get_temp::<String>(field_jump_target_id()))
-            .as_deref()
-            == Some(field_path.as_str());
     let glow_fill = egui::Color32::from_rgba_unmultiplied(255, 214, 0, 38);
     if let Some(function) = field.as_function() {
         if glow {
@@ -732,14 +758,31 @@ fn draw_foundation_collapsing_header(
                 if toggle.clicked() {
                     state.toggle(ui);
                 }
-                let label = ui.add(
-                    egui::Label::new(
-                        RichText::new(title)
-                            .color(foundation_block_text())
-                            .font(bold_font(12.5)),
+                let label = if findable_text_has_match(ui, &title, FindTargetKind::Label) {
+                    let (label_rect, label) = ui.allocate_exact_size(
+                        Vec2::new(ui.available_width().max(80.0), 20.0),
+                        Sense::click(),
+                    );
+                    paint_findable_text(
+                        ui,
+                        label_rect.left_center(),
+                        Align2::LEFT_CENTER,
+                        &title,
+                        bold_font(12.5),
+                        foundation_block_text(),
+                        FindTargetKind::Label,
+                    );
+                    label
+                } else {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(&title)
+                                .color(foundation_block_text())
+                                .font(bold_font(12.5)),
+                        )
+                        .sense(Sense::click()),
                     )
-                    .sense(Sense::click()),
-                );
+                };
                 if label.clicked() {
                     state.toggle(ui);
                 }
@@ -1454,15 +1497,32 @@ pub(in crate::app) fn draw_foundation_block_control(
                 if toggle.clicked() && count > 0 {
                     state.toggle(ui);
                 }
-                let name_label = ui.add_sized(
-                    [190.0, 20.0],
-                    egui::Label::new(
-                        RichText::new(clean_field_name(name))
-                            .color(foundation_block_text())
-                            .font(bold_font(12.5)),
+                let clean_name = clean_field_name(name);
+                let name_label = if findable_text_has_match(ui, &clean_name, FindTargetKind::Label)
+                {
+                    let (name_rect, name_label) =
+                        ui.allocate_exact_size(Vec2::new(190.0, 20.0), Sense::click());
+                    paint_findable_text(
+                        ui,
+                        name_rect.left_center(),
+                        Align2::LEFT_CENTER,
+                        &clean_name,
+                        bold_font(12.5),
+                        foundation_block_text(),
+                        FindTargetKind::Label,
+                    );
+                    name_label
+                } else {
+                    ui.add_sized(
+                        [190.0, 20.0],
+                        egui::Label::new(
+                            RichText::new(clean_name)
+                                .color(foundation_block_text())
+                                .font(bold_font(12.5)),
+                        )
+                        .sense(Sense::click()),
                     )
-                    .sense(Sense::click()),
-                );
+                };
                 // Right-click the block name → copy / paste menu. Copy actions are
                 // read-only and available for any element collection (including
                 // fixed-size arrays); the size/content-changing paste & replace

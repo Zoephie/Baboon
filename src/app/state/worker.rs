@@ -77,6 +77,20 @@ pub(in crate::app) enum WorkerMessage {
         generation: u64,
         blobs: Vec<(String, String)>,
     },
+    /// Progress from an exact all-tag Find scan.
+    FindAllProgress {
+        generation: u64,
+        request_id: u64,
+        processed: usize,
+        total: usize,
+    },
+    /// Exact closed-document occurrences from an all-tag Find scan.
+    FindAllFinished {
+        generation: u64,
+        request_id: u64,
+        occurrences: Vec<FindOccurrence>,
+        unreadable: usize,
+    },
     // Background reverse-dependency index build finished. `generation` guards
     // against staleness after a source reload.
     ReverseDependenciesBuilt {

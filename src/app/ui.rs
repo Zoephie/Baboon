@@ -5,6 +5,7 @@ use super::controller::open_terminal_log;
 use super::*;
 
 mod dialogs;
+mod find;
 mod first_run;
 mod help;
 mod search_windows;
