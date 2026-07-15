@@ -40,9 +40,10 @@ pub(super) enum ExtractSource {
         sample_rate: u32,
         chunk_offsets: Vec<usize>,
     },
-    /// Resolve an FMOD bank subsound by permutation name (H3/ODST/Reach),
-    /// decode, write WAV.
-    Bank { key: String },
+    /// Resolve an FMOD bank subsound (H3/ODST/Reach), decode, write WAV.
+    /// `id` is the engine's `fmod bank subsound id hash` (preferred); `key` is
+    /// the permutation leaf name (legacy fallback). See `AudioState::bank_pcm`.
+    Bank { id: Option<u32>, key: String },
     /// Resolve a Wwise event by name (H4), decode, write WAV.
     Event { name: String },
 }

@@ -120,6 +120,129 @@ mod tests {
         assert!(resolved > 0);
     }
 
+    /// Coverage audit (skip-if-absent): walk *every* `.sound` tag under a game's
+    /// tags tree, compute each permutation's `fmod bank subsound id hash` exactly
+    /// as the sound player does, and check it resolves in the FMOD banks. Reports
+    /// id-coverage and, for id-misses, whether the legacy name lookup would have
+    /// found *anything* — so a miss is attributed to a genuinely absent subsound
+    /// vs. a hash/reconstruction gap. Run with:
+    ///   SND_TAGS_ROOT=/Users/camden/Halo/haloreach_mcc/tags \
+    ///     cargo test fmod_id_resolves_every_permutation -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn fmod_id_resolves_every_permutation() {
+        use blam_tags::audio::{fmod_bank_subsound_id_hash, fmod_pitch_range_folder, SoundBanks};
+
+        let root = std::env::var("SND_TAGS_ROOT")
+            .unwrap_or_else(|_| "/Users/camden/Halo/haloreach_mcc/tags".to_owned());
+        let tags_root = std::path::Path::new(&root);
+        if !tags_root.exists() {
+            eprintln!("skip: no tags at {}", tags_root.display());
+            return;
+        }
+        let banks = SoundBanks::open_pc(tags_root).expect("open FMOD banks");
+
+        // Recursively collect every .sound tag.
+        let mut sound_tags = Vec::new();
+        let mut stack = vec![tags_root.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    stack.push(p);
+                } else if p.extension().is_some_and(|e| e == "sound") {
+                    sound_tags.push(p);
+                }
+            }
+        }
+        eprintln!("scanning {} .sound tags under {}", sound_tags.len(), root);
+
+        let (mut perms, mut by_id, mut by_name, mut id_miss_name_hit, mut absent, mut no_pr) =
+            (0usize, 0usize, 0usize, 0usize, 0usize, 0usize);
+        let mut hash_gaps: Vec<String> = Vec::new();
+
+        for tag_path in &sound_tags {
+            let Ok(tag) = blam_tags::TagFile::read(tag_path) else {
+                continue;
+            };
+            let tag_root = tag.root();
+            let Some(pitch_ranges) = find_block_field(&tag_root, "pitch range") else {
+                no_pr += 1;
+                continue;
+            };
+            // Tag rel path (backslash, no extension) — the hash input's tag part.
+            let rel = tag_path
+                .strip_prefix(tags_root)
+                .unwrap_or(tag_path)
+                .with_extension("")
+                .to_string_lossy()
+                .replace('/', "\\");
+            let multi_pr = pitch_ranges.len() > 1;
+            for pr_index in 0..pitch_ranges.len() {
+                let Some(pr) = pitch_ranges.element(pr_index) else {
+                    continue;
+                };
+                let pr_name = find_full_field_name(&pr, "name")
+                    .and_then(|full| pr.read_string_id(full))
+                    .unwrap_or_default();
+                let folder = fmod_pitch_range_folder(&pr_name, multi_pr);
+                let Some(permutations) = find_block_field(&pr, "permutation") else {
+                    continue;
+                };
+                for perm_index in 0..permutations.len() {
+                    let Some(perm) = permutations.element(perm_index) else {
+                        continue;
+                    };
+                    let Some(name) = find_full_field_name(&perm, "name")
+                        .and_then(|full| perm.read_string_id(full))
+                        .filter(|n| !n.is_empty())
+                    else {
+                        continue;
+                    };
+                    perms += 1;
+                    let id = fmod_bank_subsound_id_hash(&rel, folder, &name);
+                    let id_hit = banks.resolve_by_id(id).is_some();
+                    let name_hit = banks.resolve(&name).is_some();
+                    if id_hit {
+                        by_id += 1;
+                    }
+                    if name_hit {
+                        by_name += 1;
+                    }
+                    if !id_hit {
+                        if name_hit {
+                            id_miss_name_hit += 1;
+                            if hash_gaps.len() < 30 {
+                                hash_gaps.push(format!("{rel}\\{}#{perm_index} :: {name}", pr_name));
+                            }
+                        } else {
+                            absent += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        eprintln!("permutations: {perms}");
+        eprintln!(
+            "  resolved by id  : {by_id} ({:.2}%)",
+            100.0 * by_id as f64 / perms.max(1) as f64
+        );
+        eprintln!("  resolved by name: {by_name} (legacy, ambiguous)");
+        eprintln!("  id-miss, name-hit (potential hash gap): {id_miss_name_hit}");
+        eprintln!("  id-miss, name-miss (subsound absent from bank): {absent}");
+        eprintln!("  tags without a pitch-range block (Wwise/classic): {no_pr}");
+        if !hash_gaps.is_empty() {
+            eprintln!("  sample hash gaps:");
+            for g in &hash_gaps {
+                eprintln!("    {g}");
+            }
+        }
+    }
+
     /// H2 investigation (skip-if-absent): walk the classic `.sound` tag and dump
     /// every non-empty `data` field with its path + size + first bytes, to locate
     /// the inline audio and characterize its framing. Point at a tag with
@@ -426,7 +549,7 @@ mod tests {
         let wav_dir = std::env::temp_dir().join("baboon_ce_extract_wav");
         let _ = std::fs::remove_dir_all(&wav_dir);
 
-        let items = build_extract_items(&tag, &rows, None, &wav_dir, false);
+        let items = build_extract_items(&tag, &rows, None, &wav_dir, false, None);
         let mut audio = super::audio::AudioState::default();
         audio.run_extract(ExtractRequest {
             items,
@@ -442,7 +565,7 @@ mod tests {
         // Raw .ogg passthrough should be byte-identical to the inline samples.
         let ogg_dir = std::env::temp_dir().join("baboon_ce_extract_ogg");
         let _ = std::fs::remove_dir_all(&ogg_dir);
-        let items = build_extract_items(&tag, &rows, None, &ogg_dir, true);
+        let items = build_extract_items(&tag, &rows, None, &ogg_dir, true, None);
         audio.run_extract(ExtractRequest {
             items,
             tags_root: None,
@@ -482,7 +605,7 @@ mod tests {
         let h2_params = Some(h2_codec_params(&tag));
         let dir = std::env::temp_dir().join("baboon_h2_extract");
         let _ = std::fs::remove_dir_all(&dir);
-        let items = build_extract_items(&tag, &rows, h2_params, &dir, false);
+        let items = build_extract_items(&tag, &rows, h2_params, &dir, false, None);
         let count = items.len();
         let mut audio = super::audio::AudioState::default();
         audio.run_extract(ExtractRequest {
@@ -523,7 +646,7 @@ mod tests {
         assert!(!rows.is_empty());
         let dir = std::env::temp_dir().join("baboon_bank_extract");
         let _ = std::fs::remove_dir_all(&dir);
-        let items = build_extract_items(&tag, &rows, None, &dir, false);
+        let items = build_extract_items(&tag, &rows, None, &dir, false, None);
         let mut audio = super::audio::AudioState::default();
         audio.run_extract(ExtractRequest {
             items,
