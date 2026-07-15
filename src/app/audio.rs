@@ -102,9 +102,15 @@ pub(super) enum InlineCodec {
 }
 
 pub(super) enum SoundAction {
-    /// Play the FMOD bank subsound named `key` (a permutation string-id).
-    /// Used by Halo 3+ whose audio is paged out to `<game>/fmod/pc/*.fsb`.
-    Play { key: String, label: String },
+    /// Play an FMOD bank subsound (Halo 3+, audio paged out to
+    /// `<game>/fmod/pc/*.fsb`). `id` is the engine's `fmod bank subsound id
+    /// hash` (preferred, collision-free); `key` is the permutation leaf name
+    /// (legacy fallback for banks without a `.fsb.info` manifest).
+    Play {
+        id: Option<u32>,
+        key: String,
+        label: String,
+    },
     /// Play encoded audio stored *inline* in the tag (classic Halo CE/H2).
     /// `chunk_offsets` are H2 per-chunk byte offsets into `bytes` (each chunk is
     /// an independent stream, concatenated on decode); empty = one stream (CE).
@@ -256,12 +262,25 @@ impl AudioState {
         self.banks.as_ref()
     }
 
-    /// Resolve an FMOD permutation `key` to a decoded (cached) buffer. Shared by
+    /// Resolve an FMOD permutation to a decoded (cached) buffer. Shared by
     /// audition and extraction; the bank borrow is scoped so it drops before the
     /// cache insert.
-    fn bank_pcm(&mut self, tags_root: &Path, key: &str) -> Result<Arc<DecodedPcm>, BankError> {
+    ///
+    /// Prefers the engine's `fmod bank subsound id hash` (`id`), which uniquely
+    /// identifies the intended permutation across the whole bank. Falls back to
+    /// the legacy `key` (permutation leaf name) when the id isn't available or
+    /// the bank has no `.fsb.info` — the name lookup is ambiguous (many tags
+    /// share a leaf) but is all older/non-MCC banks offer.
+    fn bank_pcm(
+        &mut self,
+        tags_root: &Path,
+        id: Option<u32>,
+        key: &str,
+    ) -> Result<Arc<DecodedPcm>, BankError> {
         let resolved = match self.ensure_banks(tags_root) {
-            Some(banks) => banks.resolve(key),
+            Some(banks) => id
+                .and_then(|id| banks.resolve_by_id(id))
+                .or_else(|| banks.resolve(key)),
             None => return Err(BankError::NoBank),
         };
         let Some((bank_index, sub_index)) = resolved else {
@@ -315,9 +334,9 @@ impl AudioState {
                         write_wav_pcm16(&item.out_path, &pcm.samples, pcm.channels, pcm.sample_rate)
                             .map_err(|e| e.to_string())
                     }),
-                ExtractSource::Bank { key } => match request.tags_root.as_deref() {
+                ExtractSource::Bank { id, key } => match request.tags_root.as_deref() {
                     None => Err("no source loaded".to_owned()),
-                    Some(tags_root) => match self.bank_pcm(tags_root, &key) {
+                    Some(tags_root) => match self.bank_pcm(tags_root, id, &key) {
                         Ok(pcm) => write_wav_pcm16(
                             &item.out_path,
                             &pcm.samples,
@@ -457,7 +476,7 @@ impl AudioState {
         let Some(action) = self.pending.take() else {
             return;
         };
-        let (key, label) = match action {
+        let (id, key, label) = match action {
             SoundAction::SetVolume(v) => {
                 let v = v.clamp(0.0, 1.0);
                 self.volume = Volume(v);
@@ -520,7 +539,7 @@ impl AudioState {
                 }
                 return;
             }
-            SoundAction::Play { key, label } => (key, label),
+            SoundAction::Play { id, key, label } => (id, key, label),
         };
         self.wwise_deferred = None; // FMOD playback supersedes a pending event
 
@@ -529,7 +548,7 @@ impl AudioState {
             return;
         };
 
-        match self.bank_pcm(tags_root, &key) {
+        match self.bank_pcm(tags_root, id, &key) {
             Ok(pcm) => self.play_decoded(&pcm, &label),
             Err(BankError::NoBank) => {
                 self.status = Some("no FMOD bank under <game>/fmod/pc".to_owned())

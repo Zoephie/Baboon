@@ -593,16 +593,42 @@ pub(super) fn sound_permutation_rows(tag: &TagFile) -> Vec<SoundPermRow> {
     rows
 }
 
+/// A `.sound` tag's `<tags root>`-relative path without extension (e.g.
+/// `.../tags/sound/dialog/.../ambush.sound` → `sound\dialog\...\ambush`), for
+/// building the FMOD subsound id. Backslash-normalized; the hash lowercases.
+fn sound_tag_rel(abs: &std::path::Path, tags_root: &std::path::Path) -> Option<String> {
+    let rel = abs.strip_prefix(tags_root).ok()?;
+    Some(rel.with_extension("").to_string_lossy().replace('/', "\\"))
+}
+
+/// The engine's `fmod bank subsound id hash` for a Halo 3+ permutation row —
+/// the collision-free key that resolves to the exact intended variant. Needs the
+/// owning `.sound` tag's rel path (e.g. `sound\dialog\...\ambush`); returns
+/// `None` when it's unknown, and playback then falls back to leaf-name lookup.
+/// Folds in the pitch-range folder per the engine rule, and hashes the
+/// permutation's raw string-id (`row.name`) — matching the tool's own build.
+fn row_bank_id(sound_rel: Option<&str>, multi_pr: bool, row: &SoundPermRow) -> Option<u32> {
+    let sound_rel = sound_rel?;
+    let pitch = blam_tags::audio::fmod_pitch_range_folder(&row.pitch_range, multi_pr);
+    Some(blam_tags::audio::fmod_bank_subsound_id_hash(
+        sound_rel, pitch, &row.name,
+    ))
+}
+
 /// The play action for a permutation row (bank subsound / CE inline Ogg / H2
 /// inline blob). Returns `None` if the inline bytes can't be re-extracted.
+/// `sound_rel`/`multi_pr` disambiguate the FMOD subsound (see [`row_bank_id`]).
 fn row_play_action(
     tag: &TagFile,
     row: &SoundPermRow,
     h2_params: Option<(super::audio::InlineCodec, u16, u32)>,
+    sound_rel: Option<&str>,
+    multi_pr: bool,
 ) -> Option<super::audio::SoundAction> {
     use super::audio::{InlineCodec, SoundAction};
     match &row.kind {
         RowKind::Bank => Some(SoundAction::Play {
+            id: row_bank_id(sound_rel, multi_pr, row),
             key: row.name.clone(),
             label: row.name.clone(),
         }),
@@ -646,10 +672,13 @@ fn row_extract_source(
     row: &SoundPermRow,
     h2_params: Option<(super::audio::InlineCodec, u16, u32)>,
     raw_ce: bool,
+    sound_rel: Option<&str>,
+    multi_pr: bool,
 ) -> Option<ExtractSource> {
     use super::audio::InlineCodec;
     match &row.kind {
         RowKind::Bank => Some(ExtractSource::Bank {
+            id: row_bank_id(sound_rel, multi_pr, row),
             key: row.name.clone(),
         }),
         RowKind::InlineCe {
@@ -762,11 +791,12 @@ pub(super) fn build_extract_items(
     h2_params: Option<(super::audio::InlineCodec, u16, u32)>,
     base: &std::path::Path,
     raw_ce: bool,
+    sound_rel: Option<&str>,
 ) -> Vec<ExtractItem> {
     let multi_pr = rows_span_multiple_pitch_ranges(rows);
     rows.iter()
         .filter_map(|row| {
-            let source = row_extract_source(tag, row, h2_params, raw_ce)?;
+            let source = row_extract_source(tag, row, h2_params, raw_ce, sound_rel, multi_pr)?;
             let rel = perm_relative_path(multi_pr, row, row_extract_ext(&row.kind, raw_ce));
             Some(ExtractItem {
                 out_path: base.join(rel),
@@ -891,6 +921,13 @@ pub(in crate::app) fn draw_sound_player(
         .tag_key
         .strip_prefix("file:")
         .map(std::path::PathBuf::from);
+    // This tag's rel path (e.g. `sound\dialog\...\ambush`) + whether it spans
+    // multiple pitch ranges — both feed the FMOD subsound id hash.
+    let sound_rel = abs_tag_path
+        .as_deref()
+        .zip(edit.tags_root)
+        .and_then(|(abs, root)| sound_tag_rel(abs, root));
+    let multi_pr = rows_span_multiple_pitch_ranges(&rows);
 
     egui::CollapsingHeader::new(
         RichText::new(format!("Sound \u{2014} {} permutation(s)", rows.len())).color(text_dark()),
@@ -942,7 +979,8 @@ pub(in crate::app) fn draw_sound_player(
                         .pick_folder()
                 });
                 if let Some(base) = base {
-                    let items = build_extract_items(tag, &rows, h2_params, &base, raw_ce);
+                    let items =
+                        build_extract_items(tag, &rows, h2_params, &base, raw_ce, sound_rel.as_deref());
                     let label = base
                         .file_name()
                         .map(|name| name.to_string_lossy().into_owned())
@@ -976,7 +1014,8 @@ pub(in crate::app) fn draw_sound_player(
                                 _ => "Play this permutation (inline tag audio)",
                             };
                             if ui.small_button("\u{25B6}").on_hover_text(hover).clicked() {
-                                *edit.sound_play_request = row_play_action(tag, row, h2_params);
+                                *edit.sound_play_request =
+                                    row_play_action(tag, row, h2_params, sound_rel.as_deref(), multi_pr);
                             }
                             if ui
                                 .small_button("\u{2B07}")
@@ -992,9 +1031,14 @@ pub(in crate::app) fn draw_sound_player(
                                     ))
                                     .save_file()
                                 {
-                                    if let Some(source) =
-                                        row_extract_source(tag, row, h2_params, raw_ce)
-                                    {
+                                    if let Some(source) = row_extract_source(
+                                        tag,
+                                        row,
+                                        h2_params,
+                                        raw_ce,
+                                        sound_rel.as_deref(),
+                                        multi_pr,
+                                    ) {
                                         *edit.sound_extract_request = Some(ExtractRequest {
                                             items: vec![ExtractItem {
                                                 out_path: path,
@@ -1112,8 +1156,12 @@ fn load_referenced_sound(
 }
 
 /// The play action for the first playable unit of a (referenced) sound tag:
-/// a Wwise event (H4) or the first pitch-range permutation.
-fn referenced_sound_play_action(tag: &TagFile) -> Option<super::audio::SoundAction> {
+/// a Wwise event (H4) or the first pitch-range permutation. `sound_rel` is the
+/// referenced tag's rel path, used to compute the FMOD subsound id.
+fn referenced_sound_play_action(
+    tag: &TagFile,
+    sound_rel: Option<&str>,
+) -> Option<super::audio::SoundAction> {
     if let Some((_, name)) = h4_event_names(tag).into_iter().next() {
         return Some(super::audio::SoundAction::PlayEvent {
             event_name: name.clone(),
@@ -1122,17 +1170,23 @@ fn referenced_sound_play_action(tag: &TagFile) -> Option<super::audio::SoundActi
     }
 
     let rows = sound_permutation_rows(tag);
+    let multi_pr = rows_span_multiple_pitch_ranges(&rows);
     let is_h2 = rows
         .iter()
         .any(|row| matches!(row.kind, RowKind::InlineH2 { .. }));
     let h2_params = is_h2.then(|| h2_codec_params(tag));
     rows.first()
-        .and_then(|row| row_play_action(tag, row, h2_params))
+        .and_then(|row| row_play_action(tag, row, h2_params, sound_rel, multi_pr))
 }
 
 /// Extract items for a whole (referenced) sound tag under `base` — Wwise events
 /// or pitch-range permutations, matching the primary extractor's layout.
-fn referenced_sound_extract_items(tag: &TagFile, base: &std::path::Path) -> Vec<ExtractItem> {
+/// `sound_rel` is the referenced tag's rel path (for the FMOD subsound id).
+fn referenced_sound_extract_items(
+    tag: &TagFile,
+    base: &std::path::Path,
+    sound_rel: Option<&str>,
+) -> Vec<ExtractItem> {
     let events = h4_event_names(tag);
     if !events.is_empty() {
         return events
@@ -1148,7 +1202,7 @@ fn referenced_sound_extract_items(tag: &TagFile, base: &std::path::Path) -> Vec<
         .iter()
         .any(|row| matches!(row.kind, RowKind::InlineH2 { .. }));
     let h2_params = is_h2.then(|| h2_codec_params(tag));
-    build_extract_items(tag, &rows, h2_params, base, false)
+    build_extract_items(tag, &rows, h2_params, base, false, sound_rel)
 }
 
 /// Render a set of `.sound` refs with a ▶ Play, ⬇ Extract, and the clickable
@@ -1184,7 +1238,7 @@ fn draw_referenced_sound_cell(
                     if let Some((sound, _)) =
                         load_referenced_sound(game, tags_root, definitions_root, path, *group)
                     {
-                        play = referenced_sound_play_action(&sound);
+                        play = referenced_sound_play_action(&sound, Some(path.as_str()));
                     }
                 }
                 if is_sound
@@ -1199,7 +1253,8 @@ fn draw_referenced_sound_cell(
                         if let Some(base) =
                             tags_root.and_then(|root| reimport_base_dir_lang(root, &abs, language))
                         {
-                            let items = referenced_sound_extract_items(&sound, &base);
+                            let items =
+                                referenced_sound_extract_items(&sound, &base, Some(path.as_str()));
                             let label = path.rsplit(['\\', '/']).next().unwrap_or(path).to_owned();
                             extract = Some(ExtractRequest {
                                 items,

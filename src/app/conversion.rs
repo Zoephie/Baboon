@@ -4438,8 +4438,19 @@ mod tests {
                 if catalog.unusable_schema_reason(group, source_game).is_some() {
                     continue;
                 }
-                let source = TagFile::new(root.join(source_game).join(format!("{group}.json")))
-                    .unwrap_or_else(|error| panic!("{source_game}/{group}: {error}"));
+                // Resolve the schema by its real (cased) filename via `by_tag`.
+                // `group` is a lowercased `by_name` key, so `{group}.json` only
+                // matches the file on case-insensitive filesystems (macOS/Windows)
+                // — a few schema files are mixed-case (e.g.
+                // `GameEngineFirefightVariantTag.json`) and would be missed on
+                // Linux. The runtime loader uses the `by_tag` casing, so match it.
+                let index = &indexes[source_index];
+                let name = index
+                    .by_tag
+                    .get(&index.by_name[group])
+                    .map_or(group.as_str(), String::as_str);
+                let source = TagFile::new(root.join(source_game).join(format!("{name}.json")))
+                    .unwrap_or_else(|error| panic!("{source_game}/{name}: {error}"));
                 for (target_index, target_game) in CONVERSION_GAMES.iter().enumerate() {
                     if source_game == target_game
                         || !indexes[target_index].by_name.contains_key(group)
