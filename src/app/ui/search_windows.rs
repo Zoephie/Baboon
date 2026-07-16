@@ -413,7 +413,9 @@ impl Baboon {
                             let text = results
                                 .entries
                                 .iter()
-                                .map(|entry| entry.display_path.replace('\\', "/"))
+                                .map(|entry| {
+                                    crate::format::to_native_path_string(&entry.display_path)
+                                })
                                 .collect::<Vec<_>>()
                                 .join("\n");
                             ui.output_mut(|output| output.copied_text = text);

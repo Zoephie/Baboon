@@ -39,6 +39,14 @@ const TERMINAL_VISIBLE_LINE_LIMIT: usize = 20_000;
 const TERMINAL_VISIBLE_LINE_TRIM_TARGET: usize = 18_000;
 const ENTRY_INDEX_REFRESH_INTERVAL_SECS: f64 = 30.0;
 
+#[cfg(any(windows, test))]
+fn explorer_select_args(path: &Path) -> [std::ffi::OsString; 2] {
+    [
+        std::ffi::OsString::from("/select,"),
+        path.as_os_str().to_owned(),
+    ]
+}
+
 impl Baboon {
     fn push_terminal_line(&mut self, line: String) {
         self.terminal.lines.push(TerminalLineEntry::new(line));
@@ -1637,8 +1645,9 @@ impl Baboon {
             self.status = "Tag is no longer in the browser".to_owned();
             return;
         };
-        ctx.output_mut(|output| output.copied_text = entry.display_path.clone());
-        self.status = format!("Copied {}", entry.display_path);
+        let copied_path = crate::format::to_native_path_string(&entry.display_path);
+        ctx.output_mut(|output| output.copied_text = copied_path.clone());
+        self.status = format!("Copied {copied_path}");
     }
 
     pub(super) fn open_entry_in_explorer(&mut self, key: &str) {
@@ -1663,8 +1672,17 @@ impl Baboon {
         };
         #[cfg(windows)]
         {
-            let arg = format!("/select,{}", path.display());
-            match Command::new("explorer.exe").arg(arg).spawn() {
+            if !path.is_file() {
+                self.status = format!(
+                    "Could not open File Explorer: file no longer exists at {}",
+                    path.display()
+                );
+                return;
+            }
+            match Command::new("explorer.exe")
+                .args(explorer_select_args(&path))
+                .spawn()
+            {
                 Ok(_) => self.status = format!("Opened {}", path.display()),
                 Err(error) => self.status = format!("Could not open File Explorer: {error}"),
             }
@@ -4514,6 +4532,19 @@ fn render_last_opened_windows_prompt(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explorer_select_arguments_keep_switch_separate_from_path_with_spaces() {
+        let path = Path::new(r"C:\Program Files\H2EK\tags\objects\example.weapon");
+
+        assert_eq!(
+            explorer_select_args(path),
+            [
+                std::ffi::OsString::from("/select,"),
+                path.as_os_str().to_owned(),
+            ]
+        );
+    }
 
     fn unique_test_dir(name: &str) -> PathBuf {
         let nanos = std::time::SystemTime::now()
