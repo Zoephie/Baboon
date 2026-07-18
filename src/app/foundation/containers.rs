@@ -819,13 +819,27 @@ pub(in crate::app) fn draw_foundation_block(
 
     let block_default_open = depth == 0 || is_priority_section(name);
     let open_override = edit.resolve_open(path_prefix, block_default_open);
-    // A clipboard is compatible when it came from the same group + block path.
-    let clipboard_len = edit
-        .block_clipboard
-        .filter(|clip| {
-            edit.editable && clip.group_tag == edit.group_tag && clip.block_path == path_prefix
-        })
-        .map(|clip| clip.elements.len());
+    // A clipboard is compatible when it came from the same group + block schema
+    // position AND holds elements of the same on-disk size. Element subscripts
+    // are stripped so which parent block element is selected doesn't matter —
+    // the block's shape is identical across siblings. A size mismatch means a
+    // different struct version; surfacing it as `VersionMismatch` keeps a
+    // cross-version paste out of the menu (the engine would reject it after the
+    // click anyway) and prevents version corruption until upgrade/downgrade.
+    let paste_gate = match edit.block_clipboard {
+        Some(clip)
+            if edit.editable
+                && clip.group_tag == edit.group_tag
+                && strip_element_indices(&clip.block_path) == strip_element_indices(path_prefix) =>
+        {
+            if clip.element_size == Some(block.element_size()) {
+                PasteGate::Ready(clip.elements.len())
+            } else {
+                PasteGate::VersionMismatch
+            }
+        }
+        _ => PasteGate::Empty,
+    };
     let block_size_label = edit
         .show_block_sizes
         .then(|| format_block_size_label(count, block.element_size()));
@@ -844,7 +858,7 @@ pub(in crate::app) fn draw_foundation_block(
         depth,
         block_default_open,
         open_override,
-        clipboard_len,
+        paste_gate,
         block_size_label.as_deref(),
         |i| block_element_dropdown_label(block.element(i), names, i),
         |ui| {
@@ -891,6 +905,7 @@ pub(in crate::app) fn draw_foundation_block(
                 group_tag: edit.group_tag,
                 block_path: path_prefix.to_owned(),
                 label: clean_field_name(name),
+                element_size: Some(block.element_size()),
                 elements,
             });
         }
@@ -1248,13 +1263,21 @@ pub(in crate::app) fn draw_foundation_array(
         block_element_dropdown_label(array.element(sel), names, sel)
     };
     let open_override = edit.resolve_open(path_prefix, depth == 0);
-    // A clipboard is compatible when it came from this same array path.
-    let clipboard_len = edit
-        .block_clipboard
-        .filter(|clip| {
-            edit.editable && clip.group_tag == edit.group_tag && clip.block_path == path_prefix
-        })
-        .map(|clip| clip.elements.len());
+    // A clipboard is compatible when it came from this same array schema
+    // position. Element subscripts are stripped so which parent block element is
+    // selected doesn't matter — the array's shape is identical across siblings.
+    // Arrays are fixed-count inline structs, not FieldSet-versioned, so there's
+    // no version dimension to gate on (only group + schema position).
+    let paste_gate = match edit.block_clipboard {
+        Some(clip)
+            if edit.editable
+                && clip.group_tag == edit.group_tag
+                && strip_element_indices(&clip.block_path) == strip_element_indices(path_prefix) =>
+        {
+            PasteGate::Ready(clip.elements.len())
+        }
+        _ => PasteGate::Empty,
+    };
     let actions = draw_foundation_block_control(
         ui,
         name,
@@ -1270,7 +1293,7 @@ pub(in crate::app) fn draw_foundation_array(
         depth,
         depth == 0,
         open_override,
-        clipboard_len,
+        paste_gate,
         None,
         |i| block_element_dropdown_label(array.element(i), names, i),
         |ui| {
@@ -1318,6 +1341,9 @@ pub(in crate::app) fn draw_foundation_array(
                 group_tag: edit.group_tag,
                 block_path: path_prefix.to_owned(),
                 label: clean_field_name(name),
+                // Inline arrays aren't FieldSet-versioned and expose no element-
+                // size accessor — no version dimension to gate on.
+                element_size: None,
                 elements,
             });
         }
@@ -1380,6 +1406,23 @@ pub(in crate::app) fn field_jump_target_id() -> egui::Id {
     egui::Id::new("foundation_jump_to_field")
 }
 
+/// Whether the block clipboard can paste into the block/array whose header is
+/// being drawn — decided up-front so the menu mirrors exactly what the engine
+/// will accept (see `blam_tags::TagBlockMut::paste_element`).
+#[derive(Clone, Copy)]
+pub(in crate::app) enum PasteGate {
+    /// No clipboard, or a clipboard from a different group / schema position —
+    /// paste is simply unavailable and needs no explanation.
+    Empty,
+    /// A compatible clipboard holding `n` element(s) — paste / replace enabled.
+    Ready(usize),
+    /// A clipboard targets this same block but its elements are a different
+    /// on-disk size, i.e. a different struct version. Disabled with a hover so
+    /// the user learns why — guards against cross-version corruption until
+    /// upgrade/downgrade lands.
+    VersionMismatch,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(in crate::app) fn draw_foundation_block_control(
     ui: &mut Ui,
@@ -1399,9 +1442,9 @@ pub(in crate::app) fn draw_foundation_block_control(
     default_open: bool,
     // `Some(open)` forces the open-state this frame (Search-fields filter).
     open_override: Option<bool>,
-    // `Some(n)` when a compatible clipboard holds `n` element(s) (enables the
-    // paste / replace menu items); `None` disables them.
-    clipboard_len: Option<usize>,
+    // Whether the clipboard can paste here — gates the paste / replace menu
+    // items and explains a blocked cross-version paste.
+    paste_gate: PasteGate,
     block_size_label: Option<&str>,
     element_label: impl Fn(usize) -> String,
     add_contents: impl FnOnce(&mut Ui),
@@ -1557,7 +1600,7 @@ pub(in crate::app) fn draw_foundation_block_control(
                         }
                         // In-place replace of the selected element — never changes
                         // the count, so it works for arrays too.
-                        if clipboard_len.is_some()
+                        if matches!(paste_gate, PasteGate::Ready(_))
                             && ui
                                 .add_enabled(
                                     count > 0,
@@ -1582,8 +1625,8 @@ pub(in crate::app) fn draw_foundation_block_control(
                                 ui.close_menu();
                             }
                             ui.separator();
-                            match clipboard_len {
-                                Some(n) => {
+                            match paste_gate {
+                                PasteGate::Ready(n) => {
                                     let noun = if n == 1 { "element" } else { "elements" };
                                     if ui.button(format!("Paste {n} {noun}")).clicked() {
                                         actions.paste = true;
@@ -1594,7 +1637,16 @@ pub(in crate::app) fn draw_foundation_block_control(
                                         ui.close_menu();
                                     }
                                 }
-                                None => {
+                                PasteGate::VersionMismatch => {
+                                    ui.add_enabled(false, egui::Button::new("Paste"))
+                                        .on_disabled_hover_text(
+                                            "Clipboard element is a different struct version \
+                                             (different on-disk size) — pasting across versions \
+                                             would corrupt the tag. Upgrade/downgrade between \
+                                             versions isn't supported yet.",
+                                        );
+                                }
+                                PasteGate::Empty => {
                                     ui.add_enabled(false, egui::Button::new("Paste"));
                                 }
                             }

@@ -87,6 +87,13 @@ pub(in crate::app) struct BlockClipboard {
     pub(in crate::app) block_path: String,
     /// Human label for the menu, e.g. "initial permutation".
     pub(in crate::app) label: String,
+    /// On-disk byte size of one copied element — the engine's version-
+    /// authoritative paste key (`raw_data / count`; e.g. H2 `bitmap_data`
+    /// v1 = 116 vs latest = 140). `Some` for block copies; `None` for inline
+    /// arrays, which aren't FieldSet-versioned and expose no size accessor.
+    /// Gates paste so a different struct version can't be pasted (and corrupt
+    /// the tag) until upgrade/downgrade exists.
+    pub(in crate::app) element_size: Option<usize>,
     /// One element (Copy element) or every element (Copy entire block).
     pub(in crate::app) elements: Vec<blam_tags::TagBlockElement>,
 }
