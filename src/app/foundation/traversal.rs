@@ -20,6 +20,27 @@ pub(in crate::app) fn strip_node_indices(path: &str) -> String {
     out
 }
 
+/// Strip only element subscripts (`[N]`) from a field path, preserving field
+/// ordinals (`#N`). Two paths that differ only in which parent block element
+/// was selected normalize to the same string, so the block clipboard can gate
+/// paste on the block's *schema* position rather than the concrete instance
+/// (e.g. `damage sections#3[0]/instant responses#5` and `…[1]/…#5` both become
+/// `damage sections#3/instant responses#5`). Keeping the `#N` ordinal still
+/// distinguishes genuinely different same-named sibling blocks.
+pub(in crate::app) fn strip_element_indices(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    let mut skipping = false;
+    for ch in path.chars() {
+        match ch {
+            '[' => skipping = true,
+            ']' => skipping = false,
+            _ if skipping => {}
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
 /// Whether a tag offers the "Search fields" box. Shader/material tags are
 /// excluded because they use the dedicated grid surface rather than the block
 /// tree; every other tag (including sound tags, which have a full field tree

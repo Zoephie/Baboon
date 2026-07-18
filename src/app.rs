@@ -680,6 +680,31 @@ mod tests {
     }
 
     #[test]
+    fn strip_element_indices_keeps_ordinals_drops_subscripts() {
+        // Block-clipboard compatibility must ignore which parent element is
+        // selected (the `[N]` subscript) but keep the field ordinal (`#N`) so a
+        // copied element pastes into the same block under a *different* parent
+        // index, while distinct same-named sibling blocks stay separate.
+        assert_eq!(
+            strip_element_indices("damage sections#3[0]/instant responses#5"),
+            "damage sections#3/instant responses#5"
+        );
+        assert_eq!(
+            strip_element_indices("damage sections#3[1]/instant responses#5"),
+            "damage sections#3/instant responses#5"
+        );
+        // The two paths above — same block, different parent index — match.
+        assert_eq!(
+            strip_element_indices("damage sections#3[0]/instant responses#5"),
+            strip_element_indices("damage sections#3[7]/instant responses#5"),
+        );
+        assert_eq!(
+            strip_element_indices("regions#3[0]/permutations#7[2]"),
+            "regions#3/permutations#7"
+        );
+    }
+
+    #[test]
     fn tag_ref_path_helpers() {
         // Null terminator stripped so the ref resolves on disk.
         assert_eq!(
