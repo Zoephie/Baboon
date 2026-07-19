@@ -106,14 +106,15 @@ fn collect_visible_paths(
 ) -> bool {
     let mut any = false;
     for field in tag_struct.fields() {
-        let name_matches = clean_field_name(field.name())
-            .to_ascii_lowercase()
-            .contains(query);
-        // Canonical path = raw field names joined by '/', no element indices.
+        let clean = clean_field_name(field.name());
+        let name_matches = clean.to_ascii_lowercase().contains(query);
+        // Canonical path = CLEAN field names joined by '/', no element indices or
+        // ordinals. Must match `strip_node_indices` of the render-walk paths,
+        // which are also built from clean names (see `append_field_path_for`).
         let canon = if canon_prefix.is_empty() {
-            field.name().to_owned()
+            clean.clone()
         } else {
-            format!("{canon_prefix}/{}", field.name())
+            format!("{canon_prefix}/{clean}")
         };
 
         let child_under = under_matched || name_matches;

@@ -97,7 +97,7 @@ pub(in crate::app) fn inherited_struct_chain(
         let Some(parent_struct) = parent_field.as_struct() else {
             break;
         };
-        path_prefix = append_field_path(&path_prefix, parent_field.name());
+        path_prefix = append_field_path(&path_prefix, parent_field.clean_name().as_ref());
         chain.push((parent_struct, path_prefix.clone()));
         current = parent_struct;
     }
@@ -1380,17 +1380,11 @@ pub(in crate::app) fn parent_block_path(path: &str) -> Option<String> {
     Some(parent)
 }
 
-/// A readable breadcrumb for a block path: cleaned segments (index suffixes
-/// dropped) joined with ` › `, e.g. `regions[0]/permutations` → `regions › permutations`.
+/// A readable breadcrumb for a block path: cleaned segments (index/ordinal
+/// suffixes dropped) joined with ` › `, e.g. `regions[0]/permutations` →
+/// `regions › permutations`. Backed by the engine's `TagFieldPath`.
 pub(super) fn breadcrumb_for_path(path: &str) -> String {
-    path.split('/')
-        .map(|segment| {
-            let base = segment.split('[').next().unwrap_or(segment);
-            clean_field_name(base.split('#').next().unwrap_or(base))
-        })
-        .filter(|segment| !segment.is_empty())
-        .collect::<Vec<_>>()
-        .join(" › ")
+    blam_tags::TagFieldPath::parse(path).breadcrumb()
 }
 
 /// egui-memory key holding the block path that a pending "jump to parent" should

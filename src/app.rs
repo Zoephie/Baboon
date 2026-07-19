@@ -705,6 +705,66 @@ mod tests {
     }
 
     #[test]
+    fn clean_field_name_strips_every_markup_form() {
+        // Display-label cleaning must strip all Guerilla markup so a segment
+        // built from a field name never carries a path-grammar character. These
+        // are the forms the compatibility sweep found across all 5 MCC kits.
+        assert_eq!(clean_field_name("jump velocity"), "jump velocity");
+        assert_eq!(clean_field_name("ambient color:[0,255]"), "ambient color");
+        assert_eq!(clean_field_name("max sounds per tag [1,16]"), "max sounds per tag");
+        assert_eq!(clean_field_name("shader flags*"), "shader flags");
+        assert_eq!(clean_field_name("activity!"), "activity");
+        assert_eq!(clean_field_name("activity name^"), "activity name");
+        assert_eq!(clean_field_name("acoustics{background sounds}*"), "acoustics");
+        assert_eq!(clean_field_name("bounds 480i&bounds 4x3 (640x480)"), "bounds 480i");
+        // H2 model_animation_graph dumper artifact `name|CODE`.
+        assert_eq!(clean_field_name("animations|ABCDCC"), "animations");
+    }
+
+    #[test]
+    fn canonical_field_path_normalizes_names_paths_and_codes() {
+        // Single names normalize to their clean form.
+        assert_eq!(canonical_field_path("ambient color:[0,255]"), "ambient color");
+        // Multi-segment paths drop element indices AND field ordinals per segment,
+        // cleaning each name — the form the conversion loss-detector relies on.
+        assert_eq!(
+            canonical_field_path("bitmaps#21[0]/signature#0"),
+            "bitmaps/signature"
+        );
+        assert_eq!(
+            canonical_field_path("resources#0/animations|ABCDCC#8"),
+            "resources/animations"
+        );
+        assert_eq!(
+            canonical_field_path(
+                "new damage info#19[0]/damage sections#26[0]/instant responses#3[0]/response type#0"
+            ),
+            "new damage info/damage sections/instant responses/response type"
+        );
+        // clean_field_key is the lowercased canonical form.
+        assert_eq!(clean_field_key("Shader Flags*"), "shader flags");
+        assert_eq!(clean_field_key("Bitmaps#21[0]/Signature#0"), "bitmaps/signature");
+    }
+
+    #[test]
+    fn resolvable_and_canonical_path_flavors_stay_consistent() {
+        // The search-filter invariant (see `collect_visible_paths` /
+        // `field_visible`): the canonical key a container is stored under equals
+        // `strip_node_indices` of the resolvable render path. This only holds
+        // because resolvable paths carry CLEAN names (a range hint left in the
+        // name would strip-to a different key and break the filter).
+        //
+        // Simulate the two flavors for a markup-named field. `resolvable` is what
+        // `append_field_path_for` emits (clean name + ordinal, plus a parent
+        // element index); `canon` is what `collect_visible_paths` records.
+        let seg = clean_field_name("max sounds per tag [1,16]"); // build-time clean
+        let resolvable = format!("ambient color#5[0]/{seg}#9");
+        let canon = format!("ambient color/{seg}");
+        assert_eq!(strip_node_indices(&resolvable), canon);
+        assert_eq!(canon, "ambient color/max sounds per tag");
+    }
+
+    #[test]
     fn tag_ref_path_helpers() {
         // Null terminator stripped so the ref resolves on disk.
         assert_eq!(

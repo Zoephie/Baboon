@@ -38,7 +38,7 @@ pub(in crate::app) fn draw_foundation_function_row(
                         if function_button {
                             *edit.function_request = Some(FunctionPopup::new(
                                 edit.tag_key.to_owned(),
-                                clean_field_name(path),
+                                canonical_field_path(path),
                                 FunctionView::from_function(function.clone())
                                     .with_edit(foundation_function_edit_paths(path)),
                                 true,
