@@ -23,7 +23,12 @@ pub(in crate::app) fn append_field_path(prefix: &str, field_name: &str) -> Strin
 /// block ops, function data). Canonical/display paths use the plain-name
 /// form and strip the ordinal via `strip_node_indices`.
 pub(in crate::app) fn append_field_path_for(prefix: &str, field: &TagField<'_>) -> String {
-    let segment = format!("{}#{}", field.name(), field.ordinal());
+    // Emit the CLEAN (markup-free) name so field-name markup — `:units`,
+    // `[range]`, `#help` — can't collide with the path grammar's own `type:`,
+    // `[index]`, and `#ordinal` tokens (the range-hint-as-index bug). The engine
+    // resolves the ordinal positionally; the clean name is the readable/fallback
+    // key. See `blam_tags::field_name` / `blam_tags::TagFieldPath`.
+    let segment = format!("{}#{}", field.clean_name(), field.ordinal());
     if prefix.is_empty() {
         segment
     } else {
@@ -480,50 +485,20 @@ pub(in crate::app) fn parse_tag_reference(input: &str) -> Result<TagReferenceDat
 }
 
 pub(in crate::app) fn field_display_meta(name: &str) -> FieldDisplayMeta {
-    let mut text = name.trim().to_owned();
-
-    let advanced = text.ends_with('*');
-    if advanced {
-        text.pop();
-    }
-    let read_only = text.ends_with('!');
-    if read_only {
-        text.pop();
-    }
-    let (text, help) = match text.split_once('#') {
-        Some((label, help)) => (label.trim().to_owned(), Some(help.trim().to_owned())),
-        None => (text, None),
-    };
-    // A `[min,max]` range may sit in the unit slot (`name:[0,1]`) or bare in the
-    // name (`max sounds [1,16]`); pull it out so the unit and range are distinct.
-    let (text, range) = extract_range_hint(&text);
-    let (label, unit) = match text.split_once(':') {
-        Some((label, unit)) => (label.trim().to_owned(), Some(unit.trim().to_owned())),
-        None => (text.trim().to_owned(), None),
-    };
+    // The engine owns the canonical field-name markup grammar (Foundation's
+    // `TagFieldNameInfo`). We map its decomposition onto Baboon's display meta.
+    // Note the Foundation marker semantics adopted here: `*` = read-only,
+    // `!` = hidden/expert-only (Baboon's `advanced` gate). See
+    // `blam_tags::field_name`.
+    let info = blam_tags::parse_field_name(name);
     FieldDisplayMeta {
-        label: clean_field_name_basic(&label),
-        unit: unit.filter(|unit| !unit.is_empty()),
-        range,
-        help: help.filter(|help| !help.is_empty()),
+        label: info.clean_name.into_owned(),
+        unit: info.units.map(str::to_owned),
+        range: info.range.map(str::to_owned),
+        help: info.description.map(str::to_owned),
         tag_reference_allowed: Vec::new(),
-        read_only,
-
-        advanced,
-    }
-}
-
-/// Split a `[ … ]` range hint out of `text`, returning `(remainder, range)`.
-/// The range keeps its brackets (e.g. `[0,+inf]`).
-fn extract_range_hint(text: &str) -> (String, Option<String>) {
-    match (text.find('['), text.rfind(']')) {
-        (Some(open), Some(close)) if open < close => {
-            let range = text[open..=close].to_owned();
-            let mut rest = text[..open].to_owned();
-            rest.push_str(&text[close + 1..]);
-            (rest, Some(range))
-        }
-        _ => (text.to_owned(), None),
+        read_only: info.read_only,
+        advanced: info.hidden,
     }
 }
 

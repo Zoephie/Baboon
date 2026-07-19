@@ -103,7 +103,7 @@ fn collect_find_struct(
             && field.as_struct().is_some()
             && is_inherited_parent_name(field.name());
         let path = if inherited_wrapper {
-            append_field_path(prefix, field.name())
+            append_field_path(prefix, field.clean_name().as_ref())
         } else {
             append_field_path_for(prefix, &field)
         };

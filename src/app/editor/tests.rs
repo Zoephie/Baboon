@@ -1141,6 +1141,28 @@ mod tests {
     }
 
     #[test]
+    fn field_meta_uses_foundation_marker_semantics() {
+        // Foundation semantics (adopted from `TagFieldNameInfo`): `*` = read-only,
+        // `!` = hidden/expert-only (Baboon's `advanced` gate). Presence-tested, so
+        // order and combination don't matter — the old `ends_with` parser dropped
+        // `*` on `angle*!`.
+        let ro = field_display_meta("a position*");
+        assert!(ro.read_only && !ro.advanced, "'*' => read-only");
+
+        let hidden = field_display_meta("activity!");
+        assert!(hidden.advanced && !hidden.read_only, "'!' => hidden/advanced");
+
+        let both = field_display_meta("angle*!");
+        assert!(both.read_only, "combined: '*' still read-only");
+        assert!(both.advanced, "combined: '!' still hidden");
+        assert_eq!(both.label, "angle");
+
+        let both_rev = field_display_meta("aabb center!*");
+        assert!(both_rev.read_only && both_rev.advanced, "order-independent");
+        assert_eq!(both_rev.label, "aabb center");
+    }
+
+    #[test]
     fn field_meta_separates_range_from_unit_and_suffix_shows_both() {
         // Range in the unit slot: unit is empty, range captured; suffix shows
         // the type (no unit) followed by the range.

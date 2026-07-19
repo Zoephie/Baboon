@@ -446,7 +446,7 @@ pub(super) fn material_section_text(text: String) -> RichText {
 }
 
 pub(super) fn clean_field_name(name: &str) -> String {
-    field_display_meta(name).label
+    blam_tags::clean_field_name(name).into_owned()
 }
 
 pub(super) fn clean_field_name_basic(name: &str) -> String {
@@ -457,11 +457,18 @@ pub(super) fn clean_field_name_basic(name: &str) -> String {
         .join(" ")
 }
 
+/// Canonical form of a field PATH (or a single field name): each `/`-segment
+/// has its markup stripped and its element index / ordinal dropped. Backed by
+/// the engine's `TagFieldPath`, so names and multi-segment paths normalize
+/// uniformly. Used for path/name comparison keys.
+pub(super) fn canonical_field_path(path: &str) -> String {
+    blam_tags::TagFieldPath::parse(path)
+        .strip_node_indices()
+        .to_string()
+}
+
 pub(super) fn clean_field_key(name: &str) -> String {
-    clean_field_name(name)
-        .replace('^', "")
-        .trim()
-        .to_ascii_lowercase()
+    canonical_field_path(name).to_ascii_lowercase()
 }
 
 pub(super) fn clean_type_name(type_name: &str) -> String {
