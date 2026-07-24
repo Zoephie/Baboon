@@ -2505,8 +2505,11 @@ impl Baboon {
             .collect();
         match blam_tags::iostore::writer::write_mod_container(&refs, &output) {
             Ok(()) => {
-                self.status =
-                    format!("Exported {count} tag(s) to {} (base game unchanged)", output.display())
+                let stem = output.file_stem().and_then(|s| s.to_str()).unwrap_or("mod");
+                self.status = format!(
+                    "Exported {count} tag(s) → {stem}.utoc/.ucas/.pak — copy all three into \
+                     Meteorite/Content/Paks/ (base game unchanged)"
+                )
             }
             Err(e) => self.status = format!("Export Mod failed: {e}"),
         }
@@ -2732,8 +2735,11 @@ impl Baboon {
             match self.export_container_override(&key, Some((new_rel, redirect))) {
                 Ok(Some(path)) => {
                     let what = if redirect { "renamed tag" } else { "tag copy" };
-                    self.status =
-                        format!("Exported {what} to {} (base game unchanged)", path.display());
+                    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("mod");
+                    self.status = format!(
+                        "Exported {what} → {stem}.utoc/.ucas/.pak — copy all three into \
+                         Meteorite/Content/Paks/ (base game unchanged)"
+                    );
                 }
                 Ok(None) => {}
                 Err(e) => self.status = format!("Export failed: {e}"),
