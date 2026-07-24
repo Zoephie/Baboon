@@ -228,6 +228,9 @@ pub(in crate::app) fn load_referenced_tag_from_source(
         TagSource::MonolithicCache { cache, .. } => cache
             .read_tag_by_name(group_tag, reference)
             .map_err(|error| anyhow::anyhow!("read {reference}.{extension} failed: {error}")),
+        TagSource::IoStoreContainerSet { .. } => anyhow::bail!(
+            "resolving tag references for geometry export is not yet supported for Campaign Evolved containers"
+        ),
     }
 }
 

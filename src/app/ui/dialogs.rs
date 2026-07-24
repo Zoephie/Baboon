@@ -445,6 +445,81 @@ impl Baboon {
         }
     }
 
+    /// Destructive-save confirmation for Campaign Evolved container tags. Save
+    /// overwrites the shipped pak files in place, so we always confirm and point
+    /// the user at Export Mod as the non-destructive alternative.
+    pub(super) fn draw_overwrite_confirm_window(&mut self, ctx: &egui::Context) {
+        let Some(key) = self.overwrite_confirm.clone() else {
+            return;
+        };
+        let mut open = true;
+        let mut do_overwrite = false;
+        let mut do_export = false;
+        let mut cancel = false;
+        let mut dont_ask = !self.confirm_container_overwrite;
+        egui::Window::new("Overwrite game files?")
+            .id(egui::Id::new("overwrite_confirm"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(520.0)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(
+                    RichText::new("Save will overwrite this tag inside the game's shipped pak files, in place:")
+                        .color(text_dark()),
+                );
+                ui.add_space(5.0);
+                ui.label(RichText::new(&key).color(text_dark()).monospace());
+                ui.add_space(9.0);
+                ui.label(
+                    RichText::new(
+                        "This modifies the original game content and cannot be undone without a backup of the pak files.",
+                    )
+                    .color(egui::Color32::from_rgb(210, 120, 90)),
+                );
+                ui.add_space(5.0);
+                ui.label(
+                    RichText::new(
+                        "To keep the base game untouched, cancel and use File \u{2192} Export Mod\u{2026} instead — it bundles your changes into a separate mod overlay.",
+                    )
+                    .color(subtle_dark())
+                    .small(),
+                );
+                ui.add_space(8.0);
+                ui.checkbox(
+                    &mut dont_ask,
+                    "Don't ask again (changeable in Settings)",
+                );
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Overwrite Game Files").clicked() {
+                        do_overwrite = true;
+                    }
+                    if ui.button("Export Mod Instead\u{2026}").clicked() {
+                        do_export = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+        if !open || cancel {
+            self.overwrite_confirm = None;
+        } else if do_overwrite {
+            self.overwrite_confirm = None;
+            // Apply the opt-out only when the user commits to the overwrite.
+            if dont_ask && self.confirm_container_overwrite {
+                self.confirm_container_overwrite = false;
+                self.persist_prefs_if_changed();
+            }
+            self.overwrite_current_tag_in_place(&key);
+        } else if do_export {
+            self.overwrite_confirm = None;
+            self.export_mod();
+        }
+    }
+
     pub(super) fn draw_rename_tag_window(&mut self, ctx: &egui::Context) {
         if self.rename_tag.is_none() {
             return;
@@ -454,7 +529,12 @@ impl Baboon {
         let mut cancel = false;
         {
             let state = self.rename_tag.as_mut().expect("checked above");
-            egui::Window::new("Rename Tag")
+            let title = if state.is_container && !state.redirect {
+                "Save Tag As (New Copy)"
+            } else {
+                "Rename Tag"
+            };
+            egui::Window::new(title)
                 .id(egui::Id::new("rename_tag"))
                 .open(&mut open)
                 .default_width(560.0)
@@ -503,7 +583,33 @@ impl Baboon {
                             .small(),
                     );
                     ui.add_space(8.0);
-                    if state.referrers_unavailable {
+                    if state.is_container {
+                        if state.redirect {
+                            ui.label(
+                                RichText::new(
+                                    "Existing references will be redirected to the new tag via the \
+                                     overlay container.",
+                                )
+                                .color(text_dark()),
+                            );
+                        } else {
+                            ui.label(
+                                RichText::new(
+                                    "Writes an independent new tag; existing references are \
+                                     unchanged.",
+                                )
+                                .color(text_dark()),
+                            );
+                        }
+                        ui.label(
+                            RichText::new(
+                                "A higher-priority overlay container is written; base game files \
+                                 are never modified.",
+                            )
+                            .color(subtle_dark())
+                            .small(),
+                        );
+                    } else if state.referrers_unavailable {
                         ui.label(
                             RichText::new(
                                 "Reference index unavailable — references are still rewritten on \
@@ -539,7 +645,11 @@ impl Baboon {
                                 !state.new_path_input.trim().is_empty(),
                                 egui::Button::new("Apply"),
                             )
-                            .on_hover_text("Move the file on disk and rewrite all references")
+                            .on_hover_text(if state.is_container {
+                                "Write a higher-priority overlay container (base game unchanged)"
+                            } else {
+                                "Move the file on disk and rewrite all references"
+                            })
                             .clicked()
                         {
                             do_apply = true;

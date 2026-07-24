@@ -39,6 +39,27 @@ const TERMINAL_VISIBLE_LINE_LIMIT: usize = 20_000;
 const TERMINAL_VISIBLE_LINE_TRIM_TARGET: usize = 18_000;
 const ENTRY_INDEX_REFRESH_INTERVAL_SECS: f64 = 30.0;
 
+/// Map a container `.ubulk` path to the UE package path the runtime hashes.
+/// `Meteorite/Content/Tags/objects/.../foo-biped.ubulk` → `/Game/Tags/objects/.../foo-biped`.
+fn container_rel_to_package_path(rel: &str) -> Option<String> {
+    let no_ext = rel.strip_suffix(".ubulk").unwrap_or(rel);
+    let after = no_ext.strip_prefix("Meteorite/Content/").unwrap_or(no_ext);
+    Some(format!("/Game/{after}"))
+}
+
+/// Prompt for an override `.utoc` output path, defaulting to `default_name`.
+fn pick_override_utoc(default_name: &str) -> Option<PathBuf> {
+    let mut output = rfd::FileDialog::new()
+        .set_title("Export Override Container")
+        .set_file_name(default_name)
+        .add_filter("IoStore TOC", &["utoc"])
+        .save_file()?;
+    if output.extension().is_none() {
+        output.set_extension("utoc");
+    }
+    Some(output)
+}
+
 #[cfg(any(windows, test))]
 fn explorer_select_args(path: &Path) -> [std::ffi::OsString; 2] {
     [
@@ -190,6 +211,12 @@ impl Baboon {
     /// Starts source work off the UI thread and reports completion through `WorkerMessage`.
     /// Captured source identity prevents stale results from replacing newer state.
     pub(super) fn begin_load_folder_path(&mut self, path: PathBuf, ctx: egui::Context) {
+        // A UE5 `Paks` directory (Halo: Campaign Evolved) is mounted as a
+        // container set rather than walked as loose files.
+        if let Some(paks) = crate::source::find_paks_dir(&path) {
+            self.begin_load_iostore_container_set_path(paks, ctx);
+            return;
+        }
         let tx = self.tx.clone();
         let names = self.default_names.clone();
         let definitions_root = locate_definitions_root();
@@ -237,6 +264,58 @@ impl Baboon {
         let recent_path = clean_recent_path(path.clone());
         thread::spawn(move || {
             let result = load_monolithic_blob_index(path, &names).map_err(|e| e.to_string());
+            let _ = tx.send(WorkerMessage::SourceLoaded {
+                result,
+                recent_path: Some(recent_path),
+            });
+            ctx.request_repaint();
+        });
+    }
+
+    pub(super) fn begin_load_iostore_container(&mut self, ctx: egui::Context) {
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Open Halo: Campaign Evolved container (.utoc)")
+            .add_filter("IoStore TOC", &["utoc"])
+            .pick_file()
+        else {
+            return;
+        };
+        self.begin_load_iostore_container_path(path, ctx);
+    }
+
+    /// Mounts a single IoStore container (`.utoc`) off the UI thread; completion
+    /// is reported through `WorkerMessage::SourceLoaded` like the other loaders.
+    pub(super) fn begin_load_iostore_container_path(&mut self, path: PathBuf, ctx: egui::Context) {
+        let tx = self.tx.clone();
+        let names = self.default_names.clone();
+        let definitions_root = locate_definitions_root();
+        self.status = format!("Mounting {}", path.display());
+        let recent_path = clean_recent_path(path.clone());
+        thread::spawn(move || {
+            let result =
+                load_iostore_container(path, &names, &definitions_root).map_err(|e| e.to_string());
+            let _ = tx.send(WorkerMessage::SourceLoaded {
+                result,
+                recent_path: Some(recent_path),
+            });
+            ctx.request_repaint();
+        });
+    }
+
+    /// Mounts every container in a `Paks` directory as one merged set.
+    pub(super) fn begin_load_iostore_container_set_path(
+        &mut self,
+        paks_dir: PathBuf,
+        ctx: egui::Context,
+    ) {
+        let tx = self.tx.clone();
+        let names = self.default_names.clone();
+        let definitions_root = locate_definitions_root();
+        self.status = format!("Mounting containers in {}", paks_dir.display());
+        let recent_path = clean_recent_path(paks_dir.clone());
+        thread::spawn(move || {
+            let result = load_iostore_container_set(paks_dir, &names, &definitions_root)
+                .map_err(|e| e.to_string());
             let _ = tx.send(WorkerMessage::SourceLoaded {
                 result,
                 recent_path: Some(recent_path),
@@ -1303,7 +1382,9 @@ impl Baboon {
         };
         match &entry.location {
             TagEntryLocation::LooseFile(path) => path.display().to_string(),
-            TagEntryLocation::Monolithic { .. } => entry.display_path.clone(),
+            TagEntryLocation::Monolithic { .. } | TagEntryLocation::Container { .. } => {
+                entry.display_path.clone()
+            }
         }
     }
 
@@ -1334,6 +1415,8 @@ impl Baboon {
             TagSource::MonolithicCache { root, .. } => {
                 (LastSessionSourceKind::MonolithicCache, root.clone())
             }
+            // Container mounts are not persisted across sessions yet.
+            TagSource::IoStoreContainerSet { .. } => return None,
         };
         let mut tags = Vec::new();
         for key in ordered_unique_keys(self.open_tabs.iter().chain(self.floating_tabs.iter())) {
@@ -1342,7 +1425,7 @@ impl Baboon {
             };
             let path = match &entry.location {
                 TagEntryLocation::LooseFile(path) => Some(path.clone()),
-                TagEntryLocation::Monolithic { .. } => None,
+                TagEntryLocation::Monolithic { .. } | TagEntryLocation::Container { .. } => None,
             };
             tags.push(LastSessionTag {
                 key: entry.key.clone(),
@@ -1667,6 +1750,10 @@ impl Baboon {
             }
             (TagEntryLocation::Monolithic { .. }, _) => {
                 self.status = "Monolithic tag has no loose file to show".to_owned();
+                return;
+            }
+            (TagEntryLocation::Container { .. }, _) => {
+                self.status = "Container tag has no loose file to show".to_owned();
                 return;
             }
         };
@@ -2172,6 +2259,17 @@ impl Baboon {
             self.status = "No tag selected".to_owned();
             return;
         };
+        // For a container tag, "Save" overwrites the tag inside the game's pak
+        // in place (destructive). Confirm first unless the user opted out (loose
+        // builds never prompt).
+        if self.current_source_is_container() {
+            if self.confirm_container_overwrite {
+                self.overwrite_confirm = Some(key);
+            } else {
+                self.overwrite_current_tag_in_place(&key);
+            }
+            return;
+        }
         match self.save_tag_by_key(&key) {
             Ok(path) => self.status = format!("Saved {}", path.display()),
             Err(error) => self.status = format!("Save failed: {error}"),
@@ -2201,11 +2299,230 @@ impl Baboon {
         Ok(output)
     }
 
+    pub(super) fn current_source_is_container(&self) -> bool {
+        matches!(
+            self.source.as_ref().map(|s| &s.source),
+            Some(TagSource::IoStoreContainerSet { .. })
+        )
+    }
+
+    /// Export a container tag as a higher-priority override container. The base
+    /// game is never modified.
+    /// - `rename_to == None`: same-name override (Save) — replaces this tag's
+    ///   chunk(s), with the `.uasset` SerialSize patched on a size change.
+    /// - `Some((new_rel, redirect))`: a new tag at `/Game/Tags/<new_rel>-<group>`
+    ///   (Save As / Rename); `redirect` adds an old→new package redirect so
+    ///   existing references resolve to the renamed tag.
+    /// Returns the output path, or `None` if the save dialog was cancelled.
+    fn export_container_override(
+        &mut self,
+        key: &str,
+        rename_to: Option<(String, bool)>,
+    ) -> Result<Option<PathBuf>, String> {
+        let Some(entry) = self.entry_for_key(key).cloned() else {
+            return Err("Tag is no longer in the source".to_owned());
+        };
+        let TagEntryLocation::Container { container, rel_path } = &entry.location else {
+            return Err("Not a Campaign Evolved container tag".to_owned());
+        };
+        let Some(source) = self.source.as_ref() else {
+            return Err("No source loaded".to_owned());
+        };
+        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+            return Err("Source is not a container".to_owned());
+        };
+        let archive = containers
+            .get(*container)
+            .ok_or("container provenance is stale")?
+            .archive
+            .clone();
+        let rel_path = rel_path.clone();
+        let group = entry.group_name.clone().unwrap_or_default();
+
+        // Tag content: current edited bytes if the tag is loaded, else the
+        // original `.ubulk`.
+        let tag_bytes = if let Some(doc) = self.parsed_tags.get(key) {
+            doc.tag.write_to_bytes().map_err(|e| format!("serialize tag: {e}"))?
+        } else {
+            archive.read(&rel_path).map_err(|e| format!("read tag: {e}"))?
+        };
+
+        match rename_to {
+            None => {
+                let stem = rel_path
+                    .rsplit('/')
+                    .next()
+                    .and_then(|f| f.strip_suffix(".ubulk"))
+                    .unwrap_or("tag");
+                let Some(output) = pick_override_utoc(&format!("{stem}-WinGDK_P.utoc")) else {
+                    return Ok(None);
+                };
+                blam_tags::iostore::writer::write_tag_override(
+                    &archive, &rel_path, &tag_bytes, &output,
+                )
+                .map_err(|e| format!("write override: {e}"))?;
+                Ok(Some(output))
+            }
+            Some((new_rel, redirect)) => {
+                let ua_path = rel_path
+                    .strip_suffix(".ubulk")
+                    .map(|s| format!("{s}.uasset"))
+                    .ok_or("source is not a .ubulk")?;
+                let template = archive
+                    .read(&ua_path)
+                    .map_err(|e| format!("read template .uasset: {e}"))?;
+                let old_pkg = container_rel_to_package_path(&rel_path)
+                    .ok_or("could not derive source package path")?;
+                let new_pkg = format!("/Game/Tags/{new_rel}-{group}");
+                let leaf = new_rel.rsplit('/').next().unwrap_or("tag");
+                let Some(output) = pick_override_utoc(&format!("{leaf}-{group}-WinGDK_P.utoc"))
+                else {
+                    return Ok(None);
+                };
+                blam_tags::iostore::writer::write_new_tag_container(
+                    &template,
+                    &tag_bytes,
+                    &new_pkg,
+                    if redirect { Some(old_pkg.as_str()) } else { None },
+                    &output,
+                )
+                .map_err(|e| format!("write container: {e}"))?;
+                Ok(Some(output))
+            }
+        }
+    }
+
+    /// Overwrite the current container tag inside its own pak, in place.
+    /// **Destructive** — modifies the shipped game files. Only reached after the
+    /// user confirms the overwrite dialog.
+    pub(super) fn overwrite_current_tag_in_place(&mut self, key: &str) {
+        let Some(entry) = self.entry_for_key(key).cloned() else {
+            self.status = "Tag is no longer in the source".to_owned();
+            return;
+        };
+        let TagEntryLocation::Container { container, rel_path } = &entry.location else {
+            self.status = "Not a Campaign Evolved container tag".to_owned();
+            return;
+        };
+        let container_idx = *container;
+        let rel_path = rel_path.clone();
+        let Some(doc) = self.parsed_tags.get(key) else {
+            self.status = "Load the tag before saving".to_owned();
+            return;
+        };
+        let bytes = match doc.tag.write_to_bytes() {
+            Ok(b) => b,
+            Err(e) => {
+                self.status = format!("Failed to serialize tag: {e}");
+                return;
+            }
+        };
+        let utoc_path = {
+            let Some(source) = self.source.as_ref() else {
+                self.status = "No source loaded".to_owned();
+                return;
+            };
+            let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+                self.status = "Source is not a container".to_owned();
+                return;
+            };
+            let Some(m) = containers.get(container_idx) else {
+                self.status = "Container provenance is stale".to_owned();
+                return;
+            };
+            m.utoc_path.clone()
+        };
+        if let Err(e) =
+            blam_tags::iostore::writer::overwrite_tag_in_place(&utoc_path, &rel_path, &bytes)
+        {
+            self.status = format!("Overwrite failed: {e}");
+            return;
+        }
+        // Hot-swap the pak's archive so subsequent reads see the new bytes.
+        match blam_tags::iostore::IoStoreArchive::open(&utoc_path) {
+            Ok(a) => {
+                if let Some(source) = self.source.as_mut()
+                    && let TagSource::IoStoreContainerSet { containers, .. } = &mut source.source
+                    && let Some(m) = containers.get_mut(container_idx)
+                {
+                    m.archive = std::sync::Arc::new(a);
+                }
+            }
+            Err(e) => self.status = format!("Saved, but reloading the pak failed: {e}"),
+        }
+        if let Some(doc) = self.parsed_tags.get_mut(key) {
+            doc.dirty = false;
+        }
+        self.status = format!("Saved into {} (game files modified)", utoc_path.display());
+    }
+
+    /// Bundle every open, modified container tag into one portable `_P` overlay
+    /// mod — the base game is left untouched.
+    pub(super) fn export_mod(&mut self) {
+        let Some(source) = self.source.as_ref() else {
+            self.status = "No source loaded".to_owned();
+            return;
+        };
+        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+            self.status = "Export Mod is only for Campaign Evolved containers".to_owned();
+            return;
+        };
+        // (archive, rel_path, edited bytes) for each loaded + dirty container tag.
+        let mut collected: Vec<(std::sync::Arc<blam_tags::iostore::IoStoreArchive>, String, Vec<u8>)> =
+            Vec::new();
+        for (k, doc) in self.parsed_tags.iter() {
+            if !doc.dirty {
+                continue;
+            }
+            let Some(entry) = self.entry_for_key(k) else {
+                continue;
+            };
+            let TagEntryLocation::Container { container, rel_path } = &entry.location else {
+                continue;
+            };
+            let Some(m) = containers.get(*container) else {
+                continue;
+            };
+            let Ok(bytes) = doc.tag.write_to_bytes() else {
+                continue;
+            };
+            collected.push((m.archive.clone(), rel_path.clone(), bytes));
+        }
+        if collected.is_empty() {
+            self.status = "No modified tags to export — edit a tag first".to_owned();
+            return;
+        }
+        let count = collected.len();
+        let Some(mut output) = pick_override_utoc("mymod-WinGDK_P.utoc") else {
+            return;
+        };
+        if output.extension().is_none() {
+            output.set_extension("utoc");
+        }
+        let refs: Vec<(&blam_tags::iostore::IoStoreArchive, &str, &[u8])> = collected
+            .iter()
+            .map(|(a, p, b)| (a.as_ref(), p.as_str(), b.as_slice()))
+            .collect();
+        match blam_tags::iostore::writer::write_mod_container(&refs, &output) {
+            Ok(()) => {
+                self.status =
+                    format!("Exported {count} tag(s) to {} (base game unchanged)", output.display())
+            }
+            Err(e) => self.status = format!("Export Mod failed: {e}"),
+        }
+    }
+
     pub(super) fn save_current_tag_as(&mut self) {
         let Some(key) = self.selected_key.clone() else {
             self.status = "No tag selected".to_owned();
             return;
         };
+        // For a container tag, "Save As" opens the rename dialog in duplicate
+        // mode (new name, no reference redirect) and writes an override.
+        if self.current_source_is_container() {
+            self.open_container_duplicate(&key);
+            return;
+        }
         let Some(entry) = self.entry_for_key(&key).cloned() else {
             self.status = "Selected tag is no longer in the source".to_owned();
             return;
@@ -2324,11 +2641,22 @@ impl Baboon {
     /// Open the rename/move dialog for a tag, pre-listing the tags that
     /// reference it (which will be rewritten on apply).
     pub(super) fn open_rename_tag(&mut self, key: &str) {
+        self.open_rename_or_duplicate(key, true);
+    }
+
+    /// Open the rename dialog in "duplicate" mode (Save As for a container tag —
+    /// writes a new tag with no redirect).
+    pub(super) fn open_container_duplicate(&mut self, key: &str) {
+        self.open_rename_or_duplicate(key, false);
+    }
+
+    fn open_rename_or_duplicate(&mut self, key: &str, redirect: bool) {
         let Some(entry) = self.entry_for_key(key).cloned() else {
             return;
         };
-        if !matches!(entry.location, TagEntryLocation::LooseFile(_)) {
-            self.status = "Only loose-folder tags can be renamed/moved".to_owned();
+        let is_container = matches!(entry.location, TagEntryLocation::Container { .. });
+        if !is_container && !matches!(entry.location, TagEntryLocation::LooseFile(_)) {
+            self.status = "Only loose-folder or container tags can be renamed".to_owned();
             return;
         }
         let display = entry.display_path.replace('\\', "/");
@@ -2353,15 +2681,67 @@ impl Baboon {
             new_path_input: name,
             referrers,
             referrers_unavailable,
+            is_container,
+            redirect,
         });
     }
 
     /// Apply the rename/move: move the file on disk and rewrite every
     /// referencing tag, in the background (reuses the folder-refactor pipeline).
     pub(super) fn begin_rename_tag(&mut self) {
-        let Some(state) = self.rename_tag.as_ref() else {
+        let Some((key, old_display, new_name_raw, is_container, redirect)) =
+            self.rename_tag.as_ref().map(|s| {
+                (
+                    s.key.clone(),
+                    s.old_display.clone(),
+                    s.new_path_input.clone(),
+                    s.is_container,
+                    s.redirect,
+                )
+            })
+        else {
             return;
         };
+        let new_name = new_name_raw.trim().to_owned();
+        if new_name.is_empty() {
+            self.status = "Enter a new tag name".to_owned();
+            return;
+        }
+        if new_name.contains(['/', '\\']) {
+            self.status = "Enter a name only; use Move to choose a folder".to_owned();
+            return;
+        }
+        if new_name.contains('.') {
+            self.status = "Enter a name without an extension".to_owned();
+            return;
+        }
+        let parent = old_display
+            .rsplit_once('/')
+            .map(|(parent, _)| parent)
+            .unwrap_or("");
+        let new_rel = if parent.is_empty() {
+            new_name
+        } else {
+            format!("{parent}/{new_name}")
+        };
+
+        // Container tags: write an override container (rename adds a redirect,
+        // duplicate does not) instead of moving a loose file.
+        if is_container {
+            self.rename_tag = None;
+            match self.export_container_override(&key, Some((new_rel, redirect))) {
+                Ok(Some(path)) => {
+                    let what = if redirect { "renamed tag" } else { "tag copy" };
+                    self.status =
+                        format!("Exported {what} to {} (base game unchanged)", path.display());
+                }
+                Ok(None) => {}
+                Err(e) => self.status = format!("Export failed: {e}"),
+            }
+            return;
+        }
+
+        // Loose folder: move the file on disk + rewrite references.
         if self.folder_refactor.is_some() {
             self.status = "A move/rename is already running".to_owned();
             return;
@@ -2374,30 +2754,7 @@ impl Baboon {
             self.status = "Rename requires a loaded tags folder".to_owned();
             return;
         };
-        let new_name = state.new_path_input.trim().to_owned();
-        if new_name.is_empty() {
-            self.status = "Enter a new tag name".to_owned();
-            return;
-        }
-        if new_name.contains(['/', '\\']) {
-            self.status = "Rename accepts a name only; use Move to choose a folder".to_owned();
-            return;
-        }
-        if new_name.contains('.') {
-            self.status = "Enter a name without an extension".to_owned();
-            return;
-        }
-        let parent = state
-            .old_display
-            .rsplit_once('/')
-            .map(|(parent, _)| parent)
-            .unwrap_or("");
-        let new_rel = if parent.is_empty() {
-            new_name
-        } else {
-            format!("{parent}/{new_name}")
-        };
-        let Some(entry) = self.entry_for_key(&state.key).cloned() else {
+        let Some(entry) = self.entry_for_key(&key).cloned() else {
             self.status = "Tag no longer exists".to_owned();
             return;
         };
@@ -3541,6 +3898,7 @@ impl Baboon {
             session_restore: self.session_restore,
             show_block_sizes: self.show_block_sizes,
             scroll_to_cycle_dropdowns: self.scroll_to_cycle_dropdowns,
+            confirm_container_overwrite: self.confirm_container_overwrite,
             expert_mode: self.expert_mode,
             dark_mode: self.dark_mode,
             ui_scale: self.ui_scale,

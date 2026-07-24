@@ -101,6 +101,10 @@ pub(super) fn load_gui_prefs() -> GuiPrefs {
             .get("scroll_to_cycle_dropdowns")
             .and_then(Value::as_bool)
             .unwrap_or(true),
+        confirm_container_overwrite: value
+            .get("confirm_container_overwrite")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
         expert_mode: value
             .get("expert_mode")
             .and_then(Value::as_bool)
@@ -408,6 +412,7 @@ pub(super) fn save_gui_prefs(
         "session_restore": prefs.session_restore.as_str(),
         "show_block_sizes": prefs.show_block_sizes,
         "scroll_to_cycle_dropdowns": prefs.scroll_to_cycle_dropdowns,
+        "confirm_container_overwrite": prefs.confirm_container_overwrite,
         "expert_mode": prefs.expert_mode,
         "dark_mode": prefs.dark_mode,
         "ui_scale": prefs.ui_scale,

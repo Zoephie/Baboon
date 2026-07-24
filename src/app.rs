@@ -40,7 +40,8 @@ use crate::format::{TagNameIndex, format_value, group_label};
 use crate::source::{
     DependencyRef, EkFolderAlias, EntryIndexRefresh, LoadedSourceData, ReverseDependencyIndex,
     SUPPORTED_EK_GAMES, TagEntry, TagEntryLocation, TagSource, TagTree, TagTreeNode, load_folder,
-    load_folder_node_entries, load_monolithic_blob_index, load_single_file, loose_file_entry,
+    load_folder_node_entries, load_iostore_container, load_iostore_container_set,
+    load_monolithic_blob_index, load_single_file, loose_file_entry,
     read_entry, resolve_folder_root, scan_folder_subtree_entries,
     scan_folder_subtree_entries_with_progress, supported_ek_game_id,
 };
@@ -175,6 +176,8 @@ pub struct Baboon {
     session_restore: SessionRestore,
     show_block_sizes: bool,
     scroll_to_cycle_dropdowns: bool,
+    /// Warn before Save overwrites Campaign Evolved pak files in place.
+    confirm_container_overwrite: bool,
     expert_mode: bool,
     dark_mode: bool,
     ui_scale: f32,
@@ -189,6 +192,8 @@ pub struct Baboon {
     settings_tab: SettingsTab,
     new_tag_open: bool,
     new_tag_dialog: NewTagDialog,
+    /// Pending in-place overwrite confirmation (the tag key) for a container tag.
+    overwrite_confirm: Option<String>,
     about_open: bool,
     help_panel_tab: HelpPanelTab,
     help_docs: HelpDocsState,
@@ -371,6 +376,7 @@ impl Baboon {
             session_restore: prefs.session_restore,
             show_block_sizes: prefs.show_block_sizes,
             scroll_to_cycle_dropdowns: prefs.scroll_to_cycle_dropdowns,
+            confirm_container_overwrite: prefs.confirm_container_overwrite,
             expert_mode: prefs.expert_mode,
             dark_mode: prefs.dark_mode,
             ui_scale: prefs.ui_scale,
@@ -385,6 +391,7 @@ impl Baboon {
             settings_tab: SettingsTab::Startup,
             new_tag_open: false,
             new_tag_dialog: NewTagDialog::default(),
+            overwrite_confirm: None,
             about_open: false,
             help_panel_tab: HelpPanelTab::About,
             help_docs: HelpDocsState::load(),

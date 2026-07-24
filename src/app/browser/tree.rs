@@ -1011,7 +1011,10 @@ pub(in crate::app) fn draw_entry(
     response.context_menu(|ui| {
         style_tag_context_menu(ui);
 
-        let rename_enabled = matches!(entry.location, TagEntryLocation::LooseFile(_));
+        let rename_enabled = matches!(
+            entry.location,
+            TagEntryLocation::LooseFile(_) | TagEntryLocation::Container { .. }
+        );
         let extract_enabled = supports_tag_extract_menu(entry.group_tag);
         ui.horizontal(|ui| {
             if context_menu_primary_button(ui, "Rename", rename_enabled).clicked() {

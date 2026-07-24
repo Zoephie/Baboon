@@ -4,8 +4,12 @@
 use super::*;
 
 pub(in crate::app) fn is_editable_tag(entry: &TagEntry, tag: &TagFile) -> bool {
-    matches!(entry.location, TagEntryLocation::LooseFile(_))
-        && (tag.classic_engine().is_some() || tag.endian == Endian::Le)
+    // Loose tags are edited in place; container (Campaign Evolved) tags are
+    // edited in memory and written out as an override on Save/Save As/Rename.
+    matches!(
+        entry.location,
+        TagEntryLocation::LooseFile(_) | TagEntryLocation::Container { .. }
+    ) && (tag.classic_engine().is_some() || tag.endian == Endian::Le)
 }
 
 pub(in crate::app) fn append_field_path(prefix: &str, field_name: &str) -> String {
