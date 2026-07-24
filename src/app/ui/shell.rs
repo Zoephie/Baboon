@@ -41,6 +41,13 @@ impl Baboon {
                             ui.close_menu();
                             self.begin_load_monolithic(ctx.clone());
                         }
+                        if ui
+                            .button("Open Campaign Evolved container (.utoc)...")
+                            .clicked()
+                        {
+                            ui.close_menu();
+                            self.begin_load_iostore_container(ctx.clone());
+                        }
                         ui.separator();
                         let has_loaded_folder = self.loaded_tags_root().is_some();
                         if ui
@@ -97,6 +104,21 @@ impl Baboon {
                         {
                             ui.close_menu();
                             self.save_current_tag_as();
+                        }
+                        if self.current_source_is_container() {
+                            if ui
+                                .add_enabled(
+                                    self.parsed_tags.values().any(|d| d.dirty),
+                                    egui::Button::new("Export Mod..."),
+                                )
+                                .on_hover_text(
+                                    "Bundle every open, modified tag into one portable mod overlay (the base game is left untouched)",
+                                )
+                                .clicked()
+                            {
+                                ui.close_menu();
+                                self.export_mod();
+                            }
                         }
                         if self.expert_mode {
                             if ui
@@ -1675,6 +1697,7 @@ impl Baboon {
         self.draw_settings_window(ctx);
         self.draw_tool_commands_window(ctx);
         self.draw_new_tag_window(ctx);
+        self.draw_overwrite_confirm_window(ctx);
         self.draw_tag_conversion_window(ctx);
         self.draw_folder_conversion_window(ctx);
         self.draw_about_window(ctx);

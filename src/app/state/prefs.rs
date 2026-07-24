@@ -156,6 +156,8 @@ pub(in crate::app) struct GuiPrefs {
     pub(in crate::app) session_restore: SessionRestore,
     pub(in crate::app) show_block_sizes: bool,
     pub(in crate::app) scroll_to_cycle_dropdowns: bool,
+    /// Warn before Save overwrites Campaign Evolved pak files in place.
+    pub(in crate::app) confirm_container_overwrite: bool,
     pub(in crate::app) expert_mode: bool,
     pub(in crate::app) dark_mode: bool,
     pub(in crate::app) ui_scale: f32,
@@ -183,6 +185,7 @@ impl Default for GuiPrefs {
             double_click_to_open_tags: false,
             show_block_sizes: false,
             scroll_to_cycle_dropdowns: true,
+            confirm_container_overwrite: true,
             expert_mode: false,
             dark_mode: false,
             ui_scale: DEFAULT_UI_SCALE,

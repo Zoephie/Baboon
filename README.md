@@ -37,6 +37,11 @@ The game is also detected from a folder literally named after the game id (e.g.
 `halo3_mcc`), and **custom editing-kit folder names** can be mapped to a game in
 *File → Settings* for non-standard layouts.
 
+Beyond the MCC editing kits, Baboon also mounts **Halo: Campaign Evolved**
+(`haloce_evolved`) — the UE5 remake of Halo 1 on a modified Reach engine, whose
+Reach-format tags are cooked into UE5 IoStore paks. It's loaded from its game
+folder rather than a `tags/` directory; see *Campaign Evolved mods* below.
+
 Per-game group-name tables and schemas are loaded from
 `definitions/<game>/*.json`. Release builds place the `definitions/` folder next
 to `Baboon.exe`, which keeps the schemas inspectable and editable without
@@ -58,6 +63,12 @@ never blocks:
   directories only as you open them, so even a full kit opens instantly.
 - **Monolithic cache** — open a Halo 4 `blob_index.dat` monolithic tag cache and
   browse its contents as if they were loose files (read-only).
+- **Campaign Evolved container** — point **Load Folder** at the Halo: Campaign
+  Evolved game directory (or its `Meteorite/Content/Paks`). Baboon auto-detects
+  the UE5 IoStore paks, mounts them as one read-only virtual filesystem, and
+  presents the Reach tags exactly like loose files. Every pack (the shared base
+  chunk plus the per-level chunks that carry each mission's scenario and BSPs) is
+  merged into a single lowercase tag tree. See *Campaign Evolved mods* below.
 
 Tag files are identified by probing their 64-byte header for the `BLAM`
 (big-endian) / `MALB` (little-endian) magic, so non-tag files in the tree are
@@ -277,6 +288,41 @@ All extraction runs on background threads and reports progress to the status bar
     render + collision JMS for Halo CE).
 - **Import info** and **animation extraction**, all run in-process via the
   `blam-tags` library.
+
+### Halo: Campaign Evolved mods
+
+Campaign Evolved's tags live inside UE5 IoStore paks. Baboon edits them **in
+memory** and offers two ways to commit changes — overwrite the game directly, or
+package your changes as a separate, reversible mod:
+
+- **Save** (Ctrl+S) — **overwrites the tag inside the game's own pak, in place.**
+  The edited chunk is appended to the container's `.ucas` and its `.utoc` is
+  rewritten to point at it (preserving the container's perfect-hash seeds), with
+  the paired `.uasset`'s bulk-data size patched when an edit changes the tag's
+  byte length. This modifies the shipped game files, so Baboon **always confirms
+  first** — the dialog offers *Export Mod* as the non-destructive alternative, and
+  has a *Don't ask again* option (also under **Settings → Startup → Saving**).
+  There is no undo without a backup of the paks. *(Loose-folder MCC tags save
+  normally and never prompt.)*
+- **Export Mod…** (File menu) — bundle **every open, modified tag** into one
+  portable, higher-priority **overlay container** without touching the base game.
+  Mods are fully reversible (delete the overlay to uninstall).
+- **Save As** — *duplicate* the tag under a new name into an overlay container (a
+  new UE package with its own identity, `.uasset`, and container-header entry).
+- **Rename** (right-click) — the same as Save As, plus a package **redirect** so
+  existing tags that reference the old name resolve to the renamed one.
+
+Export Mod / Save As / Rename each produce a `<name>-WinGDK_P.utoc` / `.ucas`
+pair. Drop **both** files into the game's `Meteorite/Content/Paks/` folder
+alongside the base paks; the `_P` suffix gives the overlay patch priority and
+UE's loader serves your chunks on top of the base (last-mounted-wins).
+
+Tag identity (`FPackageId` / export hashes), UE5 Zen-package `.uasset`
+(de)serialization, and override-container writing are all implemented natively in
+`blam-tags` with no external UE tooling — references resolve by the same
+`CityHash64` package-path hashing the game itself uses. Output containers are
+validated structurally against an independent packer; loading them in the
+shipping game is the one step that requires a Windows/Xbox run to confirm.
 
 ### Geometry import & integrated terminal
 

@@ -137,9 +137,13 @@ fn draw_game_banner_header(ui: &mut Ui, app: &mut Baboon, game: &str, path_label
                 ui.vertical(|ui| {
                     ui.add_space(8.0);
                     ui.label(
-                        RichText::new(format!("Tags - {} (MCC)", game_display_name(game)))
-                            .color(text_dark())
-                            .strong(),
+                        RichText::new(format!(
+                            "Tags - {} ({})",
+                            game_display_name(game),
+                            game_platform_label(game)
+                        ))
+                        .color(text_dark())
+                        .strong(),
                     );
                     ui.add(
                         egui::Label::new(RichText::new(path_label).color(subtle_dark()).small())
@@ -155,6 +159,7 @@ fn sidebar_source_path_label(source: &TagSource) -> String {
         TagSource::SingleFile { path } => path.display().to_string(),
         TagSource::LooseFolder { root, .. } => root.display().to_string(),
         TagSource::MonolithicCache { root, .. } => root.display().to_string(),
+        TagSource::IoStoreContainerSet { root, .. } => root.display().to_string(),
     }
 }
 

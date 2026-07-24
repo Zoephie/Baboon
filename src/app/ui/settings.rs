@@ -96,6 +96,22 @@ impl Baboon {
             SessionRestore::Never,
             "Start fresh (never reopen)",
         );
+
+        ui.add_space(10.0);
+        ui.separator();
+        ui.label(RichText::new("Saving").color(text_dark()).strong());
+        ui.add_space(4.0);
+        ui.checkbox(
+            &mut self.confirm_container_overwrite,
+            "Confirm before Save overwrites Campaign Evolved game files",
+        );
+        ui.label(
+            RichText::new(
+                "Saving a tag loaded from a Campaign Evolved container overwrites the game's pak files in place. Use File \u{2192} Export Mod\u{2026} to bundle changes into a separate mod instead.",
+            )
+            .color(subtle_dark())
+            .small(),
+        );
     }
 
     pub(super) fn draw_settings_browser_tab(&mut self, ui: &mut Ui) {

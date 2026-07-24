@@ -45,6 +45,12 @@ pub(in crate::app) struct RenameTagState {
     pub(in crate::app) referrers: Vec<String>,
     /// True when no reverse-dependency index was available to list referrers.
     pub(in crate::app) referrers_unavailable: bool,
+    /// Source is a Campaign Evolved container: apply writes an override
+    /// container instead of moving a loose file + rewriting references.
+    pub(in crate::app) is_container: bool,
+    /// Container-only: rename (redirect old references to the new tag) vs.
+    /// duplicate (Save As — no redirect). Ignored for loose sources.
+    pub(in crate::app) redirect: bool,
 }
 
 /// Results of a tag query (find-references / unreferenced), shown in a floating

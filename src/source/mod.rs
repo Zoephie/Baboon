@@ -13,6 +13,7 @@ use std::time::UNIX_EPOCH;
 
 use anyhow::{Context, Result, anyhow};
 use blam_tags::classic::{ClassicHeader, read_classic_tag_file};
+use blam_tags::iostore::{IoStoreArchive, parse_ublock_stem};
 use blam_tags::monolithic::MonolithicCache;
 use blam_tags::paths::group_tag_to_extension;
 use blam_tags::{TagFile, TagLayout, format_group_tag};
@@ -53,6 +54,13 @@ pub struct TagEntry {
 pub enum TagEntryLocation {
     LooseFile(PathBuf),
     Monolithic { name: String, group_tag: u32 },
+    /// A tag inside a mounted UE5 IoStore container (Halo: Campaign Evolved).
+    /// `container` indexes the owning [`TagSource::IoStoreContainerSet`]'s
+    /// `containers` (its provenance — which pak the tag came from, needed by the
+    /// write/repack path). `rel_path` is the container-relative path of the
+    /// `.ubulk` payload in its **original case** (the IoStore directory index is
+    /// case-sensitive), whose bytes are a self-describing Reach MCC tag.
+    Container { container: usize, rel_path: String },
 }
 
 #[derive(Clone)]
@@ -75,6 +83,25 @@ pub enum TagSource {
         root: PathBuf,
         cache: Arc<MonolithicCache>,
     },
+    /// One or more mounted UE5 IoStore containers (`.utoc`/`.ucas`) presented as
+    /// a single read-only virtual filesystem of Reach tags. `root` is the `Paks`
+    /// directory; `containers` are the individual mounted packs (base + level
+    /// chunks), each shared behind an `Arc` so reads don't reopen or re-mmap.
+    IoStoreContainerSet {
+        root: PathBuf,
+        containers: Vec<MountedContainer>,
+    },
+}
+
+/// One mounted IoStore pack within a [`TagSource::IoStoreContainerSet`]. Carries
+/// provenance (`utoc_path`, `chunk_label`) so the write/repack path knows
+/// exactly which container/chunk a tag belongs to.
+#[derive(Clone)]
+pub struct MountedContainer {
+    pub utoc_path: PathBuf,
+    /// e.g. `pakchunk240-WinGDK` — the pak this tag was read from.
+    pub chunk_label: String,
+    pub archive: Arc<IoStoreArchive>,
 }
 
 impl TagSource {
@@ -84,6 +111,9 @@ impl TagSource {
             TagSource::LooseFolder { root, .. } => format!("Folder: {}", root.display()),
             TagSource::MonolithicCache { root, .. } => {
                 format!("Monolithic cache: {}", root.display())
+            }
+            TagSource::IoStoreContainerSet { root, containers } => {
+                format!("Containers ({}): {}", containers.len(), root.display())
             }
         }
     }
@@ -228,6 +258,7 @@ pub(crate) const SUPPORTED_EK_GAMES: &[(&str, &str)] = &[
     ("Halo 3 ODST", "halo3odst_mcc"),
     ("Halo Reach", "haloreach_mcc"),
     ("Halo 4", "halo4_mcc"),
+    ("Halo: Campaign Evolved", "haloce_evolved"),
 ];
 
 #[derive(Default)]
