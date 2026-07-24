@@ -20,27 +20,30 @@ animations — all from one application.
 
 ## Supported games
 
-Baboon recognises and auto-configures itself for the following MCC editing
-kits, detected from the kit's root folder name:
+Baboon recognises and auto-configures itself for the following games. The MCC
+editing kits are detected from the kit's root folder name; Halo: Campaign
+Evolved is mounted from its game install (see the footnote and *Campaign Evolved
+mods* below):
 
-| Editing kit              | Folder              | Game identifier |
-| ------------------------ | ------------------- | --------------- |
-| Halo CE                  | `HCEEK` / `H1EK`    | `haloce_mcc`    |
-| Halo 2                   | `H2EK`              | `halo2_mcc`     |
-| Halo 3                   | `H3EK`              | `halo3_mcc`     |
-| Halo 3: ODST             | `H3ODSTEK`          | `halo3odst_mcc` |
-| Halo: Reach              | `HREK`              | `haloreach_mcc` |
-| Halo 4                   | `H4EK`              | `halo4_mcc`     |
-| Halo 2: Anniversary (MP) | `H2AMPEK` / `H2AEK` | `halo2amp_mcc`  |
+| Game                     | Folder                        | Game identifier  |
+| ------------------------ | ----------------------------- | ---------------- |
+| Halo CE                  | `HCEEK` / `H1EK`              | `haloce_mcc`     |
+| Halo 2                   | `H2EK`                        | `halo2_mcc`      |
+| Halo 3                   | `H3EK`                        | `halo3_mcc`      |
+| Halo 3: ODST             | `H3ODSTEK`                    | `halo3odst_mcc`  |
+| Halo: Reach              | `HREK`                        | `haloreach_mcc`  |
+| Halo 4                   | `H4EK`                        | `halo4_mcc`      |
+| Halo 2: Anniversary (MP) | `H2AMPEK` / `H2AEK`          | `halo2amp_mcc`   |
+| Halo: Campaign Evolved † | game install (IoStore paks)   | `haloce_evolved` |
 
-The game is also detected from a folder literally named after the game id (e.g.
-`halo3_mcc`), and **custom editing-kit folder names** can be mapped to a game in
-*File → Settings* for non-standard layouts.
+The MCC game is also detected from a folder literally named after the game id
+(e.g. `halo3_mcc`), and **custom editing-kit folder names** can be mapped to a
+game in *File → Settings* for non-standard layouts.
 
-Beyond the MCC editing kits, Baboon also mounts **Halo: Campaign Evolved**
-(`haloce_evolved`) — the UE5 remake of Halo 1 on a modified Reach engine, whose
-Reach-format tags are cooked into UE5 IoStore paks. It's loaded from its game
-folder rather than a `tags/` directory; see *Campaign Evolved mods* below.
+† **Halo: Campaign Evolved** is not an MCC editing kit — it's the UE5 remake of
+Halo 1 on a modified Reach engine, whose Reach-format tags are cooked into UE5
+IoStore paks. It's mounted from its game folder via **Load Folder** rather than a
+`tags/` directory; see *Campaign Evolved mods* below.
 
 Per-game group-name tables and schemas are loaded from
 `definitions/<game>/*.json`. Release builds place the `definitions/` folder next
@@ -312,10 +315,13 @@ package your changes as a separate, reversible mod:
 - **Rename** (right-click) — the same as Save As, plus a package **redirect** so
   existing tags that reference the old name resolve to the renamed one.
 
-Export Mod / Save As / Rename each produce a `<name>-WinGDK_P.utoc` / `.ucas`
-pair. Drop **both** files into the game's `Meteorite/Content/Paks/` folder
-alongside the base paks; the `_P` suffix gives the overlay patch priority and
-UE's loader serves your chunks on top of the base (last-mounted-wins).
+Export Mod / Save As / Rename each produce a `<name>-WinGDK_P` IoStore
+**triplet** — `.utoc`, `.ucas`, and a small `.pak` stub. Drop **all three**
+files into the game's `Meteorite/Content/Paks/` folder alongside the base paks.
+The `.pak` is required: UE's loader discovers containers by scanning that folder
+for `.pak` files and derives the matching `.utoc`/`.ucas` from each — an overlay
+with no `.pak` is never mounted. The `_P` suffix then gives the overlay patch
+priority so UE serves your chunks on top of the base (last-mounted-wins).
 
 Tag identity (`FPackageId` / export hashes), UE5 Zen-package `.uasset`
 (de)serialization, and override-container writing are all implemented natively in

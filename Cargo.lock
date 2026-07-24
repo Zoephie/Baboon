@@ -471,7 +471,7 @@ dependencies = [
 [[package]]
 name = "blam-tags"
 version = "0.1.0"
-source = "git+https://github.com/camden-smallwood/blam-tags?rev=863c879d86db30ef297783e08b7b54288af24797#863c879d86db30ef297783e08b7b54288af24797"
+source = "git+https://github.com/camden-smallwood/blam-tags?rev=64bdc76366b2ac613cf28c6d0ab29648354c26fe#64bdc76366b2ac613cf28c6d0ab29648354c26fe"
 dependencies = [
  "anyhow",
  "bcdec_rs",
@@ -488,6 +488,7 @@ dependencies = [
  "opus",
  "serde",
  "serde_json",
+ "sha1",
  "strum",
  "tiff",
  "vorbis_rs",
@@ -3193,6 +3194,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "sha1"
+version = "0.10.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.2.17",
+ "digest",
 ]
 
 [[package]]
