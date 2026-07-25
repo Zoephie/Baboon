@@ -189,9 +189,9 @@ impl Baboon {
                         .cloned()
                         .unwrap_or_default();
                     ui.horizontal(|ui| {
-                        ui.add_sized([82.0, 20.0], egui::Label::new(shortcut.label));
+                        ui.add_sized([130.0, 20.0], egui::Label::new(shortcut.label));
                         if ui
-                            .add(egui::TextEdit::singleline(&mut input).desired_width(430.0))
+                            .add(egui::TextEdit::singleline(&mut input).desired_width(382.0))
                             .changed()
                         {
                             self.set_editing_kit_path_input(shortcut, input.clone());

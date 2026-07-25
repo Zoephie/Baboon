@@ -3,6 +3,9 @@
 
 use super::*;
 
+const CAMPAIGN_EVOLVED_GAME: &str = "haloce_evolved";
+const CAMPAIGN_EVOLVED_INSTALL_FOLDER: &str = "Halo Campaign Evolved";
+
 pub(super) fn detect_editing_kit_paths() -> HashMap<String, PathBuf> {
     detect_editing_kit_paths_in_common_roots(steam_common_roots())
 }
@@ -15,7 +18,17 @@ where
 {
     let mut detected = HashMap::new();
     for common_root in common_roots {
+        let campaign_evolved = common_root.join(CAMPAIGN_EVOLVED_INSTALL_FOLDER);
+        if !detected.contains_key(CAMPAIGN_EVOLVED_GAME)
+            && crate::source::find_paks_dir(&campaign_evolved).is_some()
+        {
+            detected.insert(CAMPAIGN_EVOLVED_GAME.to_owned(), campaign_evolved);
+        }
+
         for shortcut in EDITING_KIT_SHORTCUTS {
+            if shortcut.game == CAMPAIGN_EVOLVED_GAME {
+                continue;
+            }
             if detected.contains_key(shortcut.game) {
                 continue;
             }

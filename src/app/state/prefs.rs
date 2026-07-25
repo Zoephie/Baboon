@@ -65,7 +65,7 @@ pub(in crate::app) struct EditingKitShortcut {
     pub(in crate::app) fallback: &'static str,
 }
 
-pub(in crate::app) const EDITING_KIT_SHORTCUTS: [EditingKitShortcut; 7] = [
+pub(in crate::app) const EDITING_KIT_SHORTCUTS: [EditingKitShortcut; 8] = [
     EditingKitShortcut {
         label: "HCEEK",
         game: "haloce_mcc",
@@ -100,6 +100,11 @@ pub(in crate::app) const EDITING_KIT_SHORTCUTS: [EditingKitShortcut; 7] = [
         label: "H2AMPEK",
         game: "halo2amp_mcc",
         fallback: "H2A",
+    },
+    EditingKitShortcut {
+        label: "Campaign Evolved",
+        game: "haloce_evolved",
+        fallback: "HCE",
     },
 ];
 
@@ -231,6 +236,7 @@ mod tests {
                 ("HREK", "haloreach_mcc"),
                 ("H4EK", "halo4_mcc"),
                 ("H2AMPEK", "halo2amp_mcc"),
+                ("Campaign Evolved", "haloce_evolved"),
             ]
         );
     }

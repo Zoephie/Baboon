@@ -790,6 +790,7 @@ mod tests {
     fn engine_emblems_are_separate_from_game_banners() {
         assert!(get_game_emblem_bytes("haloce_mcc").is_some());
         assert!(get_game_emblem_bytes("halo2_mcc").is_some());
+        assert!(get_game_emblem_bytes("haloce_evolved").is_some());
         assert_ne!(
             get_game_emblem_bytes("halo2_mcc"),
             get_game_emblem_bytes("halo2amp_mcc")
@@ -798,6 +799,14 @@ mod tests {
         assert_ne!(
             get_game_emblem_bytes("haloce_mcc"),
             Some(get_game_banner_bytes("haloce_mcc"))
+        );
+        assert_ne!(
+            get_game_banner_bytes("haloce_evolved"),
+            get_game_banner_bytes("haloce_mcc")
+        );
+        assert_ne!(
+            get_game_emblem_bytes("haloce_evolved"),
+            get_game_emblem_bytes("haloce_mcc")
         );
     }
 

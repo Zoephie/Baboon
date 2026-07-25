@@ -4053,8 +4053,12 @@ impl Baboon {
     }
 
     pub(super) fn choose_editing_kit_path(&mut self, shortcut: EditingKitShortcut) {
-        let mut dialog = rfd::FileDialog::new()
-            .set_title(format!("Select {} Editing Kit Folder", shortcut.label));
+        let title = if shortcut.game == "haloce_evolved" {
+            "Select Campaign Evolved Install or Paks Folder".to_owned()
+        } else {
+            format!("Select {} Editing Kit Folder", shortcut.label)
+        };
+        let mut dialog = rfd::FileDialog::new().set_title(title);
         if let Some(path) = self.editing_kit_paths.get(shortcut.game) {
             if path.is_dir() {
                 dialog = dialog.set_directory(path);
@@ -4932,17 +4936,40 @@ mod tests {
     fn detect_editing_kit_paths_finds_all_known_common_folder_names() {
         let common = unique_test_dir("ek-detect-all");
         for shortcut in EDITING_KIT_SHORTCUTS {
+            if shortcut.game == "haloce_evolved" {
+                continue;
+            }
             std::fs::create_dir_all(common.join(shortcut.label).join("tags")).unwrap();
         }
+        let campaign_evolved_paks = common
+            .join("Halo Campaign Evolved")
+            .join("Meteorite")
+            .join("Content")
+            .join("Paks");
+        std::fs::create_dir_all(&campaign_evolved_paks).unwrap();
+        std::fs::write(campaign_evolved_paks.join("pakchunk0-WinGDK.utoc"), []).unwrap();
 
         let detected = detect_editing_kit_paths_in_common_roots(vec![common.clone()]);
 
         for shortcut in EDITING_KIT_SHORTCUTS {
-            assert_eq!(
-                detected.get(shortcut.game),
-                Some(&common.join(shortcut.label))
-            );
+            let expected = if shortcut.game == "haloce_evolved" {
+                common.join("Halo Campaign Evolved")
+            } else {
+                common.join(shortcut.label)
+            };
+            assert_eq!(detected.get(shortcut.game), Some(&expected));
         }
+        let _ = std::fs::remove_dir_all(common);
+    }
+
+    #[test]
+    fn detect_editing_kit_paths_ignores_campaign_evolved_without_containers() {
+        let common = unique_test_dir("ek-detect-campaign-evolved-containers-required");
+        std::fs::create_dir_all(common.join("Halo Campaign Evolved")).unwrap();
+
+        let detected = detect_editing_kit_paths_in_common_roots(vec![common.clone()]);
+
+        assert!(!detected.contains_key("haloce_evolved"));
         let _ = std::fs::remove_dir_all(common);
     }
 
@@ -4961,12 +4988,28 @@ mod tests {
 
     #[test]
     fn apply_detected_editing_kit_paths_fills_blanks_only() {
-        let mut paths = HashMap::from([("halo3_mcc".to_owned(), PathBuf::from("C:/Custom/H3EK"))]);
-        let mut inputs = HashMap::from([("halo3_mcc".to_owned(), "C:/Custom/H3EK".to_owned())]);
+        let mut paths = HashMap::from([
+            ("halo3_mcc".to_owned(), PathBuf::from("C:/Custom/H3EK")),
+            (
+                "haloce_evolved".to_owned(),
+                PathBuf::from("D:/Custom/Halo Campaign Evolved"),
+            ),
+        ]);
+        let mut inputs = HashMap::from([
+            ("halo3_mcc".to_owned(), "C:/Custom/H3EK".to_owned()),
+            (
+                "haloce_evolved".to_owned(),
+                "D:/Custom/Halo Campaign Evolved".to_owned(),
+            ),
+        ]);
         let mut attention = Some("halo4_mcc".to_owned());
         let detected = HashMap::from([
             ("halo3_mcc".to_owned(), PathBuf::from("C:/Steam/H3EK")),
             ("halo4_mcc".to_owned(), PathBuf::from("C:/Steam/H4EK")),
+            (
+                "haloce_evolved".to_owned(),
+                PathBuf::from("C:/Steam/Halo Campaign Evolved"),
+            ),
         ]);
 
         let added =
@@ -4980,6 +5023,10 @@ mod tests {
         assert_eq!(
             paths.get("halo4_mcc"),
             Some(&PathBuf::from("C:/Steam/H4EK"))
+        );
+        assert_eq!(
+            paths.get("haloce_evolved"),
+            Some(&PathBuf::from("D:/Custom/Halo Campaign Evolved"))
         );
         assert_eq!(
             inputs.get("halo4_mcc").map(String::as_str),

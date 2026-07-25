@@ -10,7 +10,9 @@ pub(super) fn get_game_banner_bytes(game: &str) -> &'static [u8] {
         "halo3odst_mcc" => include_bytes!("../../assets/Game Icons/h3odst.png"),
         "haloreach_mcc" => include_bytes!("../../assets/Game Icons/reach.png"),
         "halo4_mcc" => include_bytes!("../../assets/Game Icons/h4.png"),
-        "haloce_evolved" => include_bytes!("../../assets/Game Icons/ce.png"),
+        "haloce_evolved" => {
+            include_bytes!("../../assets/Game Icons/campaignevolved.png")
+        }
         _ => include_bytes!("../../assets/Game Icons/ce.png"),
     }
 }
@@ -26,7 +28,9 @@ pub(super) fn get_game_emblem_bytes(game: &str) -> Option<&'static [u8]> {
         "halo3odst_mcc" => Some(include_bytes!("../../assets/Game Icons/emblems/h3odst.png")),
         "haloreach_mcc" => Some(include_bytes!("../../assets/Game Icons/emblems/hreach.png")),
         "halo4_mcc" => Some(include_bytes!("../../assets/Game Icons/emblems/h4.png")),
-        "haloce_evolved" => Some(include_bytes!("../../assets/Game Icons/emblems/h1.png")),
+        "haloce_evolved" => Some(include_bytes!(
+            "../../assets/Game Icons/emblems/campaignevolved.png"
+        )),
         _ => None,
     }
 }
