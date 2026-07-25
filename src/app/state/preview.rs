@@ -129,6 +129,13 @@ pub(in crate::app) struct ModelPreviewState {
     /// Case-insensitive substring filter on marker names (empty = show all).
     /// Only applied while `show_markers` is on.
     pub(in crate::app) marker_filter: String,
+    /// Campaign Evolved only: decode the full-resolution **Nanite** geometry for
+    /// static mesh pieces instead of the coarse LOD fallback. Off by default —
+    /// a full model can be millions of triangles (slow to decode + render).
+    pub(in crate::app) high_detail: bool,
+    /// The `high_detail` value the cached `data` was built with, so toggling it
+    /// invalidates the cache and reloads.
+    pub(in crate::app) loaded_high_detail: bool,
     pub(in crate::app) render_mode: ModelRenderMode,
     pub(in crate::app) show_backfaces: bool,
     pub(in crate::app) scale: f32,
@@ -150,6 +157,8 @@ impl Default for ModelPreviewState {
             projected_triangles: Vec::new(),
             show_markers: false,
             marker_filter: String::new(),
+            high_detail: false,
+            loaded_high_detail: false,
             render_mode: ModelRenderMode::Shaded,
             show_backfaces: false,
             scale: 1.0,

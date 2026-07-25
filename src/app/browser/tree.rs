@@ -190,6 +190,7 @@ pub(in crate::app) fn draw_tree(
     sort: BrowserSort,
     folders_before_tags: bool,
     favorite_keys: Option<&HashSet<String>>,
+    is_container: bool,
 ) -> Option<BrowserAction> {
     let mut clicked = None;
     if !folders_before_tags {
@@ -229,6 +230,7 @@ pub(in crate::app) fn draw_tree(
                 sort,
                 folders_before_tags,
                 favorite_keys,
+                is_container,
             )
         });
     }
@@ -553,6 +555,7 @@ pub(in crate::app) fn draw_tree_node(
     sort: BrowserSort,
     folders_before_tags: bool,
     favorite_keys: Option<&HashSet<String>>,
+    is_container: bool,
 ) -> Option<BrowserAction> {
     if !filter.is_empty() && !node_matches(node, entries, filter) {
         return None;
@@ -607,6 +610,7 @@ pub(in crate::app) fn draw_tree_node(
                     sort,
                     folders_before_tags,
                     favorite_keys,
+                    is_container,
                 );
             }
         }
@@ -663,6 +667,24 @@ pub(in crate::app) fn draw_tree_node(
             .header_response
     };
     header_response.context_menu(|ui| {
+        // Campaign Evolved folder authoring (Folders mode only — in Groups mode
+        // the node path is a group label, not a folder).
+        if is_container && !groups_mode {
+            let folder_rel = node.rel_path.to_string_lossy().replace('\\', "/");
+            let folder_rel = (!folder_rel.is_empty()).then_some(folder_rel);
+            if ui.button("New tag here...").clicked() {
+                clicked = Some(BrowserAction::NewTagInFolder {
+                    folder_rel: folder_rel.clone(),
+                });
+                ui.close_menu();
+            }
+            if ui.button("Import tag here...").clicked() {
+                clicked = Some(BrowserAction::ImportTagInFolder { folder_rel });
+                ui.close_menu();
+            }
+            context_menu_separator(ui);
+        }
+
         let tag_keys = collect_tag_keys(node, entries);
         if tag_keys.is_empty() {
             ui.label(RichText::new("No tags in this folder").color(subtle_dark()));

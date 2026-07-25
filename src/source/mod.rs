@@ -61,6 +61,20 @@ pub enum TagEntryLocation {
     /// `.ubulk` payload in its **original case** (the IoStore directory index is
     /// case-sensitive), whose bytes are a self-describing Reach MCC tag.
     Container { container: usize, rel_path: String },
+    /// A brand-new Campaign Evolved tag that does not exist in any mounted pak
+    /// yet — it lives only in memory (the open [`TagDocument`]) until the user
+    /// Saves (writes a new `_P` override container) or Exports a Mod. There is
+    /// no backing `.ubulk` to read, so the document is authoritative.
+    ///
+    /// `template_container`/`template_rel` point at an existing same-group tag's
+    /// `.uasset`, used as the package template by `write_new_tag_container`.
+    /// `package` is the target UE package path `"/Game/Tags/<rel>-<group>"`.
+    NewContainer {
+        template_container: usize,
+        template_rel: String,
+        package: String,
+        group_tag: u32,
+    },
 }
 
 #[derive(Clone)]
@@ -90,6 +104,9 @@ pub enum TagSource {
     IoStoreContainerSet {
         root: PathBuf,
         containers: Vec<MountedContainer>,
+        /// Tag-reference → container payload lookup, built at mount time so
+        /// resolving a reference agrees with the browser tree by construction.
+        index: Arc<ContainerTagIndex>,
     },
 }
 
@@ -104,6 +121,41 @@ pub struct MountedContainer {
     pub archive: Arc<IoStoreArchive>,
 }
 
+/// Maps a tag reference (group + Halo-relative path) to the container payload
+/// the mount resolved it to. Keyed identically to `build_container_set`'s
+/// dedup key, so lookups agree with the browser tree by construction (and
+/// inherit its later-pack-wins layering for free).
+#[derive(Default)]
+pub struct ContainerTagIndex {
+    by_key: HashMap<String, (usize, String)>, // key -> (container index, original-case rel_path)
+}
+
+/// Normalize a tag reference into the key `build_container_set` dedups on:
+/// strip NULs (references can carry them), trim, `\` → `/`, lowercase, and
+/// prefix the group FOURCC. Mirrors the `logical` normalization at mount time.
+pub fn container_ref_key(group_tag: u32, reference: &str) -> String {
+    let normalized = reference
+        .replace('\u{0}', "")
+        .trim()
+        .replace('\\', "/")
+        .to_ascii_lowercase();
+    format!("{group_tag:08x}:{normalized}")
+}
+
+impl ContainerTagIndex {
+    /// Record a mounted tag payload, keyed by group + logical path. Later
+    /// inserts win, matching the mount loop's later-pack override.
+    pub fn insert(&mut self, key: String, container: usize, rel_path: String) {
+        self.by_key.insert(key, (container, rel_path));
+    }
+
+    pub fn lookup(&self, group_tag: u32, reference: &str) -> Option<(usize, &str)> {
+        self.by_key
+            .get(&container_ref_key(group_tag, reference))
+            .map(|(c, p)| (*c, p.as_str()))
+    }
+}
+
 impl TagSource {
     pub fn origin_label(&self) -> String {
         match self {
@@ -112,10 +164,34 @@ impl TagSource {
             TagSource::MonolithicCache { root, .. } => {
                 format!("Monolithic cache: {}", root.display())
             }
-            TagSource::IoStoreContainerSet { root, containers } => {
+            TagSource::IoStoreContainerSet { root, containers, .. } => {
                 format!("Containers ({}): {}", containers.len(), root.display())
             }
         }
+    }
+
+    /// Resolve a tag reference against mounted containers, returning the parsed
+    /// tag. Errors for non-container sources or an unresolved reference. This is
+    /// the same read the browser performs for a `TagEntryLocation::Container`.
+    pub fn read_container_tag_by_ref(&self, group_tag: u32, reference: &str) -> Result<TagFile> {
+        let TagSource::IoStoreContainerSet { containers, index, .. } = self else {
+            anyhow::bail!("tag-reference resolution requires a container source");
+        };
+        let (container, rel_path) = index.lookup(group_tag, reference).ok_or_else(|| {
+            anyhow!(
+                "{}.{:08x} not found in mounted containers",
+                reference.replace('\\', "/"),
+                group_tag
+            )
+        })?;
+        let mounted = containers
+            .get(container)
+            .context("container index out of range")?;
+        let bytes = mounted
+            .archive
+            .read(rel_path)
+            .map_err(|e| anyhow!("failed to read {rel_path} from container: {e}"))?;
+        TagFile::read_from_bytes(&bytes).map_err(|e| anyhow!("failed to parse {rel_path}: {e}"))
     }
 }
 

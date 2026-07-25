@@ -43,3 +43,6 @@ debug = false
 [profile.dev.package.audiopus_sys]
 opt-level = 1
 debug = false
+
+[patch."https://github.com/camden-smallwood/blam-tags"]
+blam-tags = { path = "/Users/camden/Source/blam-tags/blam-tags" }

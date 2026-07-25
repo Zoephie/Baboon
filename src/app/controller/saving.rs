@@ -107,9 +107,9 @@ pub(super) fn register_saved_copy_in_loaded_source(
 pub(super) fn save_as_file_name(entry: &TagEntry, extension: Option<&str>) -> String {
     let path = match &entry.location {
         TagEntryLocation::LooseFile(path) => path,
-        TagEntryLocation::Monolithic { .. } | TagEntryLocation::Container { .. } => {
-            Path::new(&entry.display_path)
-        }
+        TagEntryLocation::Monolithic { .. }
+        | TagEntryLocation::Container { .. }
+        | TagEntryLocation::NewContainer { .. } => Path::new(&entry.display_path),
     };
     let mut file_name = path
         .file_name()
@@ -134,7 +134,9 @@ pub(super) fn save_as_file_name(entry: &TagEntry, extension: Option<&str>) -> St
 pub(super) fn save_as_start_dir(entry: &TagEntry) -> Option<PathBuf> {
     match &entry.location {
         TagEntryLocation::LooseFile(path) => path.parent().map(Path::to_path_buf),
-        TagEntryLocation::Monolithic { .. } | TagEntryLocation::Container { .. } => None,
+        TagEntryLocation::Monolithic { .. }
+        | TagEntryLocation::Container { .. }
+        | TagEntryLocation::NewContainer { .. } => None,
     }
 }
 

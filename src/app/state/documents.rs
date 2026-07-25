@@ -20,6 +20,18 @@ impl TagDocument {
             journal: EditJournal::default(),
         }
     }
+
+    /// A document that starts life already modified — used for tags that exist
+    /// only in memory (a newly-created or imported container tag with no backing
+    /// payload on disk or in a pak), so closing it prompts to save and it feeds
+    /// Export Mod as a modified tag.
+    pub(in crate::app) fn modified(tag: TagFile) -> Self {
+        Self {
+            tag,
+            dirty: true,
+            journal: EditJournal::default(),
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -178,6 +190,33 @@ impl LastOpenedWindowsPrompt {
 
 pub(in crate::app) struct PendingSessionRestore {
     pub(in crate::app) tags: Vec<LastSessionTag>,
+}
+
+/// Import-a-tag-file dialog for a Campaign Evolved container source. Owns the
+/// parsed imported `TagFile` (moved out on confirm) and the schema-comparison
+/// result against our shipped JSON. Not `Clone` — `TagFile` isn't cloneable.
+pub(in crate::app) struct ImportTagDialog {
+    pub(in crate::app) source_path: PathBuf,
+    /// Pre-filled container folder (empty for the root); the leaf name is `name`.
+    pub(in crate::app) folder_rel: String,
+    pub(in crate::app) name: String,
+    pub(in crate::app) group_tag: u32,
+    pub(in crate::app) group_name: String,
+    pub(in crate::app) extension: String,
+    /// The parsed imported tag; `take()`n when the user confirms.
+    pub(in crate::app) tag: Option<TagFile>,
+    /// Structural comparison of the imported tag against our JSON definition.
+    pub(in crate::app) comparison: Option<blam_tags::LayoutComparison>,
+    /// User override for benign (field-count) schema drift.
+    pub(in crate::app) import_anyway: bool,
+    pub(in crate::app) error: Option<String>,
+}
+
+/// A parsed imported tag awaiting a "discard unsaved edits?" confirmation before
+/// it overwrites an already-open, dirty document at `target_key`.
+pub(in crate::app) struct PendingImport {
+    pub(in crate::app) tag: TagFile,
+    pub(in crate::app) target_key: String,
 }
 
 #[derive(Clone, Debug)]

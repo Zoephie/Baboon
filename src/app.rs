@@ -190,6 +190,10 @@ pub struct Baboon {
     settings_tab: SettingsTab,
     new_tag_open: bool,
     new_tag_dialog: NewTagDialog,
+    /// Import-a-tag-file dialog (Campaign Evolved), when open.
+    import_tag_dialog: Option<ImportTagDialog>,
+    /// Pending "discard unsaved edits and replace with the imported tag?" prompt.
+    import_discard_confirm: Option<PendingImport>,
     /// Pending in-place overwrite confirmation (the tag key) for a container tag.
     overwrite_confirm: Option<String>,
     about_open: bool,
@@ -388,6 +392,8 @@ impl Baboon {
             settings_tab: SettingsTab::Startup,
             new_tag_open: false,
             new_tag_dialog: NewTagDialog::default(),
+            import_tag_dialog: None,
+            import_discard_confirm: None,
             overwrite_confirm: None,
             about_open: false,
             help_panel_tab: HelpPanelTab::About,

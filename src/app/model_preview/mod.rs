@@ -5,7 +5,7 @@ use super::*;
 use blam_tags::math::{RealPoint3d, RealQuaternion, RealVector3d};
 use blam_tags::render_model::{Marker, Node, RenderMesh};
 
-mod loading;
+pub(in crate::app) mod loading;
 mod renderer;
 mod variants;
 
@@ -77,8 +77,9 @@ pub(super) fn draw_model_preview_panel(
             // spinner, kick the (blocking) parse, and repaint so the decoded
             // model appears next frame instead of a blank panel. (A future
             // change can move the parse to a worker thread — see plan 1.9.)
-            let needs_load =
-                state.loaded_key.as_deref() != Some(entry.key.as_str()) || state.data.is_none();
+            let needs_load = state.loaded_key.as_deref() != Some(entry.key.as_str())
+                || state.data.is_none()
+                || state.loaded_high_detail != state.high_detail;
             if needs_load {
                 ui.horizontal(|ui| {
                     ui.spinner();
@@ -125,6 +126,22 @@ pub(super) fn draw_model_preview_panel(
                         }
                     });
                 ui.checkbox(&mut state.show_backfaces, "Backfaces");
+                // Campaign Evolved: static pieces are Nanite; offer the full
+                // high-resolution decode (off by default — it can be millions
+                // of triangles). Only meaningful for CE `.model`s.
+                let is_campaign_evolved = tag.header.group_tag.to_be_bytes() == *b"hlmt"
+                    && tag
+                        .root()
+                        .read_tag_ref_with_group("skeleton model")
+                        .map(|(_, r)| !r.trim().is_empty())
+                        .unwrap_or(false);
+                if is_campaign_evolved {
+                    ui.checkbox(&mut state.high_detail, "High detail")
+                        .on_hover_text(
+                            "Decode full-resolution Nanite geometry instead of the coarse \
+                             fallback (slow; a full model can be millions of triangles)",
+                        );
+                }
                 ui.label(RichText::new("Viewport").color(subtle_dark()));
                 ui.add(
                     egui::Slider::new(
