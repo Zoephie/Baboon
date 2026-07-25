@@ -1,7 +1,7 @@
 //! Application state, subsystem composition, and top-level eframe integration.
 //! It owns composition of long-lived application state; subsystem-specific behavior and widget implementation belong in child modules.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -129,8 +129,6 @@ pub struct Baboon {
     parsed_tags: HashMap<String, TagDocument>,
     tag_conversion_dialog: Option<TagConversionDialog>,
     folder_conversion_dialog: Option<FolderConversionDialog>,
-    /// Least-recently-used ordering for parsed documents not pinned by a tab.
-    tag_cache_order: VecDeque<String>,
     /// Keys with an outstanding background load, preventing duplicate jobs.
     loading_tags: HashSet<String>,
     /// Active document key. Selection may temporarily precede parsing while a
@@ -352,7 +350,6 @@ impl Baboon {
             parsed_tags: HashMap::new(),
             tag_conversion_dialog: None,
             folder_conversion_dialog: None,
-            tag_cache_order: VecDeque::new(),
             loading_tags: HashSet::new(),
             selected_key: None,
             open_tabs: Vec::new(),

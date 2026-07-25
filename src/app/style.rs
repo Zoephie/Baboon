@@ -561,7 +561,6 @@ pub(super) const MATERIAL_PARAMETER_SECTIONS: &[&str] = &[
     "MISC",
 ];
 pub(super) const MAX_OPEN_TABS: usize = 32;
-pub(super) const MAX_PARSED_TAGS: usize = 24;
 
 #[cfg(test)]
 #[path = "tests/style.rs"]

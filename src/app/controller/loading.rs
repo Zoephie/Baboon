@@ -24,7 +24,6 @@ impl Baboon {
         if let Some((key, tag)) = loaded.initial_tag.take() {
             self.selected_key = Some(key.clone());
             self.open_tabs.push(key.clone());
-            self.remember_tag_use(&key);
             self.parsed_tags.insert(key, TagDocument::clean(tag));
         }
         self.status = loaded_source_status(&loaded);
@@ -82,7 +81,6 @@ impl Baboon {
 
     fn clear_source_bound_document_state(&mut self) {
         self.parsed_tags.clear();
-        self.tag_cache_order.clear();
         self.loading_tags.clear();
         self.bitmap_previews.clear();
         self.rmdf_cache.clear();

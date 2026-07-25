@@ -775,7 +775,6 @@ impl Baboon {
             self.open_tabs.push(key.clone());
         }
         self.selected_key = Some(key.clone());
-        self.remember_tag_use(&key);
         self.trim_open_tabs();
     }
 
@@ -1241,7 +1240,6 @@ impl Baboon {
             self.open_tabs.push(key.clone());
         }
         self.selected_key = Some(key.clone());
-        self.remember_tag_use(&key);
         self.trim_open_tabs();
         self.ensure_tag_loading(key, ctx);
     }
@@ -1250,7 +1248,6 @@ impl Baboon {
     /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(super) fn ensure_tag_loading(&mut self, key: String, ctx: egui::Context) {
         if self.parsed_tags.contains_key(&key) || self.loading_tags.contains(&key) {
-            self.remember_tag_use(&key);
             return;
         }
         let Some(source) = self.source.as_ref() else {
@@ -1599,7 +1596,6 @@ impl Baboon {
         self.floating_tabs.clear();
         self.parsed_tags.clear();
         self.loading_tags.clear();
-        self.tag_cache_order.clear();
         self.bitmap_previews.clear();
         self.edit_buffers.clear();
         self.selected_key = None;
@@ -1612,7 +1608,6 @@ impl Baboon {
         self.floating_tabs.retain(|tab| tab == key);
         self.parsed_tags.retain(|tab, _| tab == key);
         self.loading_tags.retain(|tab| tab == key);
-        self.tag_cache_order.retain(|tab| tab == key);
         self.bitmap_previews.retain(|tab, _| tab == key);
         let edit_prefix = format!("{key}|");
         self.edit_buffers
@@ -1629,12 +1624,6 @@ impl Baboon {
         let edit_prefix = format!("{key}|");
         self.edit_buffers
             .retain(|buffer_key, _| !buffer_key.starts_with(&edit_prefix));
-        self.tag_cache_order.retain(|tab| tab != key);
-    }
-
-    pub(super) fn remember_tag_use(&mut self, key: &str) {
-        self.tag_cache_order.retain(|tab| tab != key);
-        self.tag_cache_order.push_back(key.to_owned());
     }
 
     pub(super) fn trim_open_tabs(&mut self) {
@@ -1656,25 +1645,6 @@ impl Baboon {
         }
     }
 
-    pub(super) fn trim_tag_memory(&mut self) {
-        let open_tabs = self.open_tabs.iter().cloned().collect::<HashSet<_>>();
-        self.bitmap_previews
-            .retain(|key, _| open_tabs.contains(key));
-
-        let mut attempts = self.tag_cache_order.len();
-        while self.parsed_tags.len() > MAX_PARSED_TAGS && attempts > 0 {
-            attempts -= 1;
-            let Some(key) = self.tag_cache_order.pop_front() else {
-                break;
-            };
-            if Some(key.as_str()) == self.selected_key.as_deref() {
-                self.tag_cache_order.push_back(key);
-                continue;
-            }
-            self.parsed_tags.remove(&key);
-            self.bitmap_previews.remove(&key);
-        }
-    }
 
     pub(super) fn handle_browser_action(&mut self, action: BrowserAction, ctx: egui::Context) {
         match action {
