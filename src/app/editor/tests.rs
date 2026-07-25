@@ -131,7 +131,7 @@ mod tests {
     #[test]
     #[ignore]
     fn fmod_id_resolves_every_permutation() {
-        use blam_tags::audio::{fmod_bank_subsound_id_hash, fmod_pitch_range_folder, SoundBanks};
+        use blam_tags::audio::{SoundBanks, fmod_bank_subsound_id_hash, fmod_pitch_range_folder};
 
         let root = std::env::var("SND_TAGS_ROOT")
             .unwrap_or_else(|_| "/Users/camden/Halo/haloreach_mcc/tags".to_owned());
@@ -216,7 +216,8 @@ mod tests {
                         if name_hit {
                             id_miss_name_hit += 1;
                             if hash_gaps.len() < 30 {
-                                hash_gaps.push(format!("{rel}\\{}#{perm_index} :: {name}", pr_name));
+                                hash_gaps
+                                    .push(format!("{rel}\\{}#{perm_index} :: {name}", pr_name));
                             }
                         } else {
                             absent += 1;
@@ -1150,7 +1151,10 @@ mod tests {
         assert!(ro.read_only && !ro.advanced, "'*' => read-only");
 
         let hidden = field_display_meta("activity!");
-        assert!(hidden.advanced && !hidden.read_only, "'!' => hidden/advanced");
+        assert!(
+            hidden.advanced && !hidden.read_only,
+            "'!' => hidden/advanced"
+        );
 
         let both = field_display_meta("angle*!");
         assert!(both.read_only, "combined: '*' still read-only");
@@ -1191,6 +1195,106 @@ mod tests {
         assert_eq!(m.unit.as_deref(), Some("seconds"));
         assert_eq!(m.range.as_deref(), Some("[0.1-1]"));
         assert_eq!(field_suffix(&m, "real"), "seconds [0.1-1]");
+    }
+
+    #[test]
+    fn euler_angle_parser_accepts_complete_tuples_and_rejects_invalid_input() {
+        let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
+        let root = tag.root();
+        let euler2d = root.field("real euler angles 2d").unwrap();
+        let euler3d = root.field("real euler angles 3d").unwrap();
+
+        let TagFieldData::RealEulerAngles2d(value) =
+            parse_gui_field_value(&euler2d, "0.25, -0.5").unwrap()
+        else {
+            panic!("expected real euler angles 2d");
+        };
+        assert!((value.yaw - 0.25).abs() < 0.0001);
+        assert!((value.pitch + 0.5).abs() < 0.0001);
+
+        let TagFieldData::RealEulerAngles3d(value) =
+            parse_gui_field_value(&euler3d, "-0.65 0 1.25").unwrap()
+        else {
+            panic!("expected real euler angles 3d");
+        };
+        assert!((value.yaw + 0.65).abs() < 0.0001);
+        assert!(value.pitch.abs() < 0.0001);
+        assert!((value.roll - 1.25).abs() < 0.0001);
+
+        for invalid in ["1, 2", "1, 2, 3, 4", "yaw, pitch, roll"] {
+            assert!(
+                parse_gui_field_value(&euler3d, invalid).is_err(),
+                "{invalid:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn euler_angle_edit_round_trips_through_tag_serialization() {
+        let mut tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
+        let mut dirty = false;
+
+        let status = apply_pending_edits(
+            &mut tag,
+            vec![PendingFieldEdit {
+                path: "real euler angles 3d".to_owned(),
+                input: "-0.65, 0, 1.25".to_owned(),
+            }],
+            &mut dirty,
+        );
+
+        assert_eq!(status.as_deref(), Some("Edited real euler angles 3d"));
+        assert!(dirty);
+        let bytes = tag.write_to_bytes().unwrap();
+        let reopened = TagFile::read_from_bytes(&bytes).unwrap();
+        let value = reopened
+            .root()
+            .field("real euler angles 3d")
+            .unwrap()
+            .value()
+            .unwrap();
+        let TagFieldData::RealEulerAngles3d(value) = value else {
+            panic!("expected real euler angles 3d");
+        };
+        assert!((value.yaw + 0.65).abs() < 0.0001);
+        assert!(value.pitch.abs() < 0.0001);
+        assert!((value.roll - 1.25).abs() < 0.0001);
+    }
+
+    #[test]
+    fn supported_scenario_schemas_define_object_rotation_as_euler_angles() {
+        fn has_object_rotation(value: &serde_json::Value) -> bool {
+            match value {
+                serde_json::Value::Object(object) => {
+                    (object.get("name").and_then(serde_json::Value::as_str) == Some("rotation")
+                        && object.get("type").and_then(serde_json::Value::as_str)
+                            == Some("real_euler_angles_3d"))
+                        || object.values().any(has_object_rotation)
+                }
+                serde_json::Value::Array(values) => values.iter().any(has_object_rotation),
+                _ => false,
+            }
+        }
+
+        for game in [
+            "haloce_mcc",
+            "halo2_mcc",
+            "halo2amp_mcc",
+            "halo3_mcc",
+            "halo3odst_mcc",
+            "haloreach_mcc",
+            "halo4_mcc",
+            "haloce_evolved",
+        ] {
+            let path = test_definition_path(&format!("{game}/scenario.json"));
+            let value: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            assert!(
+                has_object_rotation(&value),
+                "{} has no real_euler_angles_3d object rotation",
+                path.display()
+            );
+        }
     }
 
     #[test]

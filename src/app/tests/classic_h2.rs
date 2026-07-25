@@ -70,9 +70,10 @@ fn load_h2_tag(tag_path: &str, def_rel: &str) -> Option<blam_tags::TagFile> {
 /// bounds-check against the base size and reject the descent entirely.
 #[test]
 fn h2_bitmap_versioned_block_field_resolves_and_edits() {
-    let Some(mut tag) =
-        load_h2_tag("/Users/camden/Halo/halo2_mcc/tags/globals/loading_screen.bitmap", "halo2_mcc/bitmap.json")
-    else {
+    let Some(mut tag) = load_h2_tag(
+        "/Users/camden/Halo/halo2_mcc/tags/globals/loading_screen.bitmap",
+        "halo2_mcc/bitmap.json",
+    ) else {
         return;
     };
 
@@ -99,7 +100,10 @@ fn h2_bitmap_versioned_block_field_resolves_and_edits() {
     apply_field_edit(&mut tag, &path, "2").unwrap();
     let value = tag.root().field_path(&path).and_then(|f| f.value());
     assert!(
-        matches!(value, Some(TagFieldData::ShortInteger(2)) | Some(TagFieldData::CharInteger(2))),
+        matches!(
+            value,
+            Some(TagFieldData::ShortInteger(2)) | Some(TagFieldData::CharInteger(2))
+        ),
         "depth not written through versioned-block path: {value:?}"
     );
 }
@@ -149,8 +153,14 @@ fn h2_jmad_name_code_block_resolves() {
         return;
     };
 
-    assert!(raw_name.contains('|'), "expected a |CODE raw name, got {raw_name:?}");
-    assert!(!path.contains('|'), "built path must carry the CLEAN name: {path}");
+    assert!(
+        raw_name.contains('|'),
+        "expected a |CODE raw name, got {raw_name:?}"
+    );
+    assert!(
+        !path.contains('|'),
+        "built path must carry the CLEAN name: {path}"
+    );
     assert!(
         tag.root().field_path(&path).is_some(),
         "jmad |CODE field {raw_name:?} did not resolve via clean path {path}"

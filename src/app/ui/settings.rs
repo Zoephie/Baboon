@@ -131,8 +131,10 @@ impl Baboon {
         ui.label(RichText::new("Editing Kits").color(text_dark()).strong());
         ui.add_space(4.0);
         ui.label(
-            RichText::new("Configure each editing-kit root or its tags folder for quick loading.")
-                .color(subtle_dark()),
+            RichText::new(
+                "Configure each editing-kit root or tags folder, plus the Campaign Evolved game install, for quick loading.",
+            )
+            .color(subtle_dark()),
         );
         if ui.button("Auto Detect").clicked() {
             self.auto_detect_editing_kit_paths();
@@ -178,14 +180,19 @@ impl Baboon {
                             ui.label(RichText::new(shortcut.fallback).color(text_dark()).strong());
                         }
                         ui.add_sized(
-                            Vec2::new(72.0, 20.0),
+                            Vec2::new(128.0, 20.0),
                             egui::Label::new(RichText::new(shortcut.label).color(text_dark())),
                         );
+                        let hint = if shortcut.game == "haloce_evolved" {
+                            "game install or Paks folder"
+                        } else {
+                            "editing-kit root or tags folder"
+                        };
                         changed = ui
                             .add(
                                 egui::TextEdit::singleline(&mut input)
-                                    .hint_text("editing-kit root or tags folder")
-                                    .desired_width(360.0),
+                                    .hint_text(hint)
+                                    .desired_width(304.0),
                             )
                             .changed();
                         browse = ui.button("Browse...").clicked();

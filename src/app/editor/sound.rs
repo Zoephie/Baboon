@@ -979,8 +979,14 @@ pub(in crate::app) fn draw_sound_player(
                         .pick_folder()
                 });
                 if let Some(base) = base {
-                    let items =
-                        build_extract_items(tag, &rows, h2_params, &base, raw_ce, sound_rel.as_deref());
+                    let items = build_extract_items(
+                        tag,
+                        &rows,
+                        h2_params,
+                        &base,
+                        raw_ce,
+                        sound_rel.as_deref(),
+                    );
                     let label = base
                         .file_name()
                         .map(|name| name.to_string_lossy().into_owned())
@@ -1014,8 +1020,13 @@ pub(in crate::app) fn draw_sound_player(
                                 _ => "Play this permutation (inline tag audio)",
                             };
                             if ui.small_button("\u{25B6}").on_hover_text(hover).clicked() {
-                                *edit.sound_play_request =
-                                    row_play_action(tag, row, h2_params, sound_rel.as_deref(), multi_pr);
+                                *edit.sound_play_request = row_play_action(
+                                    tag,
+                                    row,
+                                    h2_params,
+                                    sound_rel.as_deref(),
+                                    multi_pr,
+                                );
                             }
                             if ui
                                 .small_button("\u{2B07}")

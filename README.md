@@ -351,6 +351,13 @@ per game:
 
 Launchers are disabled until the relevant executable is found in the kit.
 
+When a loose `.scenario` tag is open, its editor header also provides Sapien and
+tag_test buttons. For supported kits, Baboon saves pending edits and passes the
+absolute scenario file directly to Sapien; Halo CE is excluded. The tag_test
+launcher updates the kit's `init.txt` while preserving unrelated commands. The
+quick-access launchers remain generic, and quick-access tag_test removes stale
+active scenario-launch commands from `init.txt`.
+
 A **Run Tool Command** window lists each game's `tool` commands (from per-game
 JSON), with a form for their parameters — enum dropdowns, file/path pickers, and
 **inline validation** that flags empty required parameters before running. The

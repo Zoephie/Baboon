@@ -4,6 +4,77 @@
 use super::*;
 
 impl Baboon {
+    pub(super) fn draw_tag_reference_picker_window(&mut self, ctx: &egui::Context) {
+        if self.tag_reference_picker.is_none() {
+            return;
+        }
+        let Some(catalog) = self
+            .source
+            .as_ref()
+            .and_then(|source| tag_reference_catalog_for_source(source, self.expert_mode))
+        else {
+            self.tag_reference_picker = None;
+            return;
+        };
+
+        let mut open = true;
+        let mut picked = None;
+        {
+            let picker = self
+                .tag_reference_picker
+                .as_mut()
+                .expect("picker presence checked above");
+            egui::Window::new("Select Tag Reference")
+                .id(egui::Id::new(
+                    "campaign_evolved_tag_reference_picker_window",
+                ))
+                .open(&mut open)
+                .movable(true)
+                .resizable(true)
+                .collapsible(false)
+                .default_size(Vec2::new(620.0, 420.0))
+                .min_size(Vec2::new(420.0, 220.0))
+                .show(ctx, |ui| {
+                    picked = draw_tag_reference_catalog_picker_contents(
+                        ui,
+                        egui::Id::new("campaign_evolved_tag_reference_picker_contents"),
+                        catalog,
+                        &picker.allowed_groups,
+                        picker.current_group,
+                        &mut picker.search,
+                    );
+                });
+        }
+
+        if let Some(input) = picked {
+            let picker = self
+                .tag_reference_picker
+                .take()
+                .expect("picker remains open while processing selection");
+            if let Some(doc) = self.parsed_tags.get_mut(&picker.tag_key) {
+                doc.journal.begin_edit(&doc.tag, "Change tag reference");
+                if let Some(status) = apply_pending_edits(
+                    &mut doc.tag,
+                    vec![PendingFieldEdit {
+                        path: picker.field_path.clone(),
+                        input: input.clone(),
+                    }],
+                    &mut doc.dirty,
+                ) {
+                    self.status = status;
+                }
+                doc.journal.end_edit_window();
+                self.edit_buffers
+                    .insert(format!("{}|{}", picker.tag_key, picker.field_path), input);
+                self.invalidate_tag_caches(&picker.tag_key);
+            } else {
+                self.status = "The tag being edited is no longer open".to_owned();
+            }
+        } else if !open {
+            self.tag_reference_picker = None;
+        }
+    }
+
     pub(super) fn draw_content_explorer_window(&mut self, ctx: &egui::Context) {
         if self.content_explorer.is_none() {
             return;

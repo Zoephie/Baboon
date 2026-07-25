@@ -254,6 +254,31 @@ fn tab_label_width(ui: &Ui, label: &str, min_width: f32, max_width: f32) -> f32 
 }
 
 impl Baboon {
+    pub(super) fn draw_scenario_launcher_buttons(&mut self, ui: &mut Ui, entry: &TagEntry) {
+        if entry.group_tag != u32::from_be_bytes(*b"scnr") {
+            return;
+        }
+        let key = entry.key.clone();
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Open scenario in:").color(subtle_dark()));
+            let sapien_ready = self.can_launch_scenario_in_sapien(entry);
+            if launcher_button(ui, self.sapien_icon.as_ref(), "S", sapien_ready)
+                .on_hover_text("Save if needed, then launch this scenario in Sapien")
+                .clicked()
+            {
+                self.launch_scenario_in_sapien(&key);
+            }
+            let tag_test_ready = self.can_launch_scenario_in_tag_test(entry);
+            if launcher_button(ui, self.tag_test_icon.as_ref(), "T", tag_test_ready)
+                .on_hover_text("Save if needed, then launch this scenario in tag_test")
+                .clicked()
+            {
+                self.launch_scenario_in_tag_test(&key);
+            }
+        });
+        ui.add_space(4.0);
+    }
+
     /// "Search fields" bar (Guerilla-style): typing a block or field name
     /// collapses the editor to just the matching node(s) and their ancestors.
     pub(super) fn draw_field_search_bar(&mut self, ui: &mut Ui, tag_key: &str) {
@@ -301,7 +326,7 @@ impl Baboon {
                 .kit_tool_path(self.tag_test_executable())
                 .is_some_and(|path| path.is_file());
             if launcher_button(ui, self.tag_test_icon.as_ref(), "T", tag_test_ready)
-                .on_hover_text("Launch tag_test")
+                .on_hover_text("Launch tag_test without an auto-start scenario")
                 .clicked()
             {
                 self.launch_tag_test();
@@ -311,7 +336,7 @@ impl Baboon {
                 .kit_tool_path("sapien.exe")
                 .is_some_and(|path| path.is_file());
             if launcher_button(ui, self.sapien_icon.as_ref(), "S", sapien_ready)
-                .on_hover_text("Launch Sapien")
+                .on_hover_text("Launch Sapien without an auto-start scenario")
                 .clicked()
             {
                 self.launch_sapien();

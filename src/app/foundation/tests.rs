@@ -19,6 +19,41 @@ mod tests {
     }
 
     #[test]
+    fn euler_angles_use_editable_named_components() {
+        let parts = foundation_editable_component_parts(&TagFieldData::RealEulerAngles2d(
+            blam_tags::math::RealEulerAngles2d {
+                yaw: 0.25,
+                pitch: -0.5,
+            },
+        ))
+        .unwrap();
+        assert_eq!(
+            parts,
+            vec![
+                ("yaw".to_owned(), "0.25".to_owned()),
+                ("pitch".to_owned(), "-0.5".to_owned()),
+            ]
+        );
+
+        let parts = foundation_editable_component_parts(&TagFieldData::RealEulerAngles3d(
+            blam_tags::math::RealEulerAngles3d {
+                yaw: -0.65,
+                pitch: 0.0,
+                roll: 1.25,
+            },
+        ))
+        .unwrap();
+        assert_eq!(
+            parts,
+            vec![
+                ("yaw".to_owned(), "-0.65".to_owned()),
+                ("pitch".to_owned(), "0".to_owned()),
+                ("roll".to_owned(), "1.25".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
     fn parent_block_path_and_breadcrumb() {
         assert_eq!(
             parent_block_path("regions[0]/permutations").as_deref(),
@@ -106,6 +141,7 @@ mod tests {
         let mut function_request = None;
         let mut block_clip_request = None;
         let mut tsv_paste_request = None;
+        let mut tag_reference_picker = None;
         let edit = FieldEditContext {
             view_scope: "test",
             tag_key: "test",
@@ -115,6 +151,8 @@ mod tests {
             definitions_root: Some(definitions_root.as_path()),
             names: None,
             tags_root: None,
+            tag_reference_catalog: None,
+            tag_reference_picker: &mut tag_reference_picker,
             status: None,
             editable: true,
             show_block_sizes: false,
@@ -250,6 +288,163 @@ mod tests {
             tag_reference_required_group(&meta, None),
             Some(structure_design)
         );
+    }
+
+    #[test]
+    fn catalog_picker_uses_schema_then_current_group_then_all_groups() {
+        let animation = parse_group_tag("jmad").unwrap();
+        let biped = parse_group_tag("bipd").unwrap();
+        let vehicle = parse_group_tag("vehi").unwrap();
+        let weapon = parse_group_tag("weap").unwrap();
+        let target = (weapon, r"objects\weapons\rifle\rifle".to_owned());
+        let meta = |allowed| FieldDisplayMeta {
+            label: "reference".to_owned(),
+            unit: None,
+            range: None,
+            help: None,
+            tag_reference_allowed: allowed,
+            read_only: false,
+            advanced: false,
+        };
+
+        let single = meta(vec![animation]);
+        assert!(tag_reference_catalog_group_allowed(
+            &single,
+            Some(&target),
+            animation,
+            false,
+        ));
+        assert!(!tag_reference_catalog_group_allowed(
+            &single,
+            Some(&target),
+            weapon,
+            false,
+        ));
+
+        let multiple = meta(vec![biped, vehicle]);
+        assert!(tag_reference_catalog_group_allowed(
+            &multiple,
+            Some(&target),
+            biped,
+            false,
+        ));
+        assert!(tag_reference_catalog_group_allowed(
+            &multiple,
+            Some(&target),
+            vehicle,
+            false,
+        ));
+        assert!(!tag_reference_catalog_group_allowed(
+            &multiple,
+            Some(&target),
+            weapon,
+            false,
+        ));
+
+        let unconstrained = meta(Vec::new());
+        assert!(tag_reference_catalog_group_allowed(
+            &unconstrained,
+            Some(&target),
+            weapon,
+            false,
+        ));
+        assert!(!tag_reference_catalog_group_allowed(
+            &unconstrained,
+            Some(&target),
+            animation,
+            false,
+        ));
+        assert!(tag_reference_catalog_group_allowed(
+            &unconstrained,
+            None,
+            animation,
+            false,
+        ));
+        assert!(tag_reference_catalog_group_allowed(
+            &unconstrained,
+            None,
+            weapon,
+            false,
+        ));
+        assert!(tag_reference_catalog_group_allowed(
+            &single,
+            Some(&target),
+            weapon,
+            true,
+        ));
+    }
+
+    #[test]
+    fn catalog_picker_searches_names_and_groups_not_parent_folders() {
+        let model = parse_group_tag("mode").unwrap();
+        let weapon = parse_group_tag("weap").unwrap();
+        let parent_only = TagEntry {
+            key: "ublock:model".to_owned(),
+            display_path: "objects/characters/elite/garbage/hg_arm.render_model".to_owned(),
+            group_tag: model,
+            group_name: Some("render_model".to_owned()),
+            location: TagEntryLocation::Container {
+                container: 0,
+                rel_path: "Tags/objects/characters/elite/garbage/hg_arm-render_model.ubulk"
+                    .to_owned(),
+            },
+        };
+        let rifle = TagEntry {
+            key: "ublock:weapon".to_owned(),
+            display_path: "objects/weapons/rifle/battle_rifle.weapon".to_owned(),
+            group_tag: weapon,
+            group_name: Some("weapon".to_owned()),
+            location: TagEntryLocation::Container {
+                container: 0,
+                rel_path: "Tags/objects/weapons/rifle/battle_rifle-weapon.ubulk".to_owned(),
+            },
+        };
+
+        assert!(!tag_reference_catalog_entry_matches(&parent_only, "elite"));
+        assert!(tag_reference_catalog_entry_matches(&rifle, "rifle"));
+        assert!(tag_reference_catalog_entry_matches(&rifle, "weapon"));
+        assert!(tag_reference_catalog_entry_matches(&rifle, "WEAP"));
+    }
+
+    #[test]
+    fn catalog_picker_is_exposed_only_for_iostore_sources() {
+        let container_source = LoadedSourceData {
+            label: "Campaign Evolved".to_owned(),
+            source: TagSource::IoStoreContainerSet {
+                root: PathBuf::from("C:/CampaignEvolved/Content/Paks"),
+                containers: Vec::new(),
+                index: std::sync::Arc::new(crate::source::ContainerTagIndex::default()),
+            },
+            names: TagNameIndex::default(),
+            game: Some("haloce_evolved".to_owned()),
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+        };
+        let catalog = tag_reference_catalog_for_source(&container_source, true)
+            .expect("container source should expose a catalog");
+        assert!(catalog.expert_mode);
+
+        let loose_source = LoadedSourceData {
+            label: "H3EK".to_owned(),
+            source: TagSource::LooseFolder {
+                root: PathBuf::from("C:/H3EK/tags"),
+                game: Some("halo3_mcc".to_owned()),
+                definitions_root: PathBuf::from("C:/H3EK/definitions"),
+            },
+            names: TagNameIndex::default(),
+            game: Some("halo3_mcc".to_owned()),
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+        };
+        assert!(tag_reference_catalog_for_source(&loose_source, true).is_none());
     }
 
     #[test]

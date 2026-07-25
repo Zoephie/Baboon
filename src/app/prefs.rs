@@ -607,6 +607,7 @@ mod tests {
         let value = json!({
             "editing_kit_paths": {
                 "halo3_mcc": "C:/Games/H3EK",
+                "haloce_evolved": "D:/Games/Halo Campaign Evolved",
                 "halo4_mcc": "",
                 "unknown": "C:/Games/Unknown"
             }
@@ -614,10 +615,14 @@ mod tests {
 
         let paths = load_editing_kit_paths(&value);
 
-        assert_eq!(paths.len(), 1);
+        assert_eq!(paths.len(), 2);
         assert_eq!(
             paths.get("halo3_mcc"),
             Some(&PathBuf::from("C:/Games/H3EK"))
+        );
+        assert_eq!(
+            paths.get("haloce_evolved"),
+            Some(&PathBuf::from("D:/Games/Halo Campaign Evolved"))
         );
         assert!(!paths.contains_key("halo4_mcc"));
         assert!(!paths.contains_key("unknown"));
