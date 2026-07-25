@@ -1062,14 +1062,14 @@ pub(in crate::app) fn draw_entry(
         });
 
         context_menu_separator(ui);
-        let has_extra_extract = is_monolithic_entry(entry)
+        let has_extra_extract = is_embedded_tag_entry(entry)
             || is_bitmap_group(entry.group_tag)
             || is_material_shader_group(entry.group_tag)
             || is_hlsl_include_group(entry.group_tag);
         if has_extra_extract {
             ui.menu_button("More extraction tools", |ui| {
                 ui.set_min_width(280.0);
-                if is_monolithic_entry(entry)
+                if is_embedded_tag_entry(entry)
                     && context_menu_button(ui, "Extract raw tag...").clicked()
                 {
                     action = Some(BrowserAction::ExtractRaw(entry.key.clone()));
@@ -1181,8 +1181,16 @@ fn paint_tag_icon_at(ui: &Ui, group_tag: u32, rect: egui::Rect) {
         .paint_at(ui, rect);
 }
 
-pub(in crate::app) fn is_monolithic_entry(entry: &TagEntry) -> bool {
-    matches!(entry.location, TagEntryLocation::Monolithic { .. })
+/// True when the tag lives *inside* a container source (a monolithic cache or a
+/// mounted UE5 IoStore pak set) rather than as a standalone loose file. These are
+/// the sources for which "Extract raw tag..." is meaningful: it pulls the embedded
+/// tag out to a self-describing standalone file. Loose-file tags are already on
+/// disk, so they have nothing to extract.
+pub(in crate::app) fn is_embedded_tag_entry(entry: &TagEntry) -> bool {
+    matches!(
+        entry.location,
+        TagEntryLocation::Monolithic { .. } | TagEntryLocation::Container { .. }
+    )
 }
 
 pub(in crate::app) fn folder_arrow_icon(ui: &mut Ui, openness: f32, response: &egui::Response) {
