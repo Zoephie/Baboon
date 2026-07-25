@@ -53,14 +53,20 @@ pub struct TagEntry {
 /// loose path does not by itself carry the game definitions needed to parse it.
 pub enum TagEntryLocation {
     LooseFile(PathBuf),
-    Monolithic { name: String, group_tag: u32 },
+    Monolithic {
+        name: String,
+        group_tag: u32,
+    },
     /// A tag inside a mounted UE5 IoStore container (Halo: Campaign Evolved).
     /// `container` indexes the owning [`TagSource::IoStoreContainerSet`]'s
     /// `containers` (its provenance — which pak the tag came from, needed by the
     /// write/repack path). `rel_path` is the container-relative path of the
     /// `.ubulk` payload in its **original case** (the IoStore directory index is
     /// case-sensitive), whose bytes are a self-describing Reach MCC tag.
-    Container { container: usize, rel_path: String },
+    Container {
+        container: usize,
+        rel_path: String,
+    },
 }
 
 #[derive(Clone)]

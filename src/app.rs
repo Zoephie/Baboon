@@ -41,9 +41,9 @@ use crate::source::{
     DependencyRef, EkFolderAlias, EntryIndexRefresh, LoadedSourceData, ReverseDependencyIndex,
     SUPPORTED_EK_GAMES, TagEntry, TagEntryLocation, TagSource, TagTree, TagTreeNode, load_folder,
     load_folder_node_entries, load_iostore_container, load_iostore_container_set,
-    load_monolithic_blob_index, load_single_file, loose_file_entry,
-    read_entry, resolve_folder_root, scan_folder_subtree_entries,
-    scan_folder_subtree_entries_with_progress, supported_ek_game_id,
+    load_monolithic_blob_index, load_single_file, loose_file_entry, read_entry,
+    resolve_folder_root, scan_folder_subtree_entries, scan_folder_subtree_entries_with_progress,
+    supported_ek_game_id,
 };
 
 pub(super) const BABOON_GITHUB_URL: &str = "https://github.com/Zoephie/Baboon";
@@ -275,6 +275,8 @@ pub struct Baboon {
     pending_sound_extract: Option<ExtractRequest>,
     /// Pending "open referenced tag in a new tab" request.
     pending_open: Option<OpenTagRequest>,
+    /// Movable Campaign Evolved tag-reference picker, when one is open.
+    tag_reference_picker: Option<TagReferencePickerState>,
     /// Pending "import geometry via tool" request from an Import button.
     pending_tool_import: Option<ToolImportRequest>,
     /// Toolbar launcher icons (decoded from embedded .ico at startup).
@@ -479,6 +481,7 @@ impl Baboon {
             audio: audio::AudioState::default(),
             pending_sound_extract: None,
             pending_open: None,
+            tag_reference_picker: None,
             pending_tool_import: None,
             blender_icon: load_ico_texture(
                 &cc.egui_ctx,
@@ -718,12 +721,21 @@ mod tests {
         // are the forms the compatibility sweep found across all 5 MCC kits.
         assert_eq!(clean_field_name("jump velocity"), "jump velocity");
         assert_eq!(clean_field_name("ambient color:[0,255]"), "ambient color");
-        assert_eq!(clean_field_name("max sounds per tag [1,16]"), "max sounds per tag");
+        assert_eq!(
+            clean_field_name("max sounds per tag [1,16]"),
+            "max sounds per tag"
+        );
         assert_eq!(clean_field_name("shader flags*"), "shader flags");
         assert_eq!(clean_field_name("activity!"), "activity");
         assert_eq!(clean_field_name("activity name^"), "activity name");
-        assert_eq!(clean_field_name("acoustics{background sounds}*"), "acoustics");
-        assert_eq!(clean_field_name("bounds 480i&bounds 4x3 (640x480)"), "bounds 480i");
+        assert_eq!(
+            clean_field_name("acoustics{background sounds}*"),
+            "acoustics"
+        );
+        assert_eq!(
+            clean_field_name("bounds 480i&bounds 4x3 (640x480)"),
+            "bounds 480i"
+        );
         // H2 model_animation_graph dumper artifact `name|CODE`.
         assert_eq!(clean_field_name("animations|ABCDCC"), "animations");
     }
@@ -731,7 +743,10 @@ mod tests {
     #[test]
     fn canonical_field_path_normalizes_names_paths_and_codes() {
         // Single names normalize to their clean form.
-        assert_eq!(canonical_field_path("ambient color:[0,255]"), "ambient color");
+        assert_eq!(
+            canonical_field_path("ambient color:[0,255]"),
+            "ambient color"
+        );
         // Multi-segment paths drop element indices AND field ordinals per segment,
         // cleaning each name — the form the conversion loss-detector relies on.
         assert_eq!(
@@ -750,7 +765,10 @@ mod tests {
         );
         // clean_field_key is the lowercased canonical form.
         assert_eq!(clean_field_key("Shader Flags*"), "shader flags");
-        assert_eq!(clean_field_key("Bitmaps#21[0]/Signature#0"), "bitmaps/signature");
+        assert_eq!(
+            clean_field_key("Bitmaps#21[0]/Signature#0"),
+            "bitmaps/signature"
+        );
     }
 
     #[test]

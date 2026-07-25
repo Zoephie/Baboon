@@ -1319,6 +1319,7 @@ impl Baboon {
                 if let Some(entry) = self.selected_entry().cloned() {
                     let selected_key = entry.key.clone();
                     draw_entry_header(ui, &entry, &self.names);
+                    self.draw_scenario_launcher_buttons(ui, &entry);
                     self.draw_keyword_bar(ui, &selected_key);
 
                     // "Search fields" collapses the editor to matching blocks.
@@ -1376,6 +1377,10 @@ impl Baboon {
                                     _ => None,
                                 }
                             }),
+                            tag_reference_catalog: self.source.as_ref().and_then(|source| {
+                                tag_reference_catalog_for_source(source, self.expert_mode)
+                            }),
+                            tag_reference_picker: &mut self.tag_reference_picker,
                             status: Some(&mut self.status),
                             editable: is_editable_tag(&entry, &doc.tag),
                             show_block_sizes: self.show_block_sizes,
@@ -1694,6 +1699,7 @@ impl Baboon {
     }
 
     fn draw_auxiliary_windows(&mut self, ctx: &egui::Context) {
+        self.draw_tag_reference_picker_window(ctx);
         self.draw_settings_window(ctx);
         self.draw_tool_commands_window(ctx);
         self.draw_new_tag_window(ctx);

@@ -16,6 +16,8 @@ use terminal::{
 };
 mod tools;
 use tools::*;
+mod scenario_launch;
+use scenario_launch::*;
 mod queries;
 use queries::*;
 mod saving;
@@ -2322,7 +2324,11 @@ impl Baboon {
         let Some(entry) = self.entry_for_key(key).cloned() else {
             return Err("Tag is no longer in the source".to_owned());
         };
-        let TagEntryLocation::Container { container, rel_path } = &entry.location else {
+        let TagEntryLocation::Container {
+            container,
+            rel_path,
+        } = &entry.location
+        else {
             return Err("Not a Campaign Evolved container tag".to_owned());
         };
         let Some(source) = self.source.as_ref() else {
@@ -2342,9 +2348,13 @@ impl Baboon {
         // Tag content: current edited bytes if the tag is loaded, else the
         // original `.ubulk`.
         let tag_bytes = if let Some(doc) = self.parsed_tags.get(key) {
-            doc.tag.write_to_bytes().map_err(|e| format!("serialize tag: {e}"))?
+            doc.tag
+                .write_to_bytes()
+                .map_err(|e| format!("serialize tag: {e}"))?
         } else {
-            archive.read(&rel_path).map_err(|e| format!("read tag: {e}"))?
+            archive
+                .read(&rel_path)
+                .map_err(|e| format!("read tag: {e}"))?
         };
 
         match rename_to {
@@ -2383,7 +2393,11 @@ impl Baboon {
                     &template,
                     &tag_bytes,
                     &new_pkg,
-                    if redirect { Some(old_pkg.as_str()) } else { None },
+                    if redirect {
+                        Some(old_pkg.as_str())
+                    } else {
+                        None
+                    },
                     &output,
                 )
                 .map_err(|e| format!("write container: {e}"))?;
@@ -2400,7 +2414,11 @@ impl Baboon {
             self.status = "Tag is no longer in the source".to_owned();
             return;
         };
-        let TagEntryLocation::Container { container, rel_path } = &entry.location else {
+        let TagEntryLocation::Container {
+            container,
+            rel_path,
+        } = &entry.location
+        else {
             self.status = "Not a Campaign Evolved container tag".to_owned();
             return;
         };
@@ -2468,8 +2486,11 @@ impl Baboon {
             return;
         };
         // (archive, rel_path, edited bytes) for each loaded + dirty container tag.
-        let mut collected: Vec<(std::sync::Arc<blam_tags::iostore::IoStoreArchive>, String, Vec<u8>)> =
-            Vec::new();
+        let mut collected: Vec<(
+            std::sync::Arc<blam_tags::iostore::IoStoreArchive>,
+            String,
+            Vec<u8>,
+        )> = Vec::new();
         for (k, doc) in self.parsed_tags.iter() {
             if !doc.dirty {
                 continue;
@@ -2477,7 +2498,11 @@ impl Baboon {
             let Some(entry) = self.entry_for_key(k) else {
                 continue;
             };
-            let TagEntryLocation::Container { container, rel_path } = &entry.location else {
+            let TagEntryLocation::Container {
+                container,
+                rel_path,
+            } = &entry.location
+            else {
                 continue;
             };
             let Some(m) = containers.get(*container) else {
@@ -3985,19 +4010,149 @@ impl Baboon {
     /// its own renamed build (e.g. H3EK is `halo3_tag_test.exe`); fall back to
     /// the generic name when the game is unknown.
     pub(super) fn tag_test_executable(&self) -> &'static str {
-        match self.source.as_ref().and_then(|s| s.game.as_deref()) {
-            Some("haloce_mcc") => "halo_tag_test.exe",
-            Some("halo2_mcc") => "halo2_tag_test.exe",
-            Some("halo3_mcc") => "halo3_tag_test.exe",
-            Some("halo3odst_mcc") => "atlas_tag_test.exe",
-            Some("haloreach_mcc") => "reach_tag_test.exe",
-            Some("halo4_mcc") => "halo4_tag_test.exe",
-            _ => "tag_test.exe",
-        }
+        tag_test_executable_for_game(self.source.as_ref().and_then(|s| s.game.as_deref()))
     }
 
     pub(super) fn launch_tag_test(&mut self) {
-        self.launch_kit_tool("tag_test", self.tag_test_executable());
+        self.launch_kit_tool_clearing_startup("tag_test", self.tag_test_executable(), "init.txt");
+    }
+
+    pub(super) fn can_launch_scenario_in_sapien(&self, entry: &TagEntry) -> bool {
+        let Some(source) = self.source.as_ref() else {
+            return false;
+        };
+        let Ok(context) = scenario_launch_context(source, entry) else {
+            return false;
+        };
+        sapien_supports_scenario_argument(&context.game)
+            && context.kit_root.join("sapien.exe").is_file()
+    }
+
+    pub(super) fn launch_scenario_in_sapien(&mut self, key: &str) {
+        let context = {
+            let Some(source) = self.source.as_ref() else {
+                self.status = "Scenario launching requires a loaded editing kit".to_owned();
+                return;
+            };
+            let Some(entry) = self.entry_for_key(key) else {
+                self.status = "The scenario tag is no longer in the source".to_owned();
+                return;
+            };
+            match scenario_launch_context(source, entry) {
+                Ok(context) => context,
+                Err(error) => {
+                    self.status = error;
+                    return;
+                }
+            }
+        };
+        if !sapien_supports_scenario_argument(&context.game) {
+            self.status =
+                "Opening a scenario directly in Sapien is not supported for this editing kit"
+                    .to_owned();
+            return;
+        }
+        let executable = context.kit_root.join("sapien.exe");
+        if !executable.is_file() {
+            self.status = format!("Sapien executable not found: {}", executable.display());
+            return;
+        }
+
+        let dirty = self
+            .parsed_tags
+            .get(key)
+            .is_some_and(|document| document.dirty);
+        if dirty {
+            if let Err(error) = self.save_tag_by_key(key) {
+                self.status = format!("Could not save scenario before launch: {error}");
+                return;
+            }
+        }
+
+        let mut process = Command::new(&executable);
+        process
+            .arg(&context.scenario_file)
+            .current_dir(&context.kit_root);
+        match process.spawn() {
+            Ok(_) => {
+                self.status = format!("Launched Sapien for {}", context.scenario_path);
+            }
+            Err(error) => {
+                self.status = format!("Could not launch Sapien for this scenario: {error}");
+            }
+        }
+    }
+
+    pub(super) fn can_launch_scenario_in_tag_test(&self, entry: &TagEntry) -> bool {
+        let Some(source) = self.source.as_ref() else {
+            return false;
+        };
+        let Ok(context) = scenario_launch_context(source, entry) else {
+            return false;
+        };
+        let executable = tag_test_executable_for_game(Some(context.game.as_str()));
+        context.kit_root.join(executable).is_file()
+    }
+
+    pub(super) fn launch_scenario_in_tag_test(&mut self, key: &str) {
+        let context = {
+            let Some(source) = self.source.as_ref() else {
+                self.status = "Scenario launching requires a loaded editing kit".to_owned();
+                return;
+            };
+            let Some(entry) = self.entry_for_key(key) else {
+                self.status = "The scenario tag is no longer in the source".to_owned();
+                return;
+            };
+            match scenario_launch_context(source, entry) {
+                Ok(context) => context,
+                Err(error) => {
+                    self.status = error;
+                    return;
+                }
+            }
+        };
+        let executable_name = tag_test_executable_for_game(Some(context.game.as_str()));
+        let executable = context.kit_root.join(executable_name);
+        if !executable.is_file() {
+            self.status = format!("tag_test executable not found: {}", executable.display());
+            return;
+        }
+
+        let dirty = self
+            .parsed_tags
+            .get(key)
+            .is_some_and(|document| document.dirty);
+        if dirty {
+            if let Err(error) = self.save_tag_by_key(key) {
+                self.status = format!("Could not save scenario before launch: {error}");
+                return;
+            }
+        }
+
+        let startup_file = context.kit_root.join("init.txt");
+        let command = scenario_startup_command(&context.game, &context.scenario_path);
+        if let Err(error) = update_scenario_startup_file(&startup_file, &command) {
+            self.status = error;
+            return;
+        }
+        let mut process = Command::new(&executable);
+        process.current_dir(&context.kit_root);
+        match process.spawn() {
+            Ok(_) => {
+                self.status = format!(
+                    "Launched tag_test for {} using {}",
+                    context.scenario_path,
+                    startup_file.display()
+                );
+            }
+            Err(error) => {
+                self.status = format!(
+                    "Wrote {}, but could not launch tag_test: {error}",
+                    startup_file.display()
+                );
+            }
+        }
     }
 
     pub(super) fn launch_blender(&mut self) {
@@ -4115,6 +4270,32 @@ impl Baboon {
         self.spawn_tool(label, &path, self.editing_kit_root());
     }
 
+    fn launch_kit_tool_clearing_startup(
+        &mut self,
+        label: &str,
+        executable_name: &str,
+        startup_file_name: &str,
+    ) {
+        let Some(path) = self.kit_tool_path(executable_name) else {
+            self.status = format!("{label} requires a loaded editing-kit folder");
+            return;
+        };
+        if !path.is_file() {
+            self.status = format!("{label} executable not found: {}", path.display());
+            return;
+        }
+        let Some(root) = self.editing_kit_root() else {
+            self.status = format!("{label} requires a loaded editing-kit folder");
+            return;
+        };
+        let startup_file = root.join(startup_file_name);
+        if let Err(error) = clear_scenario_startup_commands(&startup_file) {
+            self.status = error;
+            return;
+        }
+        self.spawn_tool(label, &path, Some(root));
+    }
+
     fn spawn_tool(&mut self, label: &str, path: &Path, work_dir: Option<PathBuf>) {
         let mut command = Command::new(path);
         if let Some(work_dir) = work_dir {
@@ -4139,13 +4320,40 @@ impl Baboon {
         }
     }
 
-    /// Resolve a pending "Open referenced tag" request against the loose-folder
-    /// tags root and open it in a new tab (creating a transient entry if the
-    /// target isn't in the current index).
+    /// Resolve a pending "Open referenced tag" request against its active
+    /// source. Loose folders resolve a file path; Campaign Evolved resolves the
+    /// existing stable entry from its mounted container catalog.
     pub(super) fn process_pending_open(&mut self, ctx: &egui::Context) {
         let Some(req) = self.pending_open.take() else {
             return;
         };
+        let container_key = self.source.as_ref().and_then(|source| {
+            matches!(&source.source, TagSource::IoStoreContainerSet { .. }).then(|| {
+                container_entry_for_reference(
+                    &source.entries,
+                    req.group_tag,
+                    &req.rel_path,
+                    &self.names,
+                )
+                .map(|entry| entry.key.clone())
+            })
+        });
+        if let Some(container_key) = container_key {
+            let Some(key) = container_key else {
+                self.status = format!(
+                    "Referenced Campaign Evolved tag not found: {} (group {})",
+                    req.rel_path.replace('\\', "/"),
+                    blam_tags::format_group_tag(req.group_tag)
+                );
+                return;
+            };
+            self.select_entry(key.clone(), ctx.clone());
+            if req.float {
+                self.pop_tab(&key);
+            }
+            return;
+        }
+
         let root = match self.source.as_ref().map(|s| &s.source) {
             Some(TagSource::LooseFolder { root, .. }) => root.clone(),
             _ => {
@@ -4482,6 +4690,7 @@ impl Baboon {
                     });
                     ui.separator();
                     draw_entry_header(ui, &entry, &self.names);
+                    self.draw_scenario_launcher_buttons(ui, &entry);
                     let supports_field_search = supports_field_search(&entry);
                     if supports_field_search {
                         self.draw_field_search_bar(ui, &key);
@@ -4531,6 +4740,10 @@ impl Baboon {
                                 TagSource::LooseFolder { root, .. } => Some(root.as_path()),
                                 _ => None,
                             }),
+                        tag_reference_catalog: self.source.as_ref().and_then(|source| {
+                            tag_reference_catalog_for_source(source, self.expert_mode)
+                        }),
+                        tag_reference_picker: &mut self.tag_reference_picker,
                         status: Some(&mut self.status),
                         editable: is_editable_tag(&entry, &doc.tag),
                         show_block_sizes: self.show_block_sizes,
@@ -6658,6 +6871,19 @@ mod dependency_tests {
         }
     }
 
+    fn container_entry(key: &str, display_path: &str, group_tag: u32) -> TagEntry {
+        TagEntry {
+            key: key.to_owned(),
+            display_path: display_path.to_owned(),
+            group_tag,
+            group_name: None,
+            location: TagEntryLocation::Container {
+                container: 0,
+                rel_path: format!("Tags/{display_path}.ubulk"),
+            },
+        }
+    }
+
     fn loose_source_with_counts(label: &str, entries: Vec<TagEntry>) -> LoadedSourceData {
         LoadedSourceData {
             label: label.to_owned(),
@@ -6713,6 +6939,51 @@ mod dependency_tests {
         assert_eq!(
             dependency_entry_reference_path(&entry, &names).unwrap(),
             "objects\\weapons\\decal_road_1.bitmap"
+        );
+    }
+
+    #[test]
+    fn container_reference_resolution_uses_group_and_normalized_path() {
+        let names = TagNameIndex::default();
+        let render_model = parse_group_tag("mode").unwrap();
+        let weapon = parse_group_tag("weap").unwrap();
+        let display_stem = "objects/shared/example";
+        let entries = vec![
+            entry(&format!("{display_stem}.render_model"), render_model),
+            container_entry(
+                "ublock:shared:model",
+                &format!("{display_stem}.render_model"),
+                render_model,
+            ),
+            container_entry(
+                "ublock:shared:weapon",
+                &format!("{display_stem}.weapon"),
+                weapon,
+            ),
+        ];
+
+        let model = container_entry_for_reference(
+            &entries,
+            render_model,
+            "OBJECTS/SHARED/EXAMPLE.RENDER_MODEL",
+            &names,
+        )
+        .expect("render-model reference should resolve");
+        assert_eq!(model.key, "ublock:shared:model");
+
+        let weapon_entry =
+            container_entry_for_reference(&entries, weapon, r"objects\shared\example", &names)
+                .expect("same path in another group should resolve independently");
+        assert_eq!(weapon_entry.key, "ublock:shared:weapon");
+
+        assert!(
+            container_entry_for_reference(
+                &entries,
+                render_model,
+                r"objects\shared\missing",
+                &names
+            )
+            .is_none()
         );
     }
 

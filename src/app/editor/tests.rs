@@ -131,7 +131,7 @@ mod tests {
     #[test]
     #[ignore]
     fn fmod_id_resolves_every_permutation() {
-        use blam_tags::audio::{fmod_bank_subsound_id_hash, fmod_pitch_range_folder, SoundBanks};
+        use blam_tags::audio::{SoundBanks, fmod_bank_subsound_id_hash, fmod_pitch_range_folder};
 
         let root = std::env::var("SND_TAGS_ROOT")
             .unwrap_or_else(|_| "/Users/camden/Halo/haloreach_mcc/tags".to_owned());
@@ -216,7 +216,8 @@ mod tests {
                         if name_hit {
                             id_miss_name_hit += 1;
                             if hash_gaps.len() < 30 {
-                                hash_gaps.push(format!("{rel}\\{}#{perm_index} :: {name}", pr_name));
+                                hash_gaps
+                                    .push(format!("{rel}\\{}#{perm_index} :: {name}", pr_name));
                             }
                         } else {
                             absent += 1;
@@ -1150,7 +1151,10 @@ mod tests {
         assert!(ro.read_only && !ro.advanced, "'*' => read-only");
 
         let hidden = field_display_meta("activity!");
-        assert!(hidden.advanced && !hidden.read_only, "'!' => hidden/advanced");
+        assert!(
+            hidden.advanced && !hidden.read_only,
+            "'!' => hidden/advanced"
+        );
 
         let both = field_display_meta("angle*!");
         assert!(both.read_only, "combined: '*' still read-only");

@@ -120,6 +120,24 @@ pub(in crate::app) struct OpenTagRequest {
     pub(in crate::app) float: bool,
 }
 
+/// Read-only tag catalog exposed to reference pickers for sources whose tags do
+/// not exist as ordinary files. The group tree's indices address `entries`.
+#[derive(Clone, Copy)]
+pub(in crate::app) struct TagReferenceCatalog<'a> {
+    pub(in crate::app) entries: &'a [TagEntry],
+    pub(in crate::app) group_tree: &'a TagTree,
+    pub(in crate::app) expert_mode: bool,
+}
+
+/// Cross-frame state for the Campaign Evolved tag-reference picker window.
+pub(in crate::app) struct TagReferencePickerState {
+    pub(in crate::app) tag_key: String,
+    pub(in crate::app) field_path: String,
+    pub(in crate::app) allowed_groups: Vec<u32>,
+    pub(in crate::app) current_group: Option<u32>,
+    pub(in crate::app) search: String,
+}
+
 /// A request to (re)import a geometry tag via `tool` (from the Import button on
 /// a render/collision/physics-model or animation-graph reference).
 #[derive(Clone)]
@@ -256,6 +274,11 @@ pub(in crate::app) struct FieldEditContext<'a> {
     pub(in crate::app) definitions_root: Option<&'a Path>,
     pub(in crate::app) names: Option<&'a TagNameIndex>,
     pub(in crate::app) tags_root: Option<&'a Path>,
+    /// Populated only for Campaign Evolved container sources. Loose editing
+    /// kits continue to use `tags_root` and the native file picker.
+    pub(in crate::app) tag_reference_catalog: Option<TagReferenceCatalog<'a>>,
+    /// Shared state for the movable Campaign Evolved reference-picker window.
+    pub(in crate::app) tag_reference_picker: &'a mut Option<TagReferencePickerState>,
     pub(in crate::app) status: Option<&'a mut String>,
     pub(in crate::app) editable: bool,
     pub(in crate::app) show_block_sizes: bool,

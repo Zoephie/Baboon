@@ -830,7 +830,8 @@ pub(in crate::app) fn draw_foundation_block(
         Some(clip)
             if edit.editable
                 && clip.group_tag == edit.group_tag
-                && strip_element_indices(&clip.block_path) == strip_element_indices(path_prefix) =>
+                && strip_element_indices(&clip.block_path)
+                    == strip_element_indices(path_prefix) =>
         {
             if clip.element_size == Some(block.element_size()) {
                 PasteGate::Ready(clip.elements.len())
@@ -1272,7 +1273,8 @@ pub(in crate::app) fn draw_foundation_array(
         Some(clip)
             if edit.editable
                 && clip.group_tag == edit.group_tag
-                && strip_element_indices(&clip.block_path) == strip_element_indices(path_prefix) =>
+                && strip_element_indices(&clip.block_path)
+                    == strip_element_indices(path_prefix) =>
         {
             PasteGate::Ready(clip.elements.len())
         }

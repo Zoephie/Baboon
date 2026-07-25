@@ -153,9 +153,15 @@ pub fn load_iostore_container_set(
     let mut utocs: Vec<PathBuf> = std::fs::read_dir(&paks_dir)
         .with_context(|| format!("failed to read {}", paks_dir.display()))?
         .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("utoc")))
+        .filter(|p| {
+            p.extension()
+                .is_some_and(|x| x.eq_ignore_ascii_case("utoc"))
+        })
         // `global.utoc` has no directory index; it would fail to open anyway.
-        .filter(|p| !p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("global.utoc")))
+        .filter(|p| {
+            !p.file_name()
+                .is_some_and(|n| n.eq_ignore_ascii_case("global.utoc"))
+        })
         .collect();
     // Mount base chunk first, then level chunks by number, so higher/patch
     // chunks win on any collision (mirrors UE's FIoDispatcher last-wins).
@@ -170,7 +176,10 @@ pub fn load_iostore_container(
     fallback_names: &TagNameIndex,
     definitions_root: &Path,
 ) -> Result<LoadedSourceData> {
-    let root = utoc.parent().map(Path::to_path_buf).unwrap_or_else(|| utoc.clone());
+    let root = utoc
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| utoc.clone());
     build_container_set(root, vec![utoc], fallback_names, definitions_root)
 }
 
@@ -224,7 +233,11 @@ fn build_container_set(
             let logical = if dir.is_empty() {
                 tag_name.to_ascii_lowercase()
             } else {
-                format!("{}/{}", dir.to_ascii_lowercase(), tag_name.to_ascii_lowercase())
+                format!(
+                    "{}/{}",
+                    dir.to_ascii_lowercase(),
+                    tag_name.to_ascii_lowercase()
+                )
             };
             let display_path = display_str_with_friendly_extension(&logical, group_tag, &names);
 
@@ -274,7 +287,9 @@ fn build_container_set(
     entries.sort_by(|a, b| natural_key(&a.display_path).cmp(&natural_key(&b.display_path)));
     let label = format!(
         "{} ({} packs)",
-        root.file_name().and_then(|s| s.to_str()).unwrap_or("Campaign Evolved"),
+        root.file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("Campaign Evolved"),
         containers.len()
     );
     let tree = build_tree(&entries);
@@ -554,12 +569,19 @@ mod container_tests {
         let TagSource::IoStoreContainerSet { ref containers, .. } = loaded.source else {
             panic!("expected a container set");
         };
-        assert!(containers.len() > 10, "expected base + level chunks, got {}", containers.len());
+        assert!(
+            containers.len() > 10,
+            "expected base + level chunks, got {}",
+            containers.len()
+        );
 
         // Scenarios live only in level chunks — proves multi-container merge.
         let scnr = u32::from_be_bytes(*b"scnr");
-        let scenarios: Vec<&TagEntry> =
-            loaded.entries.iter().filter(|e| e.group_tag == scnr).collect();
+        let scenarios: Vec<&TagEntry> = loaded
+            .entries
+            .iter()
+            .filter(|e| e.group_tag == scnr)
+            .collect();
         eprintln!(
             "mounted {} packs, {} tags, {} scenarios",
             containers.len(),
@@ -591,8 +613,10 @@ mod container_tests {
             let tag = read_entry(&loaded.source, entry)
                 .unwrap_or_else(|e| panic!("read_entry failed for {}: {e}", entry.display_path));
             assert_eq!(
-                tag.group().tag, entry.group_tag,
-                "group mismatch for {}", entry.display_path
+                tag.group().tag,
+                entry.group_tag,
+                "group mismatch for {}",
+                entry.display_path
             );
         }
     }

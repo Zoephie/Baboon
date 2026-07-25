@@ -3,6 +3,133 @@
 
 use super::*;
 
+pub(in crate::app) fn tag_reference_catalog_for_source(
+    source: &LoadedSourceData,
+    expert_mode: bool,
+) -> Option<TagReferenceCatalog<'_>> {
+    matches!(&source.source, TagSource::IoStoreContainerSet { .. }).then_some(TagReferenceCatalog {
+        entries: &source.entries,
+        group_tree: &source.group_tree,
+        expert_mode,
+    })
+}
+
+#[cfg(test)]
+pub(super) fn tag_reference_catalog_group_allowed(
+    meta: &FieldDisplayMeta,
+    target: Option<&(u32, String)>,
+    candidate_group: u32,
+    expert_mode: bool,
+) -> bool {
+    tag_reference_picker_group_allowed(
+        &meta.tag_reference_allowed,
+        target.map(|(group, _)| *group),
+        candidate_group,
+        expert_mode,
+    )
+}
+
+fn tag_reference_picker_group_allowed(
+    allowed_groups: &[u32],
+    current_group: Option<u32>,
+    candidate_group: u32,
+    expert_mode: bool,
+) -> bool {
+    if expert_mode {
+        return true;
+    }
+    if !allowed_groups.is_empty() {
+        return allowed_groups.contains(&candidate_group);
+    }
+    current_group
+        .map(|group| group == candidate_group)
+        .unwrap_or(true)
+}
+
+pub(super) fn tag_reference_catalog_entry_matches(entry: &TagEntry, filter: &str) -> bool {
+    entry_matches(entry, filter)
+}
+
+pub(in crate::app) fn draw_tag_reference_catalog_picker_contents(
+    ui: &mut Ui,
+    picker_id: egui::Id,
+    catalog: TagReferenceCatalog<'_>,
+    allowed_groups: &[u32],
+    current_group: Option<u32>,
+    filter: &mut String,
+) -> Option<String> {
+    let search = ui.add(
+        egui::TextEdit::singleline(filter)
+            .hint_text("Search tag names or groups")
+            .desired_width(f32::INFINITY),
+    );
+    search.on_hover_text(
+        "Searches tag filenames, friendly group names, and four-character group codes",
+    );
+    if catalog.expert_mode {
+        ui.label(
+            RichText::new("Expert mode: showing all tag groups")
+                .color(Color32::from_rgb(214, 166, 64))
+                .small(),
+        );
+    }
+    ui.separator();
+
+    let query = filter.trim();
+    let mut picked = None;
+    let mut visible_entries = 0usize;
+    ScrollArea::vertical()
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            for group_node in &catalog.group_tree.children {
+                let matching = group_node
+                    .entries
+                    .iter()
+                    .copied()
+                    .filter(|&index| {
+                        catalog.entries.get(index).is_some_and(|entry| {
+                            tag_reference_picker_group_allowed(
+                                allowed_groups,
+                                current_group,
+                                entry.group_tag,
+                                catalog.expert_mode,
+                            ) && tag_reference_catalog_entry_matches(entry, query)
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                if matching.is_empty() {
+                    continue;
+                }
+                visible_entries += matching.len();
+                egui::CollapsingHeader::new(format!("{} ({})", group_node.label, matching.len()))
+                    .id_salt(picker_id.with(("group", &group_node.label)))
+                    .open((!query.is_empty()).then_some(true))
+                    .show(ui, |ui| {
+                        for index in matching {
+                            let Some(entry) = catalog.entries.get(index) else {
+                                continue;
+                            };
+                            if ui
+                                .selectable_label(false, &entry.display_path)
+                                .on_hover_text(&entry.display_path)
+                                .clicked()
+                            {
+                                picked = Some(entry_reference_input(entry));
+                            }
+                        }
+                    });
+            }
+            if visible_entries == 0 {
+                ui.label(
+                    RichText::new("No compatible tags match this search")
+                        .color(subtle_dark())
+                        .small(),
+                );
+            }
+        });
+    picked
+}
+
 pub(in crate::app) fn reference_target_missing(
     names: Option<&TagNameIndex>,
     tags_root: Option<&Path>,
@@ -127,10 +254,26 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                 )
                 .on_hover_text("Referenced tag not found on disk");
             }
-            let browse_clicked =
-                foundation_header_button_clicked(ui, "...", editable && edit.tags_root.is_some());
-            // Open: load the referenced tag in a new tab (resolved against the
-            // loose-folder tags root). Enabled only when the ref is non-empty.
+            let browse_clicked = if let Some(catalog) = edit.tag_reference_catalog {
+                if editable && !catalog.entries.is_empty() {
+                    if foundation_header_button_clicked(ui, "...", true) {
+                        *edit.tag_reference_picker = Some(TagReferencePickerState {
+                            tag_key: edit.tag_key.to_owned(),
+                            field_path: path.to_owned(),
+                            allowed_groups: meta.tag_reference_allowed.clone(),
+                            current_group: target.as_ref().map(|(group, _)| *group),
+                            search: String::new(),
+                        });
+                    }
+                } else {
+                    let _ = foundation_header_button_clicked(ui, "...", false);
+                }
+                false
+            } else {
+                foundation_header_button_clicked(ui, "...", editable && edit.tags_root.is_some())
+            };
+            // Open: load the referenced tag through the active source (loose
+            // folder or mounted Campaign Evolved catalog).
             if foundation_header_button_clicked(ui, "Open", target.is_some()) {
                 if let Some((group_tag, rel_path)) = target.clone() {
                     // Alt-click opens the referenced tag in a floating window.

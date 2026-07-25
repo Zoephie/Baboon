@@ -203,6 +203,42 @@ pub(super) fn dependency_entry_reference_path(
     reference_path_without_group_extension(&entry.display_path, entry.group_tag, names)
 }
 
+pub(super) fn normalized_reference_lookup_path(
+    path: &str,
+    group_tag: u32,
+    names: &TagNameIndex,
+) -> String {
+    let mut path = sanitize_ref_path(path).replace('/', "\\");
+    if let Some(extension) = names
+        .name_for(group_tag)
+        .or_else(|| group_tag_to_extension(group_tag))
+    {
+        let suffix = format!(".{extension}");
+        if path
+            .to_ascii_lowercase()
+            .ends_with(&suffix.to_ascii_lowercase())
+        {
+            path.truncate(path.len().saturating_sub(suffix.len()));
+        }
+    }
+    normalize_ref(&path)
+}
+
+pub(super) fn container_entry_for_reference<'a>(
+    entries: &'a [TagEntry],
+    group_tag: u32,
+    rel_path: &str,
+    names: &TagNameIndex,
+) -> Option<&'a TagEntry> {
+    let target = normalized_reference_lookup_path(rel_path, group_tag, names);
+    entries.iter().find(|entry| {
+        matches!(&entry.location, TagEntryLocation::Container { .. })
+            && entry.group_tag == group_tag
+            && normalized_reference_lookup_path(&entry.display_path, entry.group_tag, names)
+                == target
+    })
+}
+
 pub(super) fn reference_path_without_group_extension(
     path: &str,
     group_tag: u32,

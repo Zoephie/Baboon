@@ -482,6 +482,7 @@ pub(in crate::app) fn draw_shader_grid_row_readonly(
     let mut function_request = None;
     let mut block_clip_request = None;
     let mut tsv_paste_request = None;
+    let mut tag_reference_picker = None;
     let mut ctx = FieldEditContext {
         view_scope: "readonly",
         tag_key: "",
@@ -491,6 +492,8 @@ pub(in crate::app) fn draw_shader_grid_row_readonly(
         definitions_root: None,
         names: None,
         tags_root: None,
+        tag_reference_catalog: None,
+        tag_reference_picker: &mut tag_reference_picker,
         status: None,
         editable: false,
         show_block_sizes: false,
