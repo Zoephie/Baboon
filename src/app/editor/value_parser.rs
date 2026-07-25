@@ -154,6 +154,18 @@ pub(in crate::app) fn parse_gui_field_value(
                 blam_tags::math::RealQuaternion { i, j, k, w },
             ))
         }
+        TagFieldType::RealEulerAngles2d => {
+            let [yaw, pitch] = parse_float_channels::<2>(trimmed, "real euler angles 2d")?;
+            Ok(TagFieldData::RealEulerAngles2d(
+                blam_tags::math::RealEulerAngles2d { yaw, pitch },
+            ))
+        }
+        TagFieldType::RealEulerAngles3d => {
+            let [yaw, pitch, roll] = parse_float_channels::<3>(trimmed, "real euler angles 3d")?;
+            Ok(TagFieldData::RealEulerAngles3d(
+                blam_tags::math::RealEulerAngles3d { yaw, pitch, roll },
+            ))
+        }
         TagFieldType::Real => parse_value(trimmed, "f32").map(TagFieldData::Real),
         TagFieldType::RealSlider => parse_value(trimmed, "f32").map(TagFieldData::RealSlider),
         TagFieldType::RealFraction => parse_value(trimmed, "f32").map(TagFieldData::RealFraction),

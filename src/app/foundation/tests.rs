@@ -19,6 +19,41 @@ mod tests {
     }
 
     #[test]
+    fn euler_angles_use_editable_named_components() {
+        let parts = foundation_editable_component_parts(&TagFieldData::RealEulerAngles2d(
+            blam_tags::math::RealEulerAngles2d {
+                yaw: 0.25,
+                pitch: -0.5,
+            },
+        ))
+        .unwrap();
+        assert_eq!(
+            parts,
+            vec![
+                ("yaw".to_owned(), "0.25".to_owned()),
+                ("pitch".to_owned(), "-0.5".to_owned()),
+            ]
+        );
+
+        let parts = foundation_editable_component_parts(&TagFieldData::RealEulerAngles3d(
+            blam_tags::math::RealEulerAngles3d {
+                yaw: -0.65,
+                pitch: 0.0,
+                roll: 1.25,
+            },
+        ))
+        .unwrap();
+        assert_eq!(
+            parts,
+            vec![
+                ("yaw".to_owned(), "-0.65".to_owned()),
+                ("pitch".to_owned(), "0".to_owned()),
+                ("roll".to_owned(), "1.25".to_owned()),
+            ]
+        );
+    }
+
+    #[test]
     fn parent_block_path_and_breadcrumb() {
         assert_eq!(
             parent_block_path("regions[0]/permutations").as_deref(),

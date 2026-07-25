@@ -518,6 +518,15 @@ pub(in crate::app) fn foundation_editable_component_parts(
             ("k".to_owned(), fmt_real(q.k)),
             ("w".to_owned(), fmt_real(q.w)),
         ]),
+        TagFieldData::RealEulerAngles2d(e) => Some(vec![
+            ("yaw".to_owned(), fmt_real(e.yaw)),
+            ("pitch".to_owned(), fmt_real(e.pitch)),
+        ]),
+        TagFieldData::RealEulerAngles3d(e) => Some(vec![
+            ("yaw".to_owned(), fmt_real(e.yaw)),
+            ("pitch".to_owned(), fmt_real(e.pitch)),
+            ("roll".to_owned(), fmt_real(e.roll)),
+        ]),
         _ => None,
     }
 }
