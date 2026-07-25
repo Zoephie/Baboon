@@ -124,7 +124,6 @@ impl Baboon {
         }
         self.parsed_tags.clear();
         self.loading_tags.clear();
-        self.tag_cache_order.clear();
         self.bitmap_previews.clear();
         self.model_previews.clear();
         self.edit_buffers.clear();

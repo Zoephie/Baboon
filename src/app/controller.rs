@@ -43,6 +43,25 @@ const ENTRY_INDEX_REFRESH_INTERVAL_SECS: f64 = 30.0;
 
 /// Map a container `.ubulk` path to the UE package path the runtime hashes.
 /// `Meteorite/Content/Tags/objects/.../foo-biped.ubulk` → `/Game/Tags/objects/.../foo-biped`.
+/// Normalize a user-entered container tag path: lowercase, `\`→`/`, collapse
+/// repeated slashes, and trim leading/trailing slashes and any tag extension.
+/// Yields the container-relative logical path (e.g. `objects/foo/bar`).
+fn normalize_container_tag_rel(input: &str) -> String {
+    let lowered = input.trim().replace('\\', "/").to_ascii_lowercase();
+    let mut segments: Vec<&str> = lowered
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect();
+    // Drop a trailing tag extension on the leaf (`foo.biped` → `foo`).
+    if let Some(last) = segments.last_mut()
+        && let Some((stem, _ext)) = last.rsplit_once('.')
+        && !stem.is_empty()
+    {
+        *last = stem;
+    }
+    segments.join("/")
+}
+
 fn container_rel_to_package_path(rel: &str) -> Option<String> {
     let no_ext = rel.strip_suffix(".ubulk").unwrap_or(rel);
     let after = no_ext.strip_prefix("Meteorite/Content/").unwrap_or(no_ext);
@@ -371,6 +390,16 @@ impl Baboon {
         self.new_tag_open = true;
     }
 
+    /// Open the New Tag dialog pre-filled with a container folder (from a
+    /// right-clicked folder node), leaving the leaf name for the user to type.
+    pub(super) fn open_new_tag_dialog_in_folder(&mut self, folder_rel: Option<String>) {
+        self.open_new_tag_dialog();
+        if let Some(folder) = folder_rel.filter(|f| !f.is_empty()) {
+            // Pre-fill the path field with the folder + a trailing slash.
+            self.new_tag_dialog.rel_path = format!("{}/", folder.trim_end_matches('/'));
+        }
+    }
+
     pub(super) fn refresh_new_tag_groups(&mut self) {
         match load_new_tag_groups(&self.new_tag_dialog.game) {
             Ok(groups) if groups.is_empty() => {
@@ -448,6 +477,12 @@ impl Baboon {
     }
 
     pub(super) fn create_new_tag(&mut self) {
+        // Campaign Evolved containers have no loose tags folder to write into —
+        // create the tag purely in memory and let Save / Export Mod write it.
+        if self.current_source_is_container() {
+            self.create_new_container_tag();
+            return;
+        }
         let Some(root) = self.loaded_tags_root() else {
             self.new_tag_dialog.error =
                 Some("Load a loose editing-kit tags folder before creating a tag".to_owned());
@@ -525,6 +560,363 @@ impl Baboon {
         self.register_created_tag(entry, tag);
         self.new_tag_open = false;
         self.status = format!("Created {}", output.display());
+    }
+
+    /// Create a brand-new Campaign Evolved tag in memory (no pak write). The tag
+    /// is a defaults-initialized `TagFile::new` from the group schema, registered
+    /// dirty at the dialog's container-relative path; Save / Export Mod then write
+    /// it via `write_new_tag_container`.
+    fn create_new_container_tag(&mut self) {
+        let Some(group) = self
+            .new_tag_dialog
+            .groups
+            .get(self.new_tag_dialog.selected_group)
+            .cloned()
+        else {
+            self.new_tag_dialog.error = Some("Choose a tag group".to_owned());
+            return;
+        };
+        let rel = normalize_container_tag_rel(&self.new_tag_dialog.rel_path);
+        if rel.is_empty() {
+            self.new_tag_dialog.error = Some("Enter a tag path (e.g. objects/foo/bar)".to_owned());
+            return;
+        }
+        let tag = match TagFile::new(&group.schema_path) {
+            Ok(tag) => tag,
+            Err(error) => {
+                self.new_tag_dialog.error = Some(format!("Could not create tag: {error}"));
+                return;
+            }
+        };
+        match self.add_new_container_tag(&rel, group.group_tag, &group.name, &group.extension, tag) {
+            Ok(()) => {
+                self.new_tag_open = false;
+                self.status = format!("Created {rel}.{} (unsaved)", group.extension);
+            }
+            Err(error) => self.new_tag_dialog.error = Some(error),
+        }
+    }
+
+    /// Register a brand-new in-memory container tag (shared by New Tag and
+    /// Import-of-a-new-path). `logical` is the normalized container-relative path
+    /// (no extension). Fails if the path is empty, no same-group template tag
+    /// exists to seed the package, or a new tag already occupies that path.
+    fn add_new_container_tag(
+        &mut self,
+        logical: &str,
+        group_tag: u32,
+        group_name: &str,
+        extension: &str,
+        tag: TagFile,
+    ) -> Result<(), String> {
+        if logical.is_empty() {
+            return Err("Enter a tag path (e.g. objects/foo/bar)".to_owned());
+        }
+        // A brand-new package needs an existing same-group tag's `.uasset` as its
+        // structural template (see `write_new_tag_container`).
+        let Some((template_container, template_rel)) = self.find_container_template(group_tag) else {
+            return Err(format!(
+                "No existing {group_name} tag in the mounted paks to use as a template"
+            ));
+        };
+        let package = format!("/Game/Tags/{logical}-{group_name}");
+        let key = format!("newtag:{package}");
+        if self.parsed_tags.contains_key(&key)
+            || self.source.as_ref().is_some_and(|s| {
+                s.entries
+                    .iter()
+                    .chain(s.all_entries.iter())
+                    .any(|e| e.key == key)
+            })
+        {
+            return Err(format!("A new tag already exists at {logical}"));
+        }
+        let entry = TagEntry {
+            key,
+            display_path: format!("{logical}.{extension}"),
+            group_tag,
+            group_name: Some(group_name.to_owned()),
+            location: TagEntryLocation::NewContainer {
+                template_container,
+                template_rel,
+                package,
+                group_tag,
+            },
+        };
+        self.register_in_memory_tag(entry, tag);
+        Ok(())
+    }
+
+    /// Open the "Import tag" dialog: pick a self-describing MCC/Reach tag file,
+    /// parse it, validate its schema against our JSON, and seed the dialog.
+    /// `folder_rel` pre-fills the destination folder (from a right-clicked node).
+    pub(super) fn begin_import_tag(&mut self, folder_rel: Option<String>) {
+        if !self.current_source_is_container() {
+            self.status = "Import tag is only for Campaign Evolved containers".to_owned();
+            return;
+        }
+        let Some(picked) = rfd::FileDialog::new()
+            .set_title("Import Tag")
+            .pick_file()
+        else {
+            return;
+        };
+        let bytes = match fs::read(&picked) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                self.status = format!("Could not read {}: {error}", picked.display());
+                return;
+            }
+        };
+        let tag = match TagFile::read_from_bytes(&bytes) {
+            Ok(tag) => tag,
+            Err(error) => {
+                self.status = format!("Not a valid MCC tag file: {error}");
+                return;
+            }
+        };
+        if tag.classic_engine().is_some() || tag.endian != Endian::Le {
+            self.status = "Only little-endian MCC tags can be imported".to_owned();
+            return;
+        }
+        let group_tag = tag.header.group_tag;
+        let group_name = self
+            .source
+            .as_ref()
+            .and_then(|s| s.names.name_for(group_tag))
+            .map(str::to_owned)
+            .or_else(|| group_tag_to_extension(group_tag).map(str::to_owned))
+            .unwrap_or_else(|| format_group_tag(group_tag));
+        let extension = group_tag_to_extension(group_tag)
+            .unwrap_or(group_name.as_str())
+            .to_owned();
+        let comparison = self.compare_import_against_json(group_tag, &tag);
+        let name = picked
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("imported")
+            .to_owned();
+        self.import_tag_dialog = Some(ImportTagDialog {
+            source_path: picked,
+            folder_rel: folder_rel.unwrap_or_default(),
+            name,
+            group_tag,
+            group_name,
+            extension,
+            tag: Some(tag),
+            comparison,
+            import_anyway: false,
+            error: None,
+        });
+    }
+
+    /// Compare an imported tag's embedded layout against our shipped JSON
+    /// definition for its group. `None` if we ship no schema for the group.
+    fn compare_import_against_json(
+        &self,
+        group_tag: u32,
+        imported: &TagFile,
+    ) -> Option<blam_tags::LayoutComparison> {
+        let game = self
+            .source
+            .as_ref()
+            .and_then(|s| s.game.clone())
+            .unwrap_or_else(|| "haloce_evolved".to_owned());
+        let group = load_new_tag_groups(&game)
+            .ok()?
+            .into_iter()
+            .find(|g| g.group_tag == group_tag)?;
+        let expected = TagFile::new(&group.schema_path).ok()?;
+        Some(blam_tags::compare_root_layout(&expected, imported))
+    }
+
+    /// Apply the pending import: validate the schema gate, resolve the target
+    /// path against existing tags, and either overwrite an existing tag's
+    /// document (dirty, with a discard prompt if it has unsaved edits) or add a
+    /// brand-new container tag.
+    pub(super) fn confirm_import_tag(&mut self) {
+        let Some(dialog) = self.import_tag_dialog.as_mut() else {
+            return;
+        };
+        // Schema gate (policy calibrated by the CE drift sweep): a group /
+        // version / root-size mismatch is a hard block; benign field-metadata
+        // drift only warns and needs the "Import anyway" override.
+        if let Some(cmp) = &dialog.comparison {
+            if !cmp.group_match || !cmp.version_match || !cmp.root_size_match {
+                dialog.error = Some(
+                    "Schema is incompatible (group, version, or size differs) — this tag \
+                     doesn't match the base game's definition."
+                        .to_owned(),
+                );
+                return;
+            }
+            if cmp.severity != blam_tags::LayoutSeverity::Match && !dialog.import_anyway {
+                dialog.error = Some(
+                    "Schema differs in field metadata. Tick \"Import anyway\" to proceed."
+                        .to_owned(),
+                );
+                return;
+            }
+        }
+        let folder = normalize_container_tag_rel(&dialog.folder_rel);
+        let leaf = normalize_container_tag_rel(&dialog.name);
+        if leaf.is_empty() {
+            dialog.error = Some("Enter a tag name".to_owned());
+            return;
+        }
+        let logical = if folder.is_empty() {
+            leaf
+        } else {
+            format!("{folder}/{leaf}")
+        };
+        let group_tag = dialog.group_tag;
+        let group_name = dialog.group_name.clone();
+        let extension = dialog.extension.clone();
+        let Some(tag) = dialog.tag.take() else {
+            dialog.error = Some("No tag to import".to_owned());
+            return;
+        };
+
+        // Does a base-game tag already exist at this path+group?
+        let existing = self.source.as_ref().and_then(|s| match &s.source {
+            TagSource::IoStoreContainerSet { index, .. } => index
+                .lookup(group_tag, &logical)
+                .map(|(c, r)| (c, r.to_owned())),
+            _ => None,
+        });
+        if let Some((container, rel_path)) = existing {
+            let key = self.source.as_ref().and_then(|s| {
+                s.entries
+                    .iter()
+                    .find(|e| {
+                        matches!(&e.location, TagEntryLocation::Container { container: c, rel_path: rp }
+                            if *c == container && rp == &rel_path)
+                    })
+                    .map(|e| e.key.clone())
+            });
+            let Some(key) = key else {
+                self.import_tag_dialog = None;
+                self.status = "Could not resolve the existing tag to overwrite".to_owned();
+                return;
+            };
+            // Already open with unsaved edits → confirm discard first.
+            if self.parsed_tags.get(&key).map(|d| d.dirty).unwrap_or(false) {
+                self.import_discard_confirm = Some(PendingImport {
+                    tag,
+                    target_key: key,
+                });
+                self.import_tag_dialog = None;
+                return;
+            }
+            self.apply_import_over_existing(&key, tag);
+            self.import_tag_dialog = None;
+        } else {
+            match self.add_new_container_tag(&logical, group_tag, &group_name, &extension, tag) {
+                Ok(()) => {
+                    self.import_tag_dialog = None;
+                    self.status = format!("Imported {logical}.{extension} (unsaved)");
+                }
+                Err(error) => {
+                    if let Some(dialog) = self.import_tag_dialog.as_mut() {
+                        dialog.error = Some(error);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Replace an existing container tag's document with imported bytes, marked
+    /// dirty (no pak write). Opens/selects the tab.
+    fn apply_import_over_existing(&mut self, key: &str, tag: TagFile) {
+        if !self.open_tabs.iter().any(|tab| tab == key) {
+            self.open_tabs.push(key.to_owned());
+        }
+        self.selected_key = Some(key.to_owned());
+        self.parsed_tags
+            .insert(key.to_owned(), TagDocument::modified(tag));
+        self.trim_open_tabs();
+        let label = self.tag_path_label(key);
+        self.status = format!("Imported over {label} (unsaved)");
+    }
+
+    /// If an import at `folder_rel`/`name` (group `group_tag`) would land on an
+    /// existing base-game tag, return that tag's logical path; else `None` (a new
+    /// tag). Used by the Import dialog's overwrite-vs-new banner.
+    pub(super) fn import_overwrite_target(
+        &self,
+        folder_rel: &str,
+        name: &str,
+        group_tag: u32,
+    ) -> Option<String> {
+        let folder = normalize_container_tag_rel(folder_rel);
+        let leaf = normalize_container_tag_rel(name);
+        if leaf.is_empty() {
+            return None;
+        }
+        let logical = if folder.is_empty() {
+            leaf
+        } else {
+            format!("{folder}/{leaf}")
+        };
+        match &self.source.as_ref()?.source {
+            TagSource::IoStoreContainerSet { index, .. } => {
+                index.lookup(group_tag, &logical).map(|_| logical)
+            }
+            _ => None,
+        }
+    }
+
+    /// Resolve the pending "discard unsaved edits?" import confirmation.
+    pub(super) fn apply_import_discard(&mut self) {
+        let Some(pending) = self.import_discard_confirm.take() else {
+            return;
+        };
+        self.apply_import_over_existing(&pending.target_key, pending.tag);
+    }
+
+    /// Find an existing container tag of `group_tag` and return its owning
+    /// container index plus its `.uasset` container path — the package template
+    /// for a new tag of the same group.
+    fn find_container_template(&self, group_tag: u32) -> Option<(usize, String)> {
+        let source = self.source.as_ref()?;
+        source
+            .entries
+            .iter()
+            .chain(source.all_entries.iter())
+            .find_map(|entry| match &entry.location {
+                TagEntryLocation::Container { container, rel_path }
+                    if entry.group_tag == group_tag =>
+                {
+                    let uasset = rel_path.strip_suffix(".ubulk").map(|s| format!("{s}.uasset"))?;
+                    Some((*container, uasset))
+                }
+                _ => None,
+            })
+    }
+
+    /// Register an in-memory (unsaved) container tag: insert it into the browser
+    /// entries, rebuild the folder + group trees so it shows up, open it in a
+    /// **dirty** tab, and select it. Used by New Tag and Import for CE.
+    pub(super) fn register_in_memory_tag(&mut self, entry: TagEntry, tag: TagFile) {
+        let key = entry.key.clone();
+        if let Some(source) = self.source.as_mut() {
+            source.entries.retain(|existing| existing.key != key);
+            source.entries.push(entry.clone());
+            // Container sources keep their full set in `entries` (all_entries is
+            // empty), so rebuild both trees from it.
+            let tree = crate::source::build_tree(&source.entries);
+            let group_tree = crate::source::build_group_tree(&source.entries);
+            source.tree = tree;
+            source.group_tree = group_tree;
+        }
+        self.source_generation = self.source_generation.wrapping_add(1);
+        self.parsed_tags
+            .insert(key.clone(), TagDocument::modified(tag));
+        if !self.open_tabs.iter().any(|tab| tab == &key) {
+            self.open_tabs.push(key.clone());
+        }
+        self.selected_key = Some(key.clone());
+        self.trim_open_tabs();
     }
 
     pub(super) fn loaded_tags_root(&self) -> Option<PathBuf> {
@@ -777,7 +1169,6 @@ impl Baboon {
             self.open_tabs.push(key.clone());
         }
         self.selected_key = Some(key.clone());
-        self.remember_tag_use(&key);
         self.trim_open_tabs();
     }
 
@@ -1243,7 +1634,6 @@ impl Baboon {
             self.open_tabs.push(key.clone());
         }
         self.selected_key = Some(key.clone());
-        self.remember_tag_use(&key);
         self.trim_open_tabs();
         self.ensure_tag_loading(key, ctx);
     }
@@ -1252,7 +1642,6 @@ impl Baboon {
     /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(super) fn ensure_tag_loading(&mut self, key: String, ctx: egui::Context) {
         if self.parsed_tags.contains_key(&key) || self.loading_tags.contains(&key) {
-            self.remember_tag_use(&key);
             return;
         }
         let Some(source) = self.source.as_ref() else {
@@ -1378,15 +1767,15 @@ impl Baboon {
         }
     }
 
-    fn tag_path_label(&self, key: &str) -> String {
+    pub(super) fn tag_path_label(&self, key: &str) -> String {
         let Some(entry) = self.entry_for_key(key) else {
             return key.to_owned();
         };
         match &entry.location {
             TagEntryLocation::LooseFile(path) => path.display().to_string(),
-            TagEntryLocation::Monolithic { .. } | TagEntryLocation::Container { .. } => {
-                entry.display_path.clone()
-            }
+            TagEntryLocation::Monolithic { .. }
+            | TagEntryLocation::Container { .. }
+            | TagEntryLocation::NewContainer { .. } => entry.display_path.clone(),
         }
     }
 
@@ -1427,7 +1816,9 @@ impl Baboon {
             };
             let path = match &entry.location {
                 TagEntryLocation::LooseFile(path) => Some(path.clone()),
-                TagEntryLocation::Monolithic { .. } | TagEntryLocation::Container { .. } => None,
+                TagEntryLocation::Monolithic { .. }
+                | TagEntryLocation::Container { .. }
+                | TagEntryLocation::NewContainer { .. } => None,
             };
             tags.push(LastSessionTag {
                 key: entry.key.clone(),
@@ -1601,7 +1992,6 @@ impl Baboon {
         self.floating_tabs.clear();
         self.parsed_tags.clear();
         self.loading_tags.clear();
-        self.tag_cache_order.clear();
         self.bitmap_previews.clear();
         self.edit_buffers.clear();
         self.selected_key = None;
@@ -1614,7 +2004,6 @@ impl Baboon {
         self.floating_tabs.retain(|tab| tab == key);
         self.parsed_tags.retain(|tab, _| tab == key);
         self.loading_tags.retain(|tab| tab == key);
-        self.tag_cache_order.retain(|tab| tab == key);
         self.bitmap_previews.retain(|tab, _| tab == key);
         let edit_prefix = format!("{key}|");
         self.edit_buffers
@@ -1631,12 +2020,6 @@ impl Baboon {
         let edit_prefix = format!("{key}|");
         self.edit_buffers
             .retain(|buffer_key, _| !buffer_key.starts_with(&edit_prefix));
-        self.tag_cache_order.retain(|tab| tab != key);
-    }
-
-    pub(super) fn remember_tag_use(&mut self, key: &str) {
-        self.tag_cache_order.retain(|tab| tab != key);
-        self.tag_cache_order.push_back(key.to_owned());
     }
 
     pub(super) fn trim_open_tabs(&mut self) {
@@ -1658,25 +2041,6 @@ impl Baboon {
         }
     }
 
-    pub(super) fn trim_tag_memory(&mut self) {
-        let open_tabs = self.open_tabs.iter().cloned().collect::<HashSet<_>>();
-        self.bitmap_previews
-            .retain(|key, _| open_tabs.contains(key));
-
-        let mut attempts = self.tag_cache_order.len();
-        while self.parsed_tags.len() > MAX_PARSED_TAGS && attempts > 0 {
-            attempts -= 1;
-            let Some(key) = self.tag_cache_order.pop_front() else {
-                break;
-            };
-            if Some(key.as_str()) == self.selected_key.as_deref() {
-                self.tag_cache_order.push_back(key);
-                continue;
-            }
-            self.parsed_tags.remove(&key);
-            self.bitmap_previews.remove(&key);
-        }
-    }
 
     pub(super) fn handle_browser_action(&mut self, action: BrowserAction, ctx: egui::Context) {
         match action {
@@ -1722,6 +2086,10 @@ impl Baboon {
             BrowserAction::FindReferences(key) => self.show_references_for(&key),
             BrowserAction::ExploreReferences(key) => self.open_content_explorer(&key),
             BrowserAction::MoveTag(key) => self.begin_move_tag(&key),
+            BrowserAction::ImportTagInFolder { folder_rel } => self.begin_import_tag(folder_rel),
+            BrowserAction::NewTagInFolder { folder_rel } => {
+                self.open_new_tag_dialog_in_folder(folder_rel)
+            }
         }
     }
 
@@ -1756,6 +2124,10 @@ impl Baboon {
             }
             (TagEntryLocation::Container { .. }, _) => {
                 self.status = "Container tag has no loose file to show".to_owned();
+                return;
+            }
+            (TagEntryLocation::NewContainer { .. }, _) => {
+                self.status = "New tag has not been saved yet".to_owned();
                 return;
             }
         };
@@ -2261,6 +2633,15 @@ impl Baboon {
             self.status = "No tag selected".to_owned();
             return;
         };
+        // A brand-new (in-memory) container tag has no baseline to overwrite —
+        // "Save" writes it as a new `_P` override container instead.
+        if matches!(
+            self.entry_for_key(&key).map(|entry| &entry.location),
+            Some(TagEntryLocation::NewContainer { .. })
+        ) {
+            self.save_new_container_tag(&key);
+            return;
+        }
         // For a container tag, "Save" overwrites the tag inside the game's pak
         // in place (destructive). Confirm first unless the user opted out (loose
         // builds never prompt).
@@ -2474,6 +2855,79 @@ impl Baboon {
         self.status = format!("Saved into {} (game files modified)", utoc_path.display());
     }
 
+    /// Save a brand-new (in-memory) container tag as a new `_P` override
+    /// container. A new tag has no baseline in the paks to overwrite, so this
+    /// writes a standalone override package via `write_new_tag_container`, using
+    /// a same-group tag's `.uasset` as the package template. The base game is
+    /// untouched; the user copies the emitted `.utoc`/`.ucas`/`.pak` into `Paks/`.
+    fn save_new_container_tag(&mut self, key: &str) {
+        let Some(entry) = self.entry_for_key(key).cloned() else {
+            self.status = "Tag is no longer in the source".to_owned();
+            return;
+        };
+        let TagEntryLocation::NewContainer {
+            template_container,
+            template_rel,
+            package,
+            ..
+        } = &entry.location
+        else {
+            self.status = "Not a new container tag".to_owned();
+            return;
+        };
+        let Some(doc) = self.parsed_tags.get(key) else {
+            self.status = "Load the tag before saving".to_owned();
+            return;
+        };
+        let bytes = match doc.tag.write_to_bytes() {
+            Ok(b) => b,
+            Err(e) => {
+                self.status = format!("Failed to serialize tag: {e}");
+                return;
+            }
+        };
+        let template = {
+            let Some(source) = self.source.as_ref() else {
+                self.status = "No source loaded".to_owned();
+                return;
+            };
+            let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+                self.status = "Source is not a container".to_owned();
+                return;
+            };
+            let Some(mounted) = containers.get(*template_container) else {
+                self.status = "Template container is stale".to_owned();
+                return;
+            };
+            match mounted.archive.read(template_rel) {
+                Ok(b) => b,
+                Err(e) => {
+                    self.status = format!("Failed to read template .uasset: {e}");
+                    return;
+                }
+            }
+        };
+        let leaf = package.rsplit('/').next().unwrap_or("tag");
+        let Some(output) = pick_override_utoc(&format!("{leaf}-WinGDK_P.utoc")) else {
+            return;
+        };
+        match blam_tags::iostore::writer::write_new_tag_container(
+            &template, &bytes, package, None, &output,
+        ) {
+            Ok(()) => {
+                if let Some(doc) = self.parsed_tags.get_mut(key) {
+                    doc.dirty = false;
+                }
+                let stem = output.file_stem().and_then(|s| s.to_str()).unwrap_or("mod");
+                self.status = format!(
+                    "Saved new tag → {stem}.utoc/.ucas/.pak — copy all three into \
+                     Meteorite/Content/Paks/ (base game unchanged)"
+                );
+            }
+            Err(e) => self.status = format!("Save failed: {e}"),
+        }
+    }
+
     /// Bundle every open, modified container tag into one portable `_P` overlay
     /// mod — the base game is left untouched.
     pub(super) fn export_mod(&mut self) {
@@ -2485,12 +2939,13 @@ impl Baboon {
             self.status = "Export Mod is only for Campaign Evolved containers".to_owned();
             return;
         };
-        // (archive, rel_path, edited bytes) for each loaded + dirty container tag.
-        let mut collected: Vec<(
-            std::sync::Arc<blam_tags::iostore::IoStoreArchive>,
-            String,
-            Vec<u8>,
-        )> = Vec::new();
+        // Split dirty tags into same-name overrides of existing tags and brand-
+        // new packages, so one mod can carry both.
+        // Override: (archive, rel_path, edited bytes).
+        let mut overrides: Vec<(std::sync::Arc<blam_tags::iostore::IoStoreArchive>, String, Vec<u8>)> =
+            Vec::new();
+        // New package: (template .uasset bytes, tag bytes, package path).
+        let mut new_pkgs: Vec<(Vec<u8>, Vec<u8>, String)> = Vec::new();
         for (k, doc) in self.parsed_tags.iter() {
             if !doc.dirty {
                 continue;
@@ -2498,37 +2953,61 @@ impl Baboon {
             let Some(entry) = self.entry_for_key(k) else {
                 continue;
             };
-            let TagEntryLocation::Container {
-                container,
-                rel_path,
-            } = &entry.location
-            else {
-                continue;
-            };
-            let Some(m) = containers.get(*container) else {
-                continue;
-            };
-            let Ok(bytes) = doc.tag.write_to_bytes() else {
-                continue;
-            };
-            collected.push((m.archive.clone(), rel_path.clone(), bytes));
+            match &entry.location {
+                TagEntryLocation::Container { container, rel_path } => {
+                    let Some(m) = containers.get(*container) else {
+                        continue;
+                    };
+                    let Ok(bytes) = doc.tag.write_to_bytes() else {
+                        continue;
+                    };
+                    overrides.push((m.archive.clone(), rel_path.clone(), bytes));
+                }
+                TagEntryLocation::NewContainer {
+                    template_container,
+                    template_rel,
+                    package,
+                    ..
+                } => {
+                    let Some(m) = containers.get(*template_container) else {
+                        continue;
+                    };
+                    let Ok(template) = m.archive.read(template_rel) else {
+                        continue;
+                    };
+                    let Ok(bytes) = doc.tag.write_to_bytes() else {
+                        continue;
+                    };
+                    new_pkgs.push((template, bytes, package.clone()));
+                }
+                _ => continue,
+            }
         }
-        if collected.is_empty() {
+        let count = overrides.len() + new_pkgs.len();
+        if count == 0 {
             self.status = "No modified tags to export — edit a tag first".to_owned();
             return;
         }
-        let count = collected.len();
         let Some(mut output) = pick_override_utoc("mymod-WinGDK_P.utoc") else {
             return;
         };
         if output.extension().is_none() {
             output.set_extension("utoc");
         }
-        let refs: Vec<(&blam_tags::iostore::IoStoreArchive, &str, &[u8])> = collected
+        let override_refs: Vec<(&blam_tags::iostore::IoStoreArchive, &str, &[u8])> = overrides
             .iter()
             .map(|(a, p, b)| (a.as_ref(), p.as_str(), b.as_slice()))
             .collect();
-        match blam_tags::iostore::writer::write_mod_container(&refs, &output) {
+        let new_refs: Vec<blam_tags::iostore::writer::NewPackage> = new_pkgs
+            .iter()
+            .map(|(template, bytes, package)| blam_tags::iostore::writer::NewPackage {
+                template_uasset: template.as_slice(),
+                tag_bytes: bytes.as_slice(),
+                new_package_path: package.as_str(),
+                redirect_from: None,
+            })
+            .collect();
+        match blam_tags::iostore::writer::write_mod_container_ex(&override_refs, &new_refs, &output) {
             Ok(()) => {
                 let stem = output.file_stem().and_then(|s| s.to_str()).unwrap_or("mod");
                 self.status = format!(
@@ -4572,6 +5051,26 @@ impl Baboon {
                 let mut saved = Vec::new();
                 let mut errors = Vec::new();
                 for tag_id in tag_ids {
+                    // A brand-new container tag saves via a file dialog (new
+                    // override container), not the loose write path.
+                    if matches!(
+                        self.entry_for_key(&tag_id).map(|entry| &entry.location),
+                        Some(TagEntryLocation::NewContainer { .. })
+                    ) {
+                        self.save_new_container_tag(&tag_id);
+                        let still_dirty = self
+                            .parsed_tags
+                            .get(&tag_id)
+                            .map(|doc| doc.dirty)
+                            .unwrap_or(false);
+                        if still_dirty {
+                            let label = self.tag_path_label(&tag_id);
+                            errors.push(format!("{label}: not saved"));
+                        } else {
+                            saved.push(tag_id.clone());
+                        }
+                        continue;
+                    }
                     match self.save_tag_by_key(&tag_id) {
                         Ok(path) => saved.push(path.display().to_string()),
                         Err(error) => {
@@ -5113,6 +5612,22 @@ fn render_last_opened_windows_prompt(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normalize_container_tag_rel_cleans_path() {
+        // Lowercases, normalizes separators, trims slashes, drops a leaf extension.
+        assert_eq!(
+            normalize_container_tag_rel("Objects\\Characters/Foo/Bar"),
+            "objects/characters/foo/bar"
+        );
+        assert_eq!(
+            normalize_container_tag_rel("/objects//foo/bar.biped/"),
+            "objects/foo/bar"
+        );
+        assert_eq!(normalize_container_tag_rel("  Foo.Weapon  "), "foo");
+        assert_eq!(normalize_container_tag_rel(""), "");
+        assert_eq!(normalize_container_tag_rel("///"), "");
+    }
 
     #[test]
     fn explorer_select_arguments_keep_switch_separate_from_path_with_spaces() {

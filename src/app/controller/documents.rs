@@ -17,9 +17,7 @@ impl Baboon {
         match result {
             Ok(tag) => {
                 self.status = "Tag loaded".to_owned();
-                self.remember_tag_use(&key);
                 self.parsed_tags.insert(key, TagDocument::clean(tag));
-                self.trim_tag_memory();
             }
             Err(error) => {
                 self.terminal.lines.push(TerminalLineEntry::new(format!(
@@ -51,8 +49,6 @@ impl Baboon {
                     self.parsed_tags
                         .insert(key.clone(), TagDocument::clean(tag));
                     self.bitmap_previews.remove(&key);
-                    self.remember_tag_use(&key);
-                    self.trim_tag_memory();
                 }
                 self.status = "Bitmap reimported and reloaded".to_owned();
             }

@@ -258,7 +258,9 @@ fn refresh_entry_index_from_cache(
 fn entry_file_path(entry: &TagEntry) -> Option<&Path> {
     match &entry.location {
         TagEntryLocation::LooseFile(path) => Some(path.as_path()),
-        TagEntryLocation::Monolithic { .. } | TagEntryLocation::Container { .. } => None,
+        TagEntryLocation::Monolithic { .. }
+        | TagEntryLocation::Container { .. }
+        | TagEntryLocation::NewContainer { .. } => None,
     }
 }
 

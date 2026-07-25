@@ -23,7 +23,7 @@ pub fn build_tree(entries: &[TagEntry]) -> TagTree {
         children: root
             .children
             .into_iter()
-            .map(|(label, node)| finish_node(label, node))
+            .map(|(label, node)| finish_node(label, node, ""))
             .collect(),
         entries: root.entries,
     }
@@ -46,7 +46,7 @@ pub fn build_group_tree(entries: &[TagEntry]) -> TagTree {
         children: root
             .children
             .into_iter()
-            .map(|(label, node)| finish_node(label, node))
+            .map(|(label, node)| finish_node(label, node, ""))
             .collect(),
         entries: root.entries,
     }
@@ -435,14 +435,21 @@ fn probe_tag_group(path: &Path) -> Result<Option<u32>> {
     }
 }
 
-fn finish_node(label: String, node: TreeBuildNode) -> TagTreeNode {
+fn finish_node(label: String, node: TreeBuildNode, parent: &str) -> TagTreeNode {
+    let rel_path = if parent.is_empty() {
+        label.clone()
+    } else {
+        format!("{parent}/{label}")
+    };
+    let children = node
+        .children
+        .into_iter()
+        .map(|(child_label, child)| finish_node(child_label, child, &rel_path))
+        .collect();
     TagTreeNode {
         label,
-        children: node
-            .children
-            .into_iter()
-            .map(|(label, node)| finish_node(label, node))
-            .collect(),
+        rel_path: PathBuf::from(&rel_path),
+        children,
         entries: node.entries,
         ..Default::default()
     }

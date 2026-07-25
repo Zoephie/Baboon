@@ -196,6 +196,8 @@ fn build_container_set(
     let mut entries: Vec<TagEntry> = Vec::new();
     // Dedup/layer by lowercase logical key; later packs (higher chunk) win.
     let mut seen: HashMap<String, usize> = HashMap::new();
+    // Same key → the payload the mount resolved it to, for reference lookups.
+    let mut index = ContainerTagIndex::default();
     let mut opened_any = false;
 
     for utoc in utocs {
@@ -254,6 +256,8 @@ fn build_container_set(
             contributed = true;
 
             let dedup_key = format!("{group_tag:08x}:{logical}");
+            // Later packs win, matching the `entries[existing] = entry` override.
+            index.insert(dedup_key.clone(), container_index, e.path.clone());
             match seen.get(&dedup_key) {
                 Some(&existing) => {
                     // Overlap should be near-zero; note it rather than hide it.
@@ -296,7 +300,7 @@ fn build_container_set(
     let group_tree = build_group_tree(&entries);
     Ok(LoadedSourceData {
         label,
-        source: TagSource::IoStoreContainerSet { root, containers },
+        source: TagSource::IoStoreContainerSet { root, containers, index: Arc::new(index) },
         names,
         game: Some(CAMPAIGN_EVOLVED_GAME.to_string()),
         all_entries: Vec::new(),
@@ -426,6 +430,13 @@ pub fn read_entry(source: &TagSource, entry: &TagEntry) -> Result<TagFile> {
         (TagEntryLocation::Container { .. }, _) => {
             anyhow::bail!("container entry selected outside a container source")
         }
+        (TagEntryLocation::NewContainer { .. }, _) => {
+            // A brand-new tag has no backing payload; its bytes live only in the
+            // in-memory document. This is only reached if the document was
+            // unloaded (e.g. the tab was closed), by which point the new tag is
+            // gone.
+            anyhow::bail!("unsaved new tag is no longer loaded")
+        }
     }
 }
 
@@ -546,6 +557,22 @@ mod container_tests {
 
     const PAKS: &str = "/Users/camden/Halo/halo-campaign-evolved_pc/Meteorite/Content/Paks";
 
+    #[test]
+    fn container_ref_key_normalizes() {
+        let skel = u32::from_be_bytes(*b"skel");
+        // Backslashes → forward, uppercase → lower, trailing NUL stripped,
+        // group FOURCC hex-prefixed — matching `build_container_set`'s logical key.
+        assert_eq!(
+            container_ref_key(skel, "Objects\\Characters\\Elite_AI\\Elite_AI\u{0}"),
+            "736b656c:objects/characters/elite_ai/elite_ai"
+        );
+        // Idempotent on an already-normalized reference.
+        assert_eq!(
+            container_ref_key(skel, "objects/characters/elite_ai/elite_ai"),
+            "736b656c:objects/characters/elite_ai/elite_ai"
+        );
+    }
+
     /// Mount the whole `Paks` directory through Baboon's set loader and read a
     /// sample of tags via `read_entry`. Asserts scenarios (only in level chunks)
     /// show up alongside pak0's shared tags. Skipped when the game isn't present.
@@ -619,6 +646,39 @@ mod container_tests {
                 entry.display_path
             );
         }
+
+        // Reference resolution: a CE `.model` (hlmt) resolves its `animation`
+        // (jmad) and `skeleton model` (skel) refs through the container index —
+        // the payload the browser tree already mounts, by construction.
+        let hlmt = u32::from_be_bytes(*b"hlmt");
+        let mut checked = false;
+        for entry in loaded.entries.iter().filter(|e| e.group_tag == hlmt) {
+            let Ok(model) = read_entry(&loaded.source, entry) else { continue };
+            let root = model.root();
+            let (Some((_, jmad_ref)), Some((_, skel_ref))) = (
+                root.read_tag_ref_with_group("animation"),
+                root.read_tag_ref_with_group("skeleton model"),
+            ) else {
+                continue;
+            };
+            if jmad_ref.trim().is_empty() || skel_ref.trim().is_empty() {
+                continue;
+            }
+            let jmad = loaded
+                .source
+                .read_container_tag_by_ref(u32::from_be_bytes(*b"jmad"), &jmad_ref)
+                .unwrap_or_else(|e| panic!("resolve jmad {jmad_ref}: {e}"));
+            assert_eq!(jmad.group().tag, u32::from_be_bytes(*b"jmad"));
+            let skel = loaded
+                .source
+                .read_container_tag_by_ref(u32::from_be_bytes(*b"skel"), &skel_ref)
+                .unwrap_or_else(|e| panic!("resolve skel {skel_ref}: {e}"));
+            assert_eq!(skel.group().tag, u32::from_be_bytes(*b"skel"));
+            eprintln!("resolved refs for {}: {jmad_ref} + {skel_ref}", entry.display_path);
+            checked = true;
+            break;
+        }
+        assert!(checked, "expected an hlmt carrying both animation and skeleton model refs");
     }
 }
 

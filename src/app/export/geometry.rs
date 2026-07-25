@@ -16,7 +16,7 @@ pub(in crate::app) fn extract_geometry_for_entry(
             let ass = AssFile::from_scenario_structure_bsp(&tag)?;
             fs::create_dir_all(output)?;
             let path = output.join(format!("{}.ASS", tag_file_stem(entry)));
-            let mut file = fs::File::create(&path)?;
+            let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
             ass.write(&mut file)?;
             Ok(format!("Extracted BSP geometry {}", path.display()))
         }
@@ -26,7 +26,7 @@ pub(in crate::app) fn extract_geometry_for_entry(
             let stem = tag_file_stem(entry);
             let jms = render_jms_for_game(&tag)?;
             let path = output.join(format!("{stem}.render.jms"));
-            let mut file = fs::File::create(&path)?;
+            let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
             jms.write(&mut file, blam_tags::game::Game::of(&tag).jms_version())?;
             Ok(format!(
                 "Extracted render_model geometry {}",
@@ -39,7 +39,7 @@ pub(in crate::app) fn extract_geometry_for_entry(
             let stem = tag_file_stem(entry);
             let jms = JmsFile::from_collision_model(&tag)?;
             let path = output.join(format!("{stem}.collision.jms"));
-            let mut file = fs::File::create(&path)?;
+            let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
             jms.write(&mut file, blam_tags::game::Game::of(&tag).jms_version())?;
             Ok(format!(
                 "Extracted collision_model geometry {}",
@@ -52,7 +52,7 @@ pub(in crate::app) fn extract_geometry_for_entry(
             let stem = tag_file_stem(entry);
             let jms = JmsFile::from_physics_model(&tag)?;
             let path = output.join(format!("{stem}.physics.jms"));
-            let mut file = fs::File::create(&path)?;
+            let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
             jms.write(&mut file, blam_tags::game::Game::of(&tag).jms_version())?;
             Ok(format!(
                 "Extracted physics_model geometry {}",
@@ -93,7 +93,33 @@ pub(in crate::app) fn extract_model_geometry(
             }
         }
         None => {
-            skipped.push("render: no render_model reference".to_owned());
+            // Campaign Evolved keeps render geometry in Unreal assets (it has a
+            // `skeleton model` instead of a `render model`). Reconstruct the
+            // high-resolution render JMS from the Unreal Nanite/skeletal meshes
+            // fused onto the classic skeleton_model rig.
+            if let Some(skel_ref) = tag_ref_path(&root, "skeleton model") {
+                match crate::app::model_preview::loading::campaign_evolved_render_jms(
+                    &model, entry, source, &skel_ref,
+                ) {
+                    Ok(jms) => {
+                        let render_dir = output.join("render");
+                        fs::create_dir_all(&render_dir)?;
+                        let path = render_dir.join(format!("{stem}.render.jms"));
+                        let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
+                        // Campaign Evolved runs on the Halo Reach engine, whose
+                        // toolset uses the Halo 3-era JMS format (8213) — N-influence
+                        // vertices with region/permutation encoded in the material
+                        // slot names — not the rigid Halo 1 8200 layout (2-influence
+                        // vertices + a per-triangle region section this path never
+                        // populates, which desyncs the importer).
+                        jms.write(&mut file, 8213)?;
+                        emitted.push(format!("render {}", path.display()));
+                    }
+                    Err(error) => skipped.push(format!("render (CE): {error}")),
+                }
+            } else {
+                skipped.push("render: no render_model reference".to_owned());
+            }
             None
         }
     };
@@ -123,12 +149,12 @@ pub(in crate::app) fn extract_model_geometry(
         if matches!(game, blam_tags::game::Game::Halo3) && render_model_prefers_ass(tag) {
             let ass = AssFile::from_render_model(tag)?;
             let path = render_dir.join(format!("{stem}.render.ASS"));
-            let mut file = fs::File::create(&path)?;
+            let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
             ass.write(&mut file)?;
             emitted.push(format!("render {}", path.display()));
         } else if let Some(jms) = render_jms_for_skeleton.as_ref() {
             let path = render_dir.join(format!("{stem}.render.jms"));
-            let mut file = fs::File::create(&path)?;
+            let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
             jms.write(&mut file, render_jms_version)?;
             emitted.push(format!("render {}", path.display()));
         }
@@ -146,7 +172,7 @@ pub(in crate::app) fn extract_model_geometry(
                         JmsFile::from_collision_model(&tag)?
                     };
                     let path = collision_dir.join(format!("{stem}.collision.jms"));
-                    let mut file = fs::File::create(&path)?;
+                    let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
                     jms.write(&mut file, blam_tags::game::Game::of(&tag).jms_version())?;
                     emitted.push(format!("collision {}", path.display()));
                 }
@@ -168,7 +194,7 @@ pub(in crate::app) fn extract_model_geometry(
                         JmsFile::from_physics_model(&tag)?
                     };
                     let path = physics_dir.join(format!("{stem}.physics.jms"));
-                    let mut file = fs::File::create(&path)?;
+                    let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
                     jms.write(&mut file, blam_tags::game::Game::of(&tag).jms_version())?;
                     emitted.push(format!("physics {}", path.display()));
                 }
@@ -228,9 +254,9 @@ pub(in crate::app) fn load_referenced_tag_from_source(
         TagSource::MonolithicCache { cache, .. } => cache
             .read_tag_by_name(group_tag, reference)
             .map_err(|error| anyhow::anyhow!("read {reference}.{extension} failed: {error}")),
-        TagSource::IoStoreContainerSet { .. } => anyhow::bail!(
-            "resolving tag references for geometry export is not yet supported for Campaign Evolved containers"
-        ),
+        TagSource::IoStoreContainerSet { .. } => source
+            .read_container_tag_by_ref(group_tag, reference)
+            .map_err(|error| anyhow::anyhow!("read {reference}.{extension} failed: {error}")),
     }
 }
 

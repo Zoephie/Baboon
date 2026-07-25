@@ -782,6 +782,9 @@ impl Baboon {
         let mut refresh_groups = false;
         let mut create = false;
         let mut close_requested = false;
+        // Campaign Evolved container sources create the tag in memory (no loose
+        // tags folder, no filesystem picker) at a container-relative path.
+        let is_container = self.current_source_is_container();
         egui::Window::new("New Tag")
             .id(egui::Id::new("new_tag_dialog"))
             .collapsible(false)
@@ -789,7 +792,7 @@ impl Baboon {
             .open(&mut open)
             .default_width(560.0)
             .show(ctx, |ui| {
-                if self.loaded_tags_root().is_none() {
+                if !is_container && self.loaded_tags_root().is_none() {
                     ui.label(
                         RichText::new(
                             "Load a loose editing-kit tags folder before creating a tag.",
@@ -799,6 +802,12 @@ impl Baboon {
                     ui.add_space(8.0);
                 }
 
+                if is_container {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Game").color(subtle_dark()));
+                        ui.label("Halo: Campaign Evolved");
+                    });
+                } else {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Game").color(subtle_dark()));
                     let before = self.new_tag_dialog.game.clone();
@@ -831,6 +840,7 @@ impl Baboon {
                         refresh_groups = true;
                     }
                 });
+                }
 
                 let selected_group_before = self.new_tag_dialog.selected_group;
                 ui.horizontal(|ui| {
@@ -874,32 +884,44 @@ impl Baboon {
                     }
                 });
                 if self.new_tag_dialog.selected_group != selected_group_before {
-                    self.new_tag_dialog.rel_path.clear();
-                    self.new_tag_dialog.output_path = None;
+                    // The container path is group-independent (the user types it);
+                    // only the loose filesystem output path is tied to the group.
+                    if !is_container {
+                        self.new_tag_dialog.rel_path.clear();
+                        self.new_tag_dialog.output_path = None;
+                    }
                     self.new_tag_dialog.error = None;
                 }
 
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Location").color(subtle_dark()));
-                    let location = if self.new_tag_dialog.rel_path.is_empty() {
-                        "No tag selected".to_owned()
+                    ui.label(RichText::new("Path").color(subtle_dark()));
+                    if is_container {
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.new_tag_dialog.rel_path)
+                                .hint_text("objects/characters/foo/foo")
+                                .desired_width(440.0),
+                        );
                     } else {
-                        self.new_tag_dialog.rel_path.clone()
-                    };
-                    let mut location_text = location;
-                    ui.add_enabled(
-                        false,
-                        egui::TextEdit::singleline(&mut location_text).desired_width(360.0),
-                    );
-                    if ui
-                        .add_enabled(
-                            self.loaded_tags_root().is_some()
-                                && !self.new_tag_dialog.groups.is_empty(),
-                            egui::Button::new("Choose..."),
-                        )
-                        .clicked()
-                    {
-                        self.choose_new_tag_output_path();
+                        let location = if self.new_tag_dialog.rel_path.is_empty() {
+                            "No tag selected".to_owned()
+                        } else {
+                            self.new_tag_dialog.rel_path.clone()
+                        };
+                        let mut location_text = location;
+                        ui.add_enabled(
+                            false,
+                            egui::TextEdit::singleline(&mut location_text).desired_width(360.0),
+                        );
+                        if ui
+                            .add_enabled(
+                                self.loaded_tags_root().is_some()
+                                    && !self.new_tag_dialog.groups.is_empty(),
+                                egui::Button::new("Choose..."),
+                            )
+                            .clicked()
+                        {
+                            self.choose_new_tag_output_path();
+                        }
                     }
                 });
 
@@ -908,14 +930,19 @@ impl Baboon {
                     .groups
                     .get(self.new_tag_dialog.selected_group)
                 {
-                    ui.label(
-                        RichText::new(format!(
+                    let hint = if is_container {
+                        format!(
+                            "Creates a .{} tag in memory. Save writes a new override \
+                             container; Export Mod bundles it. The base game is untouched.",
+                            group.extension
+                        )
+                    } else {
+                        format!(
                             "Creates a .{} tag relative to the loaded tags folder.",
                             group.extension
-                        ))
-                        .color(subtle_dark())
-                        .small(),
-                    );
+                        )
+                    };
+                    ui.label(RichText::new(hint).color(subtle_dark()).small());
                 }
 
                 if let Some(error) = &self.new_tag_dialog.error {
@@ -928,9 +955,13 @@ impl Baboon {
                     if ui.button("Cancel").clicked() {
                         close_requested = true;
                     }
-                    let can_create = self.loaded_tags_root().is_some()
-                        && !self.new_tag_dialog.groups.is_empty()
-                        && self.new_tag_dialog.output_path.is_some();
+                    let can_create = !self.new_tag_dialog.groups.is_empty()
+                        && if is_container {
+                            !self.new_tag_dialog.rel_path.trim().is_empty()
+                        } else {
+                            self.loaded_tags_root().is_some()
+                                && self.new_tag_dialog.output_path.is_some()
+                        };
                     if ui
                         .add_enabled(can_create, egui::Button::new("Create"))
                         .clicked()
@@ -949,6 +980,188 @@ impl Baboon {
         self.new_tag_open = open;
         if create {
             self.create_new_tag();
+        }
+    }
+
+    pub(super) fn draw_import_tag_window(&mut self, ctx: &egui::Context) {
+        if self.import_tag_dialog.is_none() {
+            return;
+        }
+        // Snapshot fields for the immutable overwrite lookup before borrowing the
+        // dialog mutably for rendering (the banner lags edits by one frame).
+        let (folder_snapshot, name_snapshot, group_tag) = {
+            let dialog = self.import_tag_dialog.as_ref().unwrap();
+            (dialog.folder_rel.clone(), dialog.name.clone(), dialog.group_tag)
+        };
+        let overwrite_logical =
+            self.import_overwrite_target(&folder_snapshot, &name_snapshot, group_tag);
+
+        let mut open = true;
+        let mut do_import = false;
+        let mut do_cancel = false;
+        egui::Window::new("Import Tag")
+            .id(egui::Id::new("import_tag_dialog"))
+            .collapsible(false)
+            .resizable(false)
+            .open(&mut open)
+            .default_width(560.0)
+            .show(ctx, |ui| {
+                let dialog = self.import_tag_dialog.as_mut().unwrap();
+
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("File").color(subtle_dark()));
+                    ui.label(
+                        dialog
+                            .source_path
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("(unknown)"),
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Group").color(subtle_dark()));
+                    ui.label(format!(
+                        "{} ({})",
+                        dialog.group_name,
+                        format_group_tag(dialog.group_tag)
+                    ));
+                });
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Folder").color(subtle_dark()));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut dialog.folder_rel)
+                            .hint_text("objects/characters/foo (blank = root)")
+                            .desired_width(440.0),
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Name").color(subtle_dark()));
+                    ui.add(egui::TextEdit::singleline(&mut dialog.name).desired_width(440.0));
+                });
+
+                match &overwrite_logical {
+                    Some(logical) => {
+                        ui.label(
+                            RichText::new(format!(
+                                "⟳ Overwrites existing tag  {logical}.{}",
+                                dialog.extension
+                            ))
+                            .color(Color32::from_rgb(242, 196, 48))
+                            .small(),
+                        );
+                    }
+                    None => {
+                        ui.label(
+                            RichText::new("✦ New tag (no base-game counterpart)")
+                                .color(subtle_dark())
+                                .small(),
+                        );
+                    }
+                }
+
+                match &dialog.comparison {
+                    Some(cmp) => match cmp.severity {
+                        blam_tags::LayoutSeverity::Match => {
+                            ui.label(
+                                RichText::new(format!("✔ Schema matches {}", dialog.group_name))
+                                    .color(disclosure_triangle_green())
+                                    .small(),
+                            );
+                        }
+                        blam_tags::LayoutSeverity::Drift => {
+                            ui.label(
+                                RichText::new(
+                                    "⚠ Schema differs in field metadata only (wire layout \
+                                     matches). Safe to import.",
+                                )
+                                .color(Color32::from_rgb(242, 196, 48))
+                                .small(),
+                            );
+                            ui.checkbox(&mut dialog.import_anyway, "Import anyway");
+                        }
+                        blam_tags::LayoutSeverity::Incompatible => {
+                            ui.label(
+                                RichText::new(
+                                    "✖ Schema is incompatible (group, version, or size differs) — \
+                                     this tag does not match the base game.",
+                                )
+                                .color(material_delete_text())
+                                .small(),
+                            );
+                        }
+                    },
+                    None => {
+                        ui.label(
+                            RichText::new("No shipped definition for this group — not validated.")
+                                .color(subtle_dark())
+                                .small(),
+                        );
+                    }
+                }
+
+                if let Some(error) = &dialog.error {
+                    ui.add_space(6.0);
+                    ui.label(RichText::new(error).color(material_delete_text()));
+                }
+
+                ui.add_space(10.0);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Cancel").clicked() {
+                        do_cancel = true;
+                    }
+                    let blocked = matches!(
+                        dialog.comparison.as_ref().map(|cmp| cmp.severity),
+                        Some(blam_tags::LayoutSeverity::Incompatible)
+                    ) || dialog.name.trim().is_empty();
+                    if ui
+                        .add_enabled(!blocked, egui::Button::new("Import"))
+                        .clicked()
+                    {
+                        do_import = true;
+                    }
+                });
+            });
+
+        if !open {
+            do_cancel = true;
+        }
+        if do_cancel {
+            self.import_tag_dialog = None;
+        } else if do_import {
+            self.confirm_import_tag();
+        }
+    }
+
+    pub(super) fn draw_import_discard_confirm(&mut self, ctx: &egui::Context) {
+        let Some(pending) = self.import_discard_confirm.as_ref() else {
+            return;
+        };
+        let label = self.tag_path_label(&pending.target_key);
+        let mut discard = false;
+        let mut cancel = false;
+        egui::Window::new("Discard unsaved changes?")
+            .id(egui::Id::new("import_discard_confirm"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(format!(
+                    "{label} has unsaved edits. Replace it with the imported tag?"
+                ));
+                ui.add_space(10.0);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                    if ui.button("Discard & Replace").clicked() {
+                        discard = true;
+                    }
+                });
+            });
+        if discard {
+            self.apply_import_discard();
+        } else if cancel {
+            self.import_discard_confirm = None;
         }
     }
 }

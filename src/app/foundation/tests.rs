@@ -413,6 +413,7 @@ mod tests {
             source: TagSource::IoStoreContainerSet {
                 root: PathBuf::from("C:/CampaignEvolved/Content/Paks"),
                 containers: Vec::new(),
+                index: std::sync::Arc::new(crate::source::ContainerTagIndex::default()),
             },
             names: TagNameIndex::default(),
             game: Some("haloce_evolved".to_owned()),

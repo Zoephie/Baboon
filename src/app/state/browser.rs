@@ -28,6 +28,11 @@ pub(in crate::app) enum BrowserAction {
     ExploreReferences(String),
     RenameTag(String),
     MoveTag(String),
+    /// Import a tag file into a Campaign Evolved container, at `folder_rel`
+    /// (`None` = root).
+    ImportTagInFolder { folder_rel: Option<String> },
+    /// Create a new Campaign Evolved tag at `folder_rel` (`None` = root).
+    NewTagInFolder { folder_rel: Option<String> },
 }
 
 /// The "Rename / Move tag (fix references)" dialog. Shows the referrers that

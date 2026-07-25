@@ -29,6 +29,12 @@ impl Baboon {
                             ui.close_menu();
                             self.open_new_tag_dialog();
                         }
+                        if self.current_source_is_container()
+                            && ui.button("Import Tag...").clicked()
+                        {
+                            ui.close_menu();
+                            self.begin_import_tag(None);
+                        }
                         if ui.button("Load Tag...").clicked() {
                             ui.close_menu();
                             self.begin_load_single(ctx.clone());
@@ -1003,6 +1009,7 @@ impl Baboon {
                                         sort,
                                         !groups_mode && folders_before_tags,
                                         favorite_context,
+                                        false,
                                     );
                                     favorite_action.or(tree_action)
                                 })
@@ -1058,6 +1065,10 @@ impl Baboon {
                                                 sort,
                                                 folders_before_tags,
                                                 None,
+                                                matches!(
+                                                    source.source,
+                                                    TagSource::IoStoreContainerSet { .. }
+                                                ),
                                             )
                                         }
                                     }
@@ -1088,6 +1099,7 @@ impl Baboon {
                                                 sort,
                                                 false,
                                                 favorite_context,
+                                                false,
                                             )
                                         }
                                     }
@@ -1703,6 +1715,8 @@ impl Baboon {
         self.draw_settings_window(ctx);
         self.draw_tool_commands_window(ctx);
         self.draw_new_tag_window(ctx);
+        self.draw_import_tag_window(ctx);
+        self.draw_import_discard_confirm(ctx);
         self.draw_overwrite_confirm_window(ctx);
         self.draw_tag_conversion_window(ctx);
         self.draw_folder_conversion_window(ctx);
