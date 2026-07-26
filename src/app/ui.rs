@@ -11,6 +11,7 @@ mod help;
 mod search_windows;
 mod settings;
 mod shell;
+mod tag_pane;
 mod tool_commands;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
