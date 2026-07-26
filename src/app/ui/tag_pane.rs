@@ -75,6 +75,10 @@ impl Baboon {
         let mut bitmap_reimport = None;
         let mut tsv_paste_request = None;
 
+        // Taken rather than read: it is a one-shot, and egui remembers the
+        // state each container lands in, so forcing it for a single frame is
+        // what makes it stick.
+        let expand_all = kit.pending_expand.remove(&key);
         let field_filter = compute_pending_field_filter(
             &doc.tag,
             supports_field_search,
@@ -150,6 +154,7 @@ impl Baboon {
                 .field_nav
                 .as_ref()
                 .filter(|nav| nav.kit == kit_id && nav.tag_key == key),
+            expand_all,
         };
 
         if is_bitmap_tag(entry) {

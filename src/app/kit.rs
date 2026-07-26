@@ -80,6 +80,10 @@ pub(super) struct Kit {
     /// one walks several packages.
     pub(super) ce_sound_bindings: HashMap<String, Arc<crate::source::ce_audio::CeSoundBinding>>,
 
+    /// Pending expand/collapse-all requests, keyed by tag. Raised from the tag
+    /// tab's menu and consumed by the next draw of that tag's pane.
+    pub(super) pending_expand: HashMap<String, bool>,
+
     // --- Per-tag "Search fields" state ---
     pub(super) field_search: HashMap<String, String>,
     /// The last query actually applied per tag, so the collapse is a one-shot
@@ -158,6 +162,7 @@ impl Kit {
             rmdf_cache: HashMap::new(),
             rmop_cache: HashMap::new(),
             ce_sound_bindings: HashMap::new(),
+            pending_expand: HashMap::new(),
             field_search: HashMap::new(),
             field_search_applied: HashMap::new(),
             browser_mode: BrowserMode::default(),

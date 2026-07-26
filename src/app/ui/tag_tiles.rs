@@ -20,6 +20,8 @@ struct TagPaneBehavior<'a> {
     /// the same reason closes are: they mutate the layout or the open set.
     reveal: Option<String>,
     discard: Option<String>,
+    /// Tag to expand or collapse throughout, and which of the two.
+    expand: Option<(String, bool)>,
     close_all: bool,
     close_all_but: Option<String>,
 }
@@ -155,6 +157,18 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
                 .clicked()
             {
                 self.discard = Some(key.clone());
+                ui.close_menu();
+            }
+            ui.separator();
+            // Every container in the tag resolves its open state through one
+            // place, so these reach groups, structs, blocks and arrays alike,
+            // however deeply nested.
+            if ui.button("Expand all").clicked() {
+                self.expand = Some((key.clone(), true));
+                ui.close_menu();
+            }
+            if ui.button("Collapse all").clicked() {
+                self.expand = Some((key.clone(), false));
                 ui.close_menu();
             }
             ui.separator();
@@ -339,6 +353,7 @@ impl Baboon {
             focused: None,
             reveal: None,
             discard: None,
+            expand: None,
             close_all: false,
             close_all_but: None,
         };
@@ -347,6 +362,7 @@ impl Baboon {
         let focused = behavior.focused.take();
         let reveal = behavior.reveal.take();
         let discard = behavior.discard.take();
+        let expand = behavior.expand.take();
         let close_all = behavior.close_all;
         let close_all_but = behavior.close_all_but.take();
         self.kits[kit_index].tag_tree = tree;
@@ -375,6 +391,9 @@ impl Baboon {
         }
         if let Some(key) = discard {
             self.discard_tag_changes(kit_index, &key, ctx);
+        }
+        if let Some((key, open)) = expand {
+            self.kits[kit_index].pending_expand.insert(key, open);
         }
         if close_all {
             self.request_close_action(PendingCloseAction::CloseAllTabs, ctx);
