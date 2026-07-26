@@ -284,7 +284,7 @@ impl Baboon {
     }
 
     fn refresh_all_tag_find(&mut self, ctx: &egui::Context) {
-        let needs_full_scan = self.source.as_ref().is_some_and(|source| {
+        let needs_full_scan = self.source().is_some_and(|source| {
             matches!(source.source, TagSource::LooseFolder { .. }) && source.all_entries.is_empty()
         });
         if needs_full_scan {
@@ -299,7 +299,7 @@ impl Baboon {
             self.find.occurrences.clear();
             return;
         }
-        let Some(source) = self.source.as_ref() else {
+        let Some(source) = self.source() else {
             self.find.occurrences.clear();
             return;
         };
@@ -371,9 +371,10 @@ impl Baboon {
     }
 
     fn begin_all_tag_find(&mut self, ctx: egui::Context, entries: Vec<TagEntry>) {
-        let Some(source) = self.source.as_ref() else {
+        let Some(kit_index) = self.active_kit_index() else {
             return;
         };
+        let source = &self.kits[kit_index].source;
         self.find.all_request_id = self.find.all_request_id.wrapping_add(1);
         let request_id = self.find.all_request_id;
         let generation = self.source_generation;

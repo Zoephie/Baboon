@@ -166,7 +166,7 @@ impl Baboon {
                         }
                         ui.separator();
                         let can_fix_dependencies = self.selected_key.is_some()
-                            && self.source.as_ref().is_some_and(|source| {
+                            && self.source().is_some_and(|source| {
                                 matches!(source.source, TagSource::LooseFolder { .. })
                             });
                         if ui
@@ -181,9 +181,7 @@ impl Baboon {
                         }
                         // Regenerate Index: force a fresh full scan and
                         // overwrite the cached index file.
-                        let can_regen = self
-                            .source
-                            .as_ref()
+                        let can_regen = self.source()
                             .map(|s| {
                                 matches!(s.source, TagSource::LooseFolder { .. })
                                     && s.game.is_some()
@@ -198,7 +196,7 @@ impl Baboon {
                         {
                             ui.close_menu();
                             // Clear cached entries so the scan runs fresh.
-                            if let Some(s) = self.source.as_mut() {
+                            if let Some(s) = self.source_mut() {
                                 s.all_entries.clear();
                                 s.group_tree = crate::source::build_group_tree(&[]);
                                 s.reverse_dependencies = None;
@@ -209,7 +207,7 @@ impl Baboon {
                                 "Rebuilding index...",
                             );
                         }
-                        let can_refresh_browser = self.source.as_ref().is_some_and(|source| {
+                        let can_refresh_browser = self.source().is_some_and(|source| {
                             matches!(source.source, TagSource::LooseFolder { .. })
                                 && source.game.is_some()
                         });
@@ -291,16 +289,14 @@ impl Baboon {
                         {
                             // Loose folders and Campaign Evolved containers can
                             // both be indexed; cache sources cannot.
-                            let indexable = self.source.as_ref().is_some_and(|source| {
+                            let indexable = self.source().is_some_and(|source| {
                                 matches!(
                                     source.source,
                                     TagSource::LooseFolder { .. }
                                         | TagSource::IoStoreContainerSet { .. }
                                 )
                             });
-                            let has_index = self
-                                .source
-                                .as_ref()
+                            let has_index = self.source()
                                 .is_some_and(|source| source.reverse_dependencies.is_some());
                             let label = if self.building_reverse_dependencies {
                                 "Building Reference Index…"
@@ -773,7 +769,7 @@ impl Baboon {
                 bottom: 6.0,
             }))
             .show(ctx, |ui| {
-                let sidebar_header = self.source.as_ref().map(|source| {
+                let sidebar_header = self.source().map(|source| {
                     (
                         source.game.clone(),
                         source.source.origin_label(),
@@ -795,7 +791,11 @@ impl Baboon {
                     .iter()
                     .map(|entry| entry.key.clone())
                     .collect();
-                if let Some(source) = &mut self.source {
+                // Indexed directly rather than through `source_mut()`: the block
+                // below also borrows `self.filter`, `self.filter_cache`, and
+                // `self.status`, and a method call would borrow all of `self`.
+                if let Some(kit_index) = self.active_kit_index() {
+                    let source = &mut self.kits[kit_index].source;
                     ui.add_space(8.0);
                     let scanning = self.scanning_entries;
                     // Collect deferred scan-trigger here; execute after borrow ends.

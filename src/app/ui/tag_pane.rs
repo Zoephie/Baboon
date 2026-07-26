@@ -76,7 +76,15 @@ impl Baboon {
             &mut self.field_search_applied,
         );
         let sound_volume = self.audio.volume();
-        let ce_paks_root = self.source.as_ref().and_then(|s| match &s.source {
+        let expert_mode = self.expert_mode;
+        // Borrow the kit's source as a plain field rather than through
+        // `source()`: a method borrows all of `self`, and the context below
+        // needs `&mut` on a dozen sibling fields. Going through `self.kits[i]`
+        // directly is what lets the borrow checker see them as disjoint.
+        let source = self
+            .active_kit_index()
+            .map(|index| &self.kits[index].source);
+        let ce_paks_root = source.and_then(|s| match &s.source {
             TagSource::IoStoreContainerSet { root, .. } => Some(root.as_path()),
             _ => None,
         });
@@ -85,28 +93,20 @@ impl Baboon {
             tag_key: &key,
             group_tag: entry.group_tag,
             root: Some(doc.tag.root()),
-            game: self
-                .source
-                .as_ref()
-                .and_then(|source| source.game.as_deref()),
-            definitions_root: self.source.as_ref().and_then(|source| match &source.source {
+            game: source.and_then(|source| source.game.as_deref()),
+            definitions_root: source.and_then(|source| match &source.source {
                 TagSource::LooseFolder {
                     definitions_root, ..
                 } => Some(definitions_root.as_path()),
                 _ => None,
             }),
             names: Some(&self.names),
-            tags_root: self
-                .source
-                .as_ref()
-                .and_then(|source| match &source.source {
-                    TagSource::LooseFolder { root, .. } => Some(root.as_path()),
-                    _ => None,
-                }),
-            tag_reference_catalog: self
-                .source
-                .as_ref()
-                .and_then(|source| tag_reference_catalog_for_source(source, self.expert_mode)),
+            tags_root: source.and_then(|source| match &source.source {
+                TagSource::LooseFolder { root, .. } => Some(root.as_path()),
+                _ => None,
+            }),
+            tag_reference_catalog: source
+                .and_then(|source| tag_reference_catalog_for_source(source, expert_mode)),
             tag_reference_picker: &mut self.tag_reference_picker,
             status: Some(&mut self.status),
             editable: is_editable_tag(entry, &doc.tag),
@@ -166,7 +166,7 @@ impl Baboon {
                 &doc.tag,
                 entry,
                 &self.names,
-                self.source.as_ref().map(|source| &source.source),
+                source.map(|source| &source.source),
                 &mut self.rmdf_cache,
                 &mut self.rmop_cache,
                 &mut self.color_popup,

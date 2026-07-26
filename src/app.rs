@@ -57,6 +57,8 @@ mod style;
 use style::*;
 mod state;
 use state::*;
+mod kit;
+use kit::*;
 mod journal;
 use journal::*;
 mod keywords;
@@ -125,8 +127,14 @@ pub struct Baboon {
     /// Single UI-thread receiver. Messages are applied in arrival order and
     /// generation-tagged results are discarded when their source is stale.
     rx: Receiver<WorkerMessage>,
-    /// Active source and its source-relative browser/index state.
-    source: Option<LoadedSourceData>,
+    /// Every loaded kit. Content store for the multi-kit model: a kit owns its
+    /// source and (progressively) all state scoped to that source. Never
+    /// addressed by position from outside a single borrow — use [`KitId`].
+    kits: Vec<Kit>,
+    /// Which kit the browser, tabs, and editor act on.
+    active_kit: Option<KitId>,
+    /// Monotonic [`KitId`] allocator; ids are never reused.
+    next_kit_id: u64,
     /// Parsed documents keyed by the stable [`TagEntry::key`] identity.
     parsed_tags: HashMap<String, TagDocument>,
     tag_conversion_dialog: Option<TagConversionDialog>,
@@ -364,7 +372,9 @@ impl Baboon {
             names,
             tx,
             rx,
-            source: None,
+            kits: Vec::new(),
+            active_kit: None,
+            next_kit_id: 0,
             parsed_tags: HashMap::new(),
             tag_conversion_dialog: None,
             folder_conversion_dialog: None,

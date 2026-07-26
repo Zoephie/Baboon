@@ -3122,9 +3122,7 @@ impl Baboon {
         let Some(document) = self.parsed_tags.get(key) else {
             return false;
         };
-        let Some(game) = self
-            .source
-            .as_ref()
+        let Some(game) = self.source()
             .and_then(|source| source.game.as_deref())
         else {
             return false;
@@ -3142,7 +3140,7 @@ impl Baboon {
         let Some(key) = self.selected_key.clone() else {
             return;
         };
-        let Some(source) = self.source.as_ref() else {
+        let Some(source) = self.source() else {
             return;
         };
         let Some(source_game) = source.game.clone() else {
@@ -3405,7 +3403,7 @@ impl Baboon {
             self.status = "Cross-game folder conversion requires Expert mode".to_owned();
             return;
         }
-        let Some(source_game) = self.source.as_ref().and_then(|source| source.game.clone()) else {
+        let Some(source_game) = self.source().and_then(|source| source.game.clone()) else {
             self.status = "Folder conversion requires a detected editing-kit profile".to_owned();
             return;
         };
@@ -3499,7 +3497,7 @@ impl Baboon {
             return;
         };
         let (Some(source_data), Some(target_tags_root)) = (
-            self.source.as_ref(),
+            self.source(),
             self.editing_kit_paths
                 .get(&dialog.target_game)
                 .map(|path| configured_tags_root(path)),

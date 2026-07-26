@@ -115,11 +115,17 @@ impl Baboon {
         };
         let package = ce_audio::tag_package_for_rel_path(rel_path)?;
 
-        let source = self.source.as_ref()?;
-        let TagSource::IoStoreContainerSet { containers, packages, .. } = &source.source else {
+        let kit_index = self.active_kit_index()?;
+        // Checked before the usmap is parsed, as it always has been: a non-CE
+        // source must bail out without paying for the bundled reflection data.
+        // The `matches!` ends its borrow immediately, which the destructure
+        // below could not do across the `ce_usmap` assignment.
+        if !matches!(
+            self.kits[kit_index].source.source,
+            TagSource::IoStoreContainerSet { .. }
+        ) {
             return None;
-        };
-
+        }
         if self.ce_usmap.is_none() {
             match blam_tags::iostore::usmap::Usmap::meteorite() {
                 Ok(u) => self.ce_usmap = Some(std::sync::Arc::new(u)),
@@ -130,6 +136,15 @@ impl Baboon {
             }
         }
         let usmap = self.ce_usmap.clone()?;
+
+        let TagSource::IoStoreContainerSet {
+            containers,
+            packages,
+            ..
+        } = &self.kits[kit_index].source.source
+        else {
+            return None;
+        };
 
         let binding = std::sync::Arc::new(ce_audio::resolve_sound_binding(
             containers, packages, &usmap, &package,
@@ -420,9 +435,7 @@ impl Baboon {
     }
 
     pub(super) fn open_new_tag_dialog(&mut self) {
-        let default_game = self
-            .source
-            .as_ref()
+        let default_game = self.source()
             .and_then(|source| source.game.as_deref())
             .unwrap_or("halo3_mcc")
             .to_owned();
@@ -670,7 +683,7 @@ impl Baboon {
         let package = format!("/Game/Tags/{logical}-{group_name}");
         let key = format!("newtag:{package}");
         if self.parsed_tags.contains_key(&key)
-            || self.source.as_ref().is_some_and(|s| {
+            || self.source().is_some_and(|s| {
                 s.entries
                     .iter()
                     .chain(s.all_entries.iter())
@@ -728,9 +741,7 @@ impl Baboon {
             return;
         }
         let group_tag = tag.header.group_tag;
-        let group_name = self
-            .source
-            .as_ref()
+        let group_name = self.source()
             .and_then(|s| s.names.name_for(group_tag))
             .map(str::to_owned)
             .or_else(|| group_tag_to_extension(group_tag).map(str::to_owned))
@@ -765,9 +776,7 @@ impl Baboon {
         group_tag: u32,
         imported: &TagFile,
     ) -> Option<blam_tags::LayoutComparison> {
-        let game = self
-            .source
-            .as_ref()
+        let game = self.source()
             .and_then(|s| s.game.clone())
             .unwrap_or_else(|| "haloce_evolved".to_owned());
         let group = load_new_tag_groups(&game)
@@ -826,14 +835,14 @@ impl Baboon {
         };
 
         // Does a base-game tag already exist at this path+group?
-        let existing = self.source.as_ref().and_then(|s| match &s.source {
+        let existing = self.source().and_then(|s| match &s.source {
             TagSource::IoStoreContainerSet { index, .. } => index
                 .lookup(group_tag, &logical)
                 .map(|(c, r)| (c, r.to_owned())),
             _ => None,
         });
         if let Some((container, rel_path)) = existing {
-            let key = self.source.as_ref().and_then(|s| {
+            let key = self.source().and_then(|s| {
                 s.entries
                     .iter()
                     .find(|e| {
@@ -906,7 +915,7 @@ impl Baboon {
         } else {
             format!("{folder}/{leaf}")
         };
-        match &self.source.as_ref()?.source {
+        match &self.source()?.source {
             TagSource::IoStoreContainerSet { index, .. } => {
                 index.lookup(group_tag, &logical).map(|_| logical)
             }
@@ -926,7 +935,7 @@ impl Baboon {
     /// container index plus its `.uasset` container path — the package template
     /// for a new tag of the same group.
     fn find_container_template(&self, group_tag: u32) -> Option<(usize, String)> {
-        let source = self.source.as_ref()?;
+        let source = self.source()?;
         source
             .entries
             .iter()
@@ -947,7 +956,7 @@ impl Baboon {
     /// **dirty** tab, and select it. Used by New Tag and Import for CE.
     pub(super) fn register_in_memory_tag(&mut self, entry: TagEntry, tag: TagFile) {
         let key = entry.key.clone();
-        if let Some(source) = self.source.as_mut() {
+        if let Some(source) = self.source_mut() {
             source.entries.retain(|existing| existing.key != key);
             source.entries.push(entry.clone());
             // Container sources keep their full set in `entries` (all_entries is
@@ -968,7 +977,7 @@ impl Baboon {
     }
 
     pub(super) fn loaded_tags_root(&self) -> Option<PathBuf> {
-        let TagSource::LooseFolder { root, .. } = &self.source.as_ref()?.source else {
+        let TagSource::LooseFolder { root, .. } = &self.source()?.source else {
             return None;
         };
         Some(root.clone())
@@ -988,9 +997,7 @@ impl Baboon {
         let Some(index) = self.favorite_kit_index(&root) else {
             return;
         };
-        let names = self
-            .source
-            .as_ref()
+        let names = self.source()
             .map(|source| source.names.clone())
             .unwrap_or_else(|| self.names.clone());
         let saved_paths = self.editing_kit_favorites[index].tags.clone();
@@ -1122,7 +1129,7 @@ impl Baboon {
             return Ok(false);
         }
 
-        let Some(source) = self.source.as_ref() else {
+        let Some(source) = self.source() else {
             return Err("Load an editing-kit tags folder before dropping tag files".to_owned());
         };
         let TagSource::LooseFolder { root, .. } = &source.source else {
@@ -1152,7 +1159,7 @@ impl Baboon {
         };
 
         let key = entry.key.clone();
-        if let Some(source) = self.source.as_mut() {
+        if let Some(source) = self.source_mut() {
             source.entries.retain(|existing| existing.key != key);
             source.entries.push(entry.clone());
 
@@ -1176,7 +1183,7 @@ impl Baboon {
     }
 
     fn key_for_loose_path(&self, path: &Path) -> Option<String> {
-        let source = self.source.as_ref()?;
+        let source = self.source()?;
         source
             .entries
             .iter()
@@ -1195,7 +1202,7 @@ impl Baboon {
 
     pub(super) fn register_created_tag(&mut self, entry: TagEntry, tag: TagFile) {
         let key = entry.key.clone();
-        if let Some(source) = self.source.as_mut() {
+        if let Some(source) = self.source_mut() {
             source.entries.retain(|existing| existing.key != key);
             source.entries.push(entry.clone());
             source.all_entries.retain(|existing| existing.key != key);
@@ -1221,7 +1228,7 @@ impl Baboon {
     }
 
     fn register_saved_copy_if_in_loaded_folder(&mut self, path: &Path) -> Result<bool, String> {
-        let Some(source) = self.source.as_mut() else {
+        let Some(source) = self.source_mut() else {
             return Ok(false);
         };
         let registered = register_saved_copy_in_loaded_source(source, path)?;
@@ -1248,7 +1255,7 @@ impl Baboon {
         if self.scanning_entries {
             return;
         }
-        let Some(source) = self.source.as_ref() else {
+        let Some(source) = self.source() else {
             return;
         };
         let TagSource::LooseFolder { root, .. } = &source.source else {
@@ -1307,7 +1314,7 @@ impl Baboon {
         if now < self.next_entry_index_refresh_at {
             return;
         }
-        let should_refresh = self.source.as_ref().is_some_and(|source| {
+        let should_refresh = self.source().is_some_and(|source| {
             source.game.is_some()
                 && !source.all_entries.is_empty()
                 && matches!(source.source, TagSource::LooseFolder { .. })
@@ -1323,7 +1330,7 @@ impl Baboon {
         if self.scanning_entries || self.refreshing_entry_index {
             return;
         }
-        let Some(source) = self.source.as_ref() else {
+        let Some(source) = self.source() else {
             return;
         };
         let TagSource::LooseFolder { root, .. } = &source.source else {
@@ -1346,7 +1353,7 @@ impl Baboon {
     }
 
     pub(super) fn refresh_tag_browser(&mut self, ctx: egui::Context) {
-        let reset_result = self.source.as_mut().and_then(|source| {
+        let reset_result = self.source_mut().and_then(|source| {
             let TagSource::LooseFolder { root, .. } = &source.source else {
                 return None;
             };
@@ -1373,9 +1380,10 @@ impl Baboon {
     }
 
     fn apply_entry_index_refresh(&mut self, refresh: EntryIndexRefresh, ctx: egui::Context) {
-        let Some(source) = self.source.as_mut() else {
+        let Some(kit_index) = self.active_kit_index() else {
             return;
         };
+        let source = &mut self.kits[kit_index].source;
         let n = refresh.entries.len();
         source.group_tree = crate::source::build_group_tree(&refresh.entries);
         source.all_entries = refresh.entries;
@@ -1692,7 +1700,7 @@ impl Baboon {
         if self.parsed_tags.contains_key(&key) || self.loading_tags.contains(&key) {
             return;
         }
-        let Some(source) = self.source.as_ref() else {
+        let Some(source) = self.source() else {
             return;
         };
         // Check both the lazily-loaded entries and the full scan set (all_entries).
@@ -1724,7 +1732,7 @@ impl Baboon {
     }
 
     pub(super) fn entry_for_key(&self, key: &str) -> Option<&TagEntry> {
-        let source = self.source.as_ref()?;
+        let source = self.source()?;
         source
             .entries
             .iter()
@@ -1854,7 +1862,7 @@ impl Baboon {
     }
 
     fn current_session_state(&self) -> Option<LastSessionState> {
-        let source = self.source.as_ref()?;
+        let source = self.source()?;
         let (source_kind, source_path) = match &source.source {
             TagSource::SingleFile { path } => (LastSessionSourceKind::SingleFile, path.clone()),
             TagSource::LooseFolder { root, .. } => {
@@ -1959,7 +1967,7 @@ impl Baboon {
         if !path.is_file() {
             return false;
         }
-        let Some(source) = self.source.as_ref() else {
+        let Some(source) = self.source() else {
             return false;
         };
         let TagSource::LooseFolder { root, .. } = &source.source else {
@@ -1980,7 +1988,7 @@ impl Baboon {
         let Some(entry) = entry else {
             return false;
         };
-        if let Some(source) = self.source.as_mut() {
+        if let Some(source) = self.source_mut() {
             source.entries.retain(|existing| existing.key != tag.key);
             source.entries.push(entry.clone());
             if !source.all_entries.is_empty() {
@@ -2165,7 +2173,7 @@ impl Baboon {
             self.status = "Tag is no longer in the browser".to_owned();
             return;
         };
-        let Some(source) = self.source.as_ref().map(|source| &source.source) else {
+        let Some(source) = self.source().map(|source| &source.source) else {
             self.status = "No source loaded".to_owned();
             return;
         };
@@ -2282,7 +2290,7 @@ impl Baboon {
         keys: Vec<String>,
         ctx: egui::Context,
     ) {
-        let Some(source_data) = self.source.as_ref() else {
+        let Some(source_data) = self.source() else {
             return;
         };
         let entries = keys
@@ -2319,7 +2327,7 @@ impl Baboon {
         label: String,
         ctx: egui::Context,
     ) {
-        let Some(source_data) = self.source.as_ref() else {
+        let Some(source_data) = self.source() else {
             return;
         };
         let TagSource::LooseFolder { root, .. } = &source_data.source else {
@@ -2376,16 +2384,12 @@ impl Baboon {
             return;
         };
         let names = self.names.clone();
-        let existing_all_entries = self
-            .source
-            .as_ref()
+        let existing_all_entries = self.source()
             .map(|source| source.all_entries.clone())
             .unwrap_or_default();
-        let existing_reverse_dependencies = self
-            .source
-            .as_ref()
+        let existing_reverse_dependencies = self.source()
             .and_then(|source| source.reverse_dependencies.clone());
-        let game = self.source.as_ref().and_then(|source| source.game.clone());
+        let game = self.source().and_then(|source| source.game.clone());
         let tx = self.tx.clone();
         let job_label = if move_folder {
             format!("Moving {label}")
@@ -2464,7 +2468,7 @@ impl Baboon {
     /// Starts potentially expensive source or export work off the UI thread.
     /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(super) fn begin_extract_bitmap_folder(&mut self, keys: Vec<String>, ctx: egui::Context) {
-        let Some(source_data) = self.source.as_ref() else {
+        let Some(source_data) = self.source() else {
             return;
         };
         let entries = keys
@@ -2597,7 +2601,7 @@ impl Baboon {
         keys: Vec<String>,
         ctx: egui::Context,
     ) {
-        let Some(source_data) = self.source.as_ref() else {
+        let Some(source_data) = self.source() else {
             return;
         };
         let entries = entries_for_keys(source_data, &keys);
@@ -2654,7 +2658,7 @@ impl Baboon {
         keys: Vec<String>,
         ctx: egui::Context,
     ) {
-        let Some(source_data) = self.source.as_ref() else {
+        let Some(source_data) = self.source() else {
             return;
         };
         let entries = entries_for_keys(source_data, &keys);
@@ -2680,7 +2684,7 @@ impl Baboon {
     }
 
     pub(super) fn export_context(&self, key: &str) -> Option<(TagSource, TagEntry)> {
-        let source = self.source.as_ref()?.source.clone();
+        let source = self.source()?.source.clone();
         let entry = self.entry_for_key(key)?.clone();
         Some((source, entry))
     }
@@ -2749,7 +2753,7 @@ impl Baboon {
 
     pub(super) fn current_source_is_container(&self) -> bool {
         matches!(
-            self.source.as_ref().map(|s| &s.source),
+            self.source().map(|s| &s.source),
             Some(TagSource::IoStoreContainerSet { .. })
         )
     }
@@ -2777,7 +2781,7 @@ impl Baboon {
         else {
             return Err("Not a Campaign Evolved container tag".to_owned());
         };
-        let Some(source) = self.source.as_ref() else {
+        let Some(source) = self.source() else {
             return Err("No source loaded".to_owned());
         };
         let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
@@ -2882,7 +2886,7 @@ impl Baboon {
             }
         };
         let utoc_path = {
-            let Some(source) = self.source.as_ref() else {
+            let Some(source) = self.source() else {
                 self.status = "No source loaded".to_owned();
                 return;
             };
@@ -2905,7 +2909,7 @@ impl Baboon {
         // Hot-swap the pak's archive so subsequent reads see the new bytes.
         match blam_tags::iostore::IoStoreArchive::open(&utoc_path) {
             Ok(a) => {
-                if let Some(source) = self.source.as_mut()
+                if let Some(source) = self.source_mut()
                     && let TagSource::IoStoreContainerSet { containers, .. } = &mut source.source
                     && let Some(m) = containers.get_mut(container_idx)
                 {
@@ -2952,7 +2956,7 @@ impl Baboon {
             }
         };
         let template = {
-            let Some(source) = self.source.as_ref() else {
+            let Some(source) = self.source() else {
                 self.status = "No source loaded".to_owned();
                 return;
             };
@@ -2996,7 +3000,7 @@ impl Baboon {
     /// Bundle every open, modified container tag into one portable `_P` overlay
     /// mod — the base game is left untouched.
     pub(super) fn export_mod(&mut self) {
-        let Some(source) = self.source.as_ref() else {
+        let Some(source) = self.source() else {
             self.status = "No source loaded".to_owned();
             return;
         };
@@ -3191,9 +3195,10 @@ impl Baboon {
     }
 
     fn dependency_database_entries(&mut self, root: &Path) -> Result<Vec<TagEntry>, String> {
-        let Some(source) = self.source.as_mut() else {
+        let Some(kit_index) = self.active_kit_index() else {
             return Err("no tag source is loaded".to_owned());
         };
+        let source = &mut self.kits[kit_index].source;
         if !matches!(source.source, TagSource::LooseFolder { .. }) {
             return Err("load a loose editing-kit tags folder first".to_owned());
         }
@@ -3402,15 +3407,11 @@ impl Baboon {
         job_label: &str,
     ) {
         let names = self.names.clone();
-        let game = self.source.as_ref().and_then(|source| source.game.clone());
-        let all_entries = self
-            .source
-            .as_ref()
+        let game = self.source().and_then(|source| source.game.clone());
+        let all_entries = self.source()
             .map(|source| source.all_entries.clone())
             .unwrap_or_default();
-        let reverse_dependencies = self
-            .source
-            .as_ref()
+        let reverse_dependencies = self.source()
             .and_then(|source| source.reverse_dependencies.clone());
         let tx = self.tx.clone();
         let job_label = job_label.to_owned();
@@ -3440,7 +3441,7 @@ impl Baboon {
     }
 
     pub(super) fn references_to_entry(&self, entry: &TagEntry) -> Option<Vec<TagEntry>> {
-        let source = self.source.as_ref()?;
+        let source = self.source()?;
         let index = source.reverse_dependencies.as_ref()?;
         let rel = dependency_entry_reference_path(entry, &self.names)?;
         let referrer_keys = index
@@ -3461,7 +3462,7 @@ impl Baboon {
     /// All tags that nothing references (orphans / roots). `None` when no index
     /// is available.
     pub(super) fn unreferenced_entries(&self) -> Option<Vec<TagEntry>> {
-        let source = self.source.as_ref()?;
+        let source = self.source()?;
         let index = source.reverse_dependencies.as_ref()?;
         let mut out: Vec<TagEntry> = source
             .full_entry_set()
@@ -3480,7 +3481,7 @@ impl Baboon {
     /// Resolve the dependencies a tag declares (children) into browseable
     /// entries, via a one-shot dependency-key → entry lookup over all entries.
     fn children_of_entry(&self, key: &str) -> (Vec<TagEntry>, bool) {
-        let Some(source) = self.source.as_ref() else {
+        let Some(source) = self.source() else {
             return (Vec::new(), true);
         };
         let Some(index) = source.reverse_dependencies.as_ref() else {
@@ -3809,7 +3810,7 @@ impl Baboon {
     /// present). Reads `map id` at the scenario root, which covers the modern
     /// engines (H2A/H3/ODST/Reach/H4); classic Halo 2 stores it elsewhere.
     pub(super) fn show_map_ids(&mut self) {
-        let Some(source) = self.source.as_ref() else {
+        let Some(source) = self.source() else {
             self.query_results = Some(TagQueryResults {
                 title: "Scenario map IDs".to_owned(),
                 entries: Vec::new(),
@@ -3860,7 +3861,7 @@ impl Baboon {
     /// enum names. Shared by the class-listing and uncompressed-listing tools.
     /// Returns `(class, compression, entry)` triples, or `None` if no source.
     fn scan_sound_tags(&self) -> Option<Vec<(String, String, TagEntry)>> {
-        let source = self.source.as_ref()?;
+        let source = self.source()?;
         let mut rows = Vec::new();
         for entry in &source.all_entries {
             if &entry.group_tag.to_be_bytes() != b"snd!" {
@@ -4038,11 +4039,11 @@ impl Baboon {
             return;
         }
 
-        if self.source.is_none() {
+        if self.source().is_none() {
             return;
         }
         let base_entries: Vec<TagEntry> = {
-            let source = self.source.as_ref().expect("checked");
+            let source = self.source().expect("checked");
             if source.all_entries.is_empty() {
                 source.entries.clone()
             } else {
@@ -4057,7 +4058,7 @@ impl Baboon {
                 .filter(|entry| self.group_label_matches(entry.group_tag, &group_filter))
                 .collect()
         };
-        let tag_source = self.source.as_ref().expect("checked").source.clone();
+        let tag_source = self.source().expect("checked").source.clone();
         let tx = self.tx.clone();
         self.field_value_searching = true;
         self.status = format!("Searching field values for \"{display}\"…");
@@ -4098,7 +4099,7 @@ impl Baboon {
         if self.field_index.is_ready_for(generation) || self.field_index.is_building() {
             return;
         }
-        let Some(source) = self.source.as_ref() else {
+        let Some(source) = self.source() else {
             return;
         };
         let entries: Vec<TagEntry> = if source.all_entries.is_empty() {
@@ -4141,7 +4142,7 @@ impl Baboon {
         if self.building_reverse_dependencies || self.scanning_entries {
             return;
         }
-        let Some(source) = self.source.as_ref() else {
+        let Some(source) = self.source() else {
             return;
         };
         // Loose folders index automatically after their scan. Containers are
@@ -4345,15 +4346,13 @@ impl Baboon {
     /// parsed once from its definition JSON and cached. `None` when the
     /// definitions can't be located (e.g. non-loose sources).
     pub(super) fn def_docs_for_entry(&mut self, entry: &TagEntry) -> Option<Rc<DefDocs>> {
-        let root = match self.source.as_ref().map(|source| &source.source) {
+        let root = match self.source().map(|source| &source.source) {
             Some(TagSource::LooseFolder {
                 definitions_root, ..
             }) => definitions_root.clone(),
             _ => return None,
         };
-        let game = self
-            .source
-            .as_ref()
+        let game = self.source()
             .and_then(|source| source.game.clone())?;
         let group = self
             .names
@@ -4514,9 +4513,10 @@ impl Baboon {
     }
 
     pub(super) fn reapply_current_folder_profile(&mut self) {
-        let Some(source) = self.source.as_mut() else {
+        let Some(kit_index) = self.active_kit_index() else {
             return;
         };
+        let source = &mut self.kits[kit_index].source;
         let TagSource::LooseFolder {
             root,
             game,
@@ -4550,7 +4550,7 @@ impl Baboon {
     }
 
     pub(super) fn editing_kit_root(&self) -> Option<PathBuf> {
-        let TagSource::LooseFolder { root, .. } = &self.source.as_ref()?.source else {
+        let TagSource::LooseFolder { root, .. } = &self.source()?.source else {
             return None;
         };
         if root
@@ -4575,7 +4575,7 @@ impl Baboon {
     /// its own renamed build (e.g. H3EK is `halo3_tag_test.exe`); fall back to
     /// the generic name when the game is unknown.
     pub(super) fn tag_test_executable(&self) -> &'static str {
-        tag_test_executable_for_game(self.source.as_ref().and_then(|s| s.game.as_deref()))
+        tag_test_executable_for_game(self.source().and_then(|s| s.game.as_deref()))
     }
 
     pub(super) fn launch_tag_test(&mut self) {
@@ -4583,7 +4583,7 @@ impl Baboon {
     }
 
     pub(super) fn can_launch_scenario_in_sapien(&self, entry: &TagEntry) -> bool {
-        let Some(source) = self.source.as_ref() else {
+        let Some(source) = self.source() else {
             return false;
         };
         let Ok(context) = scenario_launch_context(source, entry) else {
@@ -4595,7 +4595,7 @@ impl Baboon {
 
     pub(super) fn launch_scenario_in_sapien(&mut self, key: &str) {
         let context = {
-            let Some(source) = self.source.as_ref() else {
+            let Some(source) = self.source() else {
                 self.status = "Scenario launching requires a loaded editing kit".to_owned();
                 return;
             };
@@ -4649,7 +4649,7 @@ impl Baboon {
     }
 
     pub(super) fn can_launch_scenario_in_tag_test(&self, entry: &TagEntry) -> bool {
-        let Some(source) = self.source.as_ref() else {
+        let Some(source) = self.source() else {
             return false;
         };
         let Ok(context) = scenario_launch_context(source, entry) else {
@@ -4661,7 +4661,7 @@ impl Baboon {
 
     pub(super) fn launch_scenario_in_tag_test(&mut self, key: &str) {
         let context = {
-            let Some(source) = self.source.as_ref() else {
+            let Some(source) = self.source() else {
                 self.status = "Scenario launching requires a loaded editing kit".to_owned();
                 return;
             };
@@ -4875,7 +4875,7 @@ impl Baboon {
     /// Record the current terminal-open state against the loaded game so it
     /// is restored next time that editing kit is opened.
     pub(super) fn remember_terminal_open_for_game(&mut self) {
-        let Some(game) = self.source.as_ref().and_then(|s| s.game.clone()) else {
+        let Some(game) = self.source().and_then(|s| s.game.clone()) else {
             return;
         };
         if self.terminal_open {
@@ -4892,7 +4892,7 @@ impl Baboon {
         let Some(req) = self.pending_open.take() else {
             return;
         };
-        let container_key = self.source.as_ref().and_then(|source| {
+        let container_key = self.source().and_then(|source| {
             matches!(&source.source, TagSource::IoStoreContainerSet { .. }).then(|| {
                 container_entry_for_reference(
                     &source.entries,
@@ -4919,7 +4919,7 @@ impl Baboon {
             return;
         }
 
-        let root = match self.source.as_ref().map(|s| &s.source) {
+        let root = match self.source().map(|s| &s.source) {
             Some(TagSource::LooseFolder { root, .. }) => root.clone(),
             _ => {
                 self.status = "Open requires a loose-folder source".to_owned();
@@ -4970,7 +4970,7 @@ impl Baboon {
                 group_name,
                 location: TagEntryLocation::LooseFile(abs),
             };
-            if let Some(source) = self.source.as_mut() {
+            if let Some(source) = self.source_mut() {
                 source.entries.push(entry);
             }
         }
@@ -5002,7 +5002,7 @@ impl Baboon {
             self.status = "A command is already running".to_owned();
             return;
         }
-        let Some(source) = self.source.as_ref().map(|source| source.source.clone()) else {
+        let Some(source) = self.source().map(|source| source.source.clone()) else {
             self.status = "Reimport requires a loaded editing-kit folder".to_owned();
             return;
         };

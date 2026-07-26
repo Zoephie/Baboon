@@ -8,10 +8,11 @@ impl Baboon {
         if self.tag_reference_picker.is_none() {
             return;
         }
+        let expert_mode = self.expert_mode;
         let Some(catalog) = self
-            .source
-            .as_ref()
-            .and_then(|source| tag_reference_catalog_for_source(source, self.expert_mode))
+            .active_kit_index()
+            .map(|index| &self.kits[index].source)
+            .and_then(|source| tag_reference_catalog_for_source(source, expert_mode))
         else {
             self.tag_reference_picker = None;
             return;
@@ -229,14 +230,12 @@ impl Baboon {
     /// Floating window listing the results of a tag query (find-references /
     /// unreferenced). Clicking an entry opens it.
     pub(in crate::app) fn source_game(&self) -> Option<&str> {
-        self.source
-            .as_ref()
+        self.source()
             .and_then(|source| source.game.as_deref())
     }
 
     pub(in crate::app) fn source_tags_root(&self) -> Option<&std::path::Path> {
-        self.source
-            .as_ref()
+        self.source()
             .and_then(|source| match &source.source {
                 TagSource::LooseFolder { root, .. } => Some(root.as_path()),
                 _ => None,
@@ -244,8 +243,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn source_definitions_root(&self) -> Option<&std::path::Path> {
-        self.source
-            .as_ref()
+        self.source()
             .and_then(|source| match &source.source {
                 TagSource::LooseFolder {
                     definitions_root, ..

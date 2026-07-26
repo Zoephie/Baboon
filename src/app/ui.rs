@@ -370,9 +370,7 @@ impl Baboon {
     }
 
     fn draw_monitor_menu_button(&mut self, ui: &mut Ui) {
-        let game = self
-            .source
-            .as_ref()
+        let game = self.source()
             .and_then(|source| source.game.as_deref());
         let commands = monitor_commands_for_game(game);
         if commands.is_empty() {

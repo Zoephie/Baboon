@@ -18,7 +18,7 @@ impl Baboon {
         let paired_entry_index_build = self.building_reference_for_entry_index;
         self.building_reference_for_entry_index = false;
         self.show_entry_index_wait_notice = false;
-        if let Some(source) = self.source.as_mut() {
+        if let Some(source) = self.source_mut() {
             let n = index.len();
             if let (Some(game), TagSource::LooseFolder { root, .. }) =
                 (source.game.clone(), &source.source)
@@ -89,7 +89,7 @@ impl Baboon {
                 return false;
             }
         };
-        if let Some(source) = self.source.as_mut() {
+        if let Some(source) = self.source_mut() {
             source.entries.clear();
             source.all_entries = done.all_entries;
             source.tree = done.tree;

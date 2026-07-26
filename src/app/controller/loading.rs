@@ -29,7 +29,7 @@ impl Baboon {
         self.status = loaded_source_status(&loaded);
         self.keywords.load_for_game(loaded.game.as_deref());
         self.field_index.invalidate();
-        self.source = Some(loaded);
+        self.install_loaded_source(loaded);
         self.refresh_active_favorite_entries();
         self.source_generation = self.source_generation.wrapping_add(1);
         self.refreshing_entry_index = false;
@@ -37,12 +37,10 @@ impl Baboon {
         self.building_reference_for_entry_index = false;
         self.reference_index_progress = None;
         self.next_entry_index_refresh_at = 0.0;
-        let loose_folder_source = self.source.as_ref().is_some_and(|source| {
+        let loose_folder_source = self.source().is_some_and(|source| {
             source.game.is_some() && matches!(source.source, TagSource::LooseFolder { .. })
         });
-        let has_cached_entries = self
-            .source
-            .as_ref()
+        let has_cached_entries = self.source()
             .is_some_and(|source| !source.all_entries.is_empty());
         if loose_folder_source {
             if has_cached_entries {
@@ -107,7 +105,8 @@ impl Baboon {
         match result {
             Ok(scanned) => {
                 let mut build_reference_index = false;
-                if let Some(source) = self.source.as_mut() {
+                if let Some(kit_index) = self.active_kit_index() {
+                    let source = &mut self.kits[kit_index].source;
                     let n = scanned.len();
                     source.group_tree = crate::source::build_group_tree(&scanned);
                     source.all_entries = scanned;
