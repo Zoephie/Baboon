@@ -1659,12 +1659,25 @@ pub(in crate::app) fn draw_foundation_block_control(
                 if has_sel {
                     let (combo_response, wheel_delta) = combo_box_with_scroll(
                         ui,
+                        // The element count is part of the id on purpose. A
+                        // popup's `Area` and `ScrollArea` remember their size
+                        // in egui memory under this id, and the remembered
+                        // size becomes the space the content is laid out in --
+                        // so once the list grew past the size the popup had
+                        // when it was last open, it stayed at the old size and
+                        // scrolled instead of growing. Keying on the count
+                        // retires that memory the moment the list changes.
+                        //
+                        // This is also why closing and reopening the tag
+                        // "fixed" it: a reopened tag lands in a new tile, whose
+                        // `view_scope` is already part of this id.
                         egui::ComboBox::from_id_salt((
                             "block_instance",
                             view_scope,
                             tag_key,
                             path_salt,
                             depth,
+                            count,
                         ))
                         .selected_text(truncate_for_cell(selected_label, combo_width - 24.0))
                         .width(combo_width),
@@ -2397,7 +2410,10 @@ pub(in crate::app) fn draw_foundation_block_index_row(
             let mut new_index: Option<i64> = None;
             let (_, wheel_delta) = combo_box_with_scroll(
                 ui,
-                egui::ComboBox::from_id_salt(("block_index", path))
+                // Keyed on the option count for the same reason as the
+                // instance selector above: adding a palette entry must not
+                // leave the popup at the size it had before.
+                egui::ComboBox::from_id_salt(("block_index", path, labels.len()))
                     .selected_text(truncate_for_cell(&selected_text, 280.0))
                     .width(300.0),
                 |ui| {
