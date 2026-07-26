@@ -379,6 +379,7 @@ impl Default for NewTagDialog {
     }
 }
 
+#[derive(Debug)]
 pub(in crate::app) struct TagFieldDiff {
     pub(in crate::app) path: String,
     pub(in crate::app) a: String,

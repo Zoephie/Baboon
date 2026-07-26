@@ -1667,5 +1667,27 @@ mod tag_diff_tests {
             diffs.iter().any(|d| d.path.contains("sound classes")),
             "block element-count difference should be reported"
         );
+        // An added element is reported as added, and with its contents: a bare
+        // "one more element" says nothing about what is being shipped.
+        assert!(
+            diffs.iter().any(|d| d.b.starts_with("added")),
+            "the new element should be marked as added: {diffs:?}"
+        );
+        assert!(
+            diffs
+                .iter()
+                .filter(|d| d.path.starts_with("sound classes[0]/"))
+                .count()
+                > 0,
+            "the added element's own fields should be listed: {diffs:?}"
+        );
+        // Nothing in the added element belongs to the old tag.
+        assert!(
+            diffs
+                .iter()
+                .filter(|d| d.path.starts_with("sound classes[0]"))
+                .all(|d| d.a.is_empty()),
+            "an added element has no previous value: {diffs:?}"
+        );
     }
 }
