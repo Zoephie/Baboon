@@ -86,7 +86,14 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
             return RichText::new("(closed)").color(subtle_dark()).into();
         };
         let kit = &self.app.kits[index];
-        let dirty = kit.parsed_tags.values().any(|document| document.dirty);
+        // Stashed edits count as modifications too. They are not written into
+        // the game, and the tag holding them may not even be open, so without
+        // this a workspace carrying work from an earlier session looked clean.
+        let stashed = kit
+            .campaign_project
+            .as_ref()
+            .is_some_and(|project| !project.overlays.is_empty());
+        let dirty = stashed || kit.parsed_tags.values().any(|document| document.dirty);
         let label = kit_strip_label(kit);
         let text = if dirty {
             format!("• {label}")

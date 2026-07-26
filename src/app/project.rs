@@ -407,17 +407,50 @@ impl Baboon {
     }
 
     fn ensure_campaign_project(&mut self, kit: usize, now: f64) {
-        if self.current_source_is_campaign_project_capable(kit)
-            && self.kits[kit].campaign_project.is_none()
+        if !self.current_source_is_campaign_project_capable(kit)
+            || self.kits[kit].campaign_project.is_some()
         {
-            let root = self.kits[kit]
-                .source
-                .as_ref()
-                .map(|source| source.source.root_path().to_path_buf());
-            self.kits[kit].campaign_project = Some(ActiveCampaignProject::fresh(
-                campaign_recovery_path(root.as_deref()),
-                now,
-            ));
+            return;
+        }
+        let root = self.kits[kit]
+            .source
+            .as_ref()
+            .map(|source| source.source.root_path().to_path_buf());
+        let path = campaign_recovery_path(root.as_deref());
+        // Adopt the recovery file already sitting at this path rather than
+        // starting empty. It holds this very source's stashed edits, and it is
+        // keyed by a hash of the source root, so a file being there at all
+        // means it belongs to this install.
+        //
+        // Starting fresh made the file write-only: the first autosave, within
+        // a second of the source mounting, overwrote everything stashed in
+        // earlier sessions. Only a session restore or File > Open Baboon
+        // Project ever read one back.
+        let restored = match load_campaign_project(&path) {
+            // A snapshot recorded for a different source would mean a hash
+            // collision; ignore it rather than serve one install's edits to
+            // another.
+            Ok(snapshot)
+                if root
+                    .as_deref()
+                    .is_none_or(|root| snapshot.source_path == root) =>
+            {
+                Some(snapshot)
+            }
+            _ => None,
+        };
+        self.kits[kit].campaign_project = Some(match &restored {
+            Some(snapshot) => ActiveCampaignProject::from_snapshot(path, snapshot, now),
+            None => ActiveCampaignProject::fresh(path, now),
+        });
+        if let Some(count) = restored
+            .as_ref()
+            .map(|snapshot| snapshot.overlays.len())
+            .filter(|count| *count > 0)
+        {
+            self.status = format!(
+                "Restored {count} stashed modification(s) from this workspace's last session"
+            );
         }
     }
 
