@@ -220,6 +220,12 @@ pub struct Baboon {
     tsv_paste: Option<TsvPasteState>,
     rename_tag: Option<RenameTagState>,
     status: String,
+    /// Mirror of `status` as of the last frame, and when it changed. `status`
+    /// is assigned from well over a hundred places, so rather than route them
+    /// all through a setter, the change is detected by comparison — which
+    /// cannot be bypassed by a new assignment site.
+    status_shown: String,
+    status_changed_at: f64,
     folder_refactor: Option<FolderRefactorUiState>,
     entry_index_progress: Option<EntryIndexProgressState>,
     show_entry_index_wait_notice: bool,
@@ -398,6 +404,8 @@ impl Baboon {
             tsv_paste: None,
             rename_tag: None,
             status: "Ready".to_owned(),
+            status_shown: String::new(),
+            status_changed_at: 0.0,
             folder_refactor: None,
             entry_index_progress: None,
             show_entry_index_wait_notice: false,

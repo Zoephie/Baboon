@@ -869,8 +869,36 @@ impl Baboon {
     }
 
 
+    /// Clear the status line once its message has been up for a while.
+    ///
+    /// Runs after the worker drain so a message set this frame is timed from
+    /// this frame. Progress states are rendered from their own fields rather
+    /// than from `status`, so expiring it never blanks a running scan.
+    fn expire_status(&mut self, ctx: &egui::Context) {
+        let now = ctx.input(|input| input.time);
+        if self.status != self.status_shown {
+            self.status_shown = self.status.clone();
+            self.status_changed_at = now;
+        }
+        if self.status.is_empty() {
+            return;
+        }
+        let elapsed = now - self.status_changed_at;
+        if elapsed >= STATUS_LINGER_SECS {
+            self.status.clear();
+            self.status_shown.clear();
+        } else {
+            // Nothing else may be animating, so ask for the frame that will
+            // do the clearing rather than waiting for the next interaction.
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(
+                STATUS_LINGER_SECS - elapsed,
+            ));
+        }
+    }
+
     fn prepare_root_frame(&mut self, ctx: &egui::Context) {
         self.process_worker_messages(ctx);
+        self.expire_status(ctx);
         ctx.set_zoom_factor(self.ui_scale);
         self.handle_pixels_per_point_change(ctx);
         self.maybe_refresh_entry_index(ctx.clone());
