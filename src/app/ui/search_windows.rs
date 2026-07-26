@@ -733,7 +733,7 @@ impl Baboon {
                 ui.horizontal(|ui| {
                     if indexed {
                         ui.label(
-                            RichText::new("● indexed — searches are instant")
+                            RichText::new("• indexed — searches are instant")
                                 .color(Color32::from_rgb(120, 170, 90))
                                 .small(),
                         );

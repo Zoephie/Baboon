@@ -19,6 +19,9 @@ struct TagPaneBehavior<'a> {
     /// Deferred tab context-menu choices, applied after the tree is drawn for
     /// the same reason closes are: they mutate the layout or the open set.
     reveal: Option<String>,
+    discard: Option<String>,
+    /// Tag to expand or collapse throughout, and which of the two.
+    expand: Option<(String, bool)>,
     close_all: bool,
     close_all_but: Option<String>,
 }
@@ -95,7 +98,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             .map(tag_tab_label)
             .unwrap_or_else(|| pane.clone());
         let text = if dirty {
-            format!("● {label}")
+            format!("• {label}")
         } else {
             label
         };
@@ -138,9 +141,34 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         if button_response.middle_clicked() {
             self.close_requests.push(key.clone());
         }
+        let discardable = self.app.tag_has_discardable_changes(self.kit_index, &key);
         button_response.context_menu(|ui| {
             if ui.button("Reveal in browser").clicked() {
                 self.reveal = Some(key.clone());
+                ui.close_menu();
+            }
+            ui.separator();
+            // Offered for every game. For a loose kit this drops the in-memory
+            // edits and re-reads the file; for a container kit it also forgets
+            // what the project stashed, or the edit comes straight back.
+            if ui
+                .add_enabled(discardable, egui::Button::new("Discard unsaved changes"))
+                .on_disabled_hover_text("This tag has no unsaved changes")
+                .clicked()
+            {
+                self.discard = Some(key.clone());
+                ui.close_menu();
+            }
+            ui.separator();
+            // Every container in the tag resolves its open state through one
+            // place, so these reach groups, structs, blocks and arrays alike,
+            // however deeply nested.
+            if ui.button("Expand all").clicked() {
+                self.expand = Some((key.clone(), true));
+                ui.close_menu();
+            }
+            if ui.button("Collapse all").clicked() {
+                self.expand = Some((key.clone(), false));
                 ui.close_menu();
             }
             ui.separator();
@@ -324,6 +352,8 @@ impl Baboon {
             close_requests: Vec::new(),
             focused: None,
             reveal: None,
+            discard: None,
+            expand: None,
             close_all: false,
             close_all_but: None,
         };
@@ -331,6 +361,8 @@ impl Baboon {
         let close_requests = std::mem::take(&mut behavior.close_requests);
         let focused = behavior.focused.take();
         let reveal = behavior.reveal.take();
+        let discard = behavior.discard.take();
+        let expand = behavior.expand.take();
         let close_all = behavior.close_all;
         let close_all_but = behavior.close_all_but.take();
         self.kits[kit_index].tag_tree = tree;
@@ -348,14 +380,20 @@ impl Baboon {
         //
         // Press-activation sets the same thing, but only after the whole kit
         // tree has been walked — a frame too late for a close that executes
-        // immediately, which is what a Campaign Evolved kit's checkpointed
-        // close does. Without this, closing a tab in an unfocused pane of a
-        // split closes it in the other game.
+        // immediately, which is what closing a tab with nothing unsaved does.
+        // Without this, closing a tab in an unfocused pane of a split closes it
+        // in the other game.
         if reveal.is_some() || close_all || close_all_but.is_some() || !close_requests.is_empty() {
             self.active = kit_index;
         }
         if let Some(key) = reveal {
             self.reveal_in_browser(&key);
+        }
+        if let Some(key) = discard {
+            self.discard_tag_changes(kit_index, &key, ctx);
+        }
+        if let Some((key, open)) = expand {
+            self.kits[kit_index].pending_expand.insert(key, open);
         }
         if close_all {
             self.request_close_action(PendingCloseAction::CloseAllTabs, ctx);

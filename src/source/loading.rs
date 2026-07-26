@@ -800,3 +800,98 @@ mod paks_dir_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 }
+
+#[cfg(test)]
+mod mod_export_tests {
+    use super::*;
+
+    const PAKS: &str = "/Users/camden/Halo/halo-campaign-evolved_pc/Meteorite/Content/Paks";
+
+    /// End-to-end check of what Export Mod actually writes, short of the game
+    /// loading it: take a real container tag, change a byte, write an override
+    /// container, then read the tag back out of that container.
+    ///
+    /// Reported as "it creates the pak but ingame nothing happens", and the
+    /// in-game load has never been verified on this machine — so this pins down
+    /// whether the artifact carries the edit at all.
+    #[test]
+    fn exported_mod_container_carries_the_edited_bytes() {
+        if !Path::new(PAKS).exists() {
+            eprintln!("skipping: {PAKS} not present");
+            return;
+        }
+        let defs = Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
+        let names = TagNameIndex::load_from_definitions(&defs);
+        let loaded =
+            load_iostore_container_set(PathBuf::from(PAKS), &names, &defs).expect("mount");
+        let TagSource::IoStoreContainerSet { ref containers, .. } = loaded.source else {
+            panic!("expected a container set");
+        };
+
+        // A tag whose bytes we can perturb without changing its length, so the
+        // export takes the common same-size path.
+        let (container, rel_path, original) = loaded
+            .entries
+            .iter()
+            .find_map(|entry| match &entry.location {
+                TagEntryLocation::Container {
+                    container,
+                    rel_path,
+                } => {
+                    let archive = &containers.get(*container)?.archive;
+                    let bytes = archive.read(rel_path).ok()?;
+                    (bytes.len() > 64).then(|| (*container, rel_path.clone(), bytes))
+                }
+                _ => None,
+            })
+            .expect("a readable container tag");
+
+        let mut edited = original.clone();
+        let last = edited.len() - 1;
+        edited[last] ^= 0xFF;
+
+        let archive = containers[container].archive.clone();
+        let dir = std::env::temp_dir().join(format!("baboon-modexport-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let out = dir.join("mymod-WinGDK_P.utoc");
+        blam_tags::iostore::writer::write_mod_container_ex(
+            &[(archive.as_ref(), rel_path.as_str(), edited.as_slice())],
+            &[],
+            &out,
+        )
+        .expect("write override container");
+
+        // The game discovers containers by scanning `Paks/*.pak`, so all three
+        // files have to be there — a missing stub is a mod that never loads.
+        for ext in ["utoc", "ucas", "pak"] {
+            let path = out.with_extension(ext);
+            assert!(path.is_file(), "{} was not written", path.display());
+            eprintln!(
+                "{}: {} bytes",
+                path.file_name().unwrap().to_string_lossy(),
+                std::fs::metadata(&path).unwrap().len()
+            );
+        }
+
+        // An override container carries chunks by id with no directory index --
+        // the game resolves packages through the global store, not this TOC --
+        // so the payload is checked by chunk rather than by path. The chunk id
+        // itself is taken from the base archive when the override is built, so
+        // it matches the tag it is overriding by construction.
+        let reopened =
+            blam_tags::iostore::IoStoreArchive::open(&out).expect("reopen exported container");
+        assert_eq!(
+            reopened.chunk_count(),
+            1,
+            "a same-size override should be exactly one chunk"
+        );
+        let served = reopened.read_chunk(0).expect("read the override chunk");
+        assert_eq!(
+            served, edited,
+            "the exported container did not carry the edited bytes for {rel_path}"
+        );
+        assert_ne!(served, original, "the exported container carried the base bytes");
+        eprintln!("override verified for {rel_path} ({} bytes)", served.len());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}

@@ -22,7 +22,8 @@ pub(in crate::app) fn draw_struct_fields(
     } else {
         clean_field_name(tag_struct.name())
     };
-    let open_override = edit.resolve_open(path_prefix, depth <= 1);
+    let group_default_open = edit.default_open(depth <= 1);
+    let open_override = edit.resolve_open(path_prefix, group_default_open);
     draw_foundation_group(
         ui,
         title,
@@ -62,7 +63,8 @@ pub(in crate::app) fn draw_inherited_object_fields(
 
     for (struct_value, path_prefix) in chain.iter().rev() {
         let title = clean_field_name(struct_value.name()).to_ascii_uppercase();
-        let open_override = edit.resolve_open(path_prefix, true);
+        let inherited_default_open = edit.default_open(true);
+        let open_override = edit.resolve_open(path_prefix, inherited_default_open);
         draw_foundation_group(
             ui,
             title,
@@ -408,7 +410,7 @@ pub(in crate::app) fn draw_field(
         // Foundation/Guerilla. The user can still collapse it, and that choice
         // persists (collapse state is keyed index-free; see `strip_node_indices`).
 
-        let nested_default_open = true;
+        let nested_default_open = edit.default_open(true);
         let open_override = edit.resolve_open(&field_path, nested_default_open);
         draw_foundation_group(
             ui,
@@ -817,7 +819,7 @@ pub(in crate::app) fn draw_foundation_block(
         block_element_dropdown_label(block.element(sel), names, sel)
     };
 
-    let block_default_open = depth == 0 || is_priority_section(name);
+    let block_default_open = edit.default_open(depth == 0 || is_priority_section(name));
     let open_override = edit.resolve_open(path_prefix, block_default_open);
     // A clipboard is compatible when it came from the same group + block schema
     // position AND holds elements of the same on-disk size. Element subscripts
@@ -1272,7 +1274,8 @@ pub(in crate::app) fn draw_foundation_array(
     } else {
         block_element_dropdown_label(array.element(sel), names, sel)
     };
-    let open_override = edit.resolve_open(path_prefix, depth == 0);
+    let array_default_open = edit.default_open(depth == 0);
+    let open_override = edit.resolve_open(path_prefix, array_default_open);
     // A clipboard is compatible when it came from this same array schema
     // position. Element subscripts are stripped so which parent block element is
     // selected doesn't matter — the array's shape is identical across siblings.
@@ -1668,22 +1671,41 @@ pub(in crate::app) fn draw_foundation_block_control(
                 if has_sel {
                     let (combo_response, wheel_delta) = combo_box_with_scroll(
                         ui,
+                        // The element count is part of the id on purpose. A
+                        // popup's `Area` and `ScrollArea` remember their size
+                        // in egui memory under this id, and the remembered
+                        // size becomes the space the content is laid out in --
+                        // so once the list grew past the size the popup had
+                        // when it was last open, it stayed at the old size and
+                        // scrolled instead of growing. Keying on the count
+                        // retires that memory the moment the list changes.
+                        //
+                        // This is also why closing and reopening the tag
+                        // "fixed" it: a reopened tag lands in a new tile, whose
+                        // `view_scope` is already part of this id.
                         egui::ComboBox::from_id_salt((
                             "block_instance",
                             view_scope,
                             tag_key,
                             path_salt,
                             depth,
+                            count,
                         ))
                         .selected_text(truncate_for_cell(selected_label, combo_width - 24.0))
                         .width(combo_width),
                         |ui| {
                             selector_active |= ui.rect_contains_pointer(ui.max_rect());
+                            // Adding an element selects it, so opening the list
+                            // scrolled to the top hid the very entry that was
+                            // just added when the list outgrew the popup.
+                            let just_opened = combo_popup_just_opened(ui);
                             for i in 0..count {
-                                if ui
-                                    .selectable_label(i == selected_index, element_label(i))
-                                    .clicked()
-                                {
+                                let row =
+                                    ui.selectable_label(i == selected_index, element_label(i));
+                                if just_opened && i == selected_index {
+                                    row.scroll_to_me(Some(egui::Align::Center));
+                                }
+                                if row.clicked() {
                                     actions.new_selection = Some(i);
                                 }
                             }
@@ -1855,6 +1877,27 @@ fn combo_scroll_cycle_enabled(ui: &Ui) -> bool {
     })
 }
 
+/// How tall a combo popup may grow before it scrolls. Generous enough that
+/// ordinary lists size to their contents, while a block with hundreds of
+/// elements still gets a scrollable popup rather than a full-screen one.
+pub(in crate::app) const COMBO_POPUP_MAX_HEIGHT: f32 = 420.0;
+
+/// True on the first frame a combo popup is drawn, so a caller can reveal the
+/// selected row exactly once. Scrolling on every frame would fight the user's
+/// own scrolling and the wheel-cycling above.
+///
+/// The popup's `Ui` id is stable while it stays open, and the popup only draws
+/// while open, so a gap in the pass counter means it was closed in between.
+/// That distinguishes "just opened" from "still open" without threading state
+/// through any of the call sites.
+pub(in crate::app) fn combo_popup_just_opened(ui: &Ui) -> bool {
+    let id = ui.id().with("combo_popup_last_pass");
+    let now = ui.ctx().cumulative_pass_nr();
+    let last = ui.data(|data| data.get_temp::<u64>(id));
+    ui.data_mut(|data| data.insert_temp(id, now));
+    !matches!(last, Some(previous) if previous + 1 >= now)
+}
+
 pub(in crate::app) fn combo_box_with_scroll<R>(
     ui: &mut Ui,
     combo: egui::ComboBox,
@@ -1864,6 +1907,13 @@ pub(in crate::app) fn combo_box_with_scroll<R>(
         .scope(|ui| {
             ui.spacing_mut().interact_size.y = 20.0;
             ui.spacing_mut().button_padding.y = 2.0;
+            // egui sizes a combo popup to its contents and only scrolls once
+            // they exceed `combo_height`, so this is the clamp -- not a fixed
+            // height. The stock 200pt starts scrolling after a handful of rows,
+            // which hides entries that are simply below the fold: a block's
+            // instance selector would scroll rather than grow the moment an
+            // element was added.
+            ui.spacing_mut().combo_height = COMBO_POPUP_MAX_HEIGHT;
             combo.show_ui(ui, add_contents)
         })
         .inner;
@@ -2372,15 +2422,29 @@ pub(in crate::app) fn draw_foundation_block_index_row(
             let mut new_index: Option<i64> = None;
             let (_, wheel_delta) = combo_box_with_scroll(
                 ui,
-                egui::ComboBox::from_id_salt(("block_index", path))
+                // Keyed on the option count for the same reason as the
+                // instance selector above: adding a palette entry must not
+                // leave the popup at the size it had before.
+                egui::ComboBox::from_id_salt(("block_index", path, labels.len()))
                     .selected_text(truncate_for_cell(&selected_text, 280.0))
                     .width(300.0),
                 |ui| {
-                    if ui.selectable_label(current < 0, "<none>").clicked() {
+                    // Same as the instance selector: open showing what is
+                    // selected, not the top of a long palette.
+                    let just_opened = combo_popup_just_opened(ui);
+                    let none_row = ui.selectable_label(current < 0, "<none>");
+                    if just_opened && current < 0 {
+                        none_row.scroll_to_me(Some(egui::Align::Center));
+                    }
+                    if none_row.clicked() {
                         new_index = Some(-1);
                     }
                     for (i, label) in labels.iter().enumerate() {
-                        if ui.selectable_label(current == i as i64, label).clicked() {
+                        let row = ui.selectable_label(current == i as i64, label);
+                        if just_opened && current == i as i64 {
+                            row.scroll_to_me(Some(egui::Align::Center));
+                        }
+                        if row.clicked() {
                             new_index = Some(i as i64);
                         }
                     }
@@ -2422,4 +2486,330 @@ pub(in crate::app) fn draw_foundation_block_index_row(
             set_block_selected_index(ui, edit, target_block_path, current as usize);
         }
     });
+}
+
+#[cfg(test)]
+mod palette_repro_tests {
+    use super::*;
+
+    /// Reproduction probe for "a tag added to the scenario vehicle palette does
+    /// not appear in the vehicles block's dropdown until save + reopen".
+    /// Runs the same add-then-set-reference flow on every editing kit present.
+    #[test]
+    fn palette_addition_reaches_the_block_index_dropdown() {
+        let cases = [
+            ("halo3_mcc", "levels/multi/riverworld/riverworld.scenario"),
+            ("haloreach_mcc", "levels/multi/35_island/35_island.scenario"),
+            ("halo2_mcc", "scenarios/solo/05a_deltaapproach/05a_deltaapproach.scenario"),
+            ("haloce_mcc", "levels/d40/d40.scenario"),
+        ];
+        let defs = std::path::Path::new("definitions");
+        let names = crate::format::TagNameIndex::default();
+        let group = u32::from_be_bytes(*b"scnr");
+        let mut failures = Vec::new();
+
+        for (game, rel) in cases {
+            let tag_path = std::path::Path::new("/Users/camden/Halo")
+                .join(game)
+                .join("tags")
+                .join(rel);
+            if !tag_path.exists() {
+                eprintln!("skip {game}: {} missing", tag_path.display());
+                continue;
+            }
+            let Ok(mut tag) =
+                crate::source::read_tag_at_path(&tag_path, Some(game), Some(defs), group)
+            else {
+                eprintln!("skip {game}: could not read scenario");
+                continue;
+            };
+
+            // The dropdown a `vehicles` element's block-index field would show.
+            let options = |tag: &blam_tags::TagFile| -> Option<Vec<String>> {
+                let root = tag.root();
+                for field in root.fields_all() {
+                    if let Some(block) = field.as_block()
+                        && field.name() == "vehicles"
+                        && let Some(element) = block.element(0)
+                    {
+                        for sub in element.fields_all() {
+                            if sub.definition().block_index_target().is_some()
+                                && let Some((labels, target)) = block_index_target_options(
+                                    &element,
+                                    &sub,
+                                    &names,
+                                    Some(root),
+                                    "vehicles[0]",
+                                )
+                                && target.contains("palette")
+                            {
+                                return Some(labels);
+                            }
+                        }
+                    }
+                }
+                None
+            };
+            let palette_len = |tag: &blam_tags::TagFile| -> Option<usize> {
+                tag.root().fields_all().find_map(|field| {
+                    (field.name() == "vehicle palette")
+                        .then(|| field.as_block().map(|block| block.len()))
+                        .flatten()
+                })
+            };
+
+            let Some(before) = options(&tag) else {
+                eprintln!("skip {game}: no vehicles block-index field resolved");
+                continue;
+            };
+            let before_len = palette_len(&tag).unwrap_or(0);
+            let mut dirty = false;
+            let status = crate::app::apply_block_ops(
+                &mut tag,
+                vec![BlockOp {
+                    path: "vehicle palette".to_owned(),
+                    kind: BlockOpKind::Add,
+                }],
+                &mut dirty,
+            );
+            let after_len = palette_len(&tag).unwrap_or(0);
+            let after = options(&tag).unwrap_or_default();
+            eprintln!(
+                "{game}: palette {before_len} -> {after_len}, dropdown {} -> {} ({status:?})",
+                before.len(),
+                after.len()
+            );
+            if after_len != before_len + 1 {
+                failures.push(format!("{game}: palette did not grow"));
+                continue;
+            }
+            if after.len() != before.len() + 1 {
+                failures.push(format!(
+                    "{game}: dropdown stayed at {} option(s) after the palette grew to {after_len}",
+                    after.len()
+                ));
+                continue;
+            }
+            // And the label follows the reference the user then sets.
+            let edit = PendingFieldEdit {
+                path: format!("vehicle palette[{before_len}]/name"),
+                input: "objects/vehicles/warthog/warthog.vehicle".to_owned(),
+            };
+            let applied = crate::app::apply_pending_edits(&mut tag, vec![edit], &mut dirty);
+            let labelled = options(&tag).unwrap_or_default();
+            let last = labelled.last().cloned().unwrap_or_default();
+            eprintln!("{game}: new label {last:?} ({:?})", applied.status);
+            if !last.contains("warthog") {
+                failures.push(format!("{game}: label did not pick up the reference: {last:?}"));
+            }
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    /// Every block-index field in a tag, at every depth, with the struct path
+    /// the app itself would render it under (`name#ordinal` segments) -- so the
+    /// ancestor walk in `block_index_target_options` is exercised through
+    /// `root.descend`, not just the root-level shortcut.
+    fn collect_block_index_fields(
+        st: &blam_tags::TagStruct<'_>,
+        path: &str,
+        out: &mut Vec<String>,
+        depth: usize,
+    ) {
+        if depth > 6 || out.len() > 400 {
+            return;
+        }
+        for field in st.fields_all() {
+            let field_path = crate::app::append_field_path_for(path, &field);
+            if field.definition().block_index_target().is_some() {
+                out.push(path.to_owned());
+            }
+            if let Some(block) = field.as_block()
+                && block.len() > 0
+                && let Some(element) = block.element(0)
+            {
+                let element_path = format!("{field_path}[0]");
+                collect_block_index_fields(&element, &element_path, out, depth + 1);
+            }
+        }
+    }
+
+    /// The general form of Crisp's report: for a block-index field anywhere in
+    /// a tag, adding an element to the block it targets must be offered by the
+    /// dropdown immediately, with no save and reopen.
+    #[test]
+    fn adding_to_a_targeted_block_reaches_its_dropdown_at_every_depth() {
+        let defs = std::path::Path::new("definitions");
+        let names = crate::format::TagNameIndex::default();
+        let cases = [
+            ("halo3_mcc", "levels/multi/riverworld/riverworld.scenario", *b"scnr"),
+            ("haloreach_mcc", "levels/multi/35_island/35_island.scenario", *b"scnr"),
+        ];
+        let mut failures = Vec::new();
+        let mut checked = 0usize;
+
+        for (game, rel, group_bytes) in cases {
+            let tag_path = std::path::Path::new("/Users/camden/Halo")
+                .join(game)
+                .join("tags")
+                .join(rel);
+            if !tag_path.exists() {
+                eprintln!("skip {game}: {} missing", tag_path.display());
+                continue;
+            }
+            let group = u32::from_be_bytes(group_bytes);
+            let Ok(tag) = crate::source::read_tag_at_path(&tag_path, Some(game), Some(defs), group)
+            else {
+                eprintln!("skip {game}: unreadable");
+                continue;
+            };
+            let mut struct_paths = Vec::new();
+            collect_block_index_fields(&tag.root(), "", &mut struct_paths, 0);
+            struct_paths.sort();
+            struct_paths.dedup();
+            eprintln!("{game}: {} struct(s) holding block-index fields", struct_paths.len());
+
+            for struct_path in struct_paths.iter().take(40) {
+                // Re-read per case: each one mutates the tag.
+                let Ok(mut tag) =
+                    crate::source::read_tag_at_path(&tag_path, Some(game), Some(defs), group)
+                else {
+                    continue;
+                };
+                let resolve = |tag: &blam_tags::TagFile| -> Option<(String, usize)> {
+                    let root = tag.root();
+                    let st = if struct_path.is_empty() {
+                        root
+                    } else {
+                        root.descend(struct_path)?
+                    };
+                    for field in st.fields_all() {
+                        if field.definition().block_index_target().is_some()
+                            && let Some((labels, target)) = block_index_target_options(
+                                &st,
+                                &field,
+                                &names,
+                                Some(root),
+                                struct_path,
+                            )
+                        {
+                            return Some((target, labels.len()));
+                        }
+                    }
+                    None
+                };
+                let Some((target, before)) = resolve(&tag) else {
+                    continue;
+                };
+                let mut dirty = false;
+                let status = crate::app::apply_block_ops(
+                    &mut tag,
+                    vec![BlockOp {
+                        path: target.clone(),
+                        kind: BlockOpKind::Add,
+                    }],
+                    &mut dirty,
+                );
+                if status.as_deref().is_some_and(|s| s.contains("failed")) {
+                    eprintln!("  {struct_path:?} -> {target:?}: add failed: {status:?}");
+                    continue;
+                }
+                let after = resolve(&tag).map(|(_, n)| n).unwrap_or(0);
+                checked += 1;
+                if after != before + 1 {
+                    failures.push(format!(
+                        "{game} {struct_path:?} -> target {target:?}: {before} option(s) before, \
+                         {after} after adding an element (expected {})",
+                        before + 1
+                    ));
+                }
+            }
+        }
+        eprintln!("checked {checked} block-index field(s)");
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+
+    /// Crisp's report, stated exactly: adding an element to a block must make
+    /// that block's own instance selector offer it, without a save and reopen.
+    /// The selector lists `0..block.len()`, so this checks the length the
+    /// renderer would read on the next frame.
+    #[test]
+    fn adding_an_element_grows_the_blocks_own_length() {
+        let defs = std::path::Path::new("definitions");
+        let cases = [
+            ("halo3_mcc", "levels/multi/riverworld/riverworld.scenario", *b"scnr"),
+            ("haloreach_mcc", "levels/multi/35_island/35_island.scenario", *b"scnr"),
+            ("halo2_mcc", "scenarios/solo/05a_deltaapproach/05a_deltaapproach.scenario", *b"scnr"),
+            ("haloce_mcc", "levels/d40/d40.scenario", *b"scnr"),
+        ];
+        let mut failures = Vec::new();
+
+        for (game, rel, group_bytes) in cases {
+            let tag_path = std::path::Path::new("/Users/camden/Halo")
+                .join(game)
+                .join("tags")
+                .join(rel);
+            if !tag_path.exists() {
+                eprintln!("skip {game}: missing");
+                continue;
+            }
+            let group = u32::from_be_bytes(group_bytes);
+            let Ok(tag) = crate::source::read_tag_at_path(&tag_path, Some(game), Some(defs), group)
+            else {
+                eprintln!("skip {game}: unreadable");
+                continue;
+            };
+            // Root-level blocks, split by whether they start empty: an
+            // empty-on-disk block is the case that has bitten before.
+            let mut blocks: Vec<(String, usize)> = Vec::new();
+            for field in tag.root().fields_all() {
+                if let Some(block) = field.as_block() {
+                    blocks.push((field.name().to_owned(), block.len()));
+                }
+            }
+            let empty = blocks.iter().filter(|(_, n)| *n == 0).count();
+            eprintln!("{game}: {} root block(s), {empty} empty", blocks.len());
+
+            let mut checked = 0usize;
+            let mut stale = 0usize;
+            for (name, before) in blocks {
+                let Ok(mut tag) =
+                    crate::source::read_tag_at_path(&tag_path, Some(game), Some(defs), group)
+                else {
+                    continue;
+                };
+                let mut dirty = false;
+                let status = crate::app::apply_block_ops(
+                    &mut tag,
+                    vec![BlockOp {
+                        path: name.clone(),
+                        kind: BlockOpKind::Add,
+                    }],
+                    &mut dirty,
+                );
+                if status.as_deref().is_some_and(|s| s.contains("failed")) {
+                    continue;
+                }
+                let after = tag
+                    .root()
+                    .fields_all()
+                    .find_map(|field| {
+                        (field.name() == name)
+                            .then(|| field.as_block().map(|block| block.len()))
+                            .flatten()
+                    })
+                    .unwrap_or(0);
+                checked += 1;
+                if after != before + 1 {
+                    stale += 1;
+                    failures.push(format!(
+                        "{game} block {name:?}: len {before} -> {after} after adding an element \
+                         (status {status:?})"
+                    ));
+                }
+            }
+            eprintln!("{game}: checked {checked} block(s), {stale} stale");
+        }
+        assert!(failures.is_empty(), "{} failure(s):\n{failures:#?}", failures.len());
+    }
 }

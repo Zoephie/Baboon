@@ -86,10 +86,10 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
             return RichText::new("(closed)").color(subtle_dark()).into();
         };
         let kit = &self.app.kits[index];
-        let dirty = kit.parsed_tags.values().any(|document| document.dirty);
+        let dirty = kit.has_unwritten_modifications();
         let label = kit_strip_label(kit);
         let text = if dirty {
-            format!("● {label}")
+            format!("• {label}")
         } else {
             label
         };
@@ -182,12 +182,8 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
     ) -> Color32 {
         let base = if state.active { menu_bar() } else { left_panel() };
         let dirty = matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Pane(kit_id))
-            if self.app.kit_index(*kit_id).is_some_and(|index| {
-                self.app.kits[index]
-                    .parsed_tags
-                    .values()
-                    .any(|document| document.dirty)
-            }));
+            if self.app.kit_index(*kit_id)
+                .is_some_and(|index| self.app.kits[index].has_unwritten_modifications()));
         if dirty {
             tint_toward(base, Color32::from_rgb(184, 134, 11), 0.20)
         } else {

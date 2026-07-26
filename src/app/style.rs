@@ -50,6 +50,9 @@ pub(super) fn foundation_visuals() -> egui::Visuals {
 /// separate font). Falls back to the regular family when no bold font is found.
 pub(super) const FOUNDATION_BOLD: &str = "foundation_bold";
 
+/// Name of the last-resort face appended to every family for glyph coverage.
+const GLYPH_FALLBACK: &str = "glyph_fallback";
+
 pub(super) fn foundation_fonts() -> FontDefinitions {
     let mut fonts = FontDefinitions::default();
     for path in [
@@ -68,6 +71,39 @@ pub(super) fn foundation_fonts() -> FontDefinitions {
                 .insert(0, "foundation_ui".to_owned());
             break;
         }
+    }
+
+    // Glyph fallback, appended *last* so it only supplies characters the fonts
+    // above lack — the UI keeps the face it already had.
+    //
+    // Without it the default family on macOS and Linux is Ubuntu-Light plus the
+    // two emoji fonts, and none of the three carry the arrows and geometric
+    // shapes the UI uses: the modified-tag dot rendered as a tofu box. Windows
+    // never showed it, because Segoe/Tahoma above is inserted at index 0 and
+    // has them all.
+    for path in [
+        // Verified to carry every glyph the UI uses that the defaults miss.
+        "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+        "/System/Library/Fonts/Apple Symbols.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSansSymbols2-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        r"C:\Windows\Fonts\seguisym.ttf",
+    ] {
+        let Ok(bytes) = std::fs::read(path) else {
+            continue;
+        };
+        fonts
+            .font_data
+            .insert(GLYPH_FALLBACK.to_owned(), FontData::from_owned(bytes));
+        for family in [FontFamily::Proportional, FontFamily::Monospace] {
+            fonts
+                .families
+                .entry(family)
+                .or_default()
+                .push(GLYPH_FALLBACK.to_owned());
+        }
+        break;
     }
 
     // Bold face for headers (Foundation uses FontWeight=Bold). Try common

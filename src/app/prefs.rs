@@ -62,6 +62,10 @@ pub(super) fn load_gui_prefs() -> GuiPrefs {
     GuiPrefs {
         browser_mode,
         browser_sort,
+        nested_default: nested_default_from_str(
+            value.get("nested_default").and_then(Value::as_str),
+        )
+        .unwrap_or_default(),
         show_browser_prefixes: value
             .get("show_browser_prefixes")
             .and_then(Value::as_bool)
@@ -394,6 +398,7 @@ pub(super) fn save_gui_prefs(
     let value = json!({
         "browser_mode": browser_mode_str(prefs.browser_mode),
         "browser_sort": browser_sort_str(prefs.browser_sort),
+        "nested_default": nested_default_str(prefs.nested_default),
         "show_browser_prefixes": prefs.show_browser_prefixes,
         "folders_before_tags": prefs.folders_before_tags,
         "double_click_to_open_tags": prefs.double_click_to_open_tags,
@@ -494,6 +499,23 @@ fn browser_sort_from_str(text: Option<&str>) -> Option<BrowserSort> {
         "name" => Some(BrowserSort::Name),
         "type" => Some(BrowserSort::Type),
         _ => None,
+    }
+}
+
+fn nested_default_from_str(text: Option<&str>) -> Option<NestedDefault> {
+    match text? {
+        "schema" => Some(NestedDefault::Schema),
+        "collapsed" => Some(NestedDefault::Collapsed),
+        "expanded" => Some(NestedDefault::Expanded),
+        _ => None,
+    }
+}
+
+fn nested_default_str(nested: NestedDefault) -> &'static str {
+    match nested {
+        NestedDefault::Schema => "schema",
+        NestedDefault::Collapsed => "collapsed",
+        NestedDefault::Expanded => "expanded",
     }
 }
 
@@ -812,6 +834,29 @@ mod tests {
         assert!(clean_favorite_relative_path(PathBuf::from("../brute.model")).is_none());
         assert!(clean_favorite_relative_path(PathBuf::from("./brute.model")).is_none());
         assert!(clean_favorite_relative_path(PathBuf::new()).is_none());
+    }
+}
+
+#[cfg(test)]
+mod nested_default_tests {
+    use super::*;
+
+    /// The stored spelling has to round trip, or the setting silently reverts
+    /// to Default on the next launch.
+    #[test]
+    fn every_nested_default_round_trips_through_its_stored_name() {
+        for option in NestedDefault::ALL {
+            assert_eq!(
+                nested_default_from_str(Some(nested_default_str(option))),
+                Some(option),
+                "{} did not round trip",
+                option.label()
+            );
+        }
+        // An absent or unrecognised value falls back rather than failing the
+        // whole preferences load.
+        assert_eq!(nested_default_from_str(None), None);
+        assert_eq!(nested_default_from_str(Some("nonsense")), None);
     }
 }
 

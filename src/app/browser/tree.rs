@@ -360,7 +360,9 @@ pub(in crate::app) fn draw_tree_node_lazy(
     } else {
         node.label.clone()
     };
-    let response = egui::CollapsingHeader::new(RichText::new(folder_label).color(text_dark()))
+    let response = egui::CollapsingHeader::new(
+        RichText::new(folder_label).color(folder_label_color(ui, node, entries)),
+    )
         .icon(folder_arrow_icon)
         .default_open(!filter.is_empty())
         .open(on_path.then_some(true))
@@ -648,6 +650,7 @@ pub(in crate::app) fn draw_tree_node(
         show_group_tree_header(
             ui,
             &node.label,
+            folder_label_color(ui, node, entries),
             show_prefixes,
             !filter.is_empty(),
             on_path,
@@ -659,7 +662,9 @@ pub(in crate::app) fn draw_tree_node(
         } else {
             node.label.clone()
         };
-        egui::CollapsingHeader::new(RichText::new(folder_label).color(text_dark()))
+        egui::CollapsingHeader::new(
+            RichText::new(folder_label).color(folder_label_color(ui, node, entries)),
+        )
             .icon(folder_arrow_icon)
             .default_open(!filter.is_empty())
             .open(on_path.then_some(true))
@@ -740,6 +745,16 @@ pub(in crate::app) fn draw_tree_node(
     clicked
 }
 
+/// Colour for a folder row: marked when anything beneath it carries edits that
+/// are not written into the game, so the workspace can be scanned top-down for
+/// where the modifications actually are.
+fn folder_label_color(ui: &Ui, node: &TagTreeNode, entries: &[TagEntry]) -> Color32 {
+    match browser_modified_tags(ui) {
+        Some(modified) if modified.subtree_has_modified(node, entries) => modified_text(),
+        _ => text_dark(),
+    }
+}
+
 fn group_tree_label_parts(label: &str) -> (&str, &str) {
     label
         .rsplit_once(' ')
@@ -749,6 +764,7 @@ fn group_tree_label_parts(label: &str) -> (&str, &str) {
 fn show_group_tree_header<R>(
     ui: &mut Ui,
     label: &str,
+    label_color: Color32,
     show_prefixes: bool,
     default_open: bool,
     force_open: bool,
@@ -776,7 +792,7 @@ fn show_group_tree_header<R>(
             name.to_owned()
         };
         if !display_name.is_empty() {
-            content = content.union(ui.label(RichText::new(display_name).color(text_dark())));
+            content = content.union(ui.label(RichText::new(display_name).color(label_color)));
         }
         let badge = Frame::none()
             .fill(Color32::from_rgb(48, 58, 66))
@@ -1011,7 +1027,12 @@ pub(in crate::app) fn draw_entry(
             Align2::LEFT_CENTER,
             label,
             FontId::proportional(12.5),
-            text_dark(),
+            // Marked when the tag has unsaved edits, or bytes stashed in the
+            // workspace's project from an earlier session.
+            match browser_modified_tags(ui) {
+                Some(modified) if modified.contains_key(&entry.key) => modified_text(),
+                _ => text_dark(),
+            },
         );
     }
     if response.dragged()

@@ -257,6 +257,58 @@ impl Baboon {
                             ui.close_menu();
                             self.redo_current_tag();
                         }
+                        ui.separator();
+                        // The same two actions as the tab context menu and the
+                        // toolbar, spelled out. An unlabelled trash icon among
+                        // the tool launchers is not where anyone looks for this.
+                        let selected = self.kits[self.active].selected_key.clone();
+                        let discardable = selected
+                            .as_deref()
+                            .is_some_and(|key| self.tag_has_discardable_changes(self.active, key));
+                        if ui
+                            .add_enabled(
+                                discardable,
+                                egui::Button::new("Discard Unsaved Changes"),
+                            )
+                            .on_hover_text(
+                                "Return the current tag to the way its source has it",
+                            )
+                            .clicked()
+                        {
+                            ui.close_menu();
+                            if let Some(key) = selected {
+                                self.discard_tag_changes(self.active, &key, ctx);
+                            }
+                        }
+                        if self.current_source_is_campaign_project_capable(self.active) {
+                            let stashed = self.stashed_campaign_tags(self.active);
+                            let unsaved = self.kits[self.active]
+                                .parsed_tags
+                                .values()
+                                .filter(|document| document.dirty)
+                                .count();
+                            if ui
+                                .add_enabled(
+                                    !stashed.is_empty() || unsaved > 0,
+                                    egui::Button::new("Clear All Unsaved Modifications..."),
+                                )
+                                .on_hover_text(
+                                    "Return every tag in this workspace to the way the game \
+                                     ships it, including edits stashed in earlier sessions",
+                                )
+                                .on_disabled_hover_text(
+                                    "This workspace has no unsaved modifications",
+                                )
+                                .clicked()
+                            {
+                                ui.close_menu();
+                                self.clear_stash_confirm = Some(ClearStashConfirm {
+                                    kit: self.active_kit_id(),
+                                    stashed,
+                                    unsaved,
+                                });
+                            }
+                        }
                     });
                     ui.menu_button("Tools", |ui| {
                         if ui.button("Run Tool...").clicked() {
@@ -998,6 +1050,7 @@ impl Baboon {
         self.draw_import_tag_window(ctx);
         self.draw_import_discard_confirm(ctx);
         self.draw_overwrite_confirm_window(ctx);
+        self.draw_clear_stash_confirm_window(ctx);
         self.draw_tag_conversion_window(ctx);
         self.draw_folder_conversion_window(ctx);
         self.draw_about_window(ctx);

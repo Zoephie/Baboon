@@ -121,7 +121,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    fn with_test_edit_context(assertion: impl FnOnce(&FieldEditContext<'_>)) {
+    fn with_test_edit_context(assertion: impl FnOnce(&mut FieldEditContext<'_>)) {
         let definitions_root = locate_definitions_root();
         let mut buffers = EditDrafts::default();
         let mut pending = Vec::new();
@@ -143,6 +143,8 @@ mod tests {
         let mut tsv_paste_request = None;
         let mut tag_reference_picker = None;
         let edit = FieldEditContext {
+            expand_all: None,
+            nested_default: NestedDefault::default(),
             view_scope: "test",
             tag_key: "test",
             group_tag: parse_group_tag("jpt!").unwrap(),
@@ -184,7 +186,8 @@ mod tests {
             field_filter: None,
             field_nav: None,
         };
-        assertion(&edit);
+        let mut edit = edit;
+        assertion(&mut edit);
     }
 
     #[test]
@@ -551,5 +554,45 @@ mod tests {
         for (field_name, expected) in cases {
             assert_eq!(semantic_short_index_target_key(field_name), expected);
         }
+    }
+
+    /// Expand/collapse-all is a direct instruction about the whole tag, so it
+    /// has to win over the rules that otherwise decide a container's open
+    /// state — the search filter's, and a reference jump forcing its target's
+    /// ancestors open. Every container type resolves through here, so this is
+    /// the one place that ordering is decided.
+    #[test]
+    fn expand_all_overrides_the_other_open_rules() {
+        with_test_edit_context(|edit| {
+            // Nothing asked for: the caller's own default stands.
+            assert_eq!(edit.resolve_open("some/block", true), None);
+
+            edit.expand_all = Some(true);
+            assert_eq!(edit.resolve_open("some/block", false), Some(true));
+
+            edit.expand_all = Some(false);
+            assert_eq!(edit.resolve_open("some/block", true), Some(false));
+        });
+    }
+
+    /// The preference adjusts each container's *default* rather than forcing
+    /// its state, so a group the user has since opened or closed keeps their
+    /// choice — egui only consults a default when it has nothing stored.
+    #[test]
+    fn nested_default_overrides_only_the_schema_default() {
+        with_test_edit_context(|edit| {
+            edit.nested_default = NestedDefault::Schema;
+            assert!(edit.default_open(true));
+            assert!(!edit.default_open(false));
+
+            edit.nested_default = NestedDefault::Collapsed;
+            assert!(!edit.default_open(true), "collapsed must close a section the schema opens");
+
+            edit.nested_default = NestedDefault::Expanded;
+            assert!(edit.default_open(false), "expanded must open a section the schema closes");
+
+            // And it stays a default: nothing here forces an open state.
+            assert_eq!(edit.resolve_open("some/block", true), None);
+        });
     }
 }

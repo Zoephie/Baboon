@@ -80,6 +80,10 @@ pub(super) struct Kit {
     /// one walks several packages.
     pub(super) ce_sound_bindings: HashMap<String, Arc<crate::source::ce_audio::CeSoundBinding>>,
 
+    /// Pending expand/collapse-all requests, keyed by tag. Raised from the tag
+    /// tab's menu and consumed by the next draw of that tag's pane.
+    pub(super) pending_expand: HashMap<String, bool>,
+
     // --- Per-tag "Search fields" state ---
     pub(super) field_search: HashMap<String, String>,
     /// The last query actually applied per tag, so the collapse is a one-shot
@@ -97,6 +101,13 @@ pub(super) struct Kit {
     pub(super) browser_sort: BrowserSort,
     pub(super) filter: String,
     pub(super) filter_cache: FilterCache,
+    /// Which tags the browser should mark as modified, and the signature the
+    /// set was built from. Rebuilt only when that signature changes: resolving
+    /// a tag key to its entry is a linear scan of the source, so doing it for
+    /// every dirty tag every frame would cost far more than the handful of
+    /// lookups it represents.
+    pub(super) modified_tags: std::sync::Arc<ModifiedTags>,
+    pub(super) modified_signature: Vec<String>,
     /// Bumped whenever this kit's source or its `all_entries` set is replaced,
     /// so caches and in-flight async results know to recompute or drop against
     /// fresh data. Per kit, so reloading one kit cannot invalidate another's.
@@ -151,12 +162,15 @@ impl Kit {
             rmdf_cache: HashMap::new(),
             rmop_cache: HashMap::new(),
             ce_sound_bindings: HashMap::new(),
+            pending_expand: HashMap::new(),
             field_search: HashMap::new(),
             field_search_applied: HashMap::new(),
             browser_mode: BrowserMode::default(),
             browser_sort: BrowserSort::default(),
             filter: String::new(),
             filter_cache: FilterCache::default(),
+            modified_tags: std::sync::Arc::new(ModifiedTags::default()),
+            modified_signature: Vec::new(),
             generation: 0,
             field_index: FieldValueIndex::default(),
             keywords: KeywordStore::default(),
@@ -169,6 +183,20 @@ impl Kit {
             pending_campaign_project: None,
             pending_restore_tags: Vec::new(),
         }
+    }
+
+    /// Whether this workspace holds edits that are not written into the game:
+    /// unsaved open documents, or tags stashed in its project.
+    ///
+    /// One predicate for both, because the tab's dot and its colour were
+    /// computed separately and drifted apart — closing the last stashed tag
+    /// left the dot showing while the colour went back to clean.
+    pub(super) fn has_unwritten_modifications(&self) -> bool {
+        self.parsed_tags.values().any(|document| document.dirty)
+            || self
+                .campaign_project
+                .as_ref()
+                .is_some_and(|project| !project.overlays.is_empty())
     }
 
     /// Whether this kit is an empty workspace rather than a loaded source.

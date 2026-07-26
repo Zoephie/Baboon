@@ -89,6 +89,14 @@ impl EditDrafts {
         self.entries.insert(key, EditDraft::new(value));
     }
 
+    /// Drop every draft belonging to one tag. Drafts are keyed `tag|path`, so
+    /// discarding a tag's edits has to take its half-typed values with it or
+    /// they would be re-applied over the reloaded document.
+    pub(in crate::app) fn forget_tag(&mut self, tag_key: &str) {
+        let prefix = format!("{tag_key}|");
+        self.entries.retain(|key, _| !key.starts_with(&prefix));
+    }
+
     pub(in crate::app) fn accept_successful_edits(
         &mut self,
         tag_key: &str,
@@ -471,6 +479,12 @@ pub(in crate::app) struct FieldEditContext<'a> {
     /// Active reference-jump navigation. When set for this tag, its target
     /// field's ancestor blocks are force-opened and the field is glowed.
     pub(in crate::app) field_nav: Option<&'a FieldNav>,
+    /// One-shot "expand everything" / "collapse everything" for this tag,
+    /// consumed by the pane that draws it. egui remembers each container's
+    /// state, so a single frame of forcing is enough to make it stick.
+    pub(in crate::app) expand_all: Option<bool>,
+    /// How nested containers start out, from preferences.
+    pub(in crate::app) nested_default: NestedDefault,
 }
 
 impl FieldEditContext<'_> {
@@ -482,7 +496,24 @@ impl FieldEditContext<'_> {
     /// whose normal default is `default_open`. `None` means "leave the node's
     /// stored state alone" (no filter applied this frame); `Some(open)` forces
     /// it this frame.
+    /// The starting open state for a container whose schema-derived default is
+    /// `schema_default`, after the preference is applied.
+    ///
+    /// This adjusts the *default* rather than forcing the state each frame, so
+    /// a container the user has since opened or closed by hand keeps whatever
+    /// they chose — egui only consults a default when it has nothing stored.
+    pub(in crate::app) fn default_open(&self, schema_default: bool) -> bool {
+        self.nested_default.applies_to(schema_default)
+    }
+
     pub(in crate::app) fn resolve_open(&self, node_path: &str, default_open: bool) -> Option<bool> {
+        // An explicit expand/collapse-all wins over everything: it is a direct
+        // instruction about this whole tag, issued this frame. Every container
+        // type -- groups, structs, blocks, arrays -- resolves its open state
+        // here, so this one line reaches all of them.
+        if self.expand_all.is_some() {
+            return self.expand_all;
+        }
         // A reference-jump forces every ancestor of its target field open so the
         // field can be scrolled into view. Takes precedence over the search filter.
         if let Some(nav) = self.field_nav {

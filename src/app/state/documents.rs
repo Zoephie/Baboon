@@ -58,6 +58,10 @@ pub(in crate::app) struct DirtyTagEntry {
 /// being vetoed and prompting again.
 pub(in crate::app) struct SaveChangesPrompt {
     pub(in crate::app) visible: bool,
+    /// Whether this workspace can hold edits in a Baboon project rather than
+    /// writing them into the game. Container sources can; a loose kit has
+    /// nowhere to stash to, so it is offered Save or nothing.
+    pub(in crate::app) can_stash: bool,
     pub(in crate::app) dirty_tags: Vec<DirtyTagEntry>,
     pub(in crate::app) pending_action: PendingCloseAction,
     pub(in crate::app) error: Option<String>,
@@ -68,6 +72,7 @@ impl Default for SaveChangesPrompt {
     fn default() -> Self {
         Self {
             visible: false,
+            can_stash: false,
             dirty_tags: Vec::new(),
             pending_action: PendingCloseAction::CloseApp,
             error: None,
@@ -310,6 +315,14 @@ pub(in crate::app) struct ImportTagDialog {
 
 /// A parsed imported tag awaiting a "discard unsaved edits?" confirmation before
 /// it overwrites an already-open, dirty document at `target_key`.
+/// Pending "throw away everything this workspace has not written into the
+/// game" confirmation, listing what it is about to drop.
+pub(in crate::app) struct ClearStashConfirm {
+    pub(in crate::app) kit: KitId,
+    pub(in crate::app) stashed: Vec<String>,
+    pub(in crate::app) unsaved: usize,
+}
+
 /// Pending "Save will overwrite the game's paks in place" confirmation.
 ///
 /// Carries its workspace for the same reason [`PendingImport`] does: the
