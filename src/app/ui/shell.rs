@@ -2,6 +2,7 @@
 //! It owns immediate-mode presentation and request collection; tag mutation, persistence, and source I/O belong to their owning subsystems.
 
 use super::*;
+use super::recents::draw_recent_folders_menu;
 
 impl Baboon {
     pub(super) fn draw_root_ui(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -70,25 +71,13 @@ impl Baboon {
                             ui.close_menu();
                             self.open_loaded_data_folder();
                         }
+                        let mut recent_action = None;
                         ui.menu_button("Recent Folders", |ui| {
-                            if self.recent_folders.is_empty() {
-                                ui.add_enabled(false, egui::Button::new("No recent folders"));
-                            } else {
-                                for path in self.recent_folders.clone() {
-                                    let full_path = path.display().to_string();
-                                    let label = recent_folder_menu_label(&path);
-                                    if ui.button(label).on_hover_text(full_path).clicked() {
-                                        ui.close_menu();
-                                        self.load_recent_folder(path, ctx.clone());
-                                    }
-                                }
-                                ui.separator();
-                                if ui.button("Clear Recent Folders").clicked() {
-                                    self.recent_folders.clear();
-                                    ui.close_menu();
-                                }
-                            }
+                            recent_action = draw_recent_folders_menu(ui, &self.recent_folders);
                         });
+                        if let Some(action) = recent_action {
+                            self.apply_recent_action(action, ctx);
+                        }
                         ui.separator();
                         if icon_text_button(
                             ui,

@@ -2,16 +2,15 @@
 //! It owns which kit workspaces are visible and how they are arranged; one workspace's contents belong to the browser and tag-tile modules.
 
 use super::*;
-use super::shell::recent_folder_menu_label;
+use super::recents::{RecentAction, draw_recent_folders_menu};
 
 /// Which loader the "+" menu on the kit tab bar should start.
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 enum LoadKind {
     Folder,
     SingleFile,
     Monolithic,
     Container,
-    Recent(std::path::PathBuf),
 }
 
 /// Bridges `egui_tiles` back to [`Baboon`] while the kit tree is being drawn.
@@ -25,6 +24,7 @@ struct KitPaneBehavior<'a> {
     close_requests: Vec<KitId>,
     focused: Option<KitId>,
     add_kit: Option<LoadKind>,
+    recent_action: Option<RecentAction>,
 }
 
 impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
@@ -146,20 +146,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
             }
             ui.separator();
             ui.menu_button("Recent", |ui| {
-                if recents.is_empty() {
-                    ui.add_enabled(false, egui::Button::new("No recent folders"));
-                }
-                for path in &recents {
-                    let full = path.display().to_string();
-                    if ui
-                        .button(recent_folder_menu_label(path))
-                        .on_hover_text(full)
-                        .clicked()
-                    {
-                        ui.close_menu();
-                        self.add_kit = Some(LoadKind::Recent(path.clone()));
-                    }
-                }
+                self.recent_action = draw_recent_folders_menu(ui, &recents);
             });
         })
         .response
@@ -235,11 +222,13 @@ impl Baboon {
             close_requests: Vec::new(),
             focused: None,
             add_kit: None,
+            recent_action: None,
         };
         tree.ui(&mut behavior, ui);
         let close_requests = std::mem::take(&mut behavior.close_requests);
         let focused = behavior.focused.take();
         let add_kit = behavior.add_kit.take();
+        let recent_action = behavior.recent_action.take();
         self.kit_tree = tree;
 
         if let Some(kit_id) = focused
@@ -250,13 +239,15 @@ impl Baboon {
         for kit_id in close_requests {
             self.request_close_action(PendingCloseAction::CloseKit(kit_id), ctx);
         }
+        if let Some(action) = recent_action {
+            self.apply_recent_action(action, ctx);
+        }
         if let Some(kind) = add_kit {
             match kind {
                 LoadKind::Folder => self.begin_load_folder(ctx.clone()),
                 LoadKind::SingleFile => self.begin_load_single(ctx.clone()),
                 LoadKind::Monolithic => self.begin_load_monolithic(ctx.clone()),
                 LoadKind::Container => self.begin_load_iostore_container(ctx.clone()),
-                LoadKind::Recent(path) => self.load_recent_folder(path, ctx.clone()),
             }
         }
     }

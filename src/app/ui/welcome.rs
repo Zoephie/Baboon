@@ -13,6 +13,8 @@ enum WelcomeAction {
     LoadMonolithic,
     LoadContainer,
     LoadRecent(std::path::PathBuf),
+    ForgetRecent(std::path::PathBuf),
+    ForgetAllRecents,
     LoadKit(EditingKitShortcut),
     OpenSettings,
 }
@@ -136,18 +138,28 @@ impl Baboon {
                                 .parent()
                                 .map(|parent| parent.display().to_string())
                                 .unwrap_or_default();
-                            let clicked = ui
-                                .horizontal(|ui| {
-                                    let label =
-                                        ui.link(name).on_hover_text(path.display().to_string());
-                                    ui.label(
-                                        RichText::new(parent).color(subtle_dark()).small(),
-                                    );
-                                    label.clicked()
-                                })
-                                .inner;
-                            if clicked {
-                                action = Some(WelcomeAction::LoadRecent(path.clone()));
+                            ui.horizontal(|ui| {
+                                if ui
+                                    .add(egui::Button::new("✕").small().frame(false))
+                                    .on_hover_text("Remove from recent folders")
+                                    .clicked()
+                                {
+                                    action = Some(WelcomeAction::ForgetRecent(path.clone()));
+                                }
+                                if ui
+                                    .link(name)
+                                    .on_hover_text(path.display().to_string())
+                                    .clicked()
+                                {
+                                    action = Some(WelcomeAction::LoadRecent(path.clone()));
+                                }
+                                ui.label(RichText::new(parent).color(subtle_dark()).small());
+                            });
+                        }
+                        if !recents.is_empty() {
+                            ui.add_space(8.0);
+                            if welcome_link(ui, "Clear recent folders").clicked() {
+                                action = Some(WelcomeAction::ForgetAllRecents);
                             }
                         }
                     });
@@ -160,6 +172,14 @@ impl Baboon {
             Some(WelcomeAction::LoadMonolithic) => self.begin_load_monolithic(ctx.clone()),
             Some(WelcomeAction::LoadContainer) => self.begin_load_iostore_container(ctx.clone()),
             Some(WelcomeAction::LoadRecent(path)) => self.load_recent_folder(path, ctx.clone()),
+            Some(WelcomeAction::ForgetRecent(path)) => {
+                self.remove_recent_folder(&path);
+                self.status = format!("Removed {} from recent folders", path.display());
+            }
+            Some(WelcomeAction::ForgetAllRecents) => {
+                self.recent_folders.clear();
+                self.status = "Cleared recent folders".to_owned();
+            }
             Some(WelcomeAction::LoadKit(shortcut)) => {
                 self.load_editing_kit_shortcut(shortcut, ctx.clone())
             }

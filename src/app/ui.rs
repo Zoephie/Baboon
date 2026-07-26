@@ -10,6 +10,7 @@ mod find;
 mod first_run;
 mod help;
 mod search_windows;
+mod recents;
 mod settings;
 mod shell;
 mod kit_tiles;
