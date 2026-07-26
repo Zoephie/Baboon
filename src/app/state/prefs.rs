@@ -43,6 +43,57 @@ pub(in crate::app) enum HelpPanelTab {
     MapNames,
 }
 
+/// How nested containers in the tag editor start out.
+///
+/// `Schema` keeps each container's own judgement — top-level groups and
+/// priority sections open, deeply nested blocks closed — which suits browsing
+/// an unfamiliar tag. The other two override it outright for people who would
+/// rather always start from one end.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(in crate::app) enum NestedDefault {
+    #[default]
+    Schema,
+    Collapsed,
+    Expanded,
+}
+
+impl NestedDefault {
+    pub(in crate::app) const ALL: [NestedDefault; 3] = [
+        NestedDefault::Schema,
+        NestedDefault::Collapsed,
+        NestedDefault::Expanded,
+    ];
+
+    pub(in crate::app) fn label(self) -> &'static str {
+        match self {
+            NestedDefault::Schema => "Default",
+            NestedDefault::Collapsed => "Collapsed",
+            NestedDefault::Expanded => "Expanded",
+        }
+    }
+
+    pub(in crate::app) fn help(self) -> &'static str {
+        match self {
+            NestedDefault::Schema => {
+                "Each group, struct and block decides for itself — top-level \
+                 sections open, deeply nested ones closed"
+            }
+            NestedDefault::Collapsed => "Every nested group, struct and block starts closed",
+            NestedDefault::Expanded => "Every nested group, struct and block starts open",
+        }
+    }
+
+    /// The starting open state for a container whose schema-derived default is
+    /// `schema_default`.
+    pub(in crate::app) fn applies_to(self, schema_default: bool) -> bool {
+        match self {
+            NestedDefault::Schema => schema_default,
+            NestedDefault::Collapsed => false,
+            NestedDefault::Expanded => true,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(in crate::app) enum SettingsTab {
     Startup,
@@ -156,6 +207,7 @@ impl SessionRestore {
 pub(in crate::app) struct GuiPrefs {
     pub(in crate::app) browser_mode: BrowserMode,
     pub(in crate::app) browser_sort: BrowserSort,
+    pub(in crate::app) nested_default: NestedDefault,
     pub(in crate::app) show_browser_prefixes: bool,
     pub(in crate::app) folders_before_tags: bool,
     pub(in crate::app) double_click_to_open_tags: bool,
@@ -186,6 +238,7 @@ impl Default for GuiPrefs {
         Self {
             browser_mode: BrowserMode::default(),
             browser_sort: BrowserSort::default(),
+            nested_default: NestedDefault::default(),
             show_browser_prefixes: false,
             folders_before_tags: false,
             double_click_to_open_tags: false,

@@ -486,6 +486,7 @@ pub(in crate::app) fn draw_shader_grid_row_readonly(
     let mut ctx = FieldEditContext {
         // The shader grid draws no collapsible containers of its own.
         expand_all: None,
+        nested_default: NestedDefault::default(),
         view_scope: "readonly",
         tag_key: "",
         group_tag: 0,

@@ -483,6 +483,8 @@ pub(in crate::app) struct FieldEditContext<'a> {
     /// consumed by the pane that draws it. egui remembers each container's
     /// state, so a single frame of forcing is enough to make it stick.
     pub(in crate::app) expand_all: Option<bool>,
+    /// How nested containers start out, from preferences.
+    pub(in crate::app) nested_default: NestedDefault,
 }
 
 impl FieldEditContext<'_> {
@@ -494,6 +496,16 @@ impl FieldEditContext<'_> {
     /// whose normal default is `default_open`. `None` means "leave the node's
     /// stored state alone" (no filter applied this frame); `Some(open)` forces
     /// it this frame.
+    /// The starting open state for a container whose schema-derived default is
+    /// `schema_default`, after the preference is applied.
+    ///
+    /// This adjusts the *default* rather than forcing the state each frame, so
+    /// a container the user has since opened or closed by hand keeps whatever
+    /// they chose — egui only consults a default when it has nothing stored.
+    pub(in crate::app) fn default_open(&self, schema_default: bool) -> bool {
+        self.nested_default.applies_to(schema_default)
+    }
+
     pub(in crate::app) fn resolve_open(&self, node_path: &str, default_open: bool) -> Option<bool> {
         // An explicit expand/collapse-all wins over everything: it is a direct
         // instruction about this whole tag, issued this frame. Every container

@@ -112,6 +112,9 @@ impl Baboon {
             }
         });
         ui.add_space(12.0);
+        ui.label(RichText::new("Tag editor").strong());
+        self.draw_nested_default_picker(ui);
+        ui.add_space(12.0);
         ui.label(RichText::new("Appearance").strong());
         ui.checkbox(&mut self.dark_mode, "Dark mode");
         ui.horizontal(|ui| {

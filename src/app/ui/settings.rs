@@ -114,6 +114,26 @@ impl Baboon {
         );
     }
 
+    /// Radio row for how nested containers in the tag editor start out.
+    /// Shared by Settings and the first-run wizard so the two cannot drift.
+    pub(super) fn draw_nested_default_picker(&mut self, ui: &mut Ui) {
+        ui.label(RichText::new("Groups, structs and blocks start").color(text_dark()));
+        ui.horizontal(|ui| {
+            for option in NestedDefault::ALL {
+                ui.radio_value(&mut self.nested_default, option, option.label())
+                    .on_hover_text(option.help());
+            }
+        });
+        ui.label(
+            RichText::new(
+                "Applies to tags opened from now on. A group you open or close yourself keeps \
+                 the state you chose.",
+            )
+            .color(subtle_dark())
+            .small(),
+        );
+    }
+
     pub(super) fn draw_settings_browser_tab(&mut self, ui: &mut Ui) {
         ui.label(RichText::new("Browser").color(text_dark()).strong());
         ui.add_space(4.0);
@@ -125,6 +145,10 @@ impl Baboon {
             &mut self.folders_before_tags,
             "List subfolders before tags in browser",
         );
+        ui.add_space(12.0);
+        ui.label(RichText::new("Tag editor").color(text_dark()).strong());
+        ui.add_space(4.0);
+        self.draw_nested_default_picker(ui);
     }
 
     pub(super) fn draw_settings_editing_kits_tab(&mut self, ui: &mut Ui) {

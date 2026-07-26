@@ -155,6 +155,7 @@ impl Baboon {
                 .as_ref()
                 .filter(|nav| nav.kit == kit_id && nav.tag_key == key),
             expand_all,
+            nested_default: self.nested_default,
         };
 
         if is_bitmap_tag(entry) {

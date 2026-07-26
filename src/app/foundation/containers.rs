@@ -22,7 +22,8 @@ pub(in crate::app) fn draw_struct_fields(
     } else {
         clean_field_name(tag_struct.name())
     };
-    let open_override = edit.resolve_open(path_prefix, depth <= 1);
+    let group_default_open = edit.default_open(depth <= 1);
+    let open_override = edit.resolve_open(path_prefix, group_default_open);
     draw_foundation_group(
         ui,
         title,
@@ -62,7 +63,8 @@ pub(in crate::app) fn draw_inherited_object_fields(
 
     for (struct_value, path_prefix) in chain.iter().rev() {
         let title = clean_field_name(struct_value.name()).to_ascii_uppercase();
-        let open_override = edit.resolve_open(path_prefix, true);
+        let inherited_default_open = edit.default_open(true);
+        let open_override = edit.resolve_open(path_prefix, inherited_default_open);
         draw_foundation_group(
             ui,
             title,
@@ -408,7 +410,7 @@ pub(in crate::app) fn draw_field(
         // Foundation/Guerilla. The user can still collapse it, and that choice
         // persists (collapse state is keyed index-free; see `strip_node_indices`).
 
-        let nested_default_open = true;
+        let nested_default_open = edit.default_open(true);
         let open_override = edit.resolve_open(&field_path, nested_default_open);
         draw_foundation_group(
             ui,
@@ -817,7 +819,7 @@ pub(in crate::app) fn draw_foundation_block(
         block_element_dropdown_label(block.element(sel), names, sel)
     };
 
-    let block_default_open = depth == 0 || is_priority_section(name);
+    let block_default_open = edit.default_open(depth == 0 || is_priority_section(name));
     let open_override = edit.resolve_open(path_prefix, block_default_open);
     // A clipboard is compatible when it came from the same group + block schema
     // position AND holds elements of the same on-disk size. Element subscripts
@@ -1272,7 +1274,8 @@ pub(in crate::app) fn draw_foundation_array(
     } else {
         block_element_dropdown_label(array.element(sel), names, sel)
     };
-    let open_override = edit.resolve_open(path_prefix, depth == 0);
+    let array_default_open = edit.default_open(depth == 0);
+    let open_override = edit.resolve_open(path_prefix, array_default_open);
     // A clipboard is compatible when it came from this same array schema
     // position. Element subscripts are stripped so which parent block element is
     // selected doesn't matter — the array's shape is identical across siblings.

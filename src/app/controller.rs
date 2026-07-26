@@ -4820,6 +4820,7 @@ impl Baboon {
             // so a single-workspace session remembers its choice as before.
             browser_mode: self.kits[self.active].browser_mode,
             browser_sort: self.kits[self.active].browser_sort,
+            nested_default: self.nested_default,
             show_browser_prefixes: self.show_browser_prefixes,
             folders_before_tags: self.folders_before_tags,
             double_click_to_open_tags: self.double_click_to_open_tags,

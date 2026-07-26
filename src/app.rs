@@ -152,6 +152,8 @@ pub struct Baboon {
     /// saved default they are seeded from.
     default_browser_mode: BrowserMode,
     default_browser_sort: BrowserSort,
+    /// How nested groups, structs and blocks in the tag editor start out.
+    nested_default: NestedDefault,
     show_browser_prefixes: bool,
     folders_before_tags: bool,
     double_click_to_open_tags: bool,
@@ -356,6 +358,7 @@ impl Baboon {
             find: FindDialogState::default(),
             default_browser_mode: prefs.browser_mode,
             default_browser_sort: prefs.browser_sort,
+            nested_default: prefs.nested_default,
             show_browser_prefixes: prefs.show_browser_prefixes,
             folders_before_tags: prefs.folders_before_tags,
             double_click_to_open_tags: prefs.double_click_to_open_tags,
