@@ -5288,8 +5288,14 @@ impl Baboon {
                     self.draw_tag_pane(ui, ctx, &entry, "floating", false);
                 });
             if let Some(inner) = &window_response {
+                // Holding the primary button over the window arms the drag, since
+                // egui's own window response does not report a title-bar drag
+                // reliably. Require an actual drag, though — otherwise every
+                // click on a field inside the window would arm it and flash the
+                // dock strip.
                 let pointer_down_over_window = ctx.input(|input| {
                     input.pointer.primary_down()
+                        && input.pointer.is_decidedly_dragging()
                         && input
                             .pointer
                             .interact_pos()

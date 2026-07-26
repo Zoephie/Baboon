@@ -1150,14 +1150,7 @@ impl Baboon {
                     let mut close_all_but = None;
                     let mut reveal_key = None;
                     let mut rack_rect = None;
-                    if self.open_tabs.is_empty() {
-                        let response = ui.label(
-                            RichText::new("Drop popped tag here")
-                                .color(subtle_dark())
-                                .strong(),
-                        );
-                        rack_rect = Some(response.rect);
-                    } else {
+                    if !self.open_tabs.is_empty() {
                         const TAB_BUTTON_SIZE: f32 = 18.0;
                         const TAB_MIN_LABEL_WIDTH: f32 = 48.0;
                         const TAB_MAX_LABEL_WIDTH: f32 = 170.0;
@@ -1221,7 +1214,7 @@ impl Baboon {
                         }
 
                         for row in rows {
-                            let row_response = ui.horizontal(|ui| {
+                            ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = row_gap;
                                 for (key, label, active, dirty, label_width, group_tag) in row {
                                     let shown_label = truncate_for_cell(&label, label_width);
@@ -1315,11 +1308,57 @@ impl Baboon {
                                     }
                                 }
                             });
-                            rack_rect = Some(match rack_rect {
-                                Some(rect) => rect.union(row_response.response.rect),
-                                None => row_response.response.rect,
-                            });
                         }
+                    }
+                    // A popped-out tag docks by being dropped here. The strip is
+                    // drawn only while a drag is in flight, spans the full width,
+                    // and is the only drop target. Previously the target was the
+                    // tab rows themselves and the "drop here" label appeared only
+                    // when nothing was docked at all — so with even one docked tab
+                    // there was no affordance and only a thin sliver to hit.
+                    if self.dragging_floating_tab.is_some() {
+                        if !self.open_tabs.is_empty() {
+                            ui.add_space(3.0);
+                        }
+                        let pointer = ui.input(|input| input.pointer.interact_pos());
+                        let (strip_rect, _) = ui
+                            .allocate_exact_size(Vec2::new(ui.available_width(), 24.0), Sense::hover());
+                        let hovered = pointer.is_some_and(|pos| strip_rect.contains(pos));
+                        // Paint on the foreground layer: the window being dragged
+                        // is what covers this spot, and the cursor sits on its
+                        // title bar, so a central-panel painter would hide the
+                        // strip under the very window it is a target for.
+                        let painter = ui.ctx().layer_painter(egui::LayerId::new(
+                            egui::Order::Foreground,
+                            egui::Id::new("floating_dock_strip"),
+                        ));
+                        let accent = Color32::from_rgb(184, 134, 11);
+                        painter.rect_filled(
+                            strip_rect,
+                            4.0,
+                            if hovered {
+                                tint_toward(menu_bar(), accent, 0.35)
+                            } else {
+                                row_type()
+                            },
+                        );
+                        painter.rect_stroke(
+                            strip_rect,
+                            4.0,
+                            Stroke::new(if hovered { 2.0 } else { 1.0 }, if hovered {
+                                accent
+                            } else {
+                                grid_line()
+                            }),
+                        );
+                        painter.text(
+                            strip_rect.center(),
+                            egui::Align2::CENTER_CENTER,
+                            "Drop here to dock",
+                            egui::TextStyle::Small.resolve(ui.style()),
+                            text_dark(),
+                        );
+                        rack_rect = Some(strip_rect);
                     }
                     if close_all {
                         self.request_close_action(PendingCloseAction::CloseAllTabs, ctx);
