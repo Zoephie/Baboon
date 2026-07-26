@@ -7,10 +7,18 @@ impl Baboon {
     /// Applies `WorkerMessage::SourceLoaded`, including source reset and follow-up index work.
     pub(super) fn handle_source_loaded(
         &mut self,
+        kit: KitId,
         result: Result<LoadedSourceData, String>,
         recent_path: Option<PathBuf>,
         ctx: &egui::Context,
     ) -> bool {
+        // A load targets the kit it was started for. If that kit closed while
+        // the load was in flight the result is dropped rather than landing in
+        // whichever kit happens to be active now.
+        let Some(index) = self.resolve_kit(kit) else {
+            return true;
+        };
+        self.active = index;
         let mut loaded = match result {
             Ok(loaded) => loaded,
             Err(error) => {
@@ -81,19 +89,18 @@ impl Baboon {
     /// Applies `WorkerMessage::AllEntriesScanned`, rejecting stale source generations.
     pub(super) fn handle_all_entries_scanned(
         &mut self,
-        generation: u64,
+        stamp: KitStamp,
         result: Result<Vec<TagEntry>, String>,
         ctx: &egui::Context,
     ) -> bool {
-        if generation != self.kits[self.active].generation {
+        let Some(kit_index) = self.resolve_stamp(stamp) else {
             return true;
-        }
-        self.kits[self.active].scanning_entries = false;
+        };
+        self.kits[kit_index].scanning_entries = false;
         self.entry_index_progress = None;
         match result {
             Ok(scanned) => {
                 let mut build_reference_index = false;
-                let kit_index = self.active;
                 let kit = &mut self.kits[kit_index];
                 if let Some(source) = kit.source.as_mut() {
                     let n = scanned.len();
@@ -120,13 +127,13 @@ impl Baboon {
                         let entries = source.all_entries.clone();
                         let tx = self.tx.clone();
                         let ctx = ctx.clone();
-                        let generation = kit.generation;
+                        let stamp = KitStamp { kit: kit.id, generation: kit.generation };
                         let path = crate::source::index_db_path();
                         thread::spawn(move || {
                             let result = crate::source::save_entry_index(&game, &root, &entries)
                                 .map_err(|error| error.to_string());
                             let _ = tx.send(WorkerMessage::EntryIndexSaved {
-                                generation,
+                                stamp,
                                 path,
                                 result,
                             });
@@ -152,13 +159,16 @@ impl Baboon {
     /// Applies `WorkerMessage::EntryIndexScanProgress`, rejecting stale or inactive scans.
     pub(super) fn handle_entry_index_scan_progress(
         &mut self,
-        generation: u64,
+        stamp: KitStamp,
         processed: usize,
         total: usize,
         matched: usize,
         ctx: &egui::Context,
     ) -> bool {
-        if generation != self.kits[self.active].generation || !self.kits[self.active].scanning_entries {
+        let Some(kit_index) = self.resolve_stamp(stamp) else {
+            return true;
+        };
+        if !self.kits[kit_index].scanning_entries {
             return true;
         }
         if let Some(progress) = self.entry_index_progress.as_mut() {
@@ -173,17 +183,19 @@ impl Baboon {
     /// Applies `WorkerMessage::EntryIndexRefreshed`, rejecting stale source generations.
     pub(super) fn handle_entry_index_refreshed(
         &mut self,
-        generation: u64,
+        stamp: KitStamp,
         result: Result<EntryIndexRefresh, String>,
         ctx: &egui::Context,
     ) -> bool {
         self.refreshing_entry_index = false;
-        if generation != self.kits[self.active].generation {
+        let Some(kit_index) = self.resolve_stamp(stamp) else {
             return true;
-        }
+        };
         self.schedule_next_entry_index_refresh(ctx);
         match result {
-            Ok(refresh) if refresh.changed => self.apply_entry_index_refresh(refresh, ctx.clone()),
+            Ok(refresh) if refresh.changed => {
+                self.apply_entry_index_refresh(kit_index, refresh, ctx.clone())
+            }
             Ok(_) => {}
             Err(error) => self.status = format!("Index refresh failed: {error}"),
         }

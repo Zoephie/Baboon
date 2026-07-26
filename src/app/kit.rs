@@ -13,6 +13,19 @@ use super::*;
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub(super) struct KitId(pub(super) u64);
 
+/// Which kit a background job ran for, and against which revision of it.
+///
+/// Every kit-scoped [`WorkerMessage`] carries one. Validating it answers both
+/// staleness questions at once — did the kit close while the job ran, and was
+/// its source replaced underneath it — so no handler has to remember to check
+/// them separately. A single global generation could not do this: reloading
+/// one kit would have invalidated every other kit's in-flight work.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub(super) struct KitStamp {
+    pub(super) kit: KitId,
+    pub(super) generation: u64,
+}
+
 /// One editing kit: a tag source plus every piece of state scoped to it.
 ///
 /// Baboon was historically single-source, with all of this living flat on
@@ -162,6 +175,30 @@ impl Baboon {
 
     pub(super) fn active_kit_id(&self) -> KitId {
         self.kits[self.active].id
+    }
+
+    /// Stamp identifying the active kit and its current revision, to be
+    /// attached to a background job so its result can be routed back.
+    pub(super) fn kit_stamp(&self) -> KitStamp {
+        let kit = &self.kits[self.active];
+        KitStamp {
+            kit: kit.id,
+            generation: kit.generation,
+        }
+    }
+
+    /// Resolve a stamp to the kit index it still refers to, or `None` if the
+    /// kit has closed or its source was replaced while the job was running.
+    /// Ids are never reused, so a closed kit cannot alias a live one.
+    pub(super) fn resolve_stamp(&self, stamp: KitStamp) -> Option<usize> {
+        let index = self.kit_index(stamp.kit)?;
+        (self.kits[index].generation == stamp.generation).then_some(index)
+    }
+
+    /// Resolve a kit id to its index, ignoring generation. For results that
+    /// stay valid across a source reload, such as a parsed document.
+    pub(super) fn resolve_kit(&self, kit: KitId) -> Option<usize> {
+        self.kit_index(kit)
     }
 
     /// The active kit's source, or `None` for an empty workspace.

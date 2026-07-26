@@ -16,11 +16,12 @@ impl Baboon {
     /// Applies `WorkerMessage::EntryIndexSaved`, rejecting stale source generations.
     pub(super) fn handle_entry_index_saved(
         &mut self,
-        generation: u64,
+        stamp: KitStamp,
         path: PathBuf,
         result: Result<(), String>,
     ) -> bool {
-        if generation != self.kits[self.active].generation {
+        // Reports through the global status line only.
+        if self.resolve_stamp(stamp).is_none() {
             return true;
         }
         match result {

@@ -7,18 +7,18 @@ impl Baboon {
     /// Applies `WorkerMessage::ReverseDependenciesBuilt`, rejecting stale source generations.
     pub(super) fn handle_reverse_dependencies_built(
         &mut self,
-        generation: u64,
+        stamp: KitStamp,
         index: ReverseDependencyIndex,
     ) -> bool {
         self.building_reverse_dependencies = false;
-        if generation != self.kits[self.active].generation {
+        let Some(kit_index) = self.resolve_stamp(stamp) else {
             return true;
-        }
+        };
         self.reference_index_progress = None;
         let paired_entry_index_build = self.building_reference_for_entry_index;
         self.building_reference_for_entry_index = false;
         self.show_entry_index_wait_notice = false;
-        if let Some(source) = self.source_mut() {
+        if let Some(source) = self.kits[kit_index].source.as_mut() {
             let n = index.len();
             if let (Some(game), TagSource::LooseFolder { root, .. }) =
                 (source.game.clone(), &source.source)
@@ -46,12 +46,14 @@ impl Baboon {
     /// Applies `WorkerMessage::ReferenceIndexProgress`, rejecting stale or inactive builds.
     pub(super) fn handle_reference_index_progress(
         &mut self,
-        generation: u64,
+        stamp: KitStamp,
         processed: usize,
         total: usize,
         ctx: &egui::Context,
     ) -> bool {
-        if generation != self.kits[self.active].generation || !self.building_reverse_dependencies {
+        // Drives the global progress bar only; the stamp is checked purely so
+        // a closed or reloaded kit's progress stops updating it.
+        if self.resolve_stamp(stamp).is_none() || !self.building_reverse_dependencies {
             return true;
         }
         if let Some(progress) = self.reference_index_progress.as_mut() {

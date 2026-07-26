@@ -7,12 +7,14 @@ impl Baboon {
     /// Applies `WorkerMessage::FieldValueSearchFinished`, rejecting stale source generations.
     pub(super) fn handle_field_value_search_finished(
         &mut self,
-        generation: u64,
+        stamp: KitStamp,
         query: String,
         result: Result<Vec<FieldValueMatch>, String>,
     ) -> bool {
         self.field_value_searching = false;
-        if generation != self.kits[self.active].generation {
+        // Only the status/results window is written here, all of it global,
+        // so the stamp is checked for staleness without needing the kit.
+        if self.resolve_stamp(stamp).is_none() {
             return true;
         }
         match result {
@@ -39,11 +41,11 @@ impl Baboon {
     /// Applies `WorkerMessage::FieldIndexBuilt` when its source generation is current.
     pub(super) fn handle_field_index_built(
         &mut self,
-        generation: u64,
+        stamp: KitStamp,
         blobs: Vec<(String, String)>,
     ) -> bool {
-        if generation == self.kits[self.active].generation {
-            self.kits[self.active].field_index.install(generation, blobs);
+        if let Some(kit_index) = self.resolve_stamp(stamp) {
+            self.kits[kit_index].field_index.install(stamp.generation, blobs);
         }
         false
     }

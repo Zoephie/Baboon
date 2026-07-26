@@ -169,20 +169,20 @@ impl Baboon {
                     self.handle_update_check_finished(result)
                 }
                 WorkerMessage::FieldValueSearchFinished {
-                    generation,
+                    stamp,
                     query,
                     result,
-                } => self.handle_field_value_search_finished(generation, query, result),
-                WorkerMessage::FieldIndexBuilt { generation, blobs } => {
-                    self.handle_field_index_built(generation, blobs)
+                } => self.handle_field_value_search_finished(stamp, query, result),
+                WorkerMessage::FieldIndexBuilt { stamp, blobs } => {
+                    self.handle_field_index_built(stamp, blobs)
                 }
                 WorkerMessage::FindAllProgress {
-                    generation,
+                    stamp,
                     request_id,
                     processed,
                     total,
                 } => {
-                    if generation == self.kits[self.active].generation
+                    if self.resolve_stamp(stamp).is_some()
                         && request_id == self.find.all_request_id
                     {
                         self.find.progress = Some((processed, total));
@@ -190,12 +190,12 @@ impl Baboon {
                     false
                 }
                 WorkerMessage::FindAllFinished {
-                    generation,
+                    stamp,
                     request_id,
                     occurrences,
                     unreadable,
                 } => {
-                    if generation == self.kits[self.active].generation
+                    if self.resolve_stamp(stamp).is_some()
                         && request_id == self.find.all_request_id
                     {
                         self.find.all_closed_occurrences = occurrences;
@@ -205,21 +205,22 @@ impl Baboon {
                     }
                     false
                 }
-                WorkerMessage::ReverseDependenciesBuilt { generation, index } => {
-                    self.handle_reverse_dependencies_built(generation, index)
+                WorkerMessage::ReverseDependenciesBuilt { stamp, index } => {
+                    self.handle_reverse_dependencies_built(stamp, index)
                 }
                 WorkerMessage::ReferenceIndexProgress {
-                    generation,
+                    stamp,
                     processed,
                     total,
-                } => self.handle_reference_index_progress(generation, processed, total, ctx),
+                } => self.handle_reference_index_progress(stamp, processed, total, ctx),
                 WorkerMessage::SourceLoaded {
+                    kit,
                     result,
                     recent_path,
-                } => self.handle_source_loaded(result, recent_path, ctx),
-                WorkerMessage::TagLoaded { key, result } => self.handle_tag_loaded(key, result),
-                WorkerMessage::BitmapReimportFinished { key, result } => {
-                    self.handle_bitmap_reimport_finished(key, result)
+                } => self.handle_source_loaded(kit, result, recent_path, ctx),
+                WorkerMessage::TagLoaded { kit, key, result } => self.handle_tag_loaded(kit, key, result),
+                WorkerMessage::BitmapReimportFinished { kit, key, result } => {
+                    self.handle_bitmap_reimport_finished(kit, key, result)
                 }
                 WorkerMessage::ExportFinished(result) => self.handle_export_finished(result),
                 WorkerMessage::FolderRefactorProgress(progress) => {
@@ -234,24 +235,23 @@ impl Baboon {
                 WorkerMessage::FolderConversionFinished(report) => {
                     self.handle_folder_conversion_finished(report)
                 }
-                WorkerMessage::AllEntriesScanned { generation, result } => {
-                    self.handle_all_entries_scanned(generation, result, ctx)
+                WorkerMessage::AllEntriesScanned { stamp, result } => {
+                    self.handle_all_entries_scanned(stamp, result, ctx)
                 }
                 WorkerMessage::EntryIndexScanProgress {
-                    generation,
+                    stamp,
                     processed,
                     total,
                     matched,
-                } => self
-                    .handle_entry_index_scan_progress(generation, processed, total, matched, ctx),
-                WorkerMessage::EntryIndexRefreshed { generation, result } => {
-                    self.handle_entry_index_refreshed(generation, result, ctx)
+                } => self.handle_entry_index_scan_progress(stamp, processed, total, matched, ctx),
+                WorkerMessage::EntryIndexRefreshed { stamp, result } => {
+                    self.handle_entry_index_refreshed(stamp, result, ctx)
                 }
                 WorkerMessage::EntryIndexSaved {
-                    generation,
+                    stamp,
                     path,
                     result,
-                } => self.handle_entry_index_saved(generation, path, result),
+                } => self.handle_entry_index_saved(stamp, path, result),
             };
             if stale {
                 continue;
@@ -270,11 +270,13 @@ impl Baboon {
     /// Captured source identity prevents stale results from replacing newer state.
     pub(super) fn begin_load_single_path(&mut self, path: PathBuf, ctx: egui::Context) {
         let tx = self.tx.clone();
+        let kit = self.active_kit_id();
         let names = self.default_names.clone();
         self.status = format!("Loading {}", path.display());
         thread::spawn(move || {
             let result = load_single_file(path, &names).map_err(|e| e.to_string());
             let _ = tx.send(WorkerMessage::SourceLoaded {
+                kit,
                 result,
                 recent_path: None,
             });
@@ -302,6 +304,7 @@ impl Baboon {
             return;
         }
         let tx = self.tx.clone();
+        let kit = self.active_kit_id();
         let names = self.default_names.clone();
         let definitions_root = locate_definitions_root();
         let ek_folder_aliases = self.ek_folder_aliases.clone();
@@ -321,6 +324,7 @@ impl Baboon {
             let result = load_folder(path, &names, &definitions_root, &ek_folder_aliases)
                 .map_err(|e| e.to_string());
             let _ = tx.send(WorkerMessage::SourceLoaded {
+                kit,
                 result,
                 recent_path: Some(recent_path),
             });
@@ -343,12 +347,14 @@ impl Baboon {
     /// Captured source identity prevents stale results from replacing newer state.
     pub(super) fn begin_load_monolithic_path(&mut self, path: PathBuf, ctx: egui::Context) {
         let tx = self.tx.clone();
+        let kit = self.active_kit_id();
         let names = self.default_names.clone();
         self.status = format!("Opening {}", path.display());
         let recent_path = clean_recent_path(path.clone());
         thread::spawn(move || {
             let result = load_monolithic_blob_index(path, &names).map_err(|e| e.to_string());
             let _ = tx.send(WorkerMessage::SourceLoaded {
+                kit,
                 result,
                 recent_path: Some(recent_path),
             });
@@ -371,6 +377,7 @@ impl Baboon {
     /// is reported through `WorkerMessage::SourceLoaded` like the other loaders.
     pub(super) fn begin_load_iostore_container_path(&mut self, path: PathBuf, ctx: egui::Context) {
         let tx = self.tx.clone();
+        let kit = self.active_kit_id();
         let names = self.default_names.clone();
         let definitions_root = locate_definitions_root();
         self.status = format!("Mounting {}", path.display());
@@ -379,6 +386,7 @@ impl Baboon {
             let result =
                 load_iostore_container(path, &names, &definitions_root).map_err(|e| e.to_string());
             let _ = tx.send(WorkerMessage::SourceLoaded {
+                kit,
                 result,
                 recent_path: Some(recent_path),
             });
@@ -393,6 +401,7 @@ impl Baboon {
         ctx: egui::Context,
     ) {
         let tx = self.tx.clone();
+        let kit = self.active_kit_id();
         let names = self.default_names.clone();
         let definitions_root = locate_definitions_root();
         self.status = format!("Mounting containers in {}", paks_dir.display());
@@ -401,6 +410,7 @@ impl Baboon {
             let result = load_iostore_container_set(paks_dir, &names, &definitions_root)
                 .map_err(|e| e.to_string());
             let _ = tx.send(WorkerMessage::SourceLoaded {
+                kit,
                 result,
                 recent_path: Some(recent_path),
             });
@@ -1267,7 +1277,7 @@ impl Baboon {
         self.refreshing_entry_index = false;
         self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
         self.kits[self.active].field_index.invalidate();
-        let generation = self.kits[self.active].generation;
+        let stamp = self.kit_stamp();
         let label = label.into();
         self.kits[self.active].scanning_entries = true;
         self.show_entry_index_wait_notice = true;
@@ -1287,7 +1297,7 @@ impl Baboon {
                 &names,
                 move |progress| {
                     let _ = progress_tx.send(WorkerMessage::EntryIndexScanProgress {
-                        generation,
+                        stamp,
                         processed: progress.processed,
                         total: progress.total,
                         matched: progress.matched,
@@ -1296,7 +1306,7 @@ impl Baboon {
                 },
             )
             .map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::AllEntriesScanned { generation, result });
+            let _ = tx.send(WorkerMessage::AllEntriesScanned { stamp, result });
             ctx.request_repaint();
         });
     }
@@ -1342,12 +1352,12 @@ impl Baboon {
         let root = root.clone();
         let names = source.names.clone();
         let tx = self.tx.clone();
-        let generation = self.kits[self.active].generation;
+        let stamp = self.kit_stamp();
         self.refreshing_entry_index = true;
         thread::spawn(move || {
             let result =
                 crate::source::refresh_entry_index(&game, &root, &names).map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::EntryIndexRefreshed { generation, result });
+            let _ = tx.send(WorkerMessage::EntryIndexRefreshed { stamp, result });
             ctx.request_repaint();
         });
     }
@@ -1379,8 +1389,12 @@ impl Baboon {
         self.next_entry_index_refresh_at = now + ENTRY_INDEX_REFRESH_INTERVAL_SECS;
     }
 
-    fn apply_entry_index_refresh(&mut self, refresh: EntryIndexRefresh, ctx: egui::Context) {
-        let kit_index = self.active;
+    fn apply_entry_index_refresh(
+        &mut self,
+        kit_index: usize,
+        refresh: EntryIndexRefresh,
+        ctx: egui::Context,
+    ) {
         let kit = &mut self.kits[kit_index];
         let Some(source) = kit.source.as_mut() else {
             return;
@@ -1413,13 +1427,13 @@ impl Baboon {
             let entries = source.all_entries.clone();
             let tx = self.tx.clone();
             let ctx = ctx.clone();
-            let generation = kit.generation;
+            let stamp = KitStamp { kit: kit.id, generation: kit.generation };
             let path = crate::source::index_db_path();
             thread::spawn(move || {
                 let result = crate::source::save_entry_index(&game, &root, &entries)
                     .map_err(|error| error.to_string());
                 let _ = tx.send(WorkerMessage::EntryIndexSaved {
-                    generation,
+                    stamp,
                     path,
                     result,
                 });
@@ -1718,11 +1732,12 @@ impl Baboon {
         };
         let source_kind = source.source.clone();
         let tx = self.tx.clone();
+        let kit = self.active_kit_id();
         self.kits[self.active].loading_tags.insert(key.clone());
         self.status = format!("Loading {}", entry.display_path);
         thread::spawn(move || {
             let result = read_entry(&source_kind, &entry).map_err(|error| format!("{error:#}"));
-            let _ = tx.send(WorkerMessage::TagLoaded { key, result });
+            let _ = tx.send(WorkerMessage::TagLoaded { kit, key, result });
             ctx.request_repaint();
         });
     }
@@ -4003,10 +4018,10 @@ impl Baboon {
         }
         let query_lower = display.to_ascii_lowercase();
         let group_filter = self.field_value_group.trim().to_ascii_lowercase();
-        let generation = self.kits[self.active].generation;
+        let stamp = self.kit_stamp();
 
         // Fast path: answer from the cached index.
-        if self.kits[self.active].field_index.is_ready_for(generation) {
+        if self.kits[self.active].field_index.is_ready_for(stamp.generation) {
             // Over-fetch when group-filtering so the cap applies post-filter.
             let raw_cap = if group_filter.is_empty() { 1000 } else { 8000 };
             let hits = self.kits[self.active].field_index.query(&query_lower, raw_cap);
@@ -4070,7 +4085,7 @@ impl Baboon {
         thread::spawn(move || {
             let result = run_field_value_search(&tag_source, &entries, &query_lower);
             let _ = tx.send(WorkerMessage::FieldValueSearchFinished {
-                generation,
+                stamp,
                 query: display,
                 result,
             });
@@ -4099,8 +4114,8 @@ impl Baboon {
     /// Starts source-scoped indexing or search work without blocking the UI thread.
     /// Generation-tagged completion is ignored if the active source changes first.
     pub(super) fn begin_build_field_index(&mut self, ctx: egui::Context) {
-        let generation = self.kits[self.active].generation;
-        if self.kits[self.active].field_index.is_ready_for(generation) || self.kits[self.active].field_index.is_building() {
+        let stamp = self.kit_stamp();
+        if self.kits[self.active].field_index.is_ready_for(stamp.generation) || self.kits[self.active].field_index.is_building() {
             return;
         }
         let Some(source) = self.source() else {
@@ -4116,7 +4131,7 @@ impl Baboon {
         self.kits[self.active].field_index.mark_building();
         thread::spawn(move || {
             let blobs = build_field_value_index(&tag_source, &entries);
-            let _ = tx.send(WorkerMessage::FieldIndexBuilt { generation, blobs });
+            let _ = tx.send(WorkerMessage::FieldIndexBuilt { stamp, blobs });
             ctx.request_repaint();
         });
     }
@@ -4188,7 +4203,7 @@ impl Baboon {
             return;
         }
         let tag_source = source.source.clone();
-        let generation = self.kits[self.active].generation;
+        let stamp = self.kit_stamp();
         let tx = self.tx.clone();
         self.building_reverse_dependencies = true;
         self.building_reference_for_entry_index = paired_entry_index_build;
@@ -4204,7 +4219,7 @@ impl Baboon {
         thread::spawn(move || {
             let total = entries.len();
             let _ = tx.send(WorkerMessage::ReferenceIndexProgress {
-                generation,
+                stamp,
                 processed: 0,
                 total,
             });
@@ -4233,7 +4248,7 @@ impl Baboon {
                                 processed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                             if processed_now == total || processed_now % 32 == 0 {
                                 let _ = progress_tx.send(WorkerMessage::ReferenceIndexProgress {
-                                    generation,
+                                    stamp,
                                     processed: processed_now,
                                     total,
                                 });
@@ -4252,7 +4267,7 @@ impl Baboon {
                     }
                 }
             });
-            let _ = tx.send(WorkerMessage::ReverseDependenciesBuilt { generation, index });
+            let _ = tx.send(WorkerMessage::ReverseDependenciesBuilt { stamp, index });
             ctx.request_repaint();
         });
     }
@@ -5059,11 +5074,12 @@ impl Baboon {
         };
 
         let tx = self.tx.clone();
+        let kit = self.active_kit_id();
         thread::spawn(move || {
             let result =
                 run_terminal_command_for_reimport(&command, &work_dir, &tx, &ctx, log_file)
                     .and_then(|_| read_entry(&source, &entry).map_err(|error| error.to_string()));
-            let _ = tx.send(WorkerMessage::BitmapReimportFinished { key, result });
+            let _ = tx.send(WorkerMessage::BitmapReimportFinished { kit, key, result });
             ctx.request_repaint();
         });
     }

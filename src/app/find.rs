@@ -376,7 +376,7 @@ impl Baboon {
         };
         self.find.all_request_id = self.find.all_request_id.wrapping_add(1);
         let request_id = self.find.all_request_id;
-        let generation = self.kits[self.active].generation;
+        let stamp = self.kit_stamp();
         let tag_source = source.source.clone();
         let names = self.names().clone();
         let query = self.find.query.clone();
@@ -404,7 +404,7 @@ impl Baboon {
                 let processed = index + 1;
                 if processed == total || processed % 32 == 0 {
                     let _ = tx.send(WorkerMessage::FindAllProgress {
-                        generation,
+                        stamp,
                         request_id,
                         processed,
                         total,
@@ -413,7 +413,7 @@ impl Baboon {
                 }
             }
             let _ = tx.send(WorkerMessage::FindAllFinished {
-                generation,
+                stamp,
                 request_id,
                 occurrences,
                 unreadable,

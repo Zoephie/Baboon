@@ -5,18 +5,24 @@ use super::*;
 
 /// Results and progress events delivered from background work to the UI thread.
 ///
-/// Variants that depend on the active source carry its generation; handlers must
-/// ignore stale generations while preserving receive order for current work.
+/// Kit-scoped variants carry a [`KitStamp`] identifying which kit the job ran
+/// for and against which revision of it; handlers resolve the stamp and drop
+/// the result if the kit has closed or its source was replaced, while
+/// preserving receive order for current work.
 pub(in crate::app) enum WorkerMessage {
     SourceLoaded {
+        /// Which kit this load was started for.
+        kit: KitId,
         result: Result<LoadedSourceData, String>,
         recent_path: Option<PathBuf>,
     },
     TagLoaded {
+        kit: KitId,
         key: String,
         result: Result<TagFile, String>,
     },
     BitmapReimportFinished {
+        kit: KitId,
         key: String,
         result: Result<TagFile, String>,
     },
@@ -27,30 +33,30 @@ pub(in crate::app) enum WorkerMessage {
     FolderConversionFinished(Result<FolderConversionReport, String>),
     // Full recursive entry scan finished for a loose-folder source.
     AllEntriesScanned {
-        generation: u64,
+        stamp: KitStamp,
         result: Result<Vec<TagEntry>, String>,
     },
     // Full recursive entry scan progress for a loose-folder source.
     EntryIndexScanProgress {
-        generation: u64,
+        stamp: KitStamp,
         processed: usize,
         total: usize,
         matched: usize,
     },
     // Reverse-dependency reference index progress.
     ReferenceIndexProgress {
-        generation: u64,
+        stamp: KitStamp,
         processed: usize,
         total: usize,
     },
     // Incremental metadata-backed index refresh finished for a loose-folder source.
     EntryIndexRefreshed {
-        generation: u64,
+        stamp: KitStamp,
         result: Result<EntryIndexRefresh, String>,
     },
     // Entry index cache save finished after a full scan or incremental refresh.
     EntryIndexSaved {
-        generation: u64,
+        stamp: KitStamp,
         path: std::path::PathBuf,
         result: Result<(), String>,
     },
@@ -64,37 +70,37 @@ pub(in crate::app) enum WorkerMessage {
     },
     // GitHub latest-release lookup finished.
     UpdateCheckFinished(Result<UpdateCheckResult, String>),
-    // Background field-value search finished. Carries the source generation it
-    // ran against so stale results (after a reload) can be discarded.
+    // Background field-value search finished; the stamp discards results for
+    // a kit that has since closed or reloaded.
     FieldValueSearchFinished {
-        generation: u64,
+        stamp: KitStamp,
         query: String,
         result: Result<Vec<FieldValueMatch>, String>,
     },
     // Background field-value index build finished. `blobs` is (entry key,
-    // lowercased searchable text) pairs; `generation` guards against staleness.
+    // lowercased searchable text) pairs; the stamp guards against staleness.
     FieldIndexBuilt {
-        generation: u64,
+        stamp: KitStamp,
         blobs: Vec<(String, String)>,
     },
     /// Progress from an exact all-tag Find scan.
     FindAllProgress {
-        generation: u64,
+        stamp: KitStamp,
         request_id: u64,
         processed: usize,
         total: usize,
     },
     /// Exact closed-document occurrences from an all-tag Find scan.
     FindAllFinished {
-        generation: u64,
+        stamp: KitStamp,
         request_id: u64,
         occurrences: Vec<FindOccurrence>,
         unreadable: usize,
     },
-    // Background reverse-dependency index build finished. `generation` guards
+    // Background reverse-dependency index build finished; the stamp guards
     // against staleness after a source reload.
     ReverseDependenciesBuilt {
-        generation: u64,
+        stamp: KitStamp,
         index: ReverseDependencyIndex,
     },
 }
