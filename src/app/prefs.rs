@@ -480,8 +480,13 @@ pub(super) fn load_terminal_open_games() -> HashSet<String> {
 
 pub(super) fn load_last_session() -> Option<LastSessionState> {
     let text = fs::read_to_string(last_session_path()).ok()?;
+    parse_last_session(&text)
+}
+
+fn parse_last_session(text: &str) -> Option<LastSessionState> {
     let value = serde_json::from_str::<Value>(&text).ok()?;
-    if value.get("version").and_then(Value::as_u64)? != 1 {
+    let version = value.get("version").and_then(Value::as_u64)?;
+    if !matches!(version, 1 | 2) {
         return None;
     }
     let source = value.get("source")?;
@@ -498,6 +503,16 @@ pub(super) fn load_last_session() -> Option<LastSessionState> {
         .map(str::trim)
         .filter(|game| !game.is_empty())
         .map(str::to_owned);
+    let project_path = (version >= 2)
+        .then(|| {
+            source
+                .get("project_path")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .map(PathBuf::from)
+        })
+        .flatten();
     let mut tags = Vec::new();
     for item in value.get("tags")?.as_array()? {
         let Some(key) = item
@@ -529,13 +544,14 @@ pub(super) fn load_last_session() -> Option<LastSessionState> {
             path,
         });
     }
-    if tags.is_empty() {
+    if tags.is_empty() && project_path.is_none() {
         return None;
     }
     Some(LastSessionState {
         source_kind,
         source_path,
         game,
+        project_path,
         tags,
     })
 }
@@ -562,11 +578,12 @@ pub(super) fn save_last_session(session: &LastSessionState) -> Result<(), String
         })
         .collect::<Vec<_>>();
     let value = json!({
-        "version": 1,
+        "version": 2,
         "source": {
             "kind": session.source_kind.as_str(),
             "path": session.source_path.display().to_string(),
             "game": session.game,
+            "project_path": session.project_path.as_ref().map(|path| path.display().to_string()),
         },
         "tags": tags,
     });
@@ -582,6 +599,55 @@ pub(super) fn clear_last_session() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn last_session_v1_remains_compatible() {
+        let session = parse_last_session(
+            r#"{
+                "version": 1,
+                "source": {
+                    "kind": "loose_folder",
+                    "path": "C:/tags",
+                    "game": "haloreach"
+                },
+                "tags": [{
+                    "key": "objects/test.weapon",
+                    "label": "test",
+                    "group_tag": 2003132784
+                }]
+            }"#,
+        )
+        .expect("version 1 session");
+        assert_eq!(session.source_kind, LastSessionSourceKind::LooseFolder);
+        assert_eq!(session.project_path, None);
+        assert_eq!(session.tags.len(), 1);
+    }
+
+    #[test]
+    fn project_pointer_survives_with_no_open_tabs() {
+        let session = parse_last_session(
+            r#"{
+                "version": 2,
+                "source": {
+                    "kind": "iostore_container_set",
+                    "path": "C:/CampaignEvolved/Paks",
+                    "game": "haloce_evolved",
+                    "project_path": "C:/mods/recovery.baboon"
+                },
+                "tags": []
+            }"#,
+        )
+        .expect("project-only session");
+        assert_eq!(
+            session.source_kind,
+            LastSessionSourceKind::IoStoreContainerSet
+        );
+        assert_eq!(
+            session.project_path,
+            Some(PathBuf::from("C:/mods/recovery.baboon"))
+        );
+        assert!(session.tags.is_empty());
+    }
 
     #[test]
     fn custom_color_swatches_load_as_fixed_global_slots() {

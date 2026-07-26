@@ -1348,7 +1348,14 @@ mod tests {
             &mut dirty,
         );
 
-        assert_eq!(status.as_deref(), Some("Edited real euler angles 3d"));
+        assert_eq!(
+            status.status.as_deref(),
+            Some("Edited real euler angles 3d")
+        );
+        assert_eq!(status.outcomes.len(), 1);
+        assert_eq!(status.outcomes[0].path, "real euler angles 3d");
+        assert_eq!(status.outcomes[0].input, "-0.65, 0, 1.25");
+        assert!(status.outcomes[0].result.is_ok());
         assert!(dirty);
         let bytes = tag.write_to_bytes().unwrap();
         let reopened = TagFile::read_from_bytes(&bytes).unwrap();
@@ -1535,9 +1542,10 @@ mod tests {
         );
 
         assert_eq!(
-            status.as_deref(),
+            status.status.as_deref(),
             Some("Edited marker groups[0]/markers[0]/rotation")
         );
+        assert!(status.outcomes.iter().all(|outcome| outcome.result.is_ok()));
         assert!(dirty);
         let root = tag.root();
         let translation = root

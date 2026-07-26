@@ -62,6 +62,7 @@ fn portable_redirects_every_automatic_state_path() {
     for name in [
         "prefs.json",
         "last_session.json",
+        "campaign_evolved_recovery.baboon",
         "indexes.sqlite3",
         "halo3_mcc_index.json",
         "halo3_mcc_keywords.json",

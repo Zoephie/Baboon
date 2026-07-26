@@ -54,6 +54,10 @@ impl Baboon {
                             ui.close_menu();
                             self.begin_load_iostore_container(ctx.clone());
                         }
+                        if ui.button("Open Baboon Project...").clicked() {
+                            ui.close_menu();
+                            self.begin_open_campaign_project(ctx.clone());
+                        }
                         ui.separator();
                         let has_loaded_folder = self.loaded_tags_root().is_some();
                         if ui
@@ -99,7 +103,7 @@ impl Baboon {
                         .clicked()
                         {
                             ui.close_menu();
-                            self.save_current_tag();
+                            self.defer_file_action(DeferredFileAction::SaveCurrentTag, ctx);
                         }
                         if ui
                             .add_enabled(
@@ -114,16 +118,20 @@ impl Baboon {
                         if self.current_source_is_container() {
                             if ui
                                 .add_enabled(
-                                    self.parsed_tags.values().any(|d| d.dirty),
+                                    self.parsed_tags.values().any(|d| d.dirty)
+                                        || self
+                                            .campaign_project
+                                            .as_ref()
+                                            .is_some_and(|project| !project.overlays.is_empty()),
                                     egui::Button::new("Export Mod..."),
                                 )
                                 .on_hover_text(
-                                    "Bundle every open, modified tag into one portable mod overlay (the base game is left untouched)",
+                                    "Bundle every modified project tag into one portable mod overlay and .baboon recovery file",
                                 )
                                 .clicked()
                             {
                                 ui.close_menu();
-                                self.export_mod();
+                                self.defer_file_action(DeferredFileAction::ExportMod, ctx);
                             }
                         }
                         if self.expert_mode {
@@ -150,7 +158,10 @@ impl Baboon {
                             .clicked()
                         {
                             if let Some(key) = self.selected_key.clone() {
-                                self.request_close_action(PendingCloseAction::CloseTab(key), ctx);
+                                self.defer_file_action(
+                                    DeferredFileAction::Close(PendingCloseAction::CloseTab(key)),
+                                    ctx,
+                                );
                             }
                             ui.close_menu();
                         }
@@ -161,7 +172,10 @@ impl Baboon {
                             )
                             .clicked()
                         {
-                            self.request_close_action(PendingCloseAction::CloseAllTabs, ctx);
+                            self.defer_file_action(
+                                DeferredFileAction::Close(PendingCloseAction::CloseAllTabs),
+                                ctx,
+                            );
                             ui.close_menu();
                         }
                         ui.separator();
@@ -1163,170 +1177,219 @@ impl Baboon {
                         const TAB_MAX_LABEL_WIDTH: f32 = 170.0;
                         const TAB_SIDE_PADDING: f32 = 8.0;
                         const TAB_INNER_GAP: f32 = 3.0;
+                        let scroll_target = self.tab_scroll_target.take();
 
-                        let available_width = ui.available_width().max(120.0);
-                        let row_gap = 3.0;
-                        // (key, label, active, dirty, label_width, group_tag)
-                        let mut rows = Vec::<Vec<(String, String, bool, bool, f32, u32)>>::new();
-                        let mut row = Vec::new();
-                        let mut row_width = 0.0;
+                        ScrollArea::vertical()
+                            .id_salt("open_tag_rack")
+                            .max_height(160.0)
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| {
+                                let available_width = ui.available_width().max(120.0);
+                                let row_gap = 3.0;
+                                // (key, label, active, dirty, label_width, group_tag)
+                                let mut rows =
+                                    Vec::<Vec<(String, String, bool, bool, f32, u32)>>::new();
+                                let mut row = Vec::new();
+                                let mut row_width = 0.0;
 
-                        for key in self.open_tabs.clone() {
-                            let Some(entry) = self.entry_for_key(&key) else {
-                                continue;
-                            };
-                            let active = self.selected_key.as_deref() == Some(key.as_str());
-                            let dirty = self
-                                .parsed_tags
-                                .get(&key)
-                                .map(|doc| doc.dirty)
-                                .unwrap_or(false);
-                            let label = if dirty {
-                                format!("● {}", tag_tab_label(entry))
-                            } else {
-                                tag_tab_label(entry)
-                            };
-                            let label_width = tab_label_width(
-                                ui,
-                                &label,
-                                TAB_MIN_LABEL_WIDTH,
-                                TAB_MAX_LABEL_WIDTH,
-                            );
-                            let tab_width = TAB_SIDE_PADDING
-                                + 16.0
-                                + TAB_INNER_GAP
-                                + label_width
-                                + TAB_INNER_GAP
-                                + TAB_BUTTON_SIZE
-                                + TAB_INNER_GAP
-                                + TAB_BUTTON_SIZE;
-                            let next_width = if row.is_empty() {
-                                tab_width
-                            } else {
-                                row_width + row_gap + tab_width
-                            };
-                            if !row.is_empty() && next_width > available_width {
-                                rows.push(row);
-                                row = Vec::new();
-                                row_width = 0.0;
-                            }
-                            if !row.is_empty() {
-                                row_width += row_gap;
-                            }
-                            row_width += tab_width;
-                            row.push((key, label, active, dirty, label_width, entry.group_tag));
-                        }
-                        if !row.is_empty() {
-                            rows.push(row);
-                        }
-
-                        for row in rows {
-                            let row_response = ui.horizontal(|ui| {
-                                ui.spacing_mut().item_spacing.x = row_gap;
-                                for (key, label, active, dirty, label_width, group_tag) in row {
-                                    let shown_label = truncate_for_cell(&label, label_width);
-                                    let base_fill = if active { menu_bar() } else { row_type() };
-                                    // Subtle amber tint flags tabs with unsaved edits
-                                    // (on top of the ● marker in the label).
-                                    let fill = if dirty {
-                                        tint_toward(
-                                            base_fill,
-                                            Color32::from_rgb(184, 134, 11),
-                                            0.20,
-                                        )
-                                    } else {
-                                        base_fill
+                                for key in self.open_tabs.clone() {
+                                    let Some(entry) = self.entry_for_key(&key) else {
+                                        continue;
                                     };
-                                    let tab_response = Frame::none()
-                                        .fill(fill)
-                                        .stroke(Stroke::new(1.0, grid_line()))
-                                        .inner_margin(egui::Margin {
-                                            left: 3.0,
-                                            right: 3.0,
-                                            top: 2.0,
-                                            bottom: 2.0,
-                                        })
-                                        .show(ui, |ui| {
-                                            ui.horizontal(|ui| {
-                                                ui.spacing_mut().item_spacing.x = TAB_INNER_GAP;
-                                                draw_tag_icon(ui, group_tag, 16.0);
-                                                let label_response = ui
-                                                    .add_sized(
-                                                        Vec2::new(label_width, 18.0),
-                                                        egui::SelectableLabel::new(
-                                                            active,
-                                                            RichText::new(shown_label.clone())
-                                                                .color(text_dark())
-                                                                .strong(),
-                                                        ),
-                                                    )
-                                                    .on_hover_text(label.clone());
-                                                if label_response.clicked() {
-                                                    self.selected_key = Some(key.clone());
-                                                    self.ensure_tag_loading(
-                                                        key.clone(),
-                                                        ctx.clone(),
-                                                    );
-                                                }
-                                                if label_response.middle_clicked() {
-                                                    close_key = Some(key.clone());
-                                                }
-                                                label_response.context_menu(|ui| {
-                                                    if ui.button("Reveal in browser").clicked() {
-                                                        reveal_key = Some(key.clone());
-                                                        ui.close_menu();
-                                                    }
-                                                    ui.separator();
-                                                    if ui.button("Close all").clicked() {
-                                                        close_all = true;
-                                                        ui.close_menu();
-                                                    }
-                                                    if ui.button("Close all but this").clicked() {
-                                                        close_all_but = Some(key.clone());
-                                                        ui.close_menu();
-                                                    }
-                                                });
-                                                if icon_button(
-                                                    ui,
-                                                    ButtonIcon::WindowMode,
-                                                    "Pop tab out",
-                                                    true,
-                                                    Vec2::splat(TAB_BUTTON_SIZE),
-                                                    text_dark(),
+                                    let active = self.selected_key.as_deref() == Some(key.as_str());
+                                    let dirty = self
+                                        .parsed_tags
+                                        .get(&key)
+                                        .map(|doc| doc.dirty)
+                                        .unwrap_or(false);
+                                    let label = if dirty {
+                                        format!("● {}", tag_tab_label(entry))
+                                    } else {
+                                        tag_tab_label(entry)
+                                    };
+                                    let label_width = tab_label_width(
+                                        ui,
+                                        &label,
+                                        TAB_MIN_LABEL_WIDTH,
+                                        TAB_MAX_LABEL_WIDTH,
+                                    );
+                                    let tab_width = TAB_SIDE_PADDING
+                                        + 16.0
+                                        + TAB_INNER_GAP
+                                        + label_width
+                                        + TAB_INNER_GAP
+                                        + TAB_BUTTON_SIZE
+                                        + TAB_INNER_GAP
+                                        + TAB_BUTTON_SIZE;
+                                    let next_width = if row.is_empty() {
+                                        tab_width
+                                    } else {
+                                        row_width + row_gap + tab_width
+                                    };
+                                    if !row.is_empty() && next_width > available_width {
+                                        rows.push(row);
+                                        row = Vec::new();
+                                        row_width = 0.0;
+                                    }
+                                    if !row.is_empty() {
+                                        row_width += row_gap;
+                                    }
+                                    row_width += tab_width;
+                                    row.push((
+                                        key,
+                                        label,
+                                        active,
+                                        dirty,
+                                        label_width,
+                                        entry.group_tag,
+                                    ));
+                                }
+                                if !row.is_empty() {
+                                    rows.push(row);
+                                }
+
+                                for row in rows {
+                                    let row_response = ui.horizontal(|ui| {
+                                        ui.spacing_mut().item_spacing.x = row_gap;
+                                        for (key, label, active, dirty, label_width, group_tag) in
+                                            row
+                                        {
+                                            let shown_label =
+                                                truncate_for_cell(&label, label_width);
+                                            let base_fill =
+                                                if active { menu_bar() } else { row_type() };
+                                            // Subtle amber tint flags tabs with unsaved edits
+                                            // (on top of the ● marker in the label).
+                                            let fill = if dirty {
+                                                tint_toward(
+                                                    base_fill,
+                                                    Color32::from_rgb(184, 134, 11),
+                                                    0.20,
                                                 )
-                                                .clicked()
-                                                {
-                                                    pop_key = Some(key.clone());
-                                                }
-                                                if ui
-                                                    .add(
-                                                        egui::Button::new("x")
-                                                            .min_size(Vec2::splat(TAB_BUTTON_SIZE)),
-                                                    )
-                                                    .on_hover_text("Close tab")
-                                                    .clicked()
-                                                {
-                                                    close_key = Some(key.clone());
-                                                }
-                                            });
+                                            } else {
+                                                base_fill
+                                            };
+                                            let tab_response = Frame::none()
+                                                .fill(fill)
+                                                .stroke(Stroke::new(1.0, grid_line()))
+                                                .inner_margin(egui::Margin {
+                                                    left: 3.0,
+                                                    right: 3.0,
+                                                    top: 2.0,
+                                                    bottom: 2.0,
+                                                })
+                                                .show(ui, |ui| {
+                                                    ui.horizontal(|ui| {
+                                                        ui.spacing_mut().item_spacing.x =
+                                                            TAB_INNER_GAP;
+                                                        draw_tag_icon(ui, group_tag, 16.0);
+                                                        let label_response = ui
+                                                            .add_sized(
+                                                                Vec2::new(label_width, 18.0),
+                                                                egui::SelectableLabel::new(
+                                                                    active,
+                                                                    RichText::new(
+                                                                        shown_label.clone(),
+                                                                    )
+                                                                    .color(text_dark())
+                                                                    .strong(),
+                                                                ),
+                                                            )
+                                                            .on_hover_text(label.clone());
+                                                        if scroll_target.as_deref()
+                                                            == Some(key.as_str())
+                                                        {
+                                                            label_response.scroll_to_me(Some(
+                                                                egui::Align::Center,
+                                                            ));
+                                                        }
+                                                        if label_response.clicked() {
+                                                            self.selected_key = Some(key.clone());
+                                                            self.tab_scroll_target =
+                                                                Some(key.clone());
+                                                            self.ensure_tag_loading(
+                                                                key.clone(),
+                                                                ctx.clone(),
+                                                            );
+                                                        }
+                                                        if label_response.middle_clicked() {
+                                                            close_key = Some(key.clone());
+                                                        }
+                                                        label_response.context_menu(|ui| {
+                                                            if ui
+                                                                .button("Reveal in browser")
+                                                                .clicked()
+                                                            {
+                                                                reveal_key = Some(key.clone());
+                                                                ui.close_menu();
+                                                            }
+                                                            ui.separator();
+                                                            if ui.button("Close all").clicked() {
+                                                                close_all = true;
+                                                                ui.close_menu();
+                                                            }
+                                                            if ui
+                                                                .button("Close all but this")
+                                                                .clicked()
+                                                            {
+                                                                close_all_but = Some(key.clone());
+                                                                ui.close_menu();
+                                                            }
+                                                        });
+                                                        if icon_button(
+                                                            ui,
+                                                            ButtonIcon::WindowMode,
+                                                            "Pop tab out",
+                                                            true,
+                                                            Vec2::splat(TAB_BUTTON_SIZE),
+                                                            text_dark(),
+                                                        )
+                                                        .clicked()
+                                                        {
+                                                            pop_key = Some(key.clone());
+                                                        }
+                                                        if ui
+                                                            .add(egui::Button::new("x").min_size(
+                                                                Vec2::splat(TAB_BUTTON_SIZE),
+                                                            ))
+                                                            .on_hover_text("Close tab")
+                                                            .clicked()
+                                                        {
+                                                            close_key = Some(key.clone());
+                                                        }
+                                                    });
+                                                });
+                                            if tab_response.response.middle_clicked() {
+                                                close_key = Some(key.clone());
+                                            }
+                                        }
+                                    });
+                                    if row_response.response.rect.intersects(ui.clip_rect()) {
+                                        let visible =
+                                            row_response.response.rect.intersect(ui.clip_rect());
+                                        rack_rect = Some(match rack_rect {
+                                            Some(rect) => rect.union(visible),
+                                            None => visible,
                                         });
-                                    if tab_response.response.middle_clicked() {
-                                        close_key = Some(key.clone());
                                     }
                                 }
                             });
-                            rack_rect = Some(match rack_rect {
-                                Some(rect) => rect.union(row_response.response.rect),
-                                None => row_response.response.rect,
-                            });
-                        }
                     }
                     if close_all {
-                        self.request_close_action(PendingCloseAction::CloseAllTabs, ctx);
+                        self.defer_file_action(
+                            DeferredFileAction::Close(PendingCloseAction::CloseAllTabs),
+                            ctx,
+                        );
                     } else if let Some(key) = close_all_but {
-                        self.request_close_action(PendingCloseAction::CloseAllButThis(key), ctx);
+                        self.defer_file_action(
+                            DeferredFileAction::Close(PendingCloseAction::CloseAllButThis(key)),
+                            ctx,
+                        );
                     } else if let Some(key) = close_key {
-                        self.request_close_action(PendingCloseAction::CloseTab(key), ctx);
+                        self.defer_file_action(
+                            DeferredFileAction::Close(PendingCloseAction::CloseTab(key)),
+                            ctx,
+                        );
                     } else if let Some(key) = pop_key {
                         self.pop_tab(&key);
                     }
@@ -1495,9 +1558,11 @@ impl Baboon {
                         } else {
                             doc.journal.end_edit_window();
                         }
-                        if let Some(status) =
-                            apply_pending_edits(&mut doc.tag, pending, &mut doc.dirty)
-                        {
+                        let applied =
+                            apply_pending_edits(&mut doc.tag, pending, &mut doc.dirty);
+                        self.edit_buffers
+                            .accept_successful_edits(&selected_key, &applied.outcomes);
+                        if let Some(status) = applied.status {
                             self.status = status;
                         }
                         if let Some(status) =
@@ -1593,7 +1658,7 @@ impl Baboon {
                     if let Some(doc) = self.parsed_tags.get_mut(&tag_key) {
                         doc.journal.begin_edit(&doc.tag, "Edit color");
                         if let Some(status) =
-                            apply_pending_edits(&mut doc.tag, vec![edit], &mut doc.dirty)
+                            apply_pending_edits(&mut doc.tag, vec![edit], &mut doc.dirty).status
                         {
                             self.status = status;
                         }
@@ -1647,7 +1712,8 @@ impl Baboon {
                 if !batch.edits.is_empty() || !batch.data_ops.is_empty() {
                     doc.journal.begin_edit(&doc.tag, "Edit function");
                 }
-                if let Some(status) = apply_pending_edits(&mut doc.tag, batch.edits, &mut doc.dirty)
+                if let Some(status) =
+                    apply_pending_edits(&mut doc.tag, batch.edits, &mut doc.dirty).status
                 {
                     self.status = status;
                 }
@@ -1661,6 +1727,7 @@ impl Baboon {
         }
         self.handle_block_confirm(ctx);
         self.handle_save_changes_prompt(ctx);
+        self.handle_project_checkpoint_prompt(ctx);
         self.handle_last_opened_windows_prompt(ctx);
         self.process_pending_open(ctx);
         self.apply_field_nav(ctx);
@@ -1690,6 +1757,28 @@ impl Baboon {
         self.process_pending_tool_import(ctx);
     }
 
+    pub(super) fn run_deferred_file_action(&mut self, ctx: &egui::Context) {
+        match self.deferred_file_action.take() {
+            Some(DeferredFileAction::SaveCurrentTag) => self.save_current_tag(),
+            Some(DeferredFileAction::ExportMod) => self.export_mod(),
+            Some(DeferredFileAction::Close(action)) => self.request_close_action(action, ctx),
+            None => {}
+        }
+    }
+
+    pub(in crate::app) fn defer_file_action(
+        &mut self,
+        action: DeferredFileAction,
+        ctx: &egui::Context,
+    ) {
+        ctx.memory_mut(|memory| {
+            if let Some(focused) = memory.focused() {
+                memory.surrender_focus(focused);
+            }
+        });
+        self.deferred_file_action = Some(action);
+    }
+
     fn prepare_root_frame(&mut self, ctx: &egui::Context) {
         self.process_worker_messages(ctx);
         ctx.set_zoom_factor(self.ui_scale);
@@ -1705,7 +1794,7 @@ impl Baboon {
         }
         self.refresh_find(ctx);
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::S)) {
-            self.save_current_tag();
+            self.defer_file_action(DeferredFileAction::SaveCurrentTag, ctx);
         }
         // Undo: Ctrl+Z. Redo: Ctrl+Shift+Z or Ctrl+Y.
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Z)) {

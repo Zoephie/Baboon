@@ -3,6 +3,117 @@
 
 use super::*;
 
+pub(in crate::app) enum DeferredFileAction {
+    SaveCurrentTag,
+    ExportMod,
+    Close(PendingCloseAction),
+}
+
+#[derive(Clone, Debug)]
+pub(in crate::app) struct EditDraft {
+    pub(in crate::app) text: String,
+    baseline: String,
+    pub(in crate::app) changed: bool,
+}
+
+impl EditDraft {
+    fn new(value: impl Into<String>) -> Self {
+        let text = value.into();
+        Self {
+            baseline: text.clone(),
+            text,
+            changed: false,
+        }
+    }
+
+    fn synchronize(&mut self, value: &str) {
+        if self.changed {
+            if self.text.trim() == value.trim() {
+                self.text = value.to_owned();
+                self.baseline = value.to_owned();
+                self.changed = false;
+            }
+        } else if self.baseline != value {
+            self.text = value.to_owned();
+            self.baseline = value.to_owned();
+        }
+    }
+
+    pub(in crate::app) fn note_response(&mut self, response: &egui::Response) {
+        self.changed |= response.changed();
+    }
+
+    pub(in crate::app) fn should_commit(&self, ui: &egui::Ui, response: &egui::Response) -> bool {
+        self.changed
+            && (response.lost_focus()
+                || (response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter))))
+    }
+
+    pub(in crate::app) fn set_clean(&mut self, value: impl Into<String>) {
+        let value = value.into();
+        self.text = value.clone();
+        self.baseline = value;
+        self.changed = false;
+    }
+}
+
+#[derive(Default)]
+pub(in crate::app) struct EditDrafts {
+    entries: HashMap<String, EditDraft>,
+}
+
+impl EditDrafts {
+    pub(in crate::app) fn draft_mut(&mut self, key: String, value: &str) -> &mut EditDraft {
+        let draft = self
+            .entries
+            .entry(key)
+            .or_insert_with(|| EditDraft::new(value));
+        draft.synchronize(value);
+        draft
+    }
+
+    pub(in crate::app) fn take(&mut self, key: &str, value: &str) -> EditDraft {
+        let mut draft = self
+            .entries
+            .remove(key)
+            .unwrap_or_else(|| EditDraft::new(value));
+        draft.synchronize(value);
+        draft
+    }
+
+    pub(in crate::app) fn put(&mut self, key: String, draft: EditDraft) {
+        self.entries.insert(key, draft);
+    }
+
+    pub(in crate::app) fn insert_clean(&mut self, key: String, value: String) {
+        self.entries.insert(key, EditDraft::new(value));
+    }
+
+    pub(in crate::app) fn accept_successful_edits(
+        &mut self,
+        tag_key: &str,
+        outcomes: &[FieldEditOutcome],
+    ) {
+        for outcome in outcomes.iter().filter(|outcome| outcome.result.is_ok()) {
+            let key = format!("{tag_key}|{}", outcome.path);
+            let Some(draft) = self.entries.get_mut(&key) else {
+                continue;
+            };
+            if draft.text.trim() == outcome.input.trim() {
+                draft.set_clean(outcome.input.clone());
+            }
+        }
+    }
+
+    pub(in crate::app) fn clear(&mut self) {
+        self.entries.clear();
+    }
+
+    pub(in crate::app) fn retain(&mut self, mut keep: impl FnMut(&String, &mut EditDraft) -> bool) {
+        self.entries.retain(|key, value| keep(key, value));
+    }
+}
+
 #[derive(Clone)]
 pub(in crate::app) struct PendingFieldEdit {
     pub(in crate::app) path: String,
@@ -282,7 +393,7 @@ pub(in crate::app) struct FieldEditContext<'a> {
     pub(in crate::app) status: Option<&'a mut String>,
     pub(in crate::app) editable: bool,
     pub(in crate::app) show_block_sizes: bool,
-    pub(in crate::app) buffers: &'a mut HashMap<String, String>,
+    pub(in crate::app) buffers: &'a mut EditDrafts,
     pub(in crate::app) pending: &'a mut Vec<PendingFieldEdit>,
     pub(in crate::app) block_ops: &'a mut Vec<BlockOp>,
     pub(in crate::app) block_confirm: &'a mut Option<BlockConfirm>,
@@ -416,6 +527,33 @@ impl FieldEditContext<'_> {
         self.field_nav.is_some_and(|nav| {
             nav.tag_key == self.tag_key && nav.field_path == indexed_path && now < nav.glow_until
         })
+    }
+}
+
+#[cfg(test)]
+mod edit_draft_tests {
+    use super::*;
+
+    #[test]
+    fn changed_draft_is_not_replaced_by_stale_model_value() {
+        let mut draft = EditDraft::new("10");
+        draft.text = "25".to_owned();
+        draft.changed = true;
+        draft.synchronize("10");
+        assert_eq!(draft.text, "25");
+        assert!(draft.changed);
+    }
+
+    #[test]
+    fn successful_commit_becomes_the_new_clean_baseline() {
+        let mut draft = EditDraft::new("10");
+        draft.text = "25".to_owned();
+        draft.changed = true;
+        draft.synchronize("25");
+        assert_eq!(draft.text, "25");
+        assert!(!draft.changed);
+        draft.synchronize("30");
+        assert_eq!(draft.text, "30");
     }
 }
 

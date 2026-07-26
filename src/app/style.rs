@@ -560,8 +560,6 @@ pub(super) const MATERIAL_PARAMETER_SECTIONS: &[&str] = &[
     "ATMOSPHERE PROPERTIES",
     "MISC",
 ];
-pub(super) const MAX_OPEN_TABS: usize = 32;
-
 #[cfg(test)]
 #[path = "tests/style.rs"]
 mod tests;

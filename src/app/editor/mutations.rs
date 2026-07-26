@@ -3,15 +3,27 @@
 
 use super::*;
 
+pub(in crate::app) struct FieldEditOutcome {
+    pub(in crate::app) path: String,
+    pub(in crate::app) input: String,
+    pub(in crate::app) result: Result<(), String>,
+}
+
+pub(in crate::app) struct AppliedFieldEdits {
+    pub(in crate::app) status: Option<String>,
+    pub(in crate::app) outcomes: Vec<FieldEditOutcome>,
+}
+
 pub(in crate::app) fn apply_pending_edits(
     tag: &mut TagFile,
     edits: Vec<PendingFieldEdit>,
     dirty: &mut bool,
-) -> Option<String> {
+) -> AppliedFieldEdits {
     let mut status = None;
+    let mut outcomes = Vec::with_capacity(edits.len());
     for edit in edits {
         let result = catch_edit_unwind(|| apply_field_edit(tag, &edit.path, &edit.input));
-        match result {
+        match &result {
             Ok(()) => {
                 *dirty = true;
                 status = Some(format!("Edited {}", edit.path));
@@ -20,8 +32,13 @@ pub(in crate::app) fn apply_pending_edits(
                 status = Some(format!("Edit failed for {}: {error}", edit.path));
             }
         }
+        outcomes.push(FieldEditOutcome {
+            path: edit.path,
+            input: edit.input,
+            result,
+        });
     }
-    status
+    AppliedFieldEdits { status, outcomes }
 }
 
 pub(in crate::app) fn apply_block_ops(

@@ -3,6 +3,12 @@
 
 use super::*;
 
+pub(super) fn open_tab_once(open_tabs: &mut Vec<String>, key: String) {
+    if !open_tabs.iter().any(|tab| tab == &key) {
+        open_tabs.push(key);
+    }
+}
+
 impl Baboon {
     /// Applies `WorkerMessage::TagLoaded`, discarding results for tabs closed while loading.
     pub(super) fn handle_tag_loaded(
@@ -11,7 +17,7 @@ impl Baboon {
         result: Result<TagFile, String>,
     ) -> bool {
         self.loading_tags.remove(&key);
-        if !self.open_tabs.iter().any(|tab| tab == &key) {
+        if !self.open_tabs.iter().any(|tab| tab == &key) && !self.floating_tabs.contains(&key) {
             return true;
         }
         match result {
@@ -55,6 +61,23 @@ impl Baboon {
             Err(error) => self.status = format!("Bitmap reimport failed: {error}"),
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn opening_one_hundred_tabs_keeps_every_unique_key_in_order() {
+        let mut tabs = Vec::new();
+        for index in 0..100 {
+            open_tab_once(&mut tabs, format!("tag-{index}"));
+        }
+        open_tab_once(&mut tabs, "tag-50".to_owned());
+        assert_eq!(tabs.len(), 100);
+        assert_eq!(tabs.first().map(String::as_str), Some("tag-0"));
+        assert_eq!(tabs.last().map(String::as_str), Some("tag-99"));
     }
 }
 

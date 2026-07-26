@@ -19,10 +19,20 @@ impl Baboon {
                 return false;
             }
         };
+        if self.current_source_is_campaign_project_capable()
+            && let Err(error) =
+                self.checkpoint_campaign_project(ctx.input(|input| input.time))
+        {
+            self.status = format!(
+                "Could not switch sources because the Campaign Evolved project checkpoint failed: {error}"
+            );
+            return false;
+        }
         self.apply_loaded_source_identity(&loaded, recent_path);
         self.clear_source_bound_document_state();
         if let Some((key, tag)) = loaded.initial_tag.take() {
             self.selected_key = Some(key.clone());
+            self.tab_scroll_target = Some(key.clone());
             self.open_tabs.push(key.clone());
             self.parsed_tags.insert(key, TagDocument::clean(tag));
         }
@@ -30,6 +40,7 @@ impl Baboon {
         self.keywords.load_for_game(loaded.game.as_deref());
         self.field_index.invalidate();
         self.source = Some(loaded);
+        self.apply_pending_campaign_project(ctx.input(|input| input.time), ctx);
         self.refresh_active_favorite_entries();
         self.source_generation = self.source_generation.wrapping_add(1);
         self.refreshing_entry_index = false;
@@ -90,6 +101,7 @@ impl Baboon {
         self.selected_key = None;
         self.open_tabs.clear();
         self.floating_tabs.clear();
+        self.campaign_project = None;
     }
 
     /// Applies `WorkerMessage::AllEntriesScanned`, rejecting stale source generations.

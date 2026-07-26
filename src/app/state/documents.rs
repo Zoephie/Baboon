@@ -74,11 +74,17 @@ impl Default for SaveChangesPrompt {
     }
 }
 
+pub(in crate::app) struct ProjectCheckpointPrompt {
+    pub(in crate::app) action: PendingCloseAction,
+    pub(in crate::app) error: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::app) enum LastSessionSourceKind {
     SingleFile,
     LooseFolder,
     MonolithicCache,
+    IoStoreContainerSet,
 }
 
 impl LastSessionSourceKind {
@@ -87,6 +93,7 @@ impl LastSessionSourceKind {
             LastSessionSourceKind::SingleFile => "single_file",
             LastSessionSourceKind::LooseFolder => "loose_folder",
             LastSessionSourceKind::MonolithicCache => "monolithic_cache",
+            LastSessionSourceKind::IoStoreContainerSet => "iostore_container_set",
         }
     }
 
@@ -95,6 +102,7 @@ impl LastSessionSourceKind {
             "single_file" => Some(Self::SingleFile),
             "loose_folder" => Some(Self::LooseFolder),
             "monolithic_cache" => Some(Self::MonolithicCache),
+            "iostore_container_set" => Some(Self::IoStoreContainerSet),
             _ => None,
         }
     }
@@ -113,6 +121,7 @@ pub(in crate::app) struct LastSessionState {
     pub(in crate::app) source_kind: LastSessionSourceKind,
     pub(in crate::app) source_path: PathBuf,
     pub(in crate::app) game: Option<String>,
+    pub(in crate::app) project_path: Option<PathBuf>,
     pub(in crate::app) tags: Vec<LastSessionTag>,
 }
 
@@ -131,6 +140,7 @@ pub(in crate::app) struct LastOpenedWindowsPrompt {
     pub(in crate::app) source_kind: LastSessionSourceKind,
     pub(in crate::app) source_path: PathBuf,
     pub(in crate::app) source_available: bool,
+    pub(in crate::app) project_path: Option<PathBuf>,
     pub(in crate::app) entries: Vec<LastOpenedWindowEntry>,
     /// "Don't ask again": on OK, remember as Always; on Cancel, as Never.
     pub(in crate::app) dont_ask_again: bool,
@@ -152,6 +162,9 @@ impl LastOpenedWindowsPrompt {
                             .is_some_and(|name| name.eq_ignore_ascii_case("blob_index.dat"))
                 }
             }
+            LastSessionSourceKind::IoStoreContainerSet => {
+                crate::source::find_paks_dir(&session.source_path).is_some()
+            }
         };
         let entries = session
             .tags
@@ -166,7 +179,7 @@ impl LastOpenedWindowsPrompt {
                 }
             })
             .collect::<Vec<_>>();
-        if entries.is_empty() {
+        if entries.is_empty() && session.project_path.is_none() {
             return None;
         }
         Some(Self {
@@ -174,6 +187,7 @@ impl LastOpenedWindowsPrompt {
             source_kind: session.source_kind,
             source_path: session.source_path,
             source_available,
+            project_path: session.project_path,
             entries,
             dont_ask_again: false,
         })

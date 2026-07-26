@@ -135,8 +135,8 @@ silently skipped.
   the rack (or click *dock*) to re-dock it.
 - **Right-click a tab** to reveal that tag in the browser tree, or to close all
   tabs / all tabs but this one.
-- An LRU cache bounds how many parsed tags and tabs are kept in memory at once,
-  trimming least-recently-used documents automatically.
+- Tabs remain open until explicitly closed. The wrapped rack scrolls once it
+  reaches five rows; the practical document limit is available memory.
 
 ### Field editing
 
@@ -307,7 +307,8 @@ package your changes as a separate, reversible mod:
   has a *Don't ask again* option (also under **Settings → Startup → Saving**).
   There is no undo without a backup of the paks. *(Loose-folder MCC tags save
   normally and never prompt.)*
-- **Export Mod…** (File menu) — bundle **every open, modified tag** into one
+- **Export Mod…** (File menu) — bundle **every modified tag in the active
+  project**, including checkpointed tags whose tabs were closed, into one
   portable, higher-priority **overlay container** without touching the base game.
   Mods are fully reversible (delete the overlay to uninstall).
 - **Save As** — *duplicate* the tag under a new name into an overlay container (a
@@ -315,13 +316,23 @@ package your changes as a separate, reversible mod:
 - **Rename** (right-click) — the same as Save As, plus a package **redirect** so
   existing tags that reference the old name resolve to the renamed one.
 
-Export Mod / Save As / Rename each produce a `<name>-WinGDK_P` IoStore
-**triplet** — `.utoc`, `.ucas`, and a small `.pak` stub. Drop **all three**
+Export Mod produces a `<name>-WinGDK_P` IoStore **triplet** — `.utoc`, `.ucas`,
+and a small `.pak` stub — plus a same-stem `.baboon` project file containing
+the open-tab layout and recoverable copies of every modified/new tag. Use
+**File → Open Baboon Project…** to continue editing that project on this or
+another machine. Save As / Rename produce the IoStore triplet without a project
+sidecar. Drop **all three runtime files**
 files into the game's `Meteorite/Content/Paks/` folder alongside the base paks.
 The `.pak` is required: UE's loader discovers containers by scanning that folder
 for `.pak` files and derives the matching `.utoc`/`.ucas` from each — an overlay
 with no `.pak` is never mounted. The `_P` suffix then gives the overlay patch
 priority so UE serves your chunks on top of the base (last-mounted-wins).
+
+While a Campaign Evolved source is open, Baboon checkpoints the active project
+to `%APPDATA%\Baboon\campaign_evolved_recovery.baboon` after a short idle
+period. Clean tabs reload from the game containers; modified and newly-created
+tags are stored in the project database. The normal Ask / Always / Never session
+setting controls whether this recovery project is reopened on the next launch.
 
 Tag identity (`FPackageId` / export hashes), UE5 Zen-package `.uasset`
 (de)serialization, and override-container writing are all implemented natively in

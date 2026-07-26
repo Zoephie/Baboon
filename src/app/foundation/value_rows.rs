@@ -269,39 +269,27 @@ pub(in crate::app) fn draw_foundation_bounds_row(
     let upper_key = format!("{buffer_key}|upper");
     let lower_id = edit.widget_id(("bounds_lower", &buffer_key));
     let upper_id = edit.widget_id(("bounds_upper", &buffer_key));
-    let lower_has_focus = ui.memory(|memory| memory.has_focus(lower_id));
-    let upper_has_focus = ui.memory(|memory| memory.has_focus(upper_id));
-    let mut lower = edit
-        .buffers
-        .remove(&lower_key)
-        .unwrap_or_else(|| lower_value.to_owned());
-    let mut upper = edit
-        .buffers
-        .remove(&upper_key)
-        .unwrap_or_else(|| upper_value.to_owned());
-    if !lower_has_focus && !upper_has_focus {
-        if lower != lower_value {
-            lower = lower_value.to_owned();
-        }
-        if upper != upper_value {
-            upper = upper_value.to_owned();
-        }
-    }
+    let mut lower = edit.buffers.take(&lower_key, lower_value);
+    let mut upper = edit.buffers.take(&upper_key, upper_value);
 
     ui.horizontal(|ui| {
         ui.add_space(indent);
         foundation_label_cell(ui, &meta.label, meta.help.as_deref());
         let editable = edit.editable && !meta.read_only;
         if editable {
-            let lower_response = foundation_text_edit_cell(ui, &mut lower, 92.0, lower_id);
+            let lower_response =
+                foundation_text_edit_cell(ui, &mut lower.text, 92.0, lower_id);
             ui.label(RichText::new("to").color(subtle_dark()).small());
-            let upper_response = foundation_text_edit_cell(ui, &mut upper, 92.0, upper_id);
-            let commit = (lower_response.lost_focus() || upper_response.lost_focus())
-                && (lower.trim() != lower_value.trim() || upper.trim() != upper_value.trim());
+            let upper_response =
+                foundation_text_edit_cell(ui, &mut upper.text, 92.0, upper_id);
+            lower.note_response(&lower_response);
+            upper.note_response(&upper_response);
+            let commit = lower.should_commit(ui, &lower_response)
+                || upper.should_commit(ui, &upper_response);
             if commit {
                 edit.pending.push(PendingFieldEdit {
                     path: path.to_owned(),
-                    input: format!("{}..{}", lower.trim(), upper.trim()),
+                    input: format!("{}..{}", lower.text.trim(), upper.text.trim()),
                 });
             }
         } else {
@@ -315,8 +303,8 @@ pub(in crate::app) fn draw_foundation_bounds_row(
         draw_field_help(ui, meta);
     });
 
-    edit.buffers.insert(lower_key, lower);
-    edit.buffers.insert(upper_key, upper);
+    edit.buffers.put(lower_key, lower);
+    edit.buffers.put(upper_key, upper);
 }
 
 pub(in crate::app) fn draw_foundation_component_edit_row(
@@ -336,15 +324,9 @@ pub(in crate::app) fn draw_foundation_component_edit_row(
         .iter()
         .map(|(label, _)| edit.widget_id(("component", &buffer_key, label)))
         .collect::<Vec<_>>();
-    let any_focus = ids
-        .iter()
-        .any(|id| ui.memory(|memory| memory.has_focus(*id)));
     for (label, value) in parts {
         let key = format!("{buffer_key}|component|{label}");
-        let mut buffer = edit.buffers.remove(&key).unwrap_or_else(|| value.clone());
-        if !any_focus && buffer != *value {
-            buffer = value.clone();
-        }
+        let buffer = edit.buffers.take(&key, value);
         values.push((label.clone(), value.clone(), key, buffer));
     }
 
@@ -352,27 +334,31 @@ pub(in crate::app) fn draw_foundation_component_edit_row(
         ui.add_space(indent);
         foundation_label_cell(ui, &meta.label, meta.help.as_deref());
         let editable = edit.editable && !meta.read_only;
-        for (index, (label, _, _, buffer)) in values.iter_mut().enumerate() {
+        for (index, (label, _, _, draft)) in values.iter_mut().enumerate() {
             if !label.is_empty() {
                 ui.label(RichText::new(label.as_str()).color(subtle_dark()).small());
             }
             if editable {
-                responses.push(foundation_text_edit_cell(ui, buffer, 92.0, ids[index]));
+                let response =
+                    foundation_text_edit_cell(ui, &mut draft.text, 92.0, ids[index]);
+                draft.note_response(&response);
+                responses.push(response);
             } else {
-                foundation_input_cell(ui, buffer, 92.0);
+                foundation_input_cell(ui, &draft.text, 92.0);
             }
         }
         if editable {
-            let changed = values
+            let changed = values.iter().any(|(_, _, _, draft)| draft.changed);
+            let committed = responses
                 .iter()
-                .any(|(_, value, _, buffer)| buffer.trim() != value.trim());
-            let committed = responses.iter().any(egui::Response::lost_focus);
+                .zip(values.iter())
+                .any(|(response, (_, _, _, draft))| draft.should_commit(ui, response));
             if committed && changed {
                 edit.pending.push(PendingFieldEdit {
                     path: path.to_owned(),
                     input: values
                         .iter()
-                        .map(|(_, _, _, buffer)| buffer.trim())
+                        .map(|(_, _, _, draft)| draft.text.trim())
                         .collect::<Vec<_>>()
                         .join(", "),
                 });
@@ -384,8 +370,8 @@ pub(in crate::app) fn draw_foundation_component_edit_row(
         draw_field_help(ui, meta);
     });
 
-    for (_, _, key, buffer) in values {
-        edit.buffers.insert(key, buffer);
+    for (_, _, key, draft) in values {
+        edit.buffers.put(key, draft);
     }
 }
 
@@ -443,25 +429,19 @@ pub(in crate::app) fn draw_foundation_editable_text_row(
             .clamp(180.0, 920.0);
     let buffer_key = format!("{}|{}", edit.tag_key, path);
     let id = edit.widget_id(("text", &buffer_key));
-    let buffer = edit
-        .buffers
-        .entry(buffer_key.clone())
-        .or_insert_with(|| value.to_owned());
-    if !ui.memory(|memory| memory.has_focus(id)) && buffer != value {
-        *buffer = value.to_owned();
-    }
+    let draft = edit.buffers.draft_mut(buffer_key, value);
 
     ui.horizontal(|ui| {
         ui.add_space(indent);
         foundation_label_cell(ui, &meta.label, meta.help.as_deref());
 
-        let width = foundation_value_width(buffer, available_value_width);
-        let response = foundation_text_edit_cell(ui, buffer, width, id);
-        let commit = response.lost_focus() && buffer.trim() != value.trim();
-        if commit {
+        let width = foundation_value_width(&draft.text, available_value_width);
+        let response = foundation_text_edit_cell(ui, &mut draft.text, width, id);
+        draft.note_response(&response);
+        if draft.should_commit(ui, &response) {
             edit.pending.push(PendingFieldEdit {
                 path: path.to_owned(),
-                input: buffer.trim().to_owned(),
+                input: draft.text.trim().to_owned(),
             });
         }
         if !suffix.is_empty() {

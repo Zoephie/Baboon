@@ -60,12 +60,16 @@ impl Baboon {
                         input: input.clone(),
                     }],
                     &mut doc.dirty,
-                ) {
+                )
+                .status
+                {
                     self.status = status;
                 }
                 doc.journal.end_edit_window();
-                self.edit_buffers
-                    .insert(format!("{}|{}", picker.tag_key, picker.field_path), input);
+                self.edit_buffers.insert_clean(
+                    format!("{}|{}", picker.tag_key, picker.field_path),
+                    input,
+                );
                 self.invalidate_tag_caches(&picker.tag_key);
             } else {
                 self.status = "The tag being edited is no longer open".to_owned();

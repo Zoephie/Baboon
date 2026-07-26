@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc::{self, Receiver, Sender},
 };
 use std::thread;
@@ -59,6 +59,8 @@ mod state;
 use state::*;
 mod journal;
 use journal::*;
+mod project;
+use project::*;
 mod keywords;
 use keywords::*;
 mod field_index;
@@ -140,13 +142,18 @@ pub struct Baboon {
     open_tabs: Vec<String>,
     /// Subset of `open_tabs` currently rendered as independent windows.
     floating_tabs: HashSet<String>,
+    /// Docked tab to reveal during the next rack render.
+    tab_scroll_target: Option<String>,
     /// Per-document preview state, keyed identically to `parsed_tags` so cached
     /// textures cannot migrate between tags after selection changes.
     bitmap_previews: HashMap<String, BitmapPreviewState>,
     /// Per-document model view/camera state retained while the document is cached.
     model_previews: HashMap<String, ModelPreviewState>,
     /// Transient text-entry buffers keyed by stable widget/edit identifiers.
-    edit_buffers: HashMap<String, String>,
+    edit_buffers: EditDrafts,
+    /// File-menu actions run after the editor has rendered so focus-loss edits
+    /// are applied before their save/export snapshot is taken.
+    deferred_file_action: Option<DeferredFileAction>,
     /// Source-local render-method definition cache; `None` is a cached miss.
     rmdf_cache: HashMap<String, Option<RenderMethodDefinition>>,
     /// Source-local render-method option cache; `None` is a cached miss.
@@ -269,10 +276,15 @@ pub struct Baboon {
     /// Modal close transaction; the pending action is executed only after every
     /// selected dirty document has been saved or discard is confirmed.
     save_changes_prompt: SaveChangesPrompt,
+    project_checkpoint_prompt: Option<ProjectCheckpointPrompt>,
     /// Startup-only prompt reconstructed from the prior session file.
     last_opened_windows: Option<LastOpenedWindowsPrompt>,
     /// Restore request held until its source load completes and keys can resolve.
     pending_session_restore: Option<PendingSessionRestore>,
+    /// Active Campaign Evolved recovery/project database.
+    campaign_project: Option<ActiveCampaignProject>,
+    /// Project contents waiting for their Campaign Evolved source to finish mounting.
+    pending_campaign_project: Option<PendingCampaignProject>,
     /// Pending destructive block op (delete / delete all) awaiting confirm.
     block_confirm: Option<BlockConfirm>,
     /// Sound-tag audition: FMOD bank playback (rodio output + bank cache).
@@ -343,12 +355,17 @@ impl Baboon {
             SessionRestore::Always => match last_session {
                 Some(prompt) => {
                     let tags = prompt.checked_tags();
-                    if tags.is_empty() {
+                    if tags.is_empty() && prompt.project_path.is_none() {
                         (None, None)
                     } else {
                         (
                             None,
-                            Some((prompt.source_kind, prompt.source_path.clone(), tags)),
+                            Some((
+                                prompt.source_kind,
+                                prompt.source_path.clone(),
+                                prompt.project_path.clone(),
+                                tags,
+                            )),
                         )
                     }
                 }
@@ -372,9 +389,11 @@ impl Baboon {
             selected_key: None,
             open_tabs: Vec::new(),
             floating_tabs: HashSet::new(),
+            tab_scroll_target: None,
             bitmap_previews: HashMap::new(),
             model_previews: HashMap::new(),
-            edit_buffers: HashMap::new(),
+            edit_buffers: EditDrafts::default(),
+            deferred_file_action: None,
             rmdf_cache: HashMap::new(),
             rmop_cache: HashMap::new(),
             filter: String::new(),
@@ -492,8 +511,11 @@ impl Baboon {
             dragging_floating_tab: None,
             tab_rack_rect: None,
             save_changes_prompt: SaveChangesPrompt::default(),
+            project_checkpoint_prompt: None,
             last_opened_windows,
             pending_session_restore: None,
+            campaign_project: None,
+            pending_campaign_project: None,
             block_confirm: None,
             audio: audio::AudioState::default(),
             ce_sound_bindings: HashMap::new(),
@@ -527,8 +549,14 @@ impl Baboon {
             last_pixels_per_point: cc.egui_ctx.pixels_per_point(),
             block_clipboard: None,
         };
-        if let Some((source_kind, source_path, tags)) = auto_restore_session {
-            app.begin_last_session_restore(source_kind, source_path, tags, cc.egui_ctx.clone());
+        if let Some((source_kind, source_path, project_path, tags)) = auto_restore_session {
+            app.begin_last_session_restore(
+                source_kind,
+                source_path,
+                project_path,
+                tags,
+                cc.egui_ctx.clone(),
+            );
         }
         app
     }

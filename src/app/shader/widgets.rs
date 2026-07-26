@@ -477,7 +477,7 @@ pub(in crate::app) fn draw_shader_grid_row_readonly(
     let mut sound_extract_request = None;
     let mut tool_import = None;
     let mut bitmap_reimport = None;
-    let mut buffers = HashMap::new();
+    let mut buffers = EditDrafts::default();
     let mut color_request = None;
     let mut function_request = None;
     let mut block_clip_request = None;
