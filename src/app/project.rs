@@ -545,6 +545,55 @@ impl Baboon {
         }))
     }
 
+    /// Refresh this kit's set of modified tags if anything has changed since it
+    /// was last built.
+    ///
+    /// The signature is the identity of everything that would land in the set:
+    /// the dirty documents' keys and the stashed overlays' identities. Both are
+    /// small — a handful of entries — so building and comparing it every frame
+    /// is far cheaper than the entry lookups the rebuild performs.
+    pub(super) fn refresh_modified_tags(&mut self, kit: usize) {
+        let mut signature: Vec<String> = self.kits[kit]
+            .parsed_tags
+            .iter()
+            .filter(|(_, document)| document.dirty)
+            .map(|(key, _)| key.clone())
+            .collect();
+        if let Some(project) = self.kits[kit].campaign_project.as_ref() {
+            signature.extend(project.overlays.keys().cloned());
+        }
+        signature.sort();
+        if signature == self.kits[kit].modified_signature {
+            return;
+        }
+        let mut modified = ModifiedTags::default();
+        let dirty_keys: Vec<String> = self.kits[kit]
+            .parsed_tags
+            .iter()
+            .filter(|(_, document)| document.dirty)
+            .map(|(key, _)| key.clone())
+            .collect();
+        for key in dirty_keys {
+            if let Some(entry) = self.entry_for_key_in(kit, &key) {
+                modified.insert(entry);
+            }
+        }
+        // Stashed tags need not be open, so they are resolved from the project
+        // rather than from the open documents.
+        let identities: Vec<String> = self.kits[kit]
+            .campaign_project
+            .as_ref()
+            .map(|project| project.overlays.keys().cloned().collect())
+            .unwrap_or_default();
+        for identity in identities {
+            if let Some(entry) = self.campaign_entry_for_identity(kit, &identity) {
+                modified.insert(&entry);
+            }
+        }
+        self.kits[kit].modified_tags = std::sync::Arc::new(modified);
+        self.kits[kit].modified_signature = signature;
+    }
+
     /// Forget one tag's stashed overlay, so the tag reads as its source has it
     /// again. Returns whether anything was stashed for it.
     ///
