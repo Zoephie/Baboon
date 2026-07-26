@@ -96,7 +96,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             .map(tag_tab_label)
             .unwrap_or_else(|| pane.clone());
         let text = if dirty {
-            format!("● {label}")
+            format!("• {label}")
         } else {
             label
         };

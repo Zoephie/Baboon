@@ -89,7 +89,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
         let dirty = kit.parsed_tags.values().any(|document| document.dirty);
         let label = kit_strip_label(kit);
         let text = if dirty {
-            format!("● {label}")
+            format!("• {label}")
         } else {
             label
         };
