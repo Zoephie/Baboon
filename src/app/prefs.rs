@@ -478,12 +478,39 @@ pub(super) fn load_terminal_open_games() -> HashSet<String> {
         .unwrap_or_default()
 }
 
+/// Read `last_session.json`.
+///
+/// Version 2 stores an array of kits. Version 1 stored a single source and is
+/// upgraded in place to a one-kit session, so an existing session file still
+/// restores rather than being silently dropped.
 pub(super) fn load_last_session() -> Option<LastSessionState> {
     let text = fs::read_to_string(last_session_path()).ok()?;
     let value = serde_json::from_str::<Value>(&text).ok()?;
-    if value.get("version").and_then(Value::as_u64)? != 1 {
+    parse_last_session(&value)
+}
+
+/// Pure parse of a session document, split out from the file read so both
+/// format versions can be tested directly.
+fn parse_last_session(value: &Value) -> Option<LastSessionState> {
+    let kits = match value.get("version").and_then(Value::as_u64)? {
+        1 => vec![parse_session_kit(value)?],
+        2 => value
+            .get("kits")?
+            .as_array()?
+            .iter()
+            .filter_map(parse_session_kit)
+            .collect(),
+        _ => return None,
+    };
+    if kits.is_empty() {
         return None;
     }
+    Some(LastSessionState { kits })
+}
+
+/// Parse one kit's `{source, tags}` object. Both format versions use the same
+/// shape for this part, which is what makes the v1 upgrade a one-liner.
+fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
     let source = value.get("source")?;
     let source_kind = LastSessionSourceKind::from_str(source.get("kind")?.as_str()?.trim())?;
     let source_path = source
@@ -532,7 +559,7 @@ pub(super) fn load_last_session() -> Option<LastSessionState> {
     if tags.is_empty() {
         return None;
     }
-    Some(LastSessionState {
+    Some(LastSessionKit {
         source_kind,
         source_path,
         game,
@@ -540,8 +567,8 @@ pub(super) fn load_last_session() -> Option<LastSessionState> {
     })
 }
 
-/// Persist the source and open tag keys used by the launch-time restore
-/// prompt. This is written only from the confirmed app-exit path, so a crash or
+/// Persist every kit's source and open tag keys for the launch-time restore
+/// prompt. Written only from the confirmed app-exit path, so a crash or a
 /// canceled close leaves the previous successfully closed session intact.
 pub(super) fn save_last_session(session: &LastSessionState) -> Result<(), String> {
     let path = last_session_path();
@@ -549,26 +576,35 @@ pub(super) fn save_last_session(session: &LastSessionState) -> Result<(), String
         fs::create_dir_all(parent)
             .map_err(|error| format!("Could not create session folder: {error}"))?;
     }
-    let tags = session
-        .tags
+    let kits = session
+        .kits
         .iter()
-        .map(|tag| {
+        .map(|kit| {
+            let tags = kit
+                .tags
+                .iter()
+                .map(|tag| {
+                    json!({
+                        "key": tag.key,
+                        "label": tag.label,
+                        "group_tag": tag.group_tag,
+                        "path": tag.path.as_ref().map(|path| path.display().to_string()),
+                    })
+                })
+                .collect::<Vec<_>>();
             json!({
-                "key": tag.key,
-                "label": tag.label,
-                "group_tag": tag.group_tag,
-                "path": tag.path.as_ref().map(|path| path.display().to_string()),
+                "source": {
+                    "kind": kit.source_kind.as_str(),
+                    "path": kit.source_path.display().to_string(),
+                    "game": kit.game,
+                },
+                "tags": tags,
             })
         })
         .collect::<Vec<_>>();
     let value = json!({
-        "version": 1,
-        "source": {
-            "kind": session.source_kind.as_str(),
-            "path": session.source_path.display().to_string(),
-            "game": session.game,
-        },
-        "tags": tags,
+        "version": 2,
+        "kits": kits,
     });
     let text = serde_json::to_string_pretty(&value)
         .map_err(|error| format!("Could not encode session: {error}"))?;
@@ -671,5 +707,74 @@ mod tests {
         assert!(clean_favorite_relative_path(PathBuf::from("../brute.model")).is_none());
         assert!(clean_favorite_relative_path(PathBuf::from("./brute.model")).is_none());
         assert!(clean_favorite_relative_path(PathBuf::new()).is_none());
+    }
+}
+
+#[cfg(test)]
+mod session_tests {
+    use super::*;
+
+    /// A version-1 file predates multiple kits. It must still restore, as one
+    /// kit — silently dropping it would lose the user's open tags on upgrade.
+    #[test]
+    fn version_1_sessions_upgrade_to_a_single_kit() {
+        let value = serde_json::json!({
+            "version": 1,
+            "source": { "kind": "loose_folder", "path": "/tags", "game": "halo3_mcc" },
+            "tags": [{ "key": "file:/tags/a.weapon", "label": "a", "group_tag": 1, "path": null }],
+        });
+        let session = parse_last_session(&value).expect("v1 session parses");
+        assert_eq!(session.kits.len(), 1);
+        assert_eq!(session.kits[0].game.as_deref(), Some("halo3_mcc"));
+        assert_eq!(session.kits[0].tags.len(), 1);
+    }
+
+    #[test]
+    fn version_2_sessions_restore_every_kit() {
+        let value = serde_json::json!({
+            "version": 2,
+            "kits": [
+                {
+                    "source": { "kind": "loose_folder", "path": "/h3", "game": "halo3_mcc" },
+                    "tags": [{ "key": "file:/h3/a.weapon", "label": "a", "group_tag": 1 }],
+                },
+                {
+                    "source": { "kind": "loose_folder", "path": "/reach", "game": "haloreach_mcc" },
+                    "tags": [{ "key": "file:/reach/b.weapon", "label": "b", "group_tag": 1 }],
+                },
+            ],
+        });
+        let session = parse_last_session(&value).expect("v2 session parses");
+        assert_eq!(session.kits.len(), 2);
+        assert_eq!(session.kits[1].game.as_deref(), Some("haloreach_mcc"));
+        assert_eq!(session.kits[1].tags[0].key, "file:/reach/b.weapon");
+    }
+
+    /// A kit whose tags all failed to parse contributes nothing, and a session
+    /// left with no kits at all is no session.
+    #[test]
+    fn kits_without_usable_tags_are_dropped() {
+        let value = serde_json::json!({
+            "version": 2,
+            "kits": [
+                { "source": { "kind": "loose_folder", "path": "/h3" }, "tags": [] },
+                {
+                    "source": { "kind": "loose_folder", "path": "/reach" },
+                    "tags": [{ "key": "file:/reach/b.weapon", "label": "b", "group_tag": 1 }],
+                },
+            ],
+        });
+        let session = parse_last_session(&value).expect("session parses");
+        assert_eq!(session.kits.len(), 1);
+        assert_eq!(session.kits[0].source_path, PathBuf::from("/reach"));
+
+        let empty = serde_json::json!({ "version": 2, "kits": [] });
+        assert!(parse_last_session(&empty).is_none());
+    }
+
+    #[test]
+    fn unknown_versions_are_ignored() {
+        let value = serde_json::json!({ "version": 99, "kits": [] });
+        assert!(parse_last_session(&value).is_none());
     }
 }

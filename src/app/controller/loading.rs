@@ -22,7 +22,7 @@ impl Baboon {
         let mut loaded = match result {
             Ok(loaded) => loaded,
             Err(error) => {
-                self.pending_session_restore = None;
+                self.kits[self.active].pending_restore_tags.clear();
                 self.status = error;
                 return false;
             }

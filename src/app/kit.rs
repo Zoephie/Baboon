@@ -108,6 +108,11 @@ pub(super) struct Kit {
     /// Matching on the requested path is what lets a repeat open of the same
     /// folder focus this kit instead of loading a duplicate.
     pub(super) requested_path: Option<PathBuf>,
+
+    /// Tags staged by a session restore, drained once this kit's source
+    /// finishes loading. Held per kit rather than in one shared slot so
+    /// several kits can restore concurrently and finish in any order.
+    pub(super) pending_restore_tags: Vec<LastSessionTag>,
 }
 
 impl Kit {
@@ -140,6 +145,7 @@ impl Kit {
             terminal_open: false,
             terminal_work_dir: None,
             requested_path: None,
+            pending_restore_tags: Vec::new(),
         }
     }
 
@@ -306,10 +312,12 @@ impl Baboon {
         // The requested path outlives the load it started, so a later open of
         // the same folder can find this kit.
         let requested_path = self.kits[index].requested_path.clone();
+        let pending_restore_tags = std::mem::take(&mut self.kits[index].pending_restore_tags);
         self.kits[index] = Kit {
             source: Some(source),
             names,
             requested_path,
+            pending_restore_tags,
             ..Kit::empty(id, self.default_names.clone())
         };
     }

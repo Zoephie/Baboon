@@ -110,12 +110,18 @@ pub(in crate::app) struct LastSessionTag {
     pub(in crate::app) path: Option<PathBuf>,
 }
 
+/// One kit's worth of saved session: its source and the tags it had open.
 #[derive(Clone, Debug)]
-pub(in crate::app) struct LastSessionState {
+pub(in crate::app) struct LastSessionKit {
     pub(in crate::app) source_kind: LastSessionSourceKind,
     pub(in crate::app) source_path: PathBuf,
     pub(in crate::app) game: Option<String>,
     pub(in crate::app) tags: Vec<LastSessionTag>,
+}
+
+#[derive(Clone, Debug)]
+pub(in crate::app) struct LastSessionState {
+    pub(in crate::app) kits: Vec<LastSessionKit>,
 }
 
 pub(in crate::app) struct LastOpenedWindowEntry {
@@ -124,38 +130,44 @@ pub(in crate::app) struct LastOpenedWindowEntry {
     pub(in crate::app) available: bool,
 }
 
-/// Launch-time restore prompt backed by `last_session.json`. OK first reloads
-/// the saved source (loose folder, monolithic cache, or single file); once the
-/// async source load completes, the queued tag keys are reopened through the
-/// normal `select_entry` path.
-pub(in crate::app) struct LastOpenedWindowsPrompt {
-    pub(in crate::app) visible: bool,
+/// One kit's section of the restore prompt.
+pub(in crate::app) struct LastOpenedWindowsKit {
     pub(in crate::app) source_kind: LastSessionSourceKind,
     pub(in crate::app) source_path: PathBuf,
+    pub(in crate::app) game: Option<String>,
     pub(in crate::app) source_available: bool,
     pub(in crate::app) entries: Vec<LastOpenedWindowEntry>,
+}
+
+/// Launch-time restore prompt backed by `last_session.json`. OK reloads each
+/// saved kit's source; as each async load completes, that kit's queued tag
+/// keys are reopened through the normal `select_entry` path. Restores are
+/// independent, so the kits can finish loading in any order.
+pub(in crate::app) struct LastOpenedWindowsPrompt {
+    pub(in crate::app) visible: bool,
+    pub(in crate::app) kits: Vec<LastOpenedWindowsKit>,
     /// "Don't ask again": on OK, remember as Always; on Cancel, as Never.
     pub(in crate::app) dont_ask_again: bool,
 }
 
-impl LastOpenedWindowsPrompt {
-    pub(in crate::app) fn from_session(session: LastSessionState) -> Option<Self> {
-        let source_available = match session.source_kind {
-            LastSessionSourceKind::SingleFile => session.source_path.is_file(),
-            LastSessionSourceKind::LooseFolder => session.source_path.is_dir(),
+impl LastOpenedWindowsKit {
+    fn from_saved(saved: LastSessionKit) -> Option<Self> {
+        let source_available = match saved.source_kind {
+            LastSessionSourceKind::SingleFile => saved.source_path.is_file(),
+            LastSessionSourceKind::LooseFolder => saved.source_path.is_dir(),
             LastSessionSourceKind::MonolithicCache => {
-                if session.source_path.is_dir() {
-                    session.source_path.join("blob_index.dat").is_file()
+                if saved.source_path.is_dir() {
+                    saved.source_path.join("blob_index.dat").is_file()
                 } else {
-                    session.source_path.is_file()
-                        && session
+                    saved.source_path.is_file()
+                        && saved
                             .source_path
                             .file_name()
                             .is_some_and(|name| name.eq_ignore_ascii_case("blob_index.dat"))
                 }
             }
         };
-        let entries = session
+        let entries = saved
             .tags
             .into_iter()
             .map(|tag| {
@@ -172,12 +184,11 @@ impl LastOpenedWindowsPrompt {
             return None;
         }
         Some(Self {
-            visible: true,
-            source_kind: session.source_kind,
-            source_path: session.source_path,
+            source_kind: saved.source_kind,
+            source_path: saved.source_path,
+            game: saved.game,
             source_available,
             entries,
-            dont_ask_again: false,
         })
     }
 
@@ -190,9 +201,39 @@ impl LastOpenedWindowsPrompt {
     }
 }
 
-pub(in crate::app) struct PendingSessionRestore {
-    pub(in crate::app) tags: Vec<LastSessionTag>,
+impl LastOpenedWindowsPrompt {
+    pub(in crate::app) fn from_session(session: LastSessionState) -> Option<Self> {
+        let kits = session
+            .kits
+            .into_iter()
+            .filter_map(LastOpenedWindowsKit::from_saved)
+            .collect::<Vec<_>>();
+        if kits.is_empty() {
+            return None;
+        }
+        Some(Self {
+            visible: true,
+            kits,
+            dont_ask_again: false,
+        })
+    }
+
+    /// Every kit that still has something checked, paired with those tags.
+    pub(in crate::app) fn checked_kits(&self) -> Vec<(LastSessionSourceKind, PathBuf, Vec<LastSessionTag>)> {
+        self.kits
+            .iter()
+            .filter_map(|kit| {
+                let tags = kit.checked_tags();
+                (!tags.is_empty()).then(|| (kit.source_kind, kit.source_path.clone(), tags))
+            })
+            .collect()
+    }
+
+    pub(in crate::app) fn has_checked_tags(&self) -> bool {
+        self.kits.iter().any(|kit| !kit.checked_tags().is_empty())
+    }
 }
+
 
 /// Import-a-tag-file dialog for a Campaign Evolved container source. Owns the
 /// parsed imported `TagFile` (moved out on confirm) and the schema-comparison

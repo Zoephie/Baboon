@@ -240,8 +240,6 @@ pub struct Baboon {
     save_changes_prompt: SaveChangesPrompt,
     /// Startup-only prompt reconstructed from the prior session file.
     last_opened_windows: Option<LastOpenedWindowsPrompt>,
-    /// Restore request held until its source load completes and keys can resolve.
-    pending_session_restore: Option<PendingSessionRestore>,
     /// Pending destructive block op (delete / delete all) awaiting confirm.
     block_confirm: Option<BlockConfirm>,
     /// Sound-tag audition: FMOD bank playback (rodio output + bank cache).
@@ -305,18 +303,8 @@ impl Baboon {
             .and_then(LastOpenedWindowsPrompt::from_session);
         let (last_opened_windows, auto_restore_session) = match prefs.session_restore {
             SessionRestore::Always => match last_session {
-                Some(prompt) => {
-                    let tags = prompt.checked_tags();
-                    if tags.is_empty() {
-                        (None, None)
-                    } else {
-                        (
-                            None,
-                            Some((prompt.source_kind, prompt.source_path.clone(), tags)),
-                        )
-                    }
-                }
-                None => (None, None),
+                Some(prompt) if prompt.has_checked_tags() => (None, Some(prompt.checked_kits())),
+                _ => (None, None),
             },
             // Show the prompt.
             SessionRestore::Ask => (last_session, None),
@@ -436,7 +424,6 @@ impl Baboon {
             terminal_open_games,
             save_changes_prompt: SaveChangesPrompt::default(),
             last_opened_windows,
-            pending_session_restore: None,
             block_confirm: None,
             audio: audio::AudioState::default(),
             ce_usmap: None,
@@ -469,8 +456,8 @@ impl Baboon {
             last_pixels_per_point: cc.egui_ctx.pixels_per_point(),
             block_clipboard: None,
         };
-        if let Some((source_kind, source_path, tags)) = auto_restore_session {
-            app.begin_last_session_restore(source_kind, source_path, tags, cc.egui_ctx.clone());
+        if let Some(kits) = auto_restore_session {
+            app.begin_last_session_restore(kits, cc.egui_ctx.clone());
         }
         app
     }

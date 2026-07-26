@@ -1926,8 +1926,17 @@ impl Baboon {
         }
     }
 
+    /// Snapshot every kit's source and open tags for the restore prompt.
     fn current_session_state(&self) -> Option<LastSessionState> {
-        let source = self.source()?;
+        let kits = (0..self.kits.len())
+            .filter_map(|index| self.session_kit_state(index))
+            .collect::<Vec<_>>();
+        (!kits.is_empty()).then_some(LastSessionState { kits })
+    }
+
+    fn session_kit_state(&self, kit_index: usize) -> Option<LastSessionKit> {
+        let kit = &self.kits[kit_index];
+        let source = kit.source.as_ref()?;
         let (source_kind, source_path) = match &source.source {
             TagSource::SingleFile { path } => (LastSessionSourceKind::SingleFile, path.clone()),
             TagSource::LooseFolder { root, .. } => {
@@ -1940,8 +1949,13 @@ impl Baboon {
             TagSource::IoStoreContainerSet { .. } => return None,
         };
         let mut tags = Vec::new();
-        for key in ordered_unique_keys(self.kits[self.active].open_tabs.iter()) {
-            let Some(entry) = self.entry_for_key(&key) else {
+        for key in ordered_unique_keys(kit.open_tabs.iter()) {
+            let Some(entry) = source
+                .entries
+                .iter()
+                .chain(source.all_entries.iter())
+                .find(|entry| entry.key == key)
+            else {
                 continue;
             };
             let path = match &entry.location {
@@ -1955,16 +1969,13 @@ impl Baboon {
                 label: format!(
                     "{} - {}",
                     entry.display_path,
-                    group_label(self.names(), entry.group_tag)
+                    group_label(&kit.names, entry.group_tag)
                 ),
                 group_tag: entry.group_tag,
                 path,
             });
         }
-        if tags.is_empty() {
-            return None;
-        }
-        Some(LastSessionState {
+        (!tags.is_empty()).then_some(LastSessionKit {
             source_kind,
             source_path,
             game: source.game.clone(),
@@ -1972,38 +1983,49 @@ impl Baboon {
         })
     }
 
+    /// Reopen each saved kit. Every kit gets its own load, and its tags are
+    /// staged on the kit itself rather than in one shared slot, so the loads
+    /// can finish in any order without stealing each other's tags.
     pub(super) fn begin_last_session_restore(
         &mut self,
-        source_kind: LastSessionSourceKind,
-        source_path: PathBuf,
-        tags: Vec<LastSessionTag>,
+        kits: Vec<(LastSessionSourceKind, PathBuf, Vec<LastSessionTag>)>,
         ctx: egui::Context,
     ) {
-        if tags.is_empty() {
-            return;
-        }
-        self.pending_session_restore = Some(PendingSessionRestore { tags });
-        match source_kind {
-            LastSessionSourceKind::SingleFile => self.begin_load_single_path(source_path, ctx),
-            LastSessionSourceKind::LooseFolder => self.begin_load_folder_path(source_path, ctx),
-            LastSessionSourceKind::MonolithicCache => {
-                let blob_index = if source_path.is_dir() {
-                    source_path.join("blob_index.dat")
-                } else {
-                    source_path
-                };
-                self.begin_load_monolithic_path(blob_index, ctx);
+        for (source_kind, source_path, tags) in kits {
+            if tags.is_empty() {
+                continue;
             }
+            match source_kind {
+                LastSessionSourceKind::SingleFile => {
+                    self.begin_load_single_path(source_path, ctx.clone())
+                }
+                LastSessionSourceKind::LooseFolder => {
+                    self.begin_load_folder_path(source_path, ctx.clone())
+                }
+                LastSessionSourceKind::MonolithicCache => {
+                    let blob_index = if source_path.is_dir() {
+                        source_path.join("blob_index.dat")
+                    } else {
+                        source_path
+                    };
+                    self.begin_load_monolithic_path(blob_index, ctx.clone());
+                }
+            }
+            // The loaders route to a kit and leave it active, so this stages
+            // the tags on the kit the load will land in.
+            self.kits[self.active].pending_restore_tags = tags;
         }
     }
 
+    /// Reopen the tags staged for the kit that just finished loading.
     fn finish_pending_session_restore(&mut self, ctx: egui::Context) {
-        let Some(restore) = self.pending_session_restore.take() else {
+        let restore = std::mem::take(&mut self.kits[self.active].pending_restore_tags);
+        if restore.is_empty() {
             return;
-        };
+        }
         let mut opened = 0usize;
         let mut missing = 0usize;
-        for tag in restore.tags {
+        for tag in restore {
             if self.ensure_restored_tag_entry(&tag) {
                 self.select_entry(tag.key, ctx.clone());
                 opened += 1;
@@ -5262,17 +5284,12 @@ impl Baboon {
                 }
                 self.last_opened_windows = None;
             }
-            LastOpenedWindowsAction::Restore {
-                source_kind,
-                source_path,
-                tags,
-                remember,
-            } => {
+            LastOpenedWindowsAction::Restore { kits, remember } => {
                 if remember {
                     self.session_restore = SessionRestore::Always;
                 }
                 self.last_opened_windows = None;
-                self.begin_last_session_restore(source_kind, source_path, tags, ctx.clone());
+                self.begin_last_session_restore(kits, ctx.clone());
             }
         }
     }
@@ -5382,9 +5399,8 @@ enum LastOpenedWindowsAction {
     None,
     OpenSettings,
     Restore {
-        source_kind: LastSessionSourceKind,
-        source_path: PathBuf,
-        tags: Vec<LastSessionTag>,
+        /// Each kit to reopen, with the tags checked for it.
+        kits: Vec<(LastSessionSourceKind, PathBuf, Vec<LastSessionTag>)>,
         /// "Don't ask again" was ticked — remember this as `Always`.
         remember: bool,
     },
@@ -5418,27 +5434,38 @@ fn render_last_opened_windows_prompt(
                     .color(text_dark()),
             );
             ui.label(RichText::new("Which of these would you like to reopen?").color(text_dark()));
-            if !prompt.source_available {
-                ui.add_space(6.0);
-                ui.label(
-                    RichText::new(format!("Missing source: {}", prompt.source_path.display()))
-                        .color(Color32::from_rgb(180, 48, 40)),
-                );
-            }
             ui.add_space(8.0);
-            ScrollArea::both().max_height(170.0).show(ui, |ui| {
-                for entry in &mut prompt.entries {
-                    ui.add_enabled_ui(entry.available, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.checkbox(&mut entry.checked, "");
-                            let label = if entry.available {
-                                entry.tag.label.clone()
-                            } else {
-                                format!("{} (missing)", entry.tag.label)
-                            };
-                            ui.label(RichText::new(label).color(text_dark()));
+            ScrollArea::both().max_height(260.0).show(ui, |ui| {
+                for (index, kit) in prompt.kits.iter_mut().enumerate() {
+                    if index > 0 {
+                        ui.add_space(10.0);
+                    }
+                    let heading = match kit.game.as_deref() {
+                        Some(game) => game_display_name(game).to_owned(),
+                        None => kit.source_path.display().to_string(),
+                    };
+                    ui.label(RichText::new(heading).color(text_dark()).strong())
+                        .on_hover_text(kit.source_path.display().to_string());
+                    if !kit.source_available {
+                        ui.label(
+                            RichText::new(format!("Missing source: {}", kit.source_path.display()))
+                                .color(Color32::from_rgb(180, 48, 40)),
+                        );
+                    }
+                    for entry in &mut kit.entries {
+                        ui.add_enabled_ui(entry.available, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.add_space(10.0);
+                                ui.checkbox(&mut entry.checked, "");
+                                let label = if entry.available {
+                                    entry.tag.label.clone()
+                                } else {
+                                    format!("{} (missing)", entry.tag.label)
+                                };
+                                ui.label(RichText::new(label).color(text_dark()));
+                            });
                         });
-                    });
+                    }
                 }
             });
             ui.add_space(6.0);
@@ -5472,11 +5499,8 @@ fn render_last_opened_windows_prompt(
                     .add(egui::Button::new("OK").min_size(Vec2::new(78.0, 24.0)))
                     .clicked()
                 {
-                    let tags = prompt.checked_tags();
                     action = LastOpenedWindowsAction::Restore {
-                        source_kind: prompt.source_kind,
-                        source_path: prompt.source_path.clone(),
-                        tags,
+                        kits: prompt.checked_kits(),
                         remember: prompt.dont_ask_again,
                     };
                 }
