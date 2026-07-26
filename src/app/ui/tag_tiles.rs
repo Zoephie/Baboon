@@ -58,7 +58,11 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         // in two panes keeps independent scroll, focus, and collapse state
         // while both edit the one shared document.
         let scope = format!("tile{}", tile_id.0);
-        if ui.rect_contains_pointer(ui.max_rect()) {
+        // As with kits: pressing inside the pane selects its tag, hovering does
+        // not. `selected_key` is what "Save Current Tag" acts on, so passing
+        // the cursor over another pane must not change the target.
+        if ui.input(|input| input.pointer.any_pressed()) && ui.rect_contains_pointer(ui.max_rect())
+        {
             self.focused = Some(key.clone());
         }
         egui::ScrollArea::vertical()

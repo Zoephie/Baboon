@@ -39,7 +39,12 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
             ui.label(RichText::new("This kit is no longer open").color(subtle_dark()));
             return egui_tiles::UiResponse::None;
         };
-        if ui.rect_contains_pointer(ui.max_rect()) {
+        // Activate on a press inside the pane, not on hover. `active` decides
+        // where deferred work lands — the save prompt, Ctrl+S, an open colour
+        // picker or reference picker — and none of that should retarget just
+        // because the cursor crossed another game's pane on its way somewhere.
+        if ui.input(|input| input.pointer.any_pressed()) && ui.rect_contains_pointer(ui.max_rect())
+        {
             self.focused = Some(kit_id);
         }
         // An unloaded workspace has no tags to browse or edit, so it offers
