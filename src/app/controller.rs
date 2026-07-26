@@ -1779,6 +1779,15 @@ impl Baboon {
         }
     }
 
+    /// Whether the loaded document for `key` still has unsaved edits. Save
+    /// paths that report through `status` (container writes) use this to tell
+    /// success from failure.
+    pub(super) fn tag_is_dirty(&self, key: &str) -> bool {
+        self.parsed_tags
+            .get(key)
+            .is_some_and(|document| document.dirty)
+    }
+
     fn execute_close_action(&mut self, action: PendingCloseAction, ctx: &egui::Context) {
         match action {
             PendingCloseAction::CloseApp => {
@@ -2670,7 +2679,15 @@ impl Baboon {
             return Err("Only little-endian MCC tags can be saved".to_owned());
         }
         let TagEntryLocation::LooseFile(path) = &entry.location else {
-            return Err("Monolithic cache tags are read-only".to_owned());
+            // Container tags are writable, just not through the loose-file
+            // path — reaching here means a caller skipped the container
+            // routing, so say that rather than blaming a monolithic cache.
+            return Err(match &entry.location {
+                TagEntryLocation::Container { .. } | TagEntryLocation::NewContainer { .. } => {
+                    "Container tags cannot be saved as loose files".to_owned()
+                }
+                _ => "Monolithic cache tags are read-only".to_owned(),
+            });
         };
         let output = path.clone();
         doc.tag
@@ -5051,25 +5068,37 @@ impl Baboon {
                 let mut saved = Vec::new();
                 let mut errors = Vec::new();
                 for tag_id in tag_ids {
-                    // A brand-new container tag saves via a file dialog (new
-                    // override container), not the loose write path.
-                    if matches!(
-                        self.entry_for_key(&tag_id).map(|entry| &entry.location),
-                        Some(TagEntryLocation::NewContainer { .. })
-                    ) {
-                        self.save_new_container_tag(&tag_id);
-                        let still_dirty = self
-                            .parsed_tags
-                            .get(&tag_id)
-                            .map(|doc| doc.dirty)
-                            .unwrap_or(false);
-                        if still_dirty {
-                            let label = self.tag_path_label(&tag_id);
-                            errors.push(format!("{label}: not saved"));
-                        } else {
-                            saved.push(tag_id.clone());
+                    // Container tags have no loose file to write. A brand-new
+                    // one saves via a file dialog (new override container); an
+                    // existing one is overwritten inside the game's pak, with
+                    // this prompt's Save button standing in for the separate
+                    // overwrite confirmation. Both report through `status`
+                    // instead of returning a path, so success is read back off
+                    // the document's dirty flag.
+                    match self.entry_for_key(&tag_id).map(|entry| &entry.location) {
+                        Some(TagEntryLocation::NewContainer { .. }) => {
+                            self.save_new_container_tag(&tag_id);
+                            if self.tag_is_dirty(&tag_id) {
+                                let label = self.tag_path_label(&tag_id);
+                                errors.push(format!("{label}: not saved"));
+                            } else {
+                                saved.push(tag_id.clone());
+                            }
+                            continue;
                         }
-                        continue;
+                        Some(TagEntryLocation::Container { .. }) => {
+                            self.overwrite_current_tag_in_place(&tag_id);
+                            if self.tag_is_dirty(&tag_id) {
+                                // The overwrite failure reason is in `status`.
+                                let label = self.tag_path_label(&tag_id);
+                                let detail = self.status.clone();
+                                errors.push(format!("{label}: {detail}"));
+                            } else {
+                                saved.push(tag_id.clone());
+                            }
+                            continue;
+                        }
+                        _ => {}
                     }
                     match self.save_tag_by_key(&tag_id) {
                         Ok(path) => saved.push(path.display().to_string()),
