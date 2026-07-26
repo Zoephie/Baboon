@@ -895,7 +895,11 @@ fn shader_bitmap_thumbnail(
     group_tag: u32,
     open_ref: &str,
 ) -> Option<egui::TextureHandle> {
-    let cache_id = egui::Id::new(("shader_bitmap_thumb", group_tag, open_ref));
+    // Keyed by the source too: the decode resolves `open_ref` against this
+    // kit's tags root, and a relative tag path means different bitmaps in
+    // different games. Without the root, whichever workspace decoded first won
+    // and the other showed its thumbnail.
+    let cache_id = egui::Id::new(("shader_bitmap_thumb", edit.tags_root, group_tag, open_ref));
     if let Some(cached) = ui.data(|d| d.get_temp::<Option<egui::TextureHandle>>(cache_id)) {
         return cached;
     }

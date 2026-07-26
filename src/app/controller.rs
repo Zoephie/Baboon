@@ -1048,7 +1048,14 @@ impl Baboon {
     }
 
     pub(super) fn loaded_tags_root(&self) -> Option<PathBuf> {
-        let TagSource::LooseFolder { root, .. } = &self.source()?.source else {
+        self.loaded_tags_root_for(self.active)
+    }
+
+    /// A specific kit's loose tags root. Background work has to name its kit:
+    /// the one it started in may no longer be the focused one when it lands.
+    pub(super) fn loaded_tags_root_for(&self, kit: usize) -> Option<PathBuf> {
+        let TagSource::LooseFolder { root, .. } = &self.kits.get(kit)?.source.as_ref()?.source
+        else {
             return None;
         };
         Some(root.clone())
@@ -1060,17 +1067,22 @@ impl Baboon {
             .position(|kit| same_recent_path(&kit.tags_root, root))
     }
 
-    fn refresh_active_favorite_entries(&mut self) {
-        self.kits[self.active].active_favorite_entries.clear();
-        let Some(root) = self.loaded_tags_root() else {
+    /// Rebuild `kit`'s resolved favorite entries from the saved paths for its
+    /// tags root. Kit-scoped because a finished background refactor refreshes
+    /// the workspace it belonged to, which need not be the focused one.
+    fn refresh_favorite_entries_for(&mut self, kit: usize) {
+        self.kits[kit].active_favorite_entries.clear();
+        let Some(root) = self.loaded_tags_root_for(kit) else {
             return;
         };
         let Some(index) = self.favorite_kit_index(&root) else {
             return;
         };
-        let names = self.source()
+        let names = self.kits[kit]
+            .source
+            .as_ref()
             .map(|source| source.names.clone())
-            .unwrap_or_else(|| self.names().clone());
+            .unwrap_or_else(|| self.kits[kit].names.clone());
         let saved_paths = self.editing_kit_favorites[index].tags.clone();
         let mut missing = Vec::new();
         for relative_path in saved_paths {
@@ -1080,7 +1092,7 @@ impl Baboon {
                 continue;
             }
             if let Ok(Some(entry)) = loose_file_entry(&root, &path, &names) {
-                self.kits[self.active].active_favorite_entries.push(entry);
+                self.kits[kit].active_favorite_entries.push(entry);
             }
         }
         if !missing.is_empty() {
@@ -1144,8 +1156,18 @@ impl Baboon {
         }
     }
 
-    fn remap_current_favorites(&mut self, old_to_new_keys: &HashMap<String, String>) {
-        let Some(root) = self.loaded_tags_root() else {
+    /// Rewrite `kit`'s favorites after a move or rename changed its tag paths.
+    ///
+    /// Takes the kit rather than reading the active one: this runs from a
+    /// finished background refactor, which may well land while the user is in
+    /// another workspace — and then it resolved the wrong root and remapped the
+    /// wrong workspace's favorites with this one's rename map.
+    fn remap_favorites_for_kit(
+        &mut self,
+        kit: usize,
+        old_to_new_keys: &HashMap<String, String>,
+    ) {
+        let Some(root) = self.loaded_tags_root_for(kit) else {
             return;
         };
         let Some(index) = self.favorite_kit_index(&root) else {
@@ -1168,7 +1190,7 @@ impl Baboon {
                 true
             }
         });
-        self.refresh_active_favorite_entries();
+        self.refresh_favorite_entries_for(kit);
     }
 
     pub(super) fn open_dropped_files(&mut self, paths: Vec<PathBuf>, ctx: egui::Context) {

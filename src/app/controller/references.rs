@@ -127,7 +127,7 @@ impl Baboon {
             }
         }
         if done.moved {
-            self.remap_current_favorites(&done.old_to_new_keys);
+            self.remap_favorites_for_kit(kit_index, &done.old_to_new_keys);
             self.kits[kit_index].remap_tag_keys(&done.old_to_new_keys);
         }
         let kit = &mut self.kits[kit_index];

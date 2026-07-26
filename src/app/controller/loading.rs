@@ -60,7 +60,7 @@ impl Baboon {
         }
         let installed = self.active;
         self.apply_pending_campaign_project(installed, ctx.input(|input| input.time), ctx);
-        self.refresh_active_favorite_entries();
+        self.refresh_favorite_entries_for(installed);
         self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
         self.refreshing_entry_index = false;
         self.building_reverse_dependencies = false;

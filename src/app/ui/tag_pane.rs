@@ -141,7 +141,15 @@ impl Baboon {
             block_clipboard: self.block_clipboard.as_ref(),
             block_clip_request: &mut block_clip_request,
             field_filter: field_filter.as_ref(),
-            field_nav: self.field_nav.as_ref(),
+            // Only the pane being navigated to sees the request. The scroll
+            // gate downstream matches on the field path alone, so an unfiltered
+            // nav scrolled every pane whose tag happened to have a field at the
+            // same path — which, between two tags of the same group, is most of
+            // them. Splitting a tag view is what exposed this.
+            field_nav: self
+                .field_nav
+                .as_ref()
+                .filter(|nav| nav.kit == kit_id && nav.tag_key == key),
         };
 
         if is_bitmap_tag(entry) {
