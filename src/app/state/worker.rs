@@ -34,7 +34,13 @@ pub(in crate::app) enum WorkerMessage {
         result: Result<(), String>,
     },
     FolderRefactorProgress(FolderRefactorProgress),
-    FolderRefactorFinished(Result<FolderRefactorFinished, String>),
+    /// Stamped because the finish rewrites its kit's whole browser tree and
+    /// drops that kit's open documents: unrouted, a refactor that outlived a
+    /// workspace switch applied all of that to whichever kit was focused.
+    FolderRefactorFinished {
+        stamp: KitStamp,
+        result: Result<FolderRefactorFinished, String>,
+    },
     FolderConversionProgress(FolderConversionProgress),
     FolderConversionFinished(Result<FolderConversionReport, String>),
     // Full recursive entry scan finished for a loose-folder source.

@@ -411,7 +411,39 @@ fn active_after_removal(active: usize, removed: usize, new_len: usize) -> usize 
 
 #[cfg(test)]
 mod tests {
-    use super::active_after_removal;
+    use super::{active_after_removal, Kit, KitId};
+    use std::collections::HashMap;
+
+    /// A folder move rewrites tag keys underneath the open tabs. The tree is
+    /// what has to be rewritten: `open_tabs` is re-derived from it every frame,
+    /// so a remap that touched only the list was overwritten immediately and
+    /// left the panes pointing at keys the source no longer had.
+    #[test]
+    fn remapping_tag_keys_rewrites_the_layout_tree_itself() {
+        let mut kit = Kit::empty(KitId(0), Default::default());
+        kit.open_tag_pane("file:/tags/objects/a.weapon");
+        kit.open_tag_pane("file:/tags/objects/b.weapon");
+        kit.selected_key = Some("file:/tags/objects/a.weapon".to_owned());
+
+        let mut map = HashMap::new();
+        map.insert(
+            "file:/tags/objects/a.weapon".to_owned(),
+            "file:/tags/moved/a.weapon".to_owned(),
+        );
+        kit.remap_tag_keys(&map);
+
+        // Read back through the tree, not the cached list, so the assertion
+        // fails if only the list was rewritten.
+        let panes = kit.tabs_from_tree();
+        assert!(panes.contains(&"file:/tags/moved/a.weapon".to_owned()));
+        assert!(!panes.contains(&"file:/tags/objects/a.weapon".to_owned()));
+        assert!(panes.contains(&"file:/tags/objects/b.weapon".to_owned()));
+        assert_eq!(kit.open_tabs, panes);
+        assert_eq!(
+            kit.selected_key.as_deref(),
+            Some("file:/tags/moved/a.weapon")
+        );
+    }
 
     #[test]
     fn removing_a_kit_before_the_active_one_shifts_the_selection_down() {
@@ -461,6 +493,28 @@ impl Kit {
                 egui_tiles::Tile::Container(_) => None,
             })
             .collect()
+    }
+
+    /// Rewrite every open tag key through `map`, after a move or rename has
+    /// changed the keys underneath them.
+    ///
+    /// The tree is where this has to land: `open_tabs` is re-derived from it
+    /// every frame, so remapping only the list is overwritten immediately and
+    /// the panes keep pointing at keys their source no longer has.
+    pub(super) fn remap_tag_keys(&mut self, map: &HashMap<String, String>) {
+        for (_, tile) in self.tag_tree.tiles.iter_mut() {
+            if let egui_tiles::Tile::Pane(key) = tile
+                && let Some(new_key) = map.get(key)
+            {
+                *key = new_key.clone();
+            }
+        }
+        if let Some(selected) = self.selected_key.as_ref()
+            && let Some(new_key) = map.get(selected)
+        {
+            self.selected_key = Some(new_key.clone());
+        }
+        self.sync_open_tabs();
     }
 
     /// Re-derive `open_tabs` from the tree. Called after anything that can

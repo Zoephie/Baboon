@@ -238,8 +238,8 @@ impl Baboon {
                 WorkerMessage::FolderRefactorProgress(progress) => {
                     self.handle_folder_refactor_progress(progress)
                 }
-                WorkerMessage::FolderRefactorFinished(result) => {
-                    self.handle_folder_refactor_finished(result)
+                WorkerMessage::FolderRefactorFinished { stamp, result } => {
+                    self.handle_folder_refactor_finished(stamp, result)
                 }
                 WorkerMessage::FolderConversionProgress(progress) => {
                     self.handle_folder_conversion_progress(progress)
@@ -2501,6 +2501,9 @@ impl Baboon {
         let existing_reverse_dependencies = self.source()
             .and_then(|source| source.reverse_dependencies.clone());
         let game = self.source().and_then(|source| source.game.clone());
+        // Routed back to the kit the refactor was started in, not
+        // whichever one is focused when it lands.
+        let stamp = self.kit_stamp();
         let tx = self.tx.clone();
         let job_label = if move_folder {
             format!("Moving {label}")
@@ -2529,7 +2532,7 @@ impl Baboon {
                 )
             }))
             .unwrap_or_else(|_| Err("Folder move/copy worker crashed".to_owned()));
-            let _ = tx.send(WorkerMessage::FolderRefactorFinished(result));
+            let _ = tx.send(WorkerMessage::FolderRefactorFinished { stamp, result });
         });
     }
 
@@ -3558,6 +3561,9 @@ impl Baboon {
             .unwrap_or_default();
         let reverse_dependencies = self.source()
             .and_then(|source| source.reverse_dependencies.clone());
+        // Routed back to the kit the refactor was started in, not
+        // whichever one is focused when it lands.
+        let stamp = self.kit_stamp();
         let tx = self.tx.clone();
         let job_label = job_label.to_owned();
         self.folder_refactor = Some(FolderRefactorUiState {
@@ -3581,7 +3587,7 @@ impl Baboon {
                 )
             }))
             .unwrap_or_else(|_| Err("Tag move worker crashed".to_owned()));
-            let _ = tx.send(WorkerMessage::FolderRefactorFinished(result));
+            let _ = tx.send(WorkerMessage::FolderRefactorFinished { stamp, result });
         });
     }
 
@@ -7484,16 +7490,6 @@ fn moved_key_map(
         }
     }
     map
-}
-
-fn remap_open_tag_keys(keys: &mut Vec<String>, map: &HashMap<String, String>) {
-    for key in keys.iter_mut() {
-        if let Some(new_key) = map.get(key) {
-            *key = new_key.clone();
-        }
-    }
-    let mut seen = HashSet::new();
-    keys.retain(|key| seen.insert(key.clone()));
 }
 
 fn same_entry_key(a: &str, b: &str) -> bool {
