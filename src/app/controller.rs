@@ -77,7 +77,28 @@ fn pick_override_utoc(default_name: &str) -> Option<PathBuf> {
     if output.extension().is_none() {
         output.set_extension("utoc");
     }
-    Some(output)
+    Some(ensure_priority_suffix(output))
+}
+
+/// Force the `_P` suffix onto a mod's file name.
+///
+/// It is what gives an override container priority over the game's own
+/// containers; without it the mod mounts alongside them and the base tag wins,
+/// so the mod builds correctly and does nothing. That is not a naming
+/// preference to be respected -- a mod without it is simply broken -- and it is
+/// exactly what a user renaming the default to something meaningful drops.
+fn ensure_priority_suffix(path: PathBuf) -> PathBuf {
+    let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+        return path;
+    };
+    if stem.ends_with("_P") {
+        return path;
+    }
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("utoc");
+    path.with_file_name(format!("{stem}_P.{extension}"))
 }
 
 #[cfg(any(windows, test))]
@@ -5945,6 +5966,31 @@ fn render_last_opened_windows_prompt(
 
 #[cfg(test)]
 mod tests {
+    use super::ensure_priority_suffix;
+    use std::path::PathBuf;
+
+    /// A mod without `_P` mounts at the same priority as the game's own
+    /// containers and loses, so it builds correctly and does nothing. Renaming
+    /// the default to something meaningful is exactly how it gets dropped --
+    /// which is how one was reported.
+    #[test]
+    fn a_mod_always_gets_the_priority_suffix() {
+        assert_eq!(
+            ensure_priority_suffix(PathBuf::from("/mods/h2a_magnum.utoc")),
+            PathBuf::from("/mods/h2a_magnum_P.utoc")
+        );
+        // Already correct, including the platform suffix the game itself uses.
+        assert_eq!(
+            ensure_priority_suffix(PathBuf::from("/mods/mymod-WinGDK_P.utoc")),
+            PathBuf::from("/mods/mymod-WinGDK_P.utoc")
+        );
+        // `_p` is not the same thing to the loader, so it is not treated as one.
+        assert_eq!(
+            ensure_priority_suffix(PathBuf::from("/mods/thing_p.utoc")),
+            PathBuf::from("/mods/thing_p_P.utoc")
+        );
+    }
+
     use super::*;
 
     #[test]
