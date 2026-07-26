@@ -4380,7 +4380,8 @@ impl Baboon {
         doc.journal.begin_edit(&doc.tag, "Paste TSV");
         let _ = apply_pending_edits(&mut doc.tag, edits, &mut doc.dirty);
         doc.journal.end_edit_window();
-        self.invalidate_tag_caches(&tag_key);
+        let active = self.active;
+        self.invalidate_tag_caches_in(active, &tag_key);
 
         let mut summary = format!("Pasted {edit_count} cell(s) across {applied_rows} row(s)");
         if skipped_rows > 0 {
@@ -4454,12 +4455,13 @@ impl Baboon {
 
     /// Drop cached previews derived from a tag's contents so they rebuild from
     /// the (newly restored) tag bytes after an undo/redo.
-    pub(super) fn invalidate_tag_caches(&mut self, key: &str) {
-        if let Some(preview) = self.kits[self.active].model_previews.get_mut(key) {
+    /// Drop derived previews for `key` in `kit`, after its document changed.
+    pub(super) fn invalidate_tag_caches_in(&mut self, kit: usize, key: &str) {
+        if let Some(preview) = self.kits[kit].model_previews.get_mut(key) {
             preview.loaded_key = None;
             preview.data = None;
         }
-        if let Some(bitmap) = self.kits[self.active].bitmap_previews.get_mut(key) {
+        if let Some(bitmap) = self.kits[kit].bitmap_previews.get_mut(key) {
             bitmap.decoded = None;
             bitmap.texture = None;
             bitmap.texture_dirty = true;
@@ -4518,7 +4520,8 @@ impl Baboon {
                             doc.tag = tag;
                             doc.dirty = true;
                         }
-                        self.invalidate_tag_caches(key);
+                        let active = self.active;
+                        self.invalidate_tag_caches_in(active, key);
                         self.status = format!("{verb}: {label}");
                     }
                     Err(error) => {

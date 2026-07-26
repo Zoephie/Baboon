@@ -199,6 +199,14 @@ pub struct Baboon {
     /// One cross-frame edit popup at a time; its embedded tag/path identity
     /// prevents applying a delayed confirmation to the newly selected tag.
     color_popup: Option<MaterialColorPopup>,
+    /// Kits owning the editing popups below. Each outlives the frame that
+    /// opened it and applies an edit addressed by tag key — and a tag key is
+    /// only unique within a kit, so applying against whichever kit happens to
+    /// be active when the user confirms could edit another game's document, or
+    /// silently drop the edit when no such key exists there.
+    color_popup_kit: Option<KitId>,
+    function_popup_kit: Option<KitId>,
+    tag_reference_picker_kit: Option<KitId>,
     custom_color_swatches: Vec<Option<[u8; 4]>>,
     palette_last_dir: Option<PathBuf>,
     /// Function editor snapshot and write targets captured when the popup opens.
@@ -382,6 +390,9 @@ impl Baboon {
                 .unwrap_or_default(),
             blender_path: prefs.blender_path,
             color_popup: None,
+            color_popup_kit: None,
+            function_popup_kit: None,
+            tag_reference_picker_kit: None,
             custom_color_swatches: prefs.custom_color_swatches.clone(),
             palette_last_dir: prefs.palette_last_dir.clone(),
             function_popup: None,

@@ -52,7 +52,12 @@ impl Baboon {
                 .tag_reference_picker
                 .take()
                 .expect("picker remains open while processing selection");
-            if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(&picker.tag_key) {
+            // The kit the picker was opened from, not whichever is active now.
+            let kit = self
+                .tag_reference_picker_kit
+                .and_then(|kit| self.resolve_kit(kit))
+                .unwrap_or(self.active);
+            if let Some(doc) = self.kits[kit].parsed_tags.get_mut(&picker.tag_key) {
                 doc.journal.begin_edit(&doc.tag, "Change tag reference");
                 if let Some(status) = apply_pending_edits(
                     &mut doc.tag,
@@ -65,9 +70,10 @@ impl Baboon {
                     self.status = status;
                 }
                 doc.journal.end_edit_window();
-                self.kits[self.active].edit_buffers
+                self.kits[kit]
+                    .edit_buffers
                     .insert(format!("{}|{}", picker.tag_key, picker.field_path), input);
-                self.invalidate_tag_caches(&picker.tag_key);
+                self.invalidate_tag_caches_in(kit, &picker.tag_key);
             } else {
                 self.status = "The tag being edited is no longer open".to_owned();
             }

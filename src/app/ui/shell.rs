@@ -766,9 +766,15 @@ impl Baboon {
             &mut self.custom_color_swatches,
             &mut self.palette_last_dir,
         ) {
+            // Apply to the kit the picker was opened from. A closed kit drops
+            // the edit rather than letting it land somewhere else.
+            let kit = self
+                .color_popup_kit
+                .and_then(|kit| self.resolve_kit(kit))
+                .unwrap_or(self.active);
             match result {
                 ColorPopupResult::FieldEdit { tag_key, edit } => {
-                    if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(&tag_key) {
+                    if let Some(doc) = self.kits[kit].parsed_tags.get_mut(&tag_key) {
                         doc.journal.begin_edit(&doc.tag, "Edit color");
                         if let Some(status) =
                             apply_pending_edits(&mut doc.tag, vec![edit], &mut doc.dirty)
@@ -779,7 +785,7 @@ impl Baboon {
                     }
                 }
                 ColorPopupResult::ShaderOp { tag_key, op } => {
-                    if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(&tag_key) {
+                    if let Some(doc) = self.kits[kit].parsed_tags.get_mut(&tag_key) {
                         doc.journal.begin_edit(&doc.tag, "Shader edit");
                         if let Some(status) =
                             apply_shader_ops(&mut doc.tag, vec![op], &mut doc.dirty)
@@ -790,7 +796,7 @@ impl Baboon {
                     }
                 }
                 ColorPopupResult::ShaderParamOp { tag_key, op } => {
-                    if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(&tag_key) {
+                    if let Some(doc) = self.kits[kit].parsed_tags.get_mut(&tag_key) {
                         doc.journal.begin_edit(&doc.tag, "Shader parameter");
                         if let Some(status) =
                             apply_shader_param_ops(&mut doc.tag, vec![op], &mut doc.dirty)
@@ -801,7 +807,7 @@ impl Baboon {
                     }
                 }
                 ColorPopupResult::H2ShaderParamOp { tag_key, op } => {
-                    if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(&tag_key) {
+                    if let Some(doc) = self.kits[kit].parsed_tags.get_mut(&tag_key) {
                         doc.journal.begin_edit(&doc.tag, "Shader parameter");
                         if let Some(status) =
                             apply_h2_shader_param_ops(&mut doc.tag, vec![op], &mut doc.dirty)
@@ -821,7 +827,11 @@ impl Baboon {
         if let Some(batch) =
             draw_function_popup(ctx, &mut self.function_popup, &mut self.color_popup)
         {
-            if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(&batch.tag_key) {
+            let kit = self
+                .function_popup_kit
+                .and_then(|kit| self.resolve_kit(kit))
+                .unwrap_or(self.active);
+            if let Some(doc) = self.kits[kit].parsed_tags.get_mut(&batch.tag_key) {
                 if !batch.edits.is_empty() || !batch.data_ops.is_empty() {
                     doc.journal.begin_edit(&doc.tag, "Edit function");
                 }

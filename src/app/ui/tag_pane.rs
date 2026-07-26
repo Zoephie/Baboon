@@ -44,6 +44,7 @@ impl Baboon {
         // Documentation overlay and the Campaign Evolved Wwise binding are both
         // resolved through `&mut self` methods, so they must be taken before any
         // long-lived field borrows below.
+        let picker_was_open = self.tag_reference_picker.is_some();
         let def_docs = self.def_docs_for_entry(kit_index, entry);
         let ce_sound = self.ce_sound_binding(kit_index, &key, entry);
 
@@ -57,6 +58,7 @@ impl Baboon {
         };
 
         let kit = &mut self.kits[kit_index];
+        let kit_id = kit.id;
         let source = kit.source.as_ref();
         let names = &kit.names;
 
@@ -222,12 +224,21 @@ impl Baboon {
                 preview.data = None;
             }
         }
-        // A color swatch was clicked: open the shared picker.
+        // A color swatch was clicked: open the shared picker. Each popup
+        // records the kit it was opened from, so confirming it later edits
+        // this document rather than whichever kit is active by then.
         if let Some(popup) = color_request {
             self.color_popup = Some(popup);
+            self.color_popup_kit = Some(kit_id);
         }
         if let Some(popup) = function_request {
             self.function_popup = Some(popup);
+            self.function_popup_kit = Some(kit_id);
+        }
+        // The reference picker is opened from inside the field renderer rather
+        // than hoisted here, so it is stamped by noticing it appear.
+        if !picker_was_open && self.tag_reference_picker.is_some() {
+            self.tag_reference_picker_kit = Some(kit_id);
         }
         // Element(s) were copied: stash them on the clipboard.
         if let Some(clip) = block_clip_request {
