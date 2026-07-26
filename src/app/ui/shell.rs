@@ -415,31 +415,32 @@ impl Baboon {
                         }
                     });
                     ui.menu_button("View", |ui| {
+                        // The browser view belongs to a workspace, so this
+                        // menu shows and sets the focused kit's — matching the
+                        // Folders/Groups buttons in that kit's own toolbar.
+                        let kit = &mut self.kits[self.active];
                         if ui
-                            .selectable_label(self.browser_mode == BrowserMode::Folders, "Folders")
+                            .selectable_label(kit.browser_mode == BrowserMode::Folders, "Folders")
                             .clicked()
                         {
-                            self.browser_mode = BrowserMode::Folders;
+                            kit.browser_mode = BrowserMode::Folders;
                             ui.close_menu();
                         }
                         if ui
-                            .selectable_label(
-                                self.browser_mode == BrowserMode::Groups,
-                                "Tag Groups",
-                            )
+                            .selectable_label(kit.browser_mode == BrowserMode::Groups, "Tag Groups")
                             .clicked()
                         {
-                            self.browser_mode = BrowserMode::Groups;
+                            kit.browser_mode = BrowserMode::Groups;
                             ui.close_menu();
                         }
                         ui.separator();
-                        ui.menu_button(format!("Sort by: {}", self.browser_sort.label()), |ui| {
+                        ui.menu_button(format!("Sort by: {}", kit.browser_sort.label()), |ui| {
                             for option in BrowserSort::ALL {
                                 if ui
-                                    .selectable_label(self.browser_sort == option, option.label())
+                                    .selectable_label(kit.browser_sort == option, option.label())
                                     .clicked()
                                 {
-                                    self.browser_sort = option;
+                                    kit.browser_sort = option;
                                     ui.close_menu();
                                 }
                             }

@@ -184,8 +184,8 @@ pub(in crate::app) struct GuiPrefs {
 impl Default for GuiPrefs {
     fn default() -> Self {
         Self {
-            browser_mode: BrowserMode::Folders,
-            browser_sort: BrowserSort::Natural,
+            browser_mode: BrowserMode::default(),
+            browser_sort: BrowserSort::default(),
             show_browser_prefixes: false,
             folders_before_tags: false,
             double_click_to_open_tags: false,

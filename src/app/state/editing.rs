@@ -220,6 +220,11 @@ pub(in crate::app) struct BlockClipboard {
 /// A pending destructive block op awaiting user confirmation. Lives on the
 /// app (persists across frames) and is shown as a modal.
 pub(in crate::app) struct BlockConfirm {
+    /// Workspace whose pane raised this, stamped by that pane after the
+    /// field render that created it — the field renderers are shared by
+    /// every pane and have no kit of their own. `None` only inside that one
+    /// render; the apply drops a confirm that somehow never got stamped.
+    pub(in crate::app) kit: Option<KitId>,
     pub(in crate::app) tag_key: String,
     pub(in crate::app) path: String,
     pub(in crate::app) kind: BlockOpKind,
@@ -367,6 +372,11 @@ pub(in crate::app) struct TsvPasteRequest {
 /// The open TSV-import window: the user pastes tab-separated rows and applies
 /// them to the target block's existing elements (per-cell, via `apply_field_edit`).
 pub(in crate::app) struct TsvPasteState {
+    /// Workspace this was raised from. The confirm applies against the active
+    /// kit, and a modeless dialog outlives the frame that opened it, so the
+    /// user can focus another game in between; resolving this first is what
+    /// keeps the action on the workspace it was started in.
+    pub(in crate::app) kit: KitId,
     pub(in crate::app) tag_key: String,
     pub(in crate::app) block_path: String,
     pub(in crate::app) block_label: String,

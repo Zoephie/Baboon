@@ -298,25 +298,36 @@ fn tint_toward(base: Color32, accent: Color32, t: f32) -> Color32 {
 
 
 impl Baboon {
-    pub(super) fn draw_scenario_launcher_buttons(&mut self, ui: &mut Ui, entry: &TagEntry) {
+    /// `kit_index` is the workspace whose pane is drawing this. Readiness is
+    /// resolved against that workspace's editing kit rather than the focused
+    /// one, and a launch makes it active first: it saves the tag and starts an
+    /// external editor, neither of which should follow the wrong game.
+    pub(super) fn draw_scenario_launcher_buttons(
+        &mut self,
+        ui: &mut Ui,
+        kit_index: usize,
+        entry: &TagEntry,
+    ) {
         if entry.group_tag != u32::from_be_bytes(*b"scnr") {
             return;
         }
         let key = entry.key.clone();
         ui.horizontal(|ui| {
             ui.label(RichText::new("Open scenario in:").color(subtle_dark()));
-            let sapien_ready = self.can_launch_scenario_in_sapien(entry);
+            let sapien_ready = self.can_launch_scenario_in_sapien(kit_index, entry);
             if launcher_button(ui, self.sapien_icon.as_ref(), "S", sapien_ready)
                 .on_hover_text("Save if needed, then launch this scenario in Sapien")
                 .clicked()
             {
+                self.active = kit_index;
                 self.launch_scenario_in_sapien(&key);
             }
-            let tag_test_ready = self.can_launch_scenario_in_tag_test(entry);
+            let tag_test_ready = self.can_launch_scenario_in_tag_test(kit_index, entry);
             if launcher_button(ui, self.tag_test_icon.as_ref(), "T", tag_test_ready)
                 .on_hover_text("Save if needed, then launch this scenario in tag_test")
                 .clicked()
             {
+                self.active = kit_index;
                 self.launch_scenario_in_tag_test(&key);
             }
         });

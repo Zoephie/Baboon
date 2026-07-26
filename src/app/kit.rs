@@ -87,6 +87,14 @@ pub(super) struct Kit {
     pub(super) field_search_applied: HashMap<String, String>,
 
     // --- Browser and index state ---
+    /// How this kit's browser lists tags, and in what order. Per kit because
+    /// the useful view differs by game — a folder-organized editing kit reads
+    /// best as Folders while a container source reads best as Groups — and two
+    /// browsers are on screen at once in a split. New kits start from the
+    /// saved [`Baboon::default_browser_mode`], so a single workspace behaves
+    /// exactly as it did when this was one application-wide setting.
+    pub(super) browser_mode: BrowserMode,
+    pub(super) browser_sort: BrowserSort,
     pub(super) filter: String,
     pub(super) filter_cache: FilterCache,
     /// Bumped whenever this kit's source or its `all_entries` set is replaced,
@@ -145,6 +153,8 @@ impl Kit {
             ce_sound_bindings: HashMap::new(),
             field_search: HashMap::new(),
             field_search_applied: HashMap::new(),
+            browser_mode: BrowserMode::default(),
+            browser_sort: BrowserSort::default(),
             filter: String::new(),
             filter_cache: FilterCache::default(),
             generation: 0,
@@ -233,6 +243,15 @@ impl Baboon {
         match self.kit_index(kit) {
             Some(index) => {
                 self.active = index;
+                // Bring its workspace tab to the front too. `active` alone only
+                // decides where the action lands; if that workspace is a
+                // background tab the user is still looking at another game, and
+                // a jump or a confirmed dialog reads as having done nothing.
+                // A split needs no help here — both panes are already visible,
+                // and `make_active` leaves a pane that is not in a tab group
+                // alone.
+                self.kit_tree
+                    .make_active(|_, tile| matches!(tile, egui_tiles::Tile::Pane(id) if *id == kit));
                 true
             }
             None => false,
@@ -266,12 +285,24 @@ impl Baboon {
         id
     }
 
+    /// Build an empty kit carrying a fresh id and the application defaults,
+    /// including the browser view a new workspace opens in. Every kit is made
+    /// here so no path can miss the seeding and open in the wrong view.
+    fn empty_kit(&mut self) -> Kit {
+        let id = self.next_kit_id();
+        Kit {
+            browser_mode: self.default_browser_mode,
+            browser_sort: self.default_browser_sort,
+            ..Kit::empty(id, self.default_names.clone())
+        }
+    }
+
     /// Add an empty kit and make it active. The next load installs into it,
     /// so "open another game" is add-then-load rather than a separate path.
     pub(super) fn add_kit(&mut self) -> KitId {
-        let id = self.next_kit_id();
-        let names = self.default_names.clone();
-        self.kits.push(Kit::empty(id, names));
+        let kit = self.empty_kit();
+        let id = kit.id;
+        self.kits.push(kit);
         self.active = self.kits.len() - 1;
         id
     }
@@ -285,9 +316,8 @@ impl Baboon {
         };
         self.kits.remove(index);
         if self.kits.is_empty() {
-            let id = self.next_kit_id();
-            let names = self.default_names.clone();
-            self.kits.push(Kit::empty(id, names));
+            let kit = self.empty_kit();
+            self.kits.push(kit);
         }
         self.active = active_after_removal(self.active, index, self.kits.len());
     }
@@ -342,10 +372,17 @@ impl Baboon {
         let pending_restore_tags = std::mem::take(&mut self.kits[index].pending_restore_tags);
         let pending_campaign_project =
             std::mem::take(&mut self.kits[index].pending_campaign_project);
+        // The browser view belongs to the workspace, not to the source in it:
+        // reloading a kit — or restoring one, which stages the saved view
+        // before the load lands — must not snap it back to the default.
+        let browser_mode = self.kits[index].browser_mode;
+        let browser_sort = self.kits[index].browser_sort;
         self.kits[index] = Kit {
             source: Some(source),
             names,
             requested_path,
+            browser_mode,
+            browser_sort,
             pending_restore_tags,
             pending_campaign_project,
             ..Kit::empty(id, self.default_names.clone())
@@ -383,7 +420,39 @@ fn active_after_removal(active: usize, removed: usize, new_len: usize) -> usize 
 
 #[cfg(test)]
 mod tests {
-    use super::active_after_removal;
+    use super::{active_after_removal, Kit, KitId};
+    use std::collections::HashMap;
+
+    /// A folder move rewrites tag keys underneath the open tabs. The tree is
+    /// what has to be rewritten: `open_tabs` is re-derived from it every frame,
+    /// so a remap that touched only the list was overwritten immediately and
+    /// left the panes pointing at keys the source no longer had.
+    #[test]
+    fn remapping_tag_keys_rewrites_the_layout_tree_itself() {
+        let mut kit = Kit::empty(KitId(0), Default::default());
+        kit.open_tag_pane("file:/tags/objects/a.weapon");
+        kit.open_tag_pane("file:/tags/objects/b.weapon");
+        kit.selected_key = Some("file:/tags/objects/a.weapon".to_owned());
+
+        let mut map = HashMap::new();
+        map.insert(
+            "file:/tags/objects/a.weapon".to_owned(),
+            "file:/tags/moved/a.weapon".to_owned(),
+        );
+        kit.remap_tag_keys(&map);
+
+        // Read back through the tree, not the cached list, so the assertion
+        // fails if only the list was rewritten.
+        let panes = kit.tabs_from_tree();
+        assert!(panes.contains(&"file:/tags/moved/a.weapon".to_owned()));
+        assert!(!panes.contains(&"file:/tags/objects/a.weapon".to_owned()));
+        assert!(panes.contains(&"file:/tags/objects/b.weapon".to_owned()));
+        assert_eq!(kit.open_tabs, panes);
+        assert_eq!(
+            kit.selected_key.as_deref(),
+            Some("file:/tags/moved/a.weapon")
+        );
+    }
 
     #[test]
     fn removing_a_kit_before_the_active_one_shifts_the_selection_down() {
@@ -433,6 +502,28 @@ impl Kit {
                 egui_tiles::Tile::Container(_) => None,
             })
             .collect()
+    }
+
+    /// Rewrite every open tag key through `map`, after a move or rename has
+    /// changed the keys underneath them.
+    ///
+    /// The tree is where this has to land: `open_tabs` is re-derived from it
+    /// every frame, so remapping only the list is overwritten immediately and
+    /// the panes keep pointing at keys their source no longer has.
+    pub(super) fn remap_tag_keys(&mut self, map: &HashMap<String, String>) {
+        for (_, tile) in self.tag_tree.tiles.iter_mut() {
+            if let egui_tiles::Tile::Pane(key) = tile
+                && let Some(new_key) = map.get(key)
+            {
+                *key = new_key.clone();
+            }
+        }
+        if let Some(selected) = self.selected_key.as_ref()
+            && let Some(new_key) = map.get(selected)
+        {
+            self.selected_key = Some(new_key.clone());
+        }
+        self.sync_open_tabs();
     }
 
     /// Re-derive `open_tabs` from the tree. Called after anything that can

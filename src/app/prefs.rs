@@ -55,15 +55,10 @@ pub(super) fn load_gui_prefs() -> GuiPrefs {
     let Ok(value) = serde_json::from_str::<Value>(&text) else {
         return GuiPrefs::default();
     };
-    let browser_mode = match value.get("browser_mode").and_then(Value::as_str) {
-        Some("groups") => BrowserMode::Groups,
-        _ => BrowserMode::Folders,
-    };
-    let browser_sort = match value.get("browser_sort").and_then(Value::as_str) {
-        Some("name") => BrowserSort::Name,
-        Some("type") => BrowserSort::Type,
-        _ => BrowserSort::Natural,
-    };
+    let browser_mode =
+        browser_mode_from_str(value.get("browser_mode").and_then(Value::as_str)).unwrap_or_default();
+    let browser_sort =
+        browser_sort_from_str(value.get("browser_sort").and_then(Value::as_str)).unwrap_or_default();
     GuiPrefs {
         browser_mode,
         browser_sort,
@@ -397,15 +392,8 @@ pub(super) fn save_gui_prefs(
         }
     }
     let value = json!({
-        "browser_mode": match prefs.browser_mode {
-            BrowserMode::Folders => "folders",
-            BrowserMode::Groups => "groups",
-        },
-        "browser_sort": match prefs.browser_sort {
-            BrowserSort::Natural => "natural",
-            BrowserSort::Name => "name",
-            BrowserSort::Type => "type",
-        },
+        "browser_mode": browser_mode_str(prefs.browser_mode),
+        "browser_sort": browser_sort_str(prefs.browser_sort),
         "show_browser_prefixes": prefs.show_browser_prefixes,
         "folders_before_tags": prefs.folders_before_tags,
         "double_click_to_open_tags": prefs.double_click_to_open_tags,
@@ -483,6 +471,40 @@ pub(super) fn load_terminal_open_games() -> HashSet<String> {
 /// Version 3 stores an array of kits. Versions 1 and 2 stored a single source
 /// and are upgraded in place to a one-kit session, so a session file written
 /// by any earlier build still restores rather than being silently dropped.
+/// The browser view enums travel as strings in both `prefs.json` and
+/// `last_session.json`. Mapped in one place so the two files cannot drift.
+fn browser_mode_from_str(text: Option<&str>) -> Option<BrowserMode> {
+    match text? {
+        "folders" => Some(BrowserMode::Folders),
+        "groups" => Some(BrowserMode::Groups),
+        _ => None,
+    }
+}
+
+fn browser_mode_str(mode: BrowserMode) -> &'static str {
+    match mode {
+        BrowserMode::Folders => "folders",
+        BrowserMode::Groups => "groups",
+    }
+}
+
+fn browser_sort_from_str(text: Option<&str>) -> Option<BrowserSort> {
+    match text? {
+        "natural" => Some(BrowserSort::Natural),
+        "name" => Some(BrowserSort::Name),
+        "type" => Some(BrowserSort::Type),
+        _ => None,
+    }
+}
+
+fn browser_sort_str(sort: BrowserSort) -> &'static str {
+    match sort {
+        BrowserSort::Natural => "natural",
+        BrowserSort::Name => "name",
+        BrowserSort::Type => "type",
+    }
+}
+
 pub(super) fn load_last_session() -> Option<LastSessionState> {
     let text = fs::read_to_string(last_session_path()).ok()?;
     let value = serde_json::from_str::<Value>(&text).ok()?;
@@ -535,6 +557,10 @@ fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
         .map(str::trim)
         .filter(|path| !path.is_empty())
         .map(PathBuf::from);
+    // Absent in sessions written before the browser view became per-kit, and
+    // in every version-1 and version-2 file. `None` means "use the default".
+    let browser_mode = browser_mode_from_str(value.get("browser_mode").and_then(Value::as_str));
+    let browser_sort = browser_sort_from_str(value.get("browser_sort").and_then(Value::as_str));
     let mut tags = Vec::new();
     for item in value.get("tags")?.as_array()? {
         let Some(key) = item
@@ -574,6 +600,8 @@ fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
         source_path,
         game,
         project_path,
+        browser_mode,
+        browser_sort,
         tags,
     })
 }
@@ -587,6 +615,14 @@ pub(super) fn save_last_session(session: &LastSessionState) -> Result<(), String
         fs::create_dir_all(parent)
             .map_err(|error| format!("Could not create session folder: {error}"))?;
     }
+    let text = serde_json::to_string_pretty(&session_value(session))
+        .map_err(|error| format!("Could not encode session: {error}"))?;
+    fs::write(path, text).map_err(|error| format!("Could not save session: {error}"))
+}
+
+/// Pure encode of a session document, split out from the file write so the
+/// round trip through [`parse_last_session`] is covered by tests.
+fn session_value(session: &LastSessionState) -> Value {
     let kits = session
         .kits
         .iter()
@@ -608,18 +644,18 @@ pub(super) fn save_last_session(session: &LastSessionState) -> Result<(), String
                     "kind": kit.source_kind.as_str(),
                     "path": kit.source_path.display().to_string(),
                     "game": kit.game,
+                    "project_path": kit.project_path.as_ref().map(|path| path.display().to_string()),
                 },
+                "browser_mode": kit.browser_mode.map(browser_mode_str),
+                "browser_sort": kit.browser_sort.map(browser_sort_str),
                 "tags": tags,
             })
         })
         .collect::<Vec<_>>();
-    let value = json!({
+    json!({
         "version": 3,
         "kits": kits,
-    });
-    let text = serde_json::to_string_pretty(&value)
-        .map_err(|error| format!("Could not encode session: {error}"))?;
-    fs::write(path, text).map_err(|error| format!("Could not save session: {error}"))
+    })
 }
 
 pub(super) fn clear_last_session() {
@@ -845,5 +881,73 @@ mod session_tests {
     fn unknown_versions_are_ignored() {
         let value = serde_json::json!({ "version": 99, "kits": [] });
         assert!(parse_last_session(&value).is_none());
+    }
+
+    fn kit(path: &str, mode: Option<BrowserMode>) -> LastSessionKit {
+        LastSessionKit {
+            source_kind: LastSessionSourceKind::LooseFolder,
+            source_path: PathBuf::from(path),
+            game: None,
+            project_path: None,
+            browser_mode: mode,
+            browser_sort: Some(BrowserSort::Name),
+            tags: vec![LastSessionTag {
+                key: format!("file:{path}/a.weapon"),
+                label: "a".to_owned(),
+                group_tag: 1,
+                path: None,
+            }],
+        }
+    }
+
+    /// Each workspace keeps its own browser view, so a session holding a kit
+    /// in Folders and one in Groups must bring both back as they were — not
+    /// collapse them onto one setting.
+    #[test]
+    fn each_kit_restores_its_own_browser_view() {
+        let session = LastSessionState {
+            kits: vec![
+                kit("/evolved", Some(BrowserMode::Folders)),
+                kit("/reach", Some(BrowserMode::Groups)),
+            ],
+        };
+        let restored = parse_last_session(&session_value(&session)).expect("round trip");
+        assert_eq!(restored.kits[0].browser_mode, Some(BrowserMode::Folders));
+        assert_eq!(restored.kits[1].browser_mode, Some(BrowserMode::Groups));
+        assert_eq!(restored.kits[0].browser_sort, Some(BrowserSort::Name));
+    }
+
+    /// Sessions written before the view was saved carry none, which has to
+    /// stay distinguishable from a saved Folders so the restore can fall back
+    /// to the user's default instead of overriding it.
+    #[test]
+    fn sessions_without_a_saved_view_restore_none() {
+        let value = serde_json::json!({
+            "version": 3,
+            "kits": [{
+                "source": { "kind": "loose_folder", "path": "/h3" },
+                "tags": [{ "key": "file:/h3/a.weapon", "label": "a", "group_tag": 1 }],
+            }],
+        });
+        let session = parse_last_session(&value).expect("session parses");
+        assert_eq!(session.kits[0].browser_mode, None);
+        assert_eq!(session.kits[0].browser_sort, None);
+    }
+
+    /// A kit whose session is its project has no tags to save, so dropping the
+    /// project path on write left nothing to restore it from.
+    #[test]
+    fn a_projects_path_survives_the_round_trip() {
+        let mut project_kit = kit("/evolved", None);
+        project_kit.project_path = Some(PathBuf::from("/evolved/work.baboon"));
+        project_kit.tags.clear();
+        let session = LastSessionState {
+            kits: vec![project_kit],
+        };
+        let restored = parse_last_session(&session_value(&session)).expect("round trip");
+        assert_eq!(
+            restored.kits[0].project_path,
+            Some(PathBuf::from("/evolved/work.baboon"))
+        );
     }
 }

@@ -147,8 +147,11 @@ pub struct Baboon {
     folder_conversion_dialog: Option<FolderConversionDialog>,
     /// Modeless find-in-tag dialog and its exact occurrence list.
     find: FindDialogState,
-    browser_mode: BrowserMode,
-    browser_sort: BrowserSort,
+    /// Browser view a newly opened workspace starts in. The live setting is
+    /// [`Kit::browser_mode`] — each workspace keeps its own — and this is the
+    /// saved default they are seeded from.
+    default_browser_mode: BrowserMode,
+    default_browser_sort: BrowserSort,
     show_browser_prefixes: bool,
     folders_before_tags: bool,
     double_click_to_open_tags: bool,
@@ -178,7 +181,7 @@ pub struct Baboon {
     /// Pending "discard unsaved edits and replace with the imported tag?" prompt.
     import_discard_confirm: Option<PendingImport>,
     /// Pending in-place overwrite confirmation (the tag key) for a container tag.
-    overwrite_confirm: Option<String>,
+    overwrite_confirm: Option<OverwriteConfirm>,
     /// Pending confirmation for the Campaign Evolved "clear modifications"
     /// toolbar action, which is irreversible.
     clear_stash_confirm: Option<ClearStashConfirm>,
@@ -338,15 +341,21 @@ impl Baboon {
             default_names: names.clone(),
             tx,
             rx,
-            kits: vec![Kit::empty(KitId(0), names.clone())],
+            // The startup workspace is seeded like any other new kit; every
+            // later one goes through `Baboon::empty_kit`.
+            kits: vec![Kit {
+                browser_mode: prefs.browser_mode,
+                browser_sort: prefs.browser_sort,
+                ..Kit::empty(KitId(0), names.clone())
+            }],
             kit_tree: egui_tiles::Tree::empty(egui::Id::new("kit_tree")),
             active: 0,
             next_kit_id: 1,
             tag_conversion_dialog: None,
             folder_conversion_dialog: None,
             find: FindDialogState::default(),
-            browser_mode: prefs.browser_mode,
-            browser_sort: prefs.browser_sort,
+            default_browser_mode: prefs.browser_mode,
+            default_browser_sort: prefs.browser_sort,
             show_browser_prefixes: prefs.show_browser_prefixes,
             folders_before_tags: prefs.folders_before_tags,
             double_click_to_open_tags: prefs.double_click_to_open_tags,

@@ -20,7 +20,7 @@
 
 use std::collections::{BTreeSet, VecDeque};
 use std::io::Cursor;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
 use blam_tags::iostore::container_header::EIoContainerHeaderVersion;
@@ -240,21 +240,26 @@ pub fn resolve_sound_binding(
 /// edited without ever touching audio.
 #[derive(Default)]
 pub struct CeMediaStore {
-    paks: Option<PakSet>,
+    /// The open set and the `Paks` directory it was opened from. The root is
+    /// held because this store is shared by every workspace: without it, a
+    /// second Campaign Evolved install reused the first one's containers and
+    /// played its audio, or reported the media missing.
+    paks: Option<(PathBuf, PakSet)>,
 }
 
 impl CeMediaStore {
-    /// Open the pak set rooted at the source's `Paks` directory, if not already.
+    /// Open the pak set rooted at the source's `Paks` directory, if the set
+    /// already open is not that one.
     fn paks(&mut self, paks_root: &Path) -> Result<&mut PakSet> {
-        if self.paks.is_none() {
+        if self.paks.as_ref().is_none_or(|(root, _)| root != paks_root) {
             let set = PakSet::open_dir(paks_root)
                 .with_context(|| format!("opening pak set at {}", paks_root.display()))?;
             if set.is_empty() {
                 return Err(anyhow!("no readable .pak containers in {}", paks_root.display()));
             }
-            self.paks = Some(set);
+            self.paks = Some((paks_root.to_path_buf(), set));
         }
-        Ok(self.paks.as_mut().expect("just populated"))
+        Ok(&mut self.paks.as_mut().expect("just populated").1)
     }
 
     /// Fetch and decode one media entry to PCM.
