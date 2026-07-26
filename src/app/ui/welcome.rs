@@ -49,6 +49,11 @@ impl Baboon {
                     ui.label(RichText::new("Halo tag editor").color(subtle_dark()));
                     ui.add_space(30.0);
 
+                    // `Ui::link` carries the pointing-hand cursor and the
+                    // hover underline; a click-sensing Label looks like a link
+                    // but still shows the text-selection cursor.
+                    ui.visuals_mut().hyperlink_color = link_color();
+
                     ui.columns(2, |columns| {
                         let ui = &mut columns[0];
                         section_heading(ui, "Start");
@@ -84,13 +89,7 @@ impl Baboon {
                                             }
                                             None => ui.add_space(16.0),
                                         }
-                                        let label = ui.add(
-                                            egui::Label::new(
-                                                RichText::new(game_display_name(shortcut.game))
-                                                    .color(link_color()),
-                                            )
-                                            .sense(Sense::click()),
-                                        );
+                                        let label = ui.link(game_display_name(shortcut.game));
                                         match &path {
                                             Some(path) => {
                                                 label.on_hover_text(path.display().to_string())
@@ -131,12 +130,8 @@ impl Baboon {
                                 .unwrap_or_default();
                             let clicked = ui
                                 .horizontal(|ui| {
-                                    let label = ui
-                                        .add(
-                                            egui::Label::new(RichText::new(name).color(link_color()))
-                                                .sense(Sense::click()),
-                                        )
-                                        .on_hover_text(path.display().to_string());
+                                    let label =
+                                        ui.link(name).on_hover_text(path.display().to_string());
                                     ui.label(
                                         RichText::new(parent).color(subtle_dark()).small(),
                                     );
@@ -171,10 +166,10 @@ fn section_heading(ui: &mut Ui, text: &str) {
     ui.add_space(6.0);
 }
 
-/// A clickable text row. Deliberately not a button: the screen should read as a
-/// short list of ways in, not a wall of controls.
+/// A link row. Deliberately not a button: the screen should read as a short
+/// list of ways in, not a wall of controls.
 fn welcome_link(ui: &mut Ui, text: &str) -> egui::Response {
-    ui.add(egui::Label::new(RichText::new(text).color(link_color())).sense(Sense::click()))
+    ui.link(text)
 }
 
 fn link_color() -> Color32 {

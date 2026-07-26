@@ -25,9 +25,6 @@ struct KitPaneBehavior<'a> {
     close_requests: Vec<KitId>,
     focused: Option<KitId>,
     add_kit: Option<LoadKind>,
-    /// Whether the tab bar should be drawn at all. A lone empty workspace
-    /// hides it, so an unloaded Baboon looks as it did before kits existed.
-    show_tab_bar: bool,
 }
 
 impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
@@ -170,7 +167,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
     }
 
     fn tab_bar_height(&self, _style: &egui::Style) -> f32 {
-        if self.show_tab_bar { 26.0 } else { 0.0 }
+        26.0
     }
 
     fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
@@ -222,7 +219,14 @@ impl Baboon {
     /// pane edge splits the window between two games.
     pub(super) fn draw_kit_tiles(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         self.sync_kit_tree();
-        let show_tab_bar = !(self.kits.len() == 1 && self.kits[0].is_empty_workspace());
+        // Nothing to tab between: draw the welcome screen directly rather than
+        // wrapping it in a tree whose tab bar would be an empty strip. A
+        // zero-height tab bar still leaves the "+" and the bar's own painting
+        // behind, so the tree is skipped outright.
+        if self.kits.len() == 1 && self.kits[0].is_empty_workspace() {
+            self.draw_welcome_screen(ui, ctx);
+            return;
+        }
         let placeholder = egui_tiles::Tree::empty(egui::Id::new("kit_tree_placeholder"));
         let mut tree = std::mem::replace(&mut self.kit_tree, placeholder);
         let mut behavior = KitPaneBehavior {
@@ -231,7 +235,6 @@ impl Baboon {
             close_requests: Vec::new(),
             focused: None,
             add_kit: None,
-            show_tab_bar,
         };
         tree.ui(&mut behavior, ui);
         let close_requests = std::mem::take(&mut behavior.close_requests);
