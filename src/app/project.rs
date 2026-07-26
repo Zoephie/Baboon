@@ -449,7 +449,7 @@ impl Baboon {
             if !document.dirty {
                 continue;
             }
-            let Some(entry) = self.entry_for_key(key) else {
+            let Some(entry) = self.entry_for_key_in(kit, key) else {
                 continue;
             };
             let Some((identity, logical_path, kind, package)) = campaign_entry_project_parts(entry)
@@ -478,7 +478,7 @@ impl Baboon {
         let floating_order: Vec<String> = Vec::new();
         let mut tabs = Vec::new();
         for key in self.kits[kit].open_tabs.iter().chain(floating_order.iter()) {
-            let Some(entry) = self.entry_for_key(key) else {
+            let Some(entry) = self.entry_for_key_in(kit, key) else {
                 continue;
             };
             let Some((identity, logical_path, kind, package)) = campaign_entry_project_parts(entry)
@@ -496,7 +496,7 @@ impl Baboon {
             });
         }
         let selected_identity = self.kits[kit].selected_key.as_ref().and_then(|key| {
-            self.entry_for_key(key)
+            self.entry_for_key_in(kit, key)
                 .and_then(campaign_entry_project_parts)
                 .map(|(identity, _, _, _)| identity)
         });
@@ -838,7 +838,7 @@ impl Baboon {
         if self.kits[kit].parsed_tags.contains_key(key) {
             return true;
         }
-        let Some(entry) = self.entry_for_key(key).cloned() else {
+        let Some(entry) = self.entry_for_key_in(kit, key).cloned() else {
             return false;
         };
         let Some((identity, _, _, _)) = campaign_entry_project_parts(&entry) else {

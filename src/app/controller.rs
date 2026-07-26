@@ -1782,12 +1782,21 @@ impl Baboon {
     }
 
     pub(super) fn entry_for_key(&self, key: &str) -> Option<&TagEntry> {
-        let source = self.source()?;
+        self.entry_for_key_in(self.active, key)
+    }
+
+    /// Resolve a tag key against a specific kit. Anything that runs for a kit
+    /// other than the focused one has to use this: a key only means something
+    /// inside its own source, so resolving it against the active kit silently
+    /// finds nothing and the caller skips the tag.
+    pub(super) fn entry_for_key_in(&self, kit: usize, key: &str) -> Option<&TagEntry> {
+        let kit = self.kits.get(kit)?;
+        let source = kit.source.as_ref()?;
         source
             .entries
             .iter()
             .chain(source.all_entries.iter())
-            .chain(self.kits[self.active].active_favorite_entries.iter())
+            .chain(kit.active_favorite_entries.iter())
             .find(|entry| entry.key == key)
     }
 
