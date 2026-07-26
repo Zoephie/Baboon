@@ -243,6 +243,15 @@ impl Baboon {
         match self.kit_index(kit) {
             Some(index) => {
                 self.active = index;
+                // Bring its workspace tab to the front too. `active` alone only
+                // decides where the action lands; if that workspace is a
+                // background tab the user is still looking at another game, and
+                // a jump or a confirmed dialog reads as having done nothing.
+                // A split needs no help here — both panes are already visible,
+                // and `make_active` leaves a pane that is not in a tab group
+                // alone.
+                self.kit_tree
+                    .make_active(|_, tile| matches!(tile, egui_tiles::Tile::Pane(id) if *id == kit));
                 true
             }
             None => false,
