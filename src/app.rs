@@ -57,6 +57,8 @@ mod style;
 use style::*;
 mod state;
 use state::*;
+mod kit;
+use kit::*;
 mod journal;
 use journal::*;
 mod project;
@@ -120,59 +122,31 @@ pub(super) fn test_definition_path(rel: &str) -> PathBuf {
 /// intentionally the composition root rather than a domain model.
 pub struct Baboon {
     default_names: TagNameIndex,
-    names: TagNameIndex,
     /// Cloneable sender given to background jobs; every completion is funneled
     /// back through the receive loop so UI state mutates only on the UI thread.
     tx: Sender<WorkerMessage>,
     /// Single UI-thread receiver. Messages are applied in arrival order and
     /// generation-tagged results are discarded when their source is stale.
     rx: Receiver<WorkerMessage>,
-    /// Active source and its source-relative browser/index state.
-    source: Option<LoadedSourceData>,
-    /// Parsed documents keyed by the stable [`TagEntry::key`] identity.
-    parsed_tags: HashMap<String, TagDocument>,
+    /// Every open kit: the content store of the multi-kit model, each owning
+    /// its source and all state scoped to it. **Never empty** — an unloaded
+    /// Baboon holds one empty workspace kit, so readers of per-kit state need
+    /// no "nothing loaded" special case. Cross-frame references use [`KitId`],
+    /// never a position, since positions shift when a kit closes.
+    kits: Vec<Kit>,
+    /// Layout of the open kits: which workspaces are visible and how they are
+    /// split. References kits by [`KitId`]; `kits` remains the content store,
+    /// so repairing the tree never creates or destroys a kit.
+    kit_tree: egui_tiles::Tree<KitId>,
+    /// Index into `kits` of the kit the browser, tabs, and editor act on.
+    /// Always a valid index; kept in range whenever `kits` changes.
+    active: usize,
+    /// Monotonic [`KitId`] allocator; ids are never reused.
+    next_kit_id: u64,
     tag_conversion_dialog: Option<TagConversionDialog>,
     folder_conversion_dialog: Option<FolderConversionDialog>,
-    /// Keys with an outstanding background load, preventing duplicate jobs.
-    loading_tags: HashSet<String>,
-    /// Active document key. Selection may temporarily precede parsing while a
-    /// matching key is present in `loading_tags`.
-    selected_key: Option<String>,
-    /// Docked and floating tabs share this ordered set of open document keys.
-    open_tabs: Vec<String>,
-    /// Subset of `open_tabs` currently rendered as independent windows.
-    floating_tabs: HashSet<String>,
-    /// Docked tab to reveal during the next rack render.
-    tab_scroll_target: Option<String>,
-    /// Per-document preview state, keyed identically to `parsed_tags` so cached
-    /// textures cannot migrate between tags after selection changes.
-    bitmap_previews: HashMap<String, BitmapPreviewState>,
-    /// Per-document model view/camera state retained while the document is cached.
-    model_previews: HashMap<String, ModelPreviewState>,
-    /// Transient text-entry buffers keyed by stable widget/edit identifiers.
-    edit_buffers: EditDrafts,
-    /// File-menu actions run after the editor has rendered so focus-loss edits
-    /// are applied before their save/export snapshot is taken.
-    deferred_file_action: Option<DeferredFileAction>,
-    /// Source-local render-method definition cache; `None` is a cached miss.
-    rmdf_cache: HashMap<String, Option<RenderMethodDefinition>>,
-    /// Source-local render-method option cache; `None` is a cached miss.
-    rmop_cache: HashMap<String, Option<RenderMethodOption>>,
-    filter: String,
-    /// Per-tag "Search fields" query (keyed by tag key). Collapses the tag
-    /// editor down to the matching block(s) and their ancestors.
-    field_search: HashMap<String, String>,
-    /// The last query actually applied per tag, so the collapse is a one-shot
-    /// on change rather than a per-frame override the user can't fight.
-    field_search_applied: HashMap<String, String>,
     /// Modeless find-in-tag dialog and its exact occurrence list.
     find: FindDialogState,
-    /// Cached search results, recomputed only when the query or the underlying
-    /// entry set changes — never per frame. See [`FilterCache`].
-    filter_cache: FilterCache,
-    /// Bumped whenever the active source or its `all_entries` set is replaced,
-    /// so [`filter_cache`] knows to recompute against fresh data.
-    source_generation: u64,
     browser_mode: BrowserMode,
     browser_sort: BrowserSort,
     show_browser_prefixes: bool,
@@ -219,7 +193,6 @@ pub struct Baboon {
     tool_commands_collapsed_categories: HashSet<String>,
     recent_folders: Vec<PathBuf>,
     editing_kit_favorites: Vec<EditingKitFavorites>,
-    active_favorite_entries: Vec<TagEntry>,
     blender_path: Option<PathBuf>,
     blender_path_input: String,
     editing_kit_paths: HashMap<String, PathBuf>,
@@ -227,7 +200,18 @@ pub struct Baboon {
     editing_kit_path_attention: Option<String>,
     /// One cross-frame edit popup at a time; its embedded tag/path identity
     /// prevents applying a delayed confirmation to the newly selected tag.
+    /// File-menu actions run after the editor has rendered, so an edit being
+    /// committed by focus loss is applied before its save/export snapshot.
+    deferred_file_action: Option<DeferredFileAction>,
     color_popup: Option<MaterialColorPopup>,
+    /// Kits owning the editing popups below. Each outlives the frame that
+    /// opened it and applies an edit addressed by tag key — and a tag key is
+    /// only unique within a kit, so applying against whichever kit happens to
+    /// be active when the user confirms could edit another game's document, or
+    /// silently drop the edit when no such key exists there.
+    color_popup_kit: Option<KitId>,
+    function_popup_kit: Option<KitId>,
+    tag_reference_picker_kit: Option<KitId>,
     custom_color_swatches: Vec<Option<[u8; 4]>>,
     palette_last_dir: Option<PathBuf>,
     /// Function editor snapshot and write targets captured when the popup opens.
@@ -236,7 +220,6 @@ pub struct Baboon {
     /// "Compare Tags" (Tag Diff) window state.
     tag_diff: Option<TagDiffState>,
     content_explorer: Option<ContentExplorer>,
-    keywords: KeywordStore,
     keyword_input: String,
     keyword_chooser_open: bool,
     reveal_target: Option<RevealRequest>,
@@ -244,16 +227,19 @@ pub struct Baboon {
     field_value_query: String,
     field_value_group: String,
     field_value_searching: bool,
-    field_index: FieldValueIndex,
     /// Parsed-once documentation overlay (help/units + explanations) per group
     /// JSON, keyed by definition file path. Built lazily during render.
     def_docs_cache: HashMap<PathBuf, Rc<DefDocs>>,
     tsv_paste: Option<TsvPasteState>,
     rename_tag: Option<RenameTagState>,
     status: String,
+    /// Mirror of `status` as of the last frame, and when it changed. `status`
+    /// is assigned from well over a hundred places, so rather than route them
+    /// all through a setter, the change is detected by comparison — which
+    /// cannot be bypassed by a new assignment site.
+    status_shown: String,
+    status_changed_at: f64,
     folder_refactor: Option<FolderRefactorUiState>,
-    /// True while a background full-scan of a loose-folder source is running.
-    scanning_entries: bool,
     entry_index_progress: Option<EntryIndexProgressState>,
     show_entry_index_wait_notice: bool,
     /// True while checking a cached loose-folder index for file changes.
@@ -264,36 +250,20 @@ pub struct Baboon {
     building_reference_for_entry_index: bool,
     reference_index_progress: Option<ReferenceIndexProgressState>,
     terminal: TerminalState,
-    terminal_open: bool,
-    /// Working directory for terminal commands (game kit root, parent of tags/).
-    terminal_work_dir: Option<std::path::PathBuf>,
     /// Game identifiers (e.g. "halo3_mcc") for which the user has chosen to
     /// keep the terminal open. Persisted in prefs.json and restored per kit.
     terminal_open_games: HashSet<String>,
     saved_terminal_open_games: HashSet<String>,
-    dragging_floating_tab: Option<String>,
-    tab_rack_rect: Option<egui::Rect>,
     /// Modal close transaction; the pending action is executed only after every
     /// selected dirty document has been saved or discard is confirmed.
     save_changes_prompt: SaveChangesPrompt,
     project_checkpoint_prompt: Option<ProjectCheckpointPrompt>,
     /// Startup-only prompt reconstructed from the prior session file.
     last_opened_windows: Option<LastOpenedWindowsPrompt>,
-    /// Restore request held until its source load completes and keys can resolve.
-    pending_session_restore: Option<PendingSessionRestore>,
-    /// Active Campaign Evolved recovery/project database.
-    campaign_project: Option<ActiveCampaignProject>,
-    /// Project contents waiting for their Campaign Evolved source to finish mounting.
-    pending_campaign_project: Option<PendingCampaignProject>,
     /// Pending destructive block op (delete / delete all) awaiting confirm.
     block_confirm: Option<BlockConfirm>,
     /// Sound-tag audition: FMOD bank playback (rodio output + bank cache).
     audio: audio::AudioState,
-    /// Campaign Evolved sound tags name no audio themselves; the media is found
-    /// by walking package imports out to a Wwise event. That walk reads several
-    /// packages, so the result is cached per tag key rather than redone per
-    /// frame. Cleared when the source changes.
-    ce_sound_bindings: HashMap<String, Arc<crate::source::ce_audio::CeSoundBinding>>,
     /// The bundled UE reflection mappings, parsed once on first use — needed to
     /// decode a cooked `AkAudioEvent`.
     ce_usmap: Option<Arc<blam_tags::iostore::usmap::Usmap>>,
@@ -353,23 +323,8 @@ impl Baboon {
             .and_then(LastOpenedWindowsPrompt::from_session);
         let (last_opened_windows, auto_restore_session) = match prefs.session_restore {
             SessionRestore::Always => match last_session {
-                Some(prompt) => {
-                    let tags = prompt.checked_tags();
-                    if tags.is_empty() && prompt.project_path.is_none() {
-                        (None, None)
-                    } else {
-                        (
-                            None,
-                            Some((
-                                prompt.source_kind,
-                                prompt.source_path.clone(),
-                                prompt.project_path.clone(),
-                                tags,
-                            )),
-                        )
-                    }
-                }
-                None => (None, None),
+                Some(prompt) if prompt.has_checked_tags() => (None, Some(prompt.checked_kits())),
+                _ => (None, None),
             },
             // Show the prompt.
             SessionRestore::Ask => (last_session, None),
@@ -378,30 +333,15 @@ impl Baboon {
         };
         let mut app = Self {
             default_names: names.clone(),
-            names,
             tx,
             rx,
-            source: None,
-            parsed_tags: HashMap::new(),
+            kits: vec![Kit::empty(KitId(0), names.clone())],
+            kit_tree: egui_tiles::Tree::empty(egui::Id::new("kit_tree")),
+            active: 0,
+            next_kit_id: 1,
             tag_conversion_dialog: None,
             folder_conversion_dialog: None,
-            loading_tags: HashSet::new(),
-            selected_key: None,
-            open_tabs: Vec::new(),
-            floating_tabs: HashSet::new(),
-            tab_scroll_target: None,
-            bitmap_previews: HashMap::new(),
-            model_previews: HashMap::new(),
-            edit_buffers: EditDrafts::default(),
-            deferred_file_action: None,
-            rmdf_cache: HashMap::new(),
-            rmop_cache: HashMap::new(),
-            filter: String::new(),
-            field_search: HashMap::new(),
-            field_search_applied: HashMap::new(),
             find: FindDialogState::default(),
-            filter_cache: FilterCache::default(),
-            source_generation: 0,
             browser_mode: prefs.browser_mode,
             browser_sort: prefs.browser_sort,
             show_browser_prefixes: prefs.show_browser_prefixes,
@@ -446,7 +386,6 @@ impl Baboon {
             tool_commands_collapsed_categories: prefs.tool_commands_collapsed_categories.clone(),
             recent_folders: prefs.recent_folders.clone(),
             editing_kit_favorites: prefs.editing_kit_favorites.clone(),
-            active_favorite_entries: Vec::new(),
             editing_kit_path_inputs: editing_kit_path_inputs(&prefs.editing_kit_paths),
             editing_kit_paths: prefs.editing_kit_paths.clone(),
             editing_kit_path_attention: None,
@@ -456,7 +395,11 @@ impl Baboon {
                 .map(|path| path.display().to_string())
                 .unwrap_or_default(),
             blender_path: prefs.blender_path,
+            deferred_file_action: None,
             color_popup: None,
+            color_popup_kit: None,
+            function_popup_kit: None,
+            tag_reference_picker_kit: None,
             custom_color_swatches: prefs.custom_color_swatches.clone(),
             palette_last_dir: prefs.palette_last_dir.clone(),
             function_popup: None,
@@ -468,7 +411,6 @@ impl Baboon {
             ref_jump_occurrences: HashMap::new(),
             tag_diff: None,
             content_explorer: None,
-            keywords: KeywordStore::default(),
             keyword_input: String::new(),
             keyword_chooser_open: false,
             reveal_target: None,
@@ -476,13 +418,13 @@ impl Baboon {
             field_value_query: String::new(),
             field_value_group: String::new(),
             field_value_searching: false,
-            field_index: FieldValueIndex::default(),
             def_docs_cache: HashMap::new(),
             tsv_paste: None,
             rename_tag: None,
             status: "Ready".to_owned(),
+            status_shown: String::new(),
+            status_changed_at: 0.0,
             folder_refactor: None,
-            scanning_entries: false,
             entry_index_progress: None,
             show_entry_index_wait_notice: false,
             refreshing_entry_index: false,
@@ -504,21 +446,13 @@ impl Baboon {
                 process: None,
                 scroll_to_bottom: false,
             },
-            terminal_open: false,
-            terminal_work_dir: None,
             saved_terminal_open_games: terminal_open_games.clone(),
             terminal_open_games,
-            dragging_floating_tab: None,
-            tab_rack_rect: None,
             save_changes_prompt: SaveChangesPrompt::default(),
             project_checkpoint_prompt: None,
             last_opened_windows,
-            pending_session_restore: None,
-            campaign_project: None,
-            pending_campaign_project: None,
             block_confirm: None,
             audio: audio::AudioState::default(),
-            ce_sound_bindings: HashMap::new(),
             ce_usmap: None,
             pending_sound_extract: None,
             pending_open: None,
@@ -549,14 +483,8 @@ impl Baboon {
             last_pixels_per_point: cc.egui_ctx.pixels_per_point(),
             block_clipboard: None,
         };
-        if let Some((source_kind, source_path, project_path, tags)) = auto_restore_session {
-            app.begin_last_session_restore(
-                source_kind,
-                source_path,
-                project_path,
-                tags,
-                cc.egui_ctx.clone(),
-            );
+        if let Some(kits) = auto_restore_session {
+            app.begin_last_session_restore(kits, cc.egui_ctx.clone());
         }
         app
     }

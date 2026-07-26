@@ -229,8 +229,8 @@ impl Baboon {
             return;
         }
         let keys = match self.find.within {
-            FindWithin::CurrentTag => self.selected_key.iter().cloned().collect::<Vec<_>>(),
-            FindWithin::OpenTags => self.open_tabs.clone(),
+            FindWithin::CurrentTag => self.kits[self.active].selected_key.iter().cloned().collect::<Vec<_>>(),
+            FindWithin::OpenTags => self.kits[self.active].open_tabs.clone(),
             FindWithin::AllTags => unreachable!(),
         };
         let mut occurrences = Vec::new();
@@ -241,13 +241,13 @@ impl Baboon {
             if !supports_field_search(&entry) {
                 continue;
             }
-            let Some(doc) = self.parsed_tags.get(&key) else {
+            let Some(doc) = self.kits[self.active].parsed_tags.get(&key) else {
                 continue;
             };
             occurrences.extend(collect_find_occurrences(
                 &doc.tag,
                 &key,
-                &self.names,
+                self.names(),
                 &self.find.query,
                 self.find.look_in,
                 self.find.match_case,
@@ -267,7 +267,7 @@ impl Baboon {
                 .find
                 .occurrences
                 .iter()
-                .filter(|hit| self.parsed_tags.contains_key(&hit.tag_key))
+                .filter(|hit| self.kits[self.active].parsed_tags.contains_key(&hit.tag_key))
                 .map(|hit| (hit.tag_key.clone(), hit.field_path.clone(), hit.kind))
                 .collect();
             data.insert_temp(
@@ -284,11 +284,11 @@ impl Baboon {
     }
 
     fn refresh_all_tag_find(&mut self, ctx: &egui::Context) {
-        let needs_full_scan = self.source.as_ref().is_some_and(|source| {
+        let needs_full_scan = self.source().is_some_and(|source| {
             matches!(source.source, TagSource::LooseFolder { .. }) && source.all_entries.is_empty()
         });
         if needs_full_scan {
-            if !self.scanning_entries {
+            if !self.kits[self.active].scanning_entries {
                 self.begin_scan_all_entries_with_label(ctx.clone(), "Indexing tags for Find...");
             }
             self.find.searching = true;
@@ -299,7 +299,7 @@ impl Baboon {
             self.find.occurrences.clear();
             return;
         }
-        let Some(source) = self.source.as_ref() else {
+        let Some(source) = self.source() else {
             self.find.occurrences.clear();
             return;
         };
@@ -308,11 +308,11 @@ impl Baboon {
         } else {
             source.all_entries.clone()
         };
-        let mut open_keys = self.parsed_tags.keys().cloned().collect::<Vec<_>>();
+        let mut open_keys = self.kits[self.active].parsed_tags.keys().cloned().collect::<Vec<_>>();
         open_keys.sort();
         let signature = format!(
             "{}|{:?}|{}|{}|{}|{}|{}|{}",
-            self.source_generation,
+            self.kits[self.active].generation,
             self.find.look_in,
             self.find.match_case,
             self.find.whole_word,
@@ -327,7 +327,7 @@ impl Baboon {
         if self.find.all_signature.as_deref() != Some(signature.as_str()) {
             let closed_entries = entries
                 .iter()
-                .filter(|entry| !self.parsed_tags.contains_key(&entry.key))
+                .filter(|entry| !self.kits[self.active].parsed_tags.contains_key(&entry.key))
                 .cloned()
                 .collect::<Vec<_>>();
             self.find.all_signature = Some(signature);
@@ -337,7 +337,7 @@ impl Baboon {
 
         let mut by_key: HashMap<String, Vec<FindOccurrence>> = HashMap::new();
         for hit in &self.find.all_closed_occurrences {
-            if !self.parsed_tags.contains_key(&hit.tag_key) {
+            if !self.kits[self.active].parsed_tags.contains_key(&hit.tag_key) {
                 by_key
                     .entry(hit.tag_key.clone())
                     .or_default()
@@ -351,7 +351,7 @@ impl Baboon {
             if !supports_field_search(entry) {
                 continue;
             }
-            let Some(doc) = self.parsed_tags.get(&key) else {
+            let Some(doc) = self.kits[self.active].parsed_tags.get(&key) else {
                 continue;
             };
             by_key.insert(
@@ -359,7 +359,7 @@ impl Baboon {
                 collect_find_occurrences(
                     &doc.tag,
                     &key,
-                    &self.names,
+                    self.names(),
                     &self.find.query,
                     self.find.look_in,
                     self.find.match_case,
@@ -371,14 +371,14 @@ impl Baboon {
     }
 
     fn begin_all_tag_find(&mut self, ctx: egui::Context, entries: Vec<TagEntry>) {
-        let Some(source) = self.source.as_ref() else {
+        let Some(source) = self.kits[self.active].source.as_ref() else {
             return;
         };
         self.find.all_request_id = self.find.all_request_id.wrapping_add(1);
         let request_id = self.find.all_request_id;
-        let generation = self.source_generation;
+        let stamp = self.kit_stamp();
         let tag_source = source.source.clone();
-        let names = self.names.clone();
+        let names = self.names().clone();
         let query = self.find.query.clone();
         let look_in = self.find.look_in;
         let match_case = self.find.match_case;
@@ -404,7 +404,7 @@ impl Baboon {
                 let processed = index + 1;
                 if processed == total || processed % 32 == 0 {
                     let _ = tx.send(WorkerMessage::FindAllProgress {
-                        generation,
+                        stamp,
                         request_id,
                         processed,
                         total,
@@ -413,7 +413,7 @@ impl Baboon {
                 }
             }
             let _ = tx.send(WorkerMessage::FindAllFinished {
-                generation,
+                stamp,
                 request_id,
                 occurrences,
                 unreadable,
@@ -439,16 +439,16 @@ impl Baboon {
 
     /// Select a Find result's tag and navigate immediately or after its load completes.
     pub(super) fn activate_find_occurrence(&mut self, ctx: &egui::Context, hit: FindOccurrence) {
-        if self.selected_key.as_deref() != Some(hit.tag_key.as_str()) {
+        if self.kits[self.active].selected_key.as_deref() != Some(hit.tag_key.as_str()) {
             self.select_entry(hit.tag_key.clone(), ctx.clone());
         }
-        if !self.parsed_tags.contains_key(&hit.tag_key) {
+        if !self.kits[self.active].parsed_tags.contains_key(&hit.tag_key) {
             self.pending_find_jump = Some(hit);
             return;
         }
         if let Some(entry) = self.entry_for_key(&hit.tag_key) {
-            if is_model_group(entry.group_tag, &self.names) {
-                self.model_previews
+            if is_model_group(entry.group_tag, self.names()) {
+                self.kits[self.active].model_previews
                     .entry(hit.tag_key.clone())
                     .or_default()
                     .active_tab = ModelTagPanelTab::Fields;

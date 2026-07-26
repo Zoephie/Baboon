@@ -10,13 +10,14 @@
           "blocks": [
             {
               "kind": "paragraph",
-              "text": "Baboon detects MCC editing kits from the loaded kit root or from a folder named after a game id."
+              "text": "Baboon detects MCC editing kits from the loaded kit root or from a folder named after a game id. Halo: Campaign Evolved is also supported, as a game install rather than an editing kit."
             },
             {
               "kind": "bullets",
               "items": [
-                "Supported kits: Halo CE, Halo 2, Halo 3, Halo 3: ODST, Halo: Reach, Halo 4, and Halo 2: Anniversary multiplayer.",
+                "Supported editing kits: Halo CE, Halo 2, Halo 3, Halo 3: ODST, Halo: Reach, Halo 4, and Halo 2: Anniversary multiplayer.",
                 "Recognized roots include HCEEK, H1EK, H2EK, H3EK, H3ODSTEK, HREK, H4EK, H2AMPEK, and H2AEK.",
+                "Halo: Campaign Evolved is opened from its installed game folder instead; its tags live inside the game's container files rather than as loose files.",
                 "Use File > Settings to map a custom editing-kit folder name to a game when your layout is non-standard.",
                 "Per-game schemas are loaded from definitions/<game>/*.json next to Baboon.exe in release builds."
               ]
@@ -28,7 +29,7 @@
           "blocks": [
             {
               "kind": "paragraph",
-              "text": "Baboon can open a single tag, a loose tags folder, or a monolithic cache. Loading runs on a background thread so the UI stays responsive."
+              "text": "Baboon can open a single tag, a loose tags folder, a monolithic cache, or a Halo: Campaign Evolved install. Loading runs on a background thread so the UI stays responsive."
             },
             {
               "kind": "bullets",
@@ -36,9 +37,31 @@
                 "Use File > Load Folder to choose the root of your editing kit, such as H3EK, HREK, H4EK, H3ODSTEK, or H2AMPEK/H2AEK.",
                 "Baboon will load the kit's tags folder from that root. Picking the kit root also lets the terminal, launcher buttons, and tool import commands resolve the correct working directory.",
                 "Choosing the tags folder directly works for browsing tags, but the kit root is the safest habit when you want Baboon to work with external tools.",
+                "Point Load Folder at a Halo: Campaign Evolved install folder and Baboon finds its container directory itself; File > Open Campaign Evolved container also takes a single .utoc.",
                 "Loose folder trees load lazily as you expand directories, while a background scan builds the full index for global tools.",
-                "Halo 4 monolithic blob_index.dat caches open read-only and can be browsed as tag entries.",
-                "Tag files are detected by probing the BLAM or MALB header, so non-tag files are skipped."
+                "Monolithic blob_index.dat caches open read-only and can be browsed as tag entries.",
+                "Tag files are detected by probing the BLAM or MALB header, so non-tag files are skipped.",
+                "Opening a source that is already open switches to it rather than loading a second copy."
+              ]
+            }
+          ]
+        },
+        {
+          "title": "Multiple games and split views",
+          "blocks": [
+            {
+              "kind": "paragraph",
+              "text": "Several games can be open at once. Each is a workspace with its own browser, its own open tags, and its own indexes, shown as a tab across the top."
+            },
+            {
+              "kind": "bullets",
+              "items": [
+                "Opening a folder adds a workspace instead of replacing the current one, so loading a second game leaves the first alone.",
+                "The + button on the workspace tab bar opens another game, including from the recent folders list.",
+                "Drag a game tab against the edge of a pane to split the window and view two games side by side.",
+                "Each workspace keeps its own browser, so two games can be browsed independently.",
+                "Closing a workspace prompts for any unsaved tags in it, and closing Baboon prompts for every workspace that has them.",
+                "With nothing loaded, the editor shows a welcome screen with the open actions, your configured editing kits, and recent folders."
               ]
             }
           ]
@@ -53,7 +76,7 @@
             {
               "kind": "bullets",
               "items": [
-                "Recent folders appear in File for quick reopening.",
+                "Recent folders appear in the File menu, on the workspace tab bar, and on the welcome screen; each can be removed individually or cleared.",
                 "Search supports space-separated AND terms, | OR terms, and ^prefix, suffix$, or ^exact$ anchors.",
                 "Sort each folder or group naturally, by name, or by type.",
                 "Reveal in tree jumps the browser to a tag and opens its parent folders.",
@@ -85,14 +108,17 @@
           ]
         },
         {
-          "title": "Tabbed, dockable editor",
+          "title": "Tabbed, splittable editor",
           "blocks": [
             {
               "kind": "bullets",
               "items": [
                 "Open tags appear as tabs with their group icon.",
                 "Tabs with unsaved edits show an amber tint and marker.",
-                "Tear a tab into a floating resizable window, then dock it back into the tab rack.",
+                "Drag a tab against the edge of a pane to split the editor and view two tags at once, horizontally or vertically.",
+                "Drag a tab onto another group to move it, and drag the divider between panes to resize them.",
+                "The same tag opened in two panes scrolls independently while both edit the one document.",
+                "Right-click a tab to reveal its tag in the browser, or to close the others.",
                 "Baboon keeps an LRU cache of parsed tags so large sessions do not keep every document loaded forever."
               ]
             }
@@ -103,13 +129,13 @@
           "blocks": [
             {
               "kind": "paragraph",
-              "text": "Loose little-endian tags can be edited inline. Monolithic-cache tags and big-endian tags open read-only."
+              "text": "Loose tags and Campaign Evolved container tags can be edited inline. Monolithic-cache tags and big-endian tags open read-only."
             },
             {
               "kind": "bullets",
               "items": [
                 "Edit scalars, integers, reals, strings, string_ids, enums, flags, and colors.",
-                "Tag references can be opened directly; Alt-click opens the target in a floating window.",
+                "Tag references can be opened directly; Alt-click opens the target in a split beside the current pane.",
                 "Drag a tag from the browser onto a reference field to set it, and missing references are highlighted.",
                 "Tag-reference rows for render_model, collision_model, physics_model, and model_animation_graph can show an Import button.",
                 "Import runs the matching editing-kit tool command from the kit root, so it needs a loaded editing-kit folder.",
@@ -206,6 +232,28 @@
           ]
         },
         {
+          "title": "Halo: Campaign Evolved",
+          "blocks": [
+            {
+              "kind": "paragraph",
+              "text": "Campaign Evolved stores its tags inside the game's container files. Baboon mounts them as a single read-write tag tree."
+            },
+            {
+              "kind": "bullets",
+              "items": [
+                "Tags are edited exactly as loose tags are, but Save writes back into the game's own container files in place.",
+                "Settings > Startup can ask for confirmation before a Save overwrites game files.",
+                "File > Export Mod bundles every open, modified tag into a separate mod overlay and leaves the base game untouched.",
+                "File > New Tag and File > Import Tag add tags that live only in memory until you Save or Export Mod.",
+                "Sound tags carry no audio themselves; Baboon follows their package references out to the game's Wwise media to play and extract them.",
+                "Baboon keeps a .baboon project alongside a Campaign Evolved source, checkpointing modified and newly-created tags so they survive a crash or a reopen.",
+                "Export Mod bundles every modified tag in the project, including ones whose tabs were closed, and writes a portable .baboon file beside the mod.",
+                "File > Open Baboon Project reopens a project, restoring its tags and their layout."
+              ]
+            }
+          ]
+        },
+        {
           "title": "Sound playback and extraction",
           "blocks": [
             {
@@ -215,7 +263,7 @@
             {
               "kind": "bullets",
               "items": [
-                "Halo CE inline Ogg, Halo 2 inline Opus, Xbox IMA ADPCM, PCM, Halo 3/ODST/Reach FMOD banks, and Halo 4/H2A Wwise packages are resolved by game.",
+                "Halo CE inline Ogg, Halo 2 inline Opus, Xbox IMA ADPCM, PCM, Halo 3/ODST/Reach FMOD banks, and Halo 4/H2A/Campaign Evolved Wwise packages are resolved by game.",
                 "Use per-permutation or per-event play controls, Stop, volume, language selection, and status readouts.",
                 "Decoded audio and external banks or packages are cached lazily.",
                 "Dialogue and sound_looping tags expose play and extraction controls for referenced sounds.",
@@ -264,7 +312,7 @@
                 "Extract raw tag files, including entries from monolithic caches.",
                 "Extract bitmap images to TIFF individually or in bulk across a folder.",
                 "Extract model, render_model, collision_model, physics_model, scenario_structure_bsp, and scenario geometry to JMS or ASS where supported.",
-                "Import info and animation extraction run through the companion blam-tag-shell tools."
+                "Import info and animation extraction run inside Baboon; no companion command-line tool is needed."
               ]
             }
           ]
@@ -306,7 +354,9 @@
                 "Use File > Settings > Appearance to switch Dark mode on or off and adjust UI scale.",
                 "Appearance settings are saved in Baboon's preferences, so they stay set the next time you launch the app.",
                 "The same Appearance section also has the default Model viewport size used by .model render previews.",
-                "Settings also cover browser mode, browser prefixes, double-click behavior, expert mode, scroll wheel dropdown behavior, Blender path, and custom editing-kit aliases.",
+                "Settings tabs cover Startup, Browser, Editing kits, Editing-kit aliases, Appearance, and Tools.",
+                "Settings also cover browser mode, browser prefixes, double-click behavior, expert mode, scroll wheel dropdown behavior, Blender path, custom editing-kit aliases, and confirmation before saving over Campaign Evolved game files.",
+                "Startup can reopen the previous session; every workspace that was open is restored, each with its own tags.",
                 "Recent folders, keyword sidecars, palette sidecars, last-session restore preference, and per-kit terminal state are persisted under Baboon's app data folder."
               ]
             }

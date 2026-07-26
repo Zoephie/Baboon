@@ -3,27 +3,28 @@
 
 use super::*;
 
-pub(super) fn open_tab_once(open_tabs: &mut Vec<String>, key: String) {
-    if !open_tabs.iter().any(|tab| tab == &key) {
-        open_tabs.push(key);
-    }
-}
-
 impl Baboon {
     /// Applies `WorkerMessage::TagLoaded`, discarding results for tabs closed while loading.
     pub(super) fn handle_tag_loaded(
         &mut self,
+        kit: KitId,
         key: String,
         result: Result<TagFile, String>,
     ) -> bool {
-        self.loading_tags.remove(&key);
-        if !self.open_tabs.iter().any(|tab| tab == &key) && !self.floating_tabs.contains(&key) {
+        // Routed by kit id rather than generation: a parsed document stays
+        // valid across a source reload, and must land in the kit that asked
+        // for it even if the user has since switched to another.
+        let Some(index) = self.resolve_kit(kit) else {
+            return true;
+        };
+        self.kits[index].loading_tags.remove(&key);
+        if !self.kits[index].open_tabs.iter().any(|tab| tab == &key) {
             return true;
         }
         match result {
             Ok(tag) => {
                 self.status = "Tag loaded".to_owned();
-                self.parsed_tags.insert(key, TagDocument::clean(tag));
+                self.kits[index].parsed_tags.insert(key, TagDocument::clean(tag));
             }
             Err(error) => {
                 self.terminal.lines.push(TerminalLineEntry::new(format!(
@@ -40,62 +41,33 @@ impl Baboon {
     /// Applies `WorkerMessage::BitmapReimportFinished` and reloads an open bitmap document.
     pub(super) fn handle_bitmap_reimport_finished(
         &mut self,
+        kit: KitId,
         key: String,
         result: Result<TagFile, String>,
     ) -> bool {
+        // The terminal reset is global and must run even when the owning kit
+        // has closed, so it happens before the routing check.
         self.terminal.running = false;
         self.terminal.running_id = None;
         self.terminal.running_command = None;
         self.terminal.process = None;
         self.terminal.scroll_to_bottom = true;
         self.terminal.refocus_input = true;
+        let Some(index) = self.resolve_kit(kit) else {
+            return true;
+        };
         match result {
             Ok(tag) => {
-                if self.open_tabs.iter().any(|tab| tab == &key) {
-                    self.parsed_tags
+                if self.kits[index].open_tabs.iter().any(|tab| tab == &key) {
+                    self.kits[index]
+                        .parsed_tags
                         .insert(key.clone(), TagDocument::clean(tag));
-                    self.bitmap_previews.remove(&key);
+                    self.kits[index].bitmap_previews.remove(&key);
                 }
                 self.status = "Bitmap reimported and reloaded".to_owned();
             }
             Err(error) => self.status = format!("Bitmap reimport failed: {error}"),
         }
         false
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn opening_one_hundred_tabs_keeps_every_unique_key_in_order() {
-        let mut tabs = Vec::new();
-        for index in 0..100 {
-            open_tab_once(&mut tabs, format!("tag-{index}"));
-        }
-        open_tab_once(&mut tabs, "tag-50".to_owned());
-        assert_eq!(tabs.len(), 100);
-        assert_eq!(tabs.first().map(String::as_str), Some("tag-0"));
-        assert_eq!(tabs.last().map(String::as_str), Some("tag-99"));
-    }
-}
-
-pub(super) fn selected_tab_after_removal(
-    open_tabs: &[String],
-    removed_index: Option<usize>,
-) -> Option<String> {
-    let removed_index = removed_index?;
-    if open_tabs.is_empty() {
-        None
-    } else {
-        open_tabs
-            .get(removed_index)
-            .or_else(|| {
-                removed_index
-                    .checked_sub(1)
-                    .and_then(|index| open_tabs.get(index))
-            })
-            .cloned()
     }
 }

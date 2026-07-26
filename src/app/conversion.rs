@@ -3116,15 +3116,13 @@ impl Baboon {
         if !self.expert_mode {
             return false;
         }
-        let Some(key) = self.selected_key.as_deref() else {
+        let Some(key) = self.kits[self.active].selected_key.as_deref() else {
             return false;
         };
-        let Some(document) = self.parsed_tags.get(key) else {
+        let Some(document) = self.kits[self.active].parsed_tags.get(key) else {
             return false;
         };
-        let Some(game) = self
-            .source
-            .as_ref()
+        let Some(game) = self.source()
             .and_then(|source| source.game.as_deref())
         else {
             return false;
@@ -3139,10 +3137,10 @@ impl Baboon {
             self.status = "Cross-game conversion requires Expert mode".to_owned();
             return;
         }
-        let Some(key) = self.selected_key.clone() else {
+        let Some(key) = self.kits[self.active].selected_key.clone() else {
             return;
         };
-        let Some(source) = self.source.as_ref() else {
+        let Some(source) = self.source() else {
             return;
         };
         let Some(source_game) = source.game.clone() else {
@@ -3185,7 +3183,7 @@ impl Baboon {
             .editing_kit_paths
             .get(&target_game)
             .map(|root| configured_tags_root(root));
-        let result = self
+        let result = self.kits[self.active]
             .parsed_tags
             .get(&key)
             .ok_or_else(|| "The source tag is no longer loaded".to_owned())
@@ -3280,7 +3278,7 @@ impl Baboon {
         let Some(dialog) = self.tag_conversion_dialog.as_ref() else {
             return;
         };
-        let Some(document) = self.parsed_tags.get(&dialog.source_key) else {
+        let Some(document) = self.kits[self.active].parsed_tags.get(&dialog.source_key) else {
             if let Some(dialog) = self.tag_conversion_dialog.as_mut() {
                 dialog.error = Some("The source tag is no longer loaded".to_owned());
             }
@@ -3405,7 +3403,7 @@ impl Baboon {
             self.status = "Cross-game folder conversion requires Expert mode".to_owned();
             return;
         }
-        let Some(source_game) = self.source.as_ref().and_then(|source| source.game.clone()) else {
+        let Some(source_game) = self.source().and_then(|source| source.game.clone()) else {
             self.status = "Folder conversion requires a detected editing-kit profile".to_owned();
             return;
         };
@@ -3485,7 +3483,7 @@ impl Baboon {
         if dialog.running {
             return;
         }
-        if self.parsed_tags.values().any(|document| document.dirty) {
+        if self.kits[self.active].parsed_tags.values().any(|document| document.dirty) {
             if let Some(dialog) = self.folder_conversion_dialog.as_mut() {
                 dialog.error =
                     Some("Save or close dirty tags before converting a folder".to_owned());
@@ -3499,7 +3497,7 @@ impl Baboon {
             return;
         };
         let (Some(source_data), Some(target_tags_root)) = (
-            self.source.as_ref(),
+            self.source(),
             self.editing_kit_paths
                 .get(&dialog.target_game)
                 .map(|path| configured_tags_root(path)),

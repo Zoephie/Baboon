@@ -2,6 +2,7 @@
 //! It owns immediate-mode presentation and request collection; tag mutation, persistence, and source I/O belong to their owning subsystems.
 
 use super::*;
+use super::recents::draw_recent_folders_menu;
 
 impl Baboon {
     pub(super) fn draw_root_ui(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -74,25 +75,13 @@ impl Baboon {
                             ui.close_menu();
                             self.open_loaded_data_folder();
                         }
+                        let mut recent_action = None;
                         ui.menu_button("Recent Folders", |ui| {
-                            if self.recent_folders.is_empty() {
-                                ui.add_enabled(false, egui::Button::new("No recent folders"));
-                            } else {
-                                for path in self.recent_folders.clone() {
-                                    let full_path = path.display().to_string();
-                                    let label = recent_folder_menu_label(&path);
-                                    if ui.button(label).on_hover_text(full_path).clicked() {
-                                        ui.close_menu();
-                                        self.load_recent_folder(path, ctx.clone());
-                                    }
-                                }
-                                ui.separator();
-                                if ui.button("Clear Recent Folders").clicked() {
-                                    self.recent_folders.clear();
-                                    ui.close_menu();
-                                }
-                            }
+                            recent_action = draw_recent_folders_menu(ui, &self.recent_folders);
                         });
+                        if let Some(action) = recent_action {
+                            self.apply_recent_action(action, ctx);
+                        }
                         ui.separator();
                         if icon_text_button(
                             ui,
@@ -107,7 +96,7 @@ impl Baboon {
                         }
                         if ui
                             .add_enabled(
-                                self.selected_key.is_some(),
+                                self.kits[self.active].selected_key.is_some(),
                                 egui::Button::new("Save Current Tag As..."),
                             )
                             .clicked()
@@ -118,8 +107,8 @@ impl Baboon {
                         if self.current_source_is_container() {
                             if ui
                                 .add_enabled(
-                                    self.parsed_tags.values().any(|d| d.dirty)
-                                        || self
+                                    self.kits[self.active].parsed_tags.values().any(|d| d.dirty)
+                                        || self.kits[self.active]
                                             .campaign_project
                                             .as_ref()
                                             .is_some_and(|project| !project.overlays.is_empty()),
@@ -152,12 +141,15 @@ impl Baboon {
                         ui.separator();
                         if ui
                             .add_enabled(
-                                self.selected_key.is_some(),
+                                self.kits[self.active].selected_key.is_some(),
                                 egui::Button::new("Close Current Tag"),
                             )
                             .clicked()
                         {
-                            if let Some(key) = self.selected_key.clone() {
+                            // Deferred, per upstream: the close runs after the
+                            // editor renders, so an edit committed by the menu
+                            // taking focus is applied before the dirty check.
+                            if let Some(key) = self.kits[self.active].selected_key.clone() {
                                 self.defer_file_action(
                                     DeferredFileAction::Close(PendingCloseAction::CloseTab(key)),
                                     ctx,
@@ -167,7 +159,7 @@ impl Baboon {
                         }
                         if ui
                             .add_enabled(
-                                !self.open_tabs.is_empty() || !self.floating_tabs.is_empty(),
+                                !self.kits[self.active].open_tabs.is_empty(),
                                 egui::Button::new("Close All Tags"),
                             )
                             .clicked()
@@ -179,8 +171,8 @@ impl Baboon {
                             ui.close_menu();
                         }
                         ui.separator();
-                        let can_fix_dependencies = self.selected_key.is_some()
-                            && self.source.as_ref().is_some_and(|source| {
+                        let can_fix_dependencies = self.kits[self.active].selected_key.is_some()
+                            && self.source().is_some_and(|source| {
                                 matches!(source.source, TagSource::LooseFolder { .. })
                             });
                         if ui
@@ -195,9 +187,7 @@ impl Baboon {
                         }
                         // Regenerate Index: force a fresh full scan and
                         // overwrite the cached index file.
-                        let can_regen = self
-                            .source
-                            .as_ref()
+                        let can_regen = self.source()
                             .map(|s| {
                                 matches!(s.source, TagSource::LooseFolder { .. })
                                     && s.game.is_some()
@@ -205,32 +195,32 @@ impl Baboon {
                             .unwrap_or(false);
                         if ui
                             .add_enabled(
-                                can_regen && !self.scanning_entries,
+                                can_regen && !self.kits[self.active].scanning_entries,
                                 egui::Button::new("Regenerate Index"),
                             )
                             .clicked()
                         {
                             ui.close_menu();
                             // Clear cached entries so the scan runs fresh.
-                            if let Some(s) = self.source.as_mut() {
+                            if let Some(s) = self.source_mut() {
                                 s.all_entries.clear();
                                 s.group_tree = crate::source::build_group_tree(&[]);
                                 s.reverse_dependencies = None;
                             }
-                            self.field_index.invalidate();
+                            self.kits[self.active].field_index.invalidate();
                             self.begin_scan_all_entries_with_label(
                                 ctx.clone(),
                                 "Rebuilding index...",
                             );
                         }
-                        let can_refresh_browser = self.source.as_ref().is_some_and(|source| {
+                        let can_refresh_browser = self.source().is_some_and(|source| {
                             matches!(source.source, TagSource::LooseFolder { .. })
                                 && source.game.is_some()
                         });
                         if ui
                             .add_enabled(
                                 can_refresh_browser
-                                    && !self.scanning_entries
+                                    && !self.kits[self.active].scanning_entries
                                     && !self.refreshing_entry_index,
                                 egui::Button::new("Refresh Tag Browser"),
                             )
@@ -276,25 +266,25 @@ impl Baboon {
                         ui.separator();
                         if ui
                             .add_enabled(
-                                self.selected_key.is_some(),
+                                self.kits[self.active].selected_key.is_some(),
                                 egui::Button::new("Find References to Current Tag"),
                             )
                             .clicked()
                         {
                             ui.close_menu();
-                            if let Some(key) = self.selected_key.clone() {
+                            if let Some(key) = self.kits[self.active].selected_key.clone() {
                                 self.show_references_for(&key);
                             }
                         }
                         if ui
                             .add_enabled(
-                                self.selected_key.is_some(),
+                                self.kits[self.active].selected_key.is_some(),
                                 egui::Button::new("Explore References to Current Tag..."),
                             )
                             .clicked()
                         {
                             ui.close_menu();
-                            if let Some(key) = self.selected_key.clone() {
+                            if let Some(key) = self.kits[self.active].selected_key.clone() {
                                 self.open_content_explorer(&key);
                             }
                         }
@@ -305,16 +295,14 @@ impl Baboon {
                         {
                             // Loose folders and Campaign Evolved containers can
                             // both be indexed; cache sources cannot.
-                            let indexable = self.source.as_ref().is_some_and(|source| {
+                            let indexable = self.source().is_some_and(|source| {
                                 matches!(
                                     source.source,
                                     TagSource::LooseFolder { .. }
                                         | TagSource::IoStoreContainerSet { .. }
                                 )
                             });
-                            let has_index = self
-                                .source
-                                .as_ref()
+                            let has_index = self.source()
                                 .is_some_and(|source| source.reverse_dependencies.is_some());
                             let label = if self.building_reverse_dependencies {
                                 "Building Reference Index…"
@@ -352,14 +340,15 @@ impl Baboon {
                         }
                         if ui
                             .add_enabled(
-                                self.selected_key.is_some(),
+                                self.kits[self.active].selected_key.is_some(),
                                 egui::Button::new("Compare Current Tag With..."),
                             )
                             .clicked()
                         {
                             ui.close_menu();
-                            if let Some(key) = self.selected_key.clone() {
+                            if let Some(key) = self.kits[self.active].selected_key.clone() {
                                 self.tag_diff = Some(TagDiffState {
+                                    kit: self.active_kit_id(),
                                     a_key: key,
                                     b_key: None,
                                     b_display: None,
@@ -412,15 +401,15 @@ impl Baboon {
                         );
                         ui.checkbox(&mut self.expert_mode, "Expert mode");
                         ui.separator();
-                        let terminal_enabled = self.terminal_work_dir.is_some();
+                        let terminal_enabled = self.kits[self.active].terminal_work_dir.is_some();
                         if ui
                             .add_enabled(
                                 terminal_enabled,
-                                egui::SelectableLabel::new(self.terminal_open, "Terminal"),
+                                egui::SelectableLabel::new(self.kits[self.active].terminal_open, "Terminal"),
                             )
                             .clicked()
                         {
-                            self.terminal_open = !self.terminal_open;
+                            self.kits[self.active].terminal_open = !self.kits[self.active].terminal_open;
                             self.remember_terminal_open_for_game();
                             ui.close_menu();
                         }
@@ -466,7 +455,7 @@ impl Baboon {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Status").strong());
                     ui.separator();
-                    if self.scanning_entries {
+                    if self.kits[self.active].scanning_entries {
                         let progress = self.entry_index_progress.as_ref();
                         let label = progress
                             .map(|progress| progress.label.as_str())
@@ -524,7 +513,7 @@ impl Baboon {
             });
 
         if self.show_entry_index_wait_notice
-            && (self.scanning_entries || self.building_reference_for_entry_index)
+            && (self.kits[self.active].scanning_entries || self.building_reference_for_entry_index)
         {
             let mut open = self.show_entry_index_wait_notice;
             let mut hide_notice = false;
@@ -537,7 +526,7 @@ impl Baboon {
                     ui.set_min_width(360.0);
                     ui.label("Please wait until indexing is completed for best compatibility.");
                     ui.add_space(8.0);
-                    if self.scanning_entries {
+                    if self.kits[self.active].scanning_entries {
                         let progress = self.entry_index_progress.as_ref();
                         let label = progress
                             .map(|progress| progress.label.as_str())
@@ -587,8 +576,8 @@ impl Baboon {
         }
 
         // Terminal panel — rendered AFTER status so it sits above it.
-        if self.terminal_open {
-            let work_dir_label = self
+        if self.kits[self.active].terminal_open {
+            let work_dir_label = self.kits[self.active]
                 .terminal_work_dir
                 .as_ref()
                 .map(|p| p.display().to_string())
@@ -627,7 +616,7 @@ impl Baboon {
                                             .on_hover_text("Close terminal")
                                             .clicked()
                                         {
-                                            self.terminal_open = false;
+                                            self.kits[self.active].terminal_open = false;
                                             self.remember_terminal_open_for_game();
                                         }
                                         if icon_button(
@@ -777,885 +766,33 @@ impl Baboon {
                 });
         }
 
-        egui::SidePanel::left("tag_browser")
-            .resizable(true)
-            .default_width(330.0)
-            .frame(Frame::none().fill(left_panel()).inner_margin(egui::Margin {
-                left: 8.0,
-                right: 8.0,
-                top: 6.0,
-                bottom: 6.0,
-            }))
-            .show(ctx, |ui| {
-                let sidebar_header = self.source.as_ref().map(|source| {
-                    (
-                        source.game.clone(),
-                        source.source.origin_label(),
-                        sidebar_source_path_label(&source.source),
-                    )
-                });
-                if let Some((Some(game), _origin, path_label)) = sidebar_header.as_ref() {
-                    draw_game_banner_header(ui, self, game, path_label);
-                } else {
-                    ui.heading(RichText::new("Tags").color(text_dark()));
-                    if let Some((_, origin, _)) = sidebar_header.as_ref() {
-                        ui.small(RichText::new(origin).color(subtle_dark()));
-                        ui.add_space(8.0);
-                    }
-                }
-
-                let active_favorite_entries = self.active_favorite_entries.clone();
-                let favorite_keys: HashSet<String> = active_favorite_entries
-                    .iter()
-                    .map(|entry| entry.key.clone())
-                    .collect();
-                if let Some(source) = &mut self.source {
-                    ui.add_space(8.0);
-                    let scanning = self.scanning_entries;
-                    // Collect deferred scan-trigger here; execute after borrow ends.
-                    let mut need_scan = false;
-                    let prev_filter_empty = self.filter.is_empty();
-                    ui.scope(|ui| {
-                        ui.visuals_mut().override_text_color = Some(text_dark());
-                        ui.visuals_mut().extreme_bg_color = browser_search_bg();
-                        ui.visuals_mut().widgets.inactive.bg_fill = browser_search_bg();
-                        ui.visuals_mut().widgets.hovered.bg_fill = browser_search_hover();
-                        ui.visuals_mut().widgets.active.bg_fill = browser_search_hover();
-                        ui.horizontal(|ui| {
-                            let (icon_rect, _) =
-                                ui.allocate_exact_size(Vec2::new(18.0, 22.0), Sense::hover());
-                            let icon_rect =
-                                egui::Rect::from_center_size(icon_rect.center(), Vec2::splat(16.0));
-                            paint_button_icon_at(ui, ButtonIcon::SearchBar, icon_rect, text_dark());
-                            ui.add(
-                                egui::TextEdit::singleline(&mut self.filter)
-                                    .hint_text("search tags")
-                                    .desired_width(f32::INFINITY),
-                            );
-                        });
-                    });
-                    if let Some(warning) = browser::browser_filter_warning(&self.filter) {
-                        ui.label(
-                            RichText::new(warning)
-                                .small()
-                                .color(Color32::from_rgb(184, 134, 11)),
-                        );
-                    }
-                    ui.add_space(6.0);
-                    ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 4.0;
-                        let groups_btn = ui.scope(|ui| {
-                            ui.visuals_mut().widgets.inactive.bg_fill = browser_toolbar_bg();
-                            ui.visuals_mut().widgets.hovered.bg_fill = browser_toolbar_active();
-                            ui.visuals_mut().widgets.active.bg_fill = browser_toolbar_active();
-                            let folders = ui.add(
-                                egui::Button::image_and_text(
-                                    button_icon_image(
-                                        ui,
-                                        ButtonIcon::FolderOpen,
-                                        text_dark(),
-                                        16.0,
-                                    ),
-                                    "Folders",
-                                )
-                                .selected(self.browser_mode == BrowserMode::Folders),
-                            );
-                            if folders.clicked() {
-                                self.browser_mode = BrowserMode::Folders;
-                            }
-                            let groups = ui.add(
-                                egui::Button::image_and_text(
-                                    button_icon_image(ui, ButtonIcon::Group, text_dark(), 16.0),
-                                    "Groups",
-                                )
-                                .selected(self.browser_mode == BrowserMode::Groups),
-                            );
-                            if groups.clicked() {
-                                self.browser_mode = BrowserMode::Groups;
-                            }
-                            groups
-                        });
-                        let groups_btn = groups_btn.inner;
-                        if groups_btn.clicked()
-                            && matches!(source.source, TagSource::LooseFolder { .. })
-                            && source.all_entries.is_empty()
-                            && !scanning
-                        {
-                            need_scan = true;
-                        }
-                        ui.add_space(4.0);
-                        ui.scope(|ui| {
-                            ui.visuals_mut().widgets.inactive.bg_fill = browser_toolbar_bg();
-
-                            ui.visuals_mut().widgets.hovered.bg_fill = browser_toolbar_active();
-                            ui.visuals_mut().widgets.active.bg_fill = browser_toolbar_active();
-                            ui.menu_image_button(
-                                button_icon_image(ui, ButtonIcon::Sort, text_dark(), 16.0),
-                                |ui| {
-                                    for option in BrowserSort::ALL {
-                                        if ui
-                                            .selectable_label(
-                                                self.browser_sort == option,
-                                                option.label(),
-                                            )
-                                            .clicked()
-                                        {
-                                            self.browser_sort = option;
-                                            ui.close_menu();
-                                        }
-                                    }
-                                },
-                            )
-                            .response
-                            .on_hover_text("Sort");
-                            ui.menu_image_button(
-                                button_icon_image(ui, ButtonIcon::Filter, text_dark(), 16.0),
-                                |ui| {
-                                    ui.checkbox(&mut self.show_browser_prefixes, "Show prefixes");
-                                },
-                            )
-                            .response
-                            .on_hover_text("Filter");
-                            ui.menu_image_button(
-                                button_icon_image(ui, ButtonIcon::Other, text_dark(), 16.0),
-                                |ui| {
-                                    ui.checkbox(
-                                        &mut self.folders_before_tags,
-                                        "Folders before tags",
-                                    );
-                                },
-                            )
-                            .response
-                            .on_hover_text("Other browser options");
-                        });
-                    });
-                    if prev_filter_empty
-                        && !self.filter.is_empty()
-                        && matches!(source.source, TagSource::LooseFolder { .. })
-                        && source.all_entries.is_empty()
-                        && !scanning
-                    {
-                        need_scan = true;
-                    }
-                    ui.add_space(4.0);
-                    let selected = self.selected_key.clone();
-                    let filter = self.filter.trim().to_owned();
-                    let mode = self.browser_mode;
-                    let show_prefixes = self.show_browser_prefixes;
-                    let folders_before_tags = self.folders_before_tags;
-                    let double_click_to_open = self.double_click_to_open_tags;
-                    let mut status_update = None;
-                    // Groups and filtered Folders use all_entries (background
-                    // scan) so every tag is visible, not just visited folders.
-                    let has_all = !source.all_entries.is_empty();
-                    let groups_mode = matches!(mode, BrowserMode::Groups);
-                    let favorite_context = matches!(source.source, TagSource::LooseFolder { .. })
-                        .then_some(&favorite_keys);
-                    // One-shot "reveal in tree" request (force-open ancestors +
-                    // scroll). Borrowed into the Copy `Reveal` for the draw.
-                    let reveal_owned = self.reveal_target.take();
-                    let reveal = reveal_owned.as_ref().map(|request| Reveal {
-                        key: request.key.as_str(),
-                        remaining: request.ancestors.as_slice(),
-                    });
-                    let sort = self.browser_sort;
-                    let action = if !filter.is_empty() {
-                        // Active search: render a *pruned* tree containing only
-                        // the matching tags, with folders collapsed so the user
-                        // drills down to find them. The pruned tree is memoized
-                        // in `filter_cache` (rebuilt once per keystroke, not per
-                        // frame), and collapsed folders don't build their
-                        // children — so per-frame cost stays bounded.
-                        let entries: &[TagEntry] = if has_all {
-                            &source.all_entries
-                        } else {
-                            &source.entries
-                        };
-                        if scanning && !has_all {
-                            ScrollArea::vertical()
-                                .auto_shrink([false, false])
-                                .show(ui, |ui| {
-                                    let favorite_action = draw_favorites(
-                                        ui,
-                                        &active_favorite_entries,
-                                        selected.as_deref(),
-                                        &filter,
-                                        show_prefixes,
-                                        double_click_to_open,
-                                        &favorite_keys,
-                                    );
-                                    ui.label(
-                                        RichText::new("Indexing tags…")
-                                            .color(subtle_dark())
-                                            .small(),
-                                    );
-                                    favorite_action
-                                })
-                                .inner
-                        } else {
-                            self.filter_cache.refresh(
-                                self.source_generation,
-                                &filter,
-                                entries,
-                                has_all,
-                                groups_mode,
-                            );
-                            let cache = &self.filter_cache;
-                            ScrollArea::vertical()
-                                .auto_shrink([false, false])
-                                .show(ui, |ui| {
-                                    let favorite_action = draw_favorites(
-                                        ui,
-                                        &active_favorite_entries,
-                                        selected.as_deref(),
-                                        &filter,
-                                        show_prefixes,
-                                        double_click_to_open,
-                                        &favorite_keys,
-                                    );
-                                    if cache.entries.is_empty() {
-                                        ui.label(
-                                            RichText::new("No matching tags").color(subtle_dark()),
-                                        );
-                                        return favorite_action;
-                                    }
-                                    // Empty filter → tree renders every (already
-                                    // pruned) entry with folders collapsed.
-                                    let tree_action = draw_tree(
-                                        ui,
-                                        &cache.tree,
-                                        &cache.entries,
-                                        selected.as_deref(),
-                                        "",
-                                        show_prefixes,
-                                        double_click_to_open,
-                                        groups_mode,
-                                        reveal,
-                                        sort,
-                                        !groups_mode && folders_before_tags,
-                                        favorite_context,
-                                        false,
-                                    );
-                                    favorite_action.or(tree_action)
-                                })
-                                .inner
-                        }
-                    } else {
-                        ScrollArea::vertical()
-                            .auto_shrink([false, false])
-                            .show(ui, |ui| {
-                                let favorite_action = draw_favorites(
-                                    ui,
-                                    &active_favorite_entries,
-                                    selected.as_deref(),
-                                    &filter,
-                                    show_prefixes,
-                                    double_click_to_open,
-                                    &favorite_keys,
-                                );
-                                let tree_action = match mode {
-                                    BrowserMode::Folders => {
-                                        if let TagSource::LooseFolder { root, .. } = &source.source
-                                        {
-                                            let root = root.clone();
-                                            draw_tree_lazy(
-                                                ui,
-                                                &mut source.tree,
-                                                &mut source.entries,
-                                                &mut source.group_tree,
-                                                &root,
-                                                &source.names,
-                                                selected.as_deref(),
-                                                &filter,
-                                                show_prefixes,
-                                                double_click_to_open,
-                                                &mut status_update,
-                                                reveal,
-                                                sort,
-                                                folders_before_tags,
-                                                favorite_context,
-                                                self.expert_mode,
-                                            )
-                                        } else {
-                                            draw_tree(
-                                                ui,
-                                                &source.tree,
-                                                &source.entries,
-                                                selected.as_deref(),
-                                                &filter,
-                                                show_prefixes,
-                                                double_click_to_open,
-                                                false,
-                                                reveal,
-                                                sort,
-                                                folders_before_tags,
-                                                None,
-                                                matches!(
-                                                    source.source,
-                                                    TagSource::IoStoreContainerSet { .. }
-                                                ),
-                                            )
-                                        }
-                                    }
-                                    BrowserMode::Groups => {
-                                        if scanning && !has_all {
-                                            ui.label(
-                                                RichText::new("Indexing tags…")
-                                                    .color(subtle_dark())
-                                                    .small(),
-                                            );
-                                            None
-                                        } else {
-                                            let entries = if has_all {
-                                                &source.all_entries[..]
-                                            } else {
-                                                &source.entries[..]
-                                            };
-                                            draw_tree(
-                                                ui,
-                                                &source.group_tree,
-                                                entries,
-                                                selected.as_deref(),
-                                                &filter,
-                                                show_prefixes,
-                                                double_click_to_open,
-                                                true,
-                                                reveal,
-                                                sort,
-                                                false,
-                                                favorite_context,
-                                                false,
-                                            )
-                                        }
-                                    }
-                                };
-                                favorite_action.or(tree_action)
-                            })
-                            .inner
-                    };
-                    if let Some(status) = status_update {
-                        self.status = status;
-                    }
-                    if let Some(action) = action {
-                        self.handle_browser_action(action, ctx.clone());
-                    }
-                    // Deferred: begin_scan_all_entries needs &mut self, so
-                    // it must be called after the `source` borrow ends.
-                    if need_scan {
-                        self.begin_scan_all_entries(ctx.clone());
-                    }
-                } else {
-                    ui.label("Use File to load a tag, folder, or monolithic cache.");
-                }
-            });
-
         egui::CentralPanel::default()
-            .frame(Frame::none().fill(editor_bg()).inner_margin(egui::Margin {
-                left: 10.0,
-                right: 10.0,
-                top: 8.0,
-                bottom: 8.0,
-            }))
+            .frame(Frame::none().fill(editor_bg()))
             .show(ctx, |ui| {
-                if !self.open_tabs.is_empty() || self.dragging_floating_tab.is_some() {
-                    let mut close_key = None;
-                    let mut pop_key = None;
-                    let mut close_all = false;
-                    let mut close_all_but = None;
-                    let mut reveal_key = None;
-                    let mut rack_rect = None;
-                    if self.open_tabs.is_empty() {
-                        let response = ui.label(
-                            RichText::new("Drop popped tag here")
-                                .color(subtle_dark())
-                                .strong(),
-                        );
-                        rack_rect = Some(response.rect);
-                    } else {
-                        const TAB_BUTTON_SIZE: f32 = 18.0;
-                        const TAB_MIN_LABEL_WIDTH: f32 = 48.0;
-                        const TAB_MAX_LABEL_WIDTH: f32 = 170.0;
-                        const TAB_SIDE_PADDING: f32 = 8.0;
-                        const TAB_INNER_GAP: f32 = 3.0;
-                        let scroll_target = self.tab_scroll_target.take();
-
-                        ScrollArea::vertical()
-                            .id_salt("open_tag_rack")
-                            .max_height(160.0)
-                            .auto_shrink([false, true])
-                            .show(ui, |ui| {
-                                let available_width = ui.available_width().max(120.0);
-                                let row_gap = 3.0;
-                                // (key, label, active, dirty, label_width, group_tag)
-                                let mut rows =
-                                    Vec::<Vec<(String, String, bool, bool, f32, u32)>>::new();
-                                let mut row = Vec::new();
-                                let mut row_width = 0.0;
-
-                                for key in self.open_tabs.clone() {
-                                    let Some(entry) = self.entry_for_key(&key) else {
-                                        continue;
-                                    };
-                                    let active = self.selected_key.as_deref() == Some(key.as_str());
-                                    let dirty = self
-                                        .parsed_tags
-                                        .get(&key)
-                                        .map(|doc| doc.dirty)
-                                        .unwrap_or(false);
-                                    let label = if dirty {
-                                        format!("● {}", tag_tab_label(entry))
-                                    } else {
-                                        tag_tab_label(entry)
-                                    };
-                                    let label_width = tab_label_width(
-                                        ui,
-                                        &label,
-                                        TAB_MIN_LABEL_WIDTH,
-                                        TAB_MAX_LABEL_WIDTH,
-                                    );
-                                    let tab_width = TAB_SIDE_PADDING
-                                        + 16.0
-                                        + TAB_INNER_GAP
-                                        + label_width
-                                        + TAB_INNER_GAP
-                                        + TAB_BUTTON_SIZE
-                                        + TAB_INNER_GAP
-                                        + TAB_BUTTON_SIZE;
-                                    let next_width = if row.is_empty() {
-                                        tab_width
-                                    } else {
-                                        row_width + row_gap + tab_width
-                                    };
-                                    if !row.is_empty() && next_width > available_width {
-                                        rows.push(row);
-                                        row = Vec::new();
-                                        row_width = 0.0;
-                                    }
-                                    if !row.is_empty() {
-                                        row_width += row_gap;
-                                    }
-                                    row_width += tab_width;
-                                    row.push((
-                                        key,
-                                        label,
-                                        active,
-                                        dirty,
-                                        label_width,
-                                        entry.group_tag,
-                                    ));
-                                }
-                                if !row.is_empty() {
-                                    rows.push(row);
-                                }
-
-                                for row in rows {
-                                    let row_response = ui.horizontal(|ui| {
-                                        ui.spacing_mut().item_spacing.x = row_gap;
-                                        for (key, label, active, dirty, label_width, group_tag) in
-                                            row
-                                        {
-                                            let shown_label =
-                                                truncate_for_cell(&label, label_width);
-                                            let base_fill =
-                                                if active { menu_bar() } else { row_type() };
-                                            // Subtle amber tint flags tabs with unsaved edits
-                                            // (on top of the ● marker in the label).
-                                            let fill = if dirty {
-                                                tint_toward(
-                                                    base_fill,
-                                                    Color32::from_rgb(184, 134, 11),
-                                                    0.20,
-                                                )
-                                            } else {
-                                                base_fill
-                                            };
-                                            let tab_response = Frame::none()
-                                                .fill(fill)
-                                                .stroke(Stroke::new(1.0, grid_line()))
-                                                .inner_margin(egui::Margin {
-                                                    left: 3.0,
-                                                    right: 3.0,
-                                                    top: 2.0,
-                                                    bottom: 2.0,
-                                                })
-                                                .show(ui, |ui| {
-                                                    ui.horizontal(|ui| {
-                                                        ui.spacing_mut().item_spacing.x =
-                                                            TAB_INNER_GAP;
-                                                        draw_tag_icon(ui, group_tag, 16.0);
-                                                        let label_response = ui
-                                                            .add_sized(
-                                                                Vec2::new(label_width, 18.0),
-                                                                egui::SelectableLabel::new(
-                                                                    active,
-                                                                    RichText::new(
-                                                                        shown_label.clone(),
-                                                                    )
-                                                                    .color(text_dark())
-                                                                    .strong(),
-                                                                ),
-                                                            )
-                                                            .on_hover_text(label.clone());
-                                                        if scroll_target.as_deref()
-                                                            == Some(key.as_str())
-                                                        {
-                                                            label_response.scroll_to_me(Some(
-                                                                egui::Align::Center,
-                                                            ));
-                                                        }
-                                                        if label_response.clicked() {
-                                                            self.selected_key = Some(key.clone());
-                                                            self.tab_scroll_target =
-                                                                Some(key.clone());
-                                                            self.ensure_tag_loading(
-                                                                key.clone(),
-                                                                ctx.clone(),
-                                                            );
-                                                        }
-                                                        if label_response.middle_clicked() {
-                                                            close_key = Some(key.clone());
-                                                        }
-                                                        label_response.context_menu(|ui| {
-                                                            if ui
-                                                                .button("Reveal in browser")
-                                                                .clicked()
-                                                            {
-                                                                reveal_key = Some(key.clone());
-                                                                ui.close_menu();
-                                                            }
-                                                            ui.separator();
-                                                            if ui.button("Close all").clicked() {
-                                                                close_all = true;
-                                                                ui.close_menu();
-                                                            }
-                                                            if ui
-                                                                .button("Close all but this")
-                                                                .clicked()
-                                                            {
-                                                                close_all_but = Some(key.clone());
-                                                                ui.close_menu();
-                                                            }
-                                                        });
-                                                        if icon_button(
-                                                            ui,
-                                                            ButtonIcon::WindowMode,
-                                                            "Pop tab out",
-                                                            true,
-                                                            Vec2::splat(TAB_BUTTON_SIZE),
-                                                            text_dark(),
-                                                        )
-                                                        .clicked()
-                                                        {
-                                                            pop_key = Some(key.clone());
-                                                        }
-                                                        if ui
-                                                            .add(egui::Button::new("x").min_size(
-                                                                Vec2::splat(TAB_BUTTON_SIZE),
-                                                            ))
-                                                            .on_hover_text("Close tab")
-                                                            .clicked()
-                                                        {
-                                                            close_key = Some(key.clone());
-                                                        }
-                                                    });
-                                                });
-                                            if tab_response.response.middle_clicked() {
-                                                close_key = Some(key.clone());
-                                            }
-                                        }
-                                    });
-                                    if row_response.response.rect.intersects(ui.clip_rect()) {
-                                        let visible =
-                                            row_response.response.rect.intersect(ui.clip_rect());
-                                        rack_rect = Some(match rack_rect {
-                                            Some(rect) => rect.union(visible),
-                                            None => visible,
-                                        });
-                                    }
-                                }
-                            });
-                    }
-                    if close_all {
-                        self.defer_file_action(
-                            DeferredFileAction::Close(PendingCloseAction::CloseAllTabs),
-                            ctx,
-                        );
-                    } else if let Some(key) = close_all_but {
-                        self.defer_file_action(
-                            DeferredFileAction::Close(PendingCloseAction::CloseAllButThis(key)),
-                            ctx,
-                        );
-                    } else if let Some(key) = close_key {
-                        self.defer_file_action(
-                            DeferredFileAction::Close(PendingCloseAction::CloseTab(key)),
-                            ctx,
-                        );
-                    } else if let Some(key) = pop_key {
-                        self.pop_tab(&key);
-                    }
-                    if let Some(key) = reveal_key {
-                        self.reveal_in_browser(&key);
-                    }
-                    self.tab_rack_rect = rack_rect;
-                    ui.add_space(6.0);
-                } else {
-                    self.tab_rack_rect = None;
-                }
-
-                if let Some(entry) = self.selected_entry().cloned() {
-                    let selected_key = entry.key.clone();
-                    draw_entry_header(ui, &entry, &self.names);
-                    self.draw_scenario_launcher_buttons(ui, &entry);
-                    self.draw_keyword_bar(ui, &selected_key);
-
-                    // "Search fields" collapses the editor to matching blocks.
-                    // Not offered for shader/sound tags (their own surfaces).
-                    let supports_field_search = supports_field_search(&entry);
-                    if supports_field_search {
-                        self.draw_field_search_bar(ui, &selected_key);
-                    }
-
-                    let mut bitmap_reimport_request = None;
-                    // Documentation overlay (fetched before borrowing parsed_tags).
-                    let def_docs = self.def_docs_for_entry(&entry);
-                    // Campaign Evolved Wwise binding, likewise resolved before
-                    // `parsed_tags` is borrowed for the document.
-                    let ce_sound = self.ce_sound_binding(&selected_key, &entry);
-                    let ce_paks_root = self.source.as_ref().and_then(|s| match &s.source {
-                        TagSource::IoStoreContainerSet { root, .. } => Some(root.as_path()),
-                        _ => None,
-                    });
-                    if let Some(doc) = self.parsed_tags.get_mut(&selected_key) {
-                        let mut pending = Vec::new();
-                        let mut block_ops = Vec::new();
-                        let mut shader_ops = Vec::new();
-                        let mut shader_param_ops = Vec::new();
-                        let mut h2_shader_param_ops = Vec::new();
-                        let mut function_data_ops = Vec::new();
-                        let mut model_variant_ops = Vec::new();
-                        let mut color_request = None;
-                        let mut function_request = None;
-                        let mut block_clip_request = None;
-                        let mut bitmap_reimport = None;
-                        let mut tsv_paste_request = None;
-                        let field_filter = compute_pending_field_filter(
-                            &doc.tag,
-                            supports_field_search,
-                            &selected_key,
-                            &self.field_search,
-                            &mut self.field_search_applied,
-                        );
-                        let sound_volume = self.audio.volume();
-                        let mut edit_context = FieldEditContext {
-                            view_scope: "docked",
-                            tag_key: &selected_key,
-                            group_tag: entry.group_tag,
-                            root: Some(doc.tag.root()),
-                            game: self
-                                .source
-                                .as_ref()
-                                .and_then(|source| source.game.as_deref()),
-                            definitions_root: self.source.as_ref().and_then(|source| match &source
-                                .source
-                            {
-                                TagSource::LooseFolder {
-                                    definitions_root, ..
-                                } => Some(definitions_root.as_path()),
-                                _ => None,
-                            }),
-                            names: Some(&self.names),
-                            tags_root: self.source.as_ref().and_then(|source| {
-                                match &source.source {
-                                    TagSource::LooseFolder { root, .. } => Some(root.as_path()),
-                                    _ => None,
-                                }
-                            }),
-                            tag_reference_catalog: self.source.as_ref().and_then(|source| {
-                                tag_reference_catalog_for_source(source, self.expert_mode)
-                            }),
-                            tag_reference_picker: &mut self.tag_reference_picker,
-                            status: Some(&mut self.status),
-                            editable: is_editable_tag(&entry, &doc.tag),
-                            show_block_sizes: self.show_block_sizes,
-                            buffers: &mut self.edit_buffers,
-                            pending: &mut pending,
-                            block_ops: &mut block_ops,
-                            block_confirm: &mut self.block_confirm,
-                            open_request: &mut self.pending_open,
-                            sound_play_request: &mut self.audio.pending,
-                            sound_status: self.audio.status.as_deref(),
-                            sound_volume,
-                            sound_extract_request: &mut self.pending_sound_extract,
-                            sound_language: self.audio.language.as_deref(),
-                            ce_sound: ce_sound.as_deref(),
-                            ce_paks_root,
-                            tool_import: &mut self.pending_tool_import,
-                            bitmap_reimport: &mut bitmap_reimport,
-                            shader_ops: &mut shader_ops,
-                            shader_param_ops: &mut shader_param_ops,
-                            h2_shader_param_ops: &mut h2_shader_param_ops,
-                            function_data_ops: &mut function_data_ops,
-                            model_variant_ops: &mut model_variant_ops,
-                            color_request: &mut color_request,
-                            function_request: &mut function_request,
-                            docs: def_docs.as_deref(),
-                            tsv_paste_request: &mut tsv_paste_request,
-                            block_clipboard: self.block_clipboard.as_ref(),
-                            block_clip_request: &mut block_clip_request,
-                            field_filter: field_filter.as_ref(),
-                            field_nav: self.field_nav.as_ref(),
-                        };
-                        if is_bitmap_tag(&entry) {
-                            let preview = self
-                                .bitmap_previews
-                                .entry(selected_key.clone())
-                                .or_default();
-                            draw_bitmap_tag(
-                                ui,
-                                ctx,
-                                &doc.tag,
-                                &entry,
-                                &self.names,
-                                &mut self.color_popup,
-                                preview,
-                                self.expert_mode,
-                                &mut edit_context,
-                            );
-                        } else {
-                            let mut local_model_preview;
-                            let model_preview = if is_model_group(entry.group_tag, &self.names) {
-                                self.model_previews.entry(selected_key.clone()).or_default()
-                            } else {
-                                local_model_preview = ModelPreviewState::default();
-                                &mut local_model_preview
-                            };
-                            draw_tag(
-                                ui,
-                                &doc.tag,
-                                &entry,
-                                &self.names,
-                                self.source.as_ref().map(|source| &source.source),
-                                &mut self.rmdf_cache,
-                                &mut self.rmop_cache,
-                                &mut self.color_popup,
-                                &mut self.function_popup,
-                                model_preview,
-                                &mut self.model_preview_size,
-                                self.expert_mode,
-                                &mut edit_context,
-                            );
-                        }
-                        // Snapshot for undo before a mutating batch. Coalesces
-                        // continuous edits into one entry; closes the window on
-                        // frames with no edits.
-                        if !pending.is_empty()
-                            || !block_ops.is_empty()
-                            || !shader_ops.is_empty()
-                            || !shader_param_ops.is_empty()
-                            || !model_variant_ops.is_empty()
-                        {
-                            doc.journal.begin_edit(&doc.tag, "Edit");
-                        } else {
-                            doc.journal.end_edit_window();
-                        }
-                        let applied =
-                            apply_pending_edits(&mut doc.tag, pending, &mut doc.dirty);
-                        self.edit_buffers
-                            .accept_successful_edits(&selected_key, &applied.outcomes);
-                        if let Some(status) = applied.status {
-                            self.status = status;
-                        }
-                        if let Some(status) =
-                            apply_block_ops(&mut doc.tag, block_ops, &mut doc.dirty)
-                        {
-                            self.status = status;
-                        }
-                        if let Some(status) =
-                            apply_shader_ops(&mut doc.tag, shader_ops, &mut doc.dirty)
-                        {
-                            self.status = status;
-                        }
-                        if let Some(status) =
-                            apply_shader_param_ops(&mut doc.tag, shader_param_ops, &mut doc.dirty)
-                        {
-                            self.status = status;
-                        }
-                        if let Some(status) = apply_h2_shader_param_ops(
-                            &mut doc.tag,
-                            h2_shader_param_ops,
-                            &mut doc.dirty,
-                        ) {
-                            self.status = status;
-                        }
-                        if let Some(status) =
-                            apply_function_data_ops(&mut doc.tag, function_data_ops, &mut doc.dirty)
-                        {
-                            self.status = status;
-                        }
-                        if let Some(status) =
-                            apply_model_variant_ops(&mut doc.tag, model_variant_ops, &mut doc.dirty)
-                        {
-                            self.status = status;
-                            if let Some(preview) = self.model_previews.get_mut(&selected_key) {
-                                preview.loaded_key = None;
-                                preview.data = None;
-                            }
-                        }
-                        // A color swatch was clicked: open the shared picker.
-                        if let Some(popup) = color_request {
-                            self.color_popup = Some(popup);
-                        }
-                        if let Some(popup) = function_request {
-                            self.function_popup = Some(popup);
-                        }
-                        // Element(s) were copied: stash them on the clipboard.
-                        if let Some(clip) = block_clip_request {
-                            self.status = format!(
-                                "Copied {} '{}' element(s)",
-                                clip.elements.len(),
-                                clip.label
-                            );
-                            self.block_clipboard = Some(clip);
-                        }
-                        // "Paste TSV…" was chosen: open the import window.
-                        if let Some(req) = tsv_paste_request {
-                            self.tsv_paste = Some(TsvPasteState {
-                                tag_key: selected_key.clone(),
-                                block_path: req.block_path,
-                                block_label: req.block_label,
-                                element_count: req.element_count,
-                                text: String::new(),
-                                status: None,
-                            });
-                        }
-                        bitmap_reimport_request = bitmap_reimport;
-                    } else if self.loading_tags.contains(&selected_key) {
-                        ui.label("Loading tag data...");
-                    } else {
-                        ui.label("Select the tag again to load it.");
-                    }
-                    if let Some(key) = bitmap_reimport_request {
-                        self.begin_reimport_bitmap(key, ctx.clone());
-                    }
-                } else {
-                    ui.heading("No tag selected");
-                    ui.label("Load a source from File, then select a tag in the browser.");
-                }
+                self.draw_kit_tiles(ui, ctx);
             });
         self.draw_auxiliary_windows(ctx);
         self.persist_prefs_if_changed();
-        self.keywords.save_if_dirty();
-        self.draw_floating_tabs(ctx);
-        self.handle_floating_tab_drop(ctx);
+        // Every kit, not just the active one: a background kit's sidecar can be
+        // dirty from edits made before the user switched away.
+        for kit in &mut self.kits {
+            kit.keywords.save_if_dirty();
+        }
         if let Some(result) = draw_color_popup(
             ctx,
             &mut self.color_popup,
             &mut self.custom_color_swatches,
             &mut self.palette_last_dir,
         ) {
+            // Apply to the kit the picker was opened from. A closed kit drops
+            // the edit rather than letting it land somewhere else.
+            let kit = self
+                .color_popup_kit
+                .and_then(|kit| self.resolve_kit(kit))
+                .unwrap_or(self.active);
             match result {
                 ColorPopupResult::FieldEdit { tag_key, edit } => {
-                    if let Some(doc) = self.parsed_tags.get_mut(&tag_key) {
+                    if let Some(doc) = self.kits[kit].parsed_tags.get_mut(&tag_key) {
                         doc.journal.begin_edit(&doc.tag, "Edit color");
                         if let Some(status) =
                             apply_pending_edits(&mut doc.tag, vec![edit], &mut doc.dirty).status
@@ -1666,7 +803,7 @@ impl Baboon {
                     }
                 }
                 ColorPopupResult::ShaderOp { tag_key, op } => {
-                    if let Some(doc) = self.parsed_tags.get_mut(&tag_key) {
+                    if let Some(doc) = self.kits[kit].parsed_tags.get_mut(&tag_key) {
                         doc.journal.begin_edit(&doc.tag, "Shader edit");
                         if let Some(status) =
                             apply_shader_ops(&mut doc.tag, vec![op], &mut doc.dirty)
@@ -1677,7 +814,7 @@ impl Baboon {
                     }
                 }
                 ColorPopupResult::ShaderParamOp { tag_key, op } => {
-                    if let Some(doc) = self.parsed_tags.get_mut(&tag_key) {
+                    if let Some(doc) = self.kits[kit].parsed_tags.get_mut(&tag_key) {
                         doc.journal.begin_edit(&doc.tag, "Shader parameter");
                         if let Some(status) =
                             apply_shader_param_ops(&mut doc.tag, vec![op], &mut doc.dirty)
@@ -1688,7 +825,7 @@ impl Baboon {
                     }
                 }
                 ColorPopupResult::H2ShaderParamOp { tag_key, op } => {
-                    if let Some(doc) = self.parsed_tags.get_mut(&tag_key) {
+                    if let Some(doc) = self.kits[kit].parsed_tags.get_mut(&tag_key) {
                         doc.journal.begin_edit(&doc.tag, "Shader parameter");
                         if let Some(status) =
                             apply_h2_shader_param_ops(&mut doc.tag, vec![op], &mut doc.dirty)
@@ -1708,7 +845,11 @@ impl Baboon {
         if let Some(batch) =
             draw_function_popup(ctx, &mut self.function_popup, &mut self.color_popup)
         {
-            if let Some(doc) = self.parsed_tags.get_mut(&batch.tag_key) {
+            let kit = self
+                .function_popup_kit
+                .and_then(|kit| self.resolve_kit(kit))
+                .unwrap_or(self.active);
+            if let Some(doc) = self.kits[kit].parsed_tags.get_mut(&batch.tag_key) {
                 if !batch.edits.is_empty() || !batch.data_ops.is_empty() {
                     doc.journal.begin_edit(&doc.tag, "Edit function");
                 }
@@ -1757,6 +898,34 @@ impl Baboon {
         self.process_pending_tool_import(ctx);
     }
 
+
+    /// Clear the status line once its message has been up for a while.
+    ///
+    /// Runs after the worker drain so a message set this frame is timed from
+    /// this frame. Progress states are rendered from their own fields rather
+    /// than from `status`, so expiring it never blanks a running scan.
+    fn expire_status(&mut self, ctx: &egui::Context) {
+        let now = ctx.input(|input| input.time);
+        if self.status != self.status_shown {
+            self.status_shown = self.status.clone();
+            self.status_changed_at = now;
+        }
+        if self.status.is_empty() {
+            return;
+        }
+        let elapsed = now - self.status_changed_at;
+        if elapsed >= STATUS_LINGER_SECS {
+            self.status.clear();
+            self.status_shown.clear();
+        } else {
+            // Nothing else may be animating, so ask for the frame that will
+            // do the clearing rather than waiting for the next interaction.
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(
+                STATUS_LINGER_SECS - elapsed,
+            ));
+        }
+    }
+
     pub(super) fn run_deferred_file_action(&mut self, ctx: &egui::Context) {
         match self.deferred_file_action.take() {
             Some(DeferredFileAction::SaveCurrentTag) => self.save_current_tag(),
@@ -1781,6 +950,7 @@ impl Baboon {
 
     fn prepare_root_frame(&mut self, ctx: &egui::Context) {
         self.process_worker_messages(ctx);
+        self.expire_status(ctx);
         ctx.set_zoom_factor(self.ui_scale);
         self.handle_pixels_per_point_change(ctx);
         self.maybe_refresh_entry_index(ctx.clone());
@@ -1841,7 +1011,7 @@ impl Baboon {
     }
 }
 
-fn recent_folder_menu_label(path: &Path) -> String {
+pub(super) fn recent_folder_menu_label(path: &Path) -> String {
     const MAX_CHARS: usize = 54;
     let text = path.display().to_string();
     let count = text.chars().count();
@@ -1859,3 +1029,4 @@ fn recent_folder_menu_label(path: &Path) -> String {
         .collect::<String>();
     format!("...{tail}")
 }
+

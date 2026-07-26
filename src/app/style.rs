@@ -560,6 +560,11 @@ pub(super) const MATERIAL_PARAMETER_SECTIONS: &[&str] = &[
     "ATMOSPHERE PROPERTIES",
     "MISC",
 ];
+/// How long a status message stays on the status line before it clears.
+/// Without this the last thing that happened sits there indefinitely, which
+/// reads as current state long after it stopped being true.
+pub(super) const STATUS_LINGER_SECS: f64 = 5.0;
+
 #[cfg(test)]
 #[path = "tests/style.rs"]
 mod tests;

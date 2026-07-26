@@ -7,53 +7,70 @@ impl Baboon {
     /// Applies `WorkerMessage::SourceLoaded`, including source reset and follow-up index work.
     pub(super) fn handle_source_loaded(
         &mut self,
+        kit: KitId,
         result: Result<LoadedSourceData, String>,
         recent_path: Option<PathBuf>,
         ctx: &egui::Context,
     ) -> bool {
+        // A load targets the kit it was started for. If that kit closed while
+        // the load was in flight the result is dropped rather than landing in
+        // whichever kit happens to be active now.
+        let Some(index) = self.resolve_kit(kit) else {
+            return true;
+        };
+        self.active = index;
         let mut loaded = match result {
             Ok(loaded) => loaded,
             Err(error) => {
-                self.pending_session_restore = None;
+                self.kits[self.active].pending_restore_tags.clear();
                 self.status = error;
                 return false;
             }
         };
-        if self.current_source_is_campaign_project_capable()
+        // Check the outgoing project to disk before its source is replaced, and
+        // refuse the switch if that fails rather than losing its edits.
+        let outgoing = self.active;
+        if self.current_source_is_campaign_project_capable(outgoing)
             && let Err(error) =
-                self.checkpoint_campaign_project(ctx.input(|input| input.time))
+                self.checkpoint_campaign_project(outgoing, ctx.input(|input| input.time))
         {
             self.status = format!(
                 "Could not switch sources because the Campaign Evolved project checkpoint failed: {error}"
             );
             return false;
         }
-        self.apply_loaded_source_identity(&loaded, recent_path);
-        self.clear_source_bound_document_state();
-        if let Some((key, tag)) = loaded.initial_tag.take() {
-            self.selected_key = Some(key.clone());
-            self.tab_scroll_target = Some(key.clone());
-            self.open_tabs.push(key.clone());
-            self.parsed_tags.insert(key, TagDocument::clean(tag));
+        // Order matters: `install_loaded_source` rebuilds the kit from empty,
+        // which is what replaces the old explicit clearing of document state.
+        // Everything scoped to the new source must therefore be applied after
+        // it, not before, or it would be wiped on the way in.
+        let initial_tag = loaded.initial_tag.take();
+        let game = loaded.game.clone();
+        if let Some(path) = recent_path {
+            self.remember_recent_folder(path);
         }
         self.status = loaded_source_status(&loaded);
-        self.keywords.load_for_game(loaded.game.as_deref());
-        self.field_index.invalidate();
-        self.source = Some(loaded);
-        self.apply_pending_campaign_project(ctx.input(|input| input.time), ctx);
+        self.install_loaded_source(loaded);
+        self.color_popup = None;
+        self.function_popup = None;
+        self.apply_loaded_source_identity(game.as_deref());
+        if let Some((key, tag)) = initial_tag {
+            let kit = &mut self.kits[self.active];
+            kit.parsed_tags.insert(key.clone(), TagDocument::clean(tag));
+            kit.open_tag_pane(&key);
+        }
+        let installed = self.active;
+        self.apply_pending_campaign_project(installed, ctx.input(|input| input.time), ctx);
         self.refresh_active_favorite_entries();
-        self.source_generation = self.source_generation.wrapping_add(1);
+        self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
         self.refreshing_entry_index = false;
         self.building_reverse_dependencies = false;
         self.building_reference_for_entry_index = false;
         self.reference_index_progress = None;
         self.next_entry_index_refresh_at = 0.0;
-        let loose_folder_source = self.source.as_ref().is_some_and(|source| {
+        let loose_folder_source = self.source().is_some_and(|source| {
             source.game.is_some() && matches!(source.source, TagSource::LooseFolder { .. })
         });
-        let has_cached_entries = self
-            .source
-            .as_ref()
+        let has_cached_entries = self.source()
             .is_some_and(|source| !source.all_entries.is_empty());
         if loose_folder_source {
             if has_cached_entries {
@@ -68,58 +85,37 @@ impl Baboon {
         false
     }
 
-    fn apply_loaded_source_identity(
-        &mut self,
-        loaded: &LoadedSourceData,
-        recent_path: Option<PathBuf>,
-    ) {
-        if let Some(path) = recent_path {
-            self.remember_recent_folder(path);
-        }
-        self.terminal_work_dir = if let TagSource::LooseFolder { root, .. } = &loaded.source {
-            root.parent().map(|p| p.to_owned())
-        } else {
-            None
+    /// Apply the per-kit identity that follows from the freshly installed
+    /// source: where its terminal runs, whether the terminal starts open for
+    /// this game, and which keyword sidecar it uses.
+    fn apply_loaded_source_identity(&mut self, game: Option<&str>) {
+        let terminal_open = game.is_some_and(|game| self.terminal_open_games.contains(game));
+        let kit = &mut self.kits[self.active];
+        kit.terminal_work_dir = match kit.source.as_ref().map(|source| &source.source) {
+            Some(TagSource::LooseFolder { root, .. }) => root.parent().map(|p| p.to_owned()),
+            _ => None,
         };
-        self.terminal_open = loaded
-            .game
-            .as_deref()
-            .map(|g| self.terminal_open_games.contains(g))
-            .unwrap_or(false);
-        self.names = loaded.names.clone();
-        self.names.merge_missing(self.default_names.clone());
-    }
-
-    fn clear_source_bound_document_state(&mut self) {
-        self.parsed_tags.clear();
-        self.loading_tags.clear();
-        self.bitmap_previews.clear();
-        self.rmdf_cache.clear();
-        self.rmop_cache.clear();
-        self.color_popup = None;
-        self.function_popup = None;
-        self.selected_key = None;
-        self.open_tabs.clear();
-        self.floating_tabs.clear();
-        self.campaign_project = None;
+        kit.terminal_open = terminal_open;
+        kit.keywords.load_for_game(game);
     }
 
     /// Applies `WorkerMessage::AllEntriesScanned`, rejecting stale source generations.
     pub(super) fn handle_all_entries_scanned(
         &mut self,
-        generation: u64,
+        stamp: KitStamp,
         result: Result<Vec<TagEntry>, String>,
         ctx: &egui::Context,
     ) -> bool {
-        if generation != self.source_generation {
+        let Some(kit_index) = self.resolve_stamp(stamp) else {
             return true;
-        }
-        self.scanning_entries = false;
+        };
+        self.kits[kit_index].scanning_entries = false;
         self.entry_index_progress = None;
         match result {
             Ok(scanned) => {
                 let mut build_reference_index = false;
-                if let Some(source) = self.source.as_mut() {
+                let kit = &mut self.kits[kit_index];
+                if let Some(source) = kit.source.as_mut() {
                     let n = scanned.len();
                     source.group_tree = crate::source::build_group_tree(&scanned);
                     source.all_entries = scanned;
@@ -131,7 +127,7 @@ impl Baboon {
                         None
                     };
                     source.reverse_dependencies = None;
-                    self.field_index.invalidate();
+                    kit.field_index.invalidate();
                     self.status = browser_refresh_error.map_or_else(
                         || format!("Tag index complete: {n} tags; building reference index..."),
                         |error| format!("Tag index complete, but browser refresh failed: {error}"),
@@ -144,13 +140,13 @@ impl Baboon {
                         let entries = source.all_entries.clone();
                         let tx = self.tx.clone();
                         let ctx = ctx.clone();
-                        let generation = self.source_generation;
+                        let stamp = KitStamp { kit: kit.id, generation: kit.generation };
                         let path = crate::source::index_db_path();
                         thread::spawn(move || {
                             let result = crate::source::save_entry_index(&game, &root, &entries)
                                 .map_err(|error| error.to_string());
                             let _ = tx.send(WorkerMessage::EntryIndexSaved {
-                                generation,
+                                stamp,
                                 path,
                                 result,
                             });
@@ -176,13 +172,16 @@ impl Baboon {
     /// Applies `WorkerMessage::EntryIndexScanProgress`, rejecting stale or inactive scans.
     pub(super) fn handle_entry_index_scan_progress(
         &mut self,
-        generation: u64,
+        stamp: KitStamp,
         processed: usize,
         total: usize,
         matched: usize,
         ctx: &egui::Context,
     ) -> bool {
-        if generation != self.source_generation || !self.scanning_entries {
+        let Some(kit_index) = self.resolve_stamp(stamp) else {
+            return true;
+        };
+        if !self.kits[kit_index].scanning_entries {
             return true;
         }
         if let Some(progress) = self.entry_index_progress.as_mut() {
@@ -197,17 +196,19 @@ impl Baboon {
     /// Applies `WorkerMessage::EntryIndexRefreshed`, rejecting stale source generations.
     pub(super) fn handle_entry_index_refreshed(
         &mut self,
-        generation: u64,
+        stamp: KitStamp,
         result: Result<EntryIndexRefresh, String>,
         ctx: &egui::Context,
     ) -> bool {
         self.refreshing_entry_index = false;
-        if generation != self.source_generation {
+        let Some(kit_index) = self.resolve_stamp(stamp) else {
             return true;
-        }
+        };
         self.schedule_next_entry_index_refresh(ctx);
         match result {
-            Ok(refresh) if refresh.changed => self.apply_entry_index_refresh(refresh, ctx.clone()),
+            Ok(refresh) if refresh.changed => {
+                self.apply_entry_index_refresh(kit_index, refresh, ctx.clone())
+            }
             Ok(_) => {}
             Err(error) => self.status = format!("Index refresh failed: {error}"),
         }

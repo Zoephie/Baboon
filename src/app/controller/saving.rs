@@ -16,11 +16,12 @@ impl Baboon {
     /// Applies `WorkerMessage::EntryIndexSaved`, rejecting stale source generations.
     pub(super) fn handle_entry_index_saved(
         &mut self,
-        generation: u64,
+        stamp: KitStamp,
         path: PathBuf,
         result: Result<(), String>,
     ) -> bool {
-        if generation != self.source_generation {
+        // Reports through the global status line only.
+        if self.resolve_stamp(stamp).is_none() {
             return true;
         }
         match result {
@@ -49,7 +50,7 @@ pub(super) fn ordered_unique_keys<'a>(keys: impl Iterator<Item = &'a String>) ->
 }
 
 pub(super) fn save_as_extension(app: &Baboon, entry: &TagEntry) -> Option<String> {
-    app.names
+    app.names()
         .name_for(entry.group_tag)
         .or_else(|| group_tag_to_extension(entry.group_tag))
         .map(|extension| extension.trim().to_owned())

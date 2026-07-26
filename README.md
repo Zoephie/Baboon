@@ -7,11 +7,12 @@ Guerilla-style editing surface for working with the loose tag files shipped in
 the **Halo: The Master Chief Collection** editing kits — no round-trip through
 the official tools required.
 
-Open a single tag, an entire editing-kit `tags/` folder, or a monolithic tag
-cache; browse and search the tag tree (by name *or* field value); edit fields,
-blocks, shaders, and functions inline with full undo/redo; preview bitmaps and
-3D models; trace references and diff tags; and extract geometry, textures, and
-animations — all from one application.
+Open a single tag, an entire editing-kit `tags/` folder, a monolithic tag cache,
+or a Halo: Campaign Evolved install — **several at once**, each in its own
+workspace, side by side. Browse and search the tag tree (by name *or* field
+value); edit fields, blocks, shaders, and functions inline with full undo/redo;
+preview bitmaps and 3D models; trace references and diff tags; and extract
+geometry, textures, and animations — all from one application.
 
 > Baboon is the GUI front end for the `blam-tags` project. The library does the
 > binary tag parsing; Baboon is the interactive editor built on top of it.
@@ -56,8 +57,10 @@ rebuilding the app.
 
 ### Loading tag sources
 
-Baboon can open three kinds of source, each on a background thread so the UI
-never blocks:
+Baboon can open four kinds of source, each on a background thread so the UI
+never blocks. Opening a source that is already open switches to it rather than
+loading a second copy; opening a new one adds a workspace beside the existing
+ones rather than replacing them:
 
 - **Single tag** — open any individual loose tag file.
 - **Loose tags folder** — point at an MCC editing-kit `tags/` directory (or the
@@ -67,8 +70,9 @@ never blocks:
 - **Monolithic cache** — open a Halo 4 `blob_index.dat` monolithic tag cache and
   browse its contents as if they were loose files (read-only).
 - **Campaign Evolved container** — point **Load Folder** at the Halo: Campaign
-  Evolved game directory (or its `Meteorite/Content/Paks`). Baboon auto-detects
-  the UE5 IoStore paks, mounts them as one read-only virtual filesystem, and
+  Evolved game directory (or its `Meteorite/Content/Paks`). Baboon finds the
+  container directory inside the install itself, and remembers the folder you
+  picked. It auto-detects the UE5 IoStore paks, mounts them as one read-only virtual filesystem, and
   presents the Reach tags exactly like loose files. Every pack (the shared base
   chunk plus the per-level chunks that carry each mission's scenario and BSPs) is
   merged into a single lowercase tag tree. See *Campaign Evolved mods* below.
@@ -83,7 +87,9 @@ silently skipped.
   beside each tag (and on its editor tab) for quick visual scanning.
 - **Groups view** — tags regrouped by tag group (e.g. *biped*, *weapon*,
   *render_model*), with friendly names resolved from the definition tables.
-- **Recent folders** — a quick-open list of recently opened tag folders.
+- **Recent folders** — a quick-open list in the File menu, on the workspace
+  tab bar, and on the welcome screen; entries can be removed individually or
+  cleared.
 - **Boolean search/filter** — a fast, memoised filter supporting space-separated
   **AND**, `|` **OR**, and `^prefix` / `suffix$` / `^exact$` anchors matched over
   the filename, group four-CC, and group name. A label flags degenerate filters
@@ -127,16 +133,36 @@ silently skipped.
   *or* any tag on disk; differences (changed values and block element-count
   mismatches) show in a table and export as TSV.
 
-### Tabbed, dockable editor
+### Multiple games at once
 
-- Open multiple tags as **tabs** in a rack, each with its group icon and an
-  amber tint + ● marker when it has unsaved edits.
-- **Tear off** any tab into a floating, resizable window — and drag it back onto
-  the rack (or click *dock*) to re-dock it.
+Each loaded source is a **workspace** with its own browser, its own open tags,
+its own indexes, and its own undo history, shown as a tab across the top of the
+window.
+
+- The **+** on the workspace tab bar opens another game, including from the
+  recent folders list.
+- **Drag a workspace tab** against the edge of a pane to split the window and
+  work in two games side by side, each with its own browser.
+- Closing a workspace prompts for anything unsaved in it, and closing Baboon
+  prompts for every workspace that has unsaved work.
+- With nothing loaded, the editor shows a **welcome screen** listing the open
+  actions, your configured editing kits, and recent folders — each of which can
+  be removed individually or cleared.
+
+### Tabbed, splittable editor
+
+- Open multiple tags as **tabs**, each with its group icon and an amber tint +
+  ● marker when it has unsaved edits.
+- **Split** the editor by dragging a tab against the edge of a pane, and view
+  two tags side by side. Drag a tab onto another group to move it.
+- Open **several games at once**: each is a workspace tab with its own browser
+  and its own tags, and dragging a workspace tab splits the window between two
+  games.
 - **Right-click a tab** to reveal that tag in the browser tree, or to close all
   tabs / all tabs but this one.
-- Tabs remain open until explicitly closed. The wrapped rack scrolls once it
-  reaches five rows; the practical document limit is available memory.
+- Tabs remain open until explicitly closed; the practical document limit is
+  available memory. Drag a tab against a pane edge to split the editor and view
+  two tags at once.
 
 ### Field editing
 
@@ -146,7 +172,8 @@ pageable resources — with inline editing for loose little-endian tags:
 - Scalars, integers, reals, strings, and `string_id`s.
 - **Enums** and **bit flags** with named options.
 - **Colors** via an interactive color-picker popup with channel parsing.
-- **Tag references** with an *Open* button (Alt-click opens in a floating window)
+- **Tag references** with an *Open* button (Alt-click opens in a split beside
+  the current pane)
   that resolves and opens the referenced tag — even if it isn't in the current
   index — an *Import* button on geometry references that re-imports the source
   asset via `tool`, **drag-and-drop** from the browser to set a reference, and a
@@ -381,11 +408,12 @@ custom editing-kit folder names, recent folders, keyword and palette sidecars,
 and per-kit terminal state are persisted to `%APPDATA%\Baboon` and restored on
 launch.
 
-On launch Baboon can reopen the windows from your previous session. The startup
-behaviour is a three-way choice in *File → Settings* — **Ask** which windows to
-reopen (a prompt lists them), **Always** reopen automatically, or **Never** — and
-the reopen prompt itself carries a *Don't ask again* option (OK remembers
-*Always*, Cancel remembers *Never*).
+On launch Baboon can reopen the windows from your previous session. **Every
+workspace** is restored, each with its own tags and its own project, and the
+reopen prompt lists them grouped by game. The startup behaviour is a three-way
+choice in *File → Settings* — **Ask** which windows to reopen, **Always** reopen
+automatically, or **Never** — and the prompt itself carries a *Don't ask again*
+option (OK remembers *Always*, Cancel remembers *Never*).
 
 ---
 

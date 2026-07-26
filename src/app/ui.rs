@@ -4,13 +4,19 @@
 use super::controller::open_terminal_log;
 use super::*;
 
+mod browser_panel;
 mod dialogs;
 mod find;
 mod first_run;
 mod help;
 mod search_windows;
+mod recents;
 mod settings;
 mod shell;
+mod kit_tiles;
+mod tag_pane;
+mod welcome;
+mod tag_tiles;
 mod tool_commands;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -113,45 +119,87 @@ fn draw_index_progress_bar(ui: &mut Ui, width: f32, fraction: Option<f32>, text:
     );
 }
 
+/// The kit's game card: emblem, game name, and source path.
+///
+/// Sized to its own text and nothing else. The path used to wrap, and a
+/// wrapping label claims the full available width, so the card grew, shrank,
+/// and reflowed as the sidebar was dragged.
+///
+/// It also has to stay out of the panel's minimum width, or the sidebar would
+/// refuse to shrink past whichever game had the longest path. A panel is at
+/// least as wide as its content's minimum, so the card *allocates* only what
+/// is available and *draws* at its natural size into a clipped painter: the
+/// layout never sees the overflow, and the card keeps one shape.
 fn draw_game_banner_header(ui: &mut Ui, app: &mut Baboon, game: &str, path_label: &str) {
+    const EMBLEM: f32 = 72.0;
+    const MARGIN: f32 = 8.0;
+    const GAP: f32 = 4.0;
+    const TITLE_TOP: f32 = 8.0;
+
     let texture = app.game_banner_texture(ui.ctx(), game).cloned();
-    Frame::none()
-        .fill(if is_dark_mode() {
+    let title = egui::WidgetText::from(
+        RichText::new(format!(
+            "Tags - {} ({})",
+            game_display_name(game),
+            game_platform_label(game)
+        ))
+        .color(text_dark())
+        .strong(),
+    )
+    .into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        TextStyle::Body,
+    );
+    let path = egui::WidgetText::from(RichText::new(path_label).color(subtle_dark()).small())
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            TextStyle::Small,
+        );
+
+    let text_width = title.size().x.max(path.size().x);
+    let card = Vec2::new(
+        MARGIN * 2.0 + EMBLEM + GAP + text_width,
+        MARGIN * 2.0 + EMBLEM,
+    );
+    let (visible, _) = ui.allocate_exact_size(
+        Vec2::new(card.x.min(ui.available_width()), card.y),
+        Sense::hover(),
+    );
+    let full = egui::Rect::from_min_size(visible.min, card);
+
+    let painter = ui.painter_at(visible);
+    painter.rect_filled(
+        full,
+        0.0,
+        if is_dark_mode() {
             Color32::from_rgb(43, 43, 41)
         } else {
             Color32::from_rgb(235, 235, 230)
-        })
-        .inner_margin(egui::Margin::same(8.0))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                if let Some(texture) = texture {
-                    ui.add(
-                        egui::Image::new(egui::load::SizedTexture::new(
-                            texture.id(),
-                            Vec2::splat(72.0),
-                        ))
-                        .fit_to_exact_size(Vec2::splat(72.0)),
-                    );
-                }
-                ui.add_space(4.0);
-                ui.vertical(|ui| {
-                    ui.add_space(8.0);
-                    ui.label(
-                        RichText::new(format!(
-                            "Tags - {} ({})",
-                            game_display_name(game),
-                            game_platform_label(game)
-                        ))
-                        .color(text_dark())
-                        .strong(),
-                    );
-                    ui.add(
-                        egui::Label::new(RichText::new(path_label).color(subtle_dark()).small())
-                            .wrap(),
-                    );
-                });
-            });
-        });
+        },
+    );
+    if let Some(texture) = texture {
+        painter.image(
+            texture.id(),
+            egui::Rect::from_min_size(
+                full.min + Vec2::splat(MARGIN),
+                Vec2::splat(EMBLEM),
+            ),
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            Color32::WHITE,
+        );
+    }
+    let text_x = full.min.x + MARGIN + EMBLEM + GAP;
+    let title_y = full.min.y + MARGIN + TITLE_TOP;
+    painter.galley(egui::pos2(text_x, title_y), title.clone(), text_dark());
+    painter.galley(
+        egui::pos2(text_x, title_y + title.size().y),
+        path,
+        subtle_dark(),
+    );
 }
 
 fn sidebar_source_path_label(source: &TagSource) -> String {
@@ -248,10 +296,6 @@ fn tint_toward(base: Color32, accent: Color32, t: f32) -> Color32 {
     )
 }
 
-fn tab_label_width(ui: &Ui, label: &str, min_width: f32, max_width: f32) -> f32 {
-    let width = label.chars().count() as f32 * 7.0 + ui.spacing().button_padding.x * 2.0;
-    width.clamp(min_width, max_width)
-}
 
 impl Baboon {
     pub(super) fn draw_scenario_launcher_buttons(&mut self, ui: &mut Ui, entry: &TagEntry) {
@@ -281,10 +325,13 @@ impl Baboon {
 
     /// "Search fields" bar (Guerilla-style): typing a block or field name
     /// collapses the editor to just the matching node(s) and their ancestors.
-    pub(super) fn draw_field_search_bar(&mut self, ui: &mut Ui, tag_key: &str) {
+    pub(super) fn draw_field_search_bar(&mut self, ui: &mut Ui, kit_index: usize, tag_key: &str) {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Search fields:").color(text_dark()));
-            let query = self.field_search.entry(tag_key.to_owned()).or_default();
+            let query = self.kits[kit_index]
+                .field_search
+                .entry(tag_key.to_owned())
+                .or_default();
             ui.add(
                 egui::TextEdit::singleline(query)
                     .hint_text("block or field name")
@@ -369,9 +416,7 @@ impl Baboon {
     }
 
     fn draw_monitor_menu_button(&mut self, ui: &mut Ui) {
-        let game = self
-            .source
-            .as_ref()
+        let game = self.source()
             .and_then(|source| source.game.as_deref());
         let commands = monitor_commands_for_game(game);
         if commands.is_empty() {
@@ -407,14 +452,14 @@ impl Baboon {
 
     /// Per-tag keyword chips (add via Enter/Add, remove via the chip button).
     /// Keywords live in an external sidecar, not the tag binary.
-    fn draw_keyword_bar(&mut self, ui: &mut Ui, tag_key: &str) {
+    fn draw_keyword_bar(&mut self, ui: &mut Ui, kit_index: usize, tag_key: &str) {
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new("Keywords:").color(subtle_dark()));
-            let existing = self.keywords.keywords(tag_key).to_vec();
+            let existing = self.kits[kit_index].keywords.keywords(tag_key).to_vec();
             let mut remove: Option<String> = None;
             for keyword in &existing {
                 if ui
-                    .small_button(format!("{keyword}  ✕"))
+                    .small_button(format!("{keyword}  ×"))
                     .on_hover_text("Remove keyword")
                     .clicked()
                 {
@@ -422,7 +467,7 @@ impl Baboon {
                 }
             }
             if let Some(keyword) = remove {
-                self.keywords.remove(tag_key, &keyword);
+                self.kits[kit_index].keywords.remove(tag_key, &keyword);
             }
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut self.keyword_input)
@@ -431,7 +476,7 @@ impl Baboon {
             );
             let submitted = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             if (ui.button("Add").clicked() || submitted) && !self.keyword_input.trim().is_empty() {
-                self.keywords.add(tag_key, &self.keyword_input);
+                self.kits[kit_index].keywords.add(tag_key, &self.keyword_input);
                 self.keyword_input.clear();
             }
         });
@@ -443,6 +488,6 @@ impl eframe::App for Baboon {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.draw_root_ui(ctx, frame);
         self.run_deferred_file_action(ctx);
-        self.maybe_autosave_campaign_project(ctx);
+        self.maybe_autosave_campaign_projects(ctx);
     }
 }

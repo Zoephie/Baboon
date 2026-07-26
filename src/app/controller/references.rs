@@ -7,18 +7,18 @@ impl Baboon {
     /// Applies `WorkerMessage::ReverseDependenciesBuilt`, rejecting stale source generations.
     pub(super) fn handle_reverse_dependencies_built(
         &mut self,
-        generation: u64,
+        stamp: KitStamp,
         index: ReverseDependencyIndex,
     ) -> bool {
         self.building_reverse_dependencies = false;
-        if generation != self.source_generation {
+        let Some(kit_index) = self.resolve_stamp(stamp) else {
             return true;
-        }
+        };
         self.reference_index_progress = None;
         let paired_entry_index_build = self.building_reference_for_entry_index;
         self.building_reference_for_entry_index = false;
         self.show_entry_index_wait_notice = false;
-        if let Some(source) = self.source.as_mut() {
+        if let Some(source) = self.kits[kit_index].source.as_mut() {
             let n = index.len();
             if let (Some(game), TagSource::LooseFolder { root, .. }) =
                 (source.game.clone(), &source.source)
@@ -46,12 +46,14 @@ impl Baboon {
     /// Applies `WorkerMessage::ReferenceIndexProgress`, rejecting stale or inactive builds.
     pub(super) fn handle_reference_index_progress(
         &mut self,
-        generation: u64,
+        stamp: KitStamp,
         processed: usize,
         total: usize,
         ctx: &egui::Context,
     ) -> bool {
-        if generation != self.source_generation || !self.building_reverse_dependencies {
+        // Drives the global progress bar only; the stamp is checked purely so
+        // a closed or reloaded kit's progress stops updating it.
+        if self.resolve_stamp(stamp).is_none() || !self.building_reverse_dependencies {
             return true;
         }
         if let Some(progress) = self.reference_index_progress.as_mut() {
@@ -89,7 +91,7 @@ impl Baboon {
                 return false;
             }
         };
-        if let Some(source) = self.source.as_mut() {
+        if let Some(source) = self.source_mut() {
             source.entries.clear();
             source.all_entries = done.all_entries;
             source.tree = done.tree;
@@ -114,22 +116,21 @@ impl Baboon {
         }
         if done.moved {
             self.remap_current_favorites(&done.old_to_new_keys);
-            remap_open_tag_keys(&mut self.open_tabs, &done.old_to_new_keys);
-            remap_hashset_keys(&mut self.floating_tabs, &done.old_to_new_keys);
-            if let Some(selected) = self.selected_key.clone()
+            remap_open_tag_keys(&mut self.kits[self.active].open_tabs, &done.old_to_new_keys);
+            if let Some(selected) = self.kits[self.active].selected_key.clone()
                 && let Some(new_key) = done.old_to_new_keys.get(&selected)
             {
-                self.selected_key = Some(new_key.clone());
+                self.kits[self.active].selected_key = Some(new_key.clone());
             }
         }
-        self.parsed_tags.clear();
-        self.loading_tags.clear();
-        self.bitmap_previews.clear();
-        self.model_previews.clear();
-        self.edit_buffers.clear();
-        self.field_search.clear();
-        self.field_search_applied.clear();
-        self.source_generation = self.source_generation.wrapping_add(1);
+        self.kits[self.active].parsed_tags.clear();
+        self.kits[self.active].loading_tags.clear();
+        self.kits[self.active].bitmap_previews.clear();
+        self.kits[self.active].model_previews.clear();
+        self.kits[self.active].edit_buffers.clear();
+        self.kits[self.active].field_search.clear();
+        self.kits[self.active].field_search_applied.clear();
+        self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
         self.terminal
             .lines
             .extend(done.lines.into_iter().map(TerminalLineEntry::new));

@@ -8,9 +8,7 @@ impl Baboon {
         if !self.tool_commands.open {
             return;
         }
-        let game = self
-            .source
-            .as_ref()
+        let game = self.source()
             .and_then(|source| source.game.as_deref())
             .map(str::to_owned);
         if let Some(game) = game.as_deref() {

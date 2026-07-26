@@ -334,16 +334,25 @@ fn build_container_set(
 /// Locate a UE5 `Paks` directory at or beneath `root` (any folder containing a
 /// `.utoc`), so "Load Folder" can auto-detect a Campaign Evolved install. Checks
 /// the folder itself, the common UE layout, then a shallow walk.
+/// Locate the container directory for a Campaign Evolved install, given the
+/// folder the user picked.
+///
+/// The canonical install layouts are tried first, and only then whether the
+/// picked folder is itself full of containers. That order matters: an exported
+/// mod leaves a `.utoc` in the game root, and checking the root first would
+/// mount that one stray file and report an install with no tags in it. A
+/// directory named `Paks` holding containers is a far stronger signal than a
+/// loose `.utoc` beside the executable.
+///
+/// Picking the `Paks` directory itself still works — the recursive pass
+/// includes the starting directory.
 pub fn find_paks_dir(root: &Path) -> Option<PathBuf> {
-    if dir_has_utoc(root) {
-        return Some(root.to_path_buf());
-    }
-    for cand in [
+    for candidate in [
         root.join("Meteorite").join("Content").join("Paks"),
         root.join("Content").join("Paks"),
     ] {
-        if dir_has_utoc(&cand) {
-            return Some(cand);
+        if dir_has_utoc(&candidate) {
+            return Some(candidate);
         }
     }
     for entry in WalkDir::new(root)
@@ -358,7 +367,8 @@ pub fn find_paks_dir(root: &Path) -> Option<PathBuf> {
             return Some(entry.path().to_path_buf());
         }
     }
-    None
+    // Last resort: a directory of containers that is not named `Paks`.
+    dir_has_utoc(root).then(|| root.to_path_buf())
 }
 
 fn dir_has_utoc(dir: &Path) -> bool {
@@ -713,4 +723,80 @@ pub fn normalize_blob_index_path(path: &Path) -> Result<PathBuf> {
     path.parent()
         .map(Path::to_path_buf)
         .with_context(|| format!("{} has no parent directory", path.display()))
+}
+
+#[cfg(test)]
+mod paks_dir_tests {
+    use super::*;
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default();
+        std::env::temp_dir().join(format!("baboon_paks_{name}_{stamp}"))
+    }
+
+    fn touch(path: &Path) {
+        std::fs::create_dir_all(path.parent().expect("has a parent")).expect("create dirs");
+        std::fs::write(path, b"").expect("write file");
+    }
+
+    /// The game root of an install that has had a mod exported into it: a
+    /// stray `.utoc` sits beside the executable. The real containers must win.
+    #[test]
+    fn the_install_layout_beats_a_stray_container_in_the_root() {
+        let root = temp_dir("stray");
+        let paks = root.join("Meteorite").join("Content").join("Paks");
+        touch(&root.join("mymod-WinGDK_P.utoc"));
+        touch(&paks.join("pakchunk0-WinGDK.utoc"));
+
+        assert_eq!(find_paks_dir(&root), Some(paks));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// Picking the `Paks` directory itself still resolves to itself.
+    #[test]
+    fn picking_the_paks_directory_resolves_to_itself() {
+        let root = temp_dir("direct");
+        let paks = root.join("Meteorite").join("Content").join("Paks");
+        touch(&paks.join("pakchunk0-WinGDK.utoc"));
+
+        assert_eq!(find_paks_dir(&paks), Some(paks.clone()));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A bare directory of containers not named `Paks` is still accepted, as
+    /// the last resort rather than the first check.
+    #[test]
+    fn a_bare_container_directory_is_still_accepted() {
+        let root = temp_dir("bare");
+        touch(&root.join("pakchunk0-WinGDK.utoc"));
+
+        assert_eq!(find_paks_dir(&root), Some(root.clone()));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The real install, which is what surfaced this: its root holds an
+    /// exported `mymod-WinGDK_P.utoc`. Skipped when the game is not present.
+    #[test]
+    fn the_real_install_root_resolves_to_its_paks_directory() {
+        const ROOT: &str = "/Users/camden/Halo/halo-campaign-evolved_pc";
+        if !Path::new(ROOT).is_dir() {
+            return;
+        }
+        assert_eq!(
+            find_paks_dir(Path::new(ROOT)),
+            Some(PathBuf::from(ROOT).join("Meteorite").join("Content").join("Paks"))
+        );
+    }
+
+    #[test]
+    fn a_folder_with_no_containers_is_not_an_install() {
+        let root = temp_dir("none");
+        touch(&root.join("readme.txt"));
+
+        assert_eq!(find_paks_dir(&root), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }

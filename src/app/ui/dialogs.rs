@@ -733,7 +733,7 @@ impl Baboon {
         }
         let mut open = true;
         let mut chosen: Option<String> = None;
-        let all = self.keywords.all_keywords();
+        let all = self.kits[self.active].keywords.all_keywords();
         egui::Window::new("Keywords")
             .id(egui::Id::new("keyword_chooser"))
             .open(&mut open)

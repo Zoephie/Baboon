@@ -47,6 +47,7 @@ pub(super) fn get_icon_svg(group_tag: &str) -> &'static str {
     }
 }
 
+#[allow(dead_code)]
 pub(super) fn draw_tag_icon(ui: &mut Ui, group_tag: u32, size: f32) {
     let group = format_group_tag(group_tag);
     draw_tag_icon_svg(ui, &group, size);
@@ -62,6 +63,7 @@ pub(super) fn paint_tag_icon_at(ui: &Ui, group_tag: Option<u32>, rect: egui::Rec
         .paint_at(ui, rect);
 }
 
+#[allow(dead_code)]
 fn draw_tag_icon_svg(ui: &mut Ui, group: &str, size: f32) {
     let uri = tag_icon_uri(ui.ctx(), group);
     ui.add(
