@@ -101,14 +101,41 @@ impl CeSoundBinding {
     }
 
     /// Media for one language, falling back to `SFX` (non-localized events
-    /// carry only `SFX` no matter which language the user picked).
+    /// carry only `SFX` no matter which language the user picked) and then to
+    /// everything. Never returns empty while the binding holds media — a tag
+    /// that resolved audio must show rows for it.
     pub fn media_for_language(&self, language: &str) -> Vec<&CeSoundMedia> {
         let exact: Vec<&CeSoundMedia> =
             self.media.iter().filter(|m| m.language.eq_ignore_ascii_case(language)).collect();
         if !exact.is_empty() {
             return exact;
         }
-        self.media.iter().filter(|m| m.language.eq_ignore_ascii_case("SFX")).collect()
+        let sfx: Vec<&CeSoundMedia> =
+            self.media.iter().filter(|m| m.language.eq_ignore_ascii_case("SFX")).collect();
+        if !sfx.is_empty() {
+            return sfx;
+        }
+        self.media.iter().collect()
+    }
+
+    /// Which language to show, given the player's current selection.
+    ///
+    /// `preferred` is only honoured when this tag actually carries it —
+    /// localized voice has no `SFX` entry and non-localized audio has *only*
+    /// `SFX`, so a selection made against one shape must not blank the other.
+    /// With nothing selected, prefer English before falling back to whatever
+    /// the event cooked (the list is otherwise alphabetical, which would
+    /// arbitrarily land on Chinese).
+    pub fn language_to_show(&self, preferred: Option<&str>) -> String {
+        let languages = self.languages();
+        let has = |name: &str| languages.iter().find(|l| l.eq_ignore_ascii_case(name)).cloned();
+
+        preferred
+            .and_then(has)
+            .or_else(|| has("English(US)"))
+            .or_else(|| has("English(UK)"))
+            .or_else(|| languages.first().cloned())
+            .unwrap_or_else(|| "SFX".to_string())
     }
 }
 
@@ -292,6 +319,52 @@ mod tests {
         assert_eq!(binding.languages(), vec!["SFX".to_string()]);
     }
 
+    fn media(language: &str, id: u32) -> CeSoundMedia {
+        CeSoundMedia {
+            event_name: "Play_X".into(),
+            language: language.into(),
+            media_id: id,
+            media_path: format!("Media/{language}/{id}.wem"),
+            source_name: String::new(),
+        }
+    }
+
+    /// Localized voice carries no `SFX` entry at all. Showing `SFX` by default
+    /// rendered an empty player for every line of dialogue in the game.
+    #[test]
+    fn localized_only_binding_never_shows_an_empty_player() {
+        let binding = CeSoundBinding {
+            events: Vec::new(),
+            media: vec![
+                media("Chinese(PRC)", 1),
+                media("English(US)", 2),
+                media("German", 3),
+            ],
+        };
+
+        // Nothing selected: prefer English rather than the alphabetical first.
+        let shown = binding.language_to_show(None);
+        assert_eq!(shown, "English(US)");
+        assert_eq!(binding.media_for_language(&shown).len(), 1);
+
+        // A selection this tag does carry is honoured.
+        assert_eq!(binding.language_to_show(Some("German")), "German");
+
+        // A selection it does not carry must still show something.
+        let shown = binding.language_to_show(Some("Korean"));
+        assert!(binding.languages().contains(&shown), "fell back to an absent language");
+        assert!(!binding.media_for_language(&shown).is_empty());
+    }
+
+    /// The mirror case: a non-localized tag while the shared selector holds a
+    /// language, which must not blank it either.
+    #[test]
+    fn sfx_only_binding_ignores_a_localized_selection() {
+        let binding = CeSoundBinding { events: Vec::new(), media: vec![media("SFX", 1)] };
+        assert_eq!(binding.language_to_show(Some("German")), "SFX");
+        assert_eq!(binding.media_for_language("German").len(), 1);
+    }
+
     #[test]
     fn both_event_roots_are_recognized() {
         assert!(is_event_package("/game/wwise/events/play_foo"));
@@ -374,6 +447,9 @@ mod tests {
             "/Game/Tags/sound/005_sandbox/006_character/006_character_movement/\
              006_chm_ge_weaanim/006_chm_ge_weaanim_ar_reloadmaghit-sound",
             "/Game/Tags/sound/dialog/combat/bisenti/default/01_contact/ambush-sound",
+            // Scripted mission dialogue — the shape that rendered an empty
+            // player because it carries no SFX entry.
+            "/Game/Tags/sound/scripted/vo_scr_m02halo/m02_00040_cortana-sound",
         ];
 
         for tag in cases {
@@ -398,8 +474,17 @@ mod tests {
                 );
             }
 
+            // What the player would actually show with nothing selected must
+            // never be empty for a tag that resolved media.
+            let shown = binding.language_to_show(None);
+            assert!(
+                !binding.media_for_language(&shown).is_empty(),
+                "{tag} shows no rows for default language {shown}"
+            );
+            println!("  default language shown: {shown}");
+
             // And the media has to actually decode to non-silent audio.
-            for m in binding.media_for_language("English(US)") {
+            for m in binding.media_for_language(&shown) {
                 let pcm = store.decode(&root, m).expect("decode media");
                 assert!(!pcm.samples.is_empty(), "{} decoded to nothing", m.media_path);
                 let peak = pcm.samples.iter().map(|s| s.unsigned_abs()).max().unwrap_or(0);

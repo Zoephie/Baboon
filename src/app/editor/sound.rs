@@ -912,10 +912,11 @@ fn draw_ce_wwise_player(
 ) {
     let languages = binding.languages();
     let localized = !(languages.len() == 1 && languages[0].eq_ignore_ascii_case("SFX"));
-    // Non-localized events only ever carry `SFX`, so honour the global language
-    // selector only when this tag actually has localized media.
-    let selected = edit.sound_language.filter(|_| localized).unwrap_or("SFX");
-    let media = binding.media_for_language(selected);
+    // The global selector is shared with every other game's player, so it may
+    // hold a language this tag doesn't carry (or nothing at all). Let the
+    // binding pick what it can actually show.
+    let selected = binding.language_to_show(edit.sound_language);
+    let media = binding.media_for_language(&selected);
 
     egui::CollapsingHeader::new(
         RichText::new(format!(
@@ -957,14 +958,26 @@ fn draw_ce_wwise_player(
                         .small_button("\u{25B6}")
                         .on_hover_text("Play this permutation")
                         .clicked()
-                        && let Some(root) = edit.ce_paks_root
                     {
-                        *edit.sound_play_request =
-                            Some(super::audio::SoundAction::PlayCeMedia {
-                                paks_root: root.to_path_buf(),
-                                media: Box::new((*m).clone()),
-                                label: m.display_name(),
-                            });
+                        match edit.ce_paks_root {
+                            Some(root) => {
+                                *edit.sound_play_request =
+                                    Some(super::audio::SoundAction::PlayCeMedia {
+                                        paks_root: root.to_path_buf(),
+                                        media: Box::new((*m).clone()),
+                                        label: m.display_name(),
+                                    });
+                            }
+                            // Shouldn't happen for a container source, but a
+                            // click that does nothing at all is worse than one
+                            // that says why.
+                            None => {
+                                if let Some(status) = edit.status.as_deref_mut() {
+                                    "no container source for Wwise media"
+                                        .clone_into(status);
+                                }
+                            }
+                        }
                     }
                     ui.label(RichText::new(m.display_name()).color(text_dark()))
                         .on_hover_text(&m.source_name);
