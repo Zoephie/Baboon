@@ -69,6 +69,8 @@ mod field_docs;
 use field_docs::*;
 mod help_docs;
 use help_docs::*;
+mod tutorials;
+use tutorials::*;
 mod script_docs;
 use script_docs::*;
 mod prefs;
@@ -199,6 +201,8 @@ pub struct Baboon {
     about_open: bool,
     help_panel_tab: HelpPanelTab,
     help_docs: HelpDocsState,
+    tutorials: TutorialsState,
+    tutorials_game: String,
     script_docs: ScriptDocsUiState,
     map_names_game_tab: MapNamesGameTab,
     tool_commands: ToolCommandsUiState,
@@ -400,6 +404,8 @@ impl Baboon {
             about_open: false,
             help_panel_tab: HelpPanelTab::About,
             help_docs: HelpDocsState::load(),
+            tutorials: TutorialsState::load(&cc.egui_ctx),
+            tutorials_game: "haloce_evolved".to_owned(),
             script_docs: ScriptDocsUiState::default(),
             map_names_game_tab: MapNamesGameTab::HaloCe,
             tool_commands: ToolCommandsUiState::default(),

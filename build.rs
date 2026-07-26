@@ -106,7 +106,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> io::Result<()> {
         } else if path.is_file()
             && matches!(
                 path.extension().and_then(|ext| ext.to_str()),
-                Some("json" | "sqlite3")
+                Some("json" | "sqlite3" | "png")
             )
         {
             if let Some(parent) = target.parent() {

@@ -38,6 +38,7 @@ impl FirstRunWizardState {
 pub(in crate::app) enum HelpPanelTab {
     About,
     Doc,
+    Tutorials,
     ScriptDoc,
     MapNames,
 }

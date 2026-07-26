@@ -416,6 +416,11 @@ impl Baboon {
                             self.about_open = true;
                             ui.close_menu();
                         }
+                        if ui.button("Tutorials...").clicked() {
+                            self.help_panel_tab = HelpPanelTab::Tutorials;
+                            self.about_open = true;
+                            ui.close_menu();
+                        }
                         if ui.button("Map Names...").clicked() {
                             self.help_panel_tab = HelpPanelTab::MapNames;
                             self.about_open = true;

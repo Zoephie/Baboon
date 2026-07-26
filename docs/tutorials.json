@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "tutorials": [
+    {
+      "game": "haloce_evolved",
+      "title": "Halo Campaign Evolved - How to use ANY vehicle with Baboon (Tutorial)",
+      "creator": "Unseen Halo - Corbin",
+      "url": "https://www.youtube.com/watch?v=2xL2AiuaFwE",
+      "thumbnail": "tutorials/2xL2AiuaFwE.png"
+    },
+    {
+      "game": "haloce_evolved",
+      "title": "Halo Campaign Evolved - Mark IV in the Main Campaign",
+      "creator": "Unseen Halo - Corbin",
+      "url": "https://www.youtube.com/watch?v=Vc_uxtYe-2U",
+      "thumbnail": "tutorials/Vc_uxtYe-2U.png"
+    }
+  ]
+}
