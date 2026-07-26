@@ -90,6 +90,54 @@ fn explorer_select_args(path: &Path) -> [std::ffi::OsString; 2] {
 }
 
 impl Baboon {
+    /// Resolve (and cache) the Wwise media a Campaign Evolved `sound` tag binds
+    /// to. Returns `None` for every other game and source kind.
+    ///
+    /// Resolution walks package imports and parses several cooked packages, so
+    /// the result is memoized per tag key — the sound panel asks for it every
+    /// frame. An unbound tag caches an empty binding, so stubs are not re-walked.
+    pub(in crate::app) fn ce_sound_binding(
+        &mut self,
+        tag_key: &str,
+        entry: &TagEntry,
+    ) -> Option<std::sync::Arc<crate::source::ce_audio::CeSoundBinding>> {
+        use crate::source::ce_audio;
+
+        if !crate::app::editor::is_sound_group(entry.group_tag) {
+            return None;
+        }
+        if let Some(hit) = self.ce_sound_bindings.get(tag_key) {
+            return Some(hit.clone());
+        }
+
+        let TagEntryLocation::Container { rel_path, .. } = &entry.location else {
+            return None;
+        };
+        let package = ce_audio::tag_package_for_rel_path(rel_path)?;
+
+        let source = self.source.as_ref()?;
+        let TagSource::IoStoreContainerSet { containers, packages, .. } = &source.source else {
+            return None;
+        };
+
+        if self.ce_usmap.is_none() {
+            match blam_tags::iostore::usmap::Usmap::meteorite() {
+                Ok(u) => self.ce_usmap = Some(std::sync::Arc::new(u)),
+                Err(err) => {
+                    eprintln!("campaign evolved: could not parse bundled usmap: {err}");
+                    return None;
+                }
+            }
+        }
+        let usmap = self.ce_usmap.clone()?;
+
+        let binding = std::sync::Arc::new(ce_audio::resolve_sound_binding(
+            containers, packages, &usmap, &package,
+        ));
+        self.ce_sound_bindings.insert(tag_key.to_owned(), binding.clone());
+        Some(binding)
+    }
+
     fn push_terminal_line(&mut self, line: String) {
         self.terminal.lines.push(TerminalLineEntry::new(line));
         trim_terminal_lines(&mut self.terminal.lines);
@@ -5264,6 +5312,12 @@ impl Baboon {
                     let mut block_clip_request = None;
                     let mut tsv_paste_request = None;
                     let sound_volume = self.audio.volume();
+                    // Resolved before the context borrows `self` immutably.
+                    let ce_sound = self.ce_sound_binding(&key, &entry);
+                    let ce_paks_root = self.source.as_ref().and_then(|s| match &s.source {
+                        TagSource::IoStoreContainerSet { root, .. } => Some(root.as_path()),
+                        _ => None,
+                    });
                     let mut edit_context = FieldEditContext {
                         view_scope: "floating",
                         tag_key: &key,
@@ -5306,6 +5360,8 @@ impl Baboon {
                         sound_volume,
                         sound_extract_request: &mut self.pending_sound_extract,
                         sound_language: self.audio.language.as_deref(),
+                        ce_sound: ce_sound.as_deref(),
+                        ce_paks_root,
                         tool_import: &mut self.pending_tool_import,
                         bitmap_reimport: &mut bitmap_reimport,
                         shader_ops: &mut shader_ops,

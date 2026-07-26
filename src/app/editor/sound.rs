@@ -442,6 +442,20 @@ pub(super) fn h4_event_names(tag: &TagFile) -> Vec<(&'static str, String)> {
 /// Localized languages available for the current source, by game family (Wwise
 /// `.pck` subdirs for H4/H2A, FMOD `.fsb` for the rest). Empty ⇒ single-language.
 fn available_sound_languages(edit: &FieldEditContext<'_>) -> Vec<String> {
+    // Campaign Evolved has no `tags_root` (its tags live in containers) and its
+    // languages aren't discoverable from a bank directory — they're named by
+    // the event's own cooked data, so take them from the resolved binding.
+    // `SFX` is the non-localized bucket, not a language, so it isn't offered.
+    if let Some(binding) = edit.ce_sound {
+        let langs: Vec<String> = binding
+            .languages()
+            .into_iter()
+            .filter(|l| !l.eq_ignore_ascii_case("SFX"))
+            .collect();
+        if !langs.is_empty() {
+            return langs;
+        }
+    }
     let Some(root) = edit.tags_root else {
         return Vec::new();
     };
@@ -885,11 +899,98 @@ fn draw_wwise_event_player(
     });
 }
 
+/// Render the Campaign Evolved player.
+///
+/// CE `sound` tags hold no sample data and — unlike Halo 4 — name no event
+/// either, so there is nothing in the tag to play from. The rows here come from
+/// the binding the controller already resolved by walking the tag's package
+/// imports out to its Wwise event(s); each row is one `.wem` permutation.
+fn draw_ce_wwise_player(
+    ui: &mut Ui,
+    binding: &crate::source::ce_audio::CeSoundBinding,
+    edit: &mut FieldEditContext<'_>,
+) {
+    let languages = binding.languages();
+    let localized = !(languages.len() == 1 && languages[0].eq_ignore_ascii_case("SFX"));
+    // Non-localized events only ever carry `SFX`, so honour the global language
+    // selector only when this tag actually has localized media.
+    let selected = edit.sound_language.filter(|_| localized).unwrap_or("SFX");
+    let media = binding.media_for_language(selected);
+
+    egui::CollapsingHeader::new(
+        RichText::new(format!(
+            "Sound \u{2014} Wwise media ({} permutation{})",
+            media.len(),
+            if media.len() == 1 { "" } else { "s" }
+        ))
+        .color(text_dark()),
+    )
+    .default_open(true)
+    .show(ui, |ui| {
+        draw_sound_transport(ui, edit);
+        ui.label(
+            RichText::new(if localized {
+                "Wwise-authored \u{2014} localized voice; media lives in the \
+                 language pak chunks. Extract-only."
+            } else {
+                "Wwise-authored \u{2014} the tag carries no samples; media lives \
+                 in the pak chunks. Extract-only."
+            })
+            .color(subtle_dark()),
+        );
+        if localized {
+            ui.label(
+                RichText::new(format!(
+                    "languages: {}  (showing {selected})",
+                    languages.join(", ")
+                ))
+                .color(subtle_dark()),
+            );
+        }
+
+        egui::Grid::new("ce_wwise_media")
+            .striped(true)
+            .num_columns(4)
+            .show(ui, |ui| {
+                for m in &media {
+                    if ui
+                        .small_button("\u{25B6}")
+                        .on_hover_text("Play this permutation")
+                        .clicked()
+                        && let Some(root) = edit.ce_paks_root
+                    {
+                        *edit.sound_play_request =
+                            Some(super::audio::SoundAction::PlayCeMedia {
+                                paks_root: root.to_path_buf(),
+                                media: Box::new((*m).clone()),
+                                label: m.display_name(),
+                            });
+                    }
+                    ui.label(RichText::new(m.display_name()).color(text_dark()))
+                        .on_hover_text(&m.source_name);
+                    ui.label(RichText::new(&m.event_name).color(subtle_dark()));
+                    ui.label(RichText::new(m.media_path.clone()).color(subtle_dark()));
+                    ui.end_row();
+                }
+            });
+    });
+}
+
 pub(in crate::app) fn draw_sound_player(
     ui: &mut Ui,
     tag: &TagFile,
     edit: &mut FieldEditContext<'_>,
 ) {
+    // Campaign Evolved: audio is reached through package imports, not the tag.
+    // An empty binding means the tag is one of the many unbound stubs, which
+    // has no player at all rather than an empty one.
+    if let Some(binding) = edit.ce_sound
+        && !binding.is_empty()
+    {
+        let binding = binding.clone();
+        draw_ce_wwise_player(ui, &binding, edit);
+        return;
+    }
     // Halo 4: Wwise event reference, no inline pitch-range audio.
     let events = h4_event_names(tag);
     if !events.is_empty() {
