@@ -119,7 +119,16 @@ fn draw_index_progress_bar(ui: &mut Ui, width: f32, fraction: Option<f32>, text:
     );
 }
 
+/// The kit's game card: emblem, game name, and source path.
+///
+/// Sized to its own text and nothing else. The path used to wrap, which made a
+/// wrapping label claim the full available width — so the card grew, shrank,
+/// and reflowed to two or three lines as the sidebar was dragged. Both lines
+/// now extend instead, giving the card one width that depends only on which
+/// game it is. A card wider than the sidebar is clipped by the panel rather
+/// than changing shape.
 fn draw_game_banner_header(ui: &mut Ui, app: &mut Baboon, game: &str, path_label: &str) {
+    const EMBLEM: f32 = 72.0;
     let texture = app.game_banner_texture(ui.ctx(), game).cloned();
     Frame::none()
         .fill(if is_dark_mode() {
@@ -134,26 +143,31 @@ fn draw_game_banner_header(ui: &mut Ui, app: &mut Baboon, game: &str, path_label
                     ui.add(
                         egui::Image::new(egui::load::SizedTexture::new(
                             texture.id(),
-                            Vec2::splat(72.0),
+                            Vec2::splat(EMBLEM),
                         ))
-                        .fit_to_exact_size(Vec2::splat(72.0)),
+                        .fit_to_exact_size(Vec2::splat(EMBLEM)),
                     );
+                } else {
+                    ui.add_space(EMBLEM);
                 }
                 ui.add_space(4.0);
                 ui.vertical(|ui| {
                     ui.add_space(8.0);
-                    ui.label(
-                        RichText::new(format!(
-                            "Tags - {} ({})",
-                            game_display_name(game),
-                            game_platform_label(game)
-                        ))
-                        .color(text_dark())
-                        .strong(),
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(format!(
+                                "Tags - {} ({})",
+                                game_display_name(game),
+                                game_platform_label(game)
+                            ))
+                            .color(text_dark())
+                            .strong(),
+                        )
+                        .extend(),
                     );
                     ui.add(
                         egui::Label::new(RichText::new(path_label).color(subtle_dark()).small())
-                            .wrap(),
+                            .extend(),
                     );
                 });
             });
