@@ -52,6 +52,14 @@ impl Baboon {
                     // `Ui::link` carries the pointing-hand cursor and the
                     // hover underline; a click-sensing Label looks like a link
                     // but still shows the text-selection cursor.
+                    //
+                    // `override_text_color` has to be cleared for the link
+                    // colour to survive: it is set application-wide, and it
+                    // bakes its colour into the galley before `Link` gets to
+                    // apply `hyperlink_color`, which is only a fallback for
+                    // text that has none. Every other row here sets its own
+                    // colour explicitly, so clearing it affects only the links.
+                    ui.visuals_mut().override_text_color = None;
                     ui.visuals_mut().hyperlink_color = link_color();
 
                     ui.columns(2, |columns| {
