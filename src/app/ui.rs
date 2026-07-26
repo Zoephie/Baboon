@@ -12,6 +12,7 @@ mod search_windows;
 mod settings;
 mod shell;
 mod tag_pane;
+mod tag_tiles;
 mod tool_commands;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -249,10 +250,6 @@ fn tint_toward(base: Color32, accent: Color32, t: f32) -> Color32 {
     )
 }
 
-fn tab_label_width(ui: &Ui, label: &str, min_width: f32, max_width: f32) -> f32 {
-    let width = label.chars().count() as f32 * 7.0 + ui.spacing().button_padding.x * 2.0;
-    width.clamp(min_width, max_width)
-}
 
 impl Baboon {
     pub(super) fn draw_scenario_launcher_buttons(&mut self, ui: &mut Ui, entry: &TagEntry) {

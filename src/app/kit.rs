@@ -59,8 +59,11 @@ pub(super) struct Kit {
     pub(super) selected_key: Option<String>,
     /// Docked and floating tabs share this ordered set of open document keys.
     pub(super) open_tabs: Vec<String>,
-    /// Subset of `open_tabs` currently rendered as independent windows.
-    pub(super) floating_tabs: HashSet<String>,
+    /// Layout of this kit's open tags: which panes exist, how they are split,
+    /// and which is active in each tab group. The tree is authoritative —
+    /// `open_tabs` is re-derived from it, never the other way round — so a
+    /// split or a drag survives instead of being overwritten by a mirror.
+    pub(super) tag_tree: egui_tiles::Tree<String>,
     /// Transient text-entry buffers keyed by stable widget/edit identifiers.
     pub(super) edit_buffers: HashMap<String, String>,
 
@@ -118,7 +121,7 @@ impl Kit {
             loading_tags: HashSet::new(),
             selected_key: None,
             open_tabs: Vec::new(),
-            floating_tabs: HashSet::new(),
+            tag_tree: egui_tiles::Tree::empty(tag_tree_id(id)),
             edit_buffers: HashMap::new(),
             bitmap_previews: HashMap::new(),
             model_previews: HashMap::new(),
@@ -371,5 +374,100 @@ mod tests {
         // Closing the only kit leaves one fresh empty workspace behind it.
         assert_eq!(active_after_removal(0, 0, 1), 0);
         assert_eq!(active_after_removal(5, 0, 1), 0);
+    }
+}
+
+/// egui id for a kit's tag layout tree. Distinct per kit so two trees rendered
+/// in the same frame keep separate drag state.
+pub(super) fn tag_tree_id(id: KitId) -> egui::Id {
+    egui::Id::new(("kit_tag_tree", id.0))
+}
+
+impl Kit {
+    /// Tag keys currently laid out, in tab order. Derived from the tree, which
+    /// owns the layout; callers treat `open_tabs` as a read-only view.
+    pub(super) fn tabs_from_tree(&self) -> Vec<String> {
+        self.tag_tree
+            .tiles
+            .tiles()
+            .filter_map(|tile| match tile {
+                egui_tiles::Tile::Pane(key) => Some(key.clone()),
+                egui_tiles::Tile::Container(_) => None,
+            })
+            .collect()
+    }
+
+    /// Re-derive `open_tabs` from the tree. Called after anything that can
+    /// change the layout: a frame of `tree.ui`, an open, or a close.
+    pub(super) fn sync_open_tabs(&mut self) {
+        self.open_tabs = self.tabs_from_tree();
+        if self
+            .selected_key
+            .as_ref()
+            .is_some_and(|key| !self.open_tabs.contains(key))
+        {
+            self.selected_key = self.open_tabs.first().cloned();
+        }
+    }
+
+    /// Add `key` as a pane if it is not already laid out, and select it.
+    pub(super) fn open_tag_pane(&mut self, key: &str) {
+        if let Some(tile_id) = self.tile_for_key(key) {
+            self.tag_tree.make_active(|id, _| id == tile_id);
+        } else {
+            let tile_id = self.tag_tree.tiles.insert_pane(key.to_owned());
+            match self.tag_tree.root() {
+                Some(root) => {
+                    if let Some(egui_tiles::Tile::Container(container)) =
+                        self.tag_tree.tiles.get_mut(root)
+                    {
+                        container.add_child(tile_id);
+                    } else {
+                        // A bare pane at the root: wrap both in a tab group.
+                        let tabs = self.tag_tree.tiles.insert_tab_tile(vec![root, tile_id]);
+                        self.tag_tree.root = Some(tabs);
+                    }
+                }
+                None => self.tag_tree.root = Some(tile_id),
+            }
+            self.tag_tree.make_active(|id, _| id == tile_id);
+        }
+        self.selected_key = Some(key.to_owned());
+        self.sync_open_tabs();
+    }
+
+    /// Open `key` as a pane split beside the existing layout, rather than as
+    /// another tab in the same group. This is what alt-click does — the
+    /// successor to tearing a tag out into its own window.
+    pub(super) fn open_tag_pane_beside(&mut self, key: &str) {
+        if self.tile_for_key(key).is_some() {
+            self.open_tag_pane(key);
+            return;
+        }
+        let tile_id = self.tag_tree.tiles.insert_pane(key.to_owned());
+        match self.tag_tree.root() {
+            Some(root) => {
+                let split = self.tag_tree.tiles.insert_horizontal_tile(vec![root, tile_id]);
+                self.tag_tree.root = Some(split);
+            }
+            None => self.tag_tree.root = Some(tile_id),
+        }
+        self.selected_key = Some(key.to_owned());
+        self.sync_open_tabs();
+    }
+
+    /// Remove `key`'s pane from the layout.
+    pub(super) fn close_tag_pane(&mut self, key: &str) {
+        if let Some(tile_id) = self.tile_for_key(key) {
+            self.tag_tree.remove_recursively(tile_id);
+        }
+        self.sync_open_tabs();
+    }
+
+    fn tile_for_key(&self, key: &str) -> Option<egui_tiles::TileId> {
+        self.tag_tree.tiles.iter().find_map(|(id, tile)| match tile {
+            egui_tiles::Tile::Pane(pane) if pane == key => Some(*id),
+            _ => None,
+        })
     }
 }

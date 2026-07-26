@@ -117,7 +117,6 @@ impl Baboon {
         if done.moved {
             self.remap_current_favorites(&done.old_to_new_keys);
             remap_open_tag_keys(&mut self.kits[self.active].open_tabs, &done.old_to_new_keys);
-            remap_hashset_keys(&mut self.kits[self.active].floating_tabs, &done.old_to_new_keys);
             if let Some(selected) = self.kits[self.active].selected_key.clone()
                 && let Some(new_key) = done.old_to_new_keys.get(&selected)
             {

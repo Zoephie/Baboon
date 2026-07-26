@@ -30,7 +30,6 @@ use saving::{
 };
 mod documents;
 mod loading;
-use documents::selected_tab_after_removal;
 #[cfg(test)]
 use loading::loaded_source_status;
 mod references;
@@ -915,9 +914,7 @@ impl Baboon {
     /// Replace an existing container tag's document with imported bytes, marked
     /// dirty (no pak write). Opens/selects the tab.
     fn apply_import_over_existing(&mut self, key: &str, tag: TagFile) {
-        if !self.kits[self.active].open_tabs.iter().any(|tab| tab == key) {
-            self.kits[self.active].open_tabs.push(key.to_owned());
-        }
+        self.kits[self.active].open_tag_pane(key);
         self.kits[self.active].selected_key = Some(key.to_owned());
         self.kits[self.active].parsed_tags
             .insert(key.to_owned(), TagDocument::modified(tag));
@@ -999,9 +996,7 @@ impl Baboon {
         self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
         self.kits[self.active].parsed_tags
             .insert(key.clone(), TagDocument::modified(tag));
-        if !self.kits[self.active].open_tabs.iter().any(|tab| tab == &key) {
-            self.kits[self.active].open_tabs.push(key.clone());
-        }
+        self.kits[self.active].open_tag_pane(&key);
         self.kits[self.active].selected_key = Some(key.clone());
         self.trim_open_tabs();
     }
@@ -1250,9 +1245,7 @@ impl Baboon {
         self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
         self.kits[self.active].parsed_tags
             .insert(key.clone(), TagDocument::clean(tag));
-        if !self.kits[self.active].open_tabs.iter().any(|tab| tab == &key) {
-            self.kits[self.active].open_tabs.push(key.clone());
-        }
+        self.kits[self.active].open_tag_pane(&key);
         self.kits[self.active].selected_key = Some(key.clone());
         self.trim_open_tabs();
     }
@@ -1721,9 +1714,7 @@ impl Baboon {
     }
 
     pub(super) fn select_entry(&mut self, key: String, ctx: egui::Context) {
-        if !self.kits[self.active].open_tabs.iter().any(|tab| tab == &key) {
-            self.kits[self.active].open_tabs.push(key.clone());
-        }
+        self.kits[self.active].open_tag_pane(&key);
         self.kits[self.active].selected_key = Some(key.clone());
         self.trim_open_tabs();
         self.ensure_tag_loading(key, ctx);
@@ -1762,6 +1753,8 @@ impl Baboon {
         });
     }
 
+    /// Kept for save/export paths that address "the current tag".
+    #[allow(dead_code)]
     pub(super) fn selected_entry(&self) -> Option<&TagEntry> {
         let key = self.kits[self.active].selected_key.as_ref()?;
         self.entry_for_key(key)
@@ -1778,13 +1771,10 @@ impl Baboon {
     }
 
     pub(super) fn close_tab(&mut self, key: &str) {
-        let removed_index = self.kits[self.active].open_tabs.iter().position(|tab| tab == key);
-        self.kits[self.active].open_tabs.retain(|tab| tab != key);
-        self.kits[self.active].floating_tabs.remove(key);
+        // `close_tag_pane` re-derives the open set and moves the selection off
+        // a removed tag, so there is nothing to fix up afterwards.
+        self.kits[self.active].close_tag_pane(key);
         self.unload_tag(key);
-        if self.kits[self.active].selected_key.as_deref() == Some(key) {
-            self.kits[self.active].selected_key = selected_tab_after_removal(&self.kits[self.active].open_tabs, removed_index);
-        }
         self.color_popup = None;
         self.function_popup = None;
     }
@@ -1864,22 +1854,19 @@ impl Baboon {
     fn close_action_tag_keys(&self, action: &PendingCloseAction) -> Vec<String> {
         match action {
             PendingCloseAction::CloseApp | PendingCloseAction::CloseAllTabs => {
-                ordered_unique_keys(self.kits[self.active].open_tabs.iter().chain(self.kits[self.active].floating_tabs.iter()))
+                ordered_unique_keys(self.kits[self.active].open_tabs.iter())
             }
             PendingCloseAction::CloseTab(key) => vec![key.clone()],
             PendingCloseAction::CloseAllButThis(kept_key) => ordered_unique_keys(
-                self.kits[self.active].open_tabs
+                self.kits[self.active]
+                    .open_tabs
                     .iter()
-                    .chain(self.kits[self.active].floating_tabs.iter())
                     .filter(|key| *key != kept_key),
             ),
             // `request_close_action` has already made this kit active, so the
             // active-kit lookups above address the right documents.
             PendingCloseAction::CloseKit(_) => ordered_unique_keys(
-                self.kits[self.active]
-                    .open_tabs
-                    .iter()
-                    .chain(self.kits[self.active].floating_tabs.iter()),
+                self.kits[self.active].open_tabs.iter(),
             ),
         }
     }
@@ -1951,7 +1938,7 @@ impl Baboon {
             TagSource::IoStoreContainerSet { .. } => return None,
         };
         let mut tags = Vec::new();
-        for key in ordered_unique_keys(self.kits[self.active].open_tabs.iter().chain(self.kits[self.active].floating_tabs.iter())) {
+        for key in ordered_unique_keys(self.kits[self.active].open_tabs.iter()) {
             let Some(entry) = self.entry_for_key(&key) else {
                 continue;
             };
@@ -2082,55 +2069,10 @@ impl Baboon {
         true
     }
 
-    pub(super) fn pop_tab(&mut self, key: &str) {
-        let removed_index = self.kits[self.active].open_tabs.iter().position(|tab| tab == key);
-        self.kits[self.active].open_tabs.retain(|tab| tab != key);
-        self.kits[self.active].floating_tabs.insert(key.to_owned());
-        if self.kits[self.active].selected_key.as_deref() == Some(key) {
-            self.kits[self.active].selected_key = selected_tab_after_removal(&self.kits[self.active].open_tabs, removed_index);
-        }
-        self.color_popup = None;
-        self.function_popup = None;
-    }
-
-    pub(super) fn dock_tab(&mut self, key: &str) {
-        self.kits[self.active].floating_tabs.remove(key);
-        if !self.kits[self.active].open_tabs.iter().any(|tab| tab == key) {
-            self.kits[self.active].open_tabs.push(key.to_owned());
-        }
-        self.kits[self.active].selected_key = Some(key.to_owned());
-        self.color_popup = None;
-        self.function_popup = None;
-    }
-
-    pub(super) fn handle_floating_tab_drop(&mut self, ctx: &egui::Context) {
-        let Some(key) = self.dragging_floating_tab.clone() else {
-            return;
-        };
-        let Some(rack_rect) = self.tab_rack_rect else {
-            return;
-        };
-        let release = ctx.input(|input| {
-            input
-                .pointer
-                .interact_pos()
-                .map(|pos| (input.pointer.any_released(), pos))
-        });
-        let Some((released, pos)) = release else {
-            return;
-        };
-        if !released {
-            return;
-        }
-        if rack_rect.contains(pos) {
-            self.dock_tab(&key);
-        }
-        self.dragging_floating_tab = None;
-    }
-
     pub(super) fn close_all_tabs(&mut self) {
+        let id = self.kits[self.active].id;
+        self.kits[self.active].tag_tree = egui_tiles::Tree::empty(tag_tree_id(id));
         self.kits[self.active].open_tabs.clear();
-        self.kits[self.active].floating_tabs.clear();
         self.kits[self.active].parsed_tags.clear();
         self.kits[self.active].loading_tags.clear();
         self.kits[self.active].bitmap_previews.clear();
@@ -2141,8 +2083,11 @@ impl Baboon {
     }
 
     pub(super) fn close_all_tabs_but(&mut self, key: &str) {
-        self.kits[self.active].open_tabs.retain(|tab| tab == key);
-        self.kits[self.active].floating_tabs.retain(|tab| tab == key);
+        for open in self.kits[self.active].tabs_from_tree() {
+            if open != key {
+                self.kits[self.active].close_tag_pane(&open);
+            }
+        }
         self.kits[self.active].parsed_tags.retain(|tab, _| tab == key);
         self.kits[self.active].loading_tags.retain(|tab| tab == key);
         self.kits[self.active].bitmap_previews.retain(|tab, _| tab == key);
@@ -2176,8 +2121,8 @@ impl Baboon {
             let Some(removable) = removable else {
                 break;
             };
-            let key = self.kits[self.active].open_tabs.remove(removable);
-            self.kits[self.active].floating_tabs.remove(&key);
+            let key = self.kits[self.active].open_tabs[removable].clone();
+            self.kits[self.active].close_tag_pane(&key);
             self.unload_tag(&key);
         }
     }
@@ -4998,7 +4943,7 @@ impl Baboon {
             };
             self.select_entry(key.clone(), ctx.clone());
             if req.float {
-                self.pop_tab(&key);
+                self.kits[self.active].open_tag_pane_beside(&key);
             }
             return;
         }
@@ -5059,9 +5004,10 @@ impl Baboon {
             }
         }
         self.select_entry(key.clone(), ctx.clone());
-        // Alt-click requested a floating window: tear the just-opened tab off.
+        // Alt-click asks for the tag beside the current one rather than as
+        // another tab in the same group.
         if req.float {
-            self.pop_tab(&key);
+            self.kits[self.active].open_tag_pane_beside(&key);
         }
     }
 
@@ -5336,83 +5282,6 @@ impl Baboon {
         }
     }
 
-    pub(super) fn draw_floating_tabs(&mut self, ctx: &egui::Context) {
-        let keys = self.kits[self.active].floating_tabs.iter().cloned().collect::<Vec<_>>();
-        let mut closed = Vec::new();
-        for key in keys {
-            let Some(entry) = self.entry_for_key(&key).cloned() else {
-                closed.push(key);
-                continue;
-            };
-            // A tab whose document has not finished parsing shows no window for
-            // the frame, rather than an empty one.
-            if !self.kits[self.active].parsed_tags.contains_key(&key) {
-                continue;
-            }
-            let mut open = true;
-            let mut dock_requested = false;
-            let window_response = egui::Window::new(tag_tab_label(&entry))
-                .id(egui::Id::new(("floating_tag", key.clone())))
-                .resizable(true)
-                .default_width(860.0)
-                .default_height(640.0)
-                .open(&mut open)
-                .show(ctx, |ui| {
-                    ui.horizontal(|ui| {
-                        let (dock_rect, dock) =
-                            ui.allocate_exact_size(Vec2::splat(22.0), Sense::click_and_drag());
-                        let icon_rect =
-                            egui::Rect::from_center_size(dock_rect.center(), Vec2::splat(16.0));
-                        paint_button_icon_at(ui, ButtonIcon::WindowMode, icon_rect, text_dark());
-                        let dock = dock.on_hover_text("Click to dock, or drag onto the tab rack");
-                        if dock.clicked() {
-                            dock_requested = true;
-                        }
-                        if dock.drag_started() || dock.dragged() {
-                            self.dragging_floating_tab = Some(key.clone());
-                        }
-                        ui.label(
-                            RichText::new("drag to tab rack")
-                                .color(subtle_dark())
-                                .small(),
-                        );
-                    });
-                    ui.separator();
-                    self.draw_tag_pane(ui, ctx, &entry, "floating", false);
-                });
-            if let Some(inner) = &window_response {
-                // Holding the primary button over the window arms the drag, since
-                // egui's own window response does not report a title-bar drag
-                // reliably. Require an actual drag, though — otherwise every
-                // click on a field inside the window would arm it and flash the
-                // dock strip.
-                let pointer_down_over_window = ctx.input(|input| {
-                    input.pointer.primary_down()
-                        && input.pointer.is_decidedly_dragging()
-                        && input
-                            .pointer
-                            .interact_pos()
-                            .is_some_and(|pos| inner.response.rect.contains(pos))
-                });
-                if inner.response.drag_started()
-                    || inner.response.dragged()
-                    || pointer_down_over_window
-                {
-                    self.dragging_floating_tab = Some(key.clone());
-                }
-            }
-            if !open {
-                closed.push(key.clone());
-            }
-            if open && dock_requested {
-                self.dock_tab(&key);
-                self.dragging_floating_tab = None;
-            }
-        }
-        for key in closed {
-            self.request_close_action(PendingCloseAction::CloseTab(key), ctx);
-        }
-    }
 }
 
 fn reset_lazy_folder_browser(
@@ -7435,15 +7304,6 @@ fn remap_favorite_paths(
     }
 }
 
-fn remap_hashset_keys(keys: &mut HashSet<String>, map: &HashMap<String, String>) {
-    if keys.is_empty() {
-        return;
-    }
-    *keys = keys
-        .drain()
-        .map(|key| map.get(&key).cloned().unwrap_or(key))
-        .collect();
-}
 
 fn reference_path_from_abs_file(
     tags_root: &Path,

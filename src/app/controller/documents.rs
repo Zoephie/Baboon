@@ -71,22 +71,3 @@ impl Baboon {
         false
     }
 }
-
-pub(super) fn selected_tab_after_removal(
-    open_tabs: &[String],
-    removed_index: Option<usize>,
-) -> Option<String> {
-    let removed_index = removed_index?;
-    if open_tabs.is_empty() {
-        None
-    } else {
-        open_tabs
-            .get(removed_index)
-            .or_else(|| {
-                removed_index
-                    .checked_sub(1)
-                    .and_then(|index| open_tabs.get(index))
-            })
-            .cloned()
-    }
-}

@@ -43,9 +43,8 @@ impl Baboon {
         self.apply_loaded_source_identity(game.as_deref());
         if let Some((key, tag)) = initial_tag {
             let kit = &mut self.kits[self.active];
-            kit.selected_key = Some(key.clone());
-            kit.open_tabs.push(key.clone());
-            kit.parsed_tags.insert(key, TagDocument::clean(tag));
+            kit.parsed_tags.insert(key.clone(), TagDocument::clean(tag));
+            kit.open_tag_pane(&key);
         }
         self.refresh_active_favorite_entries();
         self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
