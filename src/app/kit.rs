@@ -23,6 +23,10 @@ pub(super) struct Kit {
     pub(super) id: KitId,
     /// The loaded source and its source-relative browser/index state.
     pub(super) source: LoadedSourceData,
+    /// This kit's tag-name index: the source's own names merged over the
+    /// application defaults. Per-kit because group and field naming differs
+    /// between games, and split view renders two kits in the same frame.
+    pub(super) names: TagNameIndex,
 }
 
 impl Baboon {
@@ -72,8 +76,20 @@ impl Baboon {
     pub(super) fn install_loaded_source(&mut self, source: LoadedSourceData) -> KitId {
         let id = KitId(self.next_kit_id);
         self.next_kit_id = self.next_kit_id.wrapping_add(1);
-        self.kits = vec![Kit { id, source }];
+        let mut names = source.names.clone();
+        names.merge_missing(self.default_names.clone());
+        self.kits = vec![Kit { id, source, names }];
         self.active_kit = Some(id);
         id
+    }
+
+    /// The active kit's tag-name index, falling back to the application
+    /// defaults when no kit is loaded. Read-only sites use this; anything that
+    /// also needs a mutable sibling borrow goes through the kit index.
+    pub(super) fn names(&self) -> &TagNameIndex {
+        match self.active_kit() {
+            Some(kit) => &kit.names,
+            None => &self.default_names,
+        }
     }
 }

@@ -73,8 +73,6 @@ impl Baboon {
             .as_deref()
             .map(|g| self.terminal_open_games.contains(g))
             .unwrap_or(false);
-        self.names = loaded.names.clone();
-        self.names.merge_missing(self.default_names.clone());
     }
 
     fn clear_source_bound_document_state(&mut self) {

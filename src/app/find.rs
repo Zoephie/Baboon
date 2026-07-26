@@ -247,7 +247,7 @@ impl Baboon {
             occurrences.extend(collect_find_occurrences(
                 &doc.tag,
                 &key,
-                &self.names,
+                self.names(),
                 &self.find.query,
                 self.find.look_in,
                 self.find.match_case,
@@ -359,7 +359,7 @@ impl Baboon {
                 collect_find_occurrences(
                     &doc.tag,
                     &key,
-                    &self.names,
+                    self.names(),
                     &self.find.query,
                     self.find.look_in,
                     self.find.match_case,
@@ -379,7 +379,7 @@ impl Baboon {
         let request_id = self.find.all_request_id;
         let generation = self.source_generation;
         let tag_source = source.source.clone();
-        let names = self.names.clone();
+        let names = self.names().clone();
         let query = self.find.query.clone();
         let look_in = self.find.look_in;
         let match_case = self.find.match_case;
@@ -448,7 +448,7 @@ impl Baboon {
             return;
         }
         if let Some(entry) = self.entry_for_key(&hit.tag_key) {
-            if is_model_group(entry.group_tag, &self.names) {
+            if is_model_group(entry.group_tag, self.names()) {
                 self.model_previews
                     .entry(hit.tag_key.clone())
                     .or_default()

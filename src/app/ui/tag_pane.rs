@@ -27,7 +27,7 @@ impl Baboon {
         show_keyword_bar: bool,
     ) {
         let key = entry.key.clone();
-        draw_entry_header(ui, entry, &self.names);
+        draw_entry_header(ui, entry, self.names());
         self.draw_scenario_launcher_buttons(ui, entry);
         if show_keyword_bar {
             self.draw_keyword_bar(ui, &key);
@@ -81,9 +81,12 @@ impl Baboon {
         // `source()`: a method borrows all of `self`, and the context below
         // needs `&mut` on a dozen sibling fields. Going through `self.kits[i]`
         // directly is what lets the borrow checker see them as disjoint.
-        let source = self
-            .active_kit_index()
-            .map(|index| &self.kits[index].source);
+        let kit_index = self.active_kit_index();
+        let source = kit_index.map(|index| &self.kits[index].source);
+        let names = match kit_index {
+            Some(index) => &self.kits[index].names,
+            None => &self.default_names,
+        };
         let ce_paks_root = source.and_then(|s| match &s.source {
             TagSource::IoStoreContainerSet { root, .. } => Some(root.as_path()),
             _ => None,
@@ -100,7 +103,7 @@ impl Baboon {
                 } => Some(definitions_root.as_path()),
                 _ => None,
             }),
-            names: Some(&self.names),
+            names: Some(names),
             tags_root: source.and_then(|source| match &source.source {
                 TagSource::LooseFolder { root, .. } => Some(root.as_path()),
                 _ => None,
@@ -147,7 +150,7 @@ impl Baboon {
                 ctx,
                 &doc.tag,
                 entry,
-                &self.names,
+                names,
                 &mut self.color_popup,
                 preview,
                 self.expert_mode,
@@ -155,7 +158,7 @@ impl Baboon {
             );
         } else {
             let mut local_model_preview;
-            let model_preview = if is_model_group(entry.group_tag, &self.names) {
+            let model_preview = if is_model_group(entry.group_tag, names) {
                 self.model_previews.entry(key.clone()).or_default()
             } else {
                 local_model_preview = ModelPreviewState::default();
@@ -165,7 +168,7 @@ impl Baboon {
                 ui,
                 &doc.tag,
                 entry,
-                &self.names,
+                names,
                 source.map(|source| &source.source),
                 &mut self.rmdf_cache,
                 &mut self.rmop_cache,

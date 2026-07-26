@@ -49,7 +49,7 @@ pub(super) fn ordered_unique_keys<'a>(keys: impl Iterator<Item = &'a String>) ->
 }
 
 pub(super) fn save_as_extension(app: &Baboon, entry: &TagEntry) -> Option<String> {
-    app.names
+    app.names()
         .name_for(entry.group_tag)
         .or_else(|| group_tag_to_extension(entry.group_tag))
         .map(|extension| extension.trim().to_owned())

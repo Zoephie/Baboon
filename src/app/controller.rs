@@ -999,7 +999,7 @@ impl Baboon {
         };
         let names = self.source()
             .map(|source| source.names.clone())
-            .unwrap_or_else(|| self.names.clone());
+            .unwrap_or_else(|| self.names().clone());
         let saved_paths = self.editing_kit_favorites[index].tags.clone();
         let mut missing = Vec::new();
         for relative_path in saved_paths {
@@ -1890,7 +1890,7 @@ impl Baboon {
                 label: format!(
                     "{} - {}",
                     entry.display_path,
-                    group_label(&self.names, entry.group_tag)
+                    group_label(self.names(), entry.group_tag)
                 ),
                 group_tag: entry.group_tag,
                 path,
@@ -2383,7 +2383,7 @@ impl Baboon {
         else {
             return;
         };
-        let names = self.names.clone();
+        let names = self.names().clone();
         let existing_all_entries = self.source()
             .map(|source| source.all_entries.clone())
             .unwrap_or_default();
@@ -3170,7 +3170,7 @@ impl Baboon {
                 return;
             }
         };
-        let names = self.names.clone();
+        let names = self.names().clone();
         let index = build_dependency_candidate_index(&entries, &names);
         let Some(doc) = self.parsed_tags.get_mut(&key) else {
             self.status = "Load the selected tag before fixing dependencies".to_owned();
@@ -3198,12 +3198,15 @@ impl Baboon {
         let Some(kit_index) = self.active_kit_index() else {
             return Err("no tag source is loaded".to_owned());
         };
-        let source = &mut self.kits[kit_index].source;
-        if !matches!(source.source, TagSource::LooseFolder { .. }) {
+        if !matches!(
+            self.kits[kit_index].source.source,
+            TagSource::LooseFolder { .. }
+        ) {
             return Err("load a loose editing-kit tags folder first".to_owned());
         }
-        let entries = scan_folder_subtree_entries(root, Path::new(""), &self.names)
+        let entries = scan_folder_subtree_entries(root, Path::new(""), &self.kits[kit_index].names)
             .map_err(|error| error.to_string())?;
+        let source = &mut self.kits[kit_index].source;
         source.all_entries = entries;
         source.group_tree = crate::source::build_group_tree(&source.all_entries);
         if let Some(game) = source.game.as_deref() {
@@ -3406,7 +3409,7 @@ impl Baboon {
         new_rel: String,
         job_label: &str,
     ) {
-        let names = self.names.clone();
+        let names = self.names().clone();
         let game = self.source().and_then(|source| source.game.clone());
         let all_entries = self.source()
             .map(|source| source.all_entries.clone())
@@ -3443,7 +3446,7 @@ impl Baboon {
     pub(super) fn references_to_entry(&self, entry: &TagEntry) -> Option<Vec<TagEntry>> {
         let source = self.source()?;
         let index = source.reverse_dependencies.as_ref()?;
-        let rel = dependency_entry_reference_path(entry, &self.names)?;
+        let rel = dependency_entry_reference_path(entry, self.names())?;
         let referrer_keys = index
             .dependents_for(entry.group_tag, &rel)
             .iter()
@@ -3468,7 +3471,7 @@ impl Baboon {
             .full_entry_set()
             .iter()
             .filter(|entry| {
-                dependency_entry_reference_path(entry, &self.names)
+                dependency_entry_reference_path(entry, self.names())
                     .map(|rel| index.dependents_for(entry.group_tag, &rel).is_empty())
                     .unwrap_or(false)
             })
@@ -3490,7 +3493,7 @@ impl Baboon {
         let deps = index.dependencies_of(key);
         let mut by_key: HashMap<String, &TagEntry> = HashMap::new();
         for entry in source.full_entry_set() {
-            if let Some(rel) = dependency_entry_reference_path(entry, &self.names) {
+            if let Some(rel) = dependency_entry_reference_path(entry, self.names()) {
                 by_key
                     .entry(crate::source::dependency_key(entry.group_tag, &rel))
                     .or_insert(entry);
@@ -3603,7 +3606,7 @@ impl Baboon {
         // The referenced tag's dependency path, so a clicked row can jump to the
         // exact field that points here.
         let ref_target =
-            dependency_entry_reference_path(&entry, &self.names).map(|rel| (entry.group_tag, rel));
+            dependency_entry_reference_path(&entry, self.names()).map(|rel| (entry.group_tag, rel));
         match self.references_to_entry(&entry) {
             Some(entries) => {
                 let note = entries
@@ -4082,7 +4085,7 @@ impl Baboon {
         if format_group_tag(group_tag).to_ascii_lowercase() == filter_lower {
             return true;
         }
-        self.names
+        self.names()
             .name_for(group_tag)
             .or_else(|| group_tag_to_extension(group_tag))
             .unwrap_or_default()
@@ -4355,7 +4358,7 @@ impl Baboon {
         let game = self.source()
             .and_then(|source| source.game.clone())?;
         let group = self
-            .names
+            .names()
             .name_for(entry.group_tag)
             .or_else(|| group_tag_to_extension(entry.group_tag))?
             .to_owned();
@@ -4536,12 +4539,13 @@ impl Baboon {
         source.label = info.label;
         source.game = new_game.clone();
         *game = new_game.clone();
-        self.names = new_game
+        let names = new_game
             .as_deref()
             .and_then(|game| TagNameIndex::load_game(definitions_root, game).ok())
             .unwrap_or_else(|| self.default_names.clone());
-        source.names = self.names.clone();
+        source.names = names.clone();
         source.group_tree = crate::source::build_group_tree(&source.all_entries);
+        self.kits[kit_index].names = names;
         self.source_generation = self.source_generation.wrapping_add(1);
         self.status = match new_game {
             Some(game) => format!("Current folder now uses {game} definitions"),
@@ -4898,7 +4902,7 @@ impl Baboon {
                     &source.entries,
                     req.group_tag,
                     &req.rel_path,
-                    &self.names,
+                    self.names(),
                 )
                 .map(|entry| entry.key.clone())
             })
@@ -4930,7 +4934,7 @@ impl Baboon {
         // (covers every group, e.g. collision_model/physics_model), falling
         // back to the built-in table.
         let ext = self
-            .names
+            .names()
             .name_for(req.group_tag)
             .or_else(|| blam_tags::paths::group_tag_to_extension(req.group_tag))
             .unwrap_or("");
@@ -4957,7 +4961,7 @@ impl Baboon {
         let key = format!("file:{}", abs.display());
         // Ensure an entry exists so ensure_tag_loading can resolve it.
         if self.entry_for_key(&key).is_none() {
-            let group_name = self.names.name_for(req.group_tag).map(str::to_owned);
+            let group_name = self.names().name_for(req.group_tag).map(str::to_owned);
             let display_path = if ext.is_empty() {
                 req.rel_path.replace('\\', "/")
             } else {

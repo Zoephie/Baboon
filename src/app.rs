@@ -120,7 +120,6 @@ pub(super) fn test_definition_path(rel: &str) -> PathBuf {
 /// intentionally the composition root rather than a domain model.
 pub struct Baboon {
     default_names: TagNameIndex,
-    names: TagNameIndex,
     /// Cloneable sender given to background jobs; every completion is funneled
     /// back through the receive loop so UI state mutates only on the UI thread.
     tx: Sender<WorkerMessage>,
@@ -368,8 +367,7 @@ impl Baboon {
             SessionRestore::Never => (None, None),
         };
         let mut app = Self {
-            default_names: names.clone(),
-            names,
+            default_names: names,
             tx,
             rx,
             kits: Vec::new(),
