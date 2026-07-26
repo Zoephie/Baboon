@@ -2414,3 +2414,122 @@ pub(in crate::app) fn draw_foundation_block_index_row(
         }
     });
 }
+
+#[cfg(test)]
+mod palette_repro_tests {
+    use super::*;
+
+    /// Reproduction probe for "a tag added to the scenario vehicle palette does
+    /// not appear in the vehicles block's dropdown until save + reopen".
+    /// Runs the same add-then-set-reference flow on every editing kit present.
+    #[test]
+    fn palette_addition_reaches_the_block_index_dropdown() {
+        let cases = [
+            ("halo3_mcc", "levels/multi/riverworld/riverworld.scenario"),
+            ("haloreach_mcc", "levels/multi/35_island/35_island.scenario"),
+            ("halo2_mcc", "scenarios/solo/05a_deltaapproach/05a_deltaapproach.scenario"),
+            ("haloce_mcc", "levels/d40/d40.scenario"),
+        ];
+        let defs = std::path::Path::new("definitions");
+        let names = crate::format::TagNameIndex::default();
+        let group = u32::from_be_bytes(*b"scnr");
+        let mut failures = Vec::new();
+
+        for (game, rel) in cases {
+            let tag_path = std::path::Path::new("/Users/camden/Halo")
+                .join(game)
+                .join("tags")
+                .join(rel);
+            if !tag_path.exists() {
+                eprintln!("skip {game}: {} missing", tag_path.display());
+                continue;
+            }
+            let Ok(mut tag) =
+                crate::source::read_tag_at_path(&tag_path, Some(game), Some(defs), group)
+            else {
+                eprintln!("skip {game}: could not read scenario");
+                continue;
+            };
+
+            // The dropdown a `vehicles` element's block-index field would show.
+            let options = |tag: &blam_tags::TagFile| -> Option<Vec<String>> {
+                let root = tag.root();
+                for field in root.fields_all() {
+                    if let Some(block) = field.as_block()
+                        && field.name() == "vehicles"
+                        && let Some(element) = block.element(0)
+                    {
+                        for sub in element.fields_all() {
+                            if sub.definition().block_index_target().is_some()
+                                && let Some((labels, target)) = block_index_target_options(
+                                    &element,
+                                    &sub,
+                                    &names,
+                                    Some(root),
+                                    "vehicles[0]",
+                                )
+                                && target.contains("palette")
+                            {
+                                return Some(labels);
+                            }
+                        }
+                    }
+                }
+                None
+            };
+            let palette_len = |tag: &blam_tags::TagFile| -> Option<usize> {
+                tag.root().fields_all().find_map(|field| {
+                    (field.name() == "vehicle palette")
+                        .then(|| field.as_block().map(|block| block.len()))
+                        .flatten()
+                })
+            };
+
+            let Some(before) = options(&tag) else {
+                eprintln!("skip {game}: no vehicles block-index field resolved");
+                continue;
+            };
+            let before_len = palette_len(&tag).unwrap_or(0);
+            let mut dirty = false;
+            let status = crate::app::apply_block_ops(
+                &mut tag,
+                vec![BlockOp {
+                    path: "vehicle palette".to_owned(),
+                    kind: BlockOpKind::Add,
+                }],
+                &mut dirty,
+            );
+            let after_len = palette_len(&tag).unwrap_or(0);
+            let after = options(&tag).unwrap_or_default();
+            eprintln!(
+                "{game}: palette {before_len} -> {after_len}, dropdown {} -> {} ({status:?})",
+                before.len(),
+                after.len()
+            );
+            if after_len != before_len + 1 {
+                failures.push(format!("{game}: palette did not grow"));
+                continue;
+            }
+            if after.len() != before.len() + 1 {
+                failures.push(format!(
+                    "{game}: dropdown stayed at {} option(s) after the palette grew to {after_len}",
+                    after.len()
+                ));
+                continue;
+            }
+            // And the label follows the reference the user then sets.
+            let edit = PendingFieldEdit {
+                path: format!("vehicle palette[{before_len}]/name"),
+                input: "objects/vehicles/warthog/warthog.vehicle".to_owned(),
+            };
+            let applied = crate::app::apply_pending_edits(&mut tag, vec![edit], &mut dirty);
+            let labelled = options(&tag).unwrap_or_default();
+            let last = labelled.last().cloned().unwrap_or_default();
+            eprintln!("{game}: new label {last:?} ({:?})", applied.status);
+            if !last.contains("warthog") {
+                failures.push(format!("{game}: label did not pick up the reference: {last:?}"));
+            }
+        }
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
+}
