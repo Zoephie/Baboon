@@ -437,8 +437,6 @@ impl Baboon {
                 });
             });
 
-        self.draw_kit_strip(ctx);
-
         egui::TopBottomPanel::bottom("status")
             .frame(Frame::none().fill(menu_bar()).inner_margin(egui::Margin {
                 left: 6.0,
@@ -761,29 +759,10 @@ impl Baboon {
                 });
         }
 
-        egui::SidePanel::left("tag_browser")
-            .resizable(true)
-            .default_width(330.0)
-            .frame(Frame::none().fill(left_panel()).inner_margin(egui::Margin {
-                left: 8.0,
-                right: 8.0,
-                top: 6.0,
-                bottom: 6.0,
-            }))
-            .show(ctx, |ui| {
-                let kit_index = self.active;
-                self.draw_kit_browser(ui, ctx, kit_index);
-            });
-
         egui::CentralPanel::default()
-            .frame(Frame::none().fill(editor_bg()).inner_margin(egui::Margin {
-                left: 10.0,
-                right: 10.0,
-                top: 8.0,
-                bottom: 8.0,
-            }))
+            .frame(Frame::none().fill(editor_bg()))
             .show(ctx, |ui| {
-                self.draw_tag_tiles(ui, ctx);
+                self.draw_kit_tiles(ui, ctx);
             });
         self.draw_auxiliary_windows(ctx);
         self.persist_prefs_if_changed();
@@ -900,137 +879,6 @@ impl Baboon {
         self.process_pending_tool_import(ctx);
     }
 
-    /// Strip of loaded kits above the browser, one button each.
-    ///
-    /// Hidden while a single empty workspace is the only kit, so an unloaded
-    /// Baboon looks exactly as it did when it was single-source.
-    fn draw_kit_strip(&mut self, ctx: &egui::Context) {
-        if self.kits.len() == 1 && self.kits[0].is_empty_workspace() {
-            return;
-        }
-        let mut activate = None;
-        let mut close = None;
-        let mut add_kit_then: Option<LoadKind> = None;
-        let recents = self.recent_folders.clone();
-        egui::TopBottomPanel::top("kit_strip")
-            .frame(Frame::none().fill(row_type()).inner_margin(egui::Margin {
-                left: 6.0,
-                right: 6.0,
-                top: 3.0,
-                bottom: 3.0,
-            }))
-            .show(ctx, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    for (index, kit) in self.kits.iter().enumerate() {
-                        let active = index == self.active;
-                        let dirty = kit.parsed_tags.values().any(|document| document.dirty);
-                        let label = kit_strip_label(kit);
-                        let shown = if dirty {
-                            format!("● {label}")
-                        } else {
-                            label.clone()
-                        };
-                        let fill = if active { menu_bar() } else { left_panel() };
-                        let fill = if dirty {
-                            tint_toward(fill, Color32::from_rgb(184, 134, 11), 0.20)
-                        } else {
-                            fill
-                        };
-                        Frame::none()
-                            .fill(fill)
-                            .stroke(Stroke::new(1.0, grid_line()))
-                            .inner_margin(egui::Margin {
-                                left: 4.0,
-                                right: 3.0,
-                                top: 2.0,
-                                bottom: 2.0,
-                            })
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    ui.spacing_mut().item_spacing.x = 3.0;
-                                    if ui
-                                        .add(egui::SelectableLabel::new(
-                                            active,
-                                            RichText::new(shown).color(text_dark()).strong(),
-                                        ))
-                                        .on_hover_text(&label)
-                                        .clicked()
-                                    {
-                                        activate = Some(index);
-                                    }
-                                    if ui
-                                        .add(egui::Button::new("x").min_size(Vec2::splat(16.0)))
-                                        .on_hover_text("Close this kit")
-                                        .clicked()
-                                    {
-                                        close = Some(kit.id);
-                                    }
-                                });
-                            });
-                    }
-                    ui.menu_button("+", |ui| {
-                        ui.set_min_width(240.0);
-                        if ui.button("Load Folder...").clicked() {
-                            ui.close_menu();
-                            add_kit_then = Some(LoadKind::Folder);
-                        }
-                        if ui.button("Load Tag...").clicked() {
-                            ui.close_menu();
-                            add_kit_then = Some(LoadKind::SingleFile);
-                        }
-                        if ui.button("Load Monolithic blob_index.dat...").clicked() {
-                            ui.close_menu();
-                            add_kit_then = Some(LoadKind::Monolithic);
-                        }
-                        if ui
-                            .button("Open Campaign Evolved container (.utoc)...")
-                            .clicked()
-                        {
-                            ui.close_menu();
-                            add_kit_then = Some(LoadKind::Container);
-                        }
-                        ui.separator();
-                        ui.menu_button("Recent", |ui| {
-                            if recents.is_empty() {
-                                ui.add_enabled(false, egui::Button::new("No recent folders"));
-                            }
-                            for path in &recents {
-                                let full = path.display().to_string();
-                                if ui
-                                    .button(recent_folder_menu_label(path))
-                                    .on_hover_text(full)
-                                    .clicked()
-                                {
-                                    ui.close_menu();
-                                    add_kit_then = Some(LoadKind::Recent(path.clone()));
-                                }
-                            }
-                        });
-                    })
-                    .response
-                    .on_hover_text("Open another game in its own kit");
-                });
-            });
-        if let Some(index) = activate {
-            self.active = index;
-        }
-        if let Some(id) = close {
-            self.request_close_action(PendingCloseAction::CloseKit(id), ctx);
-        }
-        if let Some(kind) = add_kit_then {
-            // No need to add a kit here: the loaders route to one themselves,
-            // reusing an empty workspace and adding a kit only when the current
-            // one is occupied.
-            match kind {
-                LoadKind::Folder => self.begin_load_folder(ctx.clone()),
-                LoadKind::SingleFile => self.begin_load_single(ctx.clone()),
-                LoadKind::Monolithic => self.begin_load_monolithic(ctx.clone()),
-                LoadKind::Container => self.begin_load_iostore_container(ctx.clone()),
-                LoadKind::Recent(path) => self.load_recent_folder(path, ctx.clone()),
-            }
-        }
-    }
 
     fn prepare_root_frame(&mut self, ctx: &egui::Context) {
         self.process_worker_messages(ctx);
@@ -1094,7 +942,7 @@ impl Baboon {
     }
 }
 
-fn recent_folder_menu_label(path: &Path) -> String {
+pub(super) fn recent_folder_menu_label(path: &Path) -> String {
     const MAX_CHARS: usize = 54;
     let text = path.display().to_string();
     let count = text.chars().count();
@@ -1113,12 +961,3 @@ fn recent_folder_menu_label(path: &Path) -> String {
     format!("...{tail}")
 }
 
-/// Which loader the kit strip's "+" menu should start after adding a kit.
-#[derive(Clone)]
-enum LoadKind {
-    Folder,
-    SingleFile,
-    Monolithic,
-    Container,
-    Recent(std::path::PathBuf),
-}

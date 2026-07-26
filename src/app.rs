@@ -132,6 +132,10 @@ pub struct Baboon {
     /// no "nothing loaded" special case. Cross-frame references use [`KitId`],
     /// never a position, since positions shift when a kit closes.
     kits: Vec<Kit>,
+    /// Layout of the open kits: which workspaces are visible and how they are
+    /// split. References kits by [`KitId`]; `kits` remains the content store,
+    /// so repairing the tree never creates or destroys a kit.
+    kit_tree: egui_tiles::Tree<KitId>,
     /// Index into `kits` of the kit the browser, tabs, and editor act on.
     /// Always a valid index; kept in range whenever `kits` changes.
     active: usize,
@@ -324,6 +328,7 @@ impl Baboon {
             tx,
             rx,
             kits: vec![Kit::empty(KitId(0), names.clone())],
+            kit_tree: egui_tiles::Tree::empty(egui::Id::new("kit_tree")),
             active: 0,
             next_kit_id: 1,
             tag_conversion_dialog: None,

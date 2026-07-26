@@ -190,8 +190,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
 
 impl Baboon {
     /// Draw the active kit's open tags as a tiled layout.
-    pub(super) fn draw_tag_tiles(&mut self, ui: &mut Ui, ctx: &egui::Context) {
-        let kit_index = self.active;
+    pub(super) fn draw_tag_tiles(&mut self, ui: &mut Ui, ctx: &egui::Context, kit_index: usize) {
         if self.kits[kit_index].tag_tree.is_empty() {
             if self.kits[kit_index].source.is_none() {
                 ui.heading("No tag selected");
