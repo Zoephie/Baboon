@@ -144,6 +144,94 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         button_response
     }
 
+    /// Reimplements egui_tiles' default tab so each tab can carry its tag's
+    /// group icon, as the hand-rolled tab rack did. Everything else — the
+    /// close button, the drag sense, the active-tab hairline — mirrors the
+    /// default; only the icon and the width it needs are new.
+    fn tab_ui(
+        &mut self,
+        tiles: &mut egui_tiles::Tiles<String>,
+        ui: &mut Ui,
+        id: egui::Id,
+        tile_id: egui_tiles::TileId,
+        state: &egui_tiles::TabState,
+    ) -> egui::Response {
+        const ICON: f32 = 14.0;
+        const ICON_GAP: f32 = 4.0;
+
+        let group_tag = match tiles.get(tile_id) {
+            Some(egui_tiles::Tile::Pane(key)) => self.group_tag_for_key(key),
+            _ => None,
+        };
+        let text = self.tab_title_for_tile(tiles, tile_id);
+        let close_size = Vec2::splat(self.close_button_outer_size());
+        let font_id = egui::TextStyle::Button.resolve(ui.style());
+        let galley = text.into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, font_id);
+        let x_margin = self.tab_title_spacing(ui.visuals());
+        let icon_width = if group_tag.is_some() {
+            ICON + ICON_GAP
+        } else {
+            0.0
+        };
+        let width = galley.size().x
+            + 2.0 * x_margin
+            + icon_width
+            + f32::from(state.closable) * (4.0 + close_size.x);
+        let (_, tab_rect) = ui.allocate_space(egui::vec2(width, ui.available_height()));
+        let response = ui
+            .interact(tab_rect, id, Sense::click_and_drag())
+            .on_hover_cursor(egui::CursorIcon::Grab);
+
+        if ui.is_rect_visible(tab_rect) && !state.is_being_dragged {
+            let bg = self.tab_bg_color(ui.visuals(), tiles, tile_id, state);
+            let stroke = self.tab_outline_stroke(ui.visuals(), tiles, tile_id, state);
+            ui.painter().rect(tab_rect.shrink(0.5), 0.0, bg, stroke);
+            if state.active {
+                ui.painter().hline(
+                    tab_rect.x_range(),
+                    tab_rect.bottom(),
+                    Stroke::new(stroke.width + 1.0, bg),
+                );
+            }
+            let inner = tab_rect.shrink(x_margin);
+            if group_tag.is_some() {
+                let icon_rect = egui::Rect::from_center_size(
+                    egui::pos2(inner.left() + ICON / 2.0, inner.center().y),
+                    Vec2::splat(ICON),
+                );
+                paint_tag_icon_at(ui, group_tag, icon_rect);
+            }
+            let text_color = self.tab_text_color(ui.visuals(), tiles, tile_id, state);
+            let text_pos = egui::Align2::LEFT_CENTER
+                .align_size_within_rect(galley.size(), inner.translate(egui::vec2(icon_width, 0.0)))
+                .min;
+            ui.painter().galley(text_pos, galley, text_color);
+
+            if state.closable {
+                let close_rect =
+                    egui::Align2::RIGHT_CENTER.align_size_within_rect(close_size, inner);
+                let close_id = ui.auto_id_with("tab_close_btn");
+                let close_response = ui
+                    .interact(close_rect, close_id, Sense::click_and_drag())
+                    .on_hover_cursor(egui::CursorIcon::Default);
+                let visuals = ui.style().interact(&close_response);
+                let rect = close_rect
+                    .shrink(self.close_button_inner_margin())
+                    .expand(visuals.expansion);
+                let stroke = visuals.fg_stroke;
+                ui.painter()
+                    .line_segment([rect.left_top(), rect.right_bottom()], stroke);
+                ui.painter()
+                    .line_segment([rect.right_top(), rect.left_bottom()], stroke);
+                if close_response.clicked() && self.on_tab_close(tiles, tile_id) {
+                    tiles.remove(tile_id);
+                }
+            }
+        }
+
+        self.on_tab_button(tiles, tile_id, response)
+    }
+
     fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
         egui_tiles::SimplificationOptions {
             // Keep a lone pane wrapped in its tab group so it still shows a tab
@@ -185,6 +273,18 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         _state: &egui_tiles::TabState,
     ) -> Color32 {
         text_dark()
+    }
+}
+
+impl TagPaneBehavior<'_> {
+    fn group_tag_for_key(&self, key: &str) -> Option<u32> {
+        let source = self.app.kits[self.kit_index].source.as_ref()?;
+        source
+            .entries
+            .iter()
+            .chain(source.all_entries.iter())
+            .find(|entry| entry.key == key)
+            .map(|entry| entry.group_tag)
     }
 }
 

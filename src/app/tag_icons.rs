@@ -47,9 +47,6 @@ pub(super) fn get_icon_svg(group_tag: &str) -> &'static str {
     }
 }
 
-/// Unused since the editor tab bar became tiled: `egui_tiles` renders tab
-/// titles as plain text, and restoring the per-group icon means overriding its
-/// `tab_ui` wholesale. Kept for that.
 #[allow(dead_code)]
 pub(super) fn draw_tag_icon(ui: &mut Ui, group_tag: u32, size: f32) {
     let group = format_group_tag(group_tag);
