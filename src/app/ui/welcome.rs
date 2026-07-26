@@ -196,8 +196,13 @@ fn section_heading(ui: &mut Ui, text: &str) {
 
 /// A link row. Deliberately not a button: the screen should read as a short
 /// list of ways in, not a wall of controls.
+///
+/// Wrapped in a horizontal strip because `Ui::columns` lays its children out
+/// with `Layout::top_down_justified`, which stretches every widget to the full
+/// column width — leaving the link clickable far to the right of where its
+/// text ends. A horizontal layout gives each widget its natural width.
 fn welcome_link(ui: &mut Ui, text: &str) -> egui::Response {
-    ui.link(text)
+    ui.horizontal(|ui| ui.link(text)).inner
 }
 
 fn link_color() -> Color32 {
