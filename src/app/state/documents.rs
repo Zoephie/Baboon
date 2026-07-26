@@ -317,6 +317,18 @@ pub(in crate::app) struct ImportTagDialog {
 /// it overwrites an already-open, dirty document at `target_key`.
 /// Pending "throw away everything this workspace has not written into the
 /// game" confirmation, listing what it is about to drop.
+/// What Export Mod just wrote, so the app can say what to do with it.
+///
+/// A mod is three files, and only the `.pak` looks like one. The status line
+/// used to carry the instruction and no longer did; it also clears itself after
+/// a few seconds, which is not long enough to act on.
+pub(in crate::app) struct ExportedMod {
+    pub(in crate::app) stem: String,
+    pub(in crate::app) directory: PathBuf,
+    pub(in crate::app) count: usize,
+    pub(in crate::app) skipped: usize,
+}
+
 pub(in crate::app) struct ClearStashConfirm {
     pub(in crate::app) kit: KitId,
     pub(in crate::app) stashed: Vec<String>,

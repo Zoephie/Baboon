@@ -187,6 +187,8 @@ pub struct Baboon {
     /// Pending confirmation for the Campaign Evolved "clear modifications"
     /// toolbar action, which is irreversible.
     clear_stash_confirm: Option<ClearStashConfirm>,
+    /// Shown after Export Mod, explaining what to do with the files.
+    exported_mod: Option<ExportedMod>,
     about_open: bool,
     help_panel_tab: HelpPanelTab,
     help_docs: HelpDocsState,
@@ -384,6 +386,7 @@ impl Baboon {
             import_discard_confirm: None,
             overwrite_confirm: None,
             clear_stash_confirm: None,
+            exported_mod: None,
             about_open: false,
             help_panel_tab: HelpPanelTab::About,
             help_docs: HelpDocsState::load(),

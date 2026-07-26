@@ -2461,7 +2461,7 @@ impl Baboon {
         Some(self.editing_kit_root()?.join("data"))
     }
 
-    fn open_folder_in_explorer(&mut self, path: PathBuf, label: &str) {
+    pub(super) fn open_folder_in_explorer(&mut self, path: PathBuf, label: &str) {
         if !path.is_dir() {
             self.status = format!("{label} folder not found: {}", path.display());
             return;
@@ -3328,6 +3328,15 @@ impl Baboon {
                         // recovery file and every tag opened as the game ships
                         // it -- the edits read as never having been saved.
                         let _ = self.checkpoint_campaign_project(exporting, 0.0);
+                        self.exported_mod = Some(ExportedMod {
+                            stem: stem.to_owned(),
+                            directory: output
+                                .parent()
+                                .map(Path::to_path_buf)
+                                .unwrap_or_default(),
+                            count,
+                            skipped,
+                        });
                         self.status = if skipped == 0 {
                             format!(
                                 "Exported {count} tag(s) → {stem}.utoc/.ucas/.pak/.baboon \
