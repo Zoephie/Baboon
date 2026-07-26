@@ -11,7 +11,7 @@ impl Baboon {
         index: ReverseDependencyIndex,
     ) -> bool {
         self.building_reverse_dependencies = false;
-        if generation != self.source_generation {
+        if generation != self.kits[self.active].generation {
             return true;
         }
         self.reference_index_progress = None;
@@ -51,7 +51,7 @@ impl Baboon {
         total: usize,
         ctx: &egui::Context,
     ) -> bool {
-        if generation != self.source_generation || !self.building_reverse_dependencies {
+        if generation != self.kits[self.active].generation || !self.building_reverse_dependencies {
             return true;
         }
         if let Some(progress) = self.reference_index_progress.as_mut() {
@@ -114,22 +114,22 @@ impl Baboon {
         }
         if done.moved {
             self.remap_current_favorites(&done.old_to_new_keys);
-            remap_open_tag_keys(&mut self.open_tabs, &done.old_to_new_keys);
-            remap_hashset_keys(&mut self.floating_tabs, &done.old_to_new_keys);
-            if let Some(selected) = self.selected_key.clone()
+            remap_open_tag_keys(&mut self.kits[self.active].open_tabs, &done.old_to_new_keys);
+            remap_hashset_keys(&mut self.kits[self.active].floating_tabs, &done.old_to_new_keys);
+            if let Some(selected) = self.kits[self.active].selected_key.clone()
                 && let Some(new_key) = done.old_to_new_keys.get(&selected)
             {
-                self.selected_key = Some(new_key.clone());
+                self.kits[self.active].selected_key = Some(new_key.clone());
             }
         }
-        self.parsed_tags.clear();
-        self.loading_tags.clear();
-        self.bitmap_previews.clear();
-        self.model_previews.clear();
-        self.edit_buffers.clear();
-        self.field_search.clear();
-        self.field_search_applied.clear();
-        self.source_generation = self.source_generation.wrapping_add(1);
+        self.kits[self.active].parsed_tags.clear();
+        self.kits[self.active].loading_tags.clear();
+        self.kits[self.active].bitmap_previews.clear();
+        self.kits[self.active].model_previews.clear();
+        self.kits[self.active].edit_buffers.clear();
+        self.kits[self.active].field_search.clear();
+        self.kits[self.active].field_search_applied.clear();
+        self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
         self.terminal
             .lines
             .extend(done.lines.into_iter().map(TerminalLineEntry::new));

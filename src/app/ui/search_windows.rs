@@ -9,9 +9,9 @@ impl Baboon {
             return;
         }
         let expert_mode = self.expert_mode;
-        let Some(catalog) = self
-            .active_kit_index()
-            .map(|index| &self.kits[index].source)
+        let Some(catalog) = self.kits[self.active]
+            .source
+            .as_ref()
             .and_then(|source| tag_reference_catalog_for_source(source, expert_mode))
         else {
             self.tag_reference_picker = None;
@@ -52,7 +52,7 @@ impl Baboon {
                 .tag_reference_picker
                 .take()
                 .expect("picker remains open while processing selection");
-            if let Some(doc) = self.parsed_tags.get_mut(&picker.tag_key) {
+            if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(&picker.tag_key) {
                 doc.journal.begin_edit(&doc.tag, "Change tag reference");
                 if let Some(status) = apply_pending_edits(
                     &mut doc.tag,
@@ -65,7 +65,7 @@ impl Baboon {
                     self.status = status;
                 }
                 doc.journal.end_edit_window();
-                self.edit_buffers
+                self.kits[self.active].edit_buffers
                     .insert(format!("{}|{}", picker.tag_key, picker.field_path), input);
                 self.invalidate_tag_caches(&picker.tag_key);
             } else {
@@ -138,7 +138,7 @@ impl Baboon {
                             .color(text_dark()),
                     );
                     if explorer.index_unavailable {
-                        let note = if self.building_reverse_dependencies || self.scanning_entries {
+                        let note = if self.building_reverse_dependencies || self.kits[self.active].scanning_entries {
                             "Reference index is building — reopen this in a moment."
                         } else {
                             "Reference index unavailable — run Tools → Build Reference Index."
@@ -256,7 +256,7 @@ impl Baboon {
         let Some(mut state) = self.tag_diff.take() else {
             return;
         };
-        let a_group = self
+        let a_group = self.kits[self.active]
             .parsed_tags
             .get(&state.a_key)
             .map(|doc| doc.tag.group().tag);
@@ -279,12 +279,12 @@ impl Baboon {
                         .clone()
                         .map(|k| k.replace('\\', "/"))
                         .unwrap_or_else(|| "(open tag)".to_owned());
-                    let mut keys: Vec<String> = self
+                    let mut keys: Vec<String> = self.kits[self.active]
                         .parsed_tags
                         .keys()
                         .filter(|k| {
                             **k != state.a_key
-                                && self.parsed_tags.get(*k).map(|d| d.tag.group().tag) == a_group
+                                && self.kits[self.active].parsed_tags.get(*k).map(|d| d.tag.group().tag) == a_group
                         })
                         .cloned()
                         .collect();
@@ -398,8 +398,8 @@ impl Baboon {
             if let Some(b_key) = state.b_key.clone() {
                 let names = TagNameIndex::default();
                 let diff = match (
-                    self.parsed_tags.get(&state.a_key),
-                    self.parsed_tags.get(&b_key),
+                    self.kits[self.active].parsed_tags.get(&state.a_key),
+                    self.kits[self.active].parsed_tags.get(&b_key),
                 ) {
                     (Some(a), Some(b)) => Some(diff_tags(&a.tag, &b.tag, &names, 5000)),
                     _ => None,
@@ -424,7 +424,7 @@ impl Baboon {
                     let definitions_root = self.source_definitions_root();
                     match crate::source::read_tag_at_path(&path, game, definitions_root, group) {
                         Ok(b_tag) => {
-                            if let Some(a) = self.parsed_tags.get(&state.a_key) {
+                            if let Some(a) = self.kits[self.active].parsed_tags.get(&state.a_key) {
                                 let names = TagNameIndex::default();
                                 let (diffs, truncated) = diff_tags(&a.tag, &b_tag, &names, 5000);
                                 state.b_key = None;
@@ -688,7 +688,7 @@ impl Baboon {
                     .on_hover_text("Optional: limit the search to a tag group (four-CC or name).");
                 });
                 ui.add_space(4.0);
-                let indexed = self.field_index.is_ready_for(self.source_generation);
+                let indexed = self.kits[self.active].field_index.is_ready_for(self.kits[self.active].generation);
                 ui.horizontal(|ui| {
                     if indexed {
                         ui.label(
@@ -696,7 +696,7 @@ impl Baboon {
                                 .color(Color32::from_rgb(120, 170, 90))
                                 .small(),
                         );
-                    } else if self.field_index.is_building() {
+                    } else if self.kits[self.active].field_index.is_building() {
                         ui.spinner();
                         ui.label(
                             RichText::new("building index…")

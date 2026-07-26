@@ -19,19 +19,28 @@ impl Baboon {
                 return false;
             }
         };
-        self.apply_loaded_source_identity(&loaded, recent_path);
-        self.clear_source_bound_document_state();
-        if let Some((key, tag)) = loaded.initial_tag.take() {
-            self.selected_key = Some(key.clone());
-            self.open_tabs.push(key.clone());
-            self.parsed_tags.insert(key, TagDocument::clean(tag));
+        // Order matters: `install_loaded_source` rebuilds the kit from empty,
+        // which is what replaces the old explicit clearing of document state.
+        // Everything scoped to the new source must therefore be applied after
+        // it, not before, or it would be wiped on the way in.
+        let initial_tag = loaded.initial_tag.take();
+        let game = loaded.game.clone();
+        if let Some(path) = recent_path {
+            self.remember_recent_folder(path);
         }
         self.status = loaded_source_status(&loaded);
-        self.keywords.load_for_game(loaded.game.as_deref());
-        self.field_index.invalidate();
         self.install_loaded_source(loaded);
+        self.color_popup = None;
+        self.function_popup = None;
+        self.apply_loaded_source_identity(game.as_deref());
+        if let Some((key, tag)) = initial_tag {
+            let kit = &mut self.kits[self.active];
+            kit.selected_key = Some(key.clone());
+            kit.open_tabs.push(key.clone());
+            kit.parsed_tags.insert(key, TagDocument::clean(tag));
+        }
         self.refresh_active_favorite_entries();
-        self.source_generation = self.source_generation.wrapping_add(1);
+        self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
         self.refreshing_entry_index = false;
         self.building_reverse_dependencies = false;
         self.building_reference_for_entry_index = false;
@@ -55,37 +64,18 @@ impl Baboon {
         false
     }
 
-    fn apply_loaded_source_identity(
-        &mut self,
-        loaded: &LoadedSourceData,
-        recent_path: Option<PathBuf>,
-    ) {
-        if let Some(path) = recent_path {
-            self.remember_recent_folder(path);
-        }
-        self.terminal_work_dir = if let TagSource::LooseFolder { root, .. } = &loaded.source {
-            root.parent().map(|p| p.to_owned())
-        } else {
-            None
+    /// Apply the per-kit identity that follows from the freshly installed
+    /// source: where its terminal runs, whether the terminal starts open for
+    /// this game, and which keyword sidecar it uses.
+    fn apply_loaded_source_identity(&mut self, game: Option<&str>) {
+        let terminal_open = game.is_some_and(|game| self.terminal_open_games.contains(game));
+        let kit = &mut self.kits[self.active];
+        kit.terminal_work_dir = match kit.source.as_ref().map(|source| &source.source) {
+            Some(TagSource::LooseFolder { root, .. }) => root.parent().map(|p| p.to_owned()),
+            _ => None,
         };
-        self.terminal_open = loaded
-            .game
-            .as_deref()
-            .map(|g| self.terminal_open_games.contains(g))
-            .unwrap_or(false);
-    }
-
-    fn clear_source_bound_document_state(&mut self) {
-        self.parsed_tags.clear();
-        self.loading_tags.clear();
-        self.bitmap_previews.clear();
-        self.rmdf_cache.clear();
-        self.rmop_cache.clear();
-        self.color_popup = None;
-        self.function_popup = None;
-        self.selected_key = None;
-        self.open_tabs.clear();
-        self.floating_tabs.clear();
+        kit.terminal_open = terminal_open;
+        kit.keywords.load_for_game(game);
     }
 
     /// Applies `WorkerMessage::AllEntriesScanned`, rejecting stale source generations.
@@ -95,16 +85,17 @@ impl Baboon {
         result: Result<Vec<TagEntry>, String>,
         ctx: &egui::Context,
     ) -> bool {
-        if generation != self.source_generation {
+        if generation != self.kits[self.active].generation {
             return true;
         }
-        self.scanning_entries = false;
+        self.kits[self.active].scanning_entries = false;
         self.entry_index_progress = None;
         match result {
             Ok(scanned) => {
                 let mut build_reference_index = false;
-                if let Some(kit_index) = self.active_kit_index() {
-                    let source = &mut self.kits[kit_index].source;
+                let kit_index = self.active;
+                let kit = &mut self.kits[kit_index];
+                if let Some(source) = kit.source.as_mut() {
                     let n = scanned.len();
                     source.group_tree = crate::source::build_group_tree(&scanned);
                     source.all_entries = scanned;
@@ -116,7 +107,7 @@ impl Baboon {
                         None
                     };
                     source.reverse_dependencies = None;
-                    self.field_index.invalidate();
+                    kit.field_index.invalidate();
                     self.status = browser_refresh_error.map_or_else(
                         || format!("Tag index complete: {n} tags; building reference index..."),
                         |error| format!("Tag index complete, but browser refresh failed: {error}"),
@@ -129,7 +120,7 @@ impl Baboon {
                         let entries = source.all_entries.clone();
                         let tx = self.tx.clone();
                         let ctx = ctx.clone();
-                        let generation = self.source_generation;
+                        let generation = kit.generation;
                         let path = crate::source::index_db_path();
                         thread::spawn(move || {
                             let result = crate::source::save_entry_index(&game, &root, &entries)
@@ -167,7 +158,7 @@ impl Baboon {
         matched: usize,
         ctx: &egui::Context,
     ) -> bool {
-        if generation != self.source_generation || !self.scanning_entries {
+        if generation != self.kits[self.active].generation || !self.kits[self.active].scanning_entries {
             return true;
         }
         if let Some(progress) = self.entry_index_progress.as_mut() {
@@ -187,7 +178,7 @@ impl Baboon {
         ctx: &egui::Context,
     ) -> bool {
         self.refreshing_entry_index = false;
-        if generation != self.source_generation {
+        if generation != self.kits[self.active].generation {
             return true;
         }
         self.schedule_next_entry_index_refresh(ctx);

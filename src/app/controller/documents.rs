@@ -10,14 +10,14 @@ impl Baboon {
         key: String,
         result: Result<TagFile, String>,
     ) -> bool {
-        self.loading_tags.remove(&key);
-        if !self.open_tabs.iter().any(|tab| tab == &key) {
+        self.kits[self.active].loading_tags.remove(&key);
+        if !self.kits[self.active].open_tabs.iter().any(|tab| tab == &key) {
             return true;
         }
         match result {
             Ok(tag) => {
                 self.status = "Tag loaded".to_owned();
-                self.parsed_tags.insert(key, TagDocument::clean(tag));
+                self.kits[self.active].parsed_tags.insert(key, TagDocument::clean(tag));
             }
             Err(error) => {
                 self.terminal.lines.push(TerminalLineEntry::new(format!(
@@ -45,10 +45,10 @@ impl Baboon {
         self.terminal.refocus_input = true;
         match result {
             Ok(tag) => {
-                if self.open_tabs.iter().any(|tab| tab == &key) {
-                    self.parsed_tags
+                if self.kits[self.active].open_tabs.iter().any(|tab| tab == &key) {
+                    self.kits[self.active].parsed_tags
                         .insert(key.clone(), TagDocument::clean(tag));
-                    self.bitmap_previews.remove(&key);
+                    self.kits[self.active].bitmap_previews.remove(&key);
                 }
                 self.status = "Bitmap reimported and reloaded".to_owned();
             }

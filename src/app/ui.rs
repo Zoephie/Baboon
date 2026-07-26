@@ -285,7 +285,7 @@ impl Baboon {
     pub(super) fn draw_field_search_bar(&mut self, ui: &mut Ui, tag_key: &str) {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Search fields:").color(text_dark()));
-            let query = self.field_search.entry(tag_key.to_owned()).or_default();
+            let query = self.kits[self.active].field_search.entry(tag_key.to_owned()).or_default();
             ui.add(
                 egui::TextEdit::singleline(query)
                     .hint_text("block or field name")
@@ -409,7 +409,7 @@ impl Baboon {
     fn draw_keyword_bar(&mut self, ui: &mut Ui, tag_key: &str) {
         ui.horizontal_wrapped(|ui| {
             ui.label(RichText::new("Keywords:").color(subtle_dark()));
-            let existing = self.keywords.keywords(tag_key).to_vec();
+            let existing = self.kits[self.active].keywords.keywords(tag_key).to_vec();
             let mut remove: Option<String> = None;
             for keyword in &existing {
                 if ui
@@ -421,7 +421,7 @@ impl Baboon {
                 }
             }
             if let Some(keyword) = remove {
-                self.keywords.remove(tag_key, &keyword);
+                self.kits[self.active].keywords.remove(tag_key, &keyword);
             }
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut self.keyword_input)
@@ -430,7 +430,7 @@ impl Baboon {
             );
             let submitted = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             if (ui.button("Add").clicked() || submitted) && !self.keyword_input.trim().is_empty() {
-                self.keywords.add(tag_key, &self.keyword_input);
+                self.kits[self.active].keywords.add(tag_key, &self.keyword_input);
                 self.keyword_input.clear();
             }
         });

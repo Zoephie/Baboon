@@ -103,7 +103,7 @@ impl Baboon {
                         }
                         if ui
                             .add_enabled(
-                                self.selected_key.is_some(),
+                                self.kits[self.active].selected_key.is_some(),
                                 egui::Button::new("Save Current Tag As..."),
                             )
                             .clicked()
@@ -114,7 +114,7 @@ impl Baboon {
                         if self.current_source_is_container() {
                             if ui
                                 .add_enabled(
-                                    self.parsed_tags.values().any(|d| d.dirty),
+                                    self.kits[self.active].parsed_tags.values().any(|d| d.dirty),
                                     egui::Button::new("Export Mod..."),
                                 )
                                 .on_hover_text(
@@ -144,19 +144,19 @@ impl Baboon {
                         ui.separator();
                         if ui
                             .add_enabled(
-                                self.selected_key.is_some(),
+                                self.kits[self.active].selected_key.is_some(),
                                 egui::Button::new("Close Current Tag"),
                             )
                             .clicked()
                         {
-                            if let Some(key) = self.selected_key.clone() {
+                            if let Some(key) = self.kits[self.active].selected_key.clone() {
                                 self.request_close_action(PendingCloseAction::CloseTab(key), ctx);
                             }
                             ui.close_menu();
                         }
                         if ui
                             .add_enabled(
-                                !self.open_tabs.is_empty() || !self.floating_tabs.is_empty(),
+                                !self.kits[self.active].open_tabs.is_empty() || !self.kits[self.active].floating_tabs.is_empty(),
                                 egui::Button::new("Close All Tags"),
                             )
                             .clicked()
@@ -165,7 +165,7 @@ impl Baboon {
                             ui.close_menu();
                         }
                         ui.separator();
-                        let can_fix_dependencies = self.selected_key.is_some()
+                        let can_fix_dependencies = self.kits[self.active].selected_key.is_some()
                             && self.source().is_some_and(|source| {
                                 matches!(source.source, TagSource::LooseFolder { .. })
                             });
@@ -189,7 +189,7 @@ impl Baboon {
                             .unwrap_or(false);
                         if ui
                             .add_enabled(
-                                can_regen && !self.scanning_entries,
+                                can_regen && !self.kits[self.active].scanning_entries,
                                 egui::Button::new("Regenerate Index"),
                             )
                             .clicked()
@@ -201,7 +201,7 @@ impl Baboon {
                                 s.group_tree = crate::source::build_group_tree(&[]);
                                 s.reverse_dependencies = None;
                             }
-                            self.field_index.invalidate();
+                            self.kits[self.active].field_index.invalidate();
                             self.begin_scan_all_entries_with_label(
                                 ctx.clone(),
                                 "Rebuilding index...",
@@ -214,7 +214,7 @@ impl Baboon {
                         if ui
                             .add_enabled(
                                 can_refresh_browser
-                                    && !self.scanning_entries
+                                    && !self.kits[self.active].scanning_entries
                                     && !self.refreshing_entry_index,
                                 egui::Button::new("Refresh Tag Browser"),
                             )
@@ -260,25 +260,25 @@ impl Baboon {
                         ui.separator();
                         if ui
                             .add_enabled(
-                                self.selected_key.is_some(),
+                                self.kits[self.active].selected_key.is_some(),
                                 egui::Button::new("Find References to Current Tag"),
                             )
                             .clicked()
                         {
                             ui.close_menu();
-                            if let Some(key) = self.selected_key.clone() {
+                            if let Some(key) = self.kits[self.active].selected_key.clone() {
                                 self.show_references_for(&key);
                             }
                         }
                         if ui
                             .add_enabled(
-                                self.selected_key.is_some(),
+                                self.kits[self.active].selected_key.is_some(),
                                 egui::Button::new("Explore References to Current Tag..."),
                             )
                             .clicked()
                         {
                             ui.close_menu();
-                            if let Some(key) = self.selected_key.clone() {
+                            if let Some(key) = self.kits[self.active].selected_key.clone() {
                                 self.open_content_explorer(&key);
                             }
                         }
@@ -334,13 +334,13 @@ impl Baboon {
                         }
                         if ui
                             .add_enabled(
-                                self.selected_key.is_some(),
+                                self.kits[self.active].selected_key.is_some(),
                                 egui::Button::new("Compare Current Tag With..."),
                             )
                             .clicked()
                         {
                             ui.close_menu();
-                            if let Some(key) = self.selected_key.clone() {
+                            if let Some(key) = self.kits[self.active].selected_key.clone() {
                                 self.tag_diff = Some(TagDiffState {
                                     a_key: key,
                                     b_key: None,
@@ -394,15 +394,15 @@ impl Baboon {
                         );
                         ui.checkbox(&mut self.expert_mode, "Expert mode");
                         ui.separator();
-                        let terminal_enabled = self.terminal_work_dir.is_some();
+                        let terminal_enabled = self.kits[self.active].terminal_work_dir.is_some();
                         if ui
                             .add_enabled(
                                 terminal_enabled,
-                                egui::SelectableLabel::new(self.terminal_open, "Terminal"),
+                                egui::SelectableLabel::new(self.kits[self.active].terminal_open, "Terminal"),
                             )
                             .clicked()
                         {
-                            self.terminal_open = !self.terminal_open;
+                            self.kits[self.active].terminal_open = !self.kits[self.active].terminal_open;
                             self.remember_terminal_open_for_game();
                             ui.close_menu();
                         }
@@ -448,7 +448,7 @@ impl Baboon {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Status").strong());
                     ui.separator();
-                    if self.scanning_entries {
+                    if self.kits[self.active].scanning_entries {
                         let progress = self.entry_index_progress.as_ref();
                         let label = progress
                             .map(|progress| progress.label.as_str())
@@ -506,7 +506,7 @@ impl Baboon {
             });
 
         if self.show_entry_index_wait_notice
-            && (self.scanning_entries || self.building_reference_for_entry_index)
+            && (self.kits[self.active].scanning_entries || self.building_reference_for_entry_index)
         {
             let mut open = self.show_entry_index_wait_notice;
             let mut hide_notice = false;
@@ -519,7 +519,7 @@ impl Baboon {
                     ui.set_min_width(360.0);
                     ui.label("Please wait until indexing is completed for best compatibility.");
                     ui.add_space(8.0);
-                    if self.scanning_entries {
+                    if self.kits[self.active].scanning_entries {
                         let progress = self.entry_index_progress.as_ref();
                         let label = progress
                             .map(|progress| progress.label.as_str())
@@ -569,8 +569,8 @@ impl Baboon {
         }
 
         // Terminal panel — rendered AFTER status so it sits above it.
-        if self.terminal_open {
-            let work_dir_label = self
+        if self.kits[self.active].terminal_open {
+            let work_dir_label = self.kits[self.active]
                 .terminal_work_dir
                 .as_ref()
                 .map(|p| p.display().to_string())
@@ -609,7 +609,7 @@ impl Baboon {
                                             .on_hover_text("Close terminal")
                                             .clicked()
                                         {
-                                            self.terminal_open = false;
+                                            self.kits[self.active].terminal_open = false;
                                             self.remember_terminal_open_for_game();
                                         }
                                         if icon_button(
@@ -786,21 +786,22 @@ impl Baboon {
                     }
                 }
 
-                let active_favorite_entries = self.active_favorite_entries.clone();
+                let active_favorite_entries = self.kits[self.active].active_favorite_entries.clone();
                 let favorite_keys: HashSet<String> = active_favorite_entries
                     .iter()
                     .map(|entry| entry.key.clone())
                     .collect();
                 // Indexed directly rather than through `source_mut()`: the block
-                // below also borrows `self.filter`, `self.filter_cache`, and
+                // below also borrows `self.kits[self.active].filter`, `self.kits[self.active].filter_cache`, and
                 // `self.status`, and a method call would borrow all of `self`.
-                if let Some(kit_index) = self.active_kit_index() {
-                    let source = &mut self.kits[kit_index].source;
+                let kit_index = self.active;
+                let kit = &mut self.kits[kit_index];
+                if let Some(source) = kit.source.as_mut() {
                     ui.add_space(8.0);
-                    let scanning = self.scanning_entries;
+                    let scanning = kit.scanning_entries;
                     // Collect deferred scan-trigger here; execute after borrow ends.
                     let mut need_scan = false;
-                    let prev_filter_empty = self.filter.is_empty();
+                    let prev_filter_empty = kit.filter.is_empty();
                     ui.scope(|ui| {
                         ui.visuals_mut().override_text_color = Some(text_dark());
                         ui.visuals_mut().extreme_bg_color = browser_search_bg();
@@ -814,13 +815,13 @@ impl Baboon {
                                 egui::Rect::from_center_size(icon_rect.center(), Vec2::splat(16.0));
                             paint_button_icon_at(ui, ButtonIcon::SearchBar, icon_rect, text_dark());
                             ui.add(
-                                egui::TextEdit::singleline(&mut self.filter)
+                                egui::TextEdit::singleline(&mut kit.filter)
                                     .hint_text("search tags")
                                     .desired_width(f32::INFINITY),
                             );
                         });
                     });
-                    if let Some(warning) = browser::browser_filter_warning(&self.filter) {
+                    if let Some(warning) = browser::browser_filter_warning(&kit.filter) {
                         ui.label(
                             RichText::new(warning)
                                 .small()
@@ -916,7 +917,7 @@ impl Baboon {
                         });
                     });
                     if prev_filter_empty
-                        && !self.filter.is_empty()
+                        && !kit.filter.is_empty()
                         && matches!(source.source, TagSource::LooseFolder { .. })
                         && source.all_entries.is_empty()
                         && !scanning
@@ -924,8 +925,8 @@ impl Baboon {
                         need_scan = true;
                     }
                     ui.add_space(4.0);
-                    let selected = self.selected_key.clone();
-                    let filter = self.filter.trim().to_owned();
+                    let selected = kit.selected_key.clone();
+                    let filter = kit.filter.trim().to_owned();
                     let mode = self.browser_mode;
                     let show_prefixes = self.show_browser_prefixes;
                     let folders_before_tags = self.folders_before_tags;
@@ -979,14 +980,14 @@ impl Baboon {
                                 })
                                 .inner
                         } else {
-                            self.filter_cache.refresh(
-                                self.source_generation,
+                            kit.filter_cache.refresh(
+                                kit.generation,
                                 &filter,
                                 entries,
                                 has_all,
                                 groups_mode,
                             );
-                            let cache = &self.filter_cache;
+                            let cache = &kit.filter_cache;
                             ScrollArea::vertical()
                                 .auto_shrink([false, false])
                                 .show(ui, |ui| {
@@ -1143,14 +1144,14 @@ impl Baboon {
                 bottom: 8.0,
             }))
             .show(ctx, |ui| {
-                if !self.open_tabs.is_empty() || self.dragging_floating_tab.is_some() {
+                if !self.kits[self.active].open_tabs.is_empty() || self.dragging_floating_tab.is_some() {
                     let mut close_key = None;
                     let mut pop_key = None;
                     let mut close_all = false;
                     let mut close_all_but = None;
                     let mut reveal_key = None;
                     let mut rack_rect = None;
-                    if !self.open_tabs.is_empty() {
+                    if !self.kits[self.active].open_tabs.is_empty() {
                         const TAB_BUTTON_SIZE: f32 = 18.0;
                         const TAB_MIN_LABEL_WIDTH: f32 = 48.0;
                         const TAB_MAX_LABEL_WIDTH: f32 = 170.0;
@@ -1164,12 +1165,12 @@ impl Baboon {
                         let mut row = Vec::new();
                         let mut row_width = 0.0;
 
-                        for key in self.open_tabs.clone() {
+                        for key in self.kits[self.active].open_tabs.clone() {
                             let Some(entry) = self.entry_for_key(&key) else {
                                 continue;
                             };
-                            let active = self.selected_key.as_deref() == Some(key.as_str());
-                            let dirty = self
+                            let active = self.kits[self.active].selected_key.as_deref() == Some(key.as_str());
+                            let dirty = self.kits[self.active]
                                 .parsed_tags
                                 .get(&key)
                                 .map(|doc| doc.dirty)
@@ -1255,7 +1256,7 @@ impl Baboon {
                                                     )
                                                     .on_hover_text(label.clone());
                                                 if label_response.clicked() {
-                                                    self.selected_key = Some(key.clone());
+                                                    self.kits[self.active].selected_key = Some(key.clone());
                                                     self.ensure_tag_loading(
                                                         key.clone(),
                                                         ctx.clone(),
@@ -1317,7 +1318,7 @@ impl Baboon {
                     // when nothing was docked at all — so with even one docked tab
                     // there was no affordance and only a thin sliver to hit.
                     if self.dragging_floating_tab.is_some() {
-                        if !self.open_tabs.is_empty() {
+                        if !self.kits[self.active].open_tabs.is_empty() {
                             ui.add_space(3.0);
                         }
                         let pointer = ui.input(|input| input.pointer.interact_pos());
@@ -1387,7 +1388,11 @@ impl Baboon {
             });
         self.draw_auxiliary_windows(ctx);
         self.persist_prefs_if_changed();
-        self.keywords.save_if_dirty();
+        // Every kit, not just the active one: a background kit's sidecar can be
+        // dirty from edits made before the user switched away.
+        for kit in &mut self.kits {
+            kit.keywords.save_if_dirty();
+        }
         self.draw_floating_tabs(ctx);
         self.handle_floating_tab_drop(ctx);
         if let Some(result) = draw_color_popup(
@@ -1398,7 +1403,7 @@ impl Baboon {
         ) {
             match result {
                 ColorPopupResult::FieldEdit { tag_key, edit } => {
-                    if let Some(doc) = self.parsed_tags.get_mut(&tag_key) {
+                    if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(&tag_key) {
                         doc.journal.begin_edit(&doc.tag, "Edit color");
                         if let Some(status) =
                             apply_pending_edits(&mut doc.tag, vec![edit], &mut doc.dirty)
@@ -1409,7 +1414,7 @@ impl Baboon {
                     }
                 }
                 ColorPopupResult::ShaderOp { tag_key, op } => {
-                    if let Some(doc) = self.parsed_tags.get_mut(&tag_key) {
+                    if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(&tag_key) {
                         doc.journal.begin_edit(&doc.tag, "Shader edit");
                         if let Some(status) =
                             apply_shader_ops(&mut doc.tag, vec![op], &mut doc.dirty)
@@ -1420,7 +1425,7 @@ impl Baboon {
                     }
                 }
                 ColorPopupResult::ShaderParamOp { tag_key, op } => {
-                    if let Some(doc) = self.parsed_tags.get_mut(&tag_key) {
+                    if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(&tag_key) {
                         doc.journal.begin_edit(&doc.tag, "Shader parameter");
                         if let Some(status) =
                             apply_shader_param_ops(&mut doc.tag, vec![op], &mut doc.dirty)
@@ -1431,7 +1436,7 @@ impl Baboon {
                     }
                 }
                 ColorPopupResult::H2ShaderParamOp { tag_key, op } => {
-                    if let Some(doc) = self.parsed_tags.get_mut(&tag_key) {
+                    if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(&tag_key) {
                         doc.journal.begin_edit(&doc.tag, "Shader parameter");
                         if let Some(status) =
                             apply_h2_shader_param_ops(&mut doc.tag, vec![op], &mut doc.dirty)
@@ -1451,7 +1456,7 @@ impl Baboon {
         if let Some(batch) =
             draw_function_popup(ctx, &mut self.function_popup, &mut self.color_popup)
         {
-            if let Some(doc) = self.parsed_tags.get_mut(&batch.tag_key) {
+            if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(&batch.tag_key) {
                 if !batch.edits.is_empty() || !batch.data_ops.is_empty() {
                     doc.journal.begin_edit(&doc.tag, "Edit function");
                 }

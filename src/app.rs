@@ -126,53 +126,21 @@ pub struct Baboon {
     /// Single UI-thread receiver. Messages are applied in arrival order and
     /// generation-tagged results are discarded when their source is stale.
     rx: Receiver<WorkerMessage>,
-    /// Every loaded kit. Content store for the multi-kit model: a kit owns its
-    /// source and (progressively) all state scoped to that source. Never
-    /// addressed by position from outside a single borrow — use [`KitId`].
+    /// Every open kit: the content store of the multi-kit model, each owning
+    /// its source and all state scoped to it. **Never empty** — an unloaded
+    /// Baboon holds one empty workspace kit, so readers of per-kit state need
+    /// no "nothing loaded" special case. Cross-frame references use [`KitId`],
+    /// never a position, since positions shift when a kit closes.
     kits: Vec<Kit>,
-    /// Which kit the browser, tabs, and editor act on.
-    active_kit: Option<KitId>,
+    /// Index into `kits` of the kit the browser, tabs, and editor act on.
+    /// Always a valid index; kept in range whenever `kits` changes.
+    active: usize,
     /// Monotonic [`KitId`] allocator; ids are never reused.
     next_kit_id: u64,
-    /// Parsed documents keyed by the stable [`TagEntry::key`] identity.
-    parsed_tags: HashMap<String, TagDocument>,
     tag_conversion_dialog: Option<TagConversionDialog>,
     folder_conversion_dialog: Option<FolderConversionDialog>,
-    /// Keys with an outstanding background load, preventing duplicate jobs.
-    loading_tags: HashSet<String>,
-    /// Active document key. Selection may temporarily precede parsing while a
-    /// matching key is present in `loading_tags`.
-    selected_key: Option<String>,
-    /// Docked and floating tabs share this ordered set of open document keys.
-    open_tabs: Vec<String>,
-    /// Subset of `open_tabs` currently rendered as independent windows.
-    floating_tabs: HashSet<String>,
-    /// Per-document preview state, keyed identically to `parsed_tags` so cached
-    /// textures cannot migrate between tags after selection changes.
-    bitmap_previews: HashMap<String, BitmapPreviewState>,
-    /// Per-document model view/camera state retained while the document is cached.
-    model_previews: HashMap<String, ModelPreviewState>,
-    /// Transient text-entry buffers keyed by stable widget/edit identifiers.
-    edit_buffers: HashMap<String, String>,
-    /// Source-local render-method definition cache; `None` is a cached miss.
-    rmdf_cache: HashMap<String, Option<RenderMethodDefinition>>,
-    /// Source-local render-method option cache; `None` is a cached miss.
-    rmop_cache: HashMap<String, Option<RenderMethodOption>>,
-    filter: String,
-    /// Per-tag "Search fields" query (keyed by tag key). Collapses the tag
-    /// editor down to the matching block(s) and their ancestors.
-    field_search: HashMap<String, String>,
-    /// The last query actually applied per tag, so the collapse is a one-shot
-    /// on change rather than a per-frame override the user can't fight.
-    field_search_applied: HashMap<String, String>,
     /// Modeless find-in-tag dialog and its exact occurrence list.
     find: FindDialogState,
-    /// Cached search results, recomputed only when the query or the underlying
-    /// entry set changes — never per frame. See [`FilterCache`].
-    filter_cache: FilterCache,
-    /// Bumped whenever the active source or its `all_entries` set is replaced,
-    /// so [`filter_cache`] knows to recompute against fresh data.
-    source_generation: u64,
     browser_mode: BrowserMode,
     browser_sort: BrowserSort,
     show_browser_prefixes: bool,
@@ -219,7 +187,6 @@ pub struct Baboon {
     tool_commands_collapsed_categories: HashSet<String>,
     recent_folders: Vec<PathBuf>,
     editing_kit_favorites: Vec<EditingKitFavorites>,
-    active_favorite_entries: Vec<TagEntry>,
     blender_path: Option<PathBuf>,
     blender_path_input: String,
     editing_kit_paths: HashMap<String, PathBuf>,
@@ -236,7 +203,6 @@ pub struct Baboon {
     /// "Compare Tags" (Tag Diff) window state.
     tag_diff: Option<TagDiffState>,
     content_explorer: Option<ContentExplorer>,
-    keywords: KeywordStore,
     keyword_input: String,
     keyword_chooser_open: bool,
     reveal_target: Option<RevealRequest>,
@@ -244,7 +210,6 @@ pub struct Baboon {
     field_value_query: String,
     field_value_group: String,
     field_value_searching: bool,
-    field_index: FieldValueIndex,
     /// Parsed-once documentation overlay (help/units + explanations) per group
     /// JSON, keyed by definition file path. Built lazily during render.
     def_docs_cache: HashMap<PathBuf, Rc<DefDocs>>,
@@ -252,8 +217,6 @@ pub struct Baboon {
     rename_tag: Option<RenameTagState>,
     status: String,
     folder_refactor: Option<FolderRefactorUiState>,
-    /// True while a background full-scan of a loose-folder source is running.
-    scanning_entries: bool,
     entry_index_progress: Option<EntryIndexProgressState>,
     show_entry_index_wait_notice: bool,
     /// True while checking a cached loose-folder index for file changes.
@@ -264,9 +227,6 @@ pub struct Baboon {
     building_reference_for_entry_index: bool,
     reference_index_progress: Option<ReferenceIndexProgressState>,
     terminal: TerminalState,
-    terminal_open: bool,
-    /// Working directory for terminal commands (game kit root, parent of tags/).
-    terminal_work_dir: Option<std::path::PathBuf>,
     /// Game identifiers (e.g. "halo3_mcc") for which the user has chosen to
     /// keep the terminal open. Persisted in prefs.json and restored per kit.
     terminal_open_games: HashSet<String>,
@@ -284,11 +244,6 @@ pub struct Baboon {
     block_confirm: Option<BlockConfirm>,
     /// Sound-tag audition: FMOD bank playback (rodio output + bank cache).
     audio: audio::AudioState,
-    /// Campaign Evolved sound tags name no audio themselves; the media is found
-    /// by walking package imports out to a Wwise event. That walk reads several
-    /// packages, so the result is cached per tag key rather than redone per
-    /// frame. Cleared when the source changes.
-    ce_sound_bindings: HashMap<String, Arc<crate::source::ce_audio::CeSoundBinding>>,
     /// The bundled UE reflection mappings, parsed once on first use — needed to
     /// decode a cooked `AkAudioEvent`.
     ce_usmap: Option<Arc<blam_tags::iostore::usmap::Usmap>>,
@@ -367,30 +322,15 @@ impl Baboon {
             SessionRestore::Never => (None, None),
         };
         let mut app = Self {
-            default_names: names,
+            default_names: names.clone(),
             tx,
             rx,
-            kits: Vec::new(),
-            active_kit: None,
-            next_kit_id: 0,
-            parsed_tags: HashMap::new(),
+            kits: vec![Kit::empty(KitId(0), names.clone())],
+            active: 0,
+            next_kit_id: 1,
             tag_conversion_dialog: None,
             folder_conversion_dialog: None,
-            loading_tags: HashSet::new(),
-            selected_key: None,
-            open_tabs: Vec::new(),
-            floating_tabs: HashSet::new(),
-            bitmap_previews: HashMap::new(),
-            model_previews: HashMap::new(),
-            edit_buffers: HashMap::new(),
-            rmdf_cache: HashMap::new(),
-            rmop_cache: HashMap::new(),
-            filter: String::new(),
-            field_search: HashMap::new(),
-            field_search_applied: HashMap::new(),
             find: FindDialogState::default(),
-            filter_cache: FilterCache::default(),
-            source_generation: 0,
             browser_mode: prefs.browser_mode,
             browser_sort: prefs.browser_sort,
             show_browser_prefixes: prefs.show_browser_prefixes,
@@ -435,7 +375,6 @@ impl Baboon {
             tool_commands_collapsed_categories: prefs.tool_commands_collapsed_categories.clone(),
             recent_folders: prefs.recent_folders.clone(),
             editing_kit_favorites: prefs.editing_kit_favorites.clone(),
-            active_favorite_entries: Vec::new(),
             editing_kit_path_inputs: editing_kit_path_inputs(&prefs.editing_kit_paths),
             editing_kit_paths: prefs.editing_kit_paths.clone(),
             editing_kit_path_attention: None,
@@ -457,7 +396,6 @@ impl Baboon {
             ref_jump_occurrences: HashMap::new(),
             tag_diff: None,
             content_explorer: None,
-            keywords: KeywordStore::default(),
             keyword_input: String::new(),
             keyword_chooser_open: false,
             reveal_target: None,
@@ -465,13 +403,11 @@ impl Baboon {
             field_value_query: String::new(),
             field_value_group: String::new(),
             field_value_searching: false,
-            field_index: FieldValueIndex::default(),
             def_docs_cache: HashMap::new(),
             tsv_paste: None,
             rename_tag: None,
             status: "Ready".to_owned(),
             folder_refactor: None,
-            scanning_entries: false,
             entry_index_progress: None,
             show_entry_index_wait_notice: false,
             refreshing_entry_index: false,
@@ -493,8 +429,6 @@ impl Baboon {
                 process: None,
                 scroll_to_bottom: false,
             },
-            terminal_open: false,
-            terminal_work_dir: None,
             saved_terminal_open_games: terminal_open_games.clone(),
             terminal_open_games,
             dragging_floating_tab: None,
@@ -504,7 +438,6 @@ impl Baboon {
             pending_session_restore: None,
             block_confirm: None,
             audio: audio::AudioState::default(),
-            ce_sound_bindings: HashMap::new(),
             ce_usmap: None,
             pending_sound_extract: None,
             pending_open: None,

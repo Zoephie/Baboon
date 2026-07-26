@@ -46,14 +46,19 @@ impl Baboon {
         let def_docs = self.def_docs_for_entry(entry);
         let ce_sound = self.ce_sound_binding(&key, entry);
 
-        let Some(mut doc) = self.parsed_tags.remove(&key) else {
-            if self.loading_tags.contains(&key) {
+        let Some(mut doc) = self.kits[self.active].parsed_tags.remove(&key) else {
+            if self.kits[self.active].loading_tags.contains(&key) {
                 ui.label("Loading tag data...");
             } else {
                 ui.label("Select the tag again to load it.");
             }
             return;
         };
+
+        let kit_index = self.active;
+        let kit = &mut self.kits[kit_index];
+        let source = kit.source.as_ref();
+        let names = &kit.names;
 
         let mut pending = Vec::new();
         let mut block_ops = Vec::new();
@@ -72,8 +77,8 @@ impl Baboon {
             &doc.tag,
             supports_field_search,
             &key,
-            &self.field_search,
-            &mut self.field_search_applied,
+            &kit.field_search,
+            &mut kit.field_search_applied,
         );
         let sound_volume = self.audio.volume();
         let expert_mode = self.expert_mode;
@@ -81,12 +86,6 @@ impl Baboon {
         // `source()`: a method borrows all of `self`, and the context below
         // needs `&mut` on a dozen sibling fields. Going through `self.kits[i]`
         // directly is what lets the borrow checker see them as disjoint.
-        let kit_index = self.active_kit_index();
-        let source = kit_index.map(|index| &self.kits[index].source);
-        let names = match kit_index {
-            Some(index) => &self.kits[index].names,
-            None => &self.default_names,
-        };
         let ce_paks_root = source.and_then(|s| match &s.source {
             TagSource::IoStoreContainerSet { root, .. } => Some(root.as_path()),
             _ => None,
@@ -114,7 +113,7 @@ impl Baboon {
             status: Some(&mut self.status),
             editable: is_editable_tag(entry, &doc.tag),
             show_block_sizes: self.show_block_sizes,
-            buffers: &mut self.edit_buffers,
+            buffers: &mut kit.edit_buffers,
             pending: &mut pending,
             block_ops: &mut block_ops,
             block_confirm: &mut self.block_confirm,
@@ -144,7 +143,7 @@ impl Baboon {
         };
 
         if is_bitmap_tag(entry) {
-            let preview = self.bitmap_previews.entry(key.clone()).or_default();
+            let preview = kit.bitmap_previews.entry(key.clone()).or_default();
             draw_bitmap_tag(
                 ui,
                 ctx,
@@ -159,7 +158,7 @@ impl Baboon {
         } else {
             let mut local_model_preview;
             let model_preview = if is_model_group(entry.group_tag, names) {
-                self.model_previews.entry(key.clone()).or_default()
+                kit.model_previews.entry(key.clone()).or_default()
             } else {
                 local_model_preview = ModelPreviewState::default();
                 &mut local_model_preview
@@ -170,8 +169,8 @@ impl Baboon {
                 entry,
                 names,
                 source.map(|source| &source.source),
-                &mut self.rmdf_cache,
-                &mut self.rmop_cache,
+                &mut kit.rmdf_cache,
+                &mut kit.rmop_cache,
                 &mut self.color_popup,
                 &mut self.function_popup,
                 model_preview,
@@ -218,7 +217,7 @@ impl Baboon {
         if let Some(status) = apply_model_variant_ops(&mut doc.tag, model_variant_ops, &mut doc.dirty)
         {
             self.status = status;
-            if let Some(preview) = self.model_previews.get_mut(&key) {
+            if let Some(preview) = kit.model_previews.get_mut(&key) {
                 preview.loaded_key = None;
                 preview.data = None;
             }
@@ -251,7 +250,7 @@ impl Baboon {
             });
         }
 
-        self.parsed_tags.insert(key, doc);
+        kit.parsed_tags.insert(key, doc);
 
         if let Some(key) = bitmap_reimport {
             self.begin_reimport_bitmap(key, ctx.clone());

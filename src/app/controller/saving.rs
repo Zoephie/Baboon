@@ -20,7 +20,7 @@ impl Baboon {
         path: PathBuf,
         result: Result<(), String>,
     ) -> bool {
-        if generation != self.source_generation {
+        if generation != self.kits[self.active].generation {
             return true;
         }
         match result {

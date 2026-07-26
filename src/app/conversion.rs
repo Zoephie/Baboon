@@ -3116,10 +3116,10 @@ impl Baboon {
         if !self.expert_mode {
             return false;
         }
-        let Some(key) = self.selected_key.as_deref() else {
+        let Some(key) = self.kits[self.active].selected_key.as_deref() else {
             return false;
         };
-        let Some(document) = self.parsed_tags.get(key) else {
+        let Some(document) = self.kits[self.active].parsed_tags.get(key) else {
             return false;
         };
         let Some(game) = self.source()
@@ -3137,7 +3137,7 @@ impl Baboon {
             self.status = "Cross-game conversion requires Expert mode".to_owned();
             return;
         }
-        let Some(key) = self.selected_key.clone() else {
+        let Some(key) = self.kits[self.active].selected_key.clone() else {
             return;
         };
         let Some(source) = self.source() else {
@@ -3183,7 +3183,7 @@ impl Baboon {
             .editing_kit_paths
             .get(&target_game)
             .map(|root| configured_tags_root(root));
-        let result = self
+        let result = self.kits[self.active]
             .parsed_tags
             .get(&key)
             .ok_or_else(|| "The source tag is no longer loaded".to_owned())
@@ -3278,7 +3278,7 @@ impl Baboon {
         let Some(dialog) = self.tag_conversion_dialog.as_ref() else {
             return;
         };
-        let Some(document) = self.parsed_tags.get(&dialog.source_key) else {
+        let Some(document) = self.kits[self.active].parsed_tags.get(&dialog.source_key) else {
             if let Some(dialog) = self.tag_conversion_dialog.as_mut() {
                 dialog.error = Some("The source tag is no longer loaded".to_owned());
             }
@@ -3483,7 +3483,7 @@ impl Baboon {
         if dialog.running {
             return;
         }
-        if self.parsed_tags.values().any(|document| document.dirty) {
+        if self.kits[self.active].parsed_tags.values().any(|document| document.dirty) {
             if let Some(dialog) = self.folder_conversion_dialog.as_mut() {
                 dialog.error =
                     Some("Save or close dirty tags before converting a folder".to_owned());

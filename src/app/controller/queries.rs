@@ -12,7 +12,7 @@ impl Baboon {
         result: Result<Vec<FieldValueMatch>, String>,
     ) -> bool {
         self.field_value_searching = false;
-        if generation != self.source_generation {
+        if generation != self.kits[self.active].generation {
             return true;
         }
         match result {
@@ -42,8 +42,8 @@ impl Baboon {
         generation: u64,
         blobs: Vec<(String, String)>,
     ) -> bool {
-        if generation == self.source_generation {
-            self.field_index.install(generation, blobs);
+        if generation == self.kits[self.active].generation {
+            self.kits[self.active].field_index.install(generation, blobs);
         }
         false
     }
