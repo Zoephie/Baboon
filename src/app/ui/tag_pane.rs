@@ -184,6 +184,16 @@ impl Baboon {
 
         // Snapshot for undo before a mutating batch. Coalesces continuous edits
         // into one entry; closes the window on frames with no edits.
+        // Every deferred op this pane collected, including the kinds the undo
+        // window below deliberately ignores. Used only to decide whether the
+        // frame needs redrawing.
+        let mutated = !pending.is_empty()
+            || !block_ops.is_empty()
+            || !shader_ops.is_empty()
+            || !shader_param_ops.is_empty()
+            || !h2_shader_param_ops.is_empty()
+            || !function_data_ops.is_empty()
+            || !model_variant_ops.is_empty();
         if !pending.is_empty()
             || !block_ops.is_empty()
             || !shader_ops.is_empty()
@@ -268,6 +278,14 @@ impl Baboon {
         }
 
         kit.parsed_tags.insert(key, doc);
+        // These ops are applied *after* the pane has been drawn, so the frame
+        // on screen still shows the tag as it was before the edit. egui only
+        // redraws when new input arrives, so nothing here is guaranteed to be
+        // visible until something else happens to wake the UI -- an added block
+        // element missing from that block's own instance selector, for one.
+        if mutated {
+            ctx.request_repaint();
+        }
 
         if let Some(key) = bitmap_reimport {
             self.begin_reimport_bitmap(key, ctx.clone());

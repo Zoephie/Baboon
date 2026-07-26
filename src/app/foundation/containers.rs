@@ -2655,4 +2655,88 @@ mod palette_repro_tests {
         eprintln!("checked {checked} block-index field(s)");
         assert!(failures.is_empty(), "{failures:#?}");
     }
+
+    /// Crisp's report, stated exactly: adding an element to a block must make
+    /// that block's own instance selector offer it, without a save and reopen.
+    /// The selector lists `0..block.len()`, so this checks the length the
+    /// renderer would read on the next frame.
+    #[test]
+    fn adding_an_element_grows_the_blocks_own_length() {
+        let defs = std::path::Path::new("definitions");
+        let cases = [
+            ("halo3_mcc", "levels/multi/riverworld/riverworld.scenario", *b"scnr"),
+            ("haloreach_mcc", "levels/multi/35_island/35_island.scenario", *b"scnr"),
+            ("halo2_mcc", "scenarios/solo/05a_deltaapproach/05a_deltaapproach.scenario", *b"scnr"),
+            ("haloce_mcc", "levels/d40/d40.scenario", *b"scnr"),
+        ];
+        let mut failures = Vec::new();
+
+        for (game, rel, group_bytes) in cases {
+            let tag_path = std::path::Path::new("/Users/camden/Halo")
+                .join(game)
+                .join("tags")
+                .join(rel);
+            if !tag_path.exists() {
+                eprintln!("skip {game}: missing");
+                continue;
+            }
+            let group = u32::from_be_bytes(group_bytes);
+            let Ok(tag) = crate::source::read_tag_at_path(&tag_path, Some(game), Some(defs), group)
+            else {
+                eprintln!("skip {game}: unreadable");
+                continue;
+            };
+            // Root-level blocks, split by whether they start empty: an
+            // empty-on-disk block is the case that has bitten before.
+            let mut blocks: Vec<(String, usize)> = Vec::new();
+            for field in tag.root().fields_all() {
+                if let Some(block) = field.as_block() {
+                    blocks.push((field.name().to_owned(), block.len()));
+                }
+            }
+            let empty = blocks.iter().filter(|(_, n)| *n == 0).count();
+            eprintln!("{game}: {} root block(s), {empty} empty", blocks.len());
+
+            let mut checked = 0usize;
+            let mut stale = 0usize;
+            for (name, before) in blocks {
+                let Ok(mut tag) =
+                    crate::source::read_tag_at_path(&tag_path, Some(game), Some(defs), group)
+                else {
+                    continue;
+                };
+                let mut dirty = false;
+                let status = crate::app::apply_block_ops(
+                    &mut tag,
+                    vec![BlockOp {
+                        path: name.clone(),
+                        kind: BlockOpKind::Add,
+                    }],
+                    &mut dirty,
+                );
+                if status.as_deref().is_some_and(|s| s.contains("failed")) {
+                    continue;
+                }
+                let after = tag
+                    .root()
+                    .fields_all()
+                    .find_map(|field| {
+                        (field.name() == name)
+                            .then(|| field.as_block().map(|block| block.len()))
+                            .flatten()
+                    })
+                    .unwrap_or(0);
+                checked += 1;
+                if after != before + 1 {
+                    stale += 1;
+                    failures.push(format!(
+                        "{game} block {name:?}: len {before} -> {after} after adding an element \
+                         (status {status:?})"
+                    ));
+                }
+            }
+            eprintln!("{game}: checked {checked} block(s), {stale} stale");
+        }
+        assert!(failures.is_empty(), "{} failure(s):\n{failures:#?}", failures.len());
+    }
 }
