@@ -949,9 +949,46 @@ fn draw_ce_wwise_player(
             );
         }
 
+        // Whole-tag extract. CE media is addressed directly in the pak set, so
+        // unlike the Halo 4 event player this needs no prior playback.
+        if !media.is_empty()
+            && let Some(root) = edit.ce_paks_root
+        {
+            ui.horizontal(|ui| {
+                if ui
+                    .button(RichText::new("\u{2B07} Extract all"))
+                    .on_hover_text("Extract every permutation of this language to WAV")
+                    .clicked()
+                    && let Some(base) = rfd::FileDialog::new()
+                        .set_title("Extract Wwise media")
+                        .pick_folder()
+                {
+                    let items = media
+                        .iter()
+                        .map(|m| ExtractItem {
+                            out_path: base
+                                .join(format!("{}.wav", sanitize_component(&m.display_name()))),
+                            source: ExtractSource::CeMedia {
+                                paks_root: root.to_path_buf(),
+                                media: Box::new((*m).clone()),
+                            },
+                        })
+                        .collect();
+                    *edit.sound_extract_request = Some(ExtractRequest {
+                        items,
+                        tags_root: None,
+                        label: base
+                            .file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_else(|| "sound".to_owned()),
+                    });
+                }
+            });
+        }
+
         egui::Grid::new("ce_wwise_media")
             .striped(true)
-            .num_columns(4)
+            .num_columns(5)
             .show(ui, |ui| {
                 for m in &media {
                     if ui
@@ -978,6 +1015,31 @@ fn draw_ce_wwise_player(
                                 }
                             }
                         }
+                    }
+                    if ui
+                        .small_button("\u{2B07}")
+                        .on_hover_text("Extract this permutation to WAV")
+                        .clicked()
+                        && let Some(root) = edit.ce_paks_root
+                        && let Some(path) = rfd::FileDialog::new()
+                            .set_title("Extract Wwise media")
+                            .set_file_name(format!(
+                                "{}.wav",
+                                sanitize_component(&m.display_name())
+                            ))
+                            .save_file()
+                    {
+                        *edit.sound_extract_request = Some(ExtractRequest {
+                            items: vec![ExtractItem {
+                                out_path: path,
+                                source: ExtractSource::CeMedia {
+                                    paks_root: root.to_path_buf(),
+                                    media: Box::new((*m).clone()),
+                                },
+                            }],
+                            tags_root: None,
+                            label: m.display_name(),
+                        });
                     }
                     ui.label(RichText::new(m.display_name()).color(text_dark()))
                         .on_hover_text(&m.source_name);

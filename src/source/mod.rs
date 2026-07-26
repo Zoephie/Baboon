@@ -204,10 +204,14 @@ impl ContainerPackageIndex {
             .map(|(c, p)| (*c, p.as_str()))
     }
 
+    /// Number of indexed packages. Part of the type's surface and asserted on
+    /// by the container integration tests; the app itself only ever looks up.
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.by_package.len()
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.by_package.is_empty()
     }

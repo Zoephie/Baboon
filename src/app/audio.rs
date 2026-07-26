@@ -362,6 +362,18 @@ impl AudioState {
                         Err(BankError::Decode(e)) => Err(e),
                     },
                 },
+                ExtractSource::CeMedia { paks_root, media } => {
+                    match self.ce_media.decode(&paks_root, &media) {
+                        Ok(pcm) => write_wav_pcm16(
+                            &item.out_path,
+                            &pcm.samples,
+                            pcm.channels,
+                            pcm.sample_rate,
+                        )
+                        .map_err(|e| e.to_string()),
+                        Err(err) => Err(format!("{err:#}")),
+                    }
+                }
                 ExtractSource::Event { name } => match self.wwise.as_ref() {
                     Some(banks) => banks.resolve(&name).and_then(|pcm| {
                         write_wav_pcm16(&item.out_path, &pcm.samples, pcm.channels, pcm.sample_rate)
