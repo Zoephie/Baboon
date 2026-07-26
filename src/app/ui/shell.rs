@@ -289,8 +289,14 @@ impl Baboon {
                             self.show_unreferenced_tags();
                         }
                         {
-                            let is_loose = self.source.as_ref().is_some_and(|source| {
-                                matches!(source.source, TagSource::LooseFolder { .. })
+                            // Loose folders and Campaign Evolved containers can
+                            // both be indexed; cache sources cannot.
+                            let indexable = self.source.as_ref().is_some_and(|source| {
+                                matches!(
+                                    source.source,
+                                    TagSource::LooseFolder { .. }
+                                        | TagSource::IoStoreContainerSet { .. }
+                                )
                             });
                             let has_index = self
                                 .source
@@ -305,7 +311,7 @@ impl Baboon {
                             };
                             if ui
                                 .add_enabled(
-                                    is_loose && !self.building_reverse_dependencies,
+                                    indexable && !self.building_reverse_dependencies,
                                     egui::Button::new(label),
                                 )
                                 .clicked()
