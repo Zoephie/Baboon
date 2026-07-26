@@ -3249,11 +3249,17 @@ impl Baboon {
                 let sidecar = output.with_extension("baboon");
                 match save_campaign_project(&sidecar, &snapshot) {
                     Ok(()) => {
-                        self.kits[exporting].campaign_project = Some(ActiveCampaignProject::from_snapshot(
-                            sidecar,
-                            &snapshot,
-                            0.0,
-                        ));
+                        // The sidecar is an export artifact: a copy that travels
+                        // with the mod so it can be resumed or shared. The
+                        // workspace keeps its own project.
+                        //
+                        // Repointing it here sent every later autosave to a file
+                        // beside the exported mod, wherever the user put that,
+                        // and the workspace's own recovery file stopped being
+                        // updated. The next launch then adopted the stale
+                        // recovery file and every tag opened as the game ships
+                        // it -- the edits read as never having been saved.
+                        let _ = self.checkpoint_campaign_project(exporting, 0.0);
                         self.status = if skipped == 0 {
                             format!(
                                 "Exported {count} tag(s) → {stem}.utoc/.ucas/.pak/.baboon \
