@@ -4853,8 +4853,8 @@ impl Baboon {
         self.launch_kit_tool_clearing_startup("tag_test", self.tag_test_executable(), "init.txt");
     }
 
-    pub(super) fn can_launch_scenario_in_sapien(&self, entry: &TagEntry) -> bool {
-        let Some(source) = self.source() else {
+    pub(super) fn can_launch_scenario_in_sapien(&self, kit: usize, entry: &TagEntry) -> bool {
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
             return false;
         };
         let Ok(context) = scenario_launch_context(source, entry) else {
@@ -4919,8 +4919,8 @@ impl Baboon {
         }
     }
 
-    pub(super) fn can_launch_scenario_in_tag_test(&self, entry: &TagEntry) -> bool {
-        let Some(source) = self.source() else {
+    pub(super) fn can_launch_scenario_in_tag_test(&self, kit: usize, entry: &TagEntry) -> bool {
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
             return false;
         };
         let Ok(context) = scenario_launch_context(source, entry) else {

@@ -29,7 +29,7 @@ impl Baboon {
     ) {
         let key = entry.key.clone();
         draw_entry_header(ui, entry, &self.kits[kit_index].names);
-        self.draw_scenario_launcher_buttons(ui, entry);
+        self.draw_scenario_launcher_buttons(ui, kit_index, entry);
         if show_keyword_bar {
             self.draw_keyword_bar(ui, kit_index, &key);
         }
