@@ -189,16 +189,15 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
 }
 
 impl Baboon {
-    /// Draw the active kit's open tags as a tiled layout.
+    /// Draw one kit's open tags as a tiled layout.
     pub(super) fn draw_tag_tiles(&mut self, ui: &mut Ui, ctx: &egui::Context, kit_index: usize) {
         if self.kits[kit_index].tag_tree.is_empty() {
-            if self.kits[kit_index].source.is_none() {
-                ui.heading("No tag selected");
-                ui.label("Load a source from File, then select a tag in the browser.");
-            } else {
-                ui.heading("No tag selected");
-                ui.label("Select a tag in the browser to open it here.");
-            }
+            // An unloaded workspace never reaches here — it shows the welcome
+            // screen instead — so this is only ever "loaded, nothing open yet".
+            ui.heading(RichText::new("No tag open").color(text_dark()));
+            ui.label(
+                RichText::new("Select a tag in the browser to open it here.").color(subtle_dark()),
+            );
             return;
         }
 

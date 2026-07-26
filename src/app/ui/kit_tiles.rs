@@ -45,6 +45,12 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
         if ui.rect_contains_pointer(ui.max_rect()) {
             self.focused = Some(kit_id);
         }
+        // An unloaded workspace has no tags to browse or edit, so it offers
+        // ways to open one instead of an empty browser and an empty editor.
+        if self.app.kits[kit_index].is_empty_workspace() {
+            self.app.draw_welcome_screen(ui, &self.ctx);
+            return egui_tiles::UiResponse::None;
+        }
         // Each workspace carries its own browser, so two games side by side can
         // be browsed independently rather than sharing one panel that
         // retargets as focus moves.

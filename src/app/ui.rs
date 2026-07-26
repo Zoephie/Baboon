@@ -14,6 +14,7 @@ mod settings;
 mod shell;
 mod kit_tiles;
 mod tag_pane;
+mod welcome;
 mod tag_tiles;
 mod tool_commands;
 
