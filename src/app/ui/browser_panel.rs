@@ -23,12 +23,7 @@ impl Baboon {
         ui.push_id(salt, |ui| self.draw_kit_browser_inner(ui, ctx, kit_index));
     }
 
-    fn draw_kit_browser_inner(
-        &mut self,
-        ui: &mut Ui,
-        ctx: &egui::Context,
-        kit_index: usize,
-    ) {
+    fn draw_kit_browser_inner(&mut self, ui: &mut Ui, ctx: &egui::Context, kit_index: usize) {
         // This kit's own source, not `source()` — that reads the *active* kit,
         // so in a split every browser drew the focused kit's banner and the
         // header flickered between games as the cursor moved between panes.
@@ -91,20 +86,20 @@ impl Baboon {
                 );
             }
             ui.add_space(6.0);
-            ui.horizontal(|ui| {
+            // Wrapped, and with the toolbar visuals hoisted out of the two
+            // scopes that used to group these buttons. A scope is placed as one
+            // unit, so grouped buttons could only wrap in blocks — and the
+            // widest block became the sidebar's minimum width. Individually
+            // wrapping buttons let the panel shrink to a single button.
+            ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing.x = 4.0;
-                let groups_btn = ui.scope(|ui| {
-                    ui.visuals_mut().widgets.inactive.bg_fill = browser_toolbar_bg();
-                    ui.visuals_mut().widgets.hovered.bg_fill = browser_toolbar_active();
-                    ui.visuals_mut().widgets.active.bg_fill = browser_toolbar_active();
+                ui.visuals_mut().widgets.inactive.bg_fill = browser_toolbar_bg();
+                ui.visuals_mut().widgets.hovered.bg_fill = browser_toolbar_active();
+                ui.visuals_mut().widgets.active.bg_fill = browser_toolbar_active();
+                let groups_btn = {
                     let folders = ui.add(
                         egui::Button::image_and_text(
-                            button_icon_image(
-                                ui,
-                                ButtonIcon::FolderOpen,
-                                text_dark(),
-                                16.0,
-                            ),
+                            button_icon_image(ui, ButtonIcon::FolderOpen, text_dark(), 16.0),
                             "Folders",
                         )
                         .selected(self.browser_mode == BrowserMode::Folders),
@@ -123,8 +118,7 @@ impl Baboon {
                         self.browser_mode = BrowserMode::Groups;
                     }
                     groups
-                });
-                let groups_btn = groups_btn.inner;
+                };
                 if groups_btn.clicked()
                     && matches!(source.source, TagSource::LooseFolder { .. })
                     && source.all_entries.is_empty()
@@ -132,51 +126,38 @@ impl Baboon {
                 {
                     need_scan = true;
                 }
-                ui.add_space(4.0);
-                ui.scope(|ui| {
-                    ui.visuals_mut().widgets.inactive.bg_fill = browser_toolbar_bg();
-
-                    ui.visuals_mut().widgets.hovered.bg_fill = browser_toolbar_active();
-                    ui.visuals_mut().widgets.active.bg_fill = browser_toolbar_active();
-                    ui.menu_image_button(
-                        button_icon_image(ui, ButtonIcon::Sort, text_dark(), 16.0),
-                        |ui| {
-                            for option in BrowserSort::ALL {
-                                if ui
-                                    .selectable_label(
-                                        self.browser_sort == option,
-                                        option.label(),
-                                    )
-                                    .clicked()
-                                {
-                                    self.browser_sort = option;
-                                    ui.close_menu();
-                                }
+                ui.menu_image_button(
+                    button_icon_image(ui, ButtonIcon::Sort, text_dark(), 16.0),
+                    |ui| {
+                        for option in BrowserSort::ALL {
+                            if ui
+                                .selectable_label(self.browser_sort == option, option.label())
+                                .clicked()
+                            {
+                                self.browser_sort = option;
+                                ui.close_menu();
                             }
-                        },
-                    )
-                    .response
-                    .on_hover_text("Sort");
-                    ui.menu_image_button(
-                        button_icon_image(ui, ButtonIcon::Filter, text_dark(), 16.0),
-                        |ui| {
-                            ui.checkbox(&mut self.show_browser_prefixes, "Show prefixes");
-                        },
-                    )
-                    .response
-                    .on_hover_text("Filter");
-                    ui.menu_image_button(
-                        button_icon_image(ui, ButtonIcon::Other, text_dark(), 16.0),
-                        |ui| {
-                            ui.checkbox(
-                                &mut self.folders_before_tags,
-                                "Folders before tags",
-                            );
-                        },
-                    )
-                    .response
-                    .on_hover_text("Other browser options");
-                });
+                        }
+                    },
+                )
+                .response
+                .on_hover_text("Sort");
+                ui.menu_image_button(
+                    button_icon_image(ui, ButtonIcon::Filter, text_dark(), 16.0),
+                    |ui| {
+                        ui.checkbox(&mut self.show_browser_prefixes, "Show prefixes");
+                    },
+                )
+                .response
+                .on_hover_text("Filter");
+                ui.menu_image_button(
+                    button_icon_image(ui, ButtonIcon::Other, text_dark(), 16.0),
+                    |ui| {
+                        ui.checkbox(&mut self.folders_before_tags, "Folders before tags");
+                    },
+                )
+                .response
+                .on_hover_text("Other browser options");
             });
             if prev_filter_empty
                 && !kit.filter.is_empty()
@@ -198,8 +179,8 @@ impl Baboon {
             // scan) so every tag is visible, not just visited folders.
             let has_all = !source.all_entries.is_empty();
             let groups_mode = matches!(mode, BrowserMode::Groups);
-            let favorite_context = matches!(source.source, TagSource::LooseFolder { .. })
-                .then_some(&favorite_keys);
+            let favorite_context =
+                matches!(source.source, TagSource::LooseFolder { .. }).then_some(&favorite_keys);
             // One-shot "reveal in tree" request (force-open ancestors +
             // scroll). Borrowed into the Copy `Reveal` for the draw.
             let reveal_owned = self.reveal_target.take();
@@ -233,11 +214,7 @@ impl Baboon {
                                 double_click_to_open,
                                 &favorite_keys,
                             );
-                            ui.label(
-                                RichText::new("Indexing tags…")
-                                    .color(subtle_dark())
-                                    .small(),
-                            );
+                            ui.label(RichText::new("Indexing tags…").color(subtle_dark()).small());
                             favorite_action
                         })
                         .inner
@@ -263,9 +240,7 @@ impl Baboon {
                                 &favorite_keys,
                             );
                             if cache.entries.is_empty() {
-                                ui.label(
-                                    RichText::new("No matching tags").color(subtle_dark()),
-                                );
+                                ui.label(RichText::new("No matching tags").color(subtle_dark()));
                                 return favorite_action;
                             }
                             // Empty filter → tree renders every (already
@@ -304,8 +279,7 @@ impl Baboon {
                         );
                         let tree_action = match mode {
                             BrowserMode::Folders => {
-                                if let TagSource::LooseFolder { root, .. } = &source.source
-                                {
+                                if let TagSource::LooseFolder { root, .. } = &source.source {
                                     let root = root.clone();
                                     draw_tree_lazy(
                                         ui,
