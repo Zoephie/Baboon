@@ -35,7 +35,7 @@ pub(super) fn draw_recent_folders_menu(ui: &mut Ui, recents: &[PathBuf]) -> Opti
                 ui.close_menu();
             }
             if ui
-                .add(egui::Button::new("✕").min_size(Vec2::splat(18.0)))
+                .add(egui::Button::new("×").min_size(Vec2::splat(18.0)))
                 .on_hover_text("Remove from recent folders")
                 .clicked()
             {

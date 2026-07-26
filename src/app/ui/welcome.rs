@@ -140,7 +140,7 @@ impl Baboon {
                                 .unwrap_or_default();
                             ui.horizontal(|ui| {
                                 if ui
-                                    .add(egui::Button::new("✕").small().frame(false))
+                                    .add(egui::Button::new("×").small().frame(false))
                                     .on_hover_text("Remove from recent folders")
                                     .clicked()
                                 {
