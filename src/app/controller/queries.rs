@@ -26,6 +26,7 @@ impl Baboon {
                     .then(|| format!("No tag field values contain \"{query}\"."));
                 self.status = format!("Field search for \"{query}\": {} match(es)", entries.len());
                 self.query_results = Some(TagQueryResults {
+                    kit: self.active_kit_id(),
                     title: format!("Field value '{query}' ({})", entries.len()),
                     entries,
                     annotations,

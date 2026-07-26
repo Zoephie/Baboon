@@ -3652,6 +3652,7 @@ impl Baboon {
         };
         let (children, children_unavailable) = self.children_of_entry(key);
         self.content_explorer = Some(ContentExplorer {
+            kit: self.active_kit_id(),
             focus,
             parents,
             children,
@@ -3742,6 +3743,7 @@ impl Baboon {
                     .is_empty()
                     .then(|| "No other tags reference this tag.".to_owned());
                 self.query_results = Some(TagQueryResults {
+                    kit: self.active_kit_id(),
                     title,
                     entries,
                     annotations: Vec::new(),
@@ -3751,6 +3753,7 @@ impl Baboon {
             }
             None => {
                 self.query_results = Some(TagQueryResults {
+                    kit: self.active_kit_id(),
                     title,
                     entries: Vec::new(),
                     annotations: Vec::new(),
@@ -3774,6 +3777,13 @@ impl Baboon {
                 ctx.request_repaint();
             }
         }
+        // A glow belongs to the kit whose tag it is; drop it once that kit is
+        // gone rather than glowing a field in another game.
+        if let Some(nav) = &self.field_nav
+            && self.kit_index(nav.kit).is_none()
+        {
+            self.field_nav = None;
+        }
         if let Some(hit) = self.pending_find_jump.clone() {
             if self.kits[self.active].selected_key.as_deref() == Some(hit.tag_key.as_str())
                 && self.kits[self.active].parsed_tags.contains_key(&hit.tag_key)
@@ -3784,11 +3794,17 @@ impl Baboon {
         let Some(jump) = self.pending_ref_jump.clone() else {
             return;
         };
+        // The jump belongs to the kit it was queued from; if that kit closed
+        // while the referrer was loading, drop it.
+        let Some(kit) = self.kit_index(jump.kit) else {
+            self.pending_ref_jump = None;
+            return;
+        };
         // Wait until the referrer is the focused tab and finished loading.
-        if self.kits[self.active].selected_key.as_deref() != Some(jump.tag_key.as_str()) {
+        if self.kits[kit].selected_key.as_deref() != Some(jump.tag_key.as_str()) {
             return;
         }
-        let Some(doc) = self.kits[self.active].parsed_tags.get(&jump.tag_key) else {
+        let Some(doc) = self.kits[kit].parsed_tags.get(&jump.tag_key) else {
             return; // still loading — retry next frame
         };
         let mut refs = Vec::new();
@@ -3840,6 +3856,7 @@ impl Baboon {
             ctx.data_mut(|data| data.insert_temp(jump_target_id(), block));
         }
         self.field_nav = Some(FieldNav {
+            kit: self.active_kit_id(),
             tag_key: tag_key.to_owned(),
             field_path: field_path.to_owned(),
             glow_until: ctx.input(|input| input.time) + 2.5,
@@ -3919,6 +3936,7 @@ impl Baboon {
                     .is_empty()
                     .then(|| "Every tag is referenced by at least one other tag.".to_owned());
                 self.query_results = Some(TagQueryResults {
+                    kit: self.active_kit_id(),
                     title: format!("Unreferenced tags ({})", entries.len()),
                     entries,
                     annotations: Vec::new(),
@@ -3928,6 +3946,7 @@ impl Baboon {
             }
             None => {
                 self.query_results = Some(TagQueryResults {
+                    kit: self.active_kit_id(),
                     title: "Unreferenced tags".to_owned(),
                     entries: Vec::new(),
                     annotations: Vec::new(),
@@ -3944,6 +3963,7 @@ impl Baboon {
     pub(super) fn show_map_ids(&mut self) {
         let Some(source) = self.source() else {
             self.query_results = Some(TagQueryResults {
+                kit: self.active_kit_id(),
                 title: "Scenario map IDs".to_owned(),
                 entries: Vec::new(),
                 annotations: Vec::new(),
@@ -3981,6 +4001,7 @@ impl Baboon {
                 .to_owned()
         });
         self.query_results = Some(TagQueryResults {
+            kit: self.active_kit_id(),
             title: format!("Scenario map IDs ({})", entries.len()),
             entries,
             annotations,
@@ -4022,6 +4043,7 @@ impl Baboon {
         let title = "Sounds by class";
         let Some(mut rows) = self.scan_sound_tags() else {
             self.query_results = Some(TagQueryResults {
+                kit: self.active_kit_id(),
                 title: title.to_owned(),
                 entries: Vec::new(),
                 annotations: Vec::new(),
@@ -4060,6 +4082,7 @@ impl Baboon {
             Some(format!("{} class(es) \u{2014} {summary}", counts.len()))
         };
         self.query_results = Some(TagQueryResults {
+            kit: self.active_kit_id(),
             title: format!("{title} ({})", entries.len()),
             entries,
             annotations,
@@ -4074,6 +4097,7 @@ impl Baboon {
         let title = "Uncompressed sounds";
         let Some(rows) = self.scan_sound_tags() else {
             self.query_results = Some(TagQueryResults {
+                kit: self.active_kit_id(),
                 title: title.to_owned(),
                 entries: Vec::new(),
                 annotations: Vec::new(),
@@ -4096,6 +4120,7 @@ impl Baboon {
             .is_empty()
             .then(|| "No uncompressed sound tags found.".to_owned());
         self.query_results = Some(TagQueryResults {
+            kit: self.active_kit_id(),
             title: format!("{title} ({})", entries.len()),
             entries,
             annotations,
@@ -4114,6 +4139,7 @@ impl Baboon {
         self.browser_mode = BrowserMode::Folders;
         self.kits[self.active].selected_key = Some(entry.key.clone());
         self.reveal_target = Some(RevealRequest {
+            kit: self.active_kit_id(),
             key: entry.key.clone(),
             ancestors: browser::ancestor_labels(&entry.display_path),
         });
@@ -4162,6 +4188,7 @@ impl Baboon {
                 entries.len()
             );
             self.query_results = Some(TagQueryResults {
+                kit: self.active_kit_id(),
                 title: format!("Field value '{display}' ({})", entries.len()),
                 entries,
                 annotations,
@@ -4521,6 +4548,7 @@ impl Baboon {
             .is_empty()
             .then(|| "No tags with this keyword are in the current source.".to_owned());
         self.query_results = Some(TagQueryResults {
+            kit: self.active_kit_id(),
             title: format!("Tags tagged '{keyword}' ({})", entries.len()),
             entries,
             annotations: Vec::new(),

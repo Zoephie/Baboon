@@ -52,6 +52,7 @@ impl Baboon {
         // Indexed directly rather than through `source_mut()`: the block
         // below also borrows `self.kits[kit_index].filter`, `self.kits[kit_index].filter_cache`, and
         // `self.status`, and a method call would borrow all of `self`.
+        let kit_id = self.kits[kit_index].id;
         let kit = &mut self.kits[kit_index];
         if let Some(source) = kit.source.as_mut() {
             ui.add_space(8.0);
@@ -183,7 +184,14 @@ impl Baboon {
                 matches!(source.source, TagSource::LooseFolder { .. }).then_some(&favorite_keys);
             // One-shot "reveal in tree" request (force-open ancestors +
             // scroll). Borrowed into the Copy `Reveal` for the draw.
-            let reveal_owned = self.reveal_target.take();
+            //
+            // Only this kit's browser may consume it: with two browsers on
+            // screen, whichever drew first would otherwise swallow a reveal
+            // meant for the other and scroll to a tag it does not have.
+            let reveal_owned = match &self.reveal_target {
+                Some(request) if request.kit == kit_id => self.reveal_target.take(),
+                _ => None,
+            };
             let reveal = reveal_owned.as_ref().map(|request| Reveal {
                 key: request.key.as_str(),
                 remaining: request.ancestors.as_slice(),

@@ -348,6 +348,7 @@ impl Baboon {
                             ui.close_menu();
                             if let Some(key) = self.kits[self.active].selected_key.clone() {
                                 self.tag_diff = Some(TagDiffState {
+                                    kit: self.active_kit_id(),
                                     a_key: key,
                                     b_key: None,
                                     b_display: None,

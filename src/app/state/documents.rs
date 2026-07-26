@@ -334,6 +334,8 @@ pub(in crate::app) struct TagFieldDiff {
 /// State for the "Compare Tags" window: tag A (fixed to the launch tag), the
 /// chosen tag B, and the computed diff (once "Compare" is clicked).
 pub(in crate::app) struct TagDiffState {
+    /// The kit both tags are read from.
+    pub(in crate::app) kit: KitId,
     pub(in crate::app) a_key: String,
     /// Open-tab key of tag B (when B is an open tag); `None` when B was picked
     /// from disk (then `results`/`b_display` are set directly).

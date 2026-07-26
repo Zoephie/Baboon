@@ -9,7 +9,14 @@ impl Baboon {
             return;
         }
         let expert_mode = self.expert_mode;
-        let Some(catalog) = self.kits[self.active]
+        // The catalog has to come from the kit the picker was opened from, the
+        // same kit its selection is applied to — otherwise it would offer
+        // another game's tags to pick from.
+        let picker_kit = self
+            .tag_reference_picker_kit
+            .and_then(|kit| self.resolve_kit(kit))
+            .unwrap_or(self.active);
+        let Some(catalog) = self.kits[picker_kit]
             .source
             .as_ref()
             .and_then(|source| tag_reference_catalog_for_source(source, expert_mode))
@@ -52,11 +59,7 @@ impl Baboon {
                 .tag_reference_picker
                 .take()
                 .expect("picker remains open while processing selection");
-            // The kit the picker was opened from, not whichever is active now.
-            let kit = self
-                .tag_reference_picker_kit
-                .and_then(|kit| self.resolve_kit(kit))
-                .unwrap_or(self.active);
+            let kit = picker_kit;
             if let Some(doc) = self.kits[kit].parsed_tags.get_mut(&picker.tag_key) {
                 doc.journal.begin_edit(&doc.tag, "Change tag reference");
                 if let Some(status) = apply_pending_edits(
@@ -100,6 +103,12 @@ impl Baboon {
         }
         let mut open = true;
         let mut act: Option<ExplorerAct> = None;
+        let explorer_kit = self
+            .content_explorer
+            .as_ref()
+            .map(|explorer| explorer.kit)
+            .expect("checked above");
+        let explorer_kit_index = self.resolve_kit(explorer_kit).unwrap_or(self.active);
         let mut filter = self
             .content_explorer
             .as_ref()
@@ -149,7 +158,7 @@ impl Baboon {
                             .color(text_dark()),
                     );
                     if explorer.index_unavailable {
-                        let note = if self.building_reverse_dependencies || self.kits[self.active].scanning_entries {
+                        let note = if self.building_reverse_dependencies || self.kits[explorer_kit_index].scanning_entries {
                             "Reference index is building — reopen this in a moment."
                         } else {
                             "Reference index unavailable — run Tools → Build Reference Index."
@@ -226,6 +235,12 @@ impl Baboon {
             explorer.filter = filter;
         }
         match act {
+            // The graph belongs to one kit; go back to it before acting, and
+            // close the window if that kit has gone.
+            Some(_) if !self.focus_navigation_kit(explorer_kit) => {
+                self.content_explorer = None;
+                self.status = "That workspace has been closed".to_owned();
+            }
             Some(ExplorerAct::Navigate(entry)) => self.content_explorer_navigate(entry),
             Some(ExplorerAct::Back) => self.content_explorer_back(),
             Some(ExplorerAct::Forward) => self.content_explorer_forward(),
@@ -267,7 +282,8 @@ impl Baboon {
         let Some(mut state) = self.tag_diff.take() else {
             return;
         };
-        let a_group = self.kits[self.active]
+        let diff_kit = self.kit_index(state.kit).unwrap_or(self.active);
+        let a_group = self.kits[diff_kit]
             .parsed_tags
             .get(&state.a_key)
             .map(|doc| doc.tag.group().tag);
@@ -290,12 +306,14 @@ impl Baboon {
                         .clone()
                         .map(|k| k.replace('\\', "/"))
                         .unwrap_or_else(|| "(open tag)".to_owned());
-                    let mut keys: Vec<String> = self.kits[self.active]
+                    // Candidates for tag B come from the same kit as tag A —
+                    // comparing across games would diff two different schemas.
+                    let mut keys: Vec<String> = self.kits[diff_kit]
                         .parsed_tags
                         .keys()
                         .filter(|k| {
                             **k != state.a_key
-                                && self.kits[self.active].parsed_tags.get(*k).map(|d| d.tag.group().tag) == a_group
+                                && self.kits[diff_kit].parsed_tags.get(*k).map(|d| d.tag.group().tag) == a_group
                         })
                         .cloned()
                         .collect();
@@ -409,8 +427,8 @@ impl Baboon {
             if let Some(b_key) = state.b_key.clone() {
                 let names = TagNameIndex::default();
                 let diff = match (
-                    self.kits[self.active].parsed_tags.get(&state.a_key),
-                    self.kits[self.active].parsed_tags.get(&b_key),
+                    self.kits[diff_kit].parsed_tags.get(&state.a_key),
+                    self.kits[diff_kit].parsed_tags.get(&b_key),
                 ) {
                     (Some(a), Some(b)) => Some(diff_tags(&a.tag, &b.tag, &names, 5000)),
                     _ => None,
@@ -435,7 +453,7 @@ impl Baboon {
                     let definitions_root = self.source_definitions_root();
                     match crate::source::read_tag_at_path(&path, game, definitions_root, group) {
                         Ok(b_tag) => {
-                            if let Some(a) = self.kits[self.active].parsed_tags.get(&state.a_key) {
+                            if let Some(a) = self.kits[diff_kit].parsed_tags.get(&state.a_key) {
                                 let names = TagNameIndex::default();
                                 let (diffs, truncated) = diff_tags(&a.tag, &b_tag, &names, 5000);
                                 state.b_key = None;
@@ -624,6 +642,17 @@ impl Baboon {
                 self.ref_jump_expanded.insert(index);
             }
         }
+        // Every row names a tag in the kit the query ran against, so go back to
+        // that kit before acting. If it has closed the row is inert rather than
+        // opening some unrelated tag that happens to share the key.
+        let acting = to_jump.is_some() || to_open.is_some() || to_reveal.is_some();
+        if acting && !self.focus_navigation_kit(results.kit) {
+            self.status = "That workspace has been closed".to_owned();
+            if open {
+                self.query_results = Some(results);
+            }
+            return;
+        }
         if let Some((key, field_path)) = to_jump {
             // The referrer is already loaded (we walked it for occurrences), so
             // focus it and navigate to the exact field directly.
@@ -635,6 +664,7 @@ impl Baboon {
             // the referrer that points at X (resolved once the tag loads).
             if let Some((group_tag, rel_path)) = &results.ref_target {
                 self.pending_ref_jump = Some(PendingRefJump {
+                    kit: self.active_kit_id(),
                     tag_key: key.clone(),
                     group_tag: *group_tag,
                     rel_path: rel_path.clone(),

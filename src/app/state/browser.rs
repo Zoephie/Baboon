@@ -61,6 +61,10 @@ pub(in crate::app) struct RenameTagState {
 /// Results of a tag query (find-references / unreferenced), shown in a floating
 /// results window. Each entry is clickable to open the tag.
 pub(in crate::app) struct TagQueryResults {
+    /// The kit the query ran against. Its rows name tags in that kit, so
+    /// opening one has to go back to it rather than to whichever kit is
+    /// active by the time the row is clicked.
+    pub(in crate::app) kit: KitId,
     pub(in crate::app) title: String,
     pub(in crate::app) entries: Vec<TagEntry>,
     /// Optional per-entry annotation (parallel to `entries`), e.g. the map id.
@@ -87,6 +91,8 @@ pub(in crate::app) struct RefOccurrence {
 /// referencing `(group_tag, rel_path)` and hands off to a [`FieldNav`].
 #[derive(Clone)]
 pub(in crate::app) struct PendingRefJump {
+    /// The kit the referring tag belongs to.
+    pub(in crate::app) kit: KitId,
     pub(in crate::app) tag_key: String,
     pub(in crate::app) group_tag: u32,
     pub(in crate::app) rel_path: String,
@@ -97,6 +103,8 @@ pub(in crate::app) struct PendingRefJump {
 /// seconds). Element selection along the path and the scroll target are set once
 /// via egui temp-data when the nav is created.
 pub(in crate::app) struct FieldNav {
+    /// The kit holding the tag being navigated.
+    pub(in crate::app) kit: KitId,
     pub(in crate::app) tag_key: String,
     /// Exact indexed field path, e.g. `custom references[3]/sounds[1]/melee sound`.
     pub(in crate::app) field_path: String,
@@ -119,6 +127,8 @@ pub(in crate::app) struct DraggedTagRef {
 /// `ancestors` (root→parent labels) and scroll the entry `key` into view.
 /// Consumed (taken) during the browser draw.
 pub(in crate::app) struct RevealRequest {
+    /// The kit whose browser should reveal it.
+    pub(in crate::app) kit: KitId,
     pub(in crate::app) key: String,
     pub(in crate::app) ancestors: Vec<String>,
 }
@@ -127,6 +137,8 @@ pub(in crate::app) struct RevealRequest {
 /// and what it references (children). Navigating to a parent/child re-centers
 /// and records back/forward history.
 pub(in crate::app) struct ContentExplorer {
+    /// The kit whose reference graph this is.
+    pub(in crate::app) kit: KitId,
     pub(in crate::app) focus: TagEntry,
     pub(in crate::app) parents: Vec<TagEntry>,
     pub(in crate::app) children: Vec<TagEntry>,

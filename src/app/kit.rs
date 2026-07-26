@@ -224,6 +224,21 @@ impl Baboon {
         (self.kits[index].generation == stamp.generation).then_some(index)
     }
 
+    /// Focus the kit a piece of navigation state belongs to, before acting on
+    /// it. Navigation names tags by key, and a key only means something within
+    /// its own kit — so a jump, reveal, or results row has to return to the kit
+    /// it came from. Returns false when that kit has closed, in which case the
+    /// navigation is dropped rather than applied to whichever kit is active.
+    pub(super) fn focus_navigation_kit(&mut self, kit: KitId) -> bool {
+        match self.kit_index(kit) {
+            Some(index) => {
+                self.active = index;
+                true
+            }
+            None => false,
+        }
+    }
+
     /// Resolve a kit id to its index, ignoring generation. For results that
     /// stay valid across a source reload, such as a parsed document.
     pub(super) fn resolve_kit(&self, kit: KitId) -> Option<usize> {
