@@ -48,7 +48,6 @@ impl Baboon {
                                 .color(subtle_dark()),
                         );
                     });
-                    ui.label(RichText::new("Halo tag editor").color(subtle_dark()));
                     ui.add_space(30.0);
 
                     // `Ui::link` carries the pointing-hand cursor and the
