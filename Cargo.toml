@@ -18,7 +18,7 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow = "1"
-blam-tags = { git = "https://github.com/camden-smallwood/blam-tags", rev = "6bb5842ef8a9af843e47ad744aecdc360b53cf1a", features = ["audio", "iostore"] }
+blam-tags = { git = "https://github.com/camden-smallwood/blam-tags", rev = "95c831ea159751b59fb0ed5b4dc3ae552a90002f", features = ["audio", "iostore"] }
 eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }
 egui_extras = { version = "0.29", features = ["svg"] }
 flate2 = "1"
