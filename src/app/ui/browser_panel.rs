@@ -103,20 +103,20 @@ impl Baboon {
                             button_icon_image(ui, ButtonIcon::FolderOpen, text_dark(), 16.0),
                             "Folders",
                         )
-                        .selected(self.browser_mode == BrowserMode::Folders),
+                        .selected(kit.browser_mode == BrowserMode::Folders),
                     );
                     if folders.clicked() {
-                        self.browser_mode = BrowserMode::Folders;
+                        kit.browser_mode = BrowserMode::Folders;
                     }
                     let groups = ui.add(
                         egui::Button::image_and_text(
                             button_icon_image(ui, ButtonIcon::Group, text_dark(), 16.0),
                             "Groups",
                         )
-                        .selected(self.browser_mode == BrowserMode::Groups),
+                        .selected(kit.browser_mode == BrowserMode::Groups),
                     );
                     if groups.clicked() {
-                        self.browser_mode = BrowserMode::Groups;
+                        kit.browser_mode = BrowserMode::Groups;
                     }
                     groups
                 };
@@ -132,10 +132,10 @@ impl Baboon {
                     |ui| {
                         for option in BrowserSort::ALL {
                             if ui
-                                .selectable_label(self.browser_sort == option, option.label())
+                                .selectable_label(kit.browser_sort == option, option.label())
                                 .clicked()
                             {
-                                self.browser_sort = option;
+                                kit.browser_sort = option;
                                 ui.close_menu();
                             }
                         }
@@ -171,7 +171,7 @@ impl Baboon {
             ui.add_space(4.0);
             let selected = kit.selected_key.clone();
             let filter = kit.filter.trim().to_owned();
-            let mode = self.browser_mode;
+            let mode = kit.browser_mode;
             let show_prefixes = self.show_browser_prefixes;
             let folders_before_tags = self.folders_before_tags;
             let double_click_to_open = self.double_click_to_open_tags;
@@ -196,7 +196,7 @@ impl Baboon {
                 key: request.key.as_str(),
                 remaining: request.ancestors.as_slice(),
             });
-            let sort = self.browser_sort;
+            let sort = kit.browser_sort;
             let action = if !filter.is_empty() {
                 // Active search: render a *pruned* tree containing only
                 // the matching tags, with folders collapsed so the user

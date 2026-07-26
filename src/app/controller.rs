@@ -2033,6 +2033,8 @@ impl Baboon {
             source_path,
             game: source.game.clone(),
             project_path: kit.campaign_project.as_ref().map(|project| project.path.clone()),
+            browser_mode: Some(kit.browser_mode),
+            browser_sort: Some(kit.browser_sort),
             tags,
         })
     }
@@ -2049,6 +2051,8 @@ impl Baboon {
             source_kind,
             source_path,
             project_path,
+            browser_mode,
+            browser_sort,
             tags,
         } in kits
         {
@@ -2079,6 +2083,15 @@ impl Baboon {
             // The loaders route to a kit and leave it active, so this stages
             // the tags on the kit the load will land in.
             self.kits[self.active].pending_restore_tags = tags;
+            // Its browser view is staged the same way: `install_loaded_source`
+            // carries it across the load rather than resetting it, so each
+            // workspace comes back in the view it was left in.
+            if let Some(mode) = browser_mode {
+                self.kits[self.active].browser_mode = mode;
+            }
+            if let Some(sort) = browser_sort {
+                self.kits[self.active].browser_sort = sort;
+            }
             // Its project is queued the same way, and opens once the source
             // this session recorded has finished mounting.
             if let Some(project_path) = project_path {
@@ -4136,7 +4149,7 @@ impl Baboon {
             return;
         };
         self.kits[self.active].filter.clear();
-        self.browser_mode = BrowserMode::Folders;
+        self.kits[self.active].browser_mode = BrowserMode::Folders;
         self.kits[self.active].selected_key = Some(entry.key.clone());
         self.reveal_target = Some(RevealRequest {
             kit: self.active_kit_id(),
@@ -4655,8 +4668,10 @@ impl Baboon {
 
     pub(super) fn current_prefs(&self) -> GuiPrefs {
         GuiPrefs {
-            browser_mode: self.browser_mode,
-            browser_sort: self.browser_sort,
+            // The focused workspace's view is what a new one is seeded with,
+            // so a single-workspace session remembers its choice as before.
+            browser_mode: self.kits[self.active].browser_mode,
+            browser_sort: self.kits[self.active].browser_sort,
             show_browser_prefixes: self.show_browser_prefixes,
             folders_before_tags: self.folders_before_tags,
             double_click_to_open_tags: self.double_click_to_open_tags,

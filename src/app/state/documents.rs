@@ -125,6 +125,10 @@ pub(in crate::app) struct LastSessionKit {
     pub(in crate::app) source_path: PathBuf,
     pub(in crate::app) game: Option<String>,
     pub(in crate::app) project_path: Option<PathBuf>,
+    /// The browser view this kit was in, or `None` when the session predates
+    /// per-kit views — the restored kit then falls back to the saved default.
+    pub(in crate::app) browser_mode: Option<BrowserMode>,
+    pub(in crate::app) browser_sort: Option<BrowserSort>,
     pub(in crate::app) tags: Vec<LastSessionTag>,
 }
 
@@ -138,6 +142,10 @@ pub(in crate::app) struct RestoreKit {
     pub(in crate::app) source_kind: LastSessionSourceKind,
     pub(in crate::app) source_path: PathBuf,
     pub(in crate::app) project_path: Option<PathBuf>,
+    /// The browser view this kit was in, or `None` when the session predates
+    /// per-kit views — the restored kit then falls back to the saved default.
+    pub(in crate::app) browser_mode: Option<BrowserMode>,
+    pub(in crate::app) browser_sort: Option<BrowserSort>,
     pub(in crate::app) tags: Vec<LastSessionTag>,
 }
 
@@ -154,6 +162,10 @@ pub(in crate::app) struct LastOpenedWindowsKit {
     pub(in crate::app) game: Option<String>,
     pub(in crate::app) source_available: bool,
     pub(in crate::app) project_path: Option<PathBuf>,
+    /// The browser view this kit was in, or `None` when the session predates
+    /// per-kit views — the restored kit then falls back to the saved default.
+    pub(in crate::app) browser_mode: Option<BrowserMode>,
+    pub(in crate::app) browser_sort: Option<BrowserSort>,
     pub(in crate::app) entries: Vec<LastOpenedWindowEntry>,
 }
 
@@ -210,6 +222,8 @@ impl LastOpenedWindowsKit {
             game: saved.game,
             source_available,
             project_path: saved.project_path,
+            browser_mode: saved.browser_mode,
+            browser_sort: saved.browser_sort,
             entries,
         })
     }
@@ -253,6 +267,8 @@ impl LastOpenedWindowsPrompt {
                     source_kind: kit.source_kind,
                     source_path: kit.source_path.clone(),
                     project_path: kit.project_path.clone(),
+                    browser_mode: kit.browser_mode,
+                    browser_sort: kit.browser_sort,
                     tags,
                 })
             })

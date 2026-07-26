@@ -150,16 +150,18 @@ pub(in crate::app) struct ContentExplorer {
     pub(in crate::app) forward: Vec<TagEntry>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub(in crate::app) enum BrowserMode {
+    #[default]
     Folders,
     Groups,
 }
 
 /// Ordering of tags within a browser folder/group node.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Default, Debug)]
 pub(in crate::app) enum BrowserSort {
     /// Filesystem / natural order (as built).
+    #[default]
     Natural,
     /// By filename, A→Z.
     Name,

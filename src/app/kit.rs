@@ -87,6 +87,14 @@ pub(super) struct Kit {
     pub(super) field_search_applied: HashMap<String, String>,
 
     // --- Browser and index state ---
+    /// How this kit's browser lists tags, and in what order. Per kit because
+    /// the useful view differs by game — a folder-organized editing kit reads
+    /// best as Folders while a container source reads best as Groups — and two
+    /// browsers are on screen at once in a split. New kits start from the
+    /// saved [`Baboon::default_browser_mode`], so a single workspace behaves
+    /// exactly as it did when this was one application-wide setting.
+    pub(super) browser_mode: BrowserMode,
+    pub(super) browser_sort: BrowserSort,
     pub(super) filter: String,
     pub(super) filter_cache: FilterCache,
     /// Bumped whenever this kit's source or its `all_entries` set is replaced,
@@ -145,6 +153,8 @@ impl Kit {
             ce_sound_bindings: HashMap::new(),
             field_search: HashMap::new(),
             field_search_applied: HashMap::new(),
+            browser_mode: BrowserMode::default(),
+            browser_sort: BrowserSort::default(),
             filter: String::new(),
             filter_cache: FilterCache::default(),
             generation: 0,
@@ -266,12 +276,24 @@ impl Baboon {
         id
     }
 
+    /// Build an empty kit carrying a fresh id and the application defaults,
+    /// including the browser view a new workspace opens in. Every kit is made
+    /// here so no path can miss the seeding and open in the wrong view.
+    fn empty_kit(&mut self) -> Kit {
+        let id = self.next_kit_id();
+        Kit {
+            browser_mode: self.default_browser_mode,
+            browser_sort: self.default_browser_sort,
+            ..Kit::empty(id, self.default_names.clone())
+        }
+    }
+
     /// Add an empty kit and make it active. The next load installs into it,
     /// so "open another game" is add-then-load rather than a separate path.
     pub(super) fn add_kit(&mut self) -> KitId {
-        let id = self.next_kit_id();
-        let names = self.default_names.clone();
-        self.kits.push(Kit::empty(id, names));
+        let kit = self.empty_kit();
+        let id = kit.id;
+        self.kits.push(kit);
         self.active = self.kits.len() - 1;
         id
     }
@@ -285,9 +307,8 @@ impl Baboon {
         };
         self.kits.remove(index);
         if self.kits.is_empty() {
-            let id = self.next_kit_id();
-            let names = self.default_names.clone();
-            self.kits.push(Kit::empty(id, names));
+            let kit = self.empty_kit();
+            self.kits.push(kit);
         }
         self.active = active_after_removal(self.active, index, self.kits.len());
     }
@@ -342,10 +363,17 @@ impl Baboon {
         let pending_restore_tags = std::mem::take(&mut self.kits[index].pending_restore_tags);
         let pending_campaign_project =
             std::mem::take(&mut self.kits[index].pending_campaign_project);
+        // The browser view belongs to the workspace, not to the source in it:
+        // reloading a kit — or restoring one, which stages the saved view
+        // before the load lands — must not snap it back to the default.
+        let browser_mode = self.kits[index].browser_mode;
+        let browser_sort = self.kits[index].browser_sort;
         self.kits[index] = Kit {
             source: Some(source),
             names,
             requested_path,
+            browser_mode,
+            browser_sort,
             pending_restore_tags,
             pending_campaign_project,
             ..Kit::empty(id, self.default_names.clone())
