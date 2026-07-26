@@ -301,6 +301,13 @@ pub(in crate::app) struct FieldEditContext<'a> {
     /// Selected localized sound language (`None` = default), for the player's
     /// language selector + `data_<lang>\` extraction routing.
     pub(in crate::app) sound_language: Option<&'a str>,
+    /// Campaign Evolved only: the Wwise media this `sound` tag resolves to,
+    /// already walked out through its package imports. `None` for every other
+    /// game; `Some` but empty for a tag that binds to no event.
+    pub(in crate::app) ce_sound: Option<&'a crate::source::ce_audio::CeSoundBinding>,
+    /// The container source's `Paks` directory, where the legacy `.pak`
+    /// containers holding Campaign Evolved's Wwise media live.
+    pub(in crate::app) ce_paks_root: Option<&'a Path>,
     /// Set when the user clicks "Import" on a geometry tag-reference row.
     pub(in crate::app) tool_import: &'a mut Option<ToolImportRequest>,
     /// Set when the user clicks "Reimport" on a bitmap tag.

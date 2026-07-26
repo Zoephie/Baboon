@@ -277,6 +277,14 @@ pub struct Baboon {
     block_confirm: Option<BlockConfirm>,
     /// Sound-tag audition: FMOD bank playback (rodio output + bank cache).
     audio: audio::AudioState,
+    /// Campaign Evolved sound tags name no audio themselves; the media is found
+    /// by walking package imports out to a Wwise event. That walk reads several
+    /// packages, so the result is cached per tag key rather than redone per
+    /// frame. Cleared when the source changes.
+    ce_sound_bindings: HashMap<String, Arc<crate::source::ce_audio::CeSoundBinding>>,
+    /// The bundled UE reflection mappings, parsed once on first use — needed to
+    /// decode a cooked `AkAudioEvent`.
+    ce_usmap: Option<Arc<blam_tags::iostore::usmap::Usmap>>,
     /// Pending sound-extraction batch (decode + write), drained by the audio layer.
     pending_sound_extract: Option<ExtractRequest>,
     /// Pending "open referenced tag in a new tab" request.
@@ -488,6 +496,8 @@ impl Baboon {
             pending_session_restore: None,
             block_confirm: None,
             audio: audio::AudioState::default(),
+            ce_sound_bindings: HashMap::new(),
+            ce_usmap: None,
             pending_sound_extract: None,
             pending_open: None,
             tag_reference_picker: None,

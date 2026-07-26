@@ -113,6 +113,9 @@ pub enum TagSource {
         /// Tag-reference → container payload lookup, built at mount time so
         /// resolving a reference agrees with the browser tree by construction.
         index: Arc<ContainerTagIndex>,
+        /// Cooked package-name lookup over the same containers, for following
+        /// UE package imports (Campaign Evolved's audio binding).
+        packages: Arc<ContainerPackageIndex>,
     },
 }
 
@@ -159,6 +162,58 @@ impl ContainerTagIndex {
         self.by_key
             .get(&container_ref_key(group_tag, reference))
             .map(|(c, p)| (*c, p.as_str()))
+    }
+}
+
+/// Maps a cooked UE package name (`/Game/...`, lowercased) to the container
+/// payload holding it.
+///
+/// [`ContainerTagIndex`] only covers `.ubulk` tag payloads, which is all the
+/// tag editor needs. Campaign Evolved's audio, though, is reached by following
+/// *package imports* out of a tag's `.uasset` wrapper — tag → `BlamAudioSound`
+/// → `AkAudioEvent` — and those intermediates are ordinary cooked packages with
+/// no tag payload at all. This is the sibling index that makes those hops
+/// resolvable.
+#[derive(Default)]
+pub struct ContainerPackageIndex {
+    by_package: HashMap<String, (usize, String)>,
+}
+
+/// Cooked container path → UE package name, e.g.
+/// `Meteorite/Content/Tags/sound/x-sound.uasset` → `/game/tags/sound/x-sound`.
+/// Returns `None` for anything that isn't a `.uasset` under a `Content/` root.
+pub fn container_package_name(path: &str) -> Option<String> {
+    let normalized = path.replace('\\', "/");
+    let lower = normalized.to_ascii_lowercase();
+    let stem = lower.strip_suffix(".uasset")?;
+    let rest = stem.split_once("/content/").map(|(_, r)| r)?;
+    Some(format!("/game/{rest}"))
+}
+
+impl ContainerPackageIndex {
+    /// Record a cooked package. First insert wins so the mount order that
+    /// already governs tag layering governs packages too.
+    pub fn insert(&mut self, package: String, container: usize, rel_path: String) {
+        self.by_package.entry(package).or_insert((container, rel_path));
+    }
+
+    /// Resolve a `/Game/...` package name (any case) to its container payload.
+    pub fn lookup(&self, package: &str) -> Option<(usize, &str)> {
+        self.by_package
+            .get(&package.to_ascii_lowercase())
+            .map(|(c, p)| (*c, p.as_str()))
+    }
+
+    /// Number of indexed packages. Part of the type's surface and asserted on
+    /// by the container integration tests; the app itself only ever looks up.
+    #[allow(dead_code)]
+    pub fn len(&self) -> usize {
+        self.by_package.len()
+    }
+
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.by_package.is_empty()
     }
 }
 
@@ -387,6 +442,7 @@ struct TreeBuildNode {
 }
 
 /// Loads one self-describing tag file as an isolated source.
+pub mod ce_audio;
 mod editing_kit;
 mod index;
 mod loading;

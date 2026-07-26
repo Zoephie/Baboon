@@ -46,6 +46,14 @@ pub(super) enum ExtractSource {
     Bank { id: Option<u32>, key: String },
     /// Resolve a Wwise event by name (H4), decode, write WAV.
     Event { name: String },
+    /// Decode one already-resolved Campaign Evolved Wwise media file, write
+    /// WAV. Unlike [`ExtractSource::Event`] this needs no prior play: CE's
+    /// media is addressed directly in the legacy `.pak` set rooted at
+    /// `paks_root`, so nothing has to be indexed first.
+    CeMedia {
+        paks_root: PathBuf,
+        media: Box<crate::source::ce_audio::CeSoundMedia>,
+    },
 }
 
 /// A batch of files to extract, queued by the sound-player UI and drained by

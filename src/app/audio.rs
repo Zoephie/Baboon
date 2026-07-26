@@ -125,6 +125,16 @@ pub(super) enum SoundAction {
     /// Play a Wwise event by name (Halo 4). The audio lives in
     /// `<game>/sound/pc/*.pck`; the tag only carries the event name.
     PlayEvent { event_name: String, label: String },
+    /// Play one Campaign Evolved Wwise media file. Unlike Halo 4 the tag names
+    /// no event, so the media is resolved up front by walking package imports
+    /// (see [`crate::source::ce_audio`]) and the already-resolved entry is
+    /// handed here. `paks_root` is the source's `Paks` directory, which holds
+    /// the legacy `.pak` containers the media is staged in.
+    PlayCeMedia {
+        paks_root: std::path::PathBuf,
+        media: Box<crate::source::ce_audio::CeSoundMedia>,
+        label: String,
+    },
     /// Set the playback volume (linear amplitude, 0.0..=1.0). Applies to every
     /// live voice immediately and to all subsequent plays.
     SetVolume(f32),
@@ -234,6 +244,9 @@ pub(super) struct AudioState {
     /// An event queued to play as soon as the in-flight load finishes.
     wwise_deferred: Option<(String, String)>,
     event_cache: HashMap<String, Arc<DecodedPcm>>,
+    /// Campaign Evolved's legacy `.pak` set, opened on first playback. CE media
+    /// is not in IoStore, so this is a separate store from `wwise` above.
+    ce_media: crate::source::ce_audio::CeMediaStore,
     /// Current playback volume (linear, 0.0..=1.0). Held here so it survives
     /// before the engine is lazily created and seeds it on first play.
     volume: Volume,
@@ -349,6 +362,18 @@ impl AudioState {
                         Err(BankError::Decode(e)) => Err(e),
                     },
                 },
+                ExtractSource::CeMedia { paks_root, media } => {
+                    match self.ce_media.decode(&paks_root, &media) {
+                        Ok(pcm) => write_wav_pcm16(
+                            &item.out_path,
+                            &pcm.samples,
+                            pcm.channels,
+                            pcm.sample_rate,
+                        )
+                        .map_err(|e| e.to_string()),
+                        Err(err) => Err(format!("{err:#}")),
+                    }
+                }
                 ExtractSource::Event { name } => match self.wwise.as_ref() {
                     Some(banks) => banks.resolve(&name).and_then(|pcm| {
                         write_wav_pcm16(&item.out_path, &pcm.samples, pcm.channels, pcm.sample_rate)
@@ -536,6 +561,14 @@ impl AudioState {
                     self.start_wwise_load(tags_root, ctx);
                     self.wwise_deferred = Some((event_name, label));
                     self.status = Some("loading sound banks\u{2026}".to_owned());
+                }
+                return;
+            }
+            SoundAction::PlayCeMedia { paks_root, media, label } => {
+                self.wwise_deferred = None; // this playback supersedes any wait
+                match self.ce_media.decode(&paks_root, &media) {
+                    Ok(pcm) => self.play_decoded(&pcm, &label),
+                    Err(err) => self.status = Some(format!("{err:#}")),
                 }
                 return;
             }

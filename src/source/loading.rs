@@ -198,6 +198,8 @@ fn build_container_set(
     let mut seen: HashMap<String, usize> = HashMap::new();
     // Same key → the payload the mount resolved it to, for reference lookups.
     let mut index = ContainerTagIndex::default();
+    // Cooked package names over the same containers, for following UE imports.
+    let mut packages = ContainerPackageIndex::default();
     let mut opened_any = false;
 
     for utoc in utocs {
@@ -215,6 +217,15 @@ fn build_container_set(
         let container_index = containers.len();
         let archive = Arc::new(archive);
         let mut contributed = false;
+        // Packages are only committed once we know the container is kept —
+        // `container_index` is provisional until then, because packs that
+        // contribute no tags are dropped and the next pack reuses the slot.
+        let mut pending_packages: Vec<(String, String)> = Vec::new();
+        for e in archive.entries() {
+            if let Some(pkg) = container_package_name(&e.path) {
+                pending_packages.push((pkg, e.path.clone()));
+            }
+        }
 
         for e in archive.ublock_entries() {
             let Some((tag_name, group_longname)) = parse_ublock_stem(&e.path) else {
@@ -276,6 +287,9 @@ fn build_container_set(
 
         // Only keep packs that actually contributed tags (drops empty stubs).
         if contributed {
+            for (pkg, rel) in pending_packages {
+                packages.insert(pkg, container_index, rel);
+            }
             containers.push(MountedContainer {
                 utoc_path: utoc,
                 chunk_label,
@@ -300,7 +314,12 @@ fn build_container_set(
     let group_tree = build_group_tree(&entries);
     Ok(LoadedSourceData {
         label,
-        source: TagSource::IoStoreContainerSet { root, containers, index: Arc::new(index) },
+        source: TagSource::IoStoreContainerSet {
+            root,
+            containers,
+            index: Arc::new(index),
+            packages: Arc::new(packages),
+        },
         names,
         game: Some(CAMPAIGN_EVOLVED_GAME.to_string()),
         all_entries: Vec::new(),

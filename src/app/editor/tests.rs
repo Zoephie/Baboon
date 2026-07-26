@@ -20,6 +20,111 @@ mod tests {
         assert!(!is_default_pitch_range("pitch range x"));
     }
 
+    /// Campaign Evolved extraction end-to-end (skip-if-absent): resolve a
+    /// sound tag's Wwise media exactly as the player does, run it through
+    /// `AudioState::run_extract`, and validate the WAV that lands on disk.
+    ///
+    /// Run with:
+    ///   CE_PAKS=/path/to/Meteorite/Content/Paks cargo test ce_extract -- --ignored --nocapture
+    #[test]
+    #[ignore = "requires a Campaign Evolved install; set CE_PAKS"]
+    fn ce_extract_writes_a_valid_wav() {
+        use crate::app::audio::AudioState;
+        use crate::app::sound_extract::{ExtractItem, ExtractRequest, ExtractSource};
+        use crate::source::ce_audio::{CeSoundMedia, resolve_sound_binding};
+        use crate::source::{ContainerPackageIndex, MountedContainer, container_package_name};
+        use blam_tags::iostore::{IoStoreArchive, usmap::Usmap};
+        use std::path::PathBuf;
+        use std::sync::Arc;
+
+        let Ok(root) = std::env::var("CE_PAKS") else {
+            eprintln!("skip: CE_PAKS not set");
+            return;
+        };
+        let root = PathBuf::from(root);
+        if !root.exists() {
+            eprintln!("skip: no Campaign Evolved paks at {}", root.display());
+            return;
+        }
+
+        let mut utocs: Vec<PathBuf> = std::fs::read_dir(&root)
+            .expect("read paks dir")
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("utoc")))
+            .filter(|p| !p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("global.utoc")))
+            .collect();
+        utocs.sort();
+
+        let mut containers = Vec::new();
+        let mut packages = ContainerPackageIndex::default();
+        for utoc in utocs {
+            let Ok(archive) = IoStoreArchive::open(&utoc) else { continue };
+            let idx = containers.len();
+            for e in archive.entries() {
+                if let Some(pkg) = container_package_name(&e.path) {
+                    packages.insert(pkg, idx, e.path.clone());
+                }
+            }
+            containers.push(MountedContainer {
+                utoc_path: utoc.clone(),
+                chunk_label: utoc.file_stem().unwrap().to_string_lossy().into_owned(),
+                archive: Arc::new(archive),
+            });
+        }
+
+        let usmap = Usmap::meteorite().expect("bundled usmap");
+        let binding = resolve_sound_binding(
+            &containers,
+            &packages,
+            &usmap,
+            "/Game/Tags/sound/scripted/vo_scr_m02halo/m02_00040_cortana-sound",
+        );
+        assert!(!binding.is_empty(), "no media resolved");
+
+        let shown = binding.language_to_show(None);
+        let media: Vec<CeSoundMedia> =
+            binding.media_for_language(&shown).into_iter().cloned().collect();
+        assert!(!media.is_empty());
+
+        let dir = std::env::temp_dir().join(format!("baboon_ce_extract_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let items: Vec<ExtractItem> = media
+            .iter()
+            .map(|m| ExtractItem {
+                out_path: dir.join(format!("{}.wav", sanitize_component(&m.display_name()))),
+                source: ExtractSource::CeMedia {
+                    paks_root: root.clone(),
+                    media: Box::new(m.clone()),
+                },
+            })
+            .collect();
+        let expected: Vec<PathBuf> = items.iter().map(|i| i.out_path.clone()).collect();
+
+        let mut audio = AudioState::default();
+        audio.run_extract(ExtractRequest {
+            items,
+            tags_root: None,
+            label: "ce extract test".to_owned(),
+        });
+
+        for path in &expected {
+            let bytes = std::fs::read(path)
+                .unwrap_or_else(|e| panic!("{} not written: {e}", path.display()));
+            assert!(bytes.len() > 44, "{} is header-only", path.display());
+            assert_eq!(&bytes[0..4], b"RIFF", "{} is not a RIFF", path.display());
+            assert_eq!(&bytes[8..12], b"WAVE", "{} is not a WAVE", path.display());
+            // Real audio, not a buffer of zeroes.
+            let loud = bytes[44..].chunks_exact(2).any(|s| {
+                i16::from_le_bytes([s[0], s[1]]).unsigned_abs() > 64
+            });
+            assert!(loud, "{} decoded to silence", path.display());
+            println!("wrote {} ({} bytes)", path.display(), bytes.len());
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     /// End-to-end validation of the sound-player glue against real H3 files
     /// (skip-if-absent): extract permutation names exactly as `draw_sound_player`
     /// does, then resolve each against the FMOD banks and decode — the same path

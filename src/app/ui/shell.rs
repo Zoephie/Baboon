@@ -1355,6 +1355,13 @@ impl Baboon {
                     let mut bitmap_reimport_request = None;
                     // Documentation overlay (fetched before borrowing parsed_tags).
                     let def_docs = self.def_docs_for_entry(&entry);
+                    // Campaign Evolved Wwise binding, likewise resolved before
+                    // `parsed_tags` is borrowed for the document.
+                    let ce_sound = self.ce_sound_binding(&selected_key, &entry);
+                    let ce_paks_root = self.source.as_ref().and_then(|s| match &s.source {
+                        TagSource::IoStoreContainerSet { root, .. } => Some(root.as_path()),
+                        _ => None,
+                    });
                     if let Some(doc) = self.parsed_tags.get_mut(&selected_key) {
                         let mut pending = Vec::new();
                         let mut block_ops = Vec::new();
@@ -1417,6 +1424,8 @@ impl Baboon {
                             sound_volume,
                             sound_extract_request: &mut self.pending_sound_extract,
                             sound_language: self.audio.language.as_deref(),
+                            ce_sound: ce_sound.as_deref(),
+                            ce_paks_root,
                             tool_import: &mut self.pending_tool_import,
                             bitmap_reimport: &mut bitmap_reimport,
                             shader_ops: &mut shader_ops,
