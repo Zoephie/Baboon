@@ -305,7 +305,10 @@ impl Baboon {
         // A UE5 `Paks` directory (Halo: Campaign Evolved) is mounted as a
         // container set rather than walked as loose files.
         if let Some(paks) = crate::source::find_paks_dir(&path) {
-            self.begin_load_iostore_container_set_path(paks, ctx);
+            // Remember the folder the user picked, not the container directory
+            // found inside it — the same way a loose kit remembers its root
+            // rather than the `tags/` subfolder it actually scans.
+            self.begin_load_iostore_container_set_path(paks, path, ctx);
             return;
         }
         if self.open_kit_for(&path) {
@@ -412,13 +415,18 @@ impl Baboon {
     }
 
     /// Mounts every container in a `Paks` directory as one merged set.
+    /// Mount every container in `paks_dir`. `requested` is the folder the user
+    /// actually picked — usually the game's install root, with `paks_dir`
+    /// discovered inside it — and is what the kit is remembered and matched by,
+    /// so reopening the install switches to it instead of adding a second kit.
     pub(super) fn begin_load_iostore_container_set_path(
         &mut self,
         paks_dir: PathBuf,
+        requested: PathBuf,
         ctx: egui::Context,
     ) {
-        if self.open_kit_for(&paks_dir) {
-            self.status = format!("Switched to {}", paks_dir.display());
+        if self.open_kit_for(&requested) {
+            self.status = format!("Switched to {}", requested.display());
             return;
         }
         let tx = self.tx.clone();
@@ -426,7 +434,7 @@ impl Baboon {
         let names = self.default_names.clone();
         let definitions_root = locate_definitions_root();
         self.status = format!("Mounting containers in {}", paks_dir.display());
-        let recent_path = clean_recent_path(paks_dir.clone());
+        let recent_path = clean_recent_path(requested);
         thread::spawn(move || {
             let result = load_iostore_container_set(paks_dir, &names, &definitions_root)
                 .map_err(|e| e.to_string());
