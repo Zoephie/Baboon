@@ -103,12 +103,16 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      # Attaches the built archives and nothing else. `generate_release_notes`
+      # is deliberately absent: a tagged release is usually published from a
+      # draft whose notes were written by hand, and generating them here would
+      # replace those with a commit list at the moment the tag is pushed.
+      # Passing no body leaves whatever the release already has.
       - name: Tagged release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*
-          generate_release_notes: true
           fail_on_unmatched_files: true
 
       - name: Dev rolling release
