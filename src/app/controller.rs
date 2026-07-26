@@ -238,8 +238,8 @@ impl Baboon {
                 WorkerMessage::FolderRefactorProgress(progress) => {
                     self.handle_folder_refactor_progress(progress)
                 }
-                WorkerMessage::FolderRefactorFinished(result) => {
-                    self.handle_folder_refactor_finished(result)
+                WorkerMessage::FolderRefactorFinished { stamp, result } => {
+                    self.handle_folder_refactor_finished(stamp, result)
                 }
                 WorkerMessage::FolderConversionProgress(progress) => {
                     self.handle_folder_conversion_progress(progress)
@@ -490,6 +490,7 @@ impl Baboon {
             .unwrap_or("halo3_mcc")
             .to_owned();
         self.new_tag_dialog = NewTagDialog {
+            kit: Some(self.active_kit_id()),
             game: default_game,
             rel_path: String::new(),
             output_path: None,
@@ -588,6 +589,16 @@ impl Baboon {
     }
 
     pub(super) fn create_new_tag(&mut self) {
+        // The tag is written into the active kit's source, and nothing below
+        // names a workspace, so without this the tag is created in whichever
+        // game was focused when Create was pressed rather than the one the
+        // dialog was opened for.
+        let dialog_kit = self.new_tag_dialog.kit;
+        if !dialog_kit.is_some_and(|kit| self.focus_navigation_kit(kit)) {
+            self.new_tag_dialog.error =
+                Some("The workspace this tag was being created in is closed".to_owned());
+            return;
+        }
         // Campaign Evolved containers have no loose tags folder to write into —
         // create the tag purely in memory and let Save / Export Mod write it.
         if self.current_source_is_container() {
@@ -806,6 +817,7 @@ impl Baboon {
             .unwrap_or("imported")
             .to_owned();
         self.import_tag_dialog = Some(ImportTagDialog {
+            kit: self.active_kit_id(),
             source_path: picked,
             folder_rel: folder_rel.unwrap_or_default(),
             name,
@@ -842,6 +854,16 @@ impl Baboon {
     /// document (dirty, with a discard prompt if it has unsaved edits) or add a
     /// brand-new container tag.
     pub(super) fn confirm_import_tag(&mut self) {
+        // The import is resolved and registered against the active kit's
+        // source, so return to the workspace the dialog was opened for.
+        let Some(kit) = self.import_tag_dialog.as_ref().map(|dialog| dialog.kit) else {
+            return;
+        };
+        if !self.focus_navigation_kit(kit) {
+            self.import_tag_dialog = None;
+            self.status = "The workspace this import came from is closed".to_owned();
+            return;
+        }
         let Some(dialog) = self.import_tag_dialog.as_mut() else {
             return;
         };
@@ -909,6 +931,7 @@ impl Baboon {
             // Already open with unsaved edits → confirm discard first.
             if self.kits[self.active].parsed_tags.get(&key).map(|d| d.dirty).unwrap_or(false) {
                 self.import_discard_confirm = Some(PendingImport {
+                    kit: self.active_kit_id(),
                     tag,
                     target_key: key,
                 });
@@ -975,6 +998,10 @@ impl Baboon {
         let Some(pending) = self.import_discard_confirm.take() else {
             return;
         };
+        if !self.focus_navigation_kit(pending.kit) {
+            self.status = "The workspace this import came from is closed".to_owned();
+            return;
+        }
         self.apply_import_over_existing(&pending.target_key, pending.tag);
     }
 
@@ -1021,7 +1048,14 @@ impl Baboon {
     }
 
     pub(super) fn loaded_tags_root(&self) -> Option<PathBuf> {
-        let TagSource::LooseFolder { root, .. } = &self.source()?.source else {
+        self.loaded_tags_root_for(self.active)
+    }
+
+    /// A specific kit's loose tags root. Background work has to name its kit:
+    /// the one it started in may no longer be the focused one when it lands.
+    pub(super) fn loaded_tags_root_for(&self, kit: usize) -> Option<PathBuf> {
+        let TagSource::LooseFolder { root, .. } = &self.kits.get(kit)?.source.as_ref()?.source
+        else {
             return None;
         };
         Some(root.clone())
@@ -1033,17 +1067,22 @@ impl Baboon {
             .position(|kit| same_recent_path(&kit.tags_root, root))
     }
 
-    fn refresh_active_favorite_entries(&mut self) {
-        self.kits[self.active].active_favorite_entries.clear();
-        let Some(root) = self.loaded_tags_root() else {
+    /// Rebuild `kit`'s resolved favorite entries from the saved paths for its
+    /// tags root. Kit-scoped because a finished background refactor refreshes
+    /// the workspace it belonged to, which need not be the focused one.
+    fn refresh_favorite_entries_for(&mut self, kit: usize) {
+        self.kits[kit].active_favorite_entries.clear();
+        let Some(root) = self.loaded_tags_root_for(kit) else {
             return;
         };
         let Some(index) = self.favorite_kit_index(&root) else {
             return;
         };
-        let names = self.source()
+        let names = self.kits[kit]
+            .source
+            .as_ref()
             .map(|source| source.names.clone())
-            .unwrap_or_else(|| self.names().clone());
+            .unwrap_or_else(|| self.kits[kit].names.clone());
         let saved_paths = self.editing_kit_favorites[index].tags.clone();
         let mut missing = Vec::new();
         for relative_path in saved_paths {
@@ -1053,7 +1092,7 @@ impl Baboon {
                 continue;
             }
             if let Ok(Some(entry)) = loose_file_entry(&root, &path, &names) {
-                self.kits[self.active].active_favorite_entries.push(entry);
+                self.kits[kit].active_favorite_entries.push(entry);
             }
         }
         if !missing.is_empty() {
@@ -1117,8 +1156,18 @@ impl Baboon {
         }
     }
 
-    fn remap_current_favorites(&mut self, old_to_new_keys: &HashMap<String, String>) {
-        let Some(root) = self.loaded_tags_root() else {
+    /// Rewrite `kit`'s favorites after a move or rename changed its tag paths.
+    ///
+    /// Takes the kit rather than reading the active one: this runs from a
+    /// finished background refactor, which may well land while the user is in
+    /// another workspace — and then it resolved the wrong root and remapped the
+    /// wrong workspace's favorites with this one's rename map.
+    fn remap_favorites_for_kit(
+        &mut self,
+        kit: usize,
+        old_to_new_keys: &HashMap<String, String>,
+    ) {
+        let Some(root) = self.loaded_tags_root_for(kit) else {
             return;
         };
         let Some(index) = self.favorite_kit_index(&root) else {
@@ -1141,7 +1190,7 @@ impl Baboon {
                 true
             }
         });
-        self.refresh_active_favorite_entries();
+        self.refresh_favorite_entries_for(kit);
     }
 
     pub(super) fn open_dropped_files(&mut self, paths: Vec<PathBuf>, ctx: egui::Context) {
@@ -2033,6 +2082,8 @@ impl Baboon {
             source_path,
             game: source.game.clone(),
             project_path: kit.campaign_project.as_ref().map(|project| project.path.clone()),
+            browser_mode: Some(kit.browser_mode),
+            browser_sort: Some(kit.browser_sort),
             tags,
         })
     }
@@ -2049,6 +2100,8 @@ impl Baboon {
             source_kind,
             source_path,
             project_path,
+            browser_mode,
+            browser_sort,
             tags,
         } in kits
         {
@@ -2079,6 +2132,15 @@ impl Baboon {
             // The loaders route to a kit and leave it active, so this stages
             // the tags on the kit the load will land in.
             self.kits[self.active].pending_restore_tags = tags;
+            // Its browser view is staged the same way: `install_loaded_source`
+            // carries it across the load rather than resetting it, so each
+            // workspace comes back in the view it was left in.
+            if let Some(mode) = browser_mode {
+                self.kits[self.active].browser_mode = mode;
+            }
+            if let Some(sort) = browser_sort {
+                self.kits[self.active].browser_sort = sort;
+            }
             // Its project is queued the same way, and opens once the source
             // this session recorded has finished mounting.
             if let Some(project_path) = project_path {
@@ -2488,6 +2550,9 @@ impl Baboon {
         let existing_reverse_dependencies = self.source()
             .and_then(|source| source.reverse_dependencies.clone());
         let game = self.source().and_then(|source| source.game.clone());
+        // Routed back to the kit the refactor was started in, not
+        // whichever one is focused when it lands.
+        let stamp = self.kit_stamp();
         let tx = self.tx.clone();
         let job_label = if move_folder {
             format!("Moving {label}")
@@ -2516,7 +2581,7 @@ impl Baboon {
                 )
             }))
             .unwrap_or_else(|_| Err("Folder move/copy worker crashed".to_owned()));
-            let _ = tx.send(WorkerMessage::FolderRefactorFinished(result));
+            let _ = tx.send(WorkerMessage::FolderRefactorFinished { stamp, result });
         });
     }
 
@@ -2806,7 +2871,10 @@ impl Baboon {
         // builds never prompt).
         if self.current_source_is_container() {
             if self.confirm_container_overwrite {
-                self.overwrite_confirm = Some(key);
+                self.overwrite_confirm = Some(OverwriteConfirm {
+                    kit: self.active_kit_id(),
+                    key,
+                });
             } else {
                 self.overwrite_current_tag_in_place(&key);
             }
@@ -3384,6 +3452,7 @@ impl Baboon {
             None => (Vec::new(), true),
         };
         self.rename_tag = Some(RenameTagState {
+            kit: self.active_kit_id(),
             key: entry.key.clone(),
             old_display: display,
             extension,
@@ -3398,6 +3467,18 @@ impl Baboon {
     /// Apply the rename/move: move the file on disk and rewrite every
     /// referencing tag, in the background (reuses the folder-refactor pipeline).
     pub(super) fn begin_rename_tag(&mut self) {
+        // Everything below resolves against the active kit's tags root or
+        // container set, so return to the workspace the dialog was opened for.
+        // A closed workspace drops the rename rather than moving a file in
+        // whichever game is focused now.
+        let Some(kit) = self.rename_tag.as_ref().map(|state| state.kit) else {
+            return;
+        };
+        if !self.focus_navigation_kit(kit) {
+            self.rename_tag = None;
+            self.status = "The workspace this rename came from is closed".to_owned();
+            return;
+        }
         let Some((key, old_display, new_name_raw, is_container, redirect)) =
             self.rename_tag.as_ref().map(|s| {
                 (
@@ -3545,6 +3626,9 @@ impl Baboon {
             .unwrap_or_default();
         let reverse_dependencies = self.source()
             .and_then(|source| source.reverse_dependencies.clone());
+        // Routed back to the kit the refactor was started in, not
+        // whichever one is focused when it lands.
+        let stamp = self.kit_stamp();
         let tx = self.tx.clone();
         let job_label = job_label.to_owned();
         self.folder_refactor = Some(FolderRefactorUiState {
@@ -3568,7 +3652,7 @@ impl Baboon {
                 )
             }))
             .unwrap_or_else(|_| Err("Tag move worker crashed".to_owned()));
-            let _ = tx.send(WorkerMessage::FolderRefactorFinished(result));
+            let _ = tx.send(WorkerMessage::FolderRefactorFinished { stamp, result });
         });
     }
 
@@ -4136,7 +4220,7 @@ impl Baboon {
             return;
         };
         self.kits[self.active].filter.clear();
-        self.browser_mode = BrowserMode::Folders;
+        self.kits[self.active].browser_mode = BrowserMode::Folders;
         self.kits[self.active].selected_key = Some(entry.key.clone());
         self.reveal_target = Some(RevealRequest {
             kit: self.active_kit_id(),
@@ -4417,6 +4501,16 @@ impl Baboon {
     /// Rows beyond the current element count are reported and ignored (no
     /// structural changes — fully covered by undo). Returns a status summary.
     pub(super) fn apply_tsv_paste(&mut self) {
+        // The document is looked up in the active kit below, and two workspaces
+        // of the same game share a key space, so a paste answered after a
+        // switch could land in the wrong game's tag rather than simply missing.
+        let Some(kit) = self.tsv_paste.as_ref().map(|paste| paste.kit) else {
+            return;
+        };
+        if !self.focus_navigation_kit(kit) {
+            self.set_tsv_paste_status("The workspace this paste came from is closed.");
+            return;
+        }
         let Some(paste) = self.tsv_paste.as_ref() else {
             return;
         };
@@ -4655,8 +4749,10 @@ impl Baboon {
 
     pub(super) fn current_prefs(&self) -> GuiPrefs {
         GuiPrefs {
-            browser_mode: self.browser_mode,
-            browser_sort: self.browser_sort,
+            // The focused workspace's view is what a new one is seeded with,
+            // so a single-workspace session remembers its choice as before.
+            browser_mode: self.kits[self.active].browser_mode,
+            browser_sort: self.kits[self.active].browser_sort,
             show_browser_prefixes: self.show_browser_prefixes,
             folders_before_tags: self.folders_before_tags,
             double_click_to_open_tags: self.double_click_to_open_tags,
@@ -4757,8 +4853,8 @@ impl Baboon {
         self.launch_kit_tool_clearing_startup("tag_test", self.tag_test_executable(), "init.txt");
     }
 
-    pub(super) fn can_launch_scenario_in_sapien(&self, entry: &TagEntry) -> bool {
-        let Some(source) = self.source() else {
+    pub(super) fn can_launch_scenario_in_sapien(&self, kit: usize, entry: &TagEntry) -> bool {
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
             return false;
         };
         let Ok(context) = scenario_launch_context(source, entry) else {
@@ -4823,8 +4919,8 @@ impl Baboon {
         }
     }
 
-    pub(super) fn can_launch_scenario_in_tag_test(&self, entry: &TagEntry) -> bool {
-        let Some(source) = self.source() else {
+    pub(super) fn can_launch_scenario_in_tag_test(&self, kit: usize, entry: &TagEntry) -> bool {
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
             return false;
         };
         let Ok(context) = scenario_launch_context(source, entry) else {
@@ -5242,6 +5338,10 @@ impl Baboon {
         let Some(confirm) = self.block_confirm.as_ref() else {
             return;
         };
+        // The op is applied to the active kit's document, and two workspaces of
+        // the same game share a key space, so a confirmation answered after a
+        // switch could delete from the wrong game's tag.
+        let confirm_kit = confirm.kit;
         let message = confirm.message.clone();
         let confirm_label = confirm.confirm_label.clone();
         let mut do_apply = false;
@@ -5276,7 +5376,10 @@ impl Baboon {
                 });
             });
         if do_apply {
-            if let Some(confirm) = self.block_confirm.take() {
+            let routed = confirm_kit.is_some_and(|kit| self.focus_navigation_kit(kit));
+            if let Some(confirm) = self.block_confirm.take()
+                && routed
+            {
                 if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(&confirm.tag_key) {
                     let op = BlockOp {
                         path: confirm.path,
@@ -7469,16 +7572,6 @@ fn moved_key_map(
         }
     }
     map
-}
-
-fn remap_open_tag_keys(keys: &mut Vec<String>, map: &HashMap<String, String>) {
-    for key in keys.iter_mut() {
-        if let Some(new_key) = map.get(key) {
-            *key = new_key.clone();
-        }
-    }
-    let mut seen = HashSet::new();
-    keys.retain(|key| seen.insert(key.clone()));
 }
 
 fn same_entry_key(a: &str, b: &str) -> bool {

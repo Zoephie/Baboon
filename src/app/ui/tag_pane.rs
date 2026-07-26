@@ -29,7 +29,7 @@ impl Baboon {
     ) {
         let key = entry.key.clone();
         draw_entry_header(ui, entry, &self.kits[kit_index].names);
-        self.draw_scenario_launcher_buttons(ui, entry);
+        self.draw_scenario_launcher_buttons(ui, kit_index, entry);
         if show_keyword_bar {
             self.draw_keyword_bar(ui, kit_index, &key);
         }
@@ -141,7 +141,15 @@ impl Baboon {
             block_clipboard: self.block_clipboard.as_ref(),
             block_clip_request: &mut block_clip_request,
             field_filter: field_filter.as_ref(),
-            field_nav: self.field_nav.as_ref(),
+            // Only the pane being navigated to sees the request. The scroll
+            // gate downstream matches on the field path alone, so an unfiltered
+            // nav scrolled every pane whose tag happened to have a field at the
+            // same path — which, between two tags of the same group, is most of
+            // them. Splitting a tag view is what exposed this.
+            field_nav: self
+                .field_nav
+                .as_ref()
+                .filter(|nav| nav.kit == kit_id && nav.tag_key == key),
         };
 
         if is_bitmap_tag(entry) {
@@ -246,6 +254,11 @@ impl Baboon {
         if !picker_was_open && self.tag_reference_picker.is_some() {
             self.tag_reference_picker_kit = Some(kit_id);
         }
+        // And a block confirmation, raised the same way. Stamping only an
+        // unstamped one leaves a confirmation another pane raised alone.
+        if let Some(confirm) = self.block_confirm.as_mut() {
+            confirm.kit.get_or_insert(kit_id);
+        }
         // Element(s) were copied: stash them on the clipboard.
         if let Some(clip) = block_clip_request {
             self.status = format!(
@@ -258,6 +271,7 @@ impl Baboon {
         // "Paste TSV…" was chosen: open the import window.
         if let Some(req) = tsv_paste_request {
             self.tsv_paste = Some(TsvPasteState {
+                kit: kit_id,
                 tag_key: key.clone(),
                 block_path: req.block_path,
                 block_label: req.block_label,
@@ -270,6 +284,11 @@ impl Baboon {
         kit.parsed_tags.insert(key, doc);
 
         if let Some(key) = bitmap_reimport {
+            // Resolves its source and entry against the active kit, and runs an
+            // external tool that rewrites the bitmap on disk. This pane's kit is
+            // the one being asked, so make it active first rather than trusting
+            // press-activation to have already landed this frame.
+            self.active = kit_index;
             self.begin_reimport_bitmap(key, ctx.clone());
         }
     }

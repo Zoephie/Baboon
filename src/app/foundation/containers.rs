@@ -956,6 +956,9 @@ pub(in crate::app) fn draw_foundation_block(
         if actions.replace_block {
             // Destructive (clears the block) — route through the confirm modal.
             *edit.block_confirm = Some(BlockConfirm {
+            // Stamped by the pane once this render returns; the field
+            // renderers are shared and have no kit of their own.
+            kit: None,
                 tag_key: edit.tag_key.to_owned(),
                 path: path_prefix.to_owned(),
                 kind: BlockOpKind::ReplaceBlock { elements },
@@ -1033,6 +1036,9 @@ pub(in crate::app) fn handle_block_actions(
             set_block_selected_index(ui, edit, path, sel.saturating_sub(1));
         } else {
             *edit.block_confirm = Some(BlockConfirm {
+            // Stamped by the pane once this render returns; the field
+            // renderers are shared and have no kit of their own.
+            kit: None,
                 tag_key: edit.tag_key.to_owned(),
                 path: path.to_owned(),
                 kind: BlockOpKind::Delete(sel),
@@ -1043,6 +1049,9 @@ pub(in crate::app) fn handle_block_actions(
     }
     if actions.delete_all && count > 0 {
         *edit.block_confirm = Some(BlockConfirm {
+            // Stamped by the pane once this render returns; the field
+            // renderers are shared and have no kit of their own.
+            kit: None,
             tag_key: edit.tag_key.to_owned(),
 
             path: path.to_owned(),

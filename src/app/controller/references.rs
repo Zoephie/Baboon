@@ -79,8 +79,14 @@ impl Baboon {
     }
 
     /// Applies `WorkerMessage::FolderRefactorFinished` and remaps open state after moves.
+    ///
+    /// Everything here lands on the kit the refactor was started in. It used to
+    /// land on the active kit, so a move that finished after the user switched
+    /// workspaces rebuilt the *other* game's browser from these results and
+    /// dropped its open documents and unsaved edit buffers along the way.
     pub(super) fn handle_folder_refactor_finished(
         &mut self,
+        stamp: KitStamp,
         result: Result<FolderRefactorFinished, String>,
     ) -> bool {
         self.folder_refactor = None;
@@ -91,7 +97,13 @@ impl Baboon {
                 return false;
             }
         };
-        if let Some(source) = self.source_mut() {
+        // The kit was closed or reloaded while the job ran: the work on disk is
+        // done, but there is no longer anything here to apply it to.
+        let Some(kit_index) = self.resolve_stamp(stamp) else {
+            self.status = done.status;
+            return false;
+        };
+        if let Some(source) = self.kits[kit_index].source.as_mut() {
             source.entries.clear();
             source.all_entries = done.all_entries;
             source.tree = done.tree;
@@ -115,22 +127,18 @@ impl Baboon {
             }
         }
         if done.moved {
-            self.remap_current_favorites(&done.old_to_new_keys);
-            remap_open_tag_keys(&mut self.kits[self.active].open_tabs, &done.old_to_new_keys);
-            if let Some(selected) = self.kits[self.active].selected_key.clone()
-                && let Some(new_key) = done.old_to_new_keys.get(&selected)
-            {
-                self.kits[self.active].selected_key = Some(new_key.clone());
-            }
+            self.remap_favorites_for_kit(kit_index, &done.old_to_new_keys);
+            self.kits[kit_index].remap_tag_keys(&done.old_to_new_keys);
         }
-        self.kits[self.active].parsed_tags.clear();
-        self.kits[self.active].loading_tags.clear();
-        self.kits[self.active].bitmap_previews.clear();
-        self.kits[self.active].model_previews.clear();
-        self.kits[self.active].edit_buffers.clear();
-        self.kits[self.active].field_search.clear();
-        self.kits[self.active].field_search_applied.clear();
-        self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
+        let kit = &mut self.kits[kit_index];
+        kit.parsed_tags.clear();
+        kit.loading_tags.clear();
+        kit.bitmap_previews.clear();
+        kit.model_previews.clear();
+        kit.edit_buffers.clear();
+        kit.field_search.clear();
+        kit.field_search_applied.clear();
+        kit.generation = kit.generation.wrapping_add(1);
         self.terminal
             .lines
             .extend(done.lines.into_iter().map(TerminalLineEntry::new));

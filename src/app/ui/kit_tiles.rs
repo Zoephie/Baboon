@@ -50,7 +50,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
         // An unloaded workspace has no tags to browse or edit, so it offers
         // ways to open one instead of an empty browser and an empty editor.
         if self.app.kits[kit_index].is_empty_workspace() {
-            self.app.draw_welcome_screen(ui, &self.ctx);
+            self.app.draw_welcome_screen(ui, &self.ctx, kit_index);
             return egui_tiles::UiResponse::None;
         }
         // Each workspace carries its own browser, so two games side by side can
@@ -216,7 +216,7 @@ impl Baboon {
         // zero-height tab bar still leaves the "+" and the bar's own painting
         // behind, so the tree is skipped outright.
         if self.kits.len() == 1 && self.kits[0].is_empty_workspace() {
-            self.draw_welcome_screen(ui, ctx);
+            self.draw_welcome_screen(ui, ctx, 0);
             return;
         }
         let placeholder = egui_tiles::Tree::empty(egui::Id::new("kit_tree_placeholder"));

@@ -119,7 +119,9 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         false
     }
 
-    /// Restores the tab context menu the hand-rolled tab rack used to carry.
+    /// Restores the tab context menu and middle-click-to-close the hand-rolled
+    /// tab rack used to carry. Both hang off the tab's own response, which is
+    /// why they live here rather than in `tab_ui`.
     fn on_tab_button(
         &mut self,
         tiles: &egui_tiles::Tiles<String>,
@@ -130,6 +132,12 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             return button_response;
         };
         let key = key.clone();
+        // Queued exactly as the close button queues it, so a middle-click on a
+        // tab with unsaved edits still raises the prompt instead of discarding
+        // them. `tiles` is shared here, so the removal happens after the walk.
+        if button_response.middle_clicked() {
+            self.close_requests.push(key.clone());
+        }
         button_response.context_menu(|ui| {
             if ui.button("Reveal in browser").clicked() {
                 self.reveal = Some(key.clone());
@@ -332,6 +340,19 @@ impl Baboon {
         self.kits[kit_index].sync_open_tabs();
         if let Some(key) = focused {
             self.kits[kit_index].selected_key = Some(key);
+        }
+        // Everything below addresses the *active* kit: the close prompt and the
+        // save paths under it resolve documents there, and `reveal_in_browser`
+        // scrolls that kit's browser. These all answer a click on a tab in
+        // *this* pane, so the pane's kit has to be active before they run.
+        //
+        // Press-activation sets the same thing, but only after the whole kit
+        // tree has been walked — a frame too late for a close that executes
+        // immediately, which is what a Campaign Evolved kit's checkpointed
+        // close does. Without this, closing a tab in an unfocused pane of a
+        // split closes it in the other game.
+        if reveal.is_some() || close_all || close_all_but.is_some() || !close_requests.is_empty() {
+            self.active = kit_index;
         }
         if let Some(key) = reveal {
             self.reveal_in_browser(&key);

@@ -26,7 +26,14 @@ impl Baboon {
     /// The previous empty state was an empty tag browser beside "No tag
     /// selected" — two panels, neither of which could do anything about it.
     /// Everything here is a way to open something.
-    pub(in crate::app) fn draw_welcome_screen(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+    /// `kit_index` is the empty workspace this screen is filling. Its actions
+    /// load into the active kit, and this pane's kit is the one being asked.
+    pub(in crate::app) fn draw_welcome_screen(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &egui::Context,
+        kit_index: usize,
+    ) {
         let mut action = None;
         let recents = self.recent_folders.clone();
         let configured: Vec<EditingKitShortcut> = EDITING_KIT_SHORTCUTS
@@ -165,6 +172,13 @@ impl Baboon {
                 });
             });
 
+        // `open_kit_for` reuses the active kit only when it is still an empty
+        // workspace; with another game active it would add a third kit and
+        // leave this pane empty. Press-activation normally beats the click by a
+        // frame, but not when a frame runs long.
+        if action.is_some() {
+            self.active = kit_index;
+        }
         match action {
             Some(WelcomeAction::LoadFolder) => self.begin_load_folder(ctx.clone()),
             Some(WelcomeAction::LoadTag) => self.begin_load_single(ctx.clone()),
