@@ -181,7 +181,7 @@ pub struct Baboon {
     /// Pending "discard unsaved edits and replace with the imported tag?" prompt.
     import_discard_confirm: Option<PendingImport>,
     /// Pending in-place overwrite confirmation (the tag key) for a container tag.
-    overwrite_confirm: Option<String>,
+    overwrite_confirm: Option<OverwriteConfirm>,
     about_open: bool,
     help_panel_tab: HelpPanelTab,
     help_docs: HelpDocsState,

@@ -287,6 +287,11 @@ impl LastOpenedWindowsPrompt {
 /// parsed imported `TagFile` (moved out on confirm) and the schema-comparison
 /// result against our shipped JSON. Not `Clone` — `TagFile` isn't cloneable.
 pub(in crate::app) struct ImportTagDialog {
+    /// Workspace this was raised from. The confirm applies against the active
+    /// kit, and a modeless dialog outlives the frame that opened it, so the
+    /// user can focus another game in between; resolving this first is what
+    /// keeps the action on the workspace it was started in.
+    pub(in crate::app) kit: KitId,
     pub(in crate::app) source_path: PathBuf,
     /// Pre-filled container folder (empty for the root); the leaf name is `name`.
     pub(in crate::app) folder_rel: String,
@@ -305,7 +310,23 @@ pub(in crate::app) struct ImportTagDialog {
 
 /// A parsed imported tag awaiting a "discard unsaved edits?" confirmation before
 /// it overwrites an already-open, dirty document at `target_key`.
+/// Pending "Save will overwrite the game's paks in place" confirmation.
+///
+/// Carries its workspace for the same reason [`PendingImport`] does: the
+/// confirm is modeless, and an in-place container overwrite is the last thing
+/// that should land on whichever game happens to be focused when it is
+/// answered.
+pub(in crate::app) struct OverwriteConfirm {
+    pub(in crate::app) kit: KitId,
+    pub(in crate::app) key: String,
+}
+
 pub(in crate::app) struct PendingImport {
+    /// Workspace this was raised from. The confirm applies against the active
+    /// kit, and a modeless dialog outlives the frame that opened it, so the
+    /// user can focus another game in between; resolving this first is what
+    /// keeps the action on the workspace it was started in.
+    pub(in crate::app) kit: KitId,
     pub(in crate::app) tag: TagFile,
     pub(in crate::app) target_key: String,
 }
@@ -320,6 +341,9 @@ pub(in crate::app) struct NewTagGroup {
 
 #[derive(Clone, Debug)]
 pub(in crate::app) struct NewTagDialog {
+    /// Workspace the dialog was opened for. `None` before it is first
+    /// opened, since this dialog is always resident rather than optional.
+    pub(in crate::app) kit: Option<KitId>,
     pub(in crate::app) game: String,
     pub(in crate::app) rel_path: String,
     pub(in crate::app) output_path: Option<PathBuf>,
@@ -331,6 +355,7 @@ pub(in crate::app) struct NewTagDialog {
 impl Default for NewTagDialog {
     fn default() -> Self {
         Self {
+            kit: None,
             game: "halo3_mcc".to_owned(),
             rel_path: String::new(),
             output_path: None,

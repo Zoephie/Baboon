@@ -490,6 +490,7 @@ impl Baboon {
             .unwrap_or("halo3_mcc")
             .to_owned();
         self.new_tag_dialog = NewTagDialog {
+            kit: Some(self.active_kit_id()),
             game: default_game,
             rel_path: String::new(),
             output_path: None,
@@ -588,6 +589,16 @@ impl Baboon {
     }
 
     pub(super) fn create_new_tag(&mut self) {
+        // The tag is written into the active kit's source, and nothing below
+        // names a workspace, so without this the tag is created in whichever
+        // game was focused when Create was pressed rather than the one the
+        // dialog was opened for.
+        let dialog_kit = self.new_tag_dialog.kit;
+        if !dialog_kit.is_some_and(|kit| self.focus_navigation_kit(kit)) {
+            self.new_tag_dialog.error =
+                Some("The workspace this tag was being created in is closed".to_owned());
+            return;
+        }
         // Campaign Evolved containers have no loose tags folder to write into —
         // create the tag purely in memory and let Save / Export Mod write it.
         if self.current_source_is_container() {
@@ -806,6 +817,7 @@ impl Baboon {
             .unwrap_or("imported")
             .to_owned();
         self.import_tag_dialog = Some(ImportTagDialog {
+            kit: self.active_kit_id(),
             source_path: picked,
             folder_rel: folder_rel.unwrap_or_default(),
             name,
@@ -842,6 +854,16 @@ impl Baboon {
     /// document (dirty, with a discard prompt if it has unsaved edits) or add a
     /// brand-new container tag.
     pub(super) fn confirm_import_tag(&mut self) {
+        // The import is resolved and registered against the active kit's
+        // source, so return to the workspace the dialog was opened for.
+        let Some(kit) = self.import_tag_dialog.as_ref().map(|dialog| dialog.kit) else {
+            return;
+        };
+        if !self.focus_navigation_kit(kit) {
+            self.import_tag_dialog = None;
+            self.status = "The workspace this import came from is closed".to_owned();
+            return;
+        }
         let Some(dialog) = self.import_tag_dialog.as_mut() else {
             return;
         };
@@ -909,6 +931,7 @@ impl Baboon {
             // Already open with unsaved edits → confirm discard first.
             if self.kits[self.active].parsed_tags.get(&key).map(|d| d.dirty).unwrap_or(false) {
                 self.import_discard_confirm = Some(PendingImport {
+                    kit: self.active_kit_id(),
                     tag,
                     target_key: key,
                 });
@@ -975,6 +998,10 @@ impl Baboon {
         let Some(pending) = self.import_discard_confirm.take() else {
             return;
         };
+        if !self.focus_navigation_kit(pending.kit) {
+            self.status = "The workspace this import came from is closed".to_owned();
+            return;
+        }
         self.apply_import_over_existing(&pending.target_key, pending.tag);
     }
 
@@ -2822,7 +2849,10 @@ impl Baboon {
         // builds never prompt).
         if self.current_source_is_container() {
             if self.confirm_container_overwrite {
-                self.overwrite_confirm = Some(key);
+                self.overwrite_confirm = Some(OverwriteConfirm {
+                    kit: self.active_kit_id(),
+                    key,
+                });
             } else {
                 self.overwrite_current_tag_in_place(&key);
             }
@@ -3400,6 +3430,7 @@ impl Baboon {
             None => (Vec::new(), true),
         };
         self.rename_tag = Some(RenameTagState {
+            kit: self.active_kit_id(),
             key: entry.key.clone(),
             old_display: display,
             extension,
@@ -3414,6 +3445,18 @@ impl Baboon {
     /// Apply the rename/move: move the file on disk and rewrite every
     /// referencing tag, in the background (reuses the folder-refactor pipeline).
     pub(super) fn begin_rename_tag(&mut self) {
+        // Everything below resolves against the active kit's tags root or
+        // container set, so return to the workspace the dialog was opened for.
+        // A closed workspace drops the rename rather than moving a file in
+        // whichever game is focused now.
+        let Some(kit) = self.rename_tag.as_ref().map(|state| state.kit) else {
+            return;
+        };
+        if !self.focus_navigation_kit(kit) {
+            self.rename_tag = None;
+            self.status = "The workspace this rename came from is closed".to_owned();
+            return;
+        }
         let Some((key, old_display, new_name_raw, is_container, redirect)) =
             self.rename_tag.as_ref().map(|s| {
                 (
@@ -4436,6 +4479,16 @@ impl Baboon {
     /// Rows beyond the current element count are reported and ignored (no
     /// structural changes — fully covered by undo). Returns a status summary.
     pub(super) fn apply_tsv_paste(&mut self) {
+        // The document is looked up in the active kit below, and two workspaces
+        // of the same game share a key space, so a paste answered after a
+        // switch could land in the wrong game's tag rather than simply missing.
+        let Some(kit) = self.tsv_paste.as_ref().map(|paste| paste.kit) else {
+            return;
+        };
+        if !self.focus_navigation_kit(kit) {
+            self.set_tsv_paste_status("The workspace this paste came from is closed.");
+            return;
+        }
         let Some(paste) = self.tsv_paste.as_ref() else {
             return;
         };
@@ -5263,6 +5316,10 @@ impl Baboon {
         let Some(confirm) = self.block_confirm.as_ref() else {
             return;
         };
+        // The op is applied to the active kit's document, and two workspaces of
+        // the same game share a key space, so a confirmation answered after a
+        // switch could delete from the wrong game's tag.
+        let confirm_kit = confirm.kit;
         let message = confirm.message.clone();
         let confirm_label = confirm.confirm_label.clone();
         let mut do_apply = false;
@@ -5297,7 +5354,10 @@ impl Baboon {
                 });
             });
         if do_apply {
-            if let Some(confirm) = self.block_confirm.take() {
+            let routed = confirm_kit.is_some_and(|kit| self.focus_navigation_kit(kit));
+            if let Some(confirm) = self.block_confirm.take()
+                && routed
+            {
                 if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(&confirm.tag_key) {
                     let op = BlockOp {
                         path: confirm.path,

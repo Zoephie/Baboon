@@ -246,6 +246,11 @@ impl Baboon {
         if !picker_was_open && self.tag_reference_picker.is_some() {
             self.tag_reference_picker_kit = Some(kit_id);
         }
+        // And a block confirmation, raised the same way. Stamping only an
+        // unstamped one leaves a confirmation another pane raised alone.
+        if let Some(confirm) = self.block_confirm.as_mut() {
+            confirm.kit.get_or_insert(kit_id);
+        }
         // Element(s) were copied: stash them on the clipboard.
         if let Some(clip) = block_clip_request {
             self.status = format!(
@@ -258,6 +263,7 @@ impl Baboon {
         // "Paste TSV…" was chosen: open the import window.
         if let Some(req) = tsv_paste_request {
             self.tsv_paste = Some(TsvPasteState {
+                kit: kit_id,
                 tag_key: key.clone(),
                 block_path: req.block_path,
                 block_label: req.block_label,

@@ -39,6 +39,11 @@ pub(in crate::app) enum BrowserAction {
 /// will be rewritten (preview) and an editable destination path; applying moves
 /// the file on disk and rewrites every referencing tag.
 pub(in crate::app) struct RenameTagState {
+    /// Workspace this was raised from. The confirm applies against the active
+    /// kit, and a modeless dialog outlives the frame that opened it, so the
+    /// user can focus another game in between; resolving this first is what
+    /// keeps the action on the workspace it was started in.
+    pub(in crate::app) kit: KitId,
     pub(in crate::app) key: String,
     /// Current display path (forward slashes, with extension) — shown read-only.
     pub(in crate::app) old_display: String,

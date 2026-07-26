@@ -449,7 +449,11 @@ impl Baboon {
     /// overwrites the shipped pak files in place, so we always confirm and point
     /// the user at Export Mod as the non-destructive alternative.
     pub(super) fn draw_overwrite_confirm_window(&mut self, ctx: &egui::Context) {
-        let Some(key) = self.overwrite_confirm.clone() else {
+        let Some((kit, key)) = self
+            .overwrite_confirm
+            .as_ref()
+            .map(|confirm| (confirm.kit, confirm.key.clone()))
+        else {
             return;
         };
         let mut open = true;
@@ -513,10 +517,18 @@ impl Baboon {
                 self.confirm_container_overwrite = false;
                 self.persist_prefs_if_changed();
             }
-            self.overwrite_current_tag_in_place(&key);
+            // Both actions write through the active kit's source. Return to the
+            // workspace this was raised from, and drop it if that workspace has
+            // been closed — overwriting the game's paks in place is the last
+            // thing that should land on whichever game is focused by now.
+            if self.focus_navigation_kit(kit) {
+                self.overwrite_current_tag_in_place(&key);
+            }
         } else if do_export {
             self.overwrite_confirm = None;
-            self.export_mod();
+            if self.focus_navigation_kit(kit) {
+                self.export_mod();
+            }
         }
     }
 
