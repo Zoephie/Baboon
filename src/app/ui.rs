@@ -4,6 +4,7 @@
 use super::controller::open_terminal_log;
 use super::*;
 
+mod browser_panel;
 mod dialogs;
 mod find;
 mod first_run;
