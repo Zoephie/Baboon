@@ -29,7 +29,10 @@ impl Baboon {
         ctx: &egui::Context,
         kit_index: usize,
     ) {
-        let sidebar_header = self.source().map(|source| {
+        // This kit's own source, not `source()` — that reads the *active* kit,
+        // so in a split every browser drew the focused kit's banner and the
+        // header flickered between games as the cursor moved between panes.
+        let sidebar_header = self.kits[kit_index].source.as_ref().map(|source| {
             (
                 source.game.clone(),
                 source.source.origin_label(),

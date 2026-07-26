@@ -22,32 +22,33 @@ impl Baboon {
         &mut self,
         ui: &mut Ui,
         ctx: &egui::Context,
+        kit_index: usize,
         entry: &TagEntry,
         scope: &str,
         show_keyword_bar: bool,
     ) {
         let key = entry.key.clone();
-        draw_entry_header(ui, entry, self.names());
+        draw_entry_header(ui, entry, &self.kits[kit_index].names);
         self.draw_scenario_launcher_buttons(ui, entry);
         if show_keyword_bar {
-            self.draw_keyword_bar(ui, &key);
+            self.draw_keyword_bar(ui, kit_index, &key);
         }
 
         // "Search fields" collapses the editor to matching blocks.
         // Not offered for shader/sound tags (their own surfaces).
         let supports_field_search = supports_field_search(entry);
         if supports_field_search {
-            self.draw_field_search_bar(ui, &key);
+            self.draw_field_search_bar(ui, kit_index, &key);
         }
 
         // Documentation overlay and the Campaign Evolved Wwise binding are both
         // resolved through `&mut self` methods, so they must be taken before any
         // long-lived field borrows below.
-        let def_docs = self.def_docs_for_entry(entry);
-        let ce_sound = self.ce_sound_binding(&key, entry);
+        let def_docs = self.def_docs_for_entry(kit_index, entry);
+        let ce_sound = self.ce_sound_binding(kit_index, &key, entry);
 
-        let Some(mut doc) = self.kits[self.active].parsed_tags.remove(&key) else {
-            if self.kits[self.active].loading_tags.contains(&key) {
+        let Some(mut doc) = self.kits[kit_index].parsed_tags.remove(&key) else {
+            if self.kits[kit_index].loading_tags.contains(&key) {
                 ui.label("Loading tag data...");
             } else {
                 ui.label("Select the tag again to load it.");
@@ -55,7 +56,6 @@ impl Baboon {
             return;
         };
 
-        let kit_index = self.active;
         let kit = &mut self.kits[kit_index];
         let source = kit.source.as_ref();
         let names = &kit.names;

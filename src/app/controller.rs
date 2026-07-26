@@ -97,6 +97,7 @@ impl Baboon {
     /// frame. An unbound tag caches an empty binding, so stubs are not re-walked.
     pub(in crate::app) fn ce_sound_binding(
         &mut self,
+        kit_index: usize,
         tag_key: &str,
         entry: &TagEntry,
     ) -> Option<std::sync::Arc<crate::source::ce_audio::CeSoundBinding>> {
@@ -105,7 +106,7 @@ impl Baboon {
         if !crate::app::editor::is_sound_group(entry.group_tag) {
             return None;
         }
-        if let Some(hit) = self.kits[self.active].ce_sound_bindings.get(tag_key) {
+        if let Some(hit) = self.kits[kit_index].ce_sound_bindings.get(tag_key) {
             return Some(hit.clone());
         }
 
@@ -114,7 +115,6 @@ impl Baboon {
         };
         let package = ce_audio::tag_package_for_rel_path(rel_path)?;
 
-        let kit_index = self.active;
         // Checked before the usmap is parsed, as it always has been: a non-CE
         // source must bail out without paying for the bundled reflection data.
         // The `matches!` ends its borrow immediately, which the destructure
@@ -148,7 +148,9 @@ impl Baboon {
         let binding = std::sync::Arc::new(ce_audio::resolve_sound_binding(
             containers, packages, &usmap, &package,
         ));
-        self.kits[self.active].ce_sound_bindings.insert(tag_key.to_owned(), binding.clone());
+        self.kits[kit_index]
+            .ce_sound_bindings
+            .insert(tag_key.to_owned(), binding.clone());
         Some(binding)
     }
 
@@ -4369,17 +4371,24 @@ impl Baboon {
     /// The documentation overlay (help/units + explanations) for a group,
     /// parsed once from its definition JSON and cached. `None` when the
     /// definitions can't be located (e.g. non-loose sources).
-    pub(super) fn def_docs_for_entry(&mut self, entry: &TagEntry) -> Option<Rc<DefDocs>> {
-        let root = match self.source().map(|source| &source.source) {
-            Some(TagSource::LooseFolder {
+    /// Documentation overlay for `entry`'s group, resolved against `kit_index`
+    /// rather than the active kit — in a split the two panes can be different
+    /// games, whose definitions and group naming differ.
+    pub(super) fn def_docs_for_entry(
+        &mut self,
+        kit_index: usize,
+        entry: &TagEntry,
+    ) -> Option<Rc<DefDocs>> {
+        let source = self.kits[kit_index].source.as_ref()?;
+        let root = match &source.source {
+            TagSource::LooseFolder {
                 definitions_root, ..
-            }) => definitions_root.clone(),
+            } => definitions_root.clone(),
             _ => return None,
         };
-        let game = self.source()
-            .and_then(|source| source.game.clone())?;
-        let group = self
-            .names()
+        let game = source.game.clone()?;
+        let group = self.kits[kit_index]
+            .names
             .name_for(entry.group_tag)
             .or_else(|| group_tag_to_extension(entry.group_tag))?
             .to_owned();

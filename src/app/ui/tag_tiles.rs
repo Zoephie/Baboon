@@ -66,7 +66,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 self.app
-                    .draw_tag_pane(ui, &self.ctx, &entry, &scope, true);
+                    .draw_tag_pane(ui, &self.ctx, self.kit_index, &entry, &scope, true);
             });
         egui_tiles::UiResponse::None
     }
