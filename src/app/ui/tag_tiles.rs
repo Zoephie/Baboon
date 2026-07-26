@@ -19,6 +19,7 @@ struct TagPaneBehavior<'a> {
     /// Deferred tab context-menu choices, applied after the tree is drawn for
     /// the same reason closes are: they mutate the layout or the open set.
     reveal: Option<String>,
+    discard: Option<String>,
     close_all: bool,
     close_all_but: Option<String>,
 }
@@ -130,9 +131,22 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             return button_response;
         };
         let key = key.clone();
+        let discardable = self.app.tag_has_discardable_changes(self.kit_index, &key);
         button_response.context_menu(|ui| {
             if ui.button("Reveal in browser").clicked() {
                 self.reveal = Some(key.clone());
+                ui.close_menu();
+            }
+            ui.separator();
+            // Offered for every game. For a loose kit this drops the in-memory
+            // edits and re-reads the file; for a container kit it also forgets
+            // what the project stashed, or the edit comes straight back.
+            if ui
+                .add_enabled(discardable, egui::Button::new("Discard unsaved changes"))
+                .on_disabled_hover_text("This tag has no unsaved changes")
+                .clicked()
+            {
+                self.discard = Some(key.clone());
                 ui.close_menu();
             }
             ui.separator();
@@ -316,6 +330,7 @@ impl Baboon {
             close_requests: Vec::new(),
             focused: None,
             reveal: None,
+            discard: None,
             close_all: false,
             close_all_but: None,
         };
@@ -323,6 +338,7 @@ impl Baboon {
         let close_requests = std::mem::take(&mut behavior.close_requests);
         let focused = behavior.focused.take();
         let reveal = behavior.reveal.take();
+        let discard = behavior.discard.take();
         let close_all = behavior.close_all;
         let close_all_but = behavior.close_all_but.take();
         self.kits[kit_index].tag_tree = tree;
@@ -335,6 +351,9 @@ impl Baboon {
         }
         if let Some(key) = reveal {
             self.reveal_in_browser(&key);
+        }
+        if let Some(key) = discard {
+            self.discard_tag_changes(kit_index, &key, ctx);
         }
         if close_all {
             self.request_close_action(PendingCloseAction::CloseAllTabs, ctx);

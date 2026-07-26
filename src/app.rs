@@ -179,6 +179,9 @@ pub struct Baboon {
     import_discard_confirm: Option<PendingImport>,
     /// Pending in-place overwrite confirmation (the tag key) for a container tag.
     overwrite_confirm: Option<String>,
+    /// Pending confirmation for the Campaign Evolved "clear modifications"
+    /// toolbar action, which is irreversible.
+    clear_stash_confirm: Option<ClearStashConfirm>,
     about_open: bool,
     help_panel_tab: HelpPanelTab,
     help_docs: HelpDocsState,
@@ -368,6 +371,7 @@ impl Baboon {
             import_tag_dialog: None,
             import_discard_confirm: None,
             overwrite_confirm: None,
+            clear_stash_confirm: None,
             about_open: false,
             help_panel_tab: HelpPanelTab::About,
             help_docs: HelpDocsState::load(),

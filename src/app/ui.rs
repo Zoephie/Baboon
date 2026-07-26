@@ -389,7 +389,37 @@ impl Baboon {
                 self.launch_sapien();
             }
 
-            ui.separator();
+            // Campaign Evolved holds unsaved edits in a project rather than in
+            // the game's files, so a workspace accumulates stashed
+            // modifications across sessions. This is the way back to the
+            // shipped tags; it is drawn here, outside the workspace tree, so it
+            // always acts on the focused kit.
+            if self.current_source_is_campaign_project_capable(self.active) {
+                let stashed = self.stashed_campaign_tags(self.active);
+                let unsaved = self.kits[self.active]
+                    .parsed_tags
+                    .values()
+                    .filter(|document| document.dirty)
+                    .count();
+                let anything = !stashed.is_empty() || unsaved > 0;
+                let icon = button_icon_image(ui, ButtonIcon::Garbage, text_dark(), 16.0);
+                let response = ui.add_enabled(anything, egui::Button::image(icon));
+                if response
+                    .on_hover_text(
+                        "Clear this workspace's unsaved modifications, returning every tag to \
+                         the way the game ships it",
+                    )
+                    .on_disabled_hover_text("This workspace has no unsaved modifications")
+                    .clicked()
+                {
+                    self.clear_stash_confirm = Some(ClearStashConfirm {
+                        kit: self.active_kit_id(),
+                        stashed,
+                        unsaved,
+                    });
+                }
+                ui.separator();
+            }
             self.draw_editing_kit_shortcut_buttons(ui);
         });
     }

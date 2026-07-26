@@ -89,6 +89,14 @@ impl EditDrafts {
         self.entries.insert(key, EditDraft::new(value));
     }
 
+    /// Drop every draft belonging to one tag. Drafts are keyed `tag|path`, so
+    /// discarding a tag's edits has to take its half-typed values with it or
+    /// they would be re-applied over the reloaded document.
+    pub(in crate::app) fn forget_tag(&mut self, tag_key: &str) {
+        let prefix = format!("{tag_key}|");
+        self.entries.retain(|key, _| !key.starts_with(&prefix));
+    }
+
     pub(in crate::app) fn accept_successful_edits(
         &mut self,
         tag_key: &str,

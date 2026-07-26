@@ -512,6 +512,85 @@ impl Baboon {
         }))
     }
 
+    /// Forget one tag's stashed overlay, so the tag reads as its source has it
+    /// again. Returns whether anything was stashed for it.
+    ///
+    /// Overlays are otherwise only ever inserted: without this, clearing a
+    /// document's dirty flag left the edited bytes in the project and reopening
+    /// the tag brought them straight back.
+    pub(super) fn forget_campaign_overlay(&mut self, kit: usize, key: &str) -> bool {
+        let Some(entry) = self.entry_for_key_in(kit, key).cloned() else {
+            return false;
+        };
+        let Some((identity, ..)) = campaign_entry_project_parts(&entry) else {
+            return false;
+        };
+        self.kits[kit]
+            .campaign_project
+            .as_mut()
+            .is_some_and(|project| project.overlays.remove(&identity).is_some())
+    }
+
+    /// Forget every stashed overlay in this kit's project, returning how many
+    /// tags were carrying one.
+    pub(super) fn forget_all_campaign_overlays(&mut self, kit: usize) -> usize {
+        let Some(project) = self.kits[kit].campaign_project.as_mut() else {
+            return 0;
+        };
+        let count = project.overlays.len();
+        project.overlays.clear();
+        count
+    }
+
+    /// Identities of the tags this kit currently has stashed, as display paths.
+    pub(super) fn stashed_campaign_tags(&self, kit: usize) -> Vec<String> {
+        let Some(project) = self.kits[kit].campaign_project.as_ref() else {
+            return Vec::new();
+        };
+        let mut paths: Vec<String> = project
+            .overlays
+            .values()
+            .map(|overlay| overlay.logical_path.clone())
+            .collect();
+        paths.sort();
+        paths
+    }
+
+    /// Throw away everything this workspace has not written into the game:
+    /// every stashed overlay and every unsaved document. The tags then reload
+    /// exactly as the game ships them.
+    pub(super) fn clear_campaign_stash(&mut self, kit: usize, ctx: &egui::Context) {
+        self.active = kit;
+        let stashed = self.forget_all_campaign_overlays(kit);
+        let open = self.kits[kit].open_tabs.clone();
+        // Every parsed document goes, not just the dirty ones: a document
+        // opened from the project reads clean while still holding the stashed
+        // bytes, so keeping it would put the edits straight back.
+        {
+            let kit_state = &mut self.kits[kit];
+            kit_state.parsed_tags.clear();
+            kit_state.loading_tags.clear();
+            kit_state.bitmap_previews.clear();
+            kit_state.model_previews.clear();
+            kit_state.field_search.clear();
+            kit_state.field_search_applied.clear();
+            kit_state.edit_buffers.clear();
+        }
+        let now = ctx.input(|input| input.time);
+        if let Err(error) = self.checkpoint_campaign_project(kit, now) {
+            self.status = format!("Could not update the Campaign Evolved project: {error}");
+            return;
+        }
+        for key in open {
+            self.select_entry(key, ctx.clone());
+        }
+        self.status = match stashed {
+            0 => "Cleared this workspace's unsaved modifications".to_owned(),
+            1 => "Cleared 1 stashed modification".to_owned(),
+            n => format!("Cleared {n} stashed modifications"),
+        };
+    }
+
     pub(super) fn checkpoint_campaign_project(&mut self, kit: usize, now: f64) -> Result<bool, String> {
         let Some(snapshot) = self.capture_campaign_project(kit, now)? else {
             return Ok(false);

@@ -1731,6 +1731,75 @@ impl Baboon {
         self.terminal.refocus_input = true;
     }
 
+    /// Throw away a tag's unsaved edits and put it back the way its source has
+    /// it: drop the parsed document and everything derived from it, forget any
+    /// stashed Campaign Evolved overlay, then reload the tag if it is open.
+    ///
+    /// Forgetting the overlay is the load-bearing half for a container source.
+    /// The project autosaves every dirty tag within a second of the edit, so
+    /// clearing the dirty flag alone leaves the edited bytes stashed and
+    /// reopening the tag restores them — the edit would be unremovable.
+    pub(super) fn discard_tag_changes(&mut self, kit: usize, key: &str, ctx: &egui::Context) {
+        // Reloading below goes through the active-kit path, and discarding is a
+        // user action on this kit either way.
+        self.active = kit;
+        let was_dirty = self.kits[kit]
+            .parsed_tags
+            .get(key)
+            .is_some_and(|document| document.dirty);
+        let had_overlay = self.forget_campaign_overlay(kit, key);
+        if !was_dirty && !had_overlay {
+            self.status = "That tag has no unsaved changes".to_owned();
+            return;
+        }
+        let label = self.tag_path_label(key);
+        let kit_state = &mut self.kits[kit];
+        kit_state.parsed_tags.remove(key);
+        kit_state.loading_tags.remove(key);
+        kit_state.bitmap_previews.remove(key);
+        kit_state.model_previews.remove(key);
+        kit_state.field_search.remove(key);
+        kit_state.field_search_applied.remove(key);
+        kit_state.edit_buffers.forget_tag(key);
+        // Persist the removal. The document is gone by now, so the capture
+        // below cannot put the overlay straight back.
+        if had_overlay {
+            let now = ctx.input(|input| input.time);
+            if let Err(error) = self.checkpoint_campaign_project(kit, now) {
+                self.status = format!("Could not update the Campaign Evolved project: {error}");
+                return;
+            }
+        }
+        // Still open: reload it as the source has it, rather than leaving an
+        // empty pane behind.
+        if self.kits[kit].open_tabs.iter().any(|open| open == key) {
+            self.select_entry(key.to_owned(), ctx.clone());
+        }
+        self.status = format!("Discarded unsaved changes to {label}");
+    }
+
+    /// Whether `key` has anything to discard — unsaved edits, or bytes stashed
+    /// in this kit's project from an earlier session.
+    pub(super) fn tag_has_discardable_changes(&self, kit: usize, key: &str) -> bool {
+        if self.kits[kit]
+            .parsed_tags
+            .get(key)
+            .is_some_and(|document| document.dirty)
+        {
+            return true;
+        }
+        let Some(entry) = self.entry_for_key_in(kit, key) else {
+            return false;
+        };
+        let Some((identity, ..)) = campaign_entry_project_parts(entry) else {
+            return false;
+        };
+        self.kits[kit]
+            .campaign_project
+            .as_ref()
+            .is_some_and(|project| project.overlays.contains_key(&identity))
+    }
+
     pub(super) fn select_entry(&mut self, key: String, ctx: egui::Context) {
         self.kits[self.active].open_tag_pane(&key);
         self.kits[self.active].selected_key = Some(key.clone());
@@ -1830,31 +1899,13 @@ impl Baboon {
             }
             _ => {}
         }
-        // A Campaign Evolved project retains edits, so upstream skips the
-        // unsaved-changes prompt once the checkpoint lands.
-        //
-        // CloseApp is deliberately excluded. It walks the dirty kits one at a
-        // time, and a checkpoint does not clear their dirty flags, so returning
-        // early here would re-enter this function with the same kit selected
-        // and never terminate. Exiting with a project therefore still prompts;
-        // that is one prompt too many, not one too few.
-        if !matches!(action, PendingCloseAction::CloseApp)
-            && self.current_source_is_campaign_project_capable(self.active)
-        {
-            let now = ctx.input(|input| input.time);
-            match self.checkpoint_campaign_project(self.active, now) {
-                Ok(_) => {
-                    self.execute_close_action(action, ctx);
-                    return;
-                }
-                Err(error) => {
-                    self.status = format!("Could not checkpoint Campaign Evolved project: {error}");
-                    self.project_checkpoint_prompt =
-                        Some(ProjectCheckpointPrompt { action, error });
-                    return;
-                }
-            }
-        }
+        // Upstream skipped the unsaved-changes prompt entirely for a container
+        // source, checkpointing the project instead on the grounds that the
+        // project retains the edits. It does — but silently, and there was no
+        // way to say no: overlays were only ever inserted, so an edit could not
+        // be taken back once stashed. The prompt is raised for these sources
+        // too, and offers stashing as a third, named choice.
+        let can_stash = self.current_source_is_campaign_project_capable(self.active);
         let dirty_tags = self.dirty_tags_for_close_action(&action);
         if dirty_tags.is_empty() {
             self.execute_close_action(action, ctx);
@@ -1862,6 +1913,7 @@ impl Baboon {
         }
         self.save_changes_prompt = SaveChangesPrompt {
             visible: true,
+            can_stash,
             dirty_tags,
             pending_action: action,
             error: None,
@@ -5312,15 +5364,60 @@ impl Baboon {
                 self.save_changes_prompt.dirty_tags.clear();
                 self.save_changes_prompt.error = None;
             }
+            SaveChangesPromptAction::StashForMod => {
+                let action = self.save_changes_prompt.pending_action.clone();
+                let now = ctx.input(|input| input.time);
+                match self.checkpoint_campaign_project(self.active, now) {
+                    Ok(_) => {
+                        // The project holds these bytes now, so they are no
+                        // longer unsaved work: leaving them dirty would prompt
+                        // again on the next close and, for a CloseApp walking
+                        // several kits, would never terminate.
+                        for entry in &self.save_changes_prompt.dirty_tags {
+                            if let Some(document) =
+                                self.kits[self.active].parsed_tags.get_mut(&entry.tag_id)
+                            {
+                                document.dirty = false;
+                            }
+                        }
+                        self.save_changes_prompt.visible = false;
+                        self.save_changes_prompt.dirty_tags.clear();
+                        self.save_changes_prompt.error = None;
+                        self.status = "Stashed for Export Mod".to_owned();
+                        self.execute_close_action(action, ctx);
+                    }
+                    Err(error) => {
+                        self.save_changes_prompt.error =
+                            Some(format!("Could not stash into the project: {error}"));
+                    }
+                }
+            }
             SaveChangesPromptAction::DontSave => {
                 let action = self.save_changes_prompt.pending_action.clone();
                 // Discarding is explicit, so drop the dirty flags the prompt
                 // listed. Without this, a CloseApp that spans several kits
                 // would see the same unsaved work again and re-prompt forever.
-                for entry in &self.save_changes_prompt.dirty_tags {
-                    if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(&entry.tag_id) {
+                let kit = self.active;
+                let tag_ids: Vec<String> = self
+                    .save_changes_prompt
+                    .dirty_tags
+                    .iter()
+                    .map(|entry| entry.tag_id.clone())
+                    .collect();
+                for tag_id in &tag_ids {
+                    if let Some(doc) = self.kits[kit].parsed_tags.get_mut(tag_id) {
                         doc.dirty = false;
                     }
+                    // And forget anything the project stashed for it. Autosave
+                    // captures a dirty tag within a second of the edit, so
+                    // without this "Don't Save" cleared a flag while the edited
+                    // bytes stayed behind and came back on reopen.
+                    self.forget_campaign_overlay(kit, tag_id);
+                    self.kits[kit].edit_buffers.forget_tag(tag_id);
+                }
+                let now = ctx.input(|input| input.time);
+                if let Err(error) = self.checkpoint_campaign_project(kit, now) {
+                    self.status = format!("Could not update the Campaign Evolved project: {error}");
                 }
                 self.save_changes_prompt.visible = false;
                 self.save_changes_prompt.dirty_tags.clear();
@@ -5518,6 +5615,9 @@ mod browser_refresh_tests;
 enum SaveChangesPromptAction {
     None,
     Save(Vec<String>),
+    /// Keep the edits in this workspace's Baboon project, ready for Export
+    /// Mod, without writing anything into the game's own files.
+    StashForMod,
     DontSave,
     Cancel,
 }
@@ -5542,6 +5642,17 @@ fn render_save_changes_prompt(
                 RichText::new("The following files have been modified. Select the files to save.")
                     .color(text_dark()),
             );
+            if prompt.can_stash {
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(
+                        "Save overwrites the game's own pak files in place. Stash for Mod keeps \
+                         the edits in this workspace's project instead, ready for Export Mod.",
+                    )
+                    .small()
+                    .color(subtle_dark()),
+                );
+            }
             ui.add_space(8.0);
             if let Some(error) = prompt.error.as_deref() {
                 ui.label(RichText::new(error).color(Color32::from_rgb(180, 48, 40)));
@@ -5568,6 +5679,19 @@ fn render_save_changes_prompt(
                     .clicked()
                 {
                     action = SaveChangesPromptAction::DontSave;
+                }
+                if prompt.can_stash
+                    && ui
+                        .add(
+                            egui::Button::new("Stash for Mod").min_size(Vec2::new(110.0, 24.0)),
+                        )
+                        .on_hover_text(
+                            "Keep these edits in this workspace's Baboon project, ready for \
+                             Export Mod. The game's own files are left untouched.",
+                        )
+                        .clicked()
+                {
+                    action = SaveChangesPromptAction::StashForMod;
                 }
                 if ui
                     .add(egui::Button::new("Save").min_size(Vec2::new(78.0, 24.0)))
