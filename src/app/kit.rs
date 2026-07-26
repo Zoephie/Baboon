@@ -64,8 +64,10 @@ pub(super) struct Kit {
     /// `open_tabs` is re-derived from it, never the other way round — so a
     /// split or a drag survives instead of being overwritten by a mirror.
     pub(super) tag_tree: egui_tiles::Tree<String>,
-    /// Transient text-entry buffers keyed by stable widget/edit identifiers.
-    pub(super) edit_buffers: HashMap<String, String>,
+    /// In-progress text edits keyed by stable widget/edit identifiers. Drafts
+    /// rather than bare strings so a value the user is still typing is not
+    /// overwritten by the document underneath it.
+    pub(super) edit_buffers: EditDrafts,
 
     // --- Per-document derived caches ---
     pub(super) bitmap_previews: HashMap<String, BitmapPreviewState>,
@@ -127,7 +129,7 @@ impl Kit {
             selected_key: None,
             open_tabs: Vec::new(),
             tag_tree: egui_tiles::Tree::empty(tag_tree_id(id)),
-            edit_buffers: HashMap::new(),
+            edit_buffers: EditDrafts::default(),
             bitmap_previews: HashMap::new(),
             model_previews: HashMap::new(),
             rmdf_cache: HashMap::new(),

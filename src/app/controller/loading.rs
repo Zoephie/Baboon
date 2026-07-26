@@ -27,6 +27,16 @@ impl Baboon {
                 return false;
             }
         };
+        // Check the outgoing project to disk before its source is replaced, and
+        // refuse the switch if that fails rather than losing its edits.
+        if self.current_source_is_campaign_project_capable()
+            && let Err(error) = self.checkpoint_campaign_project(ctx.input(|input| input.time))
+        {
+            self.status = format!(
+                "Could not switch sources because the Campaign Evolved project checkpoint failed: {error}"
+            );
+            return false;
+        }
         // Order matters: `install_loaded_source` rebuilds the kit from empty,
         // which is what replaces the old explicit clearing of document state.
         // Everything scoped to the new source must therefore be applied after
@@ -46,6 +56,7 @@ impl Baboon {
             kit.parsed_tags.insert(key.clone(), TagDocument::clean(tag));
             kit.open_tag_pane(&key);
         }
+        self.apply_pending_campaign_project(ctx.input(|input| input.time), ctx);
         self.refresh_active_favorite_entries();
         self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
         self.refreshing_entry_index = false;

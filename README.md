@@ -127,16 +127,20 @@ silently skipped.
   *or* any tag on disk; differences (changed values and block element-count
   mismatches) show in a table and export as TSV.
 
-### Tabbed, dockable editor
+### Tabbed, splittable editor
 
-- Open multiple tags as **tabs** in a rack, each with its group icon and an
-  amber tint + ● marker when it has unsaved edits.
-- **Tear off** any tab into a floating, resizable window — and drag it back onto
-  the rack (or click *dock*) to re-dock it.
+- Open multiple tags as **tabs**, each with its group icon and an amber tint +
+  ● marker when it has unsaved edits.
+- **Split** the editor by dragging a tab against the edge of a pane, and view
+  two tags side by side. Drag a tab onto another group to move it.
+- Open **several games at once**: each is a workspace tab with its own browser
+  and its own tags, and dragging a workspace tab splits the window between two
+  games.
 - **Right-click a tab** to reveal that tag in the browser tree, or to close all
   tabs / all tabs but this one.
-- An LRU cache bounds how many parsed tags and tabs are kept in memory at once,
-  trimming least-recently-used documents automatically.
+- Tabs remain open until explicitly closed; the practical document limit is
+  available memory. Drag a tab against a pane edge to split the editor and view
+  two tags at once.
 
 ### Field editing
 
@@ -146,7 +150,8 @@ pageable resources — with inline editing for loose little-endian tags:
 - Scalars, integers, reals, strings, and `string_id`s.
 - **Enums** and **bit flags** with named options.
 - **Colors** via an interactive color-picker popup with channel parsing.
-- **Tag references** with an *Open* button (Alt-click opens in a floating window)
+- **Tag references** with an *Open* button (Alt-click opens in a split beside
+  the current pane)
   that resolves and opens the referenced tag — even if it isn't in the current
   index — an *Import* button on geometry references that re-imports the source
   asset via `tool`, **drag-and-drop** from the browser to set a reference, and a
@@ -307,7 +312,8 @@ package your changes as a separate, reversible mod:
   has a *Don't ask again* option (also under **Settings → Startup → Saving**).
   There is no undo without a backup of the paks. *(Loose-folder MCC tags save
   normally and never prompt.)*
-- **Export Mod…** (File menu) — bundle **every open, modified tag** into one
+- **Export Mod…** (File menu) — bundle **every modified tag in the active
+  project**, including checkpointed tags whose tabs were closed, into one
   portable, higher-priority **overlay container** without touching the base game.
   Mods are fully reversible (delete the overlay to uninstall).
 - **Save As** — *duplicate* the tag under a new name into an overlay container (a
@@ -315,13 +321,23 @@ package your changes as a separate, reversible mod:
 - **Rename** (right-click) — the same as Save As, plus a package **redirect** so
   existing tags that reference the old name resolve to the renamed one.
 
-Export Mod / Save As / Rename each produce a `<name>-WinGDK_P` IoStore
-**triplet** — `.utoc`, `.ucas`, and a small `.pak` stub. Drop **all three**
+Export Mod produces a `<name>-WinGDK_P` IoStore **triplet** — `.utoc`, `.ucas`,
+and a small `.pak` stub — plus a same-stem `.baboon` project file containing
+the open-tab layout and recoverable copies of every modified/new tag. Use
+**File → Open Baboon Project…** to continue editing that project on this or
+another machine. Save As / Rename produce the IoStore triplet without a project
+sidecar. Drop **all three runtime files**
 files into the game's `Meteorite/Content/Paks/` folder alongside the base paks.
 The `.pak` is required: UE's loader discovers containers by scanning that folder
 for `.pak` files and derives the matching `.utoc`/`.ucas` from each — an overlay
 with no `.pak` is never mounted. The `_P` suffix then gives the overlay patch
 priority so UE serves your chunks on top of the base (last-mounted-wins).
+
+While a Campaign Evolved source is open, Baboon checkpoints the active project
+to `%APPDATA%\Baboon\campaign_evolved_recovery.baboon` after a short idle
+period. Clean tabs reload from the game containers; modified and newly-created
+tags are stored in the project database. The normal Ask / Always / Never session
+setting controls whether this recovery project is reopened on the next launch.
 
 Tag identity (`FPackageId` / export hashes), UE5 Zen-package `.uasset`
 (de)serialization, and override-container writing are all implemented natively in

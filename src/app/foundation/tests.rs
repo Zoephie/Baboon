@@ -123,7 +123,7 @@ mod tests {
 
     fn with_test_edit_context(assertion: impl FnOnce(&FieldEditContext<'_>)) {
         let definitions_root = locate_definitions_root();
-        let mut buffers = HashMap::new();
+        let mut buffers = EditDrafts::default();
         let mut pending = Vec::new();
         let mut block_ops = Vec::new();
         let mut block_confirm = None;

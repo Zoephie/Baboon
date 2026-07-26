@@ -55,6 +55,10 @@ impl Baboon {
                             ui.close_menu();
                             self.begin_load_iostore_container(ctx.clone());
                         }
+                        if ui.button("Open Baboon Project...").clicked() {
+                            ui.close_menu();
+                            self.begin_open_campaign_project(ctx.clone());
+                        }
                         ui.separator();
                         let has_loaded_folder = self.loaded_tags_root().is_some();
                         if ui
@@ -88,7 +92,7 @@ impl Baboon {
                         .clicked()
                         {
                             ui.close_menu();
-                            self.save_current_tag();
+                            self.defer_file_action(DeferredFileAction::SaveCurrentTag, ctx);
                         }
                         if ui
                             .add_enabled(
@@ -103,16 +107,20 @@ impl Baboon {
                         if self.current_source_is_container() {
                             if ui
                                 .add_enabled(
-                                    self.kits[self.active].parsed_tags.values().any(|d| d.dirty),
+                                    self.kits[self.active].parsed_tags.values().any(|d| d.dirty)
+                                        || self
+                                            .campaign_project
+                                            .as_ref()
+                                            .is_some_and(|project| !project.overlays.is_empty()),
                                     egui::Button::new("Export Mod..."),
                                 )
                                 .on_hover_text(
-                                    "Bundle every open, modified tag into one portable mod overlay (the base game is left untouched)",
+                                    "Bundle every modified project tag into one portable mod overlay and .baboon recovery file",
                                 )
                                 .clicked()
                             {
                                 ui.close_menu();
-                                self.export_mod();
+                                self.defer_file_action(DeferredFileAction::ExportMod, ctx);
                             }
                         }
                         if self.expert_mode {
@@ -138,8 +146,14 @@ impl Baboon {
                             )
                             .clicked()
                         {
+                            // Deferred, per upstream: the close runs after the
+                            // editor renders, so an edit committed by the menu
+                            // taking focus is applied before the dirty check.
                             if let Some(key) = self.kits[self.active].selected_key.clone() {
-                                self.request_close_action(PendingCloseAction::CloseTab(key), ctx);
+                                self.defer_file_action(
+                                    DeferredFileAction::Close(PendingCloseAction::CloseTab(key)),
+                                    ctx,
+                                );
                             }
                             ui.close_menu();
                         }
@@ -150,7 +164,10 @@ impl Baboon {
                             )
                             .clicked()
                         {
-                            self.request_close_action(PendingCloseAction::CloseAllTabs, ctx);
+                            self.defer_file_action(
+                                DeferredFileAction::Close(PendingCloseAction::CloseAllTabs),
+                                ctx,
+                            );
                             ui.close_menu();
                         }
                         ui.separator();
@@ -777,7 +794,7 @@ impl Baboon {
                     if let Some(doc) = self.kits[kit].parsed_tags.get_mut(&tag_key) {
                         doc.journal.begin_edit(&doc.tag, "Edit color");
                         if let Some(status) =
-                            apply_pending_edits(&mut doc.tag, vec![edit], &mut doc.dirty)
+                            apply_pending_edits(&mut doc.tag, vec![edit], &mut doc.dirty).status
                         {
                             self.status = status;
                         }
@@ -835,7 +852,8 @@ impl Baboon {
                 if !batch.edits.is_empty() || !batch.data_ops.is_empty() {
                     doc.journal.begin_edit(&doc.tag, "Edit function");
                 }
-                if let Some(status) = apply_pending_edits(&mut doc.tag, batch.edits, &mut doc.dirty)
+                if let Some(status) =
+                    apply_pending_edits(&mut doc.tag, batch.edits, &mut doc.dirty).status
                 {
                     self.status = status;
                 }
@@ -849,6 +867,7 @@ impl Baboon {
         }
         self.handle_block_confirm(ctx);
         self.handle_save_changes_prompt(ctx);
+        self.handle_project_checkpoint_prompt(ctx);
         self.handle_last_opened_windows_prompt(ctx);
         self.process_pending_open(ctx);
         self.apply_field_nav(ctx);
@@ -906,6 +925,28 @@ impl Baboon {
         }
     }
 
+    pub(super) fn run_deferred_file_action(&mut self, ctx: &egui::Context) {
+        match self.deferred_file_action.take() {
+            Some(DeferredFileAction::SaveCurrentTag) => self.save_current_tag(),
+            Some(DeferredFileAction::ExportMod) => self.export_mod(),
+            Some(DeferredFileAction::Close(action)) => self.request_close_action(action, ctx),
+            None => {}
+        }
+    }
+
+    pub(in crate::app) fn defer_file_action(
+        &mut self,
+        action: DeferredFileAction,
+        ctx: &egui::Context,
+    ) {
+        ctx.memory_mut(|memory| {
+            if let Some(focused) = memory.focused() {
+                memory.surrender_focus(focused);
+            }
+        });
+        self.deferred_file_action = Some(action);
+    }
+
     fn prepare_root_frame(&mut self, ctx: &egui::Context) {
         self.process_worker_messages(ctx);
         self.expire_status(ctx);
@@ -922,7 +963,7 @@ impl Baboon {
         }
         self.refresh_find(ctx);
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::S)) {
-            self.save_current_tag();
+            self.defer_file_action(DeferredFileAction::SaveCurrentTag, ctx);
         }
         // Undo: Ctrl+Z. Redo: Ctrl+Shift+Z or Ctrl+Y.
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Z)) {

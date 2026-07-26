@@ -27,6 +27,12 @@ pub(in crate::app) enum WorkerMessage {
         result: Result<TagFile, String>,
     },
     ExportFinished(Result<String, String>),
+    CampaignProjectSaved {
+        revision: u64,
+        path: PathBuf,
+        fingerprint: Vec<u8>,
+        result: Result<(), String>,
+    },
     FolderRefactorProgress(FolderRefactorProgress),
     FolderRefactorFinished(Result<FolderRefactorFinished, String>),
     FolderConversionProgress(FolderConversionProgress),

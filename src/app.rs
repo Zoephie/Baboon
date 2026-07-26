@@ -9,7 +9,7 @@ use std::rc::Rc;
 
 use std::sync::{
     Arc, Mutex,
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU64, Ordering},
     mpsc::{self, Receiver, Sender},
 };
 use std::thread;
@@ -61,6 +61,8 @@ mod kit;
 use kit::*;
 mod journal;
 use journal::*;
+mod project;
+use project::*;
 mod keywords;
 use keywords::*;
 mod field_index;
@@ -198,6 +200,9 @@ pub struct Baboon {
     editing_kit_path_attention: Option<String>,
     /// One cross-frame edit popup at a time; its embedded tag/path identity
     /// prevents applying a delayed confirmation to the newly selected tag.
+    /// File-menu actions run after the editor has rendered, so an edit being
+    /// committed by focus loss is applied before its save/export snapshot.
+    deferred_file_action: Option<DeferredFileAction>,
     color_popup: Option<MaterialColorPopup>,
     /// Kits owning the editing popups below. Each outlives the frame that
     /// opened it and applies an edit addressed by tag key — and a tag key is
@@ -252,6 +257,15 @@ pub struct Baboon {
     /// Modal close transaction; the pending action is executed only after every
     /// selected dirty document has been saved or discard is confirmed.
     save_changes_prompt: SaveChangesPrompt,
+    project_checkpoint_prompt: Option<ProjectCheckpointPrompt>,
+    /// Active Campaign Evolved recovery/project database.
+    ///
+    /// Still one per application rather than one per kit. A project belongs to
+    /// a source, so with two Campaign Evolved kits open this is wrong — see the
+    /// merge notes; kit-scoping it is follow-on work.
+    campaign_project: Option<ActiveCampaignProject>,
+    /// Project contents waiting for their Campaign Evolved source to mount.
+    pending_campaign_project: Option<PendingCampaignProject>,
     /// Startup-only prompt reconstructed from the prior session file.
     last_opened_windows: Option<LastOpenedWindowsPrompt>,
     /// Pending destructive block op (delete / delete all) awaiting confirm.
@@ -389,6 +403,7 @@ impl Baboon {
                 .map(|path| path.display().to_string())
                 .unwrap_or_default(),
             blender_path: prefs.blender_path,
+            deferred_file_action: None,
             color_popup: None,
             color_popup_kit: None,
             function_popup_kit: None,
@@ -442,6 +457,9 @@ impl Baboon {
             saved_terminal_open_games: terminal_open_games.clone(),
             terminal_open_games,
             save_changes_prompt: SaveChangesPrompt::default(),
+            project_checkpoint_prompt: None,
+            campaign_project: None,
+            pending_campaign_project: None,
             last_opened_windows,
             block_confirm: None,
             audio: audio::AudioState::default(),

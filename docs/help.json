@@ -245,7 +245,10 @@
                 "Settings > Startup can ask for confirmation before a Save overwrites game files.",
                 "File > Export Mod bundles every open, modified tag into a separate mod overlay and leaves the base game untouched.",
                 "File > New Tag and File > Import Tag add tags that live only in memory until you Save or Export Mod.",
-                "Sound tags carry no audio themselves; Baboon follows their package references out to the game's Wwise media to play and extract them."
+                "Sound tags carry no audio themselves; Baboon follows their package references out to the game's Wwise media to play and extract them.",
+                "Baboon keeps a .baboon project alongside a Campaign Evolved source, checkpointing modified and newly-created tags so they survive a crash or a reopen.",
+                "Export Mod bundles every modified tag in the project, including ones whose tabs were closed, and writes a portable .baboon file beside the mod.",
+                "File > Open Baboon Project reopens a project, restoring its tags and their layout."
               ]
             }
           ]

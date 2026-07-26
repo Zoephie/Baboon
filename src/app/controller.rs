@@ -224,6 +224,17 @@ impl Baboon {
                     self.handle_bitmap_reimport_finished(kit, key, result)
                 }
                 WorkerMessage::ExportFinished(result) => self.handle_export_finished(result),
+                WorkerMessage::CampaignProjectSaved {
+                    revision,
+                    path,
+                    fingerprint,
+                    result,
+                } => self.handle_campaign_project_saved(
+                    revision,
+                    path,
+                    fingerprint,
+                    result,
+                ),
                 WorkerMessage::FolderRefactorProgress(progress) => {
                     self.handle_folder_refactor_progress(progress)
                 }
@@ -701,7 +712,7 @@ impl Baboon {
     /// Import-of-a-new-path). `logical` is the normalized container-relative path
     /// (no extension). Fails if the path is empty, no same-group template tag
     /// exists to seed the package, or a new tag already occupies that path.
-    fn add_new_container_tag(
+    pub(super) fn add_new_container_tag(
         &mut self,
         logical: &str,
         group_tag: u32,
@@ -928,7 +939,6 @@ impl Baboon {
         self.kits[self.active].selected_key = Some(key.to_owned());
         self.kits[self.active].parsed_tags
             .insert(key.to_owned(), TagDocument::modified(tag));
-        self.trim_open_tabs();
         let label = self.tag_path_label(key);
         self.status = format!("Imported over {label} (unsaved)");
     }
@@ -971,7 +981,7 @@ impl Baboon {
     /// Find an existing container tag of `group_tag` and return its owning
     /// container index plus its `.uasset` container path — the package template
     /// for a new tag of the same group.
-    fn find_container_template(&self, group_tag: u32) -> Option<(usize, String)> {
+    pub(super) fn find_container_template(&self, group_tag: u32) -> Option<(usize, String)> {
         let source = self.source()?;
         source
             .entries
@@ -1008,7 +1018,6 @@ impl Baboon {
             .insert(key.clone(), TagDocument::modified(tag));
         self.kits[self.active].open_tag_pane(&key);
         self.kits[self.active].selected_key = Some(key.clone());
-        self.trim_open_tabs();
     }
 
     pub(super) fn loaded_tags_root(&self) -> Option<PathBuf> {
@@ -1257,7 +1266,6 @@ impl Baboon {
             .insert(key.clone(), TagDocument::clean(tag));
         self.kits[self.active].open_tag_pane(&key);
         self.kits[self.active].selected_key = Some(key.clone());
-        self.trim_open_tabs();
     }
 
     fn register_saved_copy_if_in_loaded_folder(&mut self, path: &Path) -> Result<bool, String> {
@@ -1726,8 +1734,11 @@ impl Baboon {
     pub(super) fn select_entry(&mut self, key: String, ctx: egui::Context) {
         self.kits[self.active].open_tag_pane(&key);
         self.kits[self.active].selected_key = Some(key.clone());
-        self.trim_open_tabs();
-        self.ensure_tag_loading(key, ctx);
+        // A tag the project has an overlay for opens from the project, not from
+        // disk — otherwise reopening it would silently discard its edits.
+        if !self.load_campaign_overlay_for_key(&key) {
+            self.ensure_tag_loading(key, ctx);
+        }
     }
 
     /// Starts potentially expensive source or export work off the UI thread.
@@ -1790,13 +1801,13 @@ impl Baboon {
     }
 
     pub(super) fn request_close_action(&mut self, action: PendingCloseAction, ctx: &egui::Context) {
-        if self.save_changes_prompt.visible {
+        if self.save_changes_prompt.visible || self.project_checkpoint_prompt.is_some() {
             return;
         }
         // The save prompt and every save path below it address documents by
         // tag key against the active kit. Point `active` at the kit the prompt
-        // will be about, so all of that resolves to the right documents
-        // without threading a kit id through the whole save surface.
+        // will be about first, so all of that — including the project check
+        // just below — resolves against the right kit.
         match &action {
             PendingCloseAction::CloseKit(id) => {
                 if let Some(index) = self.kit_index(*id) {
@@ -1809,6 +1820,31 @@ impl Baboon {
                 }
             }
             _ => {}
+        }
+        // A Campaign Evolved project retains edits, so upstream skips the
+        // unsaved-changes prompt once the checkpoint lands.
+        //
+        // CloseApp is deliberately excluded. It walks the dirty kits one at a
+        // time, and a checkpoint does not clear their dirty flags, so returning
+        // early here would re-enter this function with the same kit selected
+        // and never terminate. Exiting with a project therefore still prompts;
+        // that is one prompt too many, not one too few.
+        if !matches!(action, PendingCloseAction::CloseApp)
+            && self.current_source_is_campaign_project_capable()
+        {
+            let now = ctx.input(|input| input.time);
+            match self.checkpoint_campaign_project(now) {
+                Ok(_) => {
+                    self.execute_close_action(action, ctx);
+                    return;
+                }
+                Err(error) => {
+                    self.status = format!("Could not checkpoint Campaign Evolved project: {error}");
+                    self.project_checkpoint_prompt =
+                        Some(ProjectCheckpointPrompt { action, error });
+                    return;
+                }
+            }
         }
         let dirty_tags = self.dirty_tags_for_close_action(&action);
         if dirty_tags.is_empty() {
@@ -1841,7 +1877,10 @@ impl Baboon {
         if self.save_changes_prompt.visible {
             return;
         }
-        self.request_close_action(PendingCloseAction::CloseApp, ctx);
+        self.defer_file_action(
+            DeferredFileAction::Close(PendingCloseAction::CloseApp),
+            ctx,
+        );
     }
 
     fn dirty_tags_for_close_action(&self, action: &PendingCloseAction) -> Vec<DirtyTagEntry> {
@@ -1935,7 +1974,7 @@ impl Baboon {
     }
 
     /// Snapshot every kit's source and open tags for the restore prompt.
-    fn current_session_state(&self) -> Option<LastSessionState> {
+    pub(super) fn current_session_state(&self) -> Option<LastSessionState> {
         let kits = (0..self.kits.len())
             .filter_map(|index| self.session_kit_state(index))
             .collect::<Vec<_>>();
@@ -1953,8 +1992,9 @@ impl Baboon {
             TagSource::MonolithicCache { root, .. } => {
                 (LastSessionSourceKind::MonolithicCache, root.clone())
             }
-            // Container mounts are not persisted across sessions yet.
-            TagSource::IoStoreContainerSet { .. } => return None,
+            TagSource::IoStoreContainerSet { root, .. } => {
+                (LastSessionSourceKind::IoStoreContainerSet, root.clone())
+            }
         };
         let mut tags = Vec::new();
         for key in ordered_unique_keys(kit.open_tabs.iter()) {
@@ -1983,10 +2023,16 @@ impl Baboon {
                 path,
             });
         }
-        (!tags.is_empty()).then_some(LastSessionKit {
+        // A kit with no open tags is still worth saving if it carries a
+        // project, per upstream — the project is the session.
+        if tags.is_empty() && self.campaign_project.is_none() {
+            return None;
+        }
+        Some(LastSessionKit {
             source_kind,
             source_path,
             game: source.game.clone(),
+            project_path: self.campaign_project.as_ref().map(|project| project.path.clone()),
             tags,
         })
     }
@@ -1996,11 +2042,17 @@ impl Baboon {
     /// can finish in any order without stealing each other's tags.
     pub(super) fn begin_last_session_restore(
         &mut self,
-        kits: Vec<(LastSessionSourceKind, PathBuf, Vec<LastSessionTag>)>,
+        kits: Vec<RestoreKit>,
         ctx: egui::Context,
     ) {
-        for (source_kind, source_path, tags) in kits {
-            if tags.is_empty() {
+        for RestoreKit {
+            source_kind,
+            source_path,
+            project_path,
+            tags,
+        } in kits
+        {
+            if tags.is_empty() && project_path.is_none() {
                 continue;
             }
             match source_kind {
@@ -2018,10 +2070,20 @@ impl Baboon {
                     };
                     self.begin_load_monolithic_path(blob_index, ctx.clone());
                 }
+                // Upstream added container sources to the session format, so a
+                // Campaign Evolved install now comes back with the rest.
+                LastSessionSourceKind::IoStoreContainerSet => {
+                    self.begin_load_folder_path(source_path, ctx.clone())
+                }
             }
             // The loaders route to a kit and leave it active, so this stages
             // the tags on the kit the load will land in.
             self.kits[self.active].pending_restore_tags = tags;
+            // Its project is queued the same way, and opens once the source
+            // this session recorded has finished mounting.
+            if let Some(project_path) = project_path {
+                self.queue_campaign_project(project_path);
+            }
         }
     }
 
@@ -2140,24 +2202,6 @@ impl Baboon {
             .retain(|buffer_key, _| !buffer_key.starts_with(&edit_prefix));
     }
 
-    pub(super) fn trim_open_tabs(&mut self) {
-        while self.kits[self.active].open_tabs.len() > MAX_OPEN_TABS {
-            let removable = self.kits[self.active].open_tabs.iter().position(|tab| {
-                Some(tab.as_str()) != self.kits[self.active].selected_key.as_deref()
-                    && !self.kits[self.active]
-                        .parsed_tags
-                        .get(tab)
-                        .map(|doc| doc.dirty)
-                        .unwrap_or(false)
-            });
-            let Some(removable) = removable else {
-                break;
-            };
-            let key = self.kits[self.active].open_tabs[removable].clone();
-            self.kits[self.active].close_tag_pane(&key);
-            self.unload_tag(&key);
-        }
-    }
 
 
     pub(super) fn handle_browser_action(&mut self, action: BrowserAction, ctx: egui::Context) {
@@ -3050,9 +3094,20 @@ impl Baboon {
         }
     }
 
-    /// Bundle every open, modified container tag into one portable `_P` overlay
-    /// mod — the base game is left untouched.
+    /// Bundle every modified Campaign Evolved project tag into one portable `_P`
+    /// overlay and write its `.baboon` recovery project beside the triplet.
     pub(super) fn export_mod(&mut self) {
+        let snapshot = match self.capture_campaign_project(0.0) {
+            Ok(Some(snapshot)) => snapshot,
+            Ok(None) => {
+                self.status = "Export Mod is only for Campaign Evolved containers".to_owned();
+                return;
+            }
+            Err(error) => {
+                self.status = format!("Could not checkpoint project for export: {error}");
+                return;
+            }
+        };
         let Some(source) = self.source() else {
             self.status = "No source loaded".to_owned();
             return;
@@ -3061,29 +3116,26 @@ impl Baboon {
             self.status = "Export Mod is only for Campaign Evolved containers".to_owned();
             return;
         };
-        // Split dirty tags into same-name overrides of existing tags and brand-
-        // new packages, so one mod can carry both.
-        // Override: (archive, rel_path, edited bytes).
         let mut overrides: Vec<(std::sync::Arc<blam_tags::iostore::IoStoreArchive>, String, Vec<u8>)> =
             Vec::new();
-        // New package: (template .uasset bytes, tag bytes, package path).
         let mut new_pkgs: Vec<(Vec<u8>, Vec<u8>, String)> = Vec::new();
-        for (k, doc) in self.kits[self.active].parsed_tags.iter() {
-            if !doc.dirty {
-                continue;
-            }
-            let Some(entry) = self.entry_for_key(k) else {
+        let mut skipped = 0usize;
+        for overlay in snapshot.overlays.values() {
+            let Some(entry) = self.campaign_entry_for_identity(&overlay.identity) else {
+                skipped += 1;
                 continue;
             };
             match &entry.location {
                 TagEntryLocation::Container { container, rel_path } => {
                     let Some(m) = containers.get(*container) else {
+                        skipped += 1;
                         continue;
                     };
-                    let Ok(bytes) = doc.tag.write_to_bytes() else {
-                        continue;
-                    };
-                    overrides.push((m.archive.clone(), rel_path.clone(), bytes));
+                    overrides.push((
+                        m.archive.clone(),
+                        rel_path.clone(),
+                        overlay.bytes.clone(),
+                    ));
                 }
                 TagEntryLocation::NewContainer {
                     template_container,
@@ -3092,17 +3144,16 @@ impl Baboon {
                     ..
                 } => {
                     let Some(m) = containers.get(*template_container) else {
+                        skipped += 1;
                         continue;
                     };
                     let Ok(template) = m.archive.read(template_rel) else {
+                        skipped += 1;
                         continue;
                     };
-                    let Ok(bytes) = doc.tag.write_to_bytes() else {
-                        continue;
-                    };
-                    new_pkgs.push((template, bytes, package.clone()));
+                    new_pkgs.push((template, overlay.bytes.clone(), package.clone()));
                 }
-                _ => continue,
+                _ => skipped += 1,
             }
         }
         let count = overrides.len() + new_pkgs.len();
@@ -3132,10 +3183,33 @@ impl Baboon {
         match blam_tags::iostore::writer::write_mod_container_ex(&override_refs, &new_refs, &output) {
             Ok(()) => {
                 let stem = output.file_stem().and_then(|s| s.to_str()).unwrap_or("mod");
-                self.status = format!(
-                    "Exported {count} tag(s) → {stem}.utoc/.ucas/.pak — copy all three into \
-                     Meteorite/Content/Paks/ (base game unchanged)"
-                )
+                let sidecar = output.with_extension("baboon");
+                match save_campaign_project(&sidecar, &snapshot) {
+                    Ok(()) => {
+                        self.campaign_project = Some(ActiveCampaignProject::from_snapshot(
+                            sidecar,
+                            &snapshot,
+                            0.0,
+                        ));
+                        self.status = if skipped == 0 {
+                            format!(
+                                "Exported {count} tag(s) → {stem}.utoc/.ucas/.pak/.baboon \
+                                 (base game unchanged)"
+                            )
+                        } else {
+                            format!(
+                                "Exported {count} tag(s) with .baboon recovery; skipped {skipped} \
+                                 unresolved project tag(s)"
+                            )
+                        };
+                    }
+                    Err(error) => {
+                        self.status = format!(
+                            "Exported {count} tag(s) to {stem}.utoc/.ucas/.pak, but the .baboon \
+                             recovery file failed: {error}"
+                        );
+                    }
+                }
             }
             Err(e) => self.status = format!("Export Mod failed: {e}"),
         }
@@ -5281,6 +5355,73 @@ impl Baboon {
         }
     }
 
+    pub(super) fn handle_project_checkpoint_prompt(&mut self, ctx: &egui::Context) {
+        let Some(prompt) = self.project_checkpoint_prompt.as_ref() else {
+            return;
+        };
+        let error = prompt.error.clone();
+        let mut retry = false;
+        let mut discard = false;
+        let mut cancel = false;
+        egui::Window::new("Campaign Project Checkpoint Failed")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+            .default_width(520.0)
+            .show(ctx, |ui| {
+                ui.label(
+                    RichText::new(
+                        "Baboon could not preserve the latest Campaign Evolved project state.",
+                    )
+                    .color(text_dark()),
+                );
+                ui.add_space(6.0);
+                ui.label(RichText::new(error).color(Color32::from_rgb(180, 48, 40)));
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(
+                        "Retry the checkpoint, explicitly discard the uncheckpointed changes, \
+                         or cancel closing.",
+                    )
+                    .color(subtle_dark()),
+                );
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    retry = ui.button("Retry").clicked();
+                    discard = ui.button("Discard and Close").clicked();
+                    cancel = ui.button("Cancel").clicked();
+                });
+            });
+        if retry {
+            let now = ctx.input(|input| input.time);
+            match self.checkpoint_campaign_project(now) {
+                Ok(_) => {
+                    let action = self
+                        .project_checkpoint_prompt
+                        .take()
+                        .expect("checkpoint prompt exists")
+                        .action;
+                    self.execute_close_action(action, ctx);
+                }
+                Err(error) => {
+                    if let Some(prompt) = self.project_checkpoint_prompt.as_mut() {
+                        prompt.error = error.clone();
+                    }
+                    self.status = format!("Could not checkpoint Campaign Evolved project: {error}");
+                }
+            }
+        } else if discard {
+            let action = self
+                .project_checkpoint_prompt
+                .take()
+                .expect("checkpoint prompt exists")
+                .action;
+            self.execute_close_action(action, ctx);
+        } else if cancel {
+            self.project_checkpoint_prompt = None;
+        }
+    }
+
     pub(super) fn handle_last_opened_windows_prompt(&mut self, ctx: &egui::Context) {
         let action = render_last_opened_windows_prompt(ctx, self.last_opened_windows.as_mut());
         match action {
@@ -5411,7 +5552,7 @@ enum LastOpenedWindowsAction {
     OpenSettings,
     Restore {
         /// Each kit to reopen, with the tags checked for it.
-        kits: Vec<(LastSessionSourceKind, PathBuf, Vec<LastSessionTag>)>,
+        kits: Vec<RestoreKit>,
         /// "Don't ask again" was ticked — remember this as `Always`.
         remember: bool,
     },

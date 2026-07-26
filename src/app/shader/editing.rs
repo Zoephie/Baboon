@@ -833,29 +833,23 @@ fn draw_h2_function_range_control(
     };
     let id = edit.widget_id(("h2_range", row.label.as_str()));
     let buffer_key = format!("{}|h2_range:{}", edit.tag_key, row.label);
-    let buffer = edit
-        .buffers
-        .entry(buffer_key)
-        .or_insert_with(|| current.clone());
-    if !ui.memory(|m| m.has_focus(id)) && *buffer != current {
-        *buffer = current.clone();
-    }
+    let draft = edit.buffers.draft_mut(buffer_key, &current);
     let mut commit_value = None;
     ui.scope_builder(egui::UiBuilder::new().max_rect(value_rect), |ui| {
         ui.visuals_mut().extreme_bg_color = material_input();
         let resp = ui.add_enabled(
             edit.editable && enabled,
-            egui::TextEdit::singleline(buffer)
+            egui::TextEdit::singleline(&mut draft.text)
                 .id(id)
                 .desired_width(value_rect.width())
                 .text_color(material_text())
                 .font(egui::TextStyle::Monospace),
         );
         text_edit_cursor_to_start_on_tab_focus(ui, &resp);
-        if resp.lost_focus()
+        draft.note_response(&resp);
+        if draft.should_commit(ui, &resp)
             && enabled
-            && buffer.trim() != current.trim()
-            && let Ok(value) = buffer.trim().parse::<f32>()
+            && let Ok(value) = draft.text.trim().parse::<f32>()
         {
             commit_value = Some(value);
         }
@@ -1061,26 +1055,21 @@ pub(in crate::app) fn draw_shader_editable_value(
                 Vec2::new((rect.width() - 22.0).max(40.0), rect.height()),
             );
             let id = edit.widget_id(("shader_fn_scalar", &buffer_key));
-            let buffer = edit
-                .buffers
-                .entry(buffer_key.clone())
-                .or_insert_with(|| current.clone());
-            if !ui.memory(|m| m.has_focus(id)) && *buffer != current {
-                *buffer = current.clone();
-            }
+            let draft = edit.buffers.draft_mut(buffer_key.clone(), &current);
             let mut commit_val: Option<f32> = None;
             ui.scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
                 ui.visuals_mut().extreme_bg_color = material_input();
                 let resp = ui.add(
-                    egui::TextEdit::singleline(buffer)
+                    egui::TextEdit::singleline(&mut draft.text)
                         .id(id)
                         .desired_width(text_rect.width())
                         .text_color(material_text())
                         .font(egui::TextStyle::Monospace),
                 );
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
-                if resp.lost_focus() && buffer.trim() != current.trim() {
-                    if let Ok(v) = buffer.trim().parse::<f32>() {
+                draft.note_response(&resp);
+                if draft.should_commit(ui, &resp) {
+                    if let Ok(v) = draft.text.trim().parse::<f32>() {
                         commit_val = Some(v);
                     }
                 }
@@ -1223,13 +1212,7 @@ pub(in crate::app) fn draw_shader_editable_value(
                 });
             }
             let id = edit.widget_id(("shader_text", &buffer_key));
-            let buffer = edit
-                .buffers
-                .entry(buffer_key.clone())
-                .or_insert_with(|| current.clone());
-            if !ui.memory(|m| m.has_focus(id)) && *buffer != current {
-                *buffer = current.clone();
-            }
+            let mut draft = edit.buffers.take(&buffer_key, &current);
             // Flag a referenced bitmap that is missing on disk (red text).
             let missing = open_enabled
                 && reference_target_missing(edit.names, edit.tags_root, *group_tag, &open_ref);
@@ -1242,7 +1225,7 @@ pub(in crate::app) fn draw_shader_editable_value(
             ui.scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
                 ui.visuals_mut().extreme_bg_color = material_input();
                 let resp = ui.add(
-                    egui::TextEdit::singleline(buffer)
+                    egui::TextEdit::singleline(&mut draft.text)
                         .id(id)
                         .desired_width(text_rect.width())
                         .hint_text("(no reference)")
@@ -1254,8 +1237,9 @@ pub(in crate::app) fn draw_shader_editable_value(
                         .on_hover_text("Referenced bitmap not found on disk");
                 }
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
-                if resp.lost_focus() && buffer.trim() != current.trim() {
-                    commit = Some(buffer.trim().to_owned());
+                draft.note_response(&resp);
+                if draft.should_commit(ui, &resp) {
+                    commit = Some(draft.text.trim().to_owned());
                 }
             });
             if let Some(input) = commit {
@@ -1282,8 +1266,7 @@ pub(in crate::app) fn draw_shader_editable_value(
                 }
                 if let Some(payload) = drop.dnd_release_payload::<DraggedTagRef>() {
                     if is_bitmap(&payload) {
-                        edit.buffers
-                            .insert(buffer_key.clone(), payload.rel_path.clone());
+                        draft.set_clean(payload.rel_path.clone());
                         push_shader_value_edit(
                             edit,
                             row_edit,
@@ -1322,8 +1305,7 @@ pub(in crate::app) fn draw_shader_editable_value(
                 if let Some(path) = dialog.pick_file() {
                     match normalize_bitmap_browse_path(&path, edit.tags_root) {
                         Ok(rel) => {
-                            let buf = edit.buffers.entry(buffer_key).or_insert_with(String::new);
-                            *buf = rel.clone();
+                            draft.set_clean(rel.clone());
                             push_shader_value_edit(edit, row_edit, create.as_ref(), rel);
                         }
                         Err(error) => {
@@ -1334,6 +1316,7 @@ pub(in crate::app) fn draw_shader_editable_value(
                     }
                 }
             }
+            edit.buffers.put(buffer_key, draft);
         }
 
         // Shader template tag reference → text box + Open + "..." browse button.
@@ -1393,27 +1376,22 @@ pub(in crate::app) fn draw_shader_editable_value(
             }
 
             let id = edit.widget_id(("shader_template_text", &buffer_key));
-            let buffer = edit
-                .buffers
-                .entry(buffer_key.clone())
-                .or_insert_with(|| current.clone());
-            if !ui.memory(|m| m.has_focus(id)) && *buffer != current {
-                *buffer = current.clone();
-            }
+            let mut draft = edit.buffers.take(&buffer_key, &current);
             let mut commit = None;
             let text_response = ui
                 .scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
                     ui.visuals_mut().extreme_bg_color = material_input();
                     let resp = ui.add(
-                        egui::TextEdit::singleline(buffer)
+                        egui::TextEdit::singleline(&mut draft.text)
                             .id(id)
                             .desired_width(text_rect.width())
                             .text_color(material_text())
                             .font(egui::TextStyle::Monospace),
                     );
                     text_edit_cursor_to_start_on_tab_focus(ui, &resp);
-                    if resp.lost_focus() && buffer.trim() != current.trim() {
-                        commit = Some(buffer.trim().to_owned());
+                    draft.note_response(&resp);
+                    if draft.should_commit(ui, &resp) {
+                        commit = Some(draft.text.trim().to_owned());
                     }
                     resp
                 })
@@ -1469,8 +1447,7 @@ pub(in crate::app) fn draw_shader_editable_value(
                 if let Some(path) = dialog.pick_file() {
                     match normalize_shader_template_browse_path(&path, edit.tags_root) {
                         Ok(rel) => {
-                            let buf = edit.buffers.entry(buffer_key).or_insert_with(String::new);
-                            *buf = rel.clone();
+                            draft.set_clean(rel.clone());
                             push_h2_template_reference_edit(edit, row_edit, rel);
                         }
                         Err(error) => {
@@ -1481,6 +1458,7 @@ pub(in crate::app) fn draw_shader_editable_value(
                     }
                 }
             }
+            edit.buffers.put(buffer_key, draft);
         }
 
         ShaderRowEditKind::Bool { create } => {
@@ -1675,26 +1653,21 @@ pub(in crate::app) fn draw_shader_editable_value(
             let current = row_edit.current.clone();
             let create_buf_key = format!("{}|create_fn_scalar:{label}", edit.tag_key);
             let id = edit.widget_id(("shader_create_fn_scalar", label));
-            let buffer = edit
-                .buffers
-                .entry(create_buf_key)
-                .or_insert_with(|| current.clone());
-            if !ui.memory(|m| m.has_focus(id)) && *buffer != current {
-                *buffer = current.clone();
-            }
+            let draft = edit.buffers.draft_mut(create_buf_key, &current);
             let mut commit_val: Option<f32> = None;
             ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                 ui.visuals_mut().extreme_bg_color = material_pending_input();
                 let resp = ui.add(
-                    egui::TextEdit::singleline(buffer)
+                    egui::TextEdit::singleline(&mut draft.text)
                         .id(id)
                         .desired_width(rect.width())
                         .text_color(material_text())
                         .font(egui::TextStyle::Monospace),
                 );
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
-                if resp.lost_focus() && buffer.trim() != current.trim() {
-                    if let Ok(v) = buffer.trim().parse::<f32>() {
+                draft.note_response(&resp);
+                if draft.should_commit(ui, &resp) {
+                    if let Ok(v) = draft.text.trim().parse::<f32>() {
                         commit_val = Some(v);
                     }
                 }
@@ -1809,20 +1782,16 @@ pub(in crate::app) fn draw_shader_editable_value(
         } => {
             let current = row_edit.current.clone();
             let id = edit.widget_id(("h2_shader_fn_scalar", &buffer_key));
-            let buffer = edit
-                .buffers
-                .entry(buffer_key.clone())
-                .or_insert_with(|| current.clone());
-            if !ui.memory(|m| m.has_focus(id)) && *buffer != current {
-                *buffer = current.clone();
-            }
+            let draft = edit.buffers.draft_mut(buffer_key.clone(), &current);
             let mut commit_val: Option<f32> = None;
             ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                 ui.visuals_mut().extreme_bg_color = material_input();
-                let resp = draw_h2_value_prefixed_text_edit(ui, id, buffer, rect.width());
+                let resp =
+                    draw_h2_value_prefixed_text_edit(ui, id, &mut draft.text, rect.width());
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
-                if resp.lost_focus() && buffer.trim() != current.trim() {
-                    if let Ok(v) = buffer.trim().parse::<f32>() {
+                draft.note_response(&resp);
+                if draft.should_commit(ui, &resp) {
+                    if let Ok(v) = draft.text.trim().parse::<f32>() {
                         commit_val = Some(v);
                     }
                 }
@@ -1840,20 +1809,16 @@ pub(in crate::app) fn draw_shader_editable_value(
             let current = row_edit.current.clone();
             let create_buf_key = format!("{}|{}", edit.tag_key, row_edit.path);
             let id = edit.widget_id(("h2_shader_create_fn_scalar", label));
-            let buffer = edit
-                .buffers
-                .entry(create_buf_key)
-                .or_insert_with(|| current.clone());
-            if !ui.memory(|m| m.has_focus(id)) && *buffer != current {
-                *buffer = current.clone();
-            }
+            let draft = edit.buffers.draft_mut(create_buf_key, &current);
             let mut commit_val: Option<f32> = None;
             ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                 ui.visuals_mut().extreme_bg_color = material_pending_input();
-                let resp = draw_h2_value_prefixed_text_edit(ui, id, buffer, rect.width());
+                let resp =
+                    draw_h2_value_prefixed_text_edit(ui, id, &mut draft.text, rect.width());
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
-                if resp.lost_focus() && buffer.trim() != current.trim() {
-                    if let Ok(v) = buffer.trim().parse::<f32>() {
+                draft.note_response(&resp);
+                if draft.should_commit(ui, &resp) {
+                    if let Ok(v) = draft.text.trim().parse::<f32>() {
                         commit_val = Some(v);
                     }
                 }
@@ -1881,26 +1846,21 @@ pub(in crate::app) fn draw_shader_editable_value(
             let current = row_edit.current.clone();
             let create_buf_key = format!("{}|create:{label}", edit.tag_key);
             let id = edit.widget_id(("shader_create_scalar", label));
-            let buffer = edit
-                .buffers
-                .entry(create_buf_key)
-                .or_insert_with(|| current.clone());
-            if !ui.memory(|m| m.has_focus(id)) && *buffer != current {
-                *buffer = current.clone();
-            }
+            let draft = edit.buffers.draft_mut(create_buf_key, &current);
             let mut commit_val: Option<f32> = None;
             ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                 ui.visuals_mut().extreme_bg_color = material_pending_input();
                 let resp = ui.add(
-                    egui::TextEdit::singleline(buffer)
+                    egui::TextEdit::singleline(&mut draft.text)
                         .id(id)
                         .desired_width(rect.width())
                         .text_color(material_text())
                         .font(egui::TextStyle::Monospace),
                 );
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
-                if resp.lost_focus() && buffer.trim() != current.trim() {
-                    if let Ok(v) = buffer.trim().parse::<f32>() {
+                draft.note_response(&resp);
+                if draft.should_commit(ui, &resp) {
+                    if let Ok(v) = draft.text.trim().parse::<f32>() {
                         commit_val = Some(v);
                     }
                 }
@@ -1930,20 +1890,16 @@ pub(in crate::app) fn draw_shader_editable_value(
             let current = row_edit.current.clone();
             let create_buf_key = format!("{}|h2_create:{label}", edit.tag_key);
             let id = edit.widget_id(("h2_shader_create_value", label));
-            let buffer = edit
-                .buffers
-                .entry(create_buf_key)
-                .or_insert_with(|| current.clone());
-            if !ui.memory(|m| m.has_focus(id)) && *buffer != current {
-                *buffer = current.clone();
-            }
+            let draft = edit.buffers.draft_mut(create_buf_key, &current);
             let mut commit = None;
             ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                 ui.visuals_mut().extreme_bg_color = material_pending_input();
-                let resp = draw_h2_value_prefixed_text_edit(ui, id, buffer, rect.width());
+                let resp =
+                    draw_h2_value_prefixed_text_edit(ui, id, &mut draft.text, rect.width());
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
-                if resp.lost_focus() && buffer.trim() != current.trim() {
-                    commit = Some(buffer.trim().to_owned());
+                draft.note_response(&resp);
+                if draft.should_commit(ui, &resp) {
+                    commit = Some(draft.text.trim().to_owned());
                 }
             });
             if let Some(input) = commit {
@@ -2009,26 +1965,21 @@ pub(in crate::app) fn draw_shader_editable_value(
         ShaderRowEditKind::Scalar | ShaderRowEditKind::Int | ShaderRowEditKind::StringId => {
             let current = row_edit.current.clone();
             let id = edit.widget_id(("shader_text", &buffer_key));
-            let buffer = edit
-                .buffers
-                .entry(buffer_key.clone())
-                .or_insert_with(|| current.clone());
-            if !ui.memory(|m| m.has_focus(id)) && *buffer != current {
-                *buffer = current.clone();
-            }
+            let draft = edit.buffers.draft_mut(buffer_key.clone(), &current);
             let mut commit = None;
             ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                 ui.visuals_mut().extreme_bg_color = material_input();
                 let resp = ui.add(
-                    egui::TextEdit::singleline(buffer)
+                    egui::TextEdit::singleline(&mut draft.text)
                         .id(id)
                         .desired_width(rect.width())
                         .text_color(material_text())
                         .font(egui::TextStyle::Monospace),
                 );
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
-                if resp.lost_focus() && buffer.trim() != current.trim() {
-                    commit = Some(buffer.trim().to_owned());
+                draft.note_response(&resp);
+                if draft.should_commit(ui, &resp) {
+                    commit = Some(draft.text.trim().to_owned());
                 }
             });
             if let Some(input) = commit {

@@ -66,13 +66,18 @@ impl Baboon {
                         input: input.clone(),
                     }],
                     &mut doc.dirty,
-                ) {
+                )
+                .status
+                {
                     self.status = status;
                 }
                 doc.journal.end_edit_window();
+                // `insert_clean` from upstream: the picked reference is now
+                // the document's value, so the draft starts unmodified rather
+                // than looking like an uncommitted edit.
                 self.kits[kit]
                     .edit_buffers
-                    .insert(format!("{}|{}", picker.tag_key, picker.field_path), input);
+                    .insert_clean(format!("{}|{}", picker.tag_key, picker.field_path), input);
                 self.invalidate_tag_caches_in(kit, &picker.tag_key);
             } else {
                 self.status = "The tag being edited is no longer open".to_owned();

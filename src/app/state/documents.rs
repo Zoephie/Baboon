@@ -76,11 +76,17 @@ impl Default for SaveChangesPrompt {
     }
 }
 
+pub(in crate::app) struct ProjectCheckpointPrompt {
+    pub(in crate::app) action: PendingCloseAction,
+    pub(in crate::app) error: String,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::app) enum LastSessionSourceKind {
     SingleFile,
     LooseFolder,
     MonolithicCache,
+    IoStoreContainerSet,
 }
 
 impl LastSessionSourceKind {
@@ -89,6 +95,7 @@ impl LastSessionSourceKind {
             LastSessionSourceKind::SingleFile => "single_file",
             LastSessionSourceKind::LooseFolder => "loose_folder",
             LastSessionSourceKind::MonolithicCache => "monolithic_cache",
+            LastSessionSourceKind::IoStoreContainerSet => "iostore_container_set",
         }
     }
 
@@ -97,6 +104,7 @@ impl LastSessionSourceKind {
             "single_file" => Some(Self::SingleFile),
             "loose_folder" => Some(Self::LooseFolder),
             "monolithic_cache" => Some(Self::MonolithicCache),
+            "iostore_container_set" => Some(Self::IoStoreContainerSet),
             _ => None,
         }
     }
@@ -116,12 +124,21 @@ pub(in crate::app) struct LastSessionKit {
     pub(in crate::app) source_kind: LastSessionSourceKind,
     pub(in crate::app) source_path: PathBuf,
     pub(in crate::app) game: Option<String>,
+    pub(in crate::app) project_path: Option<PathBuf>,
     pub(in crate::app) tags: Vec<LastSessionTag>,
 }
 
 #[derive(Clone, Debug)]
 pub(in crate::app) struct LastSessionState {
     pub(in crate::app) kits: Vec<LastSessionKit>,
+}
+
+/// One kit to reopen during a session restore.
+pub(in crate::app) struct RestoreKit {
+    pub(in crate::app) source_kind: LastSessionSourceKind,
+    pub(in crate::app) source_path: PathBuf,
+    pub(in crate::app) project_path: Option<PathBuf>,
+    pub(in crate::app) tags: Vec<LastSessionTag>,
 }
 
 pub(in crate::app) struct LastOpenedWindowEntry {
@@ -136,6 +153,7 @@ pub(in crate::app) struct LastOpenedWindowsKit {
     pub(in crate::app) source_path: PathBuf,
     pub(in crate::app) game: Option<String>,
     pub(in crate::app) source_available: bool,
+    pub(in crate::app) project_path: Option<PathBuf>,
     pub(in crate::app) entries: Vec<LastOpenedWindowEntry>,
 }
 
@@ -166,6 +184,9 @@ impl LastOpenedWindowsKit {
                             .is_some_and(|name| name.eq_ignore_ascii_case("blob_index.dat"))
                 }
             }
+            LastSessionSourceKind::IoStoreContainerSet => {
+                crate::source::find_paks_dir(&saved.source_path).is_some()
+            }
         };
         let entries = saved
             .tags
@@ -180,7 +201,7 @@ impl LastOpenedWindowsKit {
                 }
             })
             .collect::<Vec<_>>();
-        if entries.is_empty() {
+        if entries.is_empty() && saved.project_path.is_none() {
             return None;
         }
         Some(Self {
@@ -188,6 +209,7 @@ impl LastOpenedWindowsKit {
             source_path: saved.source_path,
             game: saved.game,
             source_available,
+            project_path: saved.project_path,
             entries,
         })
     }
@@ -219,18 +241,28 @@ impl LastOpenedWindowsPrompt {
     }
 
     /// Every kit that still has something checked, paired with those tags.
-    pub(in crate::app) fn checked_kits(&self) -> Vec<(LastSessionSourceKind, PathBuf, Vec<LastSessionTag>)> {
+    /// Every kit worth reopening, with the tags checked for it. A kit with no
+    /// checked tags is still restored when it carries a project, since the
+    /// project is the session.
+    pub(in crate::app) fn checked_kits(&self) -> Vec<RestoreKit> {
         self.kits
             .iter()
             .filter_map(|kit| {
                 let tags = kit.checked_tags();
-                (!tags.is_empty()).then(|| (kit.source_kind, kit.source_path.clone(), tags))
+                (!tags.is_empty() || kit.project_path.is_some()).then(|| RestoreKit {
+                    source_kind: kit.source_kind,
+                    source_path: kit.source_path.clone(),
+                    project_path: kit.project_path.clone(),
+                    tags,
+                })
             })
             .collect()
     }
 
     pub(in crate::app) fn has_checked_tags(&self) -> bool {
-        self.kits.iter().any(|kit| !kit.checked_tags().is_empty())
+        self.kits
+            .iter()
+            .any(|kit| !kit.checked_tags().is_empty() || kit.project_path.is_some())
     }
 }
 

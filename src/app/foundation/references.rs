@@ -177,10 +177,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
     let indent = depth as f32 * 12.0;
     let buffer_key = format!("{}|{}", edit.tag_key, path);
     let id = edit.widget_id(("tag_ref", &buffer_key));
-    let buffer = edit
-        .buffers
-        .entry(buffer_key.clone())
-        .or_insert_with(|| value.to_owned());
+    let draft = edit.buffers.draft_mut(buffer_key, value);
 
     let droppable = edit.editable && !meta.read_only;
     let required_group = tag_reference_required_group(meta, target.as_ref());
@@ -190,7 +187,8 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
             foundation_label_cell(ui, &meta.label, meta.help.as_deref());
             let editable = edit.editable && !meta.read_only;
             let has_ref = target.is_some();
-            let icon_group = tag_reference_value_icon_group(meta, target.as_ref(), buffer);
+            let icon_group =
+                tag_reference_value_icon_group(meta, target.as_ref(), &draft.text);
             // A non-empty reference whose target file is absent on disk.
             let missing = target.as_ref().is_some_and(|(group, rel)| {
                 reference_target_missing(edit.names, edit.tags_root, *group, rel)
@@ -198,20 +196,15 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
             if editable {
                 let response = foundation_tag_reference_text_edit_cell(
                     ui,
-                    buffer,
+                    &mut draft.text,
                     value_width,
                     id,
                     icon_group,
                 );
 
-                let changed = buffer.trim() != value.trim();
-                if changed && should_resync_buffer(response.has_focus(), response.lost_focus()) {
-                    // Not being edited and not committing: the document moved
-                    // underneath (undo, reload, a picker), so take its value.
-                    *buffer = value.to_owned();
-                }
-                if response.lost_focus() && changed {
-                    let input = buffer.trim().to_owned();
+                draft.note_response(&response);
+                if draft.should_commit(ui, &response) {
+                    let input = draft.text.trim().to_owned();
                     commit_tag_reference_input(
                         edit.pending,
                         edit.status.as_deref_mut(),
@@ -311,7 +304,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                         edit.names,
                     ) {
                         Ok(Some(input)) => {
-                            *buffer = input.clone();
+                            draft.set_clean(input.clone());
                             edit.pending.push(PendingFieldEdit {
                                 path: path.to_owned(),
                                 input,
@@ -327,7 +320,8 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                 }
             }
             if foundation_header_button_clicked(ui, "Clear", editable) {
-                buffer.clear();
+                draft.text.clear();
+                draft.changed = true;
                 edit.pending.push(PendingFieldEdit {
                     path: path.to_owned(),
                     input: "NONE".to_owned(),
@@ -355,7 +349,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
         }
         if let Some(payload) = row_response.dnd_release_payload::<DraggedTagRef>() {
             if accepts(&payload) {
-                *buffer = payload.input.clone();
+                draft.set_clean(payload.input.clone());
                 edit.pending.push(PendingFieldEdit {
                     path: path.to_owned(),
                     input: payload.input.clone(),

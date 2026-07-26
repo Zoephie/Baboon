@@ -480,21 +480,25 @@ pub(super) fn load_terminal_open_games() -> HashSet<String> {
 
 /// Read `last_session.json`.
 ///
-/// Version 2 stores an array of kits. Version 1 stored a single source and is
-/// upgraded in place to a one-kit session, so an existing session file still
-/// restores rather than being silently dropped.
+/// Version 3 stores an array of kits. Versions 1 and 2 stored a single source
+/// and are upgraded in place to a one-kit session, so a session file written
+/// by any earlier build still restores rather than being silently dropped.
 pub(super) fn load_last_session() -> Option<LastSessionState> {
     let text = fs::read_to_string(last_session_path()).ok()?;
     let value = serde_json::from_str::<Value>(&text).ok()?;
     parse_last_session(&value)
 }
 
-/// Pure parse of a session document, split out from the file read so both
-/// format versions can be tested directly.
+/// Pure parse of a session document, split out from the file read so every
+/// format version is covered by tests.
 fn parse_last_session(value: &Value) -> Option<LastSessionState> {
     let kits = match value.get("version").and_then(Value::as_u64)? {
-        1 => vec![parse_session_kit(value)?],
-        2 => value
+        // Versions 1 and 2 each describe a single source, so they load as one
+        // kit. They are both accepted because they were both written: v1 by
+        // released Baboon, v2 by the build that added `.baboon` projects.
+        1 | 2 => vec![parse_session_kit(value)?],
+        // Version 3 is that same per-kit object, once per open kit.
+        3 => value
             .get("kits")?
             .as_array()?
             .iter()
@@ -525,6 +529,12 @@ fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
         .map(str::trim)
         .filter(|game| !game.is_empty())
         .map(str::to_owned);
+    let project_path = source
+        .get("project_path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from);
     let mut tags = Vec::new();
     for item in value.get("tags")?.as_array()? {
         let Some(key) = item
@@ -556,13 +566,14 @@ fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
             path,
         });
     }
-    if tags.is_empty() {
+    if tags.is_empty() && project_path.is_none() {
         return None;
     }
     Some(LastSessionKit {
         source_kind,
         source_path,
         game,
+        project_path,
         tags,
     })
 }
@@ -603,7 +614,7 @@ pub(super) fn save_last_session(session: &LastSessionState) -> Result<(), String
         })
         .collect::<Vec<_>>();
     let value = json!({
-        "version": 2,
+        "version": 3,
         "kits": kits,
     });
     let text = serde_json::to_string_pretty(&value)
@@ -618,6 +629,64 @@ pub(super) fn clear_last_session() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn last_session_v1_remains_compatible() {
+        let session = parse_last_session(
+            &serde_json::from_str::<Value>(
+            r#"{
+                "version": 1,
+                "source": {
+                    "kind": "loose_folder",
+                    "path": "C:/tags",
+                    "game": "haloreach"
+                },
+                "tags": [{
+                    "key": "objects/test.weapon",
+                    "label": "test",
+                    "group_tag": 2003132784
+                }]
+            }"#,
+            )
+            .expect("valid json"),
+        )
+        .expect("version 1 session");
+        // A single-source file loads as one kit.
+        assert_eq!(session.kits.len(), 1);
+        assert_eq!(session.kits[0].source_kind, LastSessionSourceKind::LooseFolder);
+        assert_eq!(session.kits[0].project_path, None);
+        assert_eq!(session.kits[0].tags.len(), 1);
+    }
+
+    #[test]
+    fn project_pointer_survives_with_no_open_tabs() {
+        let session = parse_last_session(
+            &serde_json::from_str::<Value>(
+            r#"{
+                "version": 2,
+                "source": {
+                    "kind": "iostore_container_set",
+                    "path": "C:/CampaignEvolved/Paks",
+                    "game": "haloce_evolved",
+                    "project_path": "C:/mods/recovery.baboon"
+                },
+                "tags": []
+            }"#,
+            )
+            .expect("valid json"),
+        )
+        .expect("project-only session");
+        assert_eq!(session.kits.len(), 1);
+        assert_eq!(
+            session.kits[0].source_kind,
+            LastSessionSourceKind::IoStoreContainerSet
+        );
+        assert_eq!(
+            session.kits[0].project_path,
+            Some(PathBuf::from("C:/mods/recovery.baboon"))
+        );
+        assert!(session.kits[0].tags.is_empty());
+    }
 
     #[test]
     fn custom_color_swatches_load_as_fixed_global_slots() {
@@ -730,9 +799,9 @@ mod session_tests {
     }
 
     #[test]
-    fn version_2_sessions_restore_every_kit() {
+    fn version_3_sessions_restore_every_kit() {
         let value = serde_json::json!({
-            "version": 2,
+            "version": 3,
             "kits": [
                 {
                     "source": { "kind": "loose_folder", "path": "/h3", "game": "halo3_mcc" },
@@ -744,7 +813,7 @@ mod session_tests {
                 },
             ],
         });
-        let session = parse_last_session(&value).expect("v2 session parses");
+        let session = parse_last_session(&value).expect("v3 session parses");
         assert_eq!(session.kits.len(), 2);
         assert_eq!(session.kits[1].game.as_deref(), Some("haloreach_mcc"));
         assert_eq!(session.kits[1].tags[0].key, "file:/reach/b.weapon");
@@ -755,7 +824,7 @@ mod session_tests {
     #[test]
     fn kits_without_usable_tags_are_dropped() {
         let value = serde_json::json!({
-            "version": 2,
+            "version": 3,
             "kits": [
                 { "source": { "kind": "loose_folder", "path": "/h3" }, "tags": [] },
                 {
@@ -768,7 +837,7 @@ mod session_tests {
         assert_eq!(session.kits.len(), 1);
         assert_eq!(session.kits[0].source_path, PathBuf::from("/reach"));
 
-        let empty = serde_json::json!({ "version": 2, "kits": [] });
+        let empty = serde_json::json!({ "version": 3, "kits": [] });
         assert!(parse_last_session(&empty).is_none());
     }
 

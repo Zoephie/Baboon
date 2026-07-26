@@ -253,22 +253,6 @@ pub(in crate::app) fn draw_foundation_multi_value_row(
     });
 }
 
-/// Whether a text buffer should be resynced from the document this frame.
-///
-/// Never on the frame focus is lost: that is the frame the edit commits on,
-/// and resyncing first would overwrite what the user typed with the value they
-/// were changing — so the commit would then see no change and drop the edit,
-/// leaving the field looking like it reset itself.
-///
-/// Both flags must come from the response, after the widget is drawn. Asking
-/// `Memory::has_focus` beforehand answers for the *start* of the frame, which
-/// disagrees with `lost_focus` exactly when focus moved during it — and
-/// whether it disagrees depends on where the next click landed and on widget
-/// order, which is why the dropped edits looked intermittent.
-pub(in crate::app) fn should_resync_buffer(focused: bool, lost_focus: bool) -> bool {
-    !focused && !lost_focus
-}
-
 pub(in crate::app) fn draw_foundation_bounds_row(
     ui: &mut Ui,
     meta: &FieldDisplayMeta,
@@ -285,35 +269,28 @@ pub(in crate::app) fn draw_foundation_bounds_row(
     let upper_key = format!("{buffer_key}|upper");
     let lower_id = edit.widget_id(("bounds_lower", &buffer_key));
     let upper_id = edit.widget_id(("bounds_upper", &buffer_key));
-    let mut lower = edit
-        .buffers
-        .remove(&lower_key)
-        .unwrap_or_else(|| lower_value.to_owned());
-    let mut upper = edit
-        .buffers
-        .remove(&upper_key)
-        .unwrap_or_else(|| upper_value.to_owned());
+    let mut lower = edit.buffers.take(&lower_key, lower_value);
+    let mut upper = edit.buffers.take(&upper_key, upper_value);
 
     ui.horizontal(|ui| {
         ui.add_space(indent);
         foundation_label_cell(ui, &meta.label, meta.help.as_deref());
         let editable = edit.editable && !meta.read_only;
         if editable {
-            let lower_response = foundation_text_edit_cell(ui, &mut lower, 92.0, lower_id);
+            let lower_response =
+                foundation_text_edit_cell(ui, &mut lower.text, 92.0, lower_id);
             ui.label(RichText::new("to").color(subtle_dark()).small());
-            let upper_response = foundation_text_edit_cell(ui, &mut upper, 92.0, upper_id);
-            let lost_focus = lower_response.lost_focus() || upper_response.lost_focus();
-            let focused = lower_response.has_focus() || upper_response.has_focus();
-            let changed =
-                lower.trim() != lower_value.trim() || upper.trim() != upper_value.trim();
-            if lost_focus && changed {
+            let upper_response =
+                foundation_text_edit_cell(ui, &mut upper.text, 92.0, upper_id);
+            lower.note_response(&lower_response);
+            upper.note_response(&upper_response);
+            let commit = lower.should_commit(ui, &lower_response)
+                || upper.should_commit(ui, &upper_response);
+            if commit {
                 edit.pending.push(PendingFieldEdit {
                     path: path.to_owned(),
-                    input: format!("{}..{}", lower.trim(), upper.trim()),
+                    input: format!("{}..{}", lower.text.trim(), upper.text.trim()),
                 });
-            } else if changed && should_resync_buffer(focused, lost_focus) {
-                lower = lower_value.to_owned();
-                upper = upper_value.to_owned();
             }
         } else {
             foundation_input_cell(ui, lower_value, 92.0);
@@ -326,8 +303,8 @@ pub(in crate::app) fn draw_foundation_bounds_row(
         draw_field_help(ui, meta);
     });
 
-    edit.buffers.insert(lower_key, lower);
-    edit.buffers.insert(upper_key, upper);
+    edit.buffers.put(lower_key, lower);
+    edit.buffers.put(upper_key, upper);
 }
 
 pub(in crate::app) fn draw_foundation_component_edit_row(
@@ -349,7 +326,7 @@ pub(in crate::app) fn draw_foundation_component_edit_row(
         .collect::<Vec<_>>();
     for (label, value) in parts {
         let key = format!("{buffer_key}|component|{label}");
-        let buffer = edit.buffers.remove(&key).unwrap_or_else(|| value.clone());
+        let buffer = edit.buffers.take(&key, value);
         values.push((label.clone(), value.clone(), key, buffer));
     }
 
@@ -357,35 +334,34 @@ pub(in crate::app) fn draw_foundation_component_edit_row(
         ui.add_space(indent);
         foundation_label_cell(ui, &meta.label, meta.help.as_deref());
         let editable = edit.editable && !meta.read_only;
-        for (index, (label, _, _, buffer)) in values.iter_mut().enumerate() {
+        for (index, (label, _, _, draft)) in values.iter_mut().enumerate() {
             if !label.is_empty() {
                 ui.label(RichText::new(label.as_str()).color(subtle_dark()).small());
             }
             if editable {
-                responses.push(foundation_text_edit_cell(ui, buffer, 92.0, ids[index]));
+                let response =
+                    foundation_text_edit_cell(ui, &mut draft.text, 92.0, ids[index]);
+                draft.note_response(&response);
+                responses.push(response);
             } else {
-                foundation_input_cell(ui, buffer, 92.0);
+                foundation_input_cell(ui, &draft.text, 92.0);
             }
         }
         if editable {
-            let changed = values
+            let changed = values.iter().any(|(_, _, _, draft)| draft.changed);
+            let committed = responses
                 .iter()
-                .any(|(_, value, _, buffer)| buffer.trim() != value.trim());
-            let lost_focus = responses.iter().any(egui::Response::lost_focus);
-            let focused = responses.iter().any(egui::Response::has_focus);
-            if lost_focus && changed {
+                .zip(values.iter())
+                .any(|(response, (_, _, _, draft))| draft.should_commit(ui, response));
+            if committed && changed {
                 edit.pending.push(PendingFieldEdit {
                     path: path.to_owned(),
                     input: values
                         .iter()
-                        .map(|(_, _, _, buffer)| buffer.trim())
+                        .map(|(_, _, _, draft)| draft.text.trim())
                         .collect::<Vec<_>>()
                         .join(", "),
                 });
-            } else if changed && should_resync_buffer(focused, lost_focus) {
-                for (_, value, _, buffer) in values.iter_mut() {
-                    *buffer = value.clone();
-                }
             }
         }
         if !suffix.is_empty() {
@@ -394,8 +370,8 @@ pub(in crate::app) fn draw_foundation_component_edit_row(
         draw_field_help(ui, meta);
     });
 
-    for (_, _, key, buffer) in values {
-        edit.buffers.insert(key, buffer);
+    for (_, _, key, draft) in values {
+        edit.buffers.put(key, draft);
     }
 }
 
@@ -453,25 +429,20 @@ pub(in crate::app) fn draw_foundation_editable_text_row(
             .clamp(180.0, 920.0);
     let buffer_key = format!("{}|{}", edit.tag_key, path);
     let id = edit.widget_id(("text", &buffer_key));
-    let buffer = edit
-        .buffers
-        .entry(buffer_key.clone())
-        .or_insert_with(|| value.to_owned());
+    let draft = edit.buffers.draft_mut(buffer_key, value);
 
     ui.horizontal(|ui| {
         ui.add_space(indent);
         foundation_label_cell(ui, &meta.label, meta.help.as_deref());
 
-        let width = foundation_value_width(buffer, available_value_width);
-        let response = foundation_text_edit_cell(ui, buffer, width, id);
-        let changed = buffer.trim() != value.trim();
-        if response.lost_focus() && changed {
+        let width = foundation_value_width(&draft.text, available_value_width);
+        let response = foundation_text_edit_cell(ui, &mut draft.text, width, id);
+        draft.note_response(&response);
+        if draft.should_commit(ui, &response) {
             edit.pending.push(PendingFieldEdit {
                 path: path.to_owned(),
-                input: buffer.trim().to_owned(),
+                input: draft.text.trim().to_owned(),
             });
-        } else if changed && should_resync_buffer(response.has_focus(), response.lost_focus()) {
-            *buffer = value.to_owned();
         }
         if !suffix.is_empty() {
             ui.label(RichText::new(suffix).color(subtle_dark()).small());
@@ -482,28 +453,3 @@ pub(in crate::app) fn draw_foundation_editable_text_row(
 
 /// Red used to flag tag references whose target file is missing on disk.
 pub(in crate::app) const REFERENCE_MISSING_COLOR: Color32 = Color32::from_rgb(216, 92, 92);
-
-#[cfg(test)]
-mod buffer_resync_tests {
-    use super::should_resync_buffer;
-
-    /// The frame focus is lost is the frame the edit commits on. Resyncing
-    /// then would overwrite what the user typed and the commit would see no
-    /// change — the reported "I type a value, click off, and it reverts".
-    #[test]
-    fn never_resyncs_on_the_frame_focus_is_lost() {
-        assert!(!should_resync_buffer(false, true));
-    }
-
-    #[test]
-    fn never_resyncs_while_the_field_is_being_edited() {
-        assert!(!should_resync_buffer(true, false));
-    }
-
-    /// Idle: the document may have moved underneath the buffer (undo, reload,
-    /// a picker), so the buffer takes the document's value.
-    #[test]
-    fn resyncs_when_idle() {
-        assert!(should_resync_buffer(false, false));
-    }
-}

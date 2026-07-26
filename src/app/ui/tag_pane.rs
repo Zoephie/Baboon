@@ -194,7 +194,13 @@ impl Baboon {
         } else {
             doc.journal.end_edit_window();
         }
-        if let Some(status) = apply_pending_edits(&mut doc.tag, pending, &mut doc.dirty) {
+        // Per-edit outcomes, from upstream: a draft whose value applied cleanly
+        // is marked clean, while one the parser rejected keeps the text the
+        // user typed instead of snapping back to the old value.
+        let applied = apply_pending_edits(&mut doc.tag, pending, &mut doc.dirty);
+        kit.edit_buffers
+            .accept_successful_edits(&key, &applied.outcomes);
+        if let Some(status) = applied.status {
             self.status = status;
         }
         if let Some(status) = apply_block_ops(&mut doc.tag, block_ops, &mut doc.dirty) {
