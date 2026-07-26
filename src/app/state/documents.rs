@@ -42,6 +42,8 @@ pub(in crate::app) enum PendingCloseAction {
     CloseTab(String),
     CloseAllTabs,
     CloseAllButThis(String),
+    /// Close a whole kit, discarding its documents and caches.
+    CloseKit(KitId),
 }
 
 pub(in crate::app) struct DirtyTagEntry {

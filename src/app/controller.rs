@@ -1773,6 +1773,23 @@ impl Baboon {
         if self.save_changes_prompt.visible {
             return;
         }
+        // The save prompt and every save path below it address documents by
+        // tag key against the active kit. Point `active` at the kit the prompt
+        // will be about, so all of that resolves to the right documents
+        // without threading a kit id through the whole save surface.
+        match &action {
+            PendingCloseAction::CloseKit(id) => {
+                if let Some(index) = self.kit_index(*id) {
+                    self.active = index;
+                }
+            }
+            PendingCloseAction::CloseApp => {
+                if let Some(index) = self.first_dirty_kit() {
+                    self.active = index;
+                }
+            }
+            _ => {}
+        }
         let dirty_tags = self.dirty_tags_for_close_action(&action);
         if dirty_tags.is_empty() {
             self.execute_close_action(action, ctx);
@@ -1836,6 +1853,14 @@ impl Baboon {
                     .chain(self.kits[self.active].floating_tabs.iter())
                     .filter(|key| *key != kept_key),
             ),
+            // `request_close_action` has already made this kit active, so the
+            // active-kit lookups above address the right documents.
+            PendingCloseAction::CloseKit(_) => ordered_unique_keys(
+                self.kits[self.active]
+                    .open_tabs
+                    .iter()
+                    .chain(self.kits[self.active].floating_tabs.iter()),
+            ),
         }
     }
 
@@ -1863,6 +1888,15 @@ impl Baboon {
     fn execute_close_action(&mut self, action: PendingCloseAction, ctx: &egui::Context) {
         match action {
             PendingCloseAction::CloseApp => {
+                // The prompt covers one kit at a time. If another kit still
+                // holds unsaved work, ask about it before exiting rather than
+                // dropping it silently — which is what a single-kit-only
+                // check used to do. "Don't save" clears the flags it listed,
+                // so this converges instead of looping.
+                if self.any_kit_dirty() {
+                    self.request_close_action(PendingCloseAction::CloseApp, ctx);
+                    return;
+                }
                 if let Some(session) = self.current_session_state() {
                     let _ = save_last_session(&session);
                 } else {
@@ -1874,6 +1908,12 @@ impl Baboon {
             PendingCloseAction::CloseTab(key) => self.close_tab(&key),
             PendingCloseAction::CloseAllTabs => self.close_all_tabs(),
             PendingCloseAction::CloseAllButThis(key) => self.close_all_tabs_but(&key),
+            PendingCloseAction::CloseKit(id) => {
+                self.remove_kit(id);
+                self.color_popup = None;
+                self.function_popup = None;
+                self.status = "Closed kit".to_owned();
+            }
         }
     }
 
@@ -5153,6 +5193,14 @@ impl Baboon {
             }
             SaveChangesPromptAction::DontSave => {
                 let action = self.save_changes_prompt.pending_action.clone();
+                // Discarding is explicit, so drop the dirty flags the prompt
+                // listed. Without this, a CloseApp that spans several kits
+                // would see the same unsaved work again and re-prompt forever.
+                for entry in &self.save_changes_prompt.dirty_tags {
+                    if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(&entry.tag_id) {
+                        doc.dirty = false;
+                    }
+                }
                 self.save_changes_prompt.visible = false;
                 self.save_changes_prompt.dirty_tags.clear();
                 self.save_changes_prompt.error = None;

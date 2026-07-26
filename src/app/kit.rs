@@ -222,6 +222,42 @@ impl Baboon {
         id
     }
 
+    /// Add an empty kit and make it active. The next load installs into it,
+    /// so "open another game" is add-then-load rather than a separate path.
+    pub(super) fn add_kit(&mut self) -> KitId {
+        let id = self.next_kit_id();
+        let names = self.default_names.clone();
+        self.kits.push(Kit::empty(id, names));
+        self.active = self.kits.len() - 1;
+        id
+    }
+
+    /// Remove a kit, dropping its documents and caches. `kits` is never left
+    /// empty — closing the last one leaves a fresh empty workspace, which is
+    /// the same state Baboon starts in.
+    pub(super) fn remove_kit(&mut self, id: KitId) {
+        let Some(index) = self.kit_index(id) else {
+            return;
+        };
+        self.kits.remove(index);
+        if self.kits.is_empty() {
+            let id = self.next_kit_id();
+            let names = self.default_names.clone();
+            self.kits.push(Kit::empty(id, names));
+        }
+        self.active = active_after_removal(self.active, index, self.kits.len());
+    }
+
+    /// Whether any kit holds unsaved edits.
+    pub(super) fn any_kit_dirty(&self) -> bool {
+        self.kits.iter().any(kit_has_dirty_documents)
+    }
+
+    /// Index of the first kit holding unsaved edits.
+    pub(super) fn first_dirty_kit(&self) -> Option<usize> {
+        self.kits.iter().position(kit_has_dirty_documents)
+    }
+
     /// Install a freshly loaded source into the active kit, replacing whatever
     /// it held. Multi-kit loading (add-a-kit rather than replace) arrives with
     /// the kit strip; until then this preserves single-source behavior.
@@ -235,5 +271,67 @@ impl Baboon {
             names,
             ..Kit::empty(id, self.default_names.clone())
         };
+    }
+}
+
+fn kit_has_dirty_documents(kit: &Kit) -> bool {
+    kit.parsed_tags.values().any(|document| document.dirty)
+}
+
+/// Label for a kit in the kit strip: the game's display name where one was
+/// detected, otherwise the source label, otherwise an empty workspace.
+pub(super) fn kit_strip_label(kit: &Kit) -> String {
+    let Some(source) = kit.source.as_ref() else {
+        return "New workspace".to_owned();
+    };
+    match source.game.as_deref() {
+        Some(game) => game_display_name(game).to_owned(),
+        None => source.label.clone(),
+    }
+}
+
+/// Where the active selection lands after the kit at `removed` is taken out of
+/// a list that now has `new_len` entries.
+///
+/// Kits before the removed one keep their index; kits after it shift down by
+/// one, so the active selection has to shift with them or it silently
+/// retargets a neighbour. Removing the active kit itself falls through to the
+/// clamp, which selects the kit that slid into its place (or the new last one).
+fn active_after_removal(active: usize, removed: usize, new_len: usize) -> usize {
+    let shifted = if active > removed { active - 1 } else { active };
+    shifted.min(new_len.saturating_sub(1))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::active_after_removal;
+
+    #[test]
+    fn removing_a_kit_before_the_active_one_shifts_the_selection_down() {
+        // [a b *c] -> remove a -> [b *c]: the active kit moved from 2 to 1.
+        assert_eq!(active_after_removal(2, 0, 2), 1);
+        assert_eq!(active_after_removal(1, 0, 2), 0);
+    }
+
+    #[test]
+    fn removing_a_kit_after_the_active_one_leaves_the_selection_alone() {
+        // [*a b c] -> remove c -> [*a b]: still index 0.
+        assert_eq!(active_after_removal(0, 2, 2), 0);
+        assert_eq!(active_after_removal(1, 2, 2), 1);
+    }
+
+    #[test]
+    fn removing_the_active_kit_selects_the_one_that_took_its_place() {
+        // [a *b c] -> remove b -> [a c]: index 1 is now the former c.
+        assert_eq!(active_after_removal(1, 1, 2), 1);
+        // Removing the last kit clamps back onto the new last kit.
+        assert_eq!(active_after_removal(2, 2, 2), 1);
+    }
+
+    #[test]
+    fn the_selection_never_points_past_the_end() {
+        // Closing the only kit leaves one fresh empty workspace behind it.
+        assert_eq!(active_after_removal(0, 0, 1), 0);
+        assert_eq!(active_after_removal(5, 0, 1), 0);
     }
 }
