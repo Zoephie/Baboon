@@ -1670,11 +1670,17 @@ pub(in crate::app) fn draw_foundation_block_control(
                         .width(combo_width),
                         |ui| {
                             selector_active |= ui.rect_contains_pointer(ui.max_rect());
+                            // Adding an element selects it, so opening the list
+                            // scrolled to the top hid the very entry that was
+                            // just added when the list outgrew the popup.
+                            let just_opened = combo_popup_just_opened(ui);
                             for i in 0..count {
-                                if ui
-                                    .selectable_label(i == selected_index, element_label(i))
-                                    .clicked()
-                                {
+                                let row =
+                                    ui.selectable_label(i == selected_index, element_label(i));
+                                if just_opened && i == selected_index {
+                                    row.scroll_to_me(Some(egui::Align::Center));
+                                }
+                                if row.clicked() {
                                     actions.new_selection = Some(i);
                                 }
                             }
@@ -1846,6 +1852,27 @@ fn combo_scroll_cycle_enabled(ui: &Ui) -> bool {
     })
 }
 
+/// How tall a combo popup may grow before it scrolls. Generous enough that
+/// ordinary lists size to their contents, while a block with hundreds of
+/// elements still gets a scrollable popup rather than a full-screen one.
+pub(in crate::app) const COMBO_POPUP_MAX_HEIGHT: f32 = 420.0;
+
+/// True on the first frame a combo popup is drawn, so a caller can reveal the
+/// selected row exactly once. Scrolling on every frame would fight the user's
+/// own scrolling and the wheel-cycling above.
+///
+/// The popup's `Ui` id is stable while it stays open, and the popup only draws
+/// while open, so a gap in the pass counter means it was closed in between.
+/// That distinguishes "just opened" from "still open" without threading state
+/// through any of the call sites.
+pub(in crate::app) fn combo_popup_just_opened(ui: &Ui) -> bool {
+    let id = ui.id().with("combo_popup_last_pass");
+    let now = ui.ctx().cumulative_pass_nr();
+    let last = ui.data(|data| data.get_temp::<u64>(id));
+    ui.data_mut(|data| data.insert_temp(id, now));
+    !matches!(last, Some(previous) if previous + 1 >= now)
+}
+
 pub(in crate::app) fn combo_box_with_scroll<R>(
     ui: &mut Ui,
     combo: egui::ComboBox,
@@ -1855,6 +1882,13 @@ pub(in crate::app) fn combo_box_with_scroll<R>(
         .scope(|ui| {
             ui.spacing_mut().interact_size.y = 20.0;
             ui.spacing_mut().button_padding.y = 2.0;
+            // egui sizes a combo popup to its contents and only scrolls once
+            // they exceed `combo_height`, so this is the clamp -- not a fixed
+            // height. The stock 200pt starts scrolling after a handful of rows,
+            // which hides entries that are simply below the fold: a block's
+            // instance selector would scroll rather than grow the moment an
+            // element was added.
+            ui.spacing_mut().combo_height = COMBO_POPUP_MAX_HEIGHT;
             combo.show_ui(ui, add_contents)
         })
         .inner;
@@ -2367,11 +2401,22 @@ pub(in crate::app) fn draw_foundation_block_index_row(
                     .selected_text(truncate_for_cell(&selected_text, 280.0))
                     .width(300.0),
                 |ui| {
-                    if ui.selectable_label(current < 0, "<none>").clicked() {
+                    // Same as the instance selector: open showing what is
+                    // selected, not the top of a long palette.
+                    let just_opened = combo_popup_just_opened(ui);
+                    let none_row = ui.selectable_label(current < 0, "<none>");
+                    if just_opened && current < 0 {
+                        none_row.scroll_to_me(Some(egui::Align::Center));
+                    }
+                    if none_row.clicked() {
                         new_index = Some(-1);
                     }
                     for (i, label) in labels.iter().enumerate() {
-                        if ui.selectable_label(current == i as i64, label).clicked() {
+                        let row = ui.selectable_label(current == i as i64, label);
+                        if just_opened && current == i as i64 {
+                            row.scroll_to_me(Some(egui::Align::Center));
+                        }
+                        if row.clicked() {
                             new_index = Some(i as i64);
                         }
                     }
