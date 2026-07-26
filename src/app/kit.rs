@@ -98,6 +98,13 @@ pub(super) struct Kit {
     pub(super) terminal_open: bool,
     /// Working directory for terminal commands (game kit root, parent of tags/).
     pub(super) terminal_work_dir: Option<PathBuf>,
+
+    /// The path the user chose when opening this kit, as typed into the file
+    /// dialog or the recents list — not the resolved scan root, which can
+    /// differ (picking an editing-kit root scans its `tags/` subdirectory).
+    /// Matching on the requested path is what lets a repeat open of the same
+    /// folder focus this kit instead of loading a duplicate.
+    pub(super) requested_path: Option<PathBuf>,
 }
 
 impl Kit {
@@ -129,6 +136,7 @@ impl Kit {
             scanning_entries: false,
             terminal_open: false,
             terminal_work_dir: None,
+            requested_path: None,
         }
     }
 
@@ -258,6 +266,32 @@ impl Baboon {
         self.kits.iter().position(kit_has_dirty_documents)
     }
 
+    /// Route an open request for `path` to a kit.
+    ///
+    /// Opening a source that is already open focuses its kit rather than
+    /// loading a second copy of it — the same gesture that switches to an
+    /// already-open tab in an editor. Otherwise the current kit is reused if
+    /// it is still an empty workspace, and a new kit is added if it is not, so
+    /// opening a second game never silently discards the first.
+    ///
+    /// Returns `true` when the source was already open and no load is needed.
+    pub(super) fn open_kit_for(&mut self, path: &Path) -> bool {
+        let path = clean_recent_path(path.to_path_buf());
+        if let Some(index) = self.kits.iter().position(|kit| {
+            kit.requested_path
+                .as_deref()
+                .is_some_and(|open| same_recent_path(open, &path))
+        }) {
+            self.active = index;
+            return true;
+        }
+        if !self.kits[self.active].is_empty_workspace() {
+            self.add_kit();
+        }
+        self.kits[self.active].requested_path = Some(path);
+        false
+    }
+
     /// Install a freshly loaded source into the active kit, replacing whatever
     /// it held. Multi-kit loading (add-a-kit rather than replace) arrives with
     /// the kit strip; until then this preserves single-source behavior.
@@ -266,9 +300,13 @@ impl Baboon {
         names.merge_missing(self.default_names.clone());
         let id = self.active_kit_id();
         let index = self.active;
+        // The requested path outlives the load it started, so a later open of
+        // the same folder can find this kit.
+        let requested_path = self.kits[index].requested_path.clone();
         self.kits[index] = Kit {
             source: Some(source),
             names,
+            requested_path,
             ..Kit::empty(id, self.default_names.clone())
         };
     }

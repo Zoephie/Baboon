@@ -269,6 +269,10 @@ impl Baboon {
     /// Starts source work off the UI thread and reports completion through `WorkerMessage`.
     /// Captured source identity prevents stale results from replacing newer state.
     pub(super) fn begin_load_single_path(&mut self, path: PathBuf, ctx: egui::Context) {
+        if self.open_kit_for(&path) {
+            self.status = format!("Switched to {}", path.display());
+            return;
+        }
         let tx = self.tx.clone();
         let kit = self.active_kit_id();
         let names = self.default_names.clone();
@@ -301,6 +305,10 @@ impl Baboon {
         // container set rather than walked as loose files.
         if let Some(paks) = crate::source::find_paks_dir(&path) {
             self.begin_load_iostore_container_set_path(paks, ctx);
+            return;
+        }
+        if self.open_kit_for(&path) {
+            self.status = format!("Switched to {}", path.display());
             return;
         }
         let tx = self.tx.clone();
@@ -346,6 +354,10 @@ impl Baboon {
     /// Starts source work off the UI thread and reports completion through `WorkerMessage`.
     /// Captured source identity prevents stale results from replacing newer state.
     pub(super) fn begin_load_monolithic_path(&mut self, path: PathBuf, ctx: egui::Context) {
+        if self.open_kit_for(&path) {
+            self.status = format!("Switched to {}", path.display());
+            return;
+        }
         let tx = self.tx.clone();
         let kit = self.active_kit_id();
         let names = self.default_names.clone();
@@ -376,6 +388,10 @@ impl Baboon {
     /// Mounts a single IoStore container (`.utoc`) off the UI thread; completion
     /// is reported through `WorkerMessage::SourceLoaded` like the other loaders.
     pub(super) fn begin_load_iostore_container_path(&mut self, path: PathBuf, ctx: egui::Context) {
+        if self.open_kit_for(&path) {
+            self.status = format!("Switched to {}", path.display());
+            return;
+        }
         let tx = self.tx.clone();
         let kit = self.active_kit_id();
         let names = self.default_names.clone();
@@ -400,6 +416,10 @@ impl Baboon {
         paks_dir: PathBuf,
         ctx: egui::Context,
     ) {
+        if self.open_kit_for(&paks_dir) {
+            self.status = format!("Switched to {}", paks_dir.display());
+            return;
+        }
         let tx = self.tx.clone();
         let kit = self.active_kit_id();
         let names = self.default_names.clone();

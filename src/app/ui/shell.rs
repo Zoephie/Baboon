@@ -1516,6 +1516,7 @@ impl Baboon {
         let mut activate = None;
         let mut close = None;
         let mut add_kit_then: Option<LoadKind> = None;
+        let recents = self.recent_folders.clone();
         egui::TopBottomPanel::top("kit_strip")
             .frame(Frame::none().fill(row_type()).inner_margin(egui::Margin {
                 left: 6.0,
@@ -1594,6 +1595,23 @@ impl Baboon {
                             ui.close_menu();
                             add_kit_then = Some(LoadKind::Container);
                         }
+                        ui.separator();
+                        ui.menu_button("Recent", |ui| {
+                            if recents.is_empty() {
+                                ui.add_enabled(false, egui::Button::new("No recent folders"));
+                            }
+                            for path in &recents {
+                                let full = path.display().to_string();
+                                if ui
+                                    .button(recent_folder_menu_label(path))
+                                    .on_hover_text(full)
+                                    .clicked()
+                                {
+                                    ui.close_menu();
+                                    add_kit_then = Some(LoadKind::Recent(path.clone()));
+                                }
+                            }
+                        });
                     })
                     .response
                     .on_hover_text("Open another game in its own kit");
@@ -1606,14 +1624,15 @@ impl Baboon {
             self.request_close_action(PendingCloseAction::CloseKit(id), ctx);
         }
         if let Some(kind) = add_kit_then {
-            // Add the kit first, then load: `begin_load_*` stamps the load with
-            // whichever kit is active, so the result lands in the new one.
-            self.add_kit();
+            // No need to add a kit here: the loaders route to one themselves,
+            // reusing an empty workspace and adding a kit only when the current
+            // one is occupied.
             match kind {
                 LoadKind::Folder => self.begin_load_folder(ctx.clone()),
                 LoadKind::SingleFile => self.begin_load_single(ctx.clone()),
                 LoadKind::Monolithic => self.begin_load_monolithic(ctx.clone()),
                 LoadKind::Container => self.begin_load_iostore_container(ctx.clone()),
+                LoadKind::Recent(path) => self.load_recent_folder(path, ctx.clone()),
             }
         }
     }
@@ -1700,10 +1719,11 @@ fn recent_folder_menu_label(path: &Path) -> String {
 }
 
 /// Which loader the kit strip's "+" menu should start after adding a kit.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum LoadKind {
     Folder,
     SingleFile,
     Monolithic,
     Container,
+    Recent(std::path::PathBuf),
 }
