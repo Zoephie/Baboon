@@ -1736,7 +1736,7 @@ impl Baboon {
         self.kits[self.active].selected_key = Some(key.clone());
         // A tag the project has an overlay for opens from the project, not from
         // disk — otherwise reopening it would silently discard its edits.
-        if !self.load_campaign_overlay_for_key(&key) {
+        if !self.load_campaign_overlay_for_key(self.active, &key) {
             self.ensure_tag_loading(key, ctx);
         }
     }
@@ -1830,10 +1830,10 @@ impl Baboon {
         // and never terminate. Exiting with a project therefore still prompts;
         // that is one prompt too many, not one too few.
         if !matches!(action, PendingCloseAction::CloseApp)
-            && self.current_source_is_campaign_project_capable()
+            && self.current_source_is_campaign_project_capable(self.active)
         {
             let now = ctx.input(|input| input.time);
-            match self.checkpoint_campaign_project(now) {
+            match self.checkpoint_campaign_project(self.active, now) {
                 Ok(_) => {
                     self.execute_close_action(action, ctx);
                     return;
@@ -2025,14 +2025,14 @@ impl Baboon {
         }
         // A kit with no open tags is still worth saving if it carries a
         // project, per upstream — the project is the session.
-        if tags.is_empty() && self.campaign_project.is_none() {
+        if tags.is_empty() && kit.campaign_project.is_none() {
             return None;
         }
         Some(LastSessionKit {
             source_kind,
             source_path,
             game: source.game.clone(),
-            project_path: self.campaign_project.as_ref().map(|project| project.path.clone()),
+            project_path: kit.campaign_project.as_ref().map(|project| project.path.clone()),
             tags,
         })
     }
@@ -2082,7 +2082,8 @@ impl Baboon {
             // Its project is queued the same way, and opens once the source
             // this session recorded has finished mounting.
             if let Some(project_path) = project_path {
-                self.queue_campaign_project(project_path);
+                let restoring = self.active;
+                self.queue_campaign_project(restoring, project_path);
             }
         }
     }
@@ -3097,7 +3098,8 @@ impl Baboon {
     /// Bundle every modified Campaign Evolved project tag into one portable `_P`
     /// overlay and write its `.baboon` recovery project beside the triplet.
     pub(super) fn export_mod(&mut self) {
-        let snapshot = match self.capture_campaign_project(0.0) {
+        let exporting = self.active;
+        let snapshot = match self.capture_campaign_project(exporting, 0.0) {
             Ok(Some(snapshot)) => snapshot,
             Ok(None) => {
                 self.status = "Export Mod is only for Campaign Evolved containers".to_owned();
@@ -3121,7 +3123,7 @@ impl Baboon {
         let mut new_pkgs: Vec<(Vec<u8>, Vec<u8>, String)> = Vec::new();
         let mut skipped = 0usize;
         for overlay in snapshot.overlays.values() {
-            let Some(entry) = self.campaign_entry_for_identity(&overlay.identity) else {
+            let Some(entry) = self.campaign_entry_for_identity(exporting, &overlay.identity) else {
                 skipped += 1;
                 continue;
             };
@@ -3186,7 +3188,7 @@ impl Baboon {
                 let sidecar = output.with_extension("baboon");
                 match save_campaign_project(&sidecar, &snapshot) {
                     Ok(()) => {
-                        self.campaign_project = Some(ActiveCampaignProject::from_snapshot(
+                        self.kits[exporting].campaign_project = Some(ActiveCampaignProject::from_snapshot(
                             sidecar,
                             &snapshot,
                             0.0,
@@ -5394,7 +5396,7 @@ impl Baboon {
             });
         if retry {
             let now = ctx.input(|input| input.time);
-            match self.checkpoint_campaign_project(now) {
+            match self.checkpoint_campaign_project(self.active, now) {
                 Ok(_) => {
                     let action = self
                         .project_checkpoint_prompt

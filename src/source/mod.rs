@@ -231,6 +231,18 @@ impl TagSource {
         }
     }
 
+    /// The path this source was mounted from: a file for a single tag, a
+    /// directory for everything else. Identifies the source across runs, which
+    /// is what per-source sidecars key on.
+    pub fn root_path(&self) -> &Path {
+        match self {
+            TagSource::SingleFile { path } => path,
+            TagSource::LooseFolder { root, .. } => root,
+            TagSource::MonolithicCache { root, .. } => root,
+            TagSource::IoStoreContainerSet { root, .. } => root,
+        }
+    }
+
     /// Resolve a tag reference against mounted containers, returning the parsed
     /// tag. Errors for non-container sources or an unresolved reference. This is
     /// the same read the browser performs for a `TagEntryLocation::Container`.

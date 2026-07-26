@@ -258,14 +258,6 @@ pub struct Baboon {
     /// selected dirty document has been saved or discard is confirmed.
     save_changes_prompt: SaveChangesPrompt,
     project_checkpoint_prompt: Option<ProjectCheckpointPrompt>,
-    /// Active Campaign Evolved recovery/project database.
-    ///
-    /// Still one per application rather than one per kit. A project belongs to
-    /// a source, so with two Campaign Evolved kits open this is wrong — see the
-    /// merge notes; kit-scoping it is follow-on work.
-    campaign_project: Option<ActiveCampaignProject>,
-    /// Project contents waiting for their Campaign Evolved source to mount.
-    pending_campaign_project: Option<PendingCampaignProject>,
     /// Startup-only prompt reconstructed from the prior session file.
     last_opened_windows: Option<LastOpenedWindowsPrompt>,
     /// Pending destructive block op (delete / delete all) awaiting confirm.
@@ -458,8 +450,6 @@ impl Baboon {
             terminal_open_games,
             save_changes_prompt: SaveChangesPrompt::default(),
             project_checkpoint_prompt: None,
-            campaign_project: None,
-            pending_campaign_project: None,
             last_opened_windows,
             block_confirm: None,
             audio: audio::AudioState::default(),

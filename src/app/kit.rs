@@ -111,6 +111,14 @@ pub(super) struct Kit {
     /// folder focus this kit instead of loading a duplicate.
     pub(super) requested_path: Option<PathBuf>,
 
+    /// This kit's Campaign Evolved recovery/project database, if its source
+    /// has one. Per kit because a project belongs to a source — two Campaign
+    /// Evolved kits are two projects, and one application-wide slot would let
+    /// either checkpoint over the other's tags.
+    pub(super) campaign_project: Option<ActiveCampaignProject>,
+    /// Project contents staged until this kit's source finishes mounting.
+    pub(super) pending_campaign_project: Option<PendingCampaignProject>,
+
     /// Tags staged by a session restore, drained once this kit's source
     /// finishes loading. Held per kit rather than in one shared slot so
     /// several kits can restore concurrently and finish in any order.
@@ -147,6 +155,8 @@ impl Kit {
             terminal_open: false,
             terminal_work_dir: None,
             requested_path: None,
+            campaign_project: None,
+            pending_campaign_project: None,
             pending_restore_tags: Vec::new(),
         }
     }
@@ -315,11 +325,14 @@ impl Baboon {
         // the same folder can find this kit.
         let requested_path = self.kits[index].requested_path.clone();
         let pending_restore_tags = std::mem::take(&mut self.kits[index].pending_restore_tags);
+        let pending_campaign_project =
+            std::mem::take(&mut self.kits[index].pending_campaign_project);
         self.kits[index] = Kit {
             source: Some(source),
             names,
             requested_path,
             pending_restore_tags,
+            pending_campaign_project,
             ..Kit::empty(id, self.default_names.clone())
         };
     }

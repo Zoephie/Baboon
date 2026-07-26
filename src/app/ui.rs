@@ -488,6 +488,6 @@ impl eframe::App for Baboon {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.draw_root_ui(ctx, frame);
         self.run_deferred_file_action(ctx);
-        self.maybe_autosave_campaign_project(ctx);
+        self.maybe_autosave_campaign_projects(ctx);
     }
 }

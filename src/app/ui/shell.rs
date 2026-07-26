@@ -108,7 +108,7 @@ impl Baboon {
                             if ui
                                 .add_enabled(
                                     self.kits[self.active].parsed_tags.values().any(|d| d.dirty)
-                                        || self
+                                        || self.kits[self.active]
                                             .campaign_project
                                             .as_ref()
                                             .is_some_and(|project| !project.overlays.is_empty()),
