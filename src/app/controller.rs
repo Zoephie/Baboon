@@ -1779,6 +1779,15 @@ impl Baboon {
         }
     }
 
+    /// Whether the loaded document for `key` still has unsaved edits. Save
+    /// paths that report through `status` (container writes) use this to tell
+    /// success from failure.
+    pub(super) fn tag_is_dirty(&self, key: &str) -> bool {
+        self.parsed_tags
+            .get(key)
+            .is_some_and(|document| document.dirty)
+    }
+
     fn execute_close_action(&mut self, action: PendingCloseAction, ctx: &egui::Context) {
         match action {
             PendingCloseAction::CloseApp => {
@@ -2670,7 +2679,15 @@ impl Baboon {
             return Err("Only little-endian MCC tags can be saved".to_owned());
         }
         let TagEntryLocation::LooseFile(path) = &entry.location else {
-            return Err("Monolithic cache tags are read-only".to_owned());
+            // Container tags are writable, just not through the loose-file
+            // path — reaching here means a caller skipped the container
+            // routing, so say that rather than blaming a monolithic cache.
+            return Err(match &entry.location {
+                TagEntryLocation::Container { .. } | TagEntryLocation::NewContainer { .. } => {
+                    "Container tags cannot be saved as loose files".to_owned()
+                }
+                _ => "Monolithic cache tags are read-only".to_owned(),
+            });
         };
         let output = path.clone();
         doc.tag
@@ -3378,10 +3395,16 @@ impl Baboon {
         let source = self.source.as_ref()?;
         let index = source.reverse_dependencies.as_ref()?;
         let rel = dependency_entry_reference_path(entry, &self.names)?;
-        let referrer_keys = index.dependents_for(entry.group_tag, &rel);
-        let mut out: Vec<TagEntry> = referrer_keys
+        let referrer_keys = index
+            .dependents_for(entry.group_tag, &rel)
             .iter()
-            .filter_map(|key| source.all_entries.iter().find(|e| &e.key == key).cloned())
+            .map(String::as_str)
+            .collect::<HashSet<_>>();
+        let mut out: Vec<TagEntry> = source
+            .full_entry_set()
+            .iter()
+            .filter(|entry| referrer_keys.contains(entry.key.as_str()))
+            .cloned()
             .collect();
         out.sort_by(|a, b| natural_entry_order(a).cmp(&natural_entry_order(b)));
         Some(out)
@@ -3393,7 +3416,7 @@ impl Baboon {
         let source = self.source.as_ref()?;
         let index = source.reverse_dependencies.as_ref()?;
         let mut out: Vec<TagEntry> = source
-            .all_entries
+            .full_entry_set()
             .iter()
             .filter(|entry| {
                 dependency_entry_reference_path(entry, &self.names)
@@ -3417,7 +3440,7 @@ impl Baboon {
         };
         let deps = index.dependencies_of(key);
         let mut by_key: HashMap<String, &TagEntry> = HashMap::new();
-        for entry in &source.all_entries {
+        for entry in source.full_entry_set() {
             if let Some(rel) = dependency_entry_reference_path(entry, &self.names) {
                 by_key
                     .entry(crate::source::dependency_key(entry.group_tag, &rel))
@@ -4073,27 +4096,42 @@ impl Baboon {
         let Some(source) = self.source.as_ref() else {
             return;
         };
-        if !matches!(source.source, TagSource::LooseFolder { .. }) {
+        // Loose folders index automatically after their scan. Containers are
+        // indexable too, but only on request (Tools → Build Reference Index):
+        // container tags carry no dependency-list stream, so every tag has to be
+        // parsed — for Campaign Evolved that is ~12k tags and several GB of
+        // reads, too much to run behind every mount.
+        let is_loose = matches!(source.source, TagSource::LooseFolder { .. });
+        if !is_loose && !matches!(source.source, TagSource::IoStoreContainerSet { .. }) {
             return;
         }
         if source.reverse_dependencies.is_some() && !force {
             return;
         }
-        let entries = source.all_entries.clone();
+        // A container mount enumerates every tag up front. A loose folder must
+        // use its completed scan only: an index built from the lazy browser
+        // subset would be wrong (it would flag tags as unreferenced just because
+        // their referrers weren't scanned).
+        let entries = if is_loose {
+            source.all_entries.clone()
+        } else {
+            source.full_entry_set().to_vec()
+        };
         if entries.is_empty() {
-            // The full entry set isn't ready yet. A reverse-dep index built from
-            // the partially-loaded folder would be wrong (it would flag tags as
-            // unreferenced just because their referrers weren't scanned), so
-            // kick the full scan first. `begin_scan_all_entries` is idempotent
-            // (guards on `scanning_entries`); the update loop re-enters here and
-            // builds the index once the scan lands.
-            if !self.scanning_entries {
-                self.status = "Indexing tags, then building reference index…".to_owned();
+            // The full entry set isn't ready yet, so kick the scan first.
+            // `begin_scan_all_entries` is idempotent (guards on
+            // `scanning_entries`); the update loop re-enters here and builds the
+            // index once the scan lands. Containers have nothing to scan — an
+            // empty mount simply has nothing to index.
+            if is_loose {
+                if !self.scanning_entries {
+                    self.status = "Indexing tags, then building reference index…".to_owned();
+                }
+                self.begin_scan_all_entries_with_label(
+                    ctx,
+                    "Indexing tags, then building reference index...",
+                );
             }
-            self.begin_scan_all_entries_with_label(
-                ctx,
-                "Indexing tags, then building reference index...",
-            );
             return;
         }
         let tag_source = source.source.clone();
@@ -5051,25 +5089,37 @@ impl Baboon {
                 let mut saved = Vec::new();
                 let mut errors = Vec::new();
                 for tag_id in tag_ids {
-                    // A brand-new container tag saves via a file dialog (new
-                    // override container), not the loose write path.
-                    if matches!(
-                        self.entry_for_key(&tag_id).map(|entry| &entry.location),
-                        Some(TagEntryLocation::NewContainer { .. })
-                    ) {
-                        self.save_new_container_tag(&tag_id);
-                        let still_dirty = self
-                            .parsed_tags
-                            .get(&tag_id)
-                            .map(|doc| doc.dirty)
-                            .unwrap_or(false);
-                        if still_dirty {
-                            let label = self.tag_path_label(&tag_id);
-                            errors.push(format!("{label}: not saved"));
-                        } else {
-                            saved.push(tag_id.clone());
+                    // Container tags have no loose file to write. A brand-new
+                    // one saves via a file dialog (new override container); an
+                    // existing one is overwritten inside the game's pak, with
+                    // this prompt's Save button standing in for the separate
+                    // overwrite confirmation. Both report through `status`
+                    // instead of returning a path, so success is read back off
+                    // the document's dirty flag.
+                    match self.entry_for_key(&tag_id).map(|entry| &entry.location) {
+                        Some(TagEntryLocation::NewContainer { .. }) => {
+                            self.save_new_container_tag(&tag_id);
+                            if self.tag_is_dirty(&tag_id) {
+                                let label = self.tag_path_label(&tag_id);
+                                errors.push(format!("{label}: not saved"));
+                            } else {
+                                saved.push(tag_id.clone());
+                            }
+                            continue;
                         }
-                        continue;
+                        Some(TagEntryLocation::Container { .. }) => {
+                            self.overwrite_current_tag_in_place(&tag_id);
+                            if self.tag_is_dirty(&tag_id) {
+                                // The overwrite failure reason is in `status`.
+                                let label = self.tag_path_label(&tag_id);
+                                let detail = self.status.clone();
+                                errors.push(format!("{label}: {detail}"));
+                            } else {
+                                saved.push(tag_id.clone());
+                            }
+                            continue;
+                        }
+                        _ => {}
                     }
                     match self.save_tag_by_key(&tag_id) {
                         Ok(path) => saved.push(path.display().to_string()),
@@ -6273,6 +6323,45 @@ fn collect_tag_references(
     }
 }
 
+/// Collect just the reference *targets* in a tag, without the field-path
+/// bookkeeping [`collect_tag_references`] does for the reference-jump UI.
+/// Indexing walks every element of every block across the whole tag set, where
+/// building a path string per visited field dominates the cost — and the
+/// dependency index discards those paths.
+fn collect_tag_dependency_refs(tag_struct: TagStruct<'_>, refs: &mut Vec<DependencyRef>) {
+    for field in tag_struct.fields() {
+        match field.value() {
+            Some(TagFieldData::TagReference(reference)) => {
+                let Some((group_tag, rel_path)) = reference.group_tag_and_name else {
+                    continue;
+                };
+                let rel_path = sanitize_ref_path(&rel_path).replace('/', "\\");
+                if rel_path.is_empty() || rel_path.eq_ignore_ascii_case("none") {
+                    continue;
+                }
+                refs.push(DependencyRef {
+                    group_tag,
+                    rel_path,
+                });
+                continue;
+            }
+            Some(_) => continue,
+            None => {}
+        }
+        if let Some(nested) = field.as_struct() {
+            collect_tag_dependency_refs(nested, refs);
+        } else if let Some(block) = field.as_block() {
+            for element in block.iter() {
+                collect_tag_dependency_refs(element, refs);
+            }
+        } else if let Some(array) = field.as_array() {
+            for element in array.iter() {
+                collect_tag_dependency_refs(element, refs);
+            }
+        }
+    }
+}
+
 fn build_dependency_candidate_index(
     entries: &[TagEntry],
     names: &TagNameIndex,
@@ -7090,30 +7179,182 @@ fn read_entry_dependencies(
     source: &TagSource,
     entry: &TagEntry,
 ) -> Result<Vec<DependencyRef>, String> {
-    let TagEntryLocation::LooseFile(path) = &entry.location else {
-        return Ok(Vec::new());
-    };
-    if let Some(refs) = TagFile::read_dependency_references(path)
-        .map_err(|error| format!("Could not read dependency list: {error}"))?
-    {
-        return Ok(refs
-            .into_iter()
-            .map(|(group_tag, rel_path)| DependencyRef {
-                group_tag,
-                rel_path: sanitize_ref_path(&rel_path).replace('/', "\\"),
-            })
-            .collect());
+    match &entry.location {
+        // A loose tag usually carries a `want` (dependency-list) stream, which
+        // is far cheaper to read than the whole tag.
+        TagEntryLocation::LooseFile(path) => {
+            if let Some(refs) = TagFile::read_dependency_references(path)
+                .map_err(|error| format!("Could not read dependency list: {error}"))?
+            {
+                return Ok(refs
+                    .into_iter()
+                    .map(|(group_tag, rel_path)| DependencyRef {
+                        group_tag,
+                        rel_path: sanitize_ref_path(&rel_path).replace('/', "\\"),
+                    })
+                    .collect());
+            }
+        }
+        // Cache and container tags have no separate dependency-list stream to
+        // shortcut through (verified: none of Campaign Evolved's 12,291
+        // container tags has a `want` chunk), so they fall through to the parse
+        // path below — which `read_entry` supports for both.
+        TagEntryLocation::Monolithic { .. } | TagEntryLocation::Container { .. } => {}
+        // A brand-new tag exists only as an in-memory document; it has no
+        // payload to read here, and it is not yet referenced by anything.
+        TagEntryLocation::NewContainer { .. } => return Ok(Vec::new()),
     }
     let tag = read_entry(source, entry).map_err(|error| format!("Could not parse tag: {error}"))?;
     let mut refs = Vec::new();
-    collect_tag_references(tag.root(), "", &mut refs);
-    Ok(refs
-        .into_iter()
-        .map(|reference| DependencyRef {
-            group_tag: reference.group_tag,
-            rel_path: reference.rel_path,
-        })
-        .collect())
+    collect_tag_dependency_refs(tag.root(), &mut refs);
+    Ok(refs)
+}
+
+#[cfg(test)]
+mod container_dependency_tests {
+    use super::*;
+
+    const CE_PAKS: &str = "/Users/camden/Halo/halo-campaign-evolved_pc/Meteorite/Content/Paks";
+
+    fn find_entry<'a>(
+        loaded: &'a crate::source::LoadedSourceData,
+        group: &[u8; 4],
+        path: &str,
+    ) -> &'a TagEntry {
+        let group_tag = u32::from_be_bytes(*group);
+        loaded
+            .entries
+            .iter()
+            .chain(loaded.all_entries.iter())
+            .find(|entry| {
+                entry.group_tag == group_tag
+                    && entry.display_path.to_ascii_lowercase().replace('\\', "/") == path
+            })
+            .unwrap_or_else(|| panic!("no {path} entry in the mounted containers"))
+    }
+
+    /// Container tags carry no `want` stream, so their dependencies have to come
+    /// out of the parsed tag. This walks the real path end to end: a Campaign
+    /// Evolved biped must report outbound references, and the reverse index they
+    /// feed must resolve back to the referenced tag's own entry — i.e. the
+    /// reference strings inside a container tag normalize to the same key as the
+    /// entry display paths built from the pak directory. Skips without the paks.
+    #[test]
+    fn campaign_evolved_container_tags_report_their_dependencies() {
+        let paks = PathBuf::from(CE_PAKS);
+        if !paks.exists() {
+            eprintln!("skip: CE paks not found");
+            return;
+        }
+        let definitions = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("definitions");
+        let loaded = crate::source::load_iostore_container_set(
+            paks,
+            &TagNameIndex::default(),
+            &definitions,
+        )
+        .expect("mount CE container set");
+        let names = TagNameIndex::load_game(&definitions, "haloce_evolved")
+            .expect("load Campaign Evolved tag names");
+
+        // The index build and every lookup read the complete set through
+        // `full_entry_set`; a container mount keeps it in `entries`.
+        assert!(loaded.all_entries.is_empty());
+        assert_eq!(loaded.full_entry_set().len(), loaded.entries.len());
+        assert!(
+            loaded.full_entry_set().len() > 10_000,
+            "expected the full CE tag set, got {}",
+            loaded.full_entry_set().len()
+        );
+
+        let biped = find_entry(&loaded, b"bipd", "objects/characters/elite/elite.biped").clone();
+        let deps = read_entry_dependencies(&loaded.source, &biped).expect("read biped deps");
+        assert!(
+            !deps.is_empty(),
+            "elite.biped reported no dependencies; the container parse path is not running"
+        );
+
+        // The model reference must land on the entry the browser shows.
+        let model = find_entry(&loaded, b"hlmt", "objects/characters/elite/elite.model").clone();
+        let model_ref =
+            dependency_entry_reference_path(&model, &names).expect("model reference path");
+        let mut index = ReverseDependencyIndex::default();
+        index.set_tag_dependencies(biped.key.clone(), deps);
+        assert!(
+            index
+                .dependents_for(model.group_tag, &model_ref)
+                .contains(&biped.key),
+            "elite.model has no recorded referrer; container reference paths do not \
+             normalize to entry display paths"
+        );
+    }
+
+    /// The whole-corpus build, for when the cost of indexing containers is in
+    /// question — it parses every tag. Ignored by default (minutes in a debug
+    /// build); run with:
+    ///   cargo test --release -- --ignored campaign_evolved_full_reference_index
+    #[test]
+    #[ignore = "parses all ~12k Campaign Evolved tags"]
+    fn campaign_evolved_full_reference_index_resolves_referrers() {
+        let paks = PathBuf::from(CE_PAKS);
+        if !paks.exists() {
+            eprintln!("skip: CE paks not found");
+            return;
+        }
+        let definitions = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("definitions");
+        let loaded = crate::source::load_iostore_container_set(
+            paks,
+            &TagNameIndex::default(),
+            &definitions,
+        )
+        .expect("mount CE container set");
+        let names = TagNameIndex::load_game(&definitions, "haloce_evolved")
+            .expect("load Campaign Evolved tag names");
+
+        let started = std::time::Instant::now();
+        let mut index = ReverseDependencyIndex::default();
+        let mut failed = 0usize;
+        for entry in loaded.full_entry_set() {
+            match read_entry_dependencies(&loaded.source, entry) {
+                Ok(deps) => index.set_tag_dependencies(entry.key.clone(), deps),
+                Err(_) => failed += 1,
+            }
+        }
+        eprintln!(
+            "[perf] indexed {} tags in {:.1?} ({failed} unreadable)",
+            loaded.full_entry_set().len(),
+            started.elapsed()
+        );
+        assert_eq!(failed, 0, "some container tags could not be read");
+
+        // A shared tag must come back with many referrers, and the elite biped
+        // must be among the referrers of its own model.
+        let model = find_entry(&loaded, b"hlmt", "objects/characters/elite/elite.model").clone();
+        let model_ref =
+            dependency_entry_reference_path(&model, &names).expect("model reference path");
+        let referrers = index.dependents_for(model.group_tag, &model_ref);
+        assert!(
+            !referrers.is_empty(),
+            "elite.model has no referrers in the full index"
+        );
+        let unreferenced = loaded
+            .full_entry_set()
+            .iter()
+            .filter(|entry| {
+                dependency_entry_reference_path(entry, &names)
+                    .map(|rel| index.dependents_for(entry.group_tag, &rel).is_empty())
+                    .unwrap_or(false)
+            })
+            .count();
+        eprintln!(
+            "[perf] {unreferenced} of {} tags are unreferenced",
+            loaded.full_entry_set().len()
+        );
+        assert!(
+            unreferenced < loaded.full_entry_set().len() / 2,
+            "most tags came back unreferenced ({unreferenced}); reference paths are \
+             probably not matching entry paths"
+        );
+    }
 }
 
 fn rewrite_reference_needles(rewrites: &HashMap<(u32, String), String>) -> Vec<Vec<u8>> {

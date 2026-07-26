@@ -230,6 +230,22 @@ pub struct LoadedSourceData {
     pub initial_tag: Option<(String, TagFile)>,
 }
 
+impl LoadedSourceData {
+    /// The complete entry set, for callers that must see every tag rather than
+    /// the browser's lazy subset. A loose folder fills `all_entries` from its
+    /// background scan; a container mount enumerates every tag into `entries`
+    /// up front and leaves `all_entries` empty. Only meaningful once the source
+    /// is fully enumerated — a loose folder mid-scan returns the partial
+    /// `entries`, so gate on the scan (or on an index built from it) first.
+    pub fn full_entry_set(&self) -> &[TagEntry] {
+        if self.all_entries.is_empty() {
+            &self.entries
+        } else {
+            &self.all_entries
+        }
+    }
+}
+
 /// Result of reconciling a cached folder index with current files on disk.
 /// `changed` describes index membership or fingerprints, not tag contents.
 pub struct EntryIndexRefresh {
