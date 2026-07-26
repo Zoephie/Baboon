@@ -181,9 +181,6 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
         .buffers
         .entry(buffer_key.clone())
         .or_insert_with(|| value.to_owned());
-    if !ui.memory(|memory| memory.has_focus(id)) && buffer != value {
-        *buffer = value.to_owned();
-    }
 
     let droppable = edit.editable && !meta.read_only;
     let required_group = tag_reference_required_group(meta, target.as_ref());
@@ -207,7 +204,13 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                     icon_group,
                 );
 
-                if response.lost_focus() && buffer.trim() != value.trim() {
+                let changed = buffer.trim() != value.trim();
+                if changed && should_resync_buffer(response.has_focus(), response.lost_focus()) {
+                    // Not being edited and not committing: the document moved
+                    // underneath (undo, reload, a picker), so take its value.
+                    *buffer = value.to_owned();
+                }
+                if response.lost_focus() && changed {
                     let input = buffer.trim().to_owned();
                     commit_tag_reference_input(
                         edit.pending,
