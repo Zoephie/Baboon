@@ -367,6 +367,16 @@ impl Baboon {
             if let Some(status) = status_update {
                 self.status = status;
             }
+            // Browser actions and the scan below all resolve against the active
+            // kit, and this browser is drawn inside the workspace-tree walk,
+            // where `active` is still whatever it was when the frame began.
+            // Press-activation usually beats the click by a frame, but a press
+            // and its release land in the same frame whenever one runs long --
+            // which is exactly what loading a large tag or indexing does. This
+            // browser's own kit is the right target either way.
+            if action.is_some() || need_scan {
+                self.active = kit_index;
+            }
             if let Some(action) = action {
                 self.handle_browser_action(action, ctx.clone());
             }

@@ -284,6 +284,11 @@ impl Baboon {
         kit.parsed_tags.insert(key, doc);
 
         if let Some(key) = bitmap_reimport {
+            // Resolves its source and entry against the active kit, and runs an
+            // external tool that rewrites the bitmap on disk. This pane's kit is
+            // the one being asked, so make it active first rather than trusting
+            // press-activation to have already landed this frame.
+            self.active = kit_index;
             self.begin_reimport_bitmap(key, ctx.clone());
         }
     }
