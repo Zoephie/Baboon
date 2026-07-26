@@ -2532,4 +2532,127 @@ mod palette_repro_tests {
         }
         assert!(failures.is_empty(), "{failures:#?}");
     }
+
+    /// Every block-index field in a tag, at every depth, with the struct path
+    /// the app itself would render it under (`name#ordinal` segments) -- so the
+    /// ancestor walk in `block_index_target_options` is exercised through
+    /// `root.descend`, not just the root-level shortcut.
+    fn collect_block_index_fields(
+        st: &blam_tags::TagStruct<'_>,
+        path: &str,
+        out: &mut Vec<String>,
+        depth: usize,
+    ) {
+        if depth > 6 || out.len() > 400 {
+            return;
+        }
+        for field in st.fields_all() {
+            let field_path = crate::app::append_field_path_for(path, &field);
+            if field.definition().block_index_target().is_some() {
+                out.push(path.to_owned());
+            }
+            if let Some(block) = field.as_block()
+                && block.len() > 0
+                && let Some(element) = block.element(0)
+            {
+                let element_path = format!("{field_path}[0]");
+                collect_block_index_fields(&element, &element_path, out, depth + 1);
+            }
+        }
+    }
+
+    /// The general form of Crisp's report: for a block-index field anywhere in
+    /// a tag, adding an element to the block it targets must be offered by the
+    /// dropdown immediately, with no save and reopen.
+    #[test]
+    fn adding_to_a_targeted_block_reaches_its_dropdown_at_every_depth() {
+        let defs = std::path::Path::new("definitions");
+        let names = crate::format::TagNameIndex::default();
+        let cases = [
+            ("halo3_mcc", "levels/multi/riverworld/riverworld.scenario", *b"scnr"),
+            ("haloreach_mcc", "levels/multi/35_island/35_island.scenario", *b"scnr"),
+        ];
+        let mut failures = Vec::new();
+        let mut checked = 0usize;
+
+        for (game, rel, group_bytes) in cases {
+            let tag_path = std::path::Path::new("/Users/camden/Halo")
+                .join(game)
+                .join("tags")
+                .join(rel);
+            if !tag_path.exists() {
+                eprintln!("skip {game}: {} missing", tag_path.display());
+                continue;
+            }
+            let group = u32::from_be_bytes(group_bytes);
+            let Ok(tag) = crate::source::read_tag_at_path(&tag_path, Some(game), Some(defs), group)
+            else {
+                eprintln!("skip {game}: unreadable");
+                continue;
+            };
+            let mut struct_paths = Vec::new();
+            collect_block_index_fields(&tag.root(), "", &mut struct_paths, 0);
+            struct_paths.sort();
+            struct_paths.dedup();
+            eprintln!("{game}: {} struct(s) holding block-index fields", struct_paths.len());
+
+            for struct_path in struct_paths.iter().take(40) {
+                // Re-read per case: each one mutates the tag.
+                let Ok(mut tag) =
+                    crate::source::read_tag_at_path(&tag_path, Some(game), Some(defs), group)
+                else {
+                    continue;
+                };
+                let resolve = |tag: &blam_tags::TagFile| -> Option<(String, usize)> {
+                    let root = tag.root();
+                    let st = if struct_path.is_empty() {
+                        root
+                    } else {
+                        root.descend(struct_path)?
+                    };
+                    for field in st.fields_all() {
+                        if field.definition().block_index_target().is_some()
+                            && let Some((labels, target)) = block_index_target_options(
+                                &st,
+                                &field,
+                                &names,
+                                Some(root),
+                                struct_path,
+                            )
+                        {
+                            return Some((target, labels.len()));
+                        }
+                    }
+                    None
+                };
+                let Some((target, before)) = resolve(&tag) else {
+                    continue;
+                };
+                let mut dirty = false;
+                let status = crate::app::apply_block_ops(
+                    &mut tag,
+                    vec![BlockOp {
+                        path: target.clone(),
+                        kind: BlockOpKind::Add,
+                    }],
+                    &mut dirty,
+                );
+                if status.as_deref().is_some_and(|s| s.contains("failed")) {
+                    eprintln!("  {struct_path:?} -> {target:?}: add failed: {status:?}");
+                    continue;
+                }
+                let after = resolve(&tag).map(|(_, n)| n).unwrap_or(0);
+                checked += 1;
+                if after != before + 1 {
+                    failures.push(format!(
+                        "{game} {struct_path:?} -> target {target:?}: {before} option(s) before, \
+                         {after} after adding an element (expected {})",
+                        before + 1
+                    ));
+                }
+            }
+        }
+        eprintln!("checked {checked} block-index field(s)");
+        assert!(failures.is_empty(), "{failures:#?}");
+    }
 }
