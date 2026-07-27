@@ -3432,6 +3432,94 @@ impl Baboon {
         }
     }
 
+    /// Dump everything the review is working from into `folder`, so a diff
+    /// that looks wrong can be reproduced away from the UI.
+    ///
+    /// Writes the computed rows as JSON, and for every tag both sides as raw
+    /// bytes: the tag as the game ships it and the tag as this workspace has
+    /// it. Those two files are enough to re-run the comparison exactly.
+    pub(super) fn save_review_diagnostic(&mut self, folder: PathBuf) -> Result<usize, String> {
+        let Some(kit) = self
+            .mod_export
+            .as_ref()
+            .map(|dialog| dialog.kit)
+            .and_then(|kit| self.resolve_kit(kit))
+        else {
+            return Err("The review is no longer open".to_owned());
+        };
+        let identities: Vec<String> = self
+            .mod_export
+            .as_ref()
+            .map(|dialog| dialog.rows.iter().map(|row| row.identity.clone()).collect())
+            .unwrap_or_default();
+
+        let mut tags = Vec::new();
+        for identity in identities {
+            // Computed on demand, so a diagnostic does not depend on which rows
+            // the user happened to expand.
+            if !self
+                .mod_export
+                .as_ref()
+                .is_some_and(|dialog| dialog.diffs.contains_key(&identity))
+            {
+                let diff = self.diff_reviewed_tag(kit, &identity);
+                if let Some(dialog) = self.mod_export.as_mut() {
+                    dialog.diffs.insert(identity.clone(), diff);
+                }
+            }
+            let Some(dialog) = self.mod_export.as_ref() else {
+                break;
+            };
+            let Some(diff) = dialog.diffs.get(&identity) else {
+                continue;
+            };
+            let Some(row) = dialog.rows.iter().find(|row| row.identity == identity) else {
+                continue;
+            };
+            let stem: String = identity
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                .collect();
+            for (suffix, tag) in [("base", diff.base.as_ref()), ("edited", diff.edited.as_ref())] {
+                let Some(tag) = tag else { continue };
+                let bytes = tag
+                    .write_to_bytes()
+                    .map_err(|error| format!("Could not serialize {identity}: {error}"))?;
+                std::fs::write(folder.join(format!("{stem}.{suffix}.tag")), bytes)
+                    .map_err(|error| format!("Could not write {stem}.{suffix}.tag: {error}"))?;
+            }
+            tags.push(serde_json::json!({
+                "identity": identity,
+                "path": row.display_path,
+                "kind": match row.kind {
+                    ModExportChange::New => "new",
+                    ModExportChange::Modified => "modified",
+                    ModExportChange::Unresolved => "unresolved",
+                },
+                "bytes": row.bytes,
+                "error": diff.error,
+                "truncated": diff.truncated,
+                "rows": diff
+                    .rows
+                    .iter()
+                    .map(|row| serde_json::json!({
+                        "path": row.path,
+                        "base_path": row.base_path,
+                        "before": row.a,
+                        "after": row.b,
+                    }))
+                    .collect::<Vec<_>>(),
+            }));
+        }
+        let count = tags.len();
+        let document = serde_json::json!({ "tags": tags });
+        let text = serde_json::to_string_pretty(&document)
+            .map_err(|error| format!("Could not encode the diagnostic: {error}"))?;
+        std::fs::write(folder.join("review-diagnostic.json"), text)
+            .map_err(|error| format!("Could not write review-diagnostic.json: {error}"))?;
+        Ok(count)
+    }
+
     /// Write the reviewed mod. `included` are the identities the user kept.
     pub(super) fn write_reviewed_mod(
         &mut self,

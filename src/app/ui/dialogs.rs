@@ -827,6 +827,7 @@ impl Baboon {
         let mut cancel = false;
         let mut export = false;
         let mut browse = false;
+        let mut save_diagnostic = false;
         let mut acknowledge: Option<bool> = None;
         let mut set_all: Option<bool> = None;
         let mut toggled: Option<usize> = None;
@@ -974,6 +975,13 @@ impl Baboon {
                         if ui.button("Close").clicked() {
                             cancel = true;
                         }
+                        if ui
+                            .button("Save diagnostic...")
+                            .on_hover_text("Write both sides of every tag, and the computed differences, to a folder")
+                            .clicked()
+                        {
+                            save_diagnostic = true;
+                        }
                     });
                     return;
                 }
@@ -1044,6 +1052,13 @@ impl Baboon {
                     if ui.button("Cancel").clicked() {
                         cancel = true;
                     }
+                    if ui
+                        .button("Save diagnostic...")
+                        .on_hover_text("Write both sides of every tag, and the computed differences, to a folder")
+                        .clicked()
+                    {
+                        save_diagnostic = true;
+                    }
                 });
             });
 
@@ -1101,6 +1116,18 @@ impl Baboon {
                     dialog.diffs.insert(identity, diff);
                 }
             }
+        }
+        if save_diagnostic
+            && let Some(folder) = rfd::FileDialog::new()
+                .set_title("Save review diagnostic into folder")
+                .pick_folder()
+        {
+            self.status = match self.save_review_diagnostic(folder.clone()) {
+                Ok(count) => {
+                    format!("Wrote a diagnostic for {count} tag(s) to {}", folder.display())
+                }
+                Err(error) => error,
+            };
         }
         if browse
             && let Some(folder) = rfd::FileDialog::new()
