@@ -692,61 +692,86 @@ impl Baboon {
                     }
                 });
             }
-            ui.columns(2, |columns| {
-                columns[0].push_id(("diff_before", &element), |ui| {
-                    // Tinted so which side is which is apparent at a glance
-                    // rather than only from the heading above it.
-                    Frame::none()
-                        .fill(removed_wash())
-                        .stroke(Stroke::new(1.0, removed_text().gamma_multiply(0.5)))
-                        .inner_margin(egui::Margin::symmetric(6.0, 6.0))
-                        .show(ui, |ui| {
-                    ui.label(RichText::new("before").color(removed_text()).small());
-                    match diff.base.as_ref() {
-                        Some(base) => Self::draw_diff_side(
-                            ui,
-                            base,
-                            base_element.as_deref().unwrap_or(&element),
-                            &filter,
-                            names,
-                            group_tag,
-                            game,
-                            definitions_root,
-                            expert_mode,
-                            &format!("{scope}|before"),
-                        ),
-                        // A tag the game does not ship has no before.
-                        None => {
-                            ui.label(
-                                RichText::new("new tag").color(subtle_dark()).small(),
-                            );
-                        }
-                    }
-                        });
-                });
-                columns[1].push_id(("diff_after", &element), |ui| {
-                    Frame::none()
-                        .fill(added_wash())
-                        .stroke(Stroke::new(1.0, added_text().gamma_multiply(0.5)))
-                        .inner_margin(egui::Margin::symmetric(6.0, 6.0))
-                        .show(ui, |ui| {
-                    ui.label(RichText::new("after").color(added_text()).small());
-                    if let Some(edited) = diff.edited.as_ref() {
-                        Self::draw_diff_side(
-                            ui,
-                            edited,
-                            &element,
-                            &filter,
-                            names,
-                            group_tag,
-                            game,
-                            definitions_root,
-                            expert_mode,
-                            &format!("{scope}|after"),
-                        );
-                    }
-                        });
-                });
+            // Each side is given exactly half and scrolls within itself.
+            // The editor's rows are wider than half a dialog, and a resizable
+            // window sized to its contents grows to fit them -- so without a
+            // bound the dialog widens every frame until it is off screen.
+            let available = ui.available_width();
+            let side_width = ((available - 16.0) / 2.0).max(160.0);
+            ui.horizontal_top(|ui| {
+                ui.allocate_ui_with_layout(
+                    Vec2::new(side_width, 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.set_width(side_width);
+                        Frame::none()
+                            .fill(removed_wash())
+                            .stroke(Stroke::new(1.0, removed_text().gamma_multiply(0.5)))
+                            .inner_margin(egui::Margin::symmetric(6.0, 6.0))
+                            .show(ui, |ui| {
+                                ui.label(RichText::new("before").color(removed_text()).small());
+                                egui::ScrollArea::horizontal()
+                                    .id_salt(("diff_before", &element))
+                                    .auto_shrink([false, false])
+                                    .show(ui, |ui| match diff.base.as_ref() {
+                                        Some(base) => Self::draw_diff_side(
+                                            ui,
+                                            base,
+                                            base_element.as_deref().unwrap_or(&element),
+                                            &filter,
+                                            names,
+                                            group_tag,
+                                            game,
+                                            definitions_root,
+                                            expert_mode,
+                                            &format!("{scope}|before"),
+                                        ),
+                                        // A tag the game does not ship has no before.
+                                        None => {
+                                            ui.label(
+                                                RichText::new("new tag")
+                                                    .color(subtle_dark())
+                                                    .small(),
+                                            );
+                                        }
+                                    });
+                            });
+                    },
+                );
+                ui.separator();
+                ui.allocate_ui_with_layout(
+                    Vec2::new(side_width, 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.set_width(side_width);
+                        Frame::none()
+                            .fill(added_wash())
+                            .stroke(Stroke::new(1.0, added_text().gamma_multiply(0.5)))
+                            .inner_margin(egui::Margin::symmetric(6.0, 6.0))
+                            .show(ui, |ui| {
+                                ui.label(RichText::new("after").color(added_text()).small());
+                                egui::ScrollArea::horizontal()
+                                    .id_salt(("diff_after", &element))
+                                    .auto_shrink([false, false])
+                                    .show(ui, |ui| {
+                                        if let Some(edited) = diff.edited.as_ref() {
+                                            Self::draw_diff_side(
+                                                ui,
+                                                edited,
+                                                &element,
+                                                &filter,
+                                                names,
+                                                group_tag,
+                                                game,
+                                                definitions_root,
+                                                expert_mode,
+                                                &format!("{scope}|after"),
+                                            );
+                                        }
+                                    });
+                            });
+                    },
+                );
             });
         }
         if diff.truncated {
@@ -835,8 +860,8 @@ impl Baboon {
             .open(&mut open)
             .collapsible(false)
             .resizable(true)
-            .default_width(960.0)
-            .default_height(560.0)
+            .default_width(1100.0)
+            .default_height(640.0)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 let Some(dialog) = self.mod_export.as_ref() else {
@@ -867,8 +892,13 @@ impl Baboon {
                     }
                 });
                 ui.add_space(6.0);
+                // Grows with the window: the naming and buttons below need a
+                // fixed slice, and the list takes whatever is left, so making
+                // the dialog taller shows more of the diff rather than more
+                // empty space.
+                let list_height = (ui.available_height() - 120.0).max(120.0);
                 egui::ScrollArea::vertical()
-                    .max_height(340.0)
+                    .max_height(list_height)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         for (index, row) in dialog.rows.iter().enumerate() {
