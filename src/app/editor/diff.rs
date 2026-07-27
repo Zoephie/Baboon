@@ -83,6 +83,43 @@ fn align_by_identity(
     Some(pairs)
 }
 
+/// The matched pairs whose element moved, as indices into `matched`.
+///
+/// Reordering a block changes nothing inside any element, so a diff that only
+/// reports fields says nothing happened -- while the exported tag is genuinely
+/// different, and for a palette the difference matters a great deal: block
+/// index fields elsewhere name elements by position, so moving one silently
+/// repoints every reference to it.
+///
+/// Only the smallest set that explains the reordering is reported. Everything
+/// on the longest increasing run of destination indices stayed in relative
+/// order and did not move; inserting an element shifts the ones below it
+/// without reordering anything, and must not light them all up.
+fn moved_pairs(matched: &[(usize, usize)]) -> Vec<usize> {
+    // Longest increasing subsequence over the destination indices, by patience
+    // sorting, reconstructed through predecessor links.
+    let mut piles: Vec<usize> = Vec::new();
+    let mut previous = vec![usize::MAX; matched.len()];
+    for (i, &(_, bi)) in matched.iter().enumerate() {
+        let at = piles.partition_point(|&p| matched[p].1 < bi);
+        if at > 0 {
+            previous[i] = piles[at - 1];
+        }
+        if at == piles.len() {
+            piles.push(i);
+        } else {
+            piles[at] = i;
+        }
+    }
+    let mut kept = vec![false; matched.len()];
+    let mut cursor = piles.last().copied();
+    while let Some(i) = cursor {
+        kept[i] = true;
+        cursor = (previous[i] != usize::MAX).then_some(previous[i]);
+    }
+    (0..matched.len()).filter(|&i| !kept[i]).collect()
+}
+
 /// The identity an element is matched on: whatever names it to a reader.
 fn element_identity(element: Option<TagStruct<'_>>, names: &TagNameIndex) -> Option<String> {
     foundation::block_element_content_label(element?, names)
@@ -114,6 +151,27 @@ fn diff_structs(
                     .map(|i| ((i < ba.len()).then_some(i), (i < bb.len()).then_some(i)))
                     .collect()
             });
+            // Reported before the per-element diffs so a reorder reads as a
+            // property of the block rather than of one element in it.
+            let matched: Vec<(usize, usize)> = pairs
+                .iter()
+                .filter_map(|(x, y)| Some(((*x)?, (*y)?)))
+                .collect();
+            for index in moved_pairs(&matched) {
+                if out.len() > limit {
+                    return;
+                }
+                let (ai, bi) = matched[index];
+                let label = ids_b[bi]
+                    .clone()
+                    .or_else(|| ids_a[ai].clone())
+                    .unwrap_or_else(|| format!("element {ai}"));
+                out.push(TagFieldDiff {
+                    path: format!("{field_path}[{bi}]"),
+                    a: format!("position {ai}"),
+                    b: format!("moved to {bi} — {label}"),
+                });
+            }
             for (ai, bi) in pairs {
                 if out.len() > limit {
                     return;
@@ -177,6 +235,23 @@ fn diff_structs(
             }
         } else if let (Some(sa), Some(sb)) = (fa.as_struct(), fb.as_struct()) {
             diff_structs(&sa, &sb, &field_path, names, out, limit);
+        } else if let (Some(da), Some(db)) = (fa.as_data(), fb.as_data()) {
+            // Raw data fields -- function curves, shader source, import info --
+            // are edited through their own editors and land in an exported mod
+            // like any other change. They have no readable form here, but a
+            // preview that omits them entirely is worse than one that says only
+            // that they moved.
+            if da != db {
+                out.push(TagFieldDiff {
+                    path: field_path,
+                    a: format!("{} bytes", da.len()),
+                    b: if da.len() == db.len() {
+                        format!("{} bytes, contents differ", db.len())
+                    } else {
+                        format!("{} bytes", db.len())
+                    },
+                });
+            }
         } else if let (Some(va), Some(vb)) = (fa.value(), fb.value()) {
             let ta = foundation::format_foundation_scalar_value(names, &va);
             let tb = foundation::format_foundation_scalar_value(names, &vb);
@@ -295,6 +370,38 @@ mod alignment_tests {
         assert!(align_by_identity(&ids(&["a", "b"]), &ids(&["a", "a"])).is_none());
         assert!(align_by_identity(&[None, Some("a".into())], &ids(&["a", "b"])).is_none());
         assert!(align_by_identity(&[], &[]).is_some(), "two empty blocks align trivially");
+    }
+
+    /// An insertion shifts everything below it without reordering anything.
+    /// Reporting those as moved would undo the point of matching by identity.
+    #[test]
+    fn an_insertion_moves_nothing() {
+        // a: warthog ghost banshee -> b: scorpion warthog ghost banshee
+        let matched = [(0, 1), (1, 2), (2, 3)];
+        assert!(super::moved_pairs(&matched).is_empty());
+    }
+
+    /// One element pulled to the front is one move, not three.
+    #[test]
+    fn a_reorder_reports_only_what_actually_moved() {
+        // a: warthog ghost banshee -> b: banshee warthog ghost
+        let matched = [(0, 1), (1, 2), (2, 0)];
+        let moved = super::moved_pairs(&matched);
+        assert_eq!(moved.len(), 1, "only banshee moved: {moved:?}");
+        assert_eq!(matched[moved[0]], (2, 0));
+    }
+
+    #[test]
+    fn an_unchanged_block_reports_no_moves() {
+        assert!(super::moved_pairs(&[(0, 0), (1, 1), (2, 2)]).is_empty());
+        assert!(super::moved_pairs(&[]).is_empty());
+    }
+
+    /// A full reversal cannot be explained by fewer moves than this.
+    #[test]
+    fn a_reversal_keeps_one_element_still() {
+        let matched = [(0, 3), (1, 2), (2, 1), (3, 0)];
+        assert_eq!(super::moved_pairs(&matched).len(), 3);
     }
 
     #[test]
