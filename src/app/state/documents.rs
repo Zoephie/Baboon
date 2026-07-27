@@ -324,7 +324,7 @@ pub(in crate::app) struct ModExportRow {
     pub(in crate::app) reason: Option<String>,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::app) enum ModExportChange {
     /// A tag this workspace created, with no counterpart in the game.
     New,

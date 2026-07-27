@@ -3,6 +3,42 @@
 
 use super::*;
 
+/// One changed element and the rows that belong to it.
+struct DiffSection {
+    /// Path in the edited tag, e.g. `zone set pvs[3]`. Empty for the root.
+    element: String,
+    /// The same element in the shipped tag, where the index differs.
+    base_element: Option<String>,
+    label: String,
+    kind: ModExportChange,
+    rows: Vec<TagFieldDiff>,
+}
+
+/// A container in the tag, holding whatever changed inside it.
+#[derive(Default)]
+struct DiffNode {
+    title: String,
+    children: Vec<DiffNode>,
+    sections: Vec<DiffSection>,
+}
+
+impl DiffNode {
+    /// Merge a container that only leads somewhere else into its child, so a
+    /// deep change reads as one breadcrumb rather than a stack of boxes.
+    fn collapse_chains(&mut self) {
+        for child in self.children.iter_mut() {
+            child.collapse_chains();
+        }
+        while self.sections.is_empty() && self.children.len() == 1 && !self.title.is_empty() {
+            let child = self.children.remove(0);
+            // A chevron the shipped fonts carry -- see the glyph fallback work.
+            self.title = format!("{} \u{203a} {}", self.title, child.title);
+            self.children = child.children;
+            self.sections = child.sections;
+        }
+    }
+}
+
 impl Baboon {
     pub(super) fn draw_tag_conversion_window(&mut self, ctx: &egui::Context) {
         if !self.expert_mode {
@@ -464,6 +500,106 @@ impl Baboon {
         }
     }
 
+    /// One section per changed element, in the order the tag has them, each
+    /// carrying the rows that belong to it so its panes can be filtered to just
+    /// those. A single filter over every row made each section render the
+    /// ancestors of every *other* section too -- a block that merely contained a
+    /// change appeared as though it were one.
+    fn build_diff_sections(rows: &[TagFieldDiff]) -> Vec<DiffSection> {
+        let mut sections: Vec<DiffSection> = Vec::new();
+        for row in rows {
+            let (element, _) = Self::split_element_path(&row.path);
+            let base_element = row
+                .base_path
+                .as_deref()
+                .map(|path| Self::split_element_path(path).0.to_owned());
+            let label = if Self::split_element_path(&row.path).1.is_empty() {
+                if row.b.is_empty() { row.a.clone() } else { row.b.clone() }
+            } else {
+                String::new()
+            };
+            // What happened to the element as a whole, from the row that is
+            // about the element rather than about a field inside it.
+            let kind = if Self::split_element_path(&row.path).1.is_empty() {
+                if row.a.is_empty() {
+                    ModExportChange::New
+                } else if row.b.is_empty() {
+                    ModExportChange::Unresolved
+                } else {
+                    ModExportChange::Modified
+                }
+            } else {
+                ModExportChange::Modified
+            };
+            // An added or removed element is reported with all of its
+            // contents, and those rows sit underneath it. They are already
+            // shown by that element's own pane, so they must not each open a
+            // section of their own -- doing so rendered a removed element's
+            // fields as a before/after split against whatever index had
+            // shifted into their place, inventing changes the diff never
+            // reported.
+            if let Some(last) = sections.last_mut()
+                && matches!(last.kind, ModExportChange::New | ModExportChange::Unresolved)
+                && row.path.starts_with(last.element.as_str())
+            {
+                last.rows.push(row.clone());
+                continue;
+            }
+            match sections.last_mut() {
+                Some(last) if last.element == element => {
+                    if last.label.is_empty() && !label.is_empty() {
+                        last.label = label;
+                        last.kind = kind;
+                    }
+                    last.rows.push(row.clone());
+                }
+                _ => sections.push(DiffSection {
+                    element: element.to_owned(),
+                    base_element,
+                    label,
+                    kind,
+                    rows: vec![row.clone()],
+                }),
+            }
+        }
+        sections
+    }
+
+    /// Arrange the sections into the shape of the tag, so a change is shown
+    /// inside the containers that hold it rather than under a path.
+    ///
+    /// Keyed on each section's container path -- its element path without the
+    /// final `[n]` -- split at `/`. An unbranching chain of containers is
+    /// merged into one title: four nested boxes around a single changed dword
+    /// is depth without information.
+    fn build_diff_tree(sections: Vec<DiffSection>) -> DiffNode {
+        let mut root = DiffNode::default();
+        for section in sections {
+            let (container, _) = Self::split_element_index(&section.element);
+            let mut node = &mut root;
+            for segment in container.split('/').filter(|s| !s.is_empty()) {
+                let existing = node
+                    .children
+                    .iter()
+                    .position(|child| child.title == segment);
+                let index = match existing {
+                    Some(index) => index,
+                    None => {
+                        node.children.push(DiffNode {
+                            title: segment.to_owned(),
+                            ..DiffNode::default()
+                        });
+                        node.children.len() - 1
+                    }
+                };
+                node = &mut node.children[index];
+            }
+            node.sections.push(section);
+        }
+        root.collapse_chains();
+        root
+    }
+
     /// Split `zone set pvs[3]` into the block it names and the element index.
     ///
     /// A reader wants to know which block changed and which element of it, not
@@ -639,112 +775,176 @@ impl Baboon {
             );
             return;
         }
-        // One section per changed element, in the order the tag has them, each
-        // carrying the rows that belong to it so its panes can be filtered to
-        // just those. A single filter over every row made each section render
-        // the ancestors of every *other* section too -- a block that merely
-        // contained a change appeared as though it were one.
-        let mut sections: Vec<(String, Option<String>, String, ModExportChange, Vec<TagFieldDiff>)> =
-            Vec::new();
-        for row in &diff.rows {
-            let (element, _) = Self::split_element_path(&row.path);
-            let base_element = row
-                .base_path
-                .as_deref()
-                .map(|path| Self::split_element_path(path).0.to_owned());
-            let label = if Self::split_element_path(&row.path).1.is_empty() {
-                if row.b.is_empty() { row.a.clone() } else { row.b.clone() }
-            } else {
-                String::new()
-            };
-            // What happened to the element as a whole, from the row that is
-            // about the element rather than about a field inside it.
-            let kind = if Self::split_element_path(&row.path).1.is_empty() {
-                if row.a.is_empty() {
-                    ModExportChange::New
-                } else if row.b.is_empty() {
-                    ModExportChange::Unresolved
-                } else {
-                    ModExportChange::Modified
-                }
-            } else {
-                ModExportChange::Modified
-            };
-            // An added or removed element is reported with all of its
-            // contents, and those rows sit underneath it. They are already
-            // shown by that element's own pane, so they must not each open a
-            // section of their own -- doing so rendered a removed element's
-            // fields as a before/after split against whatever index had
-            // shifted into their place, inventing changes the diff never
-            // reported.
-            if let Some((last, _, _, last_kind, last_rows)) = sections.last_mut()
-                && matches!(
-                    last_kind,
-                    ModExportChange::New | ModExportChange::Unresolved
-                )
-                && row.path.starts_with(last.as_str())
-            {
-                last_rows.push(row.clone());
-                continue;
-            }
-            match sections.last_mut() {
-                Some((last, _, existing, existing_kind, last_rows)) if last == element => {
-                    if existing.is_empty() && !label.is_empty() {
-                        *existing = label;
-                        *existing_kind = kind;
-                    }
-                    last_rows.push(row.clone());
-                }
-                _ => sections.push((
-                    element.to_owned(),
-                    base_element,
-                    label,
-                    kind,
-                    vec![row.clone()],
-                )),
-            }
+        let tree = Self::build_diff_tree(Self::build_diff_sections(&diff.rows));
+        Self::draw_diff_node(
+            ui,
+            &tree,
+            0,
+            diff,
+            names,
+            group_tag,
+            game,
+            definitions_root,
+            expert_mode,
+            scope,
+        );
+        if diff.truncated {
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new("More differences than can be listed here.")
+                    .color(subtle_dark())
+                    .small(),
+            );
         }
+    }
 
-        for (element, base_element, label, kind, section_rows) in sections {
-            let filter = Self::diff_field_filter(&section_rows);
-            ui.add_space(8.0);
-            if !element.is_empty() {
-                ui.separator();
-                // `Unresolved` stands in for "gone" here, which is the only
-                // way an element can leave.
-                let (marker, heading) = match kind {
-                    ModExportChange::New => ("+", added_text()),
-                    ModExportChange::Unresolved => ("-", removed_text()),
-                    ModExportChange::Modified => ("~", modified_text()),
-                };
-                // Named as the block it belongs to, with the element called out
-                // inside it. The indexed path answers "where in the file"; what
-                // a reader wants is "which block, and which element of it".
-                let (container, index) = Self::split_element_index(&element);
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new(container)
-                            .color(text_dark())
-                            .monospace()
-                            .strong(),
+
+    /// How many elements a block has on one side, for the block a change sits
+    /// in.
+    ///
+    /// It is the one fact the element panes cannot convey -- a pane shows the
+    /// element that went, not that the block went from six to five -- and it is
+    /// the first thing a reader checks.
+    fn block_len(tag: &blam_tags::TagFile, container: &str) -> Option<usize> {
+        let (parent, name) = match container.rsplit_once('/') {
+            Some((parent, name)) => (parent, name),
+            None => ("", container),
+        };
+        let root = tag.root();
+        let owner = if parent.is_empty() {
+            root
+        } else {
+            root.descend(parent)?
+        };
+        owner
+            .fields_all()
+            .find(|field| field.name() == name)?
+            .as_block()
+            .map(|block| block.len())
+    }
+
+    /// `6 \u{2192} 5`, when a container's element count changed.
+    fn block_count_change(diff: &ModRowDiff, node: &DiffNode) -> Option<String> {
+        let section = node.sections.first()?;
+        let (container, _) = Self::split_element_index(&section.element);
+        let base_container = section
+            .base_element
+            .as_deref()
+            .map(|element| Self::split_element_index(element).0)
+            .unwrap_or(container);
+        let before = Self::block_len(diff.base.as_ref()?, base_container)?;
+        let after = Self::block_len(diff.edited.as_ref()?, container)?;
+        (before != after).then(|| format!("{before} \u{2192} {after}"))
+    }
+
+    /// One container and everything that changed inside it.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_diff_node(
+        ui: &mut Ui,
+        node: &DiffNode,
+        depth: usize,
+        diff: &ModRowDiff,
+        names: &TagNameIndex,
+        group_tag: u32,
+        game: Option<&str>,
+        definitions_root: Option<&Path>,
+        expert_mode: bool,
+        scope: &str,
+    ) {
+        for section in &node.sections {
+            Self::draw_diff_section(
+                ui,
+                section,
+                diff,
+                names,
+                group_tag,
+                game,
+                definitions_root,
+                expert_mode,
+                scope,
+            );
+        }
+        for child in &node.children {
+            // The editor's own container chrome, so a block in the review looks
+            // like the block it is.
+            let title = match Self::block_count_change(diff, child) {
+                Some(counts) => format!("{}  {counts}", child.title),
+                None => child.title.clone(),
+            };
+            draw_foundation_group(
+                ui,
+                title,
+                ("diff_node", scope, child.title.as_str()),
+                depth,
+                true,
+                None,
+                |ui| {
+                    Self::draw_diff_node(
+                        ui,
+                        child,
+                        depth + 1,
+                        diff,
+                        names,
+                        group_tag,
+                        game,
+                        definitions_root,
+                        expert_mode,
+                        scope,
                     );
-                    ui.label(RichText::new(marker).color(heading).monospace().strong());
-                    if let Some(index) = index {
-                        ui.label(RichText::new(format!("element {index}")).color(heading));
+                },
+            );
+        }
+    }
+
+    /// One changed element, inside whatever container is already drawn around it.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_diff_section(
+        ui: &mut Ui,
+        section: &DiffSection,
+        diff: &ModRowDiff,
+        names: &TagNameIndex,
+        group_tag: u32,
+        game: Option<&str>,
+        definitions_root: Option<&Path>,
+        expert_mode: bool,
+        scope: &str,
+    ) {
+        let DiffSection {
+            element,
+            base_element,
+            label,
+            kind,
+            rows: section_rows,
+        } = section;
+        let (kind, element, base_element, label) = (*kind, element.clone(), base_element.clone(), label.clone());
+        let filter = Self::diff_field_filter(section_rows);
+        ui.add_space(6.0);
+        if !element.is_empty() {
+            // `Unresolved` stands in for "gone", the only way an element leaves.
+            let (marker, heading) = match kind {
+                ModExportChange::New => ("+", added_text()),
+                ModExportChange::Unresolved => ("-", removed_text()),
+                ModExportChange::Modified => ("~", modified_text()),
+            };
+            // The container above already names the block, so this only has to
+            // say which element of it, and what happened to it.
+            let (_, index) = Self::split_element_index(&element);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(marker).color(heading).monospace().strong());
+                if let Some(index) = index {
+                    ui.label(RichText::new(format!("element {index}")).color(heading));
+                }
+                if !label.is_empty() {
+                    let detail = label
+                        .split_once(" \u{2014} ")
+                        .map(|(_, rest)| rest)
+                        .unwrap_or(label.as_str());
+                    if detail != format!("element {}", index.unwrap_or_default()) {
+                        ui.label(RichText::new(detail).color(heading).small());
                     }
-                    if !label.is_empty() {
-                        // The label already names the element; the redundant
-                        // "added -- " / "removed -- " prefix is the marker's job.
-                        let detail = label
-                            .split_once(" — ")
-                            .map(|(_, rest)| rest)
-                            .unwrap_or(label.as_str());
-                        if detail != format!("element {}", index.unwrap_or_default()) {
-                            ui.label(RichText::new(detail).color(heading).small());
-                        }
-                    }
-                });
-            }
+                }
+            });
+        }
             // Only a modified element has two sides worth comparing. An
             // element that was added or removed exists on one side only, and a
             // half-width pane beside an empty twin says less than one full
@@ -821,15 +1021,6 @@ impl Baboon {
                     });
                 }
             }
-        }
-        if diff.truncated {
-            ui.add_space(4.0);
-            ui.label(
-                RichText::new("More differences than can be listed here.")
-                    .color(subtle_dark())
-                    .small(),
-            );
-        }
     }
 
     /// Review what Export Mod is about to write, and where.
@@ -2151,6 +2342,100 @@ impl Baboon {
 mod mod_export_tests {
     use super::*;
     use std::path::PathBuf;
+
+    /// The reported case, from `review-diagnostic.json`: two top-level fields
+    /// changed, `zone set pvs[3]` deleted, a `zone sets` element added. What the
+    /// reporter asked to see is exactly three things, in the containers that
+    /// hold them -- not 131 rows of shifted indices.
+    #[test]
+    fn tree_matches_the_reported_case() {
+        fn row(path: &str, base: Option<&str>, before: &str, after: &str) -> TagFieldDiff {
+            TagFieldDiff {
+                path: path.to_owned(),
+                base_path: base.map(str::to_owned),
+                a: before.to_owned(),
+                b: after.to_owned(),
+            }
+        }
+        let mut rows = vec![
+            row("flags", Some("flags"), "0x0000 (none set)", "0x000E [...]"),
+            row(
+                "sandbox origin point",
+                Some("sandbox origin point"),
+                "x=0, y=-0, z=0",
+                "x=1, y=2, z=3",
+            ),
+            row(
+                "zone set pvs[3]",
+                Some("zone set pvs[3]"),
+                "removed \u{2014} element 3",
+                "",
+            ),
+        ];
+        // The removed element's own fields follow it, and must fold into it.
+        for field in ["structure bsp mask", "version"] {
+            let path = format!("zone set pvs[3]/{field}");
+            rows.push(row(&path, Some(&path), "11", ""));
+        }
+        rows.push(row("zone sets[5]", None, "", "added \u{2014} element 5"));
+        for field in ["cinematic zones", "hint previous zone set"] {
+            rows.push(row(&format!("zone sets[5]/{field}"), None, "", "0"));
+        }
+
+        let sections = Baboon::build_diff_sections(&rows);
+        let kinds: Vec<_> = sections
+            .iter()
+            .map(|s| (s.element.as_str(), s.kind, s.rows.len()))
+            .collect();
+        assert_eq!(
+            kinds,
+            vec![
+                ("", ModExportChange::Modified, 2),
+                ("zone set pvs[3]", ModExportChange::Unresolved, 3),
+                ("zone sets[5]", ModExportChange::New, 3),
+            ],
+        );
+
+        let tree = Baboon::build_diff_tree(sections);
+        // The two top-level field changes stay at the root; each block holds
+        // only its own changed element.
+        assert_eq!(tree.sections.len(), 1);
+        assert_eq!(tree.sections[0].element, "");
+        let containers: Vec<_> = tree
+            .children
+            .iter()
+            .map(|c| (c.title.as_str(), c.sections.len(), c.children.len()))
+            .collect();
+        assert_eq!(
+            containers,
+            vec![("zone set pvs", 1, 0), ("zone sets", 1, 0)],
+        );
+    }
+
+    /// A change buried several blocks deep reads as one breadcrumb, not a stack
+    /// of boxes each containing only the next.
+    #[test]
+    fn single_child_container_chains_collapse() {
+        let section = DiffSection {
+            element: "structure bsp pvs[0]/cluster pvs[0]/cluster pvs bit vectors[0]".to_owned(),
+            base_element: None,
+            label: String::new(),
+            kind: ModExportChange::Modified,
+            rows: Vec::new(),
+        };
+        let tree = Baboon::build_diff_tree(vec![section]);
+        assert_eq!(tree.children.len(), 1);
+        let chain = &tree.children[0];
+        // Intermediate containers keep their element index -- it is the only
+        // place that says *which* cluster the change is in. The innermost one
+        // drops it because the section row states it.
+        assert_eq!(
+            chain.title,
+            "structure bsp pvs[0] \u{203a} cluster pvs[0] \u{203a} cluster pvs bit vectors",
+        );
+        assert_eq!(chain.sections.len(), 1);
+        assert!(chain.children.is_empty());
+    }
 
     fn dialog(name: &str) -> ModExportDialog {
         ModExportDialog {
