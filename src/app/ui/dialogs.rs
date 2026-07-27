@@ -621,10 +621,13 @@ impl Baboon {
             );
             return;
         }
-        let filter = Self::diff_field_filter(&diff.rows);
-
-        // One section per changed element, in the order the tag has them.
-        let mut sections: Vec<(String, Option<String>, String, ModExportChange)> = Vec::new();
+        // One section per changed element, in the order the tag has them, each
+        // carrying the rows that belong to it so its panes can be filtered to
+        // just those. A single filter over every row made each section render
+        // the ancestors of every *other* section too -- a block that merely
+        // contained a change appeared as though it were one.
+        let mut sections: Vec<(String, Option<String>, String, ModExportChange, Vec<TagFieldDiff>)> =
+            Vec::new();
         for row in &diff.rows {
             let (element, _) = Self::split_element_path(&row.path);
             let base_element = row
@@ -649,18 +652,43 @@ impl Baboon {
             } else {
                 ModExportChange::Modified
             };
+            // An added or removed element is reported with all of its
+            // contents, and those rows sit underneath it. They are already
+            // shown by that element's own pane, so they must not each open a
+            // section of their own -- doing so rendered a removed element's
+            // fields as a before/after split against whatever index had
+            // shifted into their place, inventing changes the diff never
+            // reported.
+            if let Some((last, _, _, last_kind, last_rows)) = sections.last_mut()
+                && matches!(
+                    last_kind,
+                    ModExportChange::New | ModExportChange::Unresolved
+                )
+                && row.path.starts_with(last.as_str())
+            {
+                last_rows.push(row.clone());
+                continue;
+            }
             match sections.last_mut() {
-                Some((last, _, existing, existing_kind)) if last == element => {
+                Some((last, _, existing, existing_kind, last_rows)) if last == element => {
                     if existing.is_empty() && !label.is_empty() {
                         *existing = label;
                         *existing_kind = kind;
                     }
+                    last_rows.push(row.clone());
                 }
-                _ => sections.push((element.to_owned(), base_element, label, kind)),
+                _ => sections.push((
+                    element.to_owned(),
+                    base_element,
+                    label,
+                    kind,
+                    vec![row.clone()],
+                )),
             }
         }
 
-        for (element, base_element, label, kind) in sections {
+        for (element, base_element, label, kind, section_rows) in sections {
+            let filter = Self::diff_field_filter(&section_rows);
             ui.add_space(8.0);
             if !element.is_empty() {
                 ui.separator();
