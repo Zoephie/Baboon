@@ -120,9 +120,107 @@ fn moved_pairs(matched: &[(usize, usize)]) -> Vec<usize> {
     (0..matched.len()).filter(|&i| !kept[i]).collect()
 }
 
-/// The identity an element is matched on: whatever names it to a reader.
+/// The identity an element is matched on: whatever *names* it.
+///
+/// Deliberately not the instance selector's label, which falls back to the
+/// element's first scalar. A checksum or a bitmask is a value, not a name:
+/// matching on one makes an element that merely had that value edited look
+/// removed and re-added, and blocks full of repeated values -- checksums, bit
+/// vectors -- have no distinct identities at all, so matching is abandoned
+/// exactly where it is needed most.
 fn element_identity(element: Option<TagStruct<'_>>, names: &TagNameIndex) -> Option<String> {
-    foundation::block_element_content_label(element?, names)
+    let element = element?;
+    foundation::first_named_string_label(element)
+        .or_else(|| foundation::first_tag_reference_label(element, names))
+        .or_else(|| foundation::first_string_label(element))
+}
+
+/// A cheap fingerprint of an element's own bytes, for matching elements that
+/// have nothing naming them.
+///
+/// Only the element's fixed-size data, so two elements differing solely inside
+/// a nested block fingerprint alike -- which is what we want: they are the same
+/// element, and recursing finds what changed within it.
+fn element_fingerprint(element: Option<TagStruct<'_>>) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    match element {
+        Some(element) => element.raw().hash(&mut hasher),
+        None => 0u8.hash(&mut hasher),
+    }
+    hasher.finish()
+}
+
+/// Pair elements by content when nothing names them.
+///
+/// A longest-common-subsequence over element fingerprints, so deleting one
+/// element from a block of anonymous ones is reported as one deletion rather
+/// than as every element below it having been rewritten -- which is what
+/// pairing by position does, and what made a single deleted `zone set pvs`
+/// element produce a screen of unrelated changes.
+///
+/// Unmatched runs on both sides at the same point are then zipped together, so
+/// an element whose contents were edited reads as modified rather than as a
+/// removal followed by an addition.
+///
+/// Returns `None` for blocks large enough that the quadratic table is not worth
+/// it; those fall back to position, which is at least predictable.
+fn align_by_content(a: &[u64], b: &[u64]) -> Option<Vec<(Option<usize>, Option<usize>)>> {
+    const MAX_ELEMENTS: usize = 512;
+    if a.len() > MAX_ELEMENTS || b.len() > MAX_ELEMENTS {
+        return None;
+    }
+    let width = b.len() + 1;
+    let mut table = vec![0u32; (a.len() + 1) * width];
+    for i in (0..a.len()).rev() {
+        for j in (0..b.len()).rev() {
+            table[i * width + j] = if a[i] == b[j] {
+                table[(i + 1) * width + j + 1] + 1
+            } else {
+                table[(i + 1) * width + j].max(table[i * width + j + 1])
+            };
+        }
+    }
+    let mut pairs = Vec::new();
+    let mut removed: Vec<usize> = Vec::new();
+    let mut added: Vec<usize> = Vec::new();
+    // Elements dropped on one side and gained on the other, at the same point
+    // in the sequence, are the same element edited.
+    let flush = |pairs: &mut Vec<(Option<usize>, Option<usize>)>,
+                 removed: &mut Vec<usize>,
+                 added: &mut Vec<usize>| {
+        let paired = removed.len().min(added.len());
+        for index in 0..paired {
+            pairs.push((Some(removed[index]), Some(added[index])));
+        }
+        for &index in &removed[paired..] {
+            pairs.push((Some(index), None));
+        }
+        for &index in &added[paired..] {
+            pairs.push((None, Some(index)));
+        }
+        removed.clear();
+        added.clear();
+    };
+    let (mut i, mut j) = (0usize, 0usize);
+    while i < a.len() && j < b.len() {
+        if a[i] == b[j] {
+            flush(&mut pairs, &mut removed, &mut added);
+            pairs.push((Some(i), Some(j)));
+            i += 1;
+            j += 1;
+        } else if table[(i + 1) * width + j] >= table[i * width + j + 1] {
+            removed.push(i);
+            i += 1;
+        } else {
+            added.push(j);
+            j += 1;
+        }
+    }
+    removed.extend(i..a.len());
+    added.extend(j..b.len());
+    flush(&mut pairs, &mut removed, &mut added);
+    Some(pairs)
 }
 
 fn diff_structs(
@@ -145,12 +243,22 @@ fn diff_structs(
             let ids_b: Vec<Option<String>> = (0..bb.len())
                 .map(|i| element_identity(bb.element(i), names))
                 .collect();
-            // Without usable identities there is nothing better than position.
-            let pairs = align_by_identity(&ids_a, &ids_b).unwrap_or_else(|| {
-                (0..ba.len().max(bb.len()))
-                    .map(|i| ((i < ba.len()).then_some(i), (i < bb.len()).then_some(i)))
-                    .collect()
-            });
+            // Names first, since they survive an element's contents changing.
+            // Otherwise match on content, which is the only thing anonymous
+            // elements have. Position is the last resort.
+            let pairs = align_by_identity(&ids_a, &ids_b)
+                .or_else(|| {
+                    let fps_a: Vec<u64> =
+                        (0..ba.len()).map(|i| element_fingerprint(ba.element(i))).collect();
+                    let fps_b: Vec<u64> =
+                        (0..bb.len()).map(|i| element_fingerprint(bb.element(i))).collect();
+                    align_by_content(&fps_a, &fps_b)
+                })
+                .unwrap_or_else(|| {
+                    (0..ba.len().max(bb.len()))
+                        .map(|i| ((i < ba.len()).then_some(i), (i < bb.len()).then_some(i)))
+                        .collect()
+                });
             // Reported before the per-element diffs so a reorder reads as a
             // property of the block rather than of one element in it.
             let matched: Vec<(usize, usize)> = pairs
@@ -439,6 +547,63 @@ mod alignment_tests {
     fn a_reversal_keeps_one_element_still() {
         let matched = [(0, 3), (1, 2), (2, 1), (3, 0)];
         assert_eq!(super::moved_pairs(&matched).len(), 3);
+    }
+
+    /// The reported case: one element deleted from a block whose elements have
+    /// nothing naming them. Pairing by position reports every element below the
+    /// deletion as rewritten; pairing by content reports one deletion.
+    #[test]
+    fn deleting_one_anonymous_element_is_one_deletion() {
+        let a = [10, 20, 30, 40, 50];
+        let b = [10, 20, 40, 50];
+        let pairs = super::align_by_content(&a, &b).expect("aligns");
+        assert_eq!(
+            pairs,
+            vec![
+                (Some(0), Some(0)),
+                (Some(1), Some(1)),
+                (Some(2), None),
+                (Some(3), Some(2)),
+                (Some(4), Some(3)),
+            ]
+        );
+    }
+
+    /// Editing an element changes its fingerprint, so it drops out of the
+    /// common subsequence on both sides at once. Zipping those together is
+    /// what makes it read as modified rather than removed and re-added.
+    #[test]
+    fn editing_an_anonymous_element_reads_as_a_modification() {
+        let a = [10, 20, 30];
+        let b = [10, 99, 30];
+        let pairs = super::align_by_content(&a, &b).expect("aligns");
+        assert_eq!(
+            pairs,
+            vec![(Some(0), Some(0)), (Some(1), Some(1)), (Some(2), Some(2))]
+        );
+    }
+
+    /// Repeated values are ordinary in these blocks -- checksums, bit vectors --
+    /// and must not defeat matching the way duplicate identities do.
+    #[test]
+    fn repeated_content_still_aligns() {
+        let a = [0, 0, 0, 7];
+        let b = [0, 0, 0, 0, 7];
+        let pairs = super::align_by_content(&a, &b).expect("aligns");
+        let added: Vec<_> = pairs.iter().filter(|(x, _)| x.is_none()).collect();
+        assert_eq!(added.len(), 1, "one element gained: {pairs:?}");
+        assert!(
+            pairs.iter().filter(|(_, y)| y.is_none()).count() == 0,
+            "nothing was lost: {pairs:?}"
+        );
+    }
+
+    /// A block big enough that the quadratic table is not worth building falls
+    /// back to position rather than stalling the review.
+    #[test]
+    fn very_large_blocks_fall_back_to_position() {
+        let big: Vec<u64> = (0..600).collect();
+        assert!(super::align_by_content(&big, &big).is_none());
     }
 
     #[test]
