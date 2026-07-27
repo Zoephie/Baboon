@@ -1337,7 +1337,7 @@ mod tests {
     #[test]
     fn euler_angle_edit_round_trips_through_tag_serialization() {
         let mut tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
-        let mut dirty = false;
+        let mut dirty = Dirty::default();
 
         let status = apply_pending_edits(
             &mut tag,
@@ -1356,7 +1356,7 @@ mod tests {
         assert_eq!(status.outcomes[0].path, "real euler angles 3d");
         assert_eq!(status.outcomes[0].input, "-0.65, 0, 1.25");
         assert!(status.outcomes[0].result.is_ok());
-        assert!(dirty);
+        assert!(dirty.is_set());
         let bytes = tag.write_to_bytes().unwrap();
         let reopened = TagFile::read_from_bytes(&bytes).unwrap();
         let value = reopened
@@ -1432,7 +1432,7 @@ mod tests {
     #[test]
     fn block_to_tsv_exports_header_and_one_row_per_element() {
         let mut tag = TagFile::new("definitions/halo2_mcc/model.json").unwrap();
-        let mut dirty = false;
+        let mut dirty = Dirty::default();
         for name in ["alpha", "beta"] {
             apply_model_variant_ops(
                 &mut tag,
@@ -1462,7 +1462,7 @@ mod tests {
     #[test]
     fn model_variant_ops_create_update_and_drop_regions() {
         let mut tag = TagFile::new(test_definition_path("halo2_mcc/model.json")).unwrap();
-        let mut dirty = false;
+        let mut dirty = Dirty::default();
 
         let status = apply_model_variant_ops(
             &mut tag,
@@ -1476,7 +1476,7 @@ mod tests {
             &mut dirty,
         );
         assert_eq!(status.as_deref(), Some("Created model variant 'test'"));
-        assert!(dirty);
+        assert!(dirty.is_set());
         assert_variant(&tag, 0, "test", "body", "default");
 
         let status = apply_model_variant_ops(
@@ -1525,7 +1525,7 @@ mod tests {
             markers.add_element();
         }
 
-        let mut dirty = false;
+        let mut dirty = Dirty::default();
         let status = apply_pending_edits(
             &mut tag,
             vec![
@@ -1546,7 +1546,7 @@ mod tests {
             Some("Edited marker groups[0]/markers[0]/rotation")
         );
         assert!(status.outcomes.iter().all(|outcome| outcome.result.is_ok()));
-        assert!(dirty);
+        assert!(dirty.is_set());
         let root = tag.root();
         let translation = root
             .field_path("marker groups[0]/markers[0]/translation")

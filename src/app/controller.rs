@@ -991,7 +991,7 @@ impl Baboon {
                 return;
             };
             // Already open with unsaved edits → confirm discard first.
-            if self.kits[self.active].parsed_tags.get(&key).map(|d| d.dirty).unwrap_or(false) {
+            if self.kits[self.active].parsed_tags.get(&key).map(|d| d.dirty.is_set()).unwrap_or(false) {
                 self.import_discard_confirm = Some(PendingImport {
                     kit: self.active_kit_id(),
                     tag,
@@ -1857,7 +1857,7 @@ impl Baboon {
         let was_dirty = self.kits[kit]
             .parsed_tags
             .get(key)
-            .is_some_and(|document| document.dirty);
+            .is_some_and(|document| document.dirty.is_set());
         let had_overlay = self.forget_campaign_overlay(kit, key);
         if !was_dirty && !had_overlay {
             self.status = "That tag has no unsaved changes".to_owned();
@@ -1895,7 +1895,7 @@ impl Baboon {
         if self.kits[kit]
             .parsed_tags
             .get(key)
-            .is_some_and(|document| document.dirty)
+            .is_some_and(|document| document.dirty.is_set())
         {
             return true;
         }
@@ -2060,7 +2060,7 @@ impl Baboon {
             .into_iter()
             .filter_map(|key| {
                 let doc = self.kits[self.active].parsed_tags.get(&key)?;
-                if !doc.dirty {
+                if !doc.dirty.is_set() {
                     return None;
                 }
                 Some(DirtyTagEntry {
@@ -2110,7 +2110,7 @@ impl Baboon {
     pub(super) fn tag_is_dirty(&self, key: &str) -> bool {
         self.kits[self.active].parsed_tags
             .get(key)
-            .is_some_and(|document| document.dirty)
+            .is_some_and(|document| document.dirty.is_set())
     }
 
     fn execute_close_action(&mut self, action: PendingCloseAction, ctx: &egui::Context) {
@@ -2655,7 +2655,7 @@ impl Baboon {
             self.status = "A folder move/copy is already running".to_owned();
             return;
         }
-        if self.kits[self.active].parsed_tags.values().any(|doc| doc.dirty) {
+        if self.kits[self.active].parsed_tags.values().any(|doc| doc.dirty.is_set()) {
             self.status = "Save or close dirty tags before moving/copying folders".to_owned();
             return;
         }
@@ -3044,7 +3044,7 @@ impl Baboon {
             .write_atomic(&output)
             .map_err(|error| error.to_string())?;
         if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(key) {
-            doc.dirty = false;
+            doc.dirty.clear();
         }
         Ok(output)
     }
@@ -3217,7 +3217,7 @@ impl Baboon {
             Err(e) => self.status = format!("Saved, but reloading the pak failed: {e}"),
         }
         if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(key) {
-            doc.dirty = false;
+            doc.dirty.clear();
         }
         self.status = format!("Saved into {} (game files modified)", utoc_path.display());
     }
@@ -3283,7 +3283,7 @@ impl Baboon {
         ) {
             Ok(()) => {
                 if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(key) {
-                    doc.dirty = false;
+                    doc.dirty.clear();
                 }
                 let stem = output.file_stem().and_then(|s| s.to_str()).unwrap_or("mod");
                 self.status = format!(
@@ -3554,7 +3554,7 @@ impl Baboon {
                         skipped += 1;
                         continue;
                     };
-                    overrides.push((m.archive.clone(), rel_path.clone(), overlay.bytes.clone()));
+                    overrides.push((m.archive.clone(), rel_path.clone(), overlay.bytes.as_ref().clone()));
                 }
                 TagEntryLocation::NewContainer {
                     template_container,
@@ -3570,7 +3570,7 @@ impl Baboon {
                         skipped += 1;
                         continue;
                     };
-                    new_pkgs.push((template, overlay.bytes.clone(), package.clone()));
+                    new_pkgs.push((template, overlay.bytes.as_ref().clone(), package.clone()));
                 }
                 _ => skipped += 1,
             }
@@ -3602,7 +3602,9 @@ impl Baboon {
                     .unwrap_or("mod")
                     .to_owned();
                 let sidecar = output.with_extension("baboon");
-                if let Err(error) = save_campaign_project(&sidecar, snapshot) {
+                // A sidecar written next to an exported mod may be replacing an
+                // older one, and nothing here knows what is in it.
+                if let Err(error) = save_campaign_project(&sidecar, snapshot, None) {
                     self.status = format!(
                         "Exported {count} tag(s), but the .baboon sidecar failed: {error}"
                     );
@@ -3726,7 +3728,7 @@ impl Baboon {
 
         let report = fix_tag_dependencies_in_tag(&mut doc.tag, &root, &names, &index);
         if report.fixed > 0 {
-            doc.dirty = true;
+            doc.dirty.touch();
         }
         let status = report.status();
         self.terminal
@@ -3885,7 +3887,7 @@ impl Baboon {
             self.status = "A move/rename is already running".to_owned();
             return;
         }
-        if self.kits[self.active].parsed_tags.values().any(|doc| doc.dirty) {
+        if self.kits[self.active].parsed_tags.values().any(|doc| doc.dirty.is_set()) {
             self.status = "Save or close dirty tags before renaming".to_owned();
             return;
         }
@@ -3908,7 +3910,7 @@ impl Baboon {
             self.status = "A move/rename is already running".to_owned();
             return;
         }
-        if self.kits[self.active].parsed_tags.values().any(|doc| doc.dirty) {
+        if self.kits[self.active].parsed_tags.values().any(|doc| doc.dirty.is_set()) {
             self.status = "Save or close dirty tags before moving".to_owned();
             return;
         }
@@ -5062,7 +5064,7 @@ impl Baboon {
                     Ok(tag) => {
                         if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(key) {
                             doc.tag = tag;
-                            doc.dirty = true;
+                            doc.dirty.touch();
                         }
                         let active = self.active;
                         self.invalidate_tag_caches_in(active, key);
@@ -5244,7 +5246,7 @@ impl Baboon {
         let dirty = self.kits[self.active]
             .parsed_tags
             .get(key)
-            .is_some_and(|document| document.dirty);
+            .is_some_and(|document| document.dirty.is_set());
         if dirty {
             if let Err(error) = self.save_tag_by_key(key) {
                 self.status = format!("Could not save scenario before launch: {error}");
@@ -5305,7 +5307,7 @@ impl Baboon {
         let dirty = self.kits[self.active]
             .parsed_tags
             .get(key)
-            .is_some_and(|document| document.dirty);
+            .is_some_and(|document| document.dirty.is_set());
         if dirty {
             if let Err(error) = self.save_tag_by_key(key) {
                 self.status = format!("Could not save scenario before launch: {error}");
@@ -5766,7 +5768,7 @@ impl Baboon {
                             if let Some(document) =
                                 self.kits[self.active].parsed_tags.get_mut(&entry.tag_id)
                             {
-                                document.dirty = false;
+                                document.dirty.clear();
                             }
                         }
                         self.save_changes_prompt.visible = false;
@@ -5795,7 +5797,7 @@ impl Baboon {
                     .collect();
                 for tag_id in &tag_ids {
                     if let Some(doc) = self.kits[kit].parsed_tags.get_mut(tag_id) {
-                        doc.dirty = false;
+                        doc.dirty.clear();
                     }
                     // And forget anything the project stashed for it. Autosave
                     // captures a dirty tag within a second of the edit, so
@@ -8109,7 +8111,7 @@ mod field_search_tests {
     #[test]
     fn first_match_finds_a_string_id_value_and_path() {
         let mut tag = TagFile::new("definitions/halo2_mcc/model.json").unwrap();
-        let mut dirty = false;
+        let mut dirty = Dirty::default();
         apply_model_variant_ops(
             &mut tag,
             vec![ModelVariantOp::Create {

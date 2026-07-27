@@ -410,7 +410,7 @@ impl Baboon {
                 let unsaved = self.kits[self.active]
                     .parsed_tags
                     .values()
-                    .filter(|document| document.dirty)
+                    .filter(|document| document.dirty.is_set())
                     .count();
                 let anything = !stashed.is_empty() || unsaved > 0;
                 let icon = button_icon_image(ui, ButtonIcon::Garbage, text_dark(), 16.0);

@@ -17,7 +17,7 @@ pub(in crate::app) struct AppliedFieldEdits {
 pub(in crate::app) fn apply_pending_edits(
     tag: &mut TagFile,
     edits: Vec<PendingFieldEdit>,
-    dirty: &mut bool,
+    dirty: &mut Dirty,
 ) -> AppliedFieldEdits {
     let mut status = None;
     let mut outcomes = Vec::with_capacity(edits.len());
@@ -25,7 +25,7 @@ pub(in crate::app) fn apply_pending_edits(
         let result = catch_edit_unwind(|| apply_field_edit(tag, &edit.path, &edit.input));
         match &result {
             Ok(()) => {
-                *dirty = true;
+                dirty.touch();
                 status = Some(format!("Edited {}", edit.path));
             }
             Err(error) => {
@@ -44,14 +44,14 @@ pub(in crate::app) fn apply_pending_edits(
 pub(in crate::app) fn apply_block_ops(
     tag: &mut TagFile,
     ops: Vec<BlockOp>,
-    dirty: &mut bool,
+    dirty: &mut Dirty,
 ) -> Option<String> {
     let mut status = None;
     for op in ops {
         let result = apply_one_block_op(tag, &op);
         match result {
             Ok(msg) => {
-                *dirty = true;
+                dirty.touch();
 
                 status = Some(msg);
             }
@@ -66,7 +66,7 @@ pub(in crate::app) fn apply_block_ops(
 pub(in crate::app) fn apply_function_data_ops(
     tag: &mut TagFile,
     ops: Vec<FunctionDataOp>,
-    dirty: &mut bool,
+    dirty: &mut Dirty,
 ) -> Option<String> {
     let mut status = None;
     for op in ops {
@@ -74,7 +74,7 @@ pub(in crate::app) fn apply_function_data_ops(
             catch_edit_unwind(|| replace_halo2_function_byte_block(tag, &op.block_path, &op.data));
         match result {
             Ok(()) => {
-                *dirty = true;
+                dirty.touch();
                 status = Some(format!("Edited {}", op.block_path));
             }
             Err(error) => {
@@ -207,7 +207,7 @@ fn replace_halo2_wrapped_function_byte_block(
 pub(in crate::app) fn apply_h2_shader_param_ops(
     tag: &mut TagFile,
     ops: Vec<H2ShaderParamOp>,
-    dirty: &mut bool,
+    dirty: &mut Dirty,
 ) -> Option<String> {
     let mut status = None;
     for op in ops {
@@ -218,7 +218,7 @@ pub(in crate::app) fn apply_h2_shader_param_ops(
         .and_then(|result| result);
         match result {
             Ok(msg) => {
-                *dirty = true;
+                dirty.touch();
                 status = Some(msg);
             }
             Err(error) => {
@@ -540,13 +540,13 @@ fn is_subchunk_backed_field(field_type: TagFieldType) -> bool {
 pub(in crate::app) fn apply_shader_ops(
     tag: &mut TagFile,
     ops: Vec<ShaderOp>,
-    dirty: &mut bool,
+    dirty: &mut Dirty,
 ) -> Option<String> {
     let mut status = None;
     for op in ops {
         match apply_one_shader_op(tag, &op) {
             Ok(msg) => {
-                *dirty = true;
+                dirty.touch();
                 status = Some(msg);
             }
             Err(error) => {
@@ -560,13 +560,13 @@ pub(in crate::app) fn apply_shader_ops(
 pub(in crate::app) fn apply_shader_param_ops(
     tag: &mut TagFile,
     ops: Vec<ShaderParamOp>,
-    dirty: &mut bool,
+    dirty: &mut Dirty,
 ) -> Option<String> {
     let mut status = None;
     for op in ops {
         match apply_one_shader_param_op(tag, &op) {
             Ok(msg) => {
-                *dirty = true;
+                dirty.touch();
                 status = Some(msg);
             }
             Err(error) => {
@@ -580,13 +580,13 @@ pub(in crate::app) fn apply_shader_param_ops(
 pub(in crate::app) fn apply_model_variant_ops(
     tag: &mut TagFile,
     ops: Vec<ModelVariantOp>,
-    dirty: &mut bool,
+    dirty: &mut Dirty,
 ) -> Option<String> {
     let mut status = None;
     for op in ops {
         match apply_one_model_variant_op(tag, &op) {
             Ok(msg) => {
-                *dirty = true;
+                dirty.touch();
                 status = Some(msg);
             }
             Err(error) => {

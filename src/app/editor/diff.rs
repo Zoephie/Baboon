@@ -830,7 +830,7 @@ mod deletion_repro_tests {
             .expect("a zone set pvs block");
         assert!(before > 4, "need several elements to shift, got {before}");
 
-        let mut dirty = false;
+        let mut dirty = Dirty::default();
         crate::app::apply_block_ops(
             &mut edited,
             vec![BlockOp {
@@ -881,7 +881,7 @@ mod deletion_repro_tests {
             return;
         };
         let names = crate::format::TagNameIndex::default();
-        let mut dirty = false;
+        let mut dirty = Dirty::default();
         crate::app::apply_block_ops(
             &mut edited,
             vec![BlockOp {
@@ -930,7 +930,7 @@ mod deletion_repro_tests {
             return;
         };
         let names = crate::format::TagNameIndex::default();
-        let mut dirty = false;
+        let mut dirty = Dirty::default();
         crate::app::apply_block_ops(
             &mut edited,
             vec![
