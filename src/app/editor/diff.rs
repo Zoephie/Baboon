@@ -161,6 +161,19 @@ fn element_fingerprint(element: Option<TagStruct<'_>>) -> u64 {
     hasher.finish()
 }
 
+/// An element by its own fixed fields only, ignoring everything nested. Two
+/// elements matching here are the same element even if something inside one of
+/// them was edited.
+fn shallow_fingerprint(element: Option<TagStruct<'_>>) -> u64 {
+    use std::hash::Hasher;
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    match element {
+        Some(element) => hasher.write(element.raw()),
+        None => hasher.write_u8(0),
+    }
+    hasher.finish()
+}
+
 fn hash_struct(
     st: &TagStruct<'_>,
     hasher: &mut std::collections::hash_map::DefaultHasher,
@@ -209,7 +222,12 @@ fn hash_struct(
 ///
 /// Returns `None` for blocks large enough that the quadratic table is not worth
 /// it; those fall back to position, which is at least predictable.
-fn align_by_content(a: &[u64], b: &[u64]) -> Option<Vec<(Option<usize>, Option<usize>)>> {
+fn align_by_content(
+    a: &[u64],
+    b: &[u64],
+    a_shallow: &[u64],
+    b_shallow: &[u64],
+) -> Option<Vec<(Option<usize>, Option<usize>)>> {
     const MAX_ELEMENTS: usize = 512;
     if a.len() > MAX_ELEMENTS || b.len() > MAX_ELEMENTS {
         return None;
@@ -233,16 +251,53 @@ fn align_by_content(a: &[u64], b: &[u64]) -> Option<Vec<(Option<usize>, Option<u
     let flush = |pairs: &mut Vec<(Option<usize>, Option<usize>)>,
                  removed: &mut Vec<usize>,
                  added: &mut Vec<usize>| {
-        let paired = removed.len().min(added.len());
-        for index in 0..paired {
-            pairs.push((Some(removed[index]), Some(added[index])));
+        // Editing a value inside an element changes its contents, so it drops
+        // out of the common subsequence even though it is still the same
+        // element. Pair the leftovers on their fixed fields first, which an
+        // edit further down does not disturb -- without this, deleting one
+        // element and editing another paired element 3 against element 4 and
+        // reported every field below as changed.
+        let mut taken = vec![false; added.len()];
+        let mut matched: Vec<(usize, usize)> = Vec::new();
+        for &from in removed.iter() {
+            if let Some(slot) = added
+                .iter()
+                .enumerate()
+                .position(|(slot, &to)| !taken[slot] && a_shallow[from] == b_shallow[to])
+            {
+                taken[slot] = true;
+                matched.push((from, added[slot]));
+            }
         }
-        for &index in &removed[paired..] {
+        let paired_from: Vec<usize> = matched.iter().map(|(from, _)| *from).collect();
+        let paired_to: Vec<usize> = matched.iter().map(|(_, to)| *to).collect();
+        let mut rest_from: Vec<usize> = removed
+            .iter()
+            .copied()
+            .filter(|index| !paired_from.contains(index))
+            .collect();
+        let mut rest_to: Vec<usize> = added
+            .iter()
+            .copied()
+            .filter(|index| !paired_to.contains(index))
+            .collect();
+        for (from, to) in matched {
+            pairs.push((Some(from), Some(to)));
+        }
+        // Whatever is still unaccounted for is paired in order, then reported
+        // as gained or lost.
+        let zipped = rest_from.len().min(rest_to.len());
+        for index in 0..zipped {
+            pairs.push((Some(rest_from[index]), Some(rest_to[index])));
+        }
+        for &index in &rest_from[zipped..] {
             pairs.push((Some(index), None));
         }
-        for &index in &added[paired..] {
+        for &index in &rest_to[zipped..] {
             pairs.push((None, Some(index)));
         }
+        rest_from.clear();
+        rest_to.clear();
         removed.clear();
         added.clear();
     };
@@ -298,7 +353,13 @@ fn diff_structs(
                         (0..ba.len()).map(|i| element_fingerprint(ba.element(i))).collect();
                     let fps_b: Vec<u64> =
                         (0..bb.len()).map(|i| element_fingerprint(bb.element(i))).collect();
-                    align_by_content(&fps_a, &fps_b)
+                    // The same elements by their fixed fields alone, which
+                    // survive an edit to anything nested inside them.
+                    let shallow_a: Vec<u64> =
+                        (0..ba.len()).map(|i| shallow_fingerprint(ba.element(i))).collect();
+                    let shallow_b: Vec<u64> =
+                        (0..bb.len()).map(|i| shallow_fingerprint(bb.element(i))).collect();
+                    align_by_content(&fps_a, &fps_b, &shallow_a, &shallow_b)
                 })
                 .unwrap_or_else(|| {
                     (0..ba.len().max(bb.len()))
@@ -524,6 +585,16 @@ fn dump_struct(
 mod alignment_tests {
     use super::align_by_identity;
 
+    /// Fixed-field keys that match nothing, so a test exercises content
+    /// matching alone rather than the fallback that pairs on them.
+    fn distinct(len: usize) -> Vec<u64> {
+        (0..len as u64).collect()
+    }
+
+    fn distinct_from(offset: usize, len: usize) -> Vec<u64> {
+        (0..len as u64).map(|i| i + 1000 + offset as u64).collect()
+    }
+
     fn ids(names: &[&str]) -> Vec<Option<String>> {
         names.iter().map(|n| Some((*n).to_owned())).collect()
     }
@@ -625,7 +696,7 @@ mod alignment_tests {
     fn deleting_one_anonymous_element_is_one_deletion() {
         let a = [10, 20, 30, 40, 50];
         let b = [10, 20, 40, 50];
-        let pairs = super::align_by_content(&a, &b).expect("aligns");
+        let pairs = super::align_by_content(&a, &b, &distinct(a.len()), &distinct_from(a.len(), b.len())).expect("aligns");
         assert_eq!(
             pairs,
             vec![
@@ -645,7 +716,7 @@ mod alignment_tests {
     fn editing_an_anonymous_element_reads_as_a_modification() {
         let a = [10, 20, 30];
         let b = [10, 99, 30];
-        let pairs = super::align_by_content(&a, &b).expect("aligns");
+        let pairs = super::align_by_content(&a, &b, &distinct(a.len()), &distinct_from(a.len(), b.len())).expect("aligns");
         assert_eq!(
             pairs,
             vec![(Some(0), Some(0)), (Some(1), Some(1)), (Some(2), Some(2))]
@@ -658,7 +729,7 @@ mod alignment_tests {
     fn repeated_content_still_aligns() {
         let a = [0, 0, 0, 7];
         let b = [0, 0, 0, 0, 7];
-        let pairs = super::align_by_content(&a, &b).expect("aligns");
+        let pairs = super::align_by_content(&a, &b, &distinct(a.len()), &distinct_from(a.len(), b.len())).expect("aligns");
         let added: Vec<_> = pairs.iter().filter(|(x, _)| x.is_none()).collect();
         assert_eq!(added.len(), 1, "one element gained: {pairs:?}");
         assert!(
@@ -672,7 +743,7 @@ mod alignment_tests {
     #[test]
     fn very_large_blocks_fall_back_to_position() {
         let big: Vec<u64> = (0..600).collect();
-        assert!(super::align_by_content(&big, &big).is_none());
+        assert!(super::align_by_content(&big, &big, &big, &big).is_none());
     }
 
     #[test]
@@ -794,6 +865,115 @@ mod deletion_repro_tests {
             "{} field(s) outside the deleted element reported as changed, e.g. {:?}",
             strays.len(),
             strays.iter().take(5).collect::<Vec<_>>()
+        );
+    }
+
+    /// The reported case, in full: an element deleted from `zone set pvs` and
+    /// a value edited inside one that shifts up to take its place.
+    ///
+    /// The edit changes that element's contents, so it drops out of the common
+    /// subsequence and used to be paired positionally against its neighbour --
+    /// reporting every field below as changed, each shifted by one position.
+    #[test]
+    fn editing_an_element_that_also_shifts_is_still_the_same_element() {
+        let (Some(base), Some(mut edited)) = (read_a15(), read_a15()) else {
+            eprintln!("skipping: Campaign Evolved not present");
+            return;
+        };
+        let names = crate::format::TagNameIndex::default();
+        let mut dirty = false;
+        crate::app::apply_block_ops(
+            &mut edited,
+            vec![BlockOp {
+                path: "zone set pvs".to_owned(),
+                kind: BlockOpKind::Delete(3),
+            }],
+            &mut dirty,
+        );
+        // Element 4 is now element 3. Editing inside it is what defeated the
+        // alignment.
+        let applied = crate::app::apply_pending_edits(
+            &mut edited,
+            vec![PendingFieldEdit {
+                path: "zone set pvs[3]/bsp checksums[0]/bsp checksum".to_owned(),
+                input: "12345".to_owned(),
+            }],
+            &mut dirty,
+        );
+        assert!(
+            applied.status.is_some(),
+            "the edit has to land for this to test anything"
+        );
+
+        let (rows, _) = diff_tags(&base, &edited, &names, 5000);
+        let modifications: Vec<&TagFieldDiff> = rows
+            .iter()
+            .filter(|row| !row.a.is_empty() && !row.b.is_empty())
+            .collect();
+        assert_eq!(
+            modifications.len(),
+            1,
+            "one value was edited, so one modification: {:?}",
+            modifications
+                .iter()
+                .map(|row| (&row.path, &row.a, &row.b))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(modifications[0].b, "12345");
+    }
+
+    /// Deleting one element and adding another, as reported.
+    #[test]
+    fn a_deletion_and_an_addition_change_no_values() {
+        let (Some(base), Some(mut edited)) = (read_a15(), read_a15()) else {
+            eprintln!("skipping: Campaign Evolved not present");
+            return;
+        };
+        let names = crate::format::TagNameIndex::default();
+        let mut dirty = false;
+        crate::app::apply_block_ops(
+            &mut edited,
+            vec![
+                BlockOp {
+                    path: "zone set pvs".to_owned(),
+                    kind: BlockOpKind::Delete(3),
+                },
+                BlockOp {
+                    path: "zone sets".to_owned(),
+                    kind: BlockOpKind::Add,
+                },
+            ],
+            &mut dirty,
+        );
+        // The dialog compares the shipped tag against the project overlay,
+        // which is the edited tag serialized and read back -- not the
+        // in-memory one it was edited in.
+        let bytes = edited.write_to_bytes().expect("serialize the edited tag");
+        let edited = TagFile::read_from_bytes(&bytes).expect("read the overlay back");
+        let (rows, _) = diff_tags(&base, &edited, &names, 5000);
+        // Removing one element and adding another changes no value anywhere,
+        // so nothing may be reported as modified: renumbering is not an edit.
+        let modifications: Vec<&TagFieldDiff> = rows
+            .iter()
+            .filter(|row| !row.a.is_empty() && !row.b.is_empty())
+            .collect();
+        assert!(
+            modifications.is_empty(),
+            "{} field(s) reported as changed by a deletion and an addition: {:?}",
+            modifications.len(),
+            modifications
+                .iter()
+                .take(5)
+                .map(|row| (&row.path, &row.a, &row.b))
+                .collect::<Vec<_>>()
+        );
+        assert!(
+            rows.iter().any(|row| row.b.starts_with("added")),
+            "the new element should be reported"
+        );
+        assert!(
+            rows.iter().any(|row| row.a.starts_with("removed")),
+            "the deleted element should be reported"
         );
     }
 }
