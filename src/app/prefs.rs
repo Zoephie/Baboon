@@ -331,7 +331,14 @@ fn parse_pref_rgba(text: &str) -> Option<[u8; 4]> {
 pub(super) fn clean_recent_path(path: PathBuf) -> PathBuf {
     let text = path.display().to_string();
     #[cfg(windows)]
-    let text = text.strip_prefix(r"\\?\").unwrap_or(&text).to_owned();
+    let text = if text
+        .get(..8)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(r"\\?\UNC\"))
+    {
+        format!(r"\\{}", &text[8..])
+    } else {
+        text.strip_prefix(r"\\?\").unwrap_or(&text).to_owned()
+    };
     #[cfg(not(windows))]
     let text = text;
     PathBuf::from(text)
@@ -415,6 +422,7 @@ fn load_custom_editing_kit_profiles(value: &Value) -> Vec<CustomEditingKitProfil
             .map(str::trim)
             .filter(|root| !root.is_empty())
             .map(PathBuf::from)
+            .map(clean_recent_path)
         else {
             continue;
         };
@@ -882,6 +890,23 @@ mod tests {
         assert!(!paths.contains_key("unknown"));
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn clean_recent_path_hides_windows_verbatim_prefixes() {
+        assert_eq!(
+            clean_recent_path(PathBuf::from(r"\\?\D:\Games\H2EK")),
+            PathBuf::from(r"D:\Games\H2EK")
+        );
+        assert_eq!(
+            clean_recent_path(PathBuf::from(r"\\?\UNC\server\share\H3EK")),
+            PathBuf::from(r"\\server\share\H3EK")
+        );
+        assert_eq!(
+            clean_recent_path(PathBuf::from(r"D:\Games\H4EK")),
+            PathBuf::from(r"D:\Games\H4EK")
+        );
+    }
+
     #[test]
     fn custom_editing_kit_profiles_round_trip_in_creation_order() {
         assert!(load_custom_editing_kit_profiles(&json!({})).is_empty());
@@ -891,7 +916,7 @@ mod tests {
                     "id": "11111111-1111-4111-8111-111111111111",
                     "name": "Reach Project",
                     "game": "haloreach_mcc",
-                    "root": "D:/Kits/ReachProject",
+                    "root": "\\\\?\\D:\\Kits\\ReachProject",
                     "icon": "editing kit icons/reach-11111111/icon-a.png"
                 },
                 {
@@ -918,6 +943,8 @@ mod tests {
             ))
         );
         assert_eq!(profiles[1].icon, None);
+        #[cfg(windows)]
+        assert_eq!(profiles[0].root, PathBuf::from(r"D:\Kits\ReachProject"));
 
         let serialized = json!({
             "custom_editing_kit_profiles": custom_editing_kit_profiles_value(&profiles)

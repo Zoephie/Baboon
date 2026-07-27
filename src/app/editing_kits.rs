@@ -314,7 +314,7 @@ fn is_named_dir(path: &Path, expected: &str) -> bool {
 }
 
 pub(super) fn canonical_or_clean(path: &Path) -> PathBuf {
-    fs::canonicalize(path).unwrap_or_else(|_| clean_recent_path(path.to_path_buf()))
+    clean_recent_path(fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()))
 }
 
 pub(super) fn custom_profile_root_conflicts(
@@ -615,10 +615,13 @@ mod tests {
             .into_iter()
             .find(|shortcut| shortcut.game == "halo3_mcc")
             .unwrap();
-        assert!(matches!(
-            validate_builtin_editing_kit(shortcut, Some(&root)),
-            EditingKitPathStatus::Ready(_)
-        ));
+        let status = validate_builtin_editing_kit(shortcut, Some(&root));
+        let layout = status.layout().expect("built-in layout should be ready");
+        #[cfg(windows)]
+        assert!(
+            !layout.root.to_string_lossy().starts_with(r"\\?\"),
+            "verbatim Windows prefix leaked into validated path"
+        );
         let _ = fs::remove_dir_all(root);
     }
 
