@@ -47,9 +47,20 @@ use crate::source::{
 };
 
 pub(super) const BABOON_GITHUB_URL: &str = "https://github.com/Zoephie/Baboon";
-pub(super) const BABOON_LATEST_RELEASE_API: &str =
+/// The newest `v*` release. GitHub never returns a prerelease here, so this
+/// endpoint is the stable channel by definition.
+pub(super) const BABOON_STABLE_RELEASE_API: &str =
     "https://api.github.com/repos/Zoephie/Baboon/releases/latest";
+/// The rolling development build. `release.yml` deletes and recreates this
+/// prerelease on every push to `main`, always under the same `dev` tag.
+pub(super) const BABOON_DEV_RELEASE_API: &str =
+    "https://api.github.com/repos/Zoephie/Baboon/releases/tags/dev";
 pub(super) const BABOON_RELEASES_URL: &str = "https://github.com/Zoephie/Baboon/releases";
+
+/// The commit this binary was built from, baked in by `build.rs`. Empty when
+/// the build happened outside a git checkout; suffixed `-dirty` when the
+/// working tree had uncommitted changes.
+pub(super) const BABOON_BUILD_COMMIT: &str = env!("BABOON_BUILD_COMMIT");
 
 mod game_assets;
 use game_assets::*;
@@ -162,6 +173,17 @@ pub struct Baboon {
     /// Persisted policy controlling whether prior windows are restored, asked
     /// about, or deliberately ignored at startup.
     session_restore: SessionRestore,
+    /// Which build track update checks look at — stable releases or the
+    /// rolling development build.
+    update_channel: UpdateChannel,
+    check_updates_on_startup: bool,
+    /// The most recent check's result, kept only while it is actually an
+    /// update. The status line expires on a timer, so this is what keeps the
+    /// news reachable after a silent startup check.
+    available_update: Option<UpdateCheckResult>,
+    /// The most recent successful check, update or not, so Settings can report
+    /// the outcome after the status line has expired.
+    last_update_check: Option<UpdateCheckResult>,
     show_block_sizes: bool,
     scroll_to_cycle_dropdowns: bool,
     /// Warn before Save overwrites Campaign Evolved pak files in place.
@@ -379,6 +401,10 @@ impl Baboon {
             folders_before_tags: prefs.folders_before_tags,
             double_click_to_open_tags: prefs.double_click_to_open_tags,
             session_restore: prefs.session_restore,
+            update_channel: prefs.update_channel,
+            check_updates_on_startup: prefs.check_updates_on_startup,
+            available_update: None,
+            last_update_check: None,
             show_block_sizes: prefs.show_block_sizes,
             scroll_to_cycle_dropdowns: prefs.scroll_to_cycle_dropdowns,
             confirm_container_overwrite: prefs.confirm_container_overwrite,
@@ -518,6 +544,9 @@ impl Baboon {
         };
         if let Some(kits) = auto_restore_session {
             app.begin_last_session_restore(kits, cc.egui_ctx.clone());
+        }
+        if app.should_check_updates_on_startup() {
+            app.begin_check_for_updates(cc.egui_ctx.clone(), true);
         }
         app
     }

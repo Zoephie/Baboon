@@ -5,6 +5,7 @@ use std::env;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 const RT_ICON: u16 = 3;
 const RT_GROUP_ICON: u16 = 14;
@@ -30,6 +31,7 @@ fn main() {
 
     copy_definitions_for_build().expect("copy blam-tags definitions");
     copy_docs_for_build().expect("copy Baboon docs");
+    emit_build_commit();
 
     if env::var_os("CARGO_CFG_WINDOWS").is_none() {
         return;
@@ -42,6 +44,58 @@ fn main() {
 
     write_icon_resource(&ico_path, &res_path).expect("write Baboon icon resource");
     println!("cargo:rustc-link-arg-bin=Baboon={}", res_path.display());
+}
+
+/// Bakes the commit this binary was built from into `BABOON_BUILD_COMMIT`.
+///
+/// The rolling development release is republished under the same `dev` tag on
+/// every push, so its tag says nothing about which build it is — the commit is
+/// the only identity it has. Comparing that against this value is how the
+/// development update channel decides whether the running build is current.
+///
+/// A working tree with uncommitted changes gets a `-dirty` suffix, which marks
+/// the build as local and unmanaged. Git being absent is not an error: the
+/// value is left empty and the channel reports the local commit as unknown.
+fn emit_build_commit() {
+    let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap());
+    let commit = git_output(&manifest_dir, &["rev-parse", "HEAD"]).unwrap_or_default();
+    let commit = if commit.is_empty() {
+        String::new()
+    } else if git_output(&manifest_dir, &["status", "--porcelain"]).is_some_and(|s| !s.is_empty()) {
+        format!("{commit}-dirty")
+    } else {
+        commit
+    };
+    println!("cargo:rustc-env=BABOON_BUILD_COMMIT={commit}");
+
+    // Watch the files that change when HEAD moves. Only existing paths are
+    // listed: naming a missing file makes Cargo rebuild on every invocation,
+    // and a ref living in `packed-refs` has no file of its own.
+    let Some(git_dir) = git_output(&manifest_dir, &["rev-parse", "--absolute-git-dir"]) else {
+        return;
+    };
+    let git_dir = PathBuf::from(git_dir);
+    let mut watched = vec![git_dir.join("HEAD"), git_dir.join("packed-refs")];
+    if let Some(head_ref) = git_output(&manifest_dir, &["symbolic-ref", "--quiet", "HEAD"]) {
+        watched.push(git_dir.join(head_ref));
+    }
+    for path in watched.iter().filter(|path| path.is_file()) {
+        println!("cargo:rerun-if-changed={}", path.display());
+    }
+}
+
+/// Runs `git` in `dir` and returns its trimmed stdout, or `None` when git is
+/// missing, the directory is not a repository, or the command failed.
+fn git_output(dir: &Path, args: &[&str]) -> Option<String> {
+    let output = Command::new("git")
+        .current_dir(dir)
+        .args(args)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(String::from_utf8_lossy(&output.stdout).trim().to_owned())
 }
 
 fn copy_definitions_for_build() -> io::Result<()> {

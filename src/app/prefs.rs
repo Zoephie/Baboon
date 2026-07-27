@@ -48,6 +48,10 @@ fn first_run_complete_from_text(text: Option<&str>) -> bool {
 #[path = "tests/prefs_first_run.rs"]
 mod first_run_tests;
 
+#[cfg(test)]
+#[path = "tests/prefs_update_channel.rs"]
+mod update_channel_tests;
+
 pub(super) fn load_gui_prefs() -> GuiPrefs {
     let Some(text) = read_prefs_text() else {
         return GuiPrefs::default();
@@ -55,10 +59,17 @@ pub(super) fn load_gui_prefs() -> GuiPrefs {
     let Ok(value) = serde_json::from_str::<Value>(&text) else {
         return GuiPrefs::default();
     };
-    let browser_mode =
-        browser_mode_from_str(value.get("browser_mode").and_then(Value::as_str)).unwrap_or_default();
-    let browser_sort =
-        browser_sort_from_str(value.get("browser_sort").and_then(Value::as_str)).unwrap_or_default();
+    prefs_from_value(&value)
+}
+
+/// Decodes stored preferences, falling back to the default for anything the
+/// file does not carry — which is how a file written before a preference
+/// existed keeps working.
+fn prefs_from_value(value: &Value) -> GuiPrefs {
+    let browser_mode = browser_mode_from_str(value.get("browser_mode").and_then(Value::as_str))
+        .unwrap_or_default();
+    let browser_sort = browser_sort_from_str(value.get("browser_sort").and_then(Value::as_str))
+        .unwrap_or_default();
     GuiPrefs {
         browser_mode,
         browser_sort,
@@ -92,6 +103,15 @@ pub(super) fn load_gui_prefs() -> GuiPrefs {
                     _ => SessionRestore::Ask,
                 }
             }),
+        update_channel: value
+            .get("update_channel")
+            .and_then(Value::as_str)
+            .and_then(UpdateChannel::from_str)
+            .unwrap_or_default(),
+        check_updates_on_startup: value
+            .get("check_updates_on_startup")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
         show_block_sizes: value
             .get("show_block_sizes")
             .and_then(Value::as_bool)
@@ -471,6 +491,20 @@ pub(super) fn save_gui_prefs(
         fs::create_dir_all(parent)
             .map_err(|error| format!("Could not create preferences folder: {error}"))?;
     }
+    let value = prefs_to_value(prefs, terminal_open_games, first_run_complete);
+    let text = serde_json::to_string_pretty(&value)
+        .map_err(|error| format!("Could not encode preferences: {error}"))?;
+    write_text_atomic(&path, &text)
+}
+
+/// Encodes preferences as the JSON stored in `prefs.json`.
+/// Split out from [`save_gui_prefs`] so the encoding can be exercised against
+/// [`prefs_from_value`] without touching the filesystem.
+fn prefs_to_value(
+    prefs: &GuiPrefs,
+    terminal_open_games: &HashSet<String>,
+    first_run_complete: bool,
+) -> Value {
     let mut games: Vec<&String> = terminal_open_games.iter().collect();
     games.sort();
     let mut collapsed_tool_categories: Vec<&String> =
@@ -485,7 +519,7 @@ pub(super) fn save_gui_prefs(
             }
         }
     }
-    let value = json!({
+    json!({
         "browser_mode": browser_mode_str(prefs.browser_mode),
         "browser_sort": browser_sort_str(prefs.browser_sort),
         "nested_default": nested_default_str(prefs.nested_default),
@@ -493,6 +527,8 @@ pub(super) fn save_gui_prefs(
         "folders_before_tags": prefs.folders_before_tags,
         "double_click_to_open_tags": prefs.double_click_to_open_tags,
         "session_restore": prefs.session_restore.as_str(),
+        "update_channel": prefs.update_channel.as_str(),
+        "check_updates_on_startup": prefs.check_updates_on_startup,
         "show_block_sizes": prefs.show_block_sizes,
         "scroll_to_cycle_dropdowns": prefs.scroll_to_cycle_dropdowns,
         "confirm_container_overwrite": prefs.confirm_container_overwrite,
@@ -527,10 +563,7 @@ pub(super) fn save_gui_prefs(
         "storage_mode": crate::storage::active_mode().map(crate::storage::StorageMode::as_str),
         "first_run_complete": first_run_complete,
         "terminal_open_games": games,
-    });
-    let text = serde_json::to_string_pretty(&value)
-        .map_err(|error| format!("Could not encode preferences: {error}"))?;
-    write_text_atomic(&path, &text)
+    })
 }
 
 fn write_text_atomic(path: &Path, text: &str) -> Result<(), String> {

@@ -112,6 +112,64 @@ impl Baboon {
             .color(subtle_dark())
             .small(),
         );
+
+        ui.add_space(10.0);
+        ui.separator();
+        ui.label(RichText::new("Updates").color(text_dark()).strong());
+        ui.add_space(4.0);
+        self.draw_update_channel_picker(ui);
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if ui.button("Check now").clicked() {
+                let ctx = ui.ctx().clone();
+                self.begin_check_for_updates(ctx, false);
+            }
+            self.draw_update_check_result(ui);
+        });
+    }
+
+    /// Radio rows for which build track update checks follow, plus whether the
+    /// check runs at startup.
+    /// Shared by Settings and the first-run wizard so the two cannot drift.
+    pub(super) fn draw_update_channel_picker(&mut self, ui: &mut Ui) {
+        ui.label(RichText::new("Check for updates on").color(text_dark()));
+        for option in UpdateChannel::ALL {
+            if ui
+                .radio_value(&mut self.update_channel, option, option.label())
+                .on_hover_text(option.help())
+                .changed()
+            {
+                // The previous channel's verdict says nothing about this one.
+                self.available_update = None;
+                self.last_update_check = None;
+            }
+        }
+        ui.add_space(4.0);
+        ui.checkbox(
+            &mut self.check_updates_on_startup,
+            "Check for updates when Baboon starts",
+        );
+    }
+
+    /// One line describing what the last check concluded, with a link when
+    /// there is something to go and get.
+    fn draw_update_check_result(&self, ui: &mut Ui) {
+        if let Some(update) = self.available_update.as_ref() {
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("Update available:")
+                        .color(text_dark())
+                        .strong(),
+                );
+                ui.hyperlink_to(update.short_name(), &update.release_url);
+            });
+            return;
+        }
+        ui.label(
+            RichText::new(self.update_check_summary())
+                .color(subtle_dark())
+                .small(),
+        );
     }
 
     /// Radio row for how nested containers in the tag editor start out.

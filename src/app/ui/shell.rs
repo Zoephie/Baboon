@@ -506,8 +506,16 @@ impl Baboon {
                             ui.close_menu();
                         }
                         if ui.button("Check for updates").clicked() {
-                            self.begin_check_for_updates(ctx.clone());
+                            self.begin_check_for_updates(ctx.clone(), false);
                             ui.close_menu();
+                        }
+                        if let Some(update) = self.available_update.as_ref() {
+                            let label = format!("Update available: {}...", update.short_name());
+                            let url = update.release_url.clone();
+                            if ui.button(label).clicked() {
+                                ctx.open_url(egui::OpenUrl::new_tab(url));
+                                ui.close_menu();
+                            }
                         }
                     });
                     ui.menu_button("Editing Kits", |ui| {
@@ -669,6 +677,36 @@ impl Baboon {
                             .text(RichText::new(&progress.phase).color(text_dark()));
                         ui.add(bar);
                         ctx.request_repaint();
+                    }
+                    // Anchored to the right edge, out of the way of the status
+                    // text and the progress bars that share this row. The
+                    // status line expires on a timer, so an update found by the
+                    // silent startup check would otherwise scroll past unread;
+                    // this link stays until the next check clears it.
+                    if let Some(update) = self.available_update.as_ref() {
+                        let label = format!("Update available: {}", update.short_name());
+                        let url = update.release_url.clone();
+                        let hover = match update.channel {
+                            UpdateChannel::Stable => "Open the release page on GitHub",
+                            UpdateChannel::Development => {
+                                "Open the latest development build on GitHub"
+                            }
+                        };
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            // An explicit colour beats the app-wide
+                            // `override_text_color`, which would otherwise
+                            // flatten both this and the link colour to
+                            // ordinary body text. `strong()` only brightens;
+                            // the weight comes from the bold family, at the
+                            // body size of the row it sits in.
+                            ui.hyperlink_to(
+                                RichText::new(label)
+                                    .font(bold_font(12.0))
+                                    .color(good_news()),
+                                &url,
+                            )
+                            .on_hover_text(hover);
+                        });
                     }
                 });
             });
