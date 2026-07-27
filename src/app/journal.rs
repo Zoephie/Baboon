@@ -25,6 +25,11 @@ pub(super) struct EditJournal {
     undo: Vec<Snapshot>,
     redo: Vec<Snapshot>,
     limit: usize,
+    /// Ceiling on the bytes one stack may hold. A snapshot is a whole
+    /// serialized tag, and Campaign Evolved ships a 105 MiB animation graph --
+    /// 64 of those is 6.7 GB. Depth still applies; whichever bound is reached
+    /// first drops the oldest entry.
+    byte_limit: usize,
     /// True while a run of consecutive edit frames is being coalesced into the
     /// single snapshot already pushed for this run.
     coalescing: bool,
@@ -36,6 +41,7 @@ impl Default for EditJournal {
             undo: Vec::new(),
             redo: Vec::new(),
             limit: 64,
+            byte_limit: 256 * 1024 * 1024,
             coalescing: false,
         }
     }
@@ -81,6 +87,7 @@ impl EditJournal {
             push_capped_into(
                 &mut self.redo,
                 self.limit,
+                self.byte_limit,
                 Snapshot {
                     bytes,
                     label: snapshot.label.clone(),
@@ -98,6 +105,7 @@ impl EditJournal {
             push_capped_into(
                 &mut self.undo,
                 self.limit,
+                self.byte_limit,
                 Snapshot {
                     bytes,
                     label: snapshot.label.clone(),
@@ -109,13 +117,17 @@ impl EditJournal {
     }
 
     fn push_capped(&mut self, snapshot: Snapshot) {
-        push_capped_into(&mut self.undo, self.limit, snapshot);
+        push_capped_into(&mut self.undo, self.limit, self.byte_limit, snapshot);
     }
 }
 
-fn push_capped_into(stack: &mut Vec<Snapshot>, limit: usize, snapshot: Snapshot) {
+fn push_capped_into(stack: &mut Vec<Snapshot>, limit: usize, byte_limit: usize, snapshot: Snapshot) {
     stack.push(snapshot);
-    if stack.len() > limit {
+    // Always keep the newest entry, even on its own over budget: dropping it
+    // would mean an edit that cannot be undone at all.
+    while stack.len() > 1
+        && (stack.len() > limit || stack.iter().map(|s| s.bytes.len()).sum::<usize>() > byte_limit)
+    {
         stack.remove(0);
     }
 }
@@ -129,7 +141,7 @@ mod tests {
     }
 
     fn add_variant(tag: &mut TagFile) {
-        let mut dirty = false;
+        let mut dirty = Dirty::default();
         apply_model_variant_ops(
             tag,
             vec![ModelVariantOp::Create {
@@ -141,6 +153,37 @@ mod tests {
             }],
             &mut dirty,
         );
+    }
+
+    /// A snapshot is a whole serialized tag, and Campaign Evolved ships a
+    /// 105 MiB animation graph. Depth alone let the journal reach gigabytes, so
+    /// the byte budget evicts first -- but never the newest entry, or the edit
+    /// just made could not be undone.
+    #[test]
+    fn the_journal_evicts_on_bytes_before_depth() {
+        let mut stack = Vec::new();
+        let budget = 1000;
+        for i in 0..5 {
+            push_capped_into(
+                &mut stack,
+                64,
+                budget,
+                Snapshot { bytes: vec![0; 400], label: format!("edit {i}") },
+            );
+        }
+        assert_eq!(stack.len(), 2, "400 x 2 fits in 1000, 400 x 3 does not");
+        assert_eq!(stack.last().unwrap().label, "edit 4", "the newest survives");
+
+        // One entry over budget on its own is still kept: losing it would mean
+        // an edit with no way back.
+        let mut lone = Vec::new();
+        push_capped_into(
+            &mut lone,
+            64,
+            budget,
+            Snapshot { bytes: vec![0; budget * 4], label: "huge".to_owned() },
+        );
+        assert_eq!(lone.len(), 1);
     }
 
     #[test]

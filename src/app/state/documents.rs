@@ -3,12 +3,47 @@
 
 use super::*;
 
+/// Whether a document diverges from its last save, and how many times it has
+/// been changed.
+///
+/// The count exists so anything that caches a document's serialized bytes can
+/// tell "still the same tag" from "edited again" without serializing it. The
+/// Campaign Evolved autosave used to re-serialize every dirty document twice a
+/// second purely to discover nothing had changed — 100 ms a tick with a 105 MiB
+/// animation graph open.
+#[derive(Default)]
+pub(in crate::app) struct Dirty {
+    set: bool,
+    revision: u64,
+}
+
+impl Dirty {
+    pub(in crate::app) fn is_set(&self) -> bool {
+        self.set
+    }
+
+    /// Monotonic across saves: clearing the flag must not let a later edit
+    /// reuse a revision some cache has already seen.
+    pub(in crate::app) fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub(in crate::app) fn touch(&mut self) {
+        self.set = true;
+        self.revision = self.revision.wrapping_add(1);
+    }
+
+    pub(in crate::app) fn clear(&mut self) {
+        self.set = false;
+    }
+}
+
 /// Parsed tag plus its unsaved-state and byte-snapshot edit history.
 /// `dirty` reflects divergence from the last successful save, while journal
 /// entries may still exist after saving to support later undo operations.
 pub(in crate::app) struct TagDocument {
     pub(in crate::app) tag: TagFile,
-    pub(in crate::app) dirty: bool,
+    pub(in crate::app) dirty: Dirty,
     pub(in crate::app) journal: EditJournal,
 }
 
@@ -16,7 +51,7 @@ impl TagDocument {
     pub(in crate::app) fn clean(tag: TagFile) -> Self {
         Self {
             tag,
-            dirty: false,
+            dirty: Dirty::default(),
             journal: EditJournal::default(),
         }
     }
@@ -26,9 +61,11 @@ impl TagDocument {
     /// payload on disk or in a pak), so closing it prompts to save and it feeds
     /// Export Mod as a modified tag.
     pub(in crate::app) fn modified(tag: TagFile) -> Self {
+        let mut dirty = Dirty::default();
+        dirty.touch();
         Self {
             tag,
-            dirty: true,
+            dirty,
             journal: EditJournal::default(),
         }
     }

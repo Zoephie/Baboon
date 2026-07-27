@@ -107,7 +107,7 @@ impl Baboon {
                         if self.current_source_is_container() {
                             if ui
                                 .add_enabled(
-                                    self.kits[self.active].parsed_tags.values().any(|d| d.dirty)
+                                    self.kits[self.active].parsed_tags.values().any(|d| d.dirty.is_set())
                                         || self.kits[self.active]
                                             .campaign_project
                                             .as_ref()
@@ -301,7 +301,7 @@ impl Baboon {
                             let unsaved = self.kits[self.active]
                                 .parsed_tags
                                 .values()
-                                .filter(|document| document.dirty)
+                                .filter(|document| document.dirty.is_set())
                                 .count();
                             if ui
                                 .add_enabled(

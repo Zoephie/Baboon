@@ -52,7 +52,21 @@ pub(super) struct CampaignProjectOverlay {
     pub(super) logical_path: String,
     pub(super) kind: CampaignProjectTagKind,
     pub(super) package: Option<String>,
-    pub(super) bytes: Vec<u8>,
+    /// Shared, not owned: the overlay map is cloned two or three times per
+    /// autosave tick, and a workspace stashing a 105 MiB tag paid a full copy
+    /// each time.
+    pub(super) bytes: Arc<Vec<u8>>,
+    /// Hashed once, where the bytes are produced. The project fingerprint is
+    /// taken over these rather than over the bytes themselves: a workspace
+    /// holding a 105 MiB animation graph cost 230 ms a tick to re-hash, twice a
+    /// second, purely to learn nothing had changed.
+    pub(super) digest: [u8; 32],
+}
+
+pub(super) fn overlay_digest(bytes: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    hasher.finalize().into()
 }
 
 #[derive(Clone, Debug)]
@@ -65,6 +79,15 @@ pub(super) struct CampaignProjectSnapshot {
 }
 
 impl CampaignProjectSnapshot {
+    /// Each overlay's digest, by identity — what the overlays table holds once
+    /// this snapshot has been written.
+    pub(super) fn digests(&self) -> HashMap<String, [u8; 32]> {
+        self.overlays
+            .iter()
+            .map(|(identity, overlay)| (identity.clone(), overlay.digest))
+            .collect()
+    }
+
     pub(super) fn fingerprint(&self) -> Vec<u8> {
         let mut hasher = Sha256::new();
         hasher.update(self.game.as_bytes());
@@ -80,7 +103,7 @@ impl CampaignProjectSnapshot {
         overlays.sort_by(|a, b| a.identity.cmp(&b.identity));
         for overlay in overlays {
             hasher.update(overlay.identity.as_bytes());
-            hasher.update(&overlay.bytes);
+            hasher.update(overlay.digest);
         }
         hasher.finalize().to_vec()
     }
@@ -89,6 +112,15 @@ impl CampaignProjectSnapshot {
 pub(super) struct ActiveCampaignProject {
     pub(super) path: PathBuf,
     pub(super) overlays: HashMap<String, CampaignProjectOverlay>,
+    /// Document key -> the `Dirty` revision its overlay bytes were written
+    /// from, so an untouched document is never serialized twice.
+    pub(super) captured_revisions: HashMap<String, u64>,
+    /// What is actually on disk, by identity, so a save writes only the rows
+    /// whose bytes changed instead of replacing every overlay.
+    pub(super) saved_digests: HashMap<String, [u8; 32]>,
+    /// What an in-flight write will leave on disk, promoted to `saved_digests`
+    /// once it reports success.
+    pub(super) pending_digests: Option<HashMap<String, [u8; 32]>>,
     pub(super) last_saved_fingerprint: Vec<u8>,
     pub(super) next_autosave_at: f64,
     pub(super) revision: u64,
@@ -102,6 +134,9 @@ impl ActiveCampaignProject {
         Self {
             path,
             overlays: HashMap::new(),
+            captured_revisions: HashMap::new(),
+            saved_digests: HashMap::new(),
+            pending_digests: None,
             last_saved_fingerprint: Vec::new(),
             next_autosave_at: now + CAMPAIGN_PROJECT_AUTOSAVE_SECS,
             revision: 0,
@@ -118,7 +153,16 @@ impl ActiveCampaignProject {
     ) -> Self {
         Self {
             path,
+            // Restored overlays came off disk, so that is exactly what is
+            // stored there.
+            saved_digests: snapshot
+                .overlays
+                .iter()
+                .map(|(identity, overlay)| (identity.clone(), overlay.digest))
+                .collect(),
             overlays: snapshot.overlays.clone(),
+            captured_revisions: HashMap::new(),
+            pending_digests: None,
             last_saved_fingerprint: snapshot.fingerprint(),
             next_autosave_at: now + CAMPAIGN_PROJECT_AUTOSAVE_SECS,
             revision: 0,
@@ -151,9 +195,17 @@ pub(super) fn campaign_recovery_path(source_root: Option<&Path>) -> PathBuf {
     crate::storage::data_path(&format!("campaign_evolved_recovery-{tag}.baboon"))
 }
 
+/// Write the project to `path`.
+///
+/// `on_disk` is what the last successful save left in the overlays table, by
+/// identity and digest; overlay rows whose bytes are unchanged are then left
+/// alone. Rewriting every overlay meant editing a 4 MiB scenario also rewrote
+/// the 105 MiB animation graph stashed beside it. Pass `None` when the file's
+/// contents are unknown — every overlay is replaced, as before.
 pub(super) fn save_campaign_project(
     path: &Path,
     snapshot: &CampaignProjectSnapshot,
+    on_disk: Option<&HashMap<String, [u8; 32]>>,
 ) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -197,8 +249,27 @@ pub(super) fn save_campaign_project(
     transaction
         .execute("DELETE FROM project", [])
         .and_then(|_| transaction.execute("DELETE FROM tabs", []))
-        .and_then(|_| transaction.execute("DELETE FROM overlays", []))
         .map_err(|error| format!("Could not reset project database: {error}"))?;
+    // Overlays are reconciled rather than replaced: drop the ones that are gone,
+    // rewrite only the ones whose bytes differ.
+    match on_disk {
+        Some(on_disk) => {
+            for identity in on_disk.keys() {
+                if !snapshot.overlays.contains_key(identity) {
+                    transaction
+                        .execute("DELETE FROM overlays WHERE identity = ?1", params![identity])
+                        .map_err(|error| {
+                            format!("Could not drop project tag {identity}: {error}")
+                        })?;
+                }
+            }
+        }
+        None => {
+            transaction
+                .execute("DELETE FROM overlays", [])
+                .map_err(|error| format!("Could not reset project overlays: {error}"))?;
+        }
+    }
     transaction
         .execute(
             "INSERT INTO project (id, version, game, source_path, selected_identity)
@@ -231,9 +302,12 @@ pub(super) fn save_campaign_project(
             .map_err(|error| format!("Could not write project tab {}: {error}", tab.label))?;
     }
     for overlay in snapshot.overlays.values() {
+        if on_disk.is_some_and(|on_disk| on_disk.get(&overlay.identity) == Some(&overlay.digest)) {
+            continue;
+        }
         transaction
             .execute(
-                "INSERT INTO overlays
+                "INSERT OR REPLACE INTO overlays
                  (identity, group_tag, logical_path, kind, package, bytes)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![
@@ -242,7 +316,7 @@ pub(super) fn save_campaign_project(
                     overlay.logical_path,
                     overlay.kind.as_str(),
                     overlay.package,
-                    overlay.bytes,
+                    overlay.bytes.as_slice(),
                 ],
             )
             .map_err(|error| {
@@ -343,7 +417,8 @@ pub(super) fn load_campaign_project(path: &Path) -> Result<CampaignProjectSnapsh
                     logical_path,
                     kind,
                     package,
-                    bytes,
+                    digest: overlay_digest(&bytes),
+                    bytes: Arc::new(bytes),
                 },
             ))
         })
@@ -478,8 +553,19 @@ impl Baboon {
             .map(|project| project.overlays.clone())
             .unwrap_or_default();
 
+        // What each dirty document's bytes were captured from last time, so a
+        // document nobody has touched since is carried over instead of being
+        // serialized again. Autosave runs twice a second whether or not
+        // anything was edited, and a stashed 105 MiB animation graph costs
+        // ~100 ms to write out.
+        let captured = self.kits[kit]
+            .campaign_project
+            .as_ref()
+            .map(|project| project.captured_revisions.clone())
+            .unwrap_or_default();
+        let mut now_captured: HashMap<String, u64> = HashMap::new();
         for (key, document) in &self.kits[kit].parsed_tags {
-            if !document.dirty {
+            if !document.dirty.is_set() {
                 continue;
             }
             let Some(entry) = self.entry_for_key_in(kit, key) else {
@@ -489,6 +575,11 @@ impl Baboon {
             else {
                 continue;
             };
+            let revision = document.dirty.revision();
+            now_captured.insert(key.clone(), revision);
+            if captured.get(key) == Some(&revision) && overlays.contains_key(&identity) {
+                continue;
+            }
             let bytes = document
                 .tag
                 .write_to_bytes()
@@ -501,7 +592,8 @@ impl Baboon {
                     logical_path,
                     kind,
                     package,
-                    bytes,
+                    digest: overlay_digest(&bytes),
+                    bytes: Arc::new(bytes),
                 },
             );
         }
@@ -534,7 +626,8 @@ impl Baboon {
                 .map(|(identity, _, _, _)| identity)
         });
         if let Some(project) = self.kits[kit].campaign_project.as_mut() {
-            project.overlays = overlays.clone();
+            project.overlays.clone_from(&overlays);
+            project.captured_revisions = now_captured;
         }
         Ok(Some(CampaignProjectSnapshot {
             game,
@@ -556,7 +649,7 @@ impl Baboon {
         let mut signature: Vec<String> = self.kits[kit]
             .parsed_tags
             .iter()
-            .filter(|(_, document)| document.dirty)
+            .filter(|(_, document)| document.dirty.is_set())
             .map(|(key, _)| key.clone())
             .collect();
         if let Some(project) = self.kits[kit].campaign_project.as_ref() {
@@ -570,7 +663,7 @@ impl Baboon {
         let dirty_keys: Vec<String> = self.kits[kit]
             .parsed_tags
             .iter()
-            .filter(|(_, document)| document.dirty)
+            .filter(|(_, document)| document.dirty.is_set())
             .map(|(key, _)| key.clone())
             .collect();
         for key in dirty_keys {
@@ -695,7 +788,9 @@ impl Baboon {
         let _write_guard = write_lock
             .lock()
             .map_err(|_| "Campaign project writer lock was poisoned".to_owned())?;
-        save_campaign_project(&project.path, &snapshot)?;
+        let on_disk = project.saved_digests.clone();
+        save_campaign_project(&project.path, &snapshot, Some(&on_disk))?;
+        project.saved_digests = snapshot.digests();
         project.last_saved_fingerprint = fingerprint;
         project.next_autosave_at = now + CAMPAIGN_PROJECT_AUTOSAVE_SECS;
         if let Some(session) = self.current_session_state() {
@@ -723,6 +818,21 @@ impl Baboon {
             .campaign_project
             .as_ref()
             .is_some_and(|project| now >= project.next_autosave_at);
+        // A save already running means this tick's work would be thrown away, so
+        // do not do it. The check used to sit *after* the capture, which is the
+        // expensive part.
+        if due
+            && self.kits[kit]
+                .campaign_project
+                .as_ref()
+                .is_some_and(|project| project.save_in_flight.is_some())
+        {
+            if let Some(project) = self.kits[kit].campaign_project.as_mut() {
+                project.next_autosave_at = now + CAMPAIGN_PROJECT_AUTOSAVE_SECS;
+            }
+            ctx.request_repaint_after(std::time::Duration::from_millis(750));
+            return;
+        }
         if due {
             let snapshot = match self.capture_campaign_project(kit, now) {
                 Ok(Some(snapshot)) => snapshot,
@@ -736,9 +846,7 @@ impl Baboon {
             let Some(project) = self.kits[kit].campaign_project.as_mut() else {
                 return;
             };
-            if project.save_in_flight.is_some() {
-                project.next_autosave_at = now + CAMPAIGN_PROJECT_AUTOSAVE_SECS;
-            } else if fingerprint == project.last_saved_fingerprint && project.path.is_file() {
+            if fingerprint == project.last_saved_fingerprint && project.path.is_file() {
                 project.next_autosave_at = now + CAMPAIGN_PROJECT_AUTOSAVE_SECS;
             } else {
                 project.revision = project.revision.wrapping_add(1);
@@ -749,6 +857,9 @@ impl Baboon {
                 latest_write_revision.store(revision, Ordering::SeqCst);
                 project.save_in_flight = Some(revision);
                 project.next_autosave_at = now + CAMPAIGN_PROJECT_AUTOSAVE_SECS;
+                // What this write will leave on disk, held until it succeeds.
+                let on_disk = project.saved_digests.clone();
+                project.pending_digests = Some(snapshot.digests());
                 let tx = self.tx.clone();
                 let repaint = ctx.clone();
                 thread::spawn(move || {
@@ -759,7 +870,7 @@ impl Baboon {
                             if latest_write_revision.load(Ordering::SeqCst) != revision {
                                 Ok(())
                             } else {
-                                save_campaign_project(&path, &snapshot)
+                                save_campaign_project(&path, &snapshot, Some(&on_disk))
                             }
                         });
                     let _ = tx.send(WorkerMessage::CampaignProjectSaved {
@@ -796,9 +907,16 @@ impl Baboon {
             return true;
         };
         project.save_in_flight = None;
+        let pending = project.pending_digests.take();
         match result {
             Ok(()) => {
                 project.last_saved_fingerprint = fingerprint;
+                // Only now is this what the file holds; a failed write leaves
+                // the previous belief in place, so the next save reconciles
+                // against what actually got there.
+                if let Some(digests) = pending {
+                    project.saved_digests = digests;
+                }
                 if let Some(session) = self.current_session_state() {
                     let _ = save_last_session(&session);
                 }
@@ -881,6 +999,7 @@ impl Baboon {
         }
 
         let mut identity_to_key = HashMap::<String, String>::new();
+        let mut restored_revisions = HashMap::<String, u64>::new();
         let mut missing = 0usize;
 
         // Recreate new project tags first, including ones that are currently
@@ -954,8 +1073,13 @@ impl Baboon {
             };
             if let Some(overlay) = pending.snapshot.overlays.get(&tab.identity) {
                 if let Ok(tag) = TagFile::read_from_bytes(&overlay.bytes) {
-                    self.kits[kit].parsed_tags
-                        .insert(key.clone(), TagDocument::modified(tag));
+                    let document = TagDocument::modified(tag);
+                    // The document was parsed from the overlay's own bytes, so
+                    // the project already holds its serialization. Recording
+                    // that spares the first autosave after a restore from
+                    // writing every stashed tag out again.
+                    restored_revisions.insert(key.clone(), document.dirty.revision());
+                    self.kits[kit].parsed_tags.insert(key.clone(), document);
                 } else {
                     missing += 1;
                     continue;
@@ -977,11 +1101,9 @@ impl Baboon {
         if let Some(key) = self.kits[kit].selected_key.clone() {
             self.kits[kit].open_tag_pane(&key);
         }
-        self.kits[kit].campaign_project = Some(ActiveCampaignProject::from_snapshot(
-            pending.path,
-            &pending.snapshot,
-            now,
-        ));
+        let mut project = ActiveCampaignProject::from_snapshot(pending.path, &pending.snapshot, now);
+        project.captured_revisions = restored_revisions;
+        self.kits[kit].campaign_project = Some(project);
         self.status = if missing == 0 {
             format!(
                 "Restored Campaign Evolved project ({} tab(s), {} modified tag(s))",
@@ -1015,8 +1137,14 @@ impl Baboon {
         };
         match TagFile::read_from_bytes(&overlay.bytes) {
             Ok(tag) => {
-                self.kits[kit].parsed_tags
-                    .insert(key.to_owned(), TagDocument::modified(tag));
+                // Same as a restore: the stashed bytes are this document's
+                // serialization already, so autosave need not redo it.
+                let document = TagDocument::modified(tag);
+                let revision = document.dirty.revision();
+                self.kits[kit].parsed_tags.insert(key.to_owned(), document);
+                if let Some(project) = self.kits[kit].campaign_project.as_mut() {
+                    project.captured_revisions.insert(key.to_owned(), revision);
+                }
                 true
             }
             Err(error) => {
@@ -1030,6 +1158,95 @@ impl Baboon {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The revision has to keep climbing across a save, or a cache that saw
+    /// revision 1, watched the document be saved and then edited again, would
+    /// see revision 1 once more and skip work it needed to do.
+    #[test]
+    fn a_dirty_revision_never_repeats() {
+        let mut dirty = Dirty::default();
+        assert!(!dirty.is_set());
+        dirty.touch();
+        let first = dirty.revision();
+        dirty.clear();
+        assert!(!dirty.is_set());
+        dirty.touch();
+        assert!(dirty.is_set());
+        assert_ne!(dirty.revision(), first);
+    }
+
+    fn overlay(identity: &str, bytes: &[u8]) -> CampaignProjectOverlay {
+        CampaignProjectOverlay {
+            identity: identity.to_owned(),
+            group_tag: 0x1234_5678,
+            logical_path: identity.to_owned(),
+            kind: CampaignProjectTagKind::Existing,
+            package: None,
+            digest: overlay_digest(bytes),
+            bytes: Arc::new(bytes.to_vec()),
+        }
+    }
+
+    fn snapshot_of(overlays: Vec<CampaignProjectOverlay>) -> CampaignProjectSnapshot {
+        CampaignProjectSnapshot {
+            game: "haloce_evolved".to_owned(),
+            source_path: PathBuf::from("Paks"),
+            selected_identity: None,
+            tabs: Vec::new(),
+            overlays: overlays
+                .into_iter()
+                .map(|overlay| (overlay.identity.clone(), overlay))
+                .collect(),
+        }
+    }
+
+    /// A save must rewrite only the overlays whose bytes changed. Stashing a
+    /// 105 MiB animation graph alongside a 4 MiB scenario meant every edit to
+    /// the scenario rewrote both.
+    #[test]
+    fn a_save_rewrites_only_the_overlays_whose_bytes_changed() {
+        let path = std::env::temp_dir().join(format!(
+            "baboon-project-diff-{}-{}.baboon",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let first = snapshot_of(vec![overlay("a", b"one"), overlay("b", b"two")]);
+        save_campaign_project(&path, &first, None).unwrap();
+
+        // "a" is unchanged, "b" is gone, "c" is new. The claim that "a" is
+        // already on disk is honoured by digest, so passing different bytes
+        // under its old digest proves the row really was skipped.
+        let mut stale = overlay("a", b"REWRITTEN");
+        stale.digest = overlay_digest(b"one");
+        let second = snapshot_of(vec![stale, overlay("c", b"three")]);
+        save_campaign_project(&path, &second, Some(&first.digests())).unwrap();
+
+        let loaded = load_campaign_project(&path).unwrap();
+        let mut identities: Vec<&String> = loaded.overlays.keys().collect();
+        identities.sort();
+        assert_eq!(identities, vec!["a", "c"], "b was dropped, c was added");
+        assert_eq!(
+            loaded.overlays["a"].bytes.as_slice(),
+            b"one",
+            "a's row was left alone"
+        );
+        assert_eq!(loaded.overlays["c"].bytes.as_slice(), b"three");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    /// The fingerprint is what autosave compares to decide whether to write, so
+    /// it has to notice a changed overlay while never touching its bytes.
+    #[test]
+    fn the_fingerprint_follows_the_digest() {
+        let before = snapshot_of(vec![overlay("a", b"one")]);
+        let same = snapshot_of(vec![overlay("a", b"one")]);
+        let changed = snapshot_of(vec![overlay("a", b"other")]);
+        assert_eq!(before.fingerprint(), same.fingerprint());
+        assert_ne!(before.fingerprint(), changed.fingerprint());
+    }
 
     #[test]
     fn campaign_project_round_trips_binary_overlays_and_tab_order() {
@@ -1047,7 +1264,8 @@ mod tests {
             logical_path: "objects/test".to_owned(),
             kind: CampaignProjectTagKind::Existing,
             package: None,
-            bytes: vec![0, 1, 2, 0xff],
+            digest: overlay_digest(&[0, 1, 2, 0xff]),
+            bytes: Arc::new(vec![0, 1, 2, 0xff]),
         };
         let snapshot = CampaignProjectSnapshot {
             game: "haloce_evolved".to_owned(),
@@ -1064,7 +1282,7 @@ mod tests {
             }],
             overlays: HashMap::from([(overlay.identity.clone(), overlay.clone())]),
         };
-        save_campaign_project(&path, &snapshot).unwrap();
+        save_campaign_project(&path, &snapshot, None).unwrap();
         let loaded = load_campaign_project(&path).unwrap();
         assert_eq!(loaded.tabs.len(), 1);
         assert_eq!(loaded.tabs[0].identity, overlay.identity);
@@ -1141,3 +1359,4 @@ mod tests {
         );
     }
 }
+
