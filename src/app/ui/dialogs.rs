@@ -973,7 +973,9 @@ impl Baboon {
                                 // window grows to fit it every frame.
                                 egui::ScrollArea::horizontal()
                                     .id_salt((title, &element))
-                                    .auto_shrink([false, false])
+                                    // Fill the pane's width, but only as tall as
+                                    // what is in it.
+                                    .auto_shrink([false, true])
                                     .show(ui, |ui| {
                                         let (tag, path, side) = if before {
                                             (
@@ -1016,7 +1018,11 @@ impl Baboon {
                 ModExportChange::Modified => {
                     ui.horizontal_top(|ui| {
                         pane(ui, half, true, "before");
-                        ui.separator();
+                        // Not a separator: in a horizontal layout it stretches
+                        // to the panel's whole remaining height, which left a
+                        // screen of empty space under two short panes. The two
+                        // washes already read as two panes.
+                        ui.add_space(4.0);
                         pane(ui, half, false, "after");
                     });
                 }
