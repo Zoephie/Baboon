@@ -3062,7 +3062,7 @@ impl Baboon {
                     .next()
                     .and_then(|f| f.strip_suffix(".ubulk"))
                     .unwrap_or("tag");
-                let Some(output) = pick_override_utoc(&format!("{stem}-WinGDK_P.utoc")) else {
+                let Some(output) = pick_override_utoc(&format!("{stem}_P.utoc")) else {
                     return Ok(None);
                 };
                 blam_tags::iostore::writer::write_tag_override(
@@ -3083,7 +3083,7 @@ impl Baboon {
                     .ok_or("could not derive source package path")?;
                 let new_pkg = format!("/Game/Tags/{new_rel}-{group}");
                 let leaf = new_rel.rsplit('/').next().unwrap_or("tag");
-                let Some(output) = pick_override_utoc(&format!("{leaf}-{group}-WinGDK_P.utoc"))
+                let Some(output) = pick_override_utoc(&format!("{leaf}-{group}_P.utoc"))
                 else {
                     return Ok(None);
                 };
@@ -3225,7 +3225,7 @@ impl Baboon {
             }
         };
         let leaf = package.rsplit('/').next().unwrap_or("tag");
-        let Some(output) = pick_override_utoc(&format!("{leaf}-WinGDK_P.utoc")) else {
+        let Some(output) = pick_override_utoc(&format!("{leaf}_P.utoc")) else {
             return;
         };
         match blam_tags::iostore::writer::write_new_tag_container(
@@ -3313,7 +3313,7 @@ impl Baboon {
             self.status = "No modified tags to export — edit a tag first".to_owned();
             return;
         }
-        let Some(mut output) = pick_override_utoc("mymod-WinGDK_P.utoc") else {
+        let Some(mut output) = pick_override_utoc("mymod_P.utoc") else {
             return;
         };
         if output.extension().is_none() {
