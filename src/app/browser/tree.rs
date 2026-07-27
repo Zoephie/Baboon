@@ -128,25 +128,22 @@ fn ordered_indices<'a>(
     use std::borrow::Cow;
     match sort {
         BrowserSort::Natural => Cow::Borrowed(indices),
+        // `sort_by_cached_key`, not `sort_by`: the key is a freshly lowercased
+        // String, and computing it inside the comparator meant two allocations
+        // per comparison -- ~9,000 of them per frame for a 600-entry folder,
+        // repeated for every expanded folder. Cached, it is one per entry.
         BrowserSort::Name => {
             let mut sorted = indices.to_vec();
-            sorted.sort_by(|&a, &b| {
-                entry_filename_lower(&entries[a]).cmp(&entry_filename_lower(&entries[b]))
-            });
+            sorted.sort_by_cached_key(|&index| entry_filename_lower(&entries[index]));
             Cow::Owned(sorted)
         }
         BrowserSort::Type => {
             let mut sorted = indices.to_vec();
-            sorted.sort_by(|&a, &b| {
-                let key_a = (
-                    format_group_tag(entries[a].group_tag),
-                    entry_filename_lower(&entries[a]),
-                );
-                let key_b = (
-                    format_group_tag(entries[b].group_tag),
-                    entry_filename_lower(&entries[b]),
-                );
-                key_a.cmp(&key_b)
+            sorted.sort_by_cached_key(|&index| {
+                (
+                    format_group_tag(entries[index].group_tag),
+                    entry_filename_lower(&entries[index]),
+                )
             });
             Cow::Owned(sorted)
         }
@@ -156,12 +153,7 @@ fn ordered_indices<'a>(
 fn ordered_child_indices(children: &[TagTreeNode], sort: BrowserSort) -> Vec<usize> {
     let mut indices: Vec<usize> = (0..children.len()).collect();
     if !matches!(sort, BrowserSort::Natural) {
-        indices.sort_by(|&a, &b| {
-            children[a]
-                .label
-                .to_ascii_lowercase()
-                .cmp(&children[b].label.to_ascii_lowercase())
-        });
+        indices.sort_by_cached_key(|&index| children[index].label.to_ascii_lowercase());
     }
     indices
 }
