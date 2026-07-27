@@ -2,6 +2,138 @@
 //! It owns test-only characterization and does not participate in runtime application behavior.
 
 use super::*;
+use std::collections::HashSet;
+
+#[test]
+fn editing_kit_menu_uses_each_shortcut_once_in_reverse_engine_order() {
+    let games: Vec<&str> = editing_kit_menu_shortcuts()
+        .map(|shortcut| shortcut.game)
+        .collect();
+
+    assert_eq!(
+        games,
+        vec![
+            "haloce_evolved",
+            "halo2amp_mcc",
+            "halo4_mcc",
+            "haloreach_mcc",
+            "halo3odst_mcc",
+            "halo3_mcc",
+            "halo2_mcc",
+            "haloce_mcc",
+        ]
+    );
+    assert_eq!(
+        games
+            .iter()
+            .map(|game| game_display_name(game))
+            .collect::<Vec<_>>(),
+        vec![
+            "Halo: Campaign Evolved",
+            "Halo 2 Anniversary Multiplayer",
+            "Halo 4",
+            "Halo: Reach",
+            "Halo 3: ODST",
+            "Halo 3",
+            "Halo 2",
+            "Halo: Combat Evolved",
+        ]
+    );
+    assert_eq!(
+        games.iter().copied().collect::<HashSet<_>>().len(),
+        games.len()
+    );
+    assert_eq!(games.len(), EDITING_KIT_SHORTCUTS.len());
+}
+
+#[test]
+fn editing_kit_menu_games_have_distinct_embedded_primary_icons() {
+    let mut icons: HashSet<&'static [u8]> = HashSet::new();
+
+    for shortcut in editing_kit_menu_shortcuts() {
+        let bytes = get_game_banner_bytes(shortcut.game);
+        let image = image::load_from_memory_with_format(bytes, image::ImageFormat::Png)
+            .unwrap_or_else(|error| panic!("{} icon is not a valid PNG: {error}", shortcut.game));
+        assert_eq!(
+            image.width(),
+            image.height(),
+            "{} icon is not square",
+            shortcut.game
+        );
+        assert!(
+            image.width() >= 200,
+            "{} icon is too small for DPI-aware downsampling",
+            shortcut.game
+        );
+        assert!(
+            icons.insert(bytes),
+            "{} reuses another editing kit's primary icon",
+            shortcut.game
+        );
+    }
+
+    assert_eq!(icons.len(), EDITING_KIT_SHORTCUTS.len());
+}
+
+#[test]
+fn editing_kit_menu_rows_keep_icons_aligned_and_separators_outside_click_targets() {
+    for scale in [MIN_UI_SCALE, MAX_UI_SCALE] {
+        let ctx = egui::Context::default();
+        ctx.set_zoom_factor(scale);
+        let mut first_row = egui::Rect::NOTHING;
+        let mut separator = egui::Rect::NOTHING;
+        let mut second_row = egui::Rect::NOTHING;
+
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(360.0, 160.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.set_min_width(EDITING_KIT_MENU_MIN_WIDTH);
+                    first_row = editing_kit_menu_row(ui, "Halo 4", "H4", None).rect;
+                    separator = ui.separator().rect;
+                    second_row = editing_kit_menu_row(
+                        ui,
+                        "Halo 2 Anniversary Multiplayer",
+                        "H2A",
+                        None,
+                    )
+                    .rect;
+                });
+            },
+        );
+
+        let first_layout = editing_kit_menu_row_layout(first_row);
+        let second_layout = editing_kit_menu_row_layout(second_row);
+        assert_eq!(first_layout.icon_rect.min.x, second_layout.icon_rect.min.x);
+        assert_eq!(first_layout.icon_rect.max.x, second_layout.icon_rect.max.x);
+        assert_eq!(
+            first_layout.icon_rect.size(),
+            Vec2::splat(EDITING_KIT_MENU_ICON_SIZE)
+        );
+        assert!(first_row.contains(first_layout.icon_rect.min));
+        assert!(first_row.contains(first_layout.icon_rect.max));
+        assert!(
+            first_layout.label_rect.right() + EDITING_KIT_MENU_ICON_GAP
+                <= first_layout.icon_rect.left()
+        );
+        assert!(first_row.max.y <= separator.min.y);
+        assert!(separator.max.y <= second_row.min.y);
+
+        let pixels_per_point = ctx.pixels_per_point();
+        assert!(
+            (first_layout.icon_rect.width() * pixels_per_point
+                - EDITING_KIT_MENU_ICON_SIZE * pixels_per_point)
+                .abs()
+                < f32::EPSILON
+        );
+    }
+}
 
 #[test]
 fn terminal_line_visuals_are_distinct_by_severity() {

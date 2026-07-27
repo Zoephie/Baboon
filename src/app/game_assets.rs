@@ -17,7 +17,7 @@ pub(super) fn get_game_banner_bytes(game: &str) -> &'static [u8] {
     }
 }
 
-/// Engine emblems used only by the compact top-toolbar editing-kit shortcuts.
+/// Compact engine emblems used by editing-kit links on the welcome screen.
 /// These intentionally remain separate from the larger game banner artwork.
 pub(super) fn get_game_emblem_bytes(game: &str) -> Option<&'static [u8]> {
     match game {

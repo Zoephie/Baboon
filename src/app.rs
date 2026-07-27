@@ -288,7 +288,6 @@ pub struct Baboon {
     pending_tool_import: Option<ToolImportRequest>,
     /// Toolbar launcher icons (decoded from embedded .ico at startup).
     blender_icon: Option<egui::TextureHandle>,
-    monitor_icon: Option<egui::TextureHandle>,
     sapien_icon: Option<egui::TextureHandle>,
     tag_test_icon: Option<egui::TextureHandle>,
     game_banner_textures: HashMap<String, egui::TextureHandle>,
@@ -483,11 +482,6 @@ impl Baboon {
                 "blender_icon",
                 include_bytes!("../assets/Quick access/blender.ico"),
             ),
-            monitor_icon: load_ico_texture(
-                &cc.egui_ctx,
-                "monitor_icon",
-                include_bytes!("../assets/Quick access/monitor.ico"),
-            ),
             sapien_icon: load_ico_texture(
                 &cc.egui_ctx,
                 "sapien_icon",
@@ -548,11 +542,6 @@ impl Baboon {
             ctx,
             "blender_icon",
             include_bytes!("../assets/Quick access/blender.ico"),
-        );
-        self.monitor_icon = load_ico_texture(
-            ctx,
-            "monitor_icon",
-            include_bytes!("../assets/Quick access/monitor.ico"),
         );
         self.sapien_icon = load_ico_texture(
             ctx,
@@ -637,7 +626,12 @@ fn load_png_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egu
     let rgba = image.to_rgba8();
     let size = [rgba.width() as usize, rgba.height() as usize];
     let color = egui::ColorImage::from_rgba_unmultiplied(size, rgba.as_raw());
-    Some(ctx.load_texture(name, color, egui::TextureOptions::LINEAR))
+    Some(ctx.load_texture(
+        name,
+        color,
+        egui::TextureOptions::LINEAR
+            .with_mipmap_mode(Some(egui::TextureFilter::Linear)),
+    ))
 }
 
 fn editing_kit_path_inputs(paths: &HashMap<String, PathBuf>) -> HashMap<String, String> {

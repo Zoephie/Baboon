@@ -19,12 +19,6 @@ mod welcome;
 mod tag_tiles;
 mod tool_commands;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum LauncherButtonVisual {
-    Normal,
-    Muted,
-}
-
 /// A toolbar launcher button: shows the decoded `.ico` icon when available,
 /// otherwise falls back to a single-letter label. Returns the response so the
 /// caller can attach a hover tooltip and read `.clicked()`.
@@ -34,21 +28,6 @@ fn launcher_button(
     fallback: &str,
     enabled: bool,
 ) -> egui::Response {
-    launcher_button_with_visual(ui, icon, fallback, enabled, LauncherButtonVisual::Normal)
-}
-
-fn launcher_button_with_visual(
-    ui: &mut Ui,
-    icon: Option<&egui::TextureHandle>,
-    fallback: &str,
-    enabled: bool,
-    visual: LauncherButtonVisual,
-) -> egui::Response {
-    let tint = match visual {
-        LauncherButtonVisual::Normal => Color32::WHITE,
-        LauncherButtonVisual::Muted => ui.visuals().weak_text_color(),
-    };
-
     match icon {
         Some(texture) => ui.add_enabled(
             enabled,
@@ -57,14 +36,102 @@ fn launcher_button_with_visual(
                     texture.id(),
                     Vec2::splat(20.0),
                 ))
-                .tint(tint),
+                .tint(Color32::WHITE),
             ),
         ),
         None => ui.add_enabled(
             enabled,
-            egui::Button::new(RichText::new(fallback).color(tint)).min_size(Vec2::splat(22.0)),
+            egui::Button::new(RichText::new(fallback).color(Color32::WHITE))
+                .min_size(Vec2::splat(22.0)),
         ),
     }
+}
+
+fn editing_kit_menu_shortcuts() -> impl Iterator<Item = EditingKitShortcut> {
+    EDITING_KIT_SHORTCUTS.into_iter().rev()
+}
+
+const EDITING_KIT_MENU_MIN_WIDTH: f32 = 240.0;
+const EDITING_KIT_MENU_ICON_SIZE: f32 = 24.0;
+const EDITING_KIT_MENU_HORIZONTAL_PADDING: f32 = 8.0;
+const EDITING_KIT_MENU_ICON_GAP: f32 = 8.0;
+
+#[derive(Clone, Copy, Debug)]
+struct EditingKitMenuRowLayout {
+    label_rect: egui::Rect,
+    icon_rect: egui::Rect,
+}
+
+fn editing_kit_menu_row_layout(row_rect: egui::Rect) -> EditingKitMenuRowLayout {
+    let content = row_rect.shrink2(Vec2::new(EDITING_KIT_MENU_HORIZONTAL_PADDING, 2.0));
+    let icon_rect = egui::Rect::from_center_size(
+        egui::pos2(
+            content.right() - EDITING_KIT_MENU_ICON_SIZE * 0.5,
+            content.center().y,
+        ),
+        Vec2::splat(EDITING_KIT_MENU_ICON_SIZE),
+    );
+    let label_rect = egui::Rect::from_min_max(
+        content.min,
+        egui::pos2(
+            icon_rect.left() - EDITING_KIT_MENU_ICON_GAP,
+            content.max.y,
+        ),
+    );
+    EditingKitMenuRowLayout {
+        label_rect,
+        icon_rect,
+    }
+}
+
+fn editing_kit_menu_row(
+    ui: &mut Ui,
+    label: &str,
+    fallback: &str,
+    texture: Option<&egui::TextureHandle>,
+) -> egui::Response {
+    let row_height = ui
+        .spacing()
+        .interact_size
+        .y
+        .max(EDITING_KIT_MENU_ICON_SIZE + 4.0);
+    let response = ui.add_sized(
+        Vec2::new(EDITING_KIT_MENU_MIN_WIDTH, row_height),
+        egui::Button::new(""),
+    );
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
+    });
+    let layout = editing_kit_menu_row_layout(response.rect);
+    let text_color = text_dark();
+    ui.painter()
+        .with_clip_rect(layout.label_rect)
+        .text(
+            layout.label_rect.left_center(),
+            egui::Align2::LEFT_CENTER,
+            label,
+            egui::TextStyle::Button.resolve(ui.style()),
+            text_color,
+        );
+    if let Some(texture) = texture {
+        ui.painter().image(
+            texture.id(),
+            layout.icon_rect,
+            egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+            Color32::WHITE,
+        );
+    } else {
+        ui.painter()
+            .with_clip_rect(layout.icon_rect)
+            .text(
+                layout.icon_rect.center(),
+                egui::Align2::CENTER_CENTER,
+                fallback,
+                egui::FontId::proportional(8.0),
+                text_color,
+            );
+    }
+    response
 }
 
 fn terminal_line_color(severity: TerminalLineSeverity) -> Color32 {
@@ -378,8 +445,6 @@ impl Baboon {
                 self.launch_blender();
             }
 
-            self.draw_monitor_menu_button(ui);
-
             let tag_test_ready = self
                 .kit_tool_path(self.tag_test_executable())
                 .is_some_and(|path| path.is_file());
@@ -429,65 +494,33 @@ impl Baboon {
                         unsaved,
                     });
                 }
-                ui.separator();
             }
-            self.draw_editing_kit_shortcut_buttons(ui);
         });
     }
 
-    fn draw_editing_kit_shortcut_buttons(&mut self, ui: &mut Ui) {
-        for shortcut in EDITING_KIT_SHORTCUTS.into_iter().rev() {
-            let texture = self.game_emblem_texture(ui.ctx(), shortcut.game).cloned();
-            let configured_path = self.editing_kit_paths.get(shortcut.game);
-            let tooltip = configured_path
-                .map(|path| format!("Load {} from {}", shortcut.label, path.display()))
-                .unwrap_or_else(|| format!("Set {} path in Settings", shortcut.label));
-            let visual = if configured_path.is_some() {
-                LauncherButtonVisual::Normal
-            } else {
-                LauncherButtonVisual::Muted
-            };
-            if launcher_button_with_visual(ui, texture.as_ref(), shortcut.fallback, true, visual)
-                .on_hover_text(tooltip)
-                .clicked()
-            {
-                self.load_editing_kit_shortcut(shortcut, ui.ctx().clone());
-            }
-        }
-    }
-
-    fn draw_monitor_menu_button(&mut self, ui: &mut Ui) {
-        let game = self.source()
-            .and_then(|source| source.game.as_deref());
+    fn draw_monitor_tools_menu(&mut self, ui: &mut Ui) {
+        let game = self.source().and_then(|source| source.game.as_deref());
         let commands = monitor_commands_for_game(game);
-        if commands.is_empty() {
-            launcher_button(ui, self.monitor_icon.as_ref(), "M", false)
-                .on_hover_text("No monitor commands available for this game");
-            return;
-        }
-
+        let enabled = !commands.is_empty();
         let ctx = ui.ctx().clone();
-        let monitor_texture = self.monitor_icon.as_ref().map(|texture| texture.id());
-        let add_commands = |ui: &mut Ui| {
-            ui.set_min_width(210.0);
-            for command in commands {
-                if ui.button(*command).clicked() {
-                    self.submit_terminal_command(format!("tool {command}"), ctx.clone());
-                    ui.close_menu();
-                }
-            }
-        };
-        if let Some(texture_id) = monitor_texture {
-            ui.menu_image_button(
-                egui::load::SizedTexture::new(texture_id, Vec2::splat(20.0)),
-                add_commands,
-            )
-            .response
-            .on_hover_text("Run monitor command");
-        } else {
-            ui.menu_button("M", add_commands)
+        let response = ui
+            .add_enabled_ui(enabled, |ui| {
+                ui.menu_button("Monitor", |ui| {
+                    ui.set_min_width(210.0);
+                    for command in commands {
+                        if ui.button(*command).clicked() {
+                            self.submit_terminal_command(format!("tool {command}"), ctx.clone());
+                            ui.close_menu();
+                        }
+                    }
+                })
                 .response
-                .on_hover_text("Run monitor command");
+            })
+            .inner;
+        if enabled {
+            response.on_hover_text("Run monitor command");
+        } else {
+            response.on_disabled_hover_text("No monitor commands available for this game");
         }
     }
 

@@ -331,6 +331,7 @@ impl Baboon {
                             ui.close_menu();
                             self.tool_commands.open = true;
                         }
+                        self.draw_monitor_tools_menu(ui);
                         ui.separator();
                         if ui
                             .add_enabled(
@@ -507,6 +508,36 @@ impl Baboon {
                         if ui.button("Check for updates").clicked() {
                             self.begin_check_for_updates(ctx.clone());
                             ui.close_menu();
+                        }
+                    });
+                    ui.menu_button("Editing Kits", |ui| {
+                        ui.set_min_width(EDITING_KIT_MENU_MIN_WIDTH);
+                        for (index, shortcut) in editing_kit_menu_shortcuts().enumerate() {
+                            let texture =
+                                self.game_banner_texture(ui.ctx(), shortcut.game).cloned();
+                            let configured_path = self.editing_kit_paths.get(shortcut.game);
+                            let tooltip = configured_path
+                                .map(|path| {
+                                    format!("Load {} from {}", shortcut.label, path.display())
+                                })
+                                .unwrap_or_else(|| {
+                                    format!("Set {} path in Settings", shortcut.label)
+                                });
+                            if editing_kit_menu_row(
+                                ui,
+                                game_display_name(shortcut.game),
+                                shortcut.fallback,
+                                texture.as_ref(),
+                            )
+                            .on_hover_text(tooltip)
+                            .clicked()
+                            {
+                                ui.close_menu();
+                                self.load_editing_kit_shortcut(shortcut, ctx.clone());
+                            }
+                            if index + 1 < EDITING_KIT_SHORTCUTS.len() {
+                                ui.separator();
+                            }
                         }
                     });
                     self.draw_tool_launcher_buttons(ui);
@@ -1100,4 +1131,3 @@ pub(super) fn recent_folder_menu_label(path: &Path) -> String {
         .collect::<String>();
     format!("...{tail}")
 }
-
