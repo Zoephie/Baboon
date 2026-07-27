@@ -78,6 +78,7 @@ mod tests {
             &packages,
             &usmap,
             "/Game/Tags/sound/scripted/vo_scr_m02halo/m02_00040_cortana-sound",
+            None,
         );
         assert!(!binding.is_empty(), "no media resolved");
 

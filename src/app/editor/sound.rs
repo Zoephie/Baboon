@@ -899,6 +899,29 @@ fn draw_wwise_event_player(
     });
 }
 
+/// Stand-in for a Campaign Evolved `sound` tag that reaches no Wwise event.
+///
+/// About a tenth of the game's sound tags are like this — Reach metadata kept
+/// for the simulation with no audio asset behind them. Saying so is the whole
+/// point: the alternative is a player that looks playable and never is.
+fn draw_ce_unbound_note(ui: &mut Ui) {
+    egui::CollapsingHeader::new(
+        RichText::new("Sound \u{2014} no audio bound").color(text_dark()),
+    )
+    .default_open(true)
+    .show(ui, |ui| {
+        ui.label(
+            RichText::new(
+                "This tag's permutation table is inherited Reach metadata. Campaign \
+                 Evolved plays audio through Wwise, and no event is wired to this tag, \
+                 so there is nothing to audition or extract.",
+            )
+            .color(subtle_dark()),
+        );
+    });
+    ui.add_space(6.0);
+}
+
 /// Render the Campaign Evolved player.
 ///
 /// CE `sound` tags hold no sample data and — unlike Halo 4 — name no event
@@ -1044,7 +1067,7 @@ fn draw_ce_wwise_player(
                     ui.label(RichText::new(m.display_name()).color(text_dark()))
                         .on_hover_text(&m.source_name);
                     ui.label(RichText::new(&m.event_name).color(subtle_dark()));
-                    ui.label(RichText::new(m.media_path.clone()).color(subtle_dark()));
+                    ui.label(RichText::new(m.location_label()).color(subtle_dark()));
                     ui.end_row();
                 }
             });
@@ -1057,13 +1080,18 @@ pub(in crate::app) fn draw_sound_player(
     edit: &mut FieldEditContext<'_>,
 ) {
     // Campaign Evolved: audio is reached through package imports, not the tag.
-    // An empty binding means the tag is one of the many unbound stubs, which
-    // has no player at all rather than an empty one.
-    if let Some(binding) = edit.ce_sound
-        && !binding.is_empty()
-    {
-        let binding = binding.clone();
-        draw_ce_wwise_player(ui, &binding, edit);
+    // `Some` means this is a CE sound tag, whatever it resolved to — so the
+    // fall-through below (which reads the Reach permutation table and plays it
+    // out of an FMOD bank that does not exist here) must never be reached. It
+    // rendered a working-looking player whose every button said "no source
+    // loaded".
+    if let Some(binding) = edit.ce_sound {
+        if binding.is_empty() {
+            draw_ce_unbound_note(ui);
+        } else {
+            let binding = binding.clone();
+            draw_ce_wwise_player(ui, &binding, edit);
+        }
         return;
     }
     // Halo 4: Wwise event reference, no inline pitch-range audio.
@@ -1392,9 +1420,51 @@ fn referenced_sound_extract_items(
     build_extract_items(tag, &rows, h2_params, base, false, sound_rel)
 }
 
+/// What a click on a referenced-sound row produced. A container source can only
+/// yield `ce_ref`: the referenced tag holds no samples, so the app resolves its
+/// Wwise binding after the frame.
+#[derive(Default)]
+struct ReferencedSoundClick {
+    open: Option<OpenTagRequest>,
+    play: Option<super::audio::SoundAction>,
+    extract: Option<ExtractRequest>,
+    ce_ref: Option<CeSoundRefRequest>,
+}
+
+impl ReferencedSoundClick {
+    /// Fold another row's click into this one. Only one button can be pressed
+    /// per frame, so a later row's `Some` simply wins.
+    fn take_from(&mut self, other: Self) {
+        self.open = other.open.or(self.open.take());
+        self.play = other.play.or(self.play.take());
+        self.extract = other.extract.or(self.extract.take());
+        self.ce_ref = other.ce_ref.or(self.ce_ref.take());
+    }
+
+    /// Hand every collected request to the app.
+    fn apply(self, edit: &mut FieldEditContext<'_>) {
+        if self.open.is_some() {
+            *edit.open_request = self.open;
+        }
+        if self.play.is_some() {
+            *edit.sound_play_request = self.play;
+        }
+        if self.extract.is_some() {
+            *edit.sound_extract_request = self.extract;
+        }
+        if self.ce_ref.is_some() {
+            *edit.ce_sound_ref_request = self.ce_ref;
+        }
+    }
+}
+
 /// Render a set of `.sound` refs with a ▶ Play, ⬇ Extract, and the clickable
 /// open-label per ref. Shared by the dialogue and sound_looping players; kept out
 /// of `edit` so the grid closure needn't borrow it mutably.
+///
+/// `container_source` marks a Campaign Evolved mount, where there is no tags
+/// root to load the referenced tag from — and nothing worth loading if there
+/// were, since CE sound tags carry no samples.
 fn draw_referenced_sound_cell(
     ui: &mut Ui,
     refs: &[(u32, String)],
@@ -1402,62 +1472,77 @@ fn draw_referenced_sound_cell(
     tags_root: Option<&std::path::Path>,
     definitions_root: Option<&std::path::Path>,
     language: Option<&str>,
-) -> (
-    Option<OpenTagRequest>,
-    Option<super::audio::SoundAction>,
-    Option<ExtractRequest>,
-) {
-    let (mut open, mut play, mut extract) = (None, None, None);
+    container_source: bool,
+) -> ReferencedSoundClick {
+    let mut click = ReferencedSoundClick::default();
     if refs.is_empty() {
         ui.label(RichText::new("(none)").color(subtle_dark()));
-        return (open, play, extract);
+        return click;
     }
     ui.vertical(|ui| {
         for (group, path) in refs {
             ui.horizontal(|ui| {
                 let is_sound = &group.to_be_bytes() == b"snd!";
+                let label = path.rsplit(['\\', '/']).next().unwrap_or(path).to_owned();
                 if is_sound
                     && ui
                         .small_button("\u{25B6}")
                         .on_hover_text("Play this referenced sound")
                         .clicked()
                 {
-                    if let Some((sound, _)) =
+                    if container_source {
+                        click.ce_ref = Some(CeSoundRefRequest {
+                            group_tag: *group,
+                            reference: path.clone(),
+                            label: label.clone(),
+                            extract: false,
+                        });
+                    } else if let Some((sound, _)) =
                         load_referenced_sound(game, tags_root, definitions_root, path, *group)
                     {
-                        play = referenced_sound_play_action(&sound, Some(path.as_str()));
+                        click.play = referenced_sound_play_action(&sound, Some(path.as_str()));
                     }
                 }
+                // Deliberately a second `if`: chaining these would skip drawing
+                // the extract button on the frame Play is clicked.
                 if is_sound
                     && ui
                         .small_button("\u{2B07}")
-                        .on_hover_text("Extract this referenced sound to its data\\ folder")
+                        .on_hover_text(if container_source {
+                            "Extract this referenced sound's permutations to a folder"
+                        } else {
+                            "Extract this referenced sound to its data\\ folder"
+                        })
                         .clicked()
                 {
-                    if let Some((sound, abs)) =
+                    if container_source {
+                        click.ce_ref = Some(CeSoundRefRequest {
+                            group_tag: *group,
+                            reference: path.clone(),
+                            label,
+                            extract: true,
+                        });
+                    } else if let Some((sound, abs)) =
                         load_referenced_sound(game, tags_root, definitions_root, path, *group)
-                    {
-                        if let Some(base) =
+                        && let Some(base) =
                             tags_root.and_then(|root| reimport_base_dir_lang(root, &abs, language))
-                        {
-                            let items =
-                                referenced_sound_extract_items(&sound, &base, Some(path.as_str()));
-                            let label = path.rsplit(['\\', '/']).next().unwrap_or(path).to_owned();
-                            extract = Some(ExtractRequest {
-                                items,
-                                tags_root: tags_root.map(std::path::Path::to_path_buf),
-                                label,
-                            });
-                        }
+                    {
+                        let items =
+                            referenced_sound_extract_items(&sound, &base, Some(path.as_str()));
+                        click.extract = Some(ExtractRequest {
+                            items,
+                            tags_root: tags_root.map(std::path::Path::to_path_buf),
+                            label,
+                        });
                     }
                 }
                 if let Some(request) = ref_open_label(ui, *group, path) {
-                    open = Some(request);
+                    click.open = Some(request);
                 }
             });
         }
     });
-    (open, play, extract)
+    click
 }
 
 pub(in crate::app) fn draw_dialogue_summary(
@@ -1512,14 +1597,13 @@ pub(in crate::app) fn draw_dialogue_summary(
         rows.push(DialogueRow { name, sounds });
     }
 
-    let mut to_open: Option<OpenTagRequest> = None;
-    let mut to_play: Option<super::audio::SoundAction> = None;
-    let mut to_extract: Option<ExtractRequest> = None;
+    let mut clicked = ReferencedSoundClick::default();
     // Copies so the grid closure needn't borrow `edit`.
     let game = edit.game;
     let tags_root = edit.tags_root;
     let defs = edit.definitions_root;
     let language = edit.sound_language;
+    let container_source = edit.ce_paks_root.is_some();
     egui::CollapsingHeader::new(
         RichText::new(format!(
             "Dialogue Overview ({total} vocalizations, {total_sounds} sounds)"
@@ -1550,23 +1634,16 @@ pub(in crate::app) fn draw_dialogue_summary(
                         ui.end_row();
                         for row in &rows {
                             ui.label(RichText::new(&row.name).color(text_dark()));
-                            let (open, play, extract) = draw_referenced_sound_cell(
+                            let click = draw_referenced_sound_cell(
                                 ui,
                                 &row.sounds,
                                 game,
                                 tags_root,
                                 defs,
                                 language,
+                                container_source,
                             );
-                            if open.is_some() {
-                                to_open = open;
-                            }
-                            if play.is_some() {
-                                to_play = play;
-                            }
-                            if extract.is_some() {
-                                to_extract = extract;
-                            }
+                            clicked.take_from(click);
 
                             ui.end_row();
                         }
@@ -1582,15 +1659,7 @@ pub(in crate::app) fn draw_dialogue_summary(
                 }
             });
     });
-    if to_open.is_some() {
-        *edit.open_request = to_open;
-    }
-    if to_play.is_some() {
-        *edit.sound_play_request = to_play;
-    }
-    if to_extract.is_some() {
-        *edit.sound_extract_request = to_extract;
-    }
+    clicked.apply(edit);
     ui.add_space(6.0);
 }
 
@@ -1647,13 +1716,12 @@ pub(in crate::app) fn draw_sound_looping_player(
     if refs.is_empty() {
         return;
     }
-    let mut to_open: Option<OpenTagRequest> = None;
-    let mut to_play: Option<super::audio::SoundAction> = None;
-    let mut to_extract: Option<ExtractRequest> = None;
+    let mut clicked = ReferencedSoundClick::default();
     let game = edit.game;
     let tags_root = edit.tags_root;
     let defs = edit.definitions_root;
     let language = edit.sound_language;
+    let container_source = edit.ce_paks_root.is_some();
     egui::CollapsingHeader::new(
         RichText::new(format!(
             "Sound Looping \u{2014} {} component sound(s)",
@@ -1674,32 +1742,21 @@ pub(in crate::app) fn draw_sound_looping_player(
                         for (label, group, path) in &refs {
                             ui.label(RichText::new(label).color(subtle_dark()));
                             let one = [(*group, path.clone())];
-                            let (open, play, extract) = draw_referenced_sound_cell(
-                                ui, &one, game, tags_root, defs, language,
-                            );
-                            if open.is_some() {
-                                to_open = open;
-                            }
-                            if play.is_some() {
-                                to_play = play;
-                            }
-                            if extract.is_some() {
-                                to_extract = extract;
-                            }
+                            clicked.take_from(draw_referenced_sound_cell(
+                                ui,
+                                &one,
+                                game,
+                                tags_root,
+                                defs,
+                                language,
+                                container_source,
+                            ));
                             ui.end_row();
                         }
                     });
             });
     });
-    if to_open.is_some() {
-        *edit.open_request = to_open;
-    }
-    if to_play.is_some() {
-        *edit.sound_play_request = to_play;
-    }
-    if to_extract.is_some() {
-        *edit.sound_extract_request = to_extract;
-    }
+    clicked.apply(edit);
     ui.add_space(6.0);
 }
 

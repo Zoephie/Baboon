@@ -74,6 +74,7 @@ impl Baboon {
         let mut block_clip_request = None;
         let mut bitmap_reimport = None;
         let mut tsv_paste_request = None;
+        let mut ce_sound_ref_request = None;
 
         // Taken rather than read: it is a one-shot, and egui remembers the
         // state each container lands in, so forcing it for a single frame is
@@ -130,6 +131,7 @@ impl Baboon {
             sound_extract_request: &mut self.pending_sound_extract,
             sound_language: self.audio.language.as_deref(),
             ce_sound: ce_sound.as_deref(),
+            ce_sound_ref_request: &mut ce_sound_ref_request,
             ce_paks_root,
             tool_import: &mut self.pending_tool_import,
             bitmap_reimport: &mut bitmap_reimport,
@@ -264,6 +266,12 @@ impl Baboon {
         if let Some(popup) = function_request {
             self.function_popup = Some(popup);
             self.function_popup_kit = Some(kit_id);
+        }
+        // A referenced sound was played/extracted from a container source. It
+        // is stamped with this kit because resolving it needs that kit's
+        // containers, not whichever one happens to be active by the drain.
+        if let Some(request) = ce_sound_ref_request {
+            self.pending_ce_sound_ref = Some((kit_id, request));
         }
         // The reference picker is opened from inside the field renderer rather
         // than hoisted here, so it is stamped by noticing it appear.

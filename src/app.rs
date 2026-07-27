@@ -280,6 +280,10 @@ pub struct Baboon {
     ce_usmap: Option<Arc<blam_tags::iostore::usmap::Usmap>>,
     /// Pending sound-extraction batch (decode + write), drained by the audio layer.
     pending_sound_extract: Option<ExtractRequest>,
+    /// Pending play/extract of a `.sound` a container-source tag only refers to,
+    /// stamped with the kit that raised it. Resolved after rendering, since the
+    /// referenced tag's audio has to be walked out to Wwise first.
+    pending_ce_sound_ref: Option<(KitId, CeSoundRefRequest)>,
     /// Pending "open referenced tag in a new tab" request.
     pending_open: Option<OpenTagRequest>,
     /// Movable Campaign Evolved tag-reference picker, when one is open.
@@ -474,6 +478,7 @@ impl Baboon {
             audio: audio::AudioState::default(),
             ce_usmap: None,
             pending_sound_extract: None,
+            pending_ce_sound_ref: None,
             pending_open: None,
             tag_reference_picker: None,
             pending_tool_import: None,
