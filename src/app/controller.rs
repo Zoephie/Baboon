@@ -3253,6 +3253,15 @@ impl Baboon {
     /// captured now and kept, so what the user reviews and what is written
     /// cannot drift apart between the two steps.
     pub(super) fn export_mod(&mut self) {
+        self.open_mod_review(false);
+    }
+
+    /// Review what this workspace is carrying, without exporting anything.
+    pub(super) fn review_changes(&mut self) {
+        self.open_mod_review(true);
+    }
+
+    fn open_mod_review(&mut self, review_only: bool) {
         let exporting = self.active;
         let snapshot = match self.capture_campaign_project(exporting, 0.0) {
             Ok(Some(snapshot)) => snapshot,
@@ -3303,6 +3312,7 @@ impl Baboon {
             .unwrap_or_default();
         self.mod_export = Some(ModExportDialog {
             kit: self.active_kit_id(),
+            review_only,
             snapshot,
             rows,
             name: "mymod".to_owned(),
@@ -3339,15 +3349,25 @@ impl Baboon {
         let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
             return failed("No source loaded".to_owned());
         };
+        let edited_tag = match TagFile::read_from_bytes(&overlay.bytes) {
+            Ok(edited) => edited,
+            Err(error) => return failed(format!("Could not read the edited tag: {error}")),
+        };
+        // A tag this workspace created has no shipped counterpart to compare
+        // against, so the whole tag is described instead.
+        if overlay.kind == CampaignProjectTagKind::New {
+            let (rows, truncated) = describe_tag(&edited_tag, &self.kits[kit].names, LIMIT);
+            return ModRowDiff {
+                rows,
+                truncated,
+                error: None,
+            };
+        }
         let base = match crate::source::read_entry(&source.source, &entry) {
             Ok(base) => base,
             Err(error) => return failed(format!("Could not read the shipped tag: {error}")),
         };
-        let edited = match TagFile::read_from_bytes(&overlay.bytes) {
-            Ok(edited) => edited,
-            Err(error) => return failed(format!("Could not read the edited tag: {error}")),
-        };
-        let (rows, truncated) = diff_tags(&base, &edited, &self.kits[kit].names, LIMIT);
+        let (rows, truncated) = diff_tags(&base, &edited_tag, &self.kits[kit].names, LIMIT);
         ModRowDiff {
             rows,
             truncated,

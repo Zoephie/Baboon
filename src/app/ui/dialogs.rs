@@ -601,7 +601,12 @@ impl Baboon {
         let mut expand_toggled: Option<String> = None;
         let mut name_edit = dialog.name.clone();
 
-        egui::Window::new("Export Mod")
+        let review_only = dialog.review_only;
+        egui::Window::new(if review_only {
+            "Unexported changes"
+        } else {
+            "Export Mod"
+        })
             .id(egui::Id::new("mod_export"))
             .open(&mut open)
             .collapsible(false)
@@ -626,14 +631,16 @@ impl Baboon {
                                 .color(egui::Color32::from_rgb(210, 120, 90)),
                         );
                     }
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("Include none").clicked() {
-                            set_all = Some(false);
-                        }
-                        if ui.button("Include all").clicked() {
-                            set_all = Some(true);
-                        }
-                    });
+                    if !review_only {
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.button("Include none").clicked() {
+                                set_all = Some(false);
+                            }
+                            if ui.button("Include all").clicked() {
+                                set_all = Some(true);
+                            }
+                        });
+                    }
                 });
                 ui.add_space(6.0);
                 egui::ScrollArea::vertical()
@@ -641,13 +648,19 @@ impl Baboon {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         for (index, row) in dialog.rows.iter().enumerate() {
-                            let expandable = row.kind == ModExportChange::Modified;
+                            // A new tag opens too: it has no counterpart to
+                            // compare against, so it shows what is in it.
+                            let expandable = row.kind != ModExportChange::Unresolved;
                             let expanded = dialog.expanded.contains(&row.identity);
                             ui.horizontal(|ui| {
                                 if expandable {
                                     if ui
                                         .small_button(if expanded { "v" } else { ">" })
-                                        .on_hover_text("Show what changed")
+                                        .on_hover_text(if row.kind == ModExportChange::New {
+                                            "Show what this tag contains"
+                                        } else {
+                                            "Show what changed"
+                                        })
                                         .clicked()
                                     {
                                         expand_toggled = Some(row.identity.clone());
@@ -655,13 +668,15 @@ impl Baboon {
                                 } else {
                                     ui.add_space(18.0);
                                 }
-                                let mut include = row.include;
-                                let enabled = row.kind != ModExportChange::Unresolved;
-                                if ui
-                                    .add_enabled(enabled, egui::Checkbox::new(&mut include, ""))
-                                    .changed()
-                                {
-                                    toggled = Some(index);
+                                if !review_only {
+                                    let mut include = row.include;
+                                    let enabled = row.kind != ModExportChange::Unresolved;
+                                    if ui
+                                        .add_enabled(enabled, egui::Checkbox::new(&mut include, ""))
+                                        .changed()
+                                    {
+                                        toggled = Some(index);
+                                    }
                                 }
                                 let (marker, color) = match row.kind {
                                     ModExportChange::New => ("+", added_text()),
@@ -707,6 +722,15 @@ impl Baboon {
                             }
                         }
                     });
+                if review_only {
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Close").clicked() {
+                            cancel = true;
+                        }
+                    });
+                    return;
+                }
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Mod name").color(text_dark()));
@@ -1759,6 +1783,7 @@ mod mod_export_tests {
     fn dialog(name: &str) -> ModExportDialog {
         ModExportDialog {
             kit: KitId(0),
+            review_only: false,
             snapshot: CampaignProjectSnapshot {
                 game: "haloce_evolved".to_owned(),
                 source_path: PathBuf::new(),

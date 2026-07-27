@@ -122,6 +122,22 @@ impl Baboon {
                                 ui.close_menu();
                                 self.defer_file_action(DeferredFileAction::ExportMod, ctx);
                             }
+                            // The same review, opened to look rather than to
+                            // export -- which is how you check what a workspace
+                            // is carrying before quitting.
+                            if ui
+                                .add_enabled(
+                                    self.kits[self.active].has_unwritten_modifications(),
+                                    egui::Button::new("Review Changes..."),
+                                )
+                                .on_hover_text(
+                                    "See every edit this workspace is holding that is not written into the game",
+                                )
+                                .clicked()
+                            {
+                                ui.close_menu();
+                                self.review_changes();
+                            }
                         }
                         if self.expert_mode {
                             if ui

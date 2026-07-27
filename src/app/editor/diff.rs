@@ -266,6 +266,24 @@ fn diff_structs(
     }
 }
 
+/// Describe a whole tag as additions, for a tag the game has no counterpart
+/// for.
+///
+/// A new tag has nothing to diff against, but "what is in it" is the same
+/// question the modified rows answer, so it is answered in the same shape and
+/// rendered by the same code rather than through a second presentation.
+pub(in crate::app) fn describe_tag(
+    tag: &TagFile,
+    names: &TagNameIndex,
+    limit: usize,
+) -> (Vec<TagFieldDiff>, bool) {
+    let mut out = Vec::new();
+    dump_struct(&tag.root(), "", names, &mut out, limit, true);
+    let truncated = out.len() > limit;
+    out.truncate(limit);
+    (out, truncated)
+}
+
 /// Emit every scalar in a struct that has no counterpart, so an added or
 /// removed element shows what it actually contains.
 fn dump_struct(

@@ -353,6 +353,9 @@ pub(in crate::app) struct ModRowDiff {
 /// was reviewed and what is written cannot disagree.
 pub(in crate::app) struct ModExportDialog {
     pub(in crate::app) kit: KitId,
+    /// Opened to look rather than to export: the same review without a
+    /// destination or an Export button.
+    pub(in crate::app) review_only: bool,
     pub(in crate::app) snapshot: CampaignProjectSnapshot,
     pub(in crate::app) rows: Vec<ModExportRow>,
     pub(in crate::app) name: String,
