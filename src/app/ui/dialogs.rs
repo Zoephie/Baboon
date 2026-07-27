@@ -464,6 +464,24 @@ impl Baboon {
         }
     }
 
+    /// Split `zone set pvs[3]` into the block it names and the element index.
+    ///
+    /// A reader wants to know which block changed and which element of it, not
+    /// to parse an indexed path.
+    fn split_element_index(element: &str) -> (&str, Option<usize>) {
+        let Some(open) = element.rfind('[') else {
+            return (element, None);
+        };
+        let index = element[open + 1..]
+            .trim_end_matches(']')
+            .parse::<usize>()
+            .ok();
+        match index {
+            Some(index) => (&element[..open], Some(index)),
+            None => (element, None),
+        }
+    }
+
     /// Which fields a diff touched, as the editor's own field filter.
     ///
     /// Canonical (index-free) paths, so one filter serves both sides: deleting
@@ -699,11 +717,31 @@ impl Baboon {
                     ModExportChange::Unresolved => ("-", removed_text()),
                     ModExportChange::Modified => ("~", modified_text()),
                 };
+                // Named as the block it belongs to, with the element called out
+                // inside it. The indexed path answers "where in the file"; what
+                // a reader wants is "which block, and which element of it".
+                let (container, index) = Self::split_element_index(&element);
                 ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(container)
+                            .color(text_dark())
+                            .monospace()
+                            .strong(),
+                    );
                     ui.label(RichText::new(marker).color(heading).monospace().strong());
-                    ui.label(RichText::new(&element).color(heading).monospace());
+                    if let Some(index) = index {
+                        ui.label(RichText::new(format!("element {index}")).color(heading));
+                    }
                     if !label.is_empty() {
-                        ui.label(RichText::new(&label).color(heading).small());
+                        // The label already names the element; the redundant
+                        // "added -- " / "removed -- " prefix is the marker's job.
+                        let detail = label
+                            .split_once(" — ")
+                            .map(|(_, rest)| rest)
+                            .unwrap_or(label.as_str());
+                        if detail != format!("element {}", index.unwrap_or_default()) {
+                            ui.label(RichText::new(detail).color(heading).small());
+                        }
                     }
                 });
             }
@@ -2142,6 +2180,23 @@ mod mod_export_tests {
         assert_eq!(dialog("h2a_magnum").stem(), "h2a_magnum_P");
         assert_eq!(dialog("h2a_magnum_P").stem(), "h2a_magnum_P");
         assert_eq!(dialog("  spaced  ").stem(), "spaced_P");
+    }
+
+    /// A heading names the block and the element within it, rather than an
+    /// indexed path the reader has to parse.
+    #[test]
+    fn an_element_path_splits_into_its_block_and_index() {
+        assert_eq!(
+            Baboon::split_element_index("zone set pvs[3]"),
+            ("zone set pvs", Some(3))
+        );
+        // Nested: the chain stays, so it is clear which block is meant.
+        assert_eq!(
+            Baboon::split_element_index("weapons[2]/triggers[0]"),
+            ("weapons[2]/triggers", Some(0))
+        );
+        // Not an element at all.
+        assert_eq!(Baboon::split_element_index("flags"), ("flags", None));
     }
 
     /// Changes nest, and the innermost element is the one worth heading. The
