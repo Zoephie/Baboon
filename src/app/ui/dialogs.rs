@@ -1774,7 +1774,11 @@ impl Baboon {
                     if is_container {
                         ui.add(
                             egui::TextEdit::singleline(&mut self.new_tag_dialog.rel_path)
-                                .hint_text("objects/characters/foo/foo")
+                                // Prefixed, because a bare path here reads as a
+                                // filled field: the placeholder looked exactly
+                                // like a value someone had already typed, and
+                                // Create sat disabled with no explanation.
+                                .hint_text("e.g. objects/characters/foo/foo")
                                 .desired_width(440.0),
                         );
                     } else {
@@ -1840,6 +1844,15 @@ impl Baboon {
                         };
                     if ui
                         .add_enabled(can_create, egui::Button::new("Create"))
+                        .on_disabled_hover_text(if self.new_tag_dialog.groups.is_empty() {
+                            "No tag groups are available for this game"
+                        } else if is_container {
+                            "Enter a path for the new tag"
+                        } else if self.loaded_tags_root().is_none() {
+                            "Load a loose editing-kit tags folder first"
+                        } else {
+                            "Choose where to save the new tag"
+                        })
                         .clicked()
                     {
                         create = true;
