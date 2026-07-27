@@ -477,14 +477,151 @@ impl Baboon {
         }
     }
 
-    /// One tag's differences, laid out like the editor: a field label, then
-    /// its old and new values side by side in the editor's own value cells.
+    /// Which fields a diff touched, as the editor's own field filter.
     ///
-    /// The values are the point of the whole dialog, so they are shown the way
-    /// the editor shows values -- readable, full width, in a cell -- rather
-    /// than as small text crammed against the right edge. Old on the left in
-    /// red, new on the right in green.
-    fn draw_mod_export_diff(ui: &mut Ui, diff: &ModRowDiff) {
+    /// Canonical (index-free) paths, so one filter serves both sides: deleting
+    /// an element shifts indices, but `zone set pvs/structure bsp mask` names
+    /// the same field whether it sits at element 3 or 4.
+    fn diff_field_filter(rows: &[TagFieldDiff]) -> FieldFilter {
+        let mut visible_paths = HashSet::new();
+        for row in rows {
+            for path in [Some(&row.path), row.base_path.as_ref()].into_iter().flatten() {
+                let canonical = strip_node_indices(path);
+                // Ancestors too: a container has to render for what is inside
+                // it to be reachable.
+                let mut prefix = canonical.as_str();
+                loop {
+                    visible_paths.insert(prefix.to_owned());
+                    match prefix.rfind('/') {
+                        Some(cut) => prefix = &prefix[..cut],
+                        None => break,
+                    }
+                }
+            }
+        }
+        FieldFilter { visible_paths }
+    }
+
+    /// Render one side of a diff through the real field editor, read-only.
+    ///
+    /// This is the editor's own renderer, not an imitation of it: values are
+    /// formatted, enums named and references resolved exactly as they are when
+    /// editing, which is what makes the change inspectable rather than merely
+    /// visible.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_diff_side(
+        ui: &mut Ui,
+        tag: &blam_tags::TagFile,
+        path: &str,
+        filter: &FieldFilter,
+        names: &TagNameIndex,
+        group_tag: u32,
+        game: Option<&str>,
+        definitions_root: Option<&Path>,
+        expert_mode: bool,
+        scope: &str,
+    ) {
+        // The editor collects deferred edits as it draws. Nothing here is
+        // editable, so they are collected into locals and dropped.
+        let mut buffers = EditDrafts::default();
+        let mut pending = Vec::new();
+        let mut block_ops = Vec::new();
+        let mut block_confirm = None;
+        let mut open_request = None;
+        let mut sound_play_request = None;
+        let mut sound_extract_request = None;
+        let mut tool_import = None;
+        let mut bitmap_reimport = None;
+        let mut shader_ops = Vec::new();
+        let mut shader_param_ops = Vec::new();
+        let mut h2_shader_param_ops = Vec::new();
+        let mut function_data_ops = Vec::new();
+        let mut model_variant_ops = Vec::new();
+        let mut color_request = None;
+        let mut function_request = None;
+        let mut block_clip_request = None;
+        let mut tsv_paste_request = None;
+        let mut tag_reference_picker = None;
+        let root = tag.root();
+        let Some(target) = (if path.is_empty() {
+            Some(root)
+        } else {
+            root.descend(path)
+        }) else {
+            ui.label(
+                RichText::new("not present on this side")
+                    .color(subtle_dark())
+                    .small(),
+            );
+            return;
+        };
+        let filter_action = FieldFilterAction::Apply((*filter).clone());
+        let mut edit = FieldEditContext {
+            expand_all: Some(true),
+            nested_default: NestedDefault::Expanded,
+            view_scope: scope,
+            tag_key: scope,
+            group_tag,
+            root: Some(root),
+            game,
+            definitions_root,
+            names: Some(names),
+            tags_root: None,
+            tag_reference_catalog: None,
+            tag_reference_picker: &mut tag_reference_picker,
+            status: None,
+            editable: false,
+            show_block_sizes: false,
+            buffers: &mut buffers,
+            pending: &mut pending,
+            block_ops: &mut block_ops,
+            block_confirm: &mut block_confirm,
+            open_request: &mut open_request,
+            sound_play_request: &mut sound_play_request,
+            sound_status: None,
+            sound_volume: 1.0,
+            sound_extract_request: &mut sound_extract_request,
+            sound_language: None,
+            ce_sound: None,
+            ce_paks_root: None,
+            tool_import: &mut tool_import,
+            bitmap_reimport: &mut bitmap_reimport,
+            shader_ops: &mut shader_ops,
+            shader_param_ops: &mut shader_param_ops,
+            h2_shader_param_ops: &mut h2_shader_param_ops,
+            function_data_ops: &mut function_data_ops,
+            model_variant_ops: &mut model_variant_ops,
+            color_request: &mut color_request,
+            function_request: &mut function_request,
+            block_clipboard: None,
+            docs: None,
+            tsv_paste_request: &mut tsv_paste_request,
+            block_clip_request: &mut block_clip_request,
+            field_filter: Some(&filter_action),
+            field_nav: None,
+        };
+        draw_struct_fields_inline(ui, target, names, 0, expert_mode, path, &mut edit);
+    }
+
+    /// One tag's differences, each shown through the real field editor with
+    /// the shipped value on the left and the edited one on the right.
+    ///
+    /// Rendered per changed element rather than as one whole-tag view: the
+    /// editor shows a block one element at a time behind its instance
+    /// selector, so changes spanning elements 3 and 7 could never both be on
+    /// screen. Each changed element gets its own section, which is what makes
+    /// the whole change visible at once.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_mod_export_diff(
+        ui: &mut Ui,
+        diff: &ModRowDiff,
+        names: &TagNameIndex,
+        group_tag: u32,
+        game: Option<&str>,
+        definitions_root: Option<&Path>,
+        expert_mode: bool,
+        scope: &str,
+    ) {
         if let Some(error) = diff.error.as_deref() {
             ui.label(RichText::new(error).color(removed_text()).small());
             return;
@@ -497,104 +634,83 @@ impl Baboon {
             );
             return;
         }
-        // Split what is left after the label between the two value cells.
-        let available = ui.available_width();
-        let label_width = (available * 0.34).clamp(120.0, 320.0);
-        let cell_width = ((available - label_width - 24.0) / 2.0).max(80.0);
+        let filter = Self::diff_field_filter(&diff.rows);
 
-        // Named, not just coloured: which side is which should not depend on
-        // telling red from green.
-        ui.horizontal(|ui| {
-            ui.add_space(4.0);
-            let (rect, _) = ui.allocate_exact_size(Vec2::new(label_width, 16.0), Sense::hover());
-            let _ = rect;
-            let (before, _) = ui.allocate_exact_size(Vec2::new(cell_width, 16.0), Sense::hover());
-            ui.painter().text(
-                before.left_center() + Vec2::new(5.0, 0.0),
-                Align2::LEFT_CENTER,
-                "before",
-                FontId::proportional(11.0),
-                removed_text(),
-            );
-            let (after, _) = ui.allocate_exact_size(Vec2::new(cell_width, 16.0), Sense::hover());
-            ui.painter().text(
-                after.left_center() + Vec2::new(5.0, 0.0),
-                Align2::LEFT_CENTER,
-                "after",
-                FontId::proportional(11.0),
-                added_text(),
-            );
-        });
-
-        let mut current = None;
+        // One section per changed element, in the order the tag has them.
+        let mut sections: Vec<(String, Option<String>, String)> = Vec::new();
         for row in &diff.rows {
-            let (element, field) = Self::split_element_path(&row.path);
-            if current != Some(element) {
-                current = Some(element);
-                if !element.is_empty() {
-                    ui.add_space(6.0);
-                    ui.separator();
+            let (element, _) = Self::split_element_path(&row.path);
+            let base_element = row
+                .base_path
+                .as_deref()
+                .map(|path| Self::split_element_path(path).0.to_owned());
+            let label = if Self::split_element_path(&row.path).1.is_empty() {
+                if row.b.is_empty() { row.a.clone() } else { row.b.clone() }
+            } else {
+                String::new()
+            };
+            match sections.last_mut() {
+                Some((last, _, existing)) if last == element => {
+                    if existing.is_empty() && !label.is_empty() {
+                        *existing = label;
+                    }
                 }
+                _ => sections.push((element.to_owned(), base_element, label)),
             }
-            // A row about the element itself: added, removed, moved, or naming
-            // an element whose own fields changed.
-            if field.is_empty() {
-                let (marker, color) = if row.a.is_empty() {
-                    ("+", added_text())
-                } else if row.b.is_empty() {
-                    ("-", removed_text())
-                } else {
-                    ("~", modified_text())
-                };
+        }
+
+        for (element, base_element, label) in sections {
+            ui.add_space(8.0);
+            if !element.is_empty() {
+                ui.separator();
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(marker).color(color).monospace().strong());
-                    let text = if row.b.is_empty() { &row.a } else { &row.b };
-                    ui.label(RichText::new(text).color(color).strong());
-                    ui.label(
-                        RichText::new(element)
-                            .color(subtle_dark())
-                            .monospace()
-                            .small(),
-                    );
+                    ui.label(RichText::new(&element).color(modified_text()).monospace());
+                    if !label.is_empty() {
+                        ui.label(RichText::new(&label).color(subtle_dark()).small());
+                    }
                 });
-                continue;
             }
-            ui.horizontal(|ui| {
-                ui.add_space(4.0);
-                let (rect, _) =
-                    ui.allocate_exact_size(Vec2::new(label_width, 24.0), Sense::hover());
-                ui.painter().text(
-                    rect.left_center() + Vec2::new(2.0, 0.0),
-                    Align2::LEFT_CENTER,
-                    field,
-                    FontId::proportional(12.5),
-                    text_dark(),
-                );
-                // An absent side means the value did not exist before or does
-                // not exist now; an empty cell says that more clearly than a
-                // missing one, which would misalign the pair.
-                foundation_input_cell_colored(
-                    ui,
-                    &row.a,
-                    cell_width,
-                    if row.a.is_empty() {
-                        subtle_dark()
-                    } else {
-                        removed_text()
-                    },
-                    None,
-                );
-                foundation_input_cell_colored(
-                    ui,
-                    &row.b,
-                    cell_width,
-                    if row.b.is_empty() {
-                        subtle_dark()
-                    } else {
-                        added_text()
-                    },
-                    None,
-                );
+            ui.columns(2, |columns| {
+                columns[0].push_id(("diff_before", &element), |ui| {
+                    ui.label(RichText::new("before").color(removed_text()).small());
+                    match diff.base.as_ref() {
+                        Some(base) => Self::draw_diff_side(
+                            ui,
+                            base,
+                            base_element.as_deref().unwrap_or(&element),
+                            &filter,
+                            names,
+                            group_tag,
+                            game,
+                            definitions_root,
+                            expert_mode,
+                            &format!("{scope}|before"),
+                        ),
+                        // A tag the game does not ship has no before.
+                        None => {
+                            ui.label(
+                                RichText::new("new tag").color(subtle_dark()).small(),
+                            );
+                        }
+                    }
+                });
+                columns[1].push_id(("diff_after", &element), |ui| {
+                    ui.label(RichText::new("after").color(added_text()).small());
+                    if let Some(edited) = diff.edited.as_ref() {
+                        Self::draw_diff_side(
+                            ui,
+                            edited,
+                            &element,
+                            &filter,
+                            names,
+                            group_tag,
+                            game,
+                            definitions_root,
+                            expert_mode,
+                            &format!("{scope}|after"),
+                        );
+                    }
+                });
             });
         }
         if diff.truncated {
@@ -645,6 +761,24 @@ impl Baboon {
             .unwrap_or(false);
         let included = dialog.included().count();
         let name_ok = !dialog.name.trim().is_empty();
+        // The editor needs its source's naming and definitions to render values
+        // the way the editor does.
+        let kit_index = self.kits.iter().position(|k| k.id == kit);
+        let names = kit_index
+            .map(|index| self.kits[index].names.clone())
+            .unwrap_or_default();
+        let game = kit_index
+            .and_then(|index| self.kits[index].source.as_ref())
+            .and_then(|source| source.game.clone());
+        let definitions_root = kit_index
+            .and_then(|index| self.kits[index].source.as_ref())
+            .and_then(|source| match &source.source {
+                TagSource::LooseFolder {
+                    definitions_root, ..
+                } => Some(definitions_root.clone()),
+                _ => None,
+            });
+        let expert_mode = self.expert_mode;
 
         let mut open = true;
         let mut cancel = false;
@@ -763,7 +897,16 @@ impl Baboon {
                             if expandable && expanded {
                                 ui.indent(("mod_export_diff", index), |ui| {
                                     match dialog.diffs.get(&row.identity) {
-                                        Some(diff) => Self::draw_mod_export_diff(ui, diff),
+                                        Some(diff) => Self::draw_mod_export_diff(
+                                            ui,
+                                            diff,
+                                            &names,
+                                            row.group_tag,
+                                            game.as_deref(),
+                                            definitions_root.as_deref(),
+                                            expert_mode,
+                                            &row.identity,
+                                        ),
                                         None => {
                                             ui.label(
                                                 RichText::new("Comparing...")

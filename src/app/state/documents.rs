@@ -321,6 +321,7 @@ pub(in crate::app) struct ImportTagDialog {
 pub(in crate::app) struct ModExportRow {
     pub(in crate::app) identity: String,
     pub(in crate::app) display_path: String,
+    pub(in crate::app) group_tag: u32,
     pub(in crate::app) kind: ModExportChange,
     pub(in crate::app) include: bool,
     pub(in crate::app) bytes: usize,
@@ -342,6 +343,10 @@ pub(in crate::app) enum ModExportChange {
 /// expanded and kept for as long as the review is open.
 pub(in crate::app) struct ModRowDiff {
     pub(in crate::app) rows: Vec<TagFieldDiff>,
+    /// The two tags the rows were computed from, kept so each change can be
+    /// rendered through the real field editor rather than described.
+    pub(in crate::app) base: Option<blam_tags::TagFile>,
+    pub(in crate::app) edited: Option<blam_tags::TagFile>,
     pub(in crate::app) truncated: bool,
     pub(in crate::app) error: Option<String>,
 }
@@ -474,7 +479,12 @@ impl Default for NewTagDialog {
 
 #[derive(Debug)]
 pub(in crate::app) struct TagFieldDiff {
+    /// Path in the edited tag.
     pub(in crate::app) path: String,
+    /// Path in the tag as shipped, when it differs -- deleting an element
+    /// shifts every index below it, so the same field lives at two paths and a
+    /// side-by-side view needs both to find it.
+    pub(in crate::app) base_path: Option<String>,
     pub(in crate::app) a: String,
     pub(in crate::app) b: String,
 }

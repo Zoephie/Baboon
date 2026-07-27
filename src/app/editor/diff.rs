@@ -10,7 +10,7 @@ pub(in crate::app) fn diff_tags(
     limit: usize,
 ) -> (Vec<TagFieldDiff>, bool) {
     let mut out = Vec::new();
-    diff_structs(&a.root(), &b.root(), "", names, &mut out, limit);
+    diff_structs(&a.root(), &b.root(), "", "", names, &mut out, limit);
     let truncated = out.len() > limit;
     out.truncate(limit);
     (out, truncated)
@@ -227,6 +227,7 @@ fn diff_structs(
     a: &TagStruct<'_>,
     b: &TagStruct<'_>,
     path: &str,
+    base_path: &str,
     names: &TagNameIndex,
     out: &mut Vec<TagFieldDiff>,
     limit: usize,
@@ -236,6 +237,7 @@ fn diff_structs(
             return;
         }
         let field_path = append_field_path(path, fa.name());
+        let base_field_path = append_field_path(base_path, fa.name());
         if let (Some(ba), Some(bb)) = (fa.as_block(), fb.as_block()) {
             let ids_a: Vec<Option<String>> = (0..ba.len())
                 .map(|i| element_identity(ba.element(i), names))
@@ -276,6 +278,7 @@ fn diff_structs(
                     .unwrap_or_else(|| format!("element {ai}"));
                 out.push(TagFieldDiff {
                     path: format!("{field_path}[{bi}]"),
+                    base_path: Some(format!("{base_field_path}[{ai}]")),
                     a: format!("position {ai}"),
                     b: format!("moved to {bi} — {label}"),
                 });
@@ -290,7 +293,15 @@ fn diff_structs(
                             continue;
                         };
                         let before = out.len();
-                        diff_structs(&ea, &eb, &format!("{field_path}[{bi}]"), names, out, limit);
+                        diff_structs(
+                            &ea,
+                            &eb,
+                            &format!("{field_path}[{bi}]"),
+                            &format!("{base_field_path}[{ai}]"),
+                            names,
+                            out,
+                            limit,
+                        );
                         // Name the element, but only once something inside it
                         // turned out to differ: an index alone says very little
                         // about which of a hundred palette entries this is.
@@ -304,6 +315,7 @@ fn diff_structs(
                                 before,
                                 TagFieldDiff {
                                     path: format!("{field_path}[{bi}]"),
+                                    base_path: Some(format!("{base_field_path}[{ai}]")),
                                     a: label.clone(),
                                     b: label,
                                 },
@@ -317,6 +329,7 @@ fn diff_structs(
                         let label = ids_b[bi].clone().unwrap_or_else(|| format!("element {bi}"));
                         out.push(TagFieldDiff {
                             path: format!("{field_path}[{bi}]"),
+                            base_path: None,
                             a: String::new(),
                             b: format!("added — {label}"),
                         });
@@ -335,6 +348,7 @@ fn diff_structs(
                         let label = ids_a[ai].clone().unwrap_or_else(|| format!("element {ai}"));
                         out.push(TagFieldDiff {
                             path: format!("{field_path}[{ai}]"),
+                            base_path: Some(format!("{base_field_path}[{ai}]")),
                             a: format!("removed — {label}"),
                             b: String::new(),
                         });
@@ -358,10 +372,18 @@ fn diff_structs(
                 let (Some(ea), Some(eb)) = (aa.element(i), ab.element(i)) else {
                     continue;
                 };
-                diff_structs(&ea, &eb, &format!("{field_path}[{i}]"), names, out, limit);
+                diff_structs(
+                    &ea,
+                    &eb,
+                    &format!("{field_path}[{i}]"),
+                    &format!("{base_field_path}[{i}]"),
+                    names,
+                    out,
+                    limit,
+                );
             }
         } else if let (Some(sa), Some(sb)) = (fa.as_struct(), fb.as_struct()) {
-            diff_structs(&sa, &sb, &field_path, names, out, limit);
+            diff_structs(&sa, &sb, &field_path, &base_field_path, names, out, limit);
         } else if let (Some(da), Some(db)) = (fa.as_data(), fb.as_data()) {
             // Raw data fields -- function curves, shader source, import info --
             // are edited through their own editors and land in an exported mod
@@ -371,6 +393,7 @@ fn diff_structs(
             if da != db {
                 out.push(TagFieldDiff {
                     path: field_path,
+                    base_path: Some(base_field_path),
                     a: format!("{} bytes", da.len()),
                     b: if da.len() == db.len() {
                         format!("{} bytes, contents differ", db.len())
@@ -385,6 +408,7 @@ fn diff_structs(
             if ta != tb {
                 out.push(TagFieldDiff {
                     path: field_path,
+                    base_path: Some(base_field_path),
                     a: ta,
                     b: tb,
                 });
@@ -443,7 +467,8 @@ fn dump_struct(
         } else if let Some(value) = field.value() {
             let text = foundation::format_foundation_scalar_value(names, &value);
             out.push(TagFieldDiff {
-                path: field_path,
+                path: field_path.clone(),
+                base_path: (!added).then_some(field_path),
                 a: if added { String::new() } else { text.clone() },
                 b: if added { text } else { String::new() },
             });
@@ -612,5 +637,28 @@ mod alignment_tests {
         assert_eq!(pairs, vec![(None, Some(0)), (None, Some(1))]);
         let pairs = align_by_identity(&ids(&["a", "b"]), &[]).expect("aligns");
         assert_eq!(pairs, vec![(Some(0), None), (Some(1), None)]);
+    }
+}
+#[cfg(test)]
+mod base_path_tests {
+    use super::*;
+
+    /// Deleting an element shifts every index below it, so the same field lives
+    /// at two different paths. A side-by-side view has to know both, or it
+    /// reads the wrong element out of the shipped tag.
+    #[test]
+    fn a_diff_row_knows_both_sides_paths() {
+        let names = TagNameIndex::default();
+        let a = TagFile::new("definitions/halo3_mcc/sound_classes.json").unwrap();
+        let mut b = TagFile::new("definitions/halo3_mcc/sound_classes.json").unwrap();
+        crate::app::add_block_element(&mut b, "sound classes").unwrap();
+        let (rows, _) = diff_tags(&a, &b, &names, 5000);
+        assert!(!rows.is_empty());
+        // An added element exists only on the edited side.
+        assert!(
+            rows.iter()
+                .any(|row| row.base_path.is_none() && row.b.starts_with("added")),
+            "an added element has no path in the shipped tag: {rows:?}"
+        );
     }
 }

@@ -3292,6 +3292,7 @@ impl Baboon {
                 ModExportRow {
                     identity: overlay.identity.clone(),
                     display_path: overlay.logical_path.clone(),
+                    group_tag: overlay.group_tag,
                     kind,
                     include: kind != ModExportChange::Unresolved,
                     bytes: overlay.bytes.len(),
@@ -3334,6 +3335,8 @@ impl Baboon {
         const LIMIT: usize = 5000;
         let failed = |error: String| ModRowDiff {
             rows: Vec::new(),
+            base: None,
+            edited: None,
             truncated: false,
             error: Some(error),
         };
@@ -3359,6 +3362,8 @@ impl Baboon {
             let (rows, truncated) = describe_tag(&edited_tag, &self.kits[kit].names, LIMIT);
             return ModRowDiff {
                 rows,
+                base: None,
+                edited: Some(edited_tag),
                 truncated,
                 error: None,
             };
@@ -3370,6 +3375,8 @@ impl Baboon {
         let (rows, truncated) = diff_tags(&base, &edited_tag, &self.kits[kit].names, LIMIT);
         ModRowDiff {
             rows,
+            base: Some(base),
+            edited: Some(edited_tag),
             truncated,
             error: None,
         }
