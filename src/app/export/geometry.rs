@@ -77,6 +77,7 @@ pub(in crate::app) fn extract_model_geometry(
     let collision_ref = tag_ref_path(&root, "collision model");
     let physics_ref =
         tag_ref_path(&root, "physics_model").or_else(|| tag_ref_path(&root, "physics model"));
+    let skeleton_ref = tag_ref_path(&root, "skeleton model");
     let stem = tag_file_stem(entry);
 
     let mut emitted = Vec::new();
@@ -97,9 +98,9 @@ pub(in crate::app) fn extract_model_geometry(
             // `skeleton model` instead of a `render model`). Reconstruct the
             // high-resolution render JMS from the Unreal Nanite/skeletal meshes
             // fused onto the classic skeleton_model rig.
-            if let Some(skel_ref) = tag_ref_path(&root, "skeleton model") {
+            if let Some(skel_ref) = skeleton_ref.as_deref() {
                 match crate::app::model_preview::loading::campaign_evolved_render_jms(
-                    &model, entry, source, &skel_ref,
+                    &model, entry, source, skel_ref,
                 ) {
                     Ok(jms) => {
                         let render_dir = output.join("render");
@@ -138,9 +139,34 @@ pub(in crate::app) fn extract_model_geometry(
         .as_ref()
         .map(|tag| blam_tags::game::Game::of(tag).jms_version())
         .unwrap_or(8213);
+    // Campaign Evolved has no render_model to take a skeleton from, so collision
+    // hulls stayed in bone-local space (every limb stacked on the pelvis) and
+    // physics shapes hung off bones that were all at the origin. The
+    // `skeleton model` holds the same rest pose the render path uses.
+    let campaign_evolved_skeleton = match (render_tag.as_ref(), skeleton_ref.as_deref()) {
+        (None, Some(reference)) => {
+            match load_referenced_tag_from_source(source, reference, "skeleton_model", b"skel") {
+                Ok(tag) => Some(tag),
+                Err(error) => {
+                    skipped.push(format!("skeleton: {error}"));
+                    None
+                }
+            }
+        }
+        _ => None,
+    };
+    // Deliberately the raw rest pose, not the armature the render JMS emits:
+    // that one is reoriented, which preserves bone positions but changes almost
+    // every rotation, and geometry composed against it would be twisted off its
+    // bone. The reorientation is applied afterwards instead, once the geometry
+    // is placed.
+    let campaign_evolved_rest_pose = campaign_evolved_skeleton
+        .as_ref()
+        .and_then(|tag| JmsFile::skeleton_rest_pose(tag).ok());
     let skeleton = render_jms_for_skeleton
         .as_ref()
-        .map(|jms| jms.nodes.as_slice());
+        .map(|jms| jms.nodes.as_slice())
+        .or(campaign_evolved_rest_pose.as_deref());
 
     if let Some(tag) = render_tag.as_ref() {
         let render_dir = output.join("render");
@@ -166,11 +192,14 @@ pub(in crate::app) fn extract_model_geometry(
                 Ok(tag) => {
                     let collision_dir = output.join("collision");
                     fs::create_dir_all(&collision_dir)?;
-                    let jms = if let Some(skeleton) = skeleton {
+                    let mut jms = if let Some(skeleton) = skeleton {
                         JmsFile::from_collision_model_with_skeleton(&tag, skeleton)?
                     } else {
                         JmsFile::from_collision_model(&tag)?
                     };
+                    if let Some(skel) = campaign_evolved_skeleton.as_ref() {
+                        jms.reorient_for_campaign_evolved(skel);
+                    }
                     let path = collision_dir.join(format!("{stem}.collision.jms"));
                     let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
                     jms.write(&mut file, blam_tags::game::Game::of(&tag).jms_version())?;
@@ -188,11 +217,14 @@ pub(in crate::app) fn extract_model_geometry(
                 Ok(tag) => {
                     let physics_dir = output.join("physics");
                     fs::create_dir_all(&physics_dir)?;
-                    let jms = if let Some(skeleton) = skeleton {
+                    let mut jms = if let Some(skeleton) = skeleton {
                         JmsFile::from_physics_model_with_skeleton(&tag, skeleton)?
                     } else {
                         JmsFile::from_physics_model(&tag)?
                     };
+                    if let Some(skel) = campaign_evolved_skeleton.as_ref() {
+                        jms.reorient_for_campaign_evolved(skel);
+                    }
                     let path = physics_dir.join(format!("{stem}.physics.jms"));
                     let mut file = std::io::BufWriter::new(fs::File::create(&path)?);
                     jms.write(&mut file, blam_tags::game::Game::of(&tag).jms_version())?;
