@@ -2563,7 +2563,7 @@ mod palette_repro_tests {
                 continue;
             };
             let before_len = palette_len(&tag).unwrap_or(0);
-            let mut dirty = false;
+            let mut dirty = Dirty::default();
             let status = crate::app::apply_block_ops(
                 &mut tag,
                 vec![BlockOp {
@@ -2701,7 +2701,7 @@ mod palette_repro_tests {
                 let Some((target, before)) = resolve(&tag) else {
                     continue;
                 };
-                let mut dirty = false;
+                let mut dirty = Dirty::default();
                 let status = crate::app::apply_block_ops(
                     &mut tag,
                     vec![BlockOp {
@@ -2778,7 +2778,7 @@ mod palette_repro_tests {
                 else {
                     continue;
                 };
-                let mut dirty = false;
+                let mut dirty = Dirty::default();
                 let status = crate::app::apply_block_ops(
                     &mut tag,
                     vec![BlockOp {

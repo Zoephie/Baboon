@@ -82,7 +82,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         let dirty = self.app.kits[self.kit_index]
             .parsed_tags
             .get(pane)
-            .is_some_and(|document| document.dirty);
+            .is_some_and(|document| document.dirty.is_set());
         let label = self
             .app
             .kits[self.kit_index]
@@ -297,7 +297,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             if self.app.kits[self.kit_index]
                 .parsed_tags
                 .get(key)
-                .is_some_and(|document| document.dirty));
+                .is_some_and(|document| document.dirty.is_set()));
         if dirty {
             tint_toward(base, Color32::from_rgb(184, 134, 11), 0.20)
         } else {

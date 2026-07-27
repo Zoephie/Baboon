@@ -3483,7 +3483,7 @@ impl Baboon {
         if dialog.running {
             return;
         }
-        if self.kits[self.active].parsed_tags.values().any(|document| document.dirty) {
+        if self.kits[self.active].parsed_tags.values().any(|document| document.dirty.is_set()) {
             if let Some(dialog) = self.folder_conversion_dialog.as_mut() {
                 dialog.error =
                     Some("Save or close dirty tags before converting a folder".to_owned());

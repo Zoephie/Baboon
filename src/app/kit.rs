@@ -192,7 +192,7 @@ impl Kit {
     /// computed separately and drifted apart — closing the last stashed tag
     /// left the dot showing while the colour went back to clean.
     pub(super) fn has_unwritten_modifications(&self) -> bool {
-        self.parsed_tags.values().any(|document| document.dirty)
+        self.parsed_tags.values().any(|document| document.dirty.is_set())
             || self
                 .campaign_project
                 .as_ref()
@@ -419,7 +419,7 @@ impl Baboon {
 }
 
 fn kit_has_dirty_documents(kit: &Kit) -> bool {
-    kit.parsed_tags.values().any(|document| document.dirty)
+    kit.parsed_tags.values().any(|document| document.dirty.is_set())
 }
 
 /// Label for a kit in the kit strip: the game's display name where one was
