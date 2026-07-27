@@ -477,7 +477,13 @@ impl Baboon {
         }
     }
 
-    /// One tag's differences, grouped by the element each belongs to.
+    /// One tag's differences, laid out like the editor: a field label, then
+    /// its old and new values side by side in the editor's own value cells.
+    ///
+    /// The values are the point of the whole dialog, so they are shown the way
+    /// the editor shows values -- readable, full width, in a cell -- rather
+    /// than as small text crammed against the right edge. Old on the left in
+    /// red, new on the right in green.
     fn draw_mod_export_diff(ui: &mut Ui, diff: &ModRowDiff) {
         if let Some(error) = diff.error.as_deref() {
             ui.label(RichText::new(error).color(removed_text()).small());
@@ -491,27 +497,48 @@ impl Baboon {
             );
             return;
         }
+        // Split what is left after the label between the two value cells.
+        let available = ui.available_width();
+        let label_width = (available * 0.34).clamp(120.0, 320.0);
+        let cell_width = ((available - label_width - 24.0) / 2.0).max(80.0);
+
+        // Named, not just coloured: which side is which should not depend on
+        // telling red from green.
+        ui.horizontal(|ui| {
+            ui.add_space(4.0);
+            let (rect, _) = ui.allocate_exact_size(Vec2::new(label_width, 16.0), Sense::hover());
+            let _ = rect;
+            let (before, _) = ui.allocate_exact_size(Vec2::new(cell_width, 16.0), Sense::hover());
+            ui.painter().text(
+                before.left_center() + Vec2::new(5.0, 0.0),
+                Align2::LEFT_CENTER,
+                "before",
+                FontId::proportional(11.0),
+                removed_text(),
+            );
+            let (after, _) = ui.allocate_exact_size(Vec2::new(cell_width, 16.0), Sense::hover());
+            ui.painter().text(
+                after.left_center() + Vec2::new(5.0, 0.0),
+                Align2::LEFT_CENTER,
+                "after",
+                FontId::proportional(11.0),
+                added_text(),
+            );
+        });
+
         let mut current = None;
         for row in &diff.rows {
             let (element, field) = Self::split_element_path(&row.path);
             if current != Some(element) {
                 current = Some(element);
                 if !element.is_empty() {
-                    ui.add_space(4.0);
+                    ui.add_space(6.0);
                     ui.separator();
-                    ui.label(
-                        RichText::new(element)
-                            .color(modified_text())
-                            .monospace()
-                            .small(),
-                    );
                 }
             }
-            // A whole element added, removed or moved: the row is about the
-            // element itself, not a field inside it.
+            // A row about the element itself: added, removed, moved, or naming
+            // an element whose own fields changed.
             if field.is_empty() {
-                // Both sides equal names an element whose own fields changed;
-                // one side empty means the element itself came or went.
                 let (marker, color) = if row.a.is_empty() {
                     ("+", added_text())
                 } else if row.b.is_empty() {
@@ -520,29 +547,54 @@ impl Baboon {
                     ("~", modified_text())
                 };
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(marker).color(color).monospace());
+                    ui.label(RichText::new(marker).color(color).monospace().strong());
                     let text = if row.b.is_empty() { &row.a } else { &row.b };
-                    ui.label(RichText::new(text).color(color).small());
+                    ui.label(RichText::new(text).color(color).strong());
+                    ui.label(
+                        RichText::new(element)
+                            .color(subtle_dark())
+                            .monospace()
+                            .small(),
+                    );
                 });
                 continue;
             }
             ui.horizontal(|ui| {
-                ui.label(
-                    RichText::new(field)
-                        .color(text_dark())
-                        .monospace()
-                        .small(),
+                ui.add_space(4.0);
+                let (rect, _) =
+                    ui.allocate_exact_size(Vec2::new(label_width, 24.0), Sense::hover());
+                ui.painter().text(
+                    rect.left_center() + Vec2::new(2.0, 0.0),
+                    Align2::LEFT_CENTER,
+                    field,
+                    FontId::proportional(12.5),
+                    text_dark(),
                 );
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if !row.b.is_empty() {
-                        ui.label(RichText::new(&row.b).color(added_text()).small());
-                        ui.label(RichText::new("+").color(added_text()).monospace().small());
-                    }
-                    if !row.a.is_empty() {
-                        ui.label(RichText::new(&row.a).color(removed_text()).small());
-                        ui.label(RichText::new("-").color(removed_text()).monospace().small());
-                    }
-                });
+                // An absent side means the value did not exist before or does
+                // not exist now; an empty cell says that more clearly than a
+                // missing one, which would misalign the pair.
+                foundation_input_cell_colored(
+                    ui,
+                    &row.a,
+                    cell_width,
+                    if row.a.is_empty() {
+                        subtle_dark()
+                    } else {
+                        removed_text()
+                    },
+                    None,
+                );
+                foundation_input_cell_colored(
+                    ui,
+                    &row.b,
+                    cell_width,
+                    if row.b.is_empty() {
+                        subtle_dark()
+                    } else {
+                        added_text()
+                    },
+                    None,
+                );
             });
         }
         if diff.truncated {
@@ -613,8 +665,8 @@ impl Baboon {
             .open(&mut open)
             .collapsible(false)
             .resizable(true)
-            .default_width(680.0)
-            .default_height(460.0)
+            .default_width(960.0)
+            .default_height(560.0)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 let Some(dialog) = self.mod_export.as_ref() else {
@@ -646,7 +698,7 @@ impl Baboon {
                 });
                 ui.add_space(6.0);
                 egui::ScrollArea::vertical()
-                    .max_height(240.0)
+                    .max_height(340.0)
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         for (index, row) in dialog.rows.iter().enumerate() {
