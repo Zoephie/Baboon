@@ -317,6 +317,71 @@ pub(in crate::app) struct ImportTagDialog {
 /// it overwrites an already-open, dirty document at `target_key`.
 /// Pending "throw away everything this workspace has not written into the
 /// game" confirmation, listing what it is about to drop.
+/// One tag the export is about to write, as reviewed before writing.
+pub(in crate::app) struct ModExportRow {
+    pub(in crate::app) identity: String,
+    pub(in crate::app) display_path: String,
+    pub(in crate::app) kind: ModExportChange,
+    pub(in crate::app) include: bool,
+    pub(in crate::app) bytes: usize,
+    /// Why this tag cannot be exported, when it cannot.
+    pub(in crate::app) reason: Option<String>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::app) enum ModExportChange {
+    /// A tag this workspace created, with no counterpart in the game.
+    New,
+    /// An edit to a tag the game ships.
+    Modified,
+    /// In the workspace's project, but no longer resolvable in this source.
+    Unresolved,
+}
+
+/// Review of what Export Mod is about to write, shown before anything is
+/// written and before a destination is chosen.
+///
+/// Holds the captured snapshot rather than re-deriving one on confirm, so what
+/// was reviewed and what is written cannot disagree.
+pub(in crate::app) struct ModExportDialog {
+    pub(in crate::app) kit: KitId,
+    pub(in crate::app) snapshot: CampaignProjectSnapshot,
+    pub(in crate::app) rows: Vec<ModExportRow>,
+    pub(in crate::app) name: String,
+    pub(in crate::app) folder: PathBuf,
+    /// True once the user has accepted overwriting the files already there.
+    pub(in crate::app) overwrite_acknowledged: bool,
+}
+
+impl ModExportDialog {
+    /// The file stem the mod will be written under. `_P` is what gives an
+    /// override container priority over the game's own, so it is part of the
+    /// name rather than something the user can leave off.
+    pub(in crate::app) fn stem(&self) -> String {
+        let name = self.name.trim();
+        if name.ends_with("_P") {
+            name.to_owned()
+        } else {
+            format!("{name}_P")
+        }
+    }
+
+    pub(in crate::app) fn included(&self) -> impl Iterator<Item = &ModExportRow> {
+        self.rows.iter().filter(|row| row.include)
+    }
+
+    /// Files that already exist where this would be written. A mod is three
+    /// files plus its project sidecar, and only the container was ever guarded.
+    pub(in crate::app) fn existing_files(&self) -> Vec<String> {
+        let stem = self.stem();
+        ["utoc", "ucas", "pak", "baboon"]
+            .into_iter()
+            .map(|extension| format!("{stem}.{extension}"))
+            .filter(|name| self.folder.join(name).exists())
+            .collect()
+    }
+}
+
 /// What Export Mod just wrote, so the app can say what to do with it.
 ///
 /// A mod is three files, and only the `.pak` looks like one. The status line

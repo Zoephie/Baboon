@@ -189,6 +189,8 @@ pub struct Baboon {
     clear_stash_confirm: Option<ClearStashConfirm>,
     /// Shown after Export Mod, explaining what to do with the files.
     exported_mod: Option<ExportedMod>,
+    /// Review of a pending Export Mod, before anything is written.
+    mod_export: Option<ModExportDialog>,
     about_open: bool,
     help_panel_tab: HelpPanelTab,
     help_docs: HelpDocsState,
@@ -387,6 +389,7 @@ impl Baboon {
             overwrite_confirm: None,
             clear_stash_confirm: None,
             exported_mod: None,
+            mod_export: None,
             about_open: false,
             help_panel_tab: HelpPanelTab::About,
             help_docs: HelpDocsState::load(),

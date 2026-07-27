@@ -69,6 +69,13 @@ pub(in crate::app) fn browser_modified_tags(ui: &Ui) -> Option<std::sync::Arc<Mo
     ui.data(|data| data.get_temp::<std::sync::Arc<ModifiedTags>>(modified_tags_id()))
 }
 
+/// Colour for a tag that this workspace created, with no counterpart in the
+/// game. Paired with a `+` marker wherever it is used, so the meaning does not
+/// rest on colour alone.
+pub(in crate::app) fn added_text() -> Color32 {
+    Color32::from_rgb(126, 186, 108)
+}
+
 /// Colour for a tag or folder holding edits that are not written into the game.
 /// The same goldenrod the workspace tab is tinted with.
 pub(in crate::app) fn modified_text() -> Color32 {

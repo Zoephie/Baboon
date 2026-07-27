@@ -448,6 +448,252 @@ impl Baboon {
     /// Destructive-save confirmation for Campaign Evolved container tags. Save
     /// overwrites the shipped pak files in place, so we always confirm and point
     /// the user at Export Mod as the non-destructive alternative.
+    /// Strip anything from a mod name that cannot be part of a file name.
+    ///
+    /// The name becomes three files in a folder the user does not type, so a
+    /// separator or a reserved character here is a write failure later rather
+    /// than a different path.
+    fn sanitize_mod_name(name: &str) -> String {
+        name.chars()
+            .filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'))
+            .collect::<String>()
+            .trim()
+            .to_owned()
+    }
+
+    /// Review what Export Mod is about to write, and where.
+    ///
+    /// The save dialog this replaces asked for one file name when the output is
+    /// three, which invited renaming -- and renaming is how a mod loses the
+    /// `_P` that gives it priority over the game's own containers. It also
+    /// guarded only the container, silently overwriting the `.ucas` and `.pak`
+    /// beside it.
+    pub(super) fn draw_mod_export_window(&mut self, ctx: &egui::Context) {
+        let Some(dialog) = self.mod_export.as_ref() else {
+            return;
+        };
+        let kit = dialog.kit;
+        let new_count = dialog
+            .rows
+            .iter()
+            .filter(|row| row.kind == ModExportChange::New)
+            .count();
+        let modified_count = dialog
+            .rows
+            .iter()
+            .filter(|row| row.kind == ModExportChange::Modified)
+            .count();
+        let unresolved_count = dialog
+            .rows
+            .iter()
+            .filter(|row| row.kind == ModExportChange::Unresolved)
+            .count();
+        let stem = dialog.stem();
+        let existing = dialog.existing_files();
+        let in_game_folder = self
+            .kits
+            .iter()
+            .find(|k| k.id == kit)
+            .and_then(|k| k.source.as_ref())
+            .map(|source| source.source.root_path() == dialog.folder)
+            .unwrap_or(false);
+        let included = dialog.included().count();
+        let name_ok = !dialog.name.trim().is_empty();
+
+        let mut open = true;
+        let mut cancel = false;
+        let mut export = false;
+        let mut browse = false;
+        let mut set_all: Option<bool> = None;
+        let mut toggled: Option<usize> = None;
+        let mut name_edit = dialog.name.clone();
+
+        egui::Window::new("Export Mod")
+            .id(egui::Id::new("mod_export"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(true)
+            .default_width(680.0)
+            .default_height(460.0)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                let Some(dialog) = self.mod_export.as_ref() else {
+                    return;
+                };
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(format!(
+                            "{new_count} new · {modified_count} modified"
+                        ))
+                        .color(text_dark()),
+                    );
+                    if unresolved_count > 0 {
+                        ui.label(
+                            RichText::new(format!("· {unresolved_count} excluded"))
+                                .color(egui::Color32::from_rgb(210, 120, 90)),
+                        );
+                    }
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button("Include none").clicked() {
+                            set_all = Some(false);
+                        }
+                        if ui.button("Include all").clicked() {
+                            set_all = Some(true);
+                        }
+                    });
+                });
+                ui.add_space(6.0);
+                egui::ScrollArea::vertical()
+                    .max_height(240.0)
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for (index, row) in dialog.rows.iter().enumerate() {
+                            ui.horizontal(|ui| {
+                                let mut include = row.include;
+                                let enabled = row.kind != ModExportChange::Unresolved;
+                                if ui
+                                    .add_enabled(enabled, egui::Checkbox::new(&mut include, ""))
+                                    .changed()
+                                {
+                                    toggled = Some(index);
+                                }
+                                let (marker, color) = match row.kind {
+                                    ModExportChange::New => ("+", added_text()),
+                                    ModExportChange::Modified => ("~", modified_text()),
+                                    ModExportChange::Unresolved => {
+                                        ("!", egui::Color32::from_rgb(210, 120, 90))
+                                    }
+                                };
+                                // A marker as well as a colour: this is a
+                                // confirmation before writing files, and colour
+                                // alone excludes a good number of readers.
+                                ui.label(RichText::new(marker).color(color).monospace());
+                                ui.label(RichText::new(&row.display_path).color(color));
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.label(
+                                            RichText::new(format!("{} KB", row.bytes / 1024))
+                                                .color(subtle_dark())
+                                                .small(),
+                                        );
+                                        if let Some(reason) = row.reason.as_deref() {
+                                            ui.label(
+                                                RichText::new(reason).color(subtle_dark()).small(),
+                                            );
+                                        }
+                                    },
+                                );
+                            });
+                        }
+                    });
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Mod name").color(text_dark()));
+                    ui.add(egui::TextEdit::singleline(&mut name_edit).desired_width(220.0));
+                    ui.label(
+                        RichText::new(format!("{stem}.utoc / .ucas / .pak"))
+                            .color(subtle_dark())
+                            .monospace()
+                            .small(),
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Folder").color(text_dark()));
+                    ui.label(
+                        RichText::new(dialog.folder.display().to_string())
+                            .color(subtle_dark())
+                            .monospace()
+                            .small(),
+                    );
+                    if ui.button("Browse...").clicked() {
+                        browse = true;
+                    }
+                });
+                if in_game_folder {
+                    ui.label(
+                        RichText::new("This is the game's own Paks folder — nothing to copy afterwards.")
+                            .color(subtle_dark())
+                            .small(),
+                    );
+                }
+                if !existing.is_empty() {
+                    ui.add_space(6.0);
+                    ui.label(
+                        RichText::new(format!("Overwrites: {}", existing.join(", ")))
+                            .color(egui::Color32::from_rgb(210, 120, 90)),
+                    );
+                }
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    let ready = name_ok && included > 0;
+                    if ui
+                        .add_enabled(ready, egui::Button::new("Export"))
+                        .on_disabled_hover_text(if name_ok {
+                            "Nothing is selected to export"
+                        } else {
+                            "Enter a name for the mod"
+                        })
+                        .clicked()
+                    {
+                        export = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+
+        // Applied after the window closes its borrow of `self`.
+        if let Some(dialog) = self.mod_export.as_mut() {
+            if dialog.name != name_edit {
+                dialog.name = Self::sanitize_mod_name(&name_edit);
+                dialog.overwrite_acknowledged = false;
+            }
+            if let Some(value) = set_all {
+                for row in dialog.rows.iter_mut() {
+                    if row.kind != ModExportChange::Unresolved {
+                        row.include = value;
+                    }
+                }
+            }
+            if let Some(index) = toggled
+                && let Some(row) = dialog.rows.get_mut(index)
+            {
+                row.include = !row.include;
+            }
+        }
+        if browse
+            && let Some(folder) = rfd::FileDialog::new()
+                .set_title("Export mod into folder")
+                .pick_folder()
+            && let Some(dialog) = self.mod_export.as_mut()
+        {
+            dialog.folder = folder;
+            dialog.overwrite_acknowledged = false;
+        }
+        if !open || cancel {
+            self.mod_export = None;
+            return;
+        }
+        if export {
+            let Some(dialog) = self.mod_export.as_ref() else {
+                return;
+            };
+            let included: HashSet<String> = dialog
+                .included()
+                .map(|row| row.identity.clone())
+                .collect();
+            let output = dialog.folder.join(format!("{}.utoc", dialog.stem()));
+            let snapshot = dialog.snapshot.clone();
+            // The workspace may have been closed while this was open.
+            if self.focus_navigation_kit(kit) {
+                self.write_reviewed_mod(&snapshot, &included, output);
+            }
+            self.mod_export = None;
+        }
+    }
+
     /// What to do with a mod that was just exported.
     ///
     /// A mod is three files and only the `.pak` looks like one, so copying that
@@ -1354,5 +1600,46 @@ impl Baboon {
         } else if cancel {
             self.import_discard_confirm = None;
         }
+    }
+}
+#[cfg(test)]
+mod mod_export_tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn dialog(name: &str) -> ModExportDialog {
+        ModExportDialog {
+            kit: KitId(0),
+            snapshot: CampaignProjectSnapshot {
+                game: "haloce_evolved".to_owned(),
+                source_path: PathBuf::new(),
+                selected_identity: None,
+                tabs: Vec::new(),
+                overlays: Default::default(),
+            },
+            rows: Vec::new(),
+            name: name.to_owned(),
+            folder: PathBuf::from("/tmp"),
+            overwrite_acknowledged: false,
+        }
+    }
+
+    /// `_P` is what gives a mod priority over the game's own containers, so it
+    /// is part of the name rather than something a rename can drop -- which is
+    /// exactly how a reported mod came to build correctly and do nothing.
+    #[test]
+    fn the_stem_always_carries_the_priority_suffix() {
+        assert_eq!(dialog("h2a_magnum").stem(), "h2a_magnum_P");
+        assert_eq!(dialog("h2a_magnum_P").stem(), "h2a_magnum_P");
+        assert_eq!(dialog("  spaced  ").stem(), "spaced_P");
+    }
+
+    /// The name becomes three files in a folder the user never types, so a
+    /// separator would be a write failure rather than a different path.
+    #[test]
+    fn a_mod_name_cannot_contain_path_syntax() {
+        assert_eq!(Baboon::sanitize_mod_name("../../etc/passwd"), "....etcpasswd");
+        assert_eq!(Baboon::sanitize_mod_name("my:mod?"), "mymod");
+        assert_eq!(Baboon::sanitize_mod_name("  trimmed  "), "trimmed");
     }
 }

@@ -3247,6 +3247,11 @@ impl Baboon {
 
     /// Bundle every modified Campaign Evolved project tag into one portable `_P`
     /// overlay and write its `.baboon` recovery project beside the triplet.
+    /// Open the review of what Export Mod would write.
+    ///
+    /// Nothing is written and no destination is chosen here. The snapshot is
+    /// captured now and kept, so what the user reviews and what is written
+    /// cannot drift apart between the two steps.
     pub(super) fn export_mod(&mut self) {
         let exporting = self.active;
         let snapshot = match self.capture_campaign_project(exporting, 0.0) {
@@ -3260,6 +3265,60 @@ impl Baboon {
                 return;
             }
         };
+        let mut rows: Vec<ModExportRow> = snapshot
+            .overlays
+            .values()
+            .map(|overlay| {
+                // An overlay whose tag no longer resolves cannot be written.
+                // That was previously counted into a status line and dropped;
+                // it is a row here, so it is at least visible.
+                let resolvable = self
+                    .campaign_entry_for_identity(exporting, &overlay.identity)
+                    .is_some();
+                let kind = match (resolvable, overlay.kind) {
+                    (false, _) => ModExportChange::Unresolved,
+                    (true, CampaignProjectTagKind::New) => ModExportChange::New,
+                    (true, CampaignProjectTagKind::Existing) => ModExportChange::Modified,
+                };
+                ModExportRow {
+                    identity: overlay.identity.clone(),
+                    display_path: overlay.logical_path.clone(),
+                    kind,
+                    include: kind != ModExportChange::Unresolved,
+                    bytes: overlay.bytes.len(),
+                    reason: (kind == ModExportChange::Unresolved)
+                        .then(|| "not in this source".to_owned()),
+                }
+            })
+            .collect();
+        rows.sort_by(|a, b| a.display_path.cmp(&b.display_path));
+
+        // The container source's root is already the game's `Paks` directory,
+        // so a mod exported straight there needs no copying at all.
+        let folder = self
+            .kits[exporting]
+            .source
+            .as_ref()
+            .map(|source| source.source.root_path().to_path_buf())
+            .unwrap_or_default();
+        self.mod_export = Some(ModExportDialog {
+            kit: self.active_kit_id(),
+            snapshot,
+            rows,
+            name: "mymod".to_owned(),
+            folder,
+            overwrite_acknowledged: false,
+        });
+    }
+
+    /// Write the reviewed mod. `included` are the identities the user kept.
+    pub(super) fn write_reviewed_mod(
+        &mut self,
+        snapshot: &CampaignProjectSnapshot,
+        included: &HashSet<String>,
+        output: PathBuf,
+    ) {
+        let exporting = self.active;
         let Some(source) = self.source() else {
             self.status = "No source loaded".to_owned();
             return;
@@ -3273,6 +3332,9 @@ impl Baboon {
         let mut new_pkgs: Vec<(Vec<u8>, Vec<u8>, String)> = Vec::new();
         let mut skipped = 0usize;
         for overlay in snapshot.overlays.values() {
+            if !included.contains(&overlay.identity) {
+                continue;
+            }
             let Some(entry) = self.campaign_entry_for_identity(exporting, &overlay.identity) else {
                 skipped += 1;
                 continue;
@@ -3283,11 +3345,7 @@ impl Baboon {
                         skipped += 1;
                         continue;
                     };
-                    overrides.push((
-                        m.archive.clone(),
-                        rel_path.clone(),
-                        overlay.bytes.clone(),
-                    ));
+                    overrides.push((m.archive.clone(), rel_path.clone(), overlay.bytes.clone()));
                 }
                 TagEntryLocation::NewContainer {
                     template_container,
@@ -3310,14 +3368,8 @@ impl Baboon {
         }
         let count = overrides.len() + new_pkgs.len();
         if count == 0 {
-            self.status = "No modified tags to export — edit a tag first".to_owned();
+            self.status = "Nothing selected to export".to_owned();
             return;
-        }
-        let Some(mut output) = pick_override_utoc("mymod_P.utoc") else {
-            return;
-        };
-        if output.extension().is_none() {
-            output.set_extension("utoc");
         }
         let override_refs: Vec<(&blam_tags::iostore::IoStoreArchive, &str, &[u8])> = overrides
             .iter()
@@ -3332,53 +3384,41 @@ impl Baboon {
                 redirect_from: None,
             })
             .collect();
-        match blam_tags::iostore::writer::write_mod_container_ex(&override_refs, &new_refs, &output) {
+        match blam_tags::iostore::writer::write_mod_container_ex(&override_refs, &new_refs, &output)
+        {
             Ok(()) => {
-                let stem = output.file_stem().and_then(|s| s.to_str()).unwrap_or("mod");
+                let stem = output
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or("mod")
+                    .to_owned();
                 let sidecar = output.with_extension("baboon");
-                match save_campaign_project(&sidecar, &snapshot) {
-                    Ok(()) => {
-                        // The sidecar is an export artifact: a copy that travels
-                        // with the mod so it can be resumed or shared. The
-                        // workspace keeps its own project.
-                        //
-                        // Repointing it here sent every later autosave to a file
-                        // beside the exported mod, wherever the user put that,
-                        // and the workspace's own recovery file stopped being
-                        // updated. The next launch then adopted the stale
-                        // recovery file and every tag opened as the game ships
-                        // it -- the edits read as never having been saved.
-                        let _ = self.checkpoint_campaign_project(exporting, 0.0);
-                        self.exported_mod = Some(ExportedMod {
-                            stem: stem.to_owned(),
-                            directory: output
-                                .parent()
-                                .map(Path::to_path_buf)
-                                .unwrap_or_default(),
-                            count,
-                            skipped,
-                        });
-                        self.status = if skipped == 0 {
-                            format!(
-                                "Exported {count} tag(s) → {stem}.utoc/.ucas/.pak/.baboon \
-                                 (base game unchanged)"
-                            )
-                        } else {
-                            format!(
-                                "Exported {count} tag(s) with .baboon recovery; skipped {skipped} \
-                                 unresolved project tag(s)"
-                            )
-                        };
-                    }
-                    Err(error) => {
-                        self.status = format!(
-                            "Exported {count} tag(s) to {stem}.utoc/.ucas/.pak, but the .baboon \
-                             recovery file failed: {error}"
-                        );
-                    }
+                if let Err(error) = save_campaign_project(&sidecar, snapshot) {
+                    self.status = format!(
+                        "Exported {count} tag(s), but the .baboon sidecar failed: {error}"
+                    );
+                }
+                // The sidecar travels with the mod; the workspace keeps its own
+                // project, checkpointed here so it carries what the export did.
+                let _ = self.checkpoint_campaign_project(exporting, 0.0);
+                let directory = output.parent().map(Path::to_path_buf).unwrap_or_default();
+                let in_place = self
+                    .source()
+                    .map(|source| source.source.root_path() == directory)
+                    .unwrap_or(false);
+                self.status = format!("Exported {count} tag(s) as {stem}");
+                // Written straight into the game's own folder: there is nothing
+                // to copy, so the instructions would only be noise.
+                if !in_place {
+                    self.exported_mod = Some(ExportedMod {
+                        stem,
+                        directory,
+                        count,
+                        skipped,
+                    });
                 }
             }
-            Err(e) => self.status = format!("Export Mod failed: {e}"),
+            Err(error) => self.status = format!("Export Mod failed: {error}"),
         }
     }
 
