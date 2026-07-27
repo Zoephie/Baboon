@@ -87,11 +87,17 @@ fn pick_override_utoc(default_name: &str) -> Option<PathBuf> {
 /// so the mod builds correctly and does nothing. That is not a naming
 /// preference to be respected -- a mod without it is simply broken -- and it is
 /// exactly what a user renaming the default to something meaningful drops.
+///
+/// Confirmed against the game's own mount path: it compares the last six
+/// characters to `_P.pak` case-insensitively and adds `100 × version` to the
+/// pak order, where the version defaults to 1 and only rises if the name
+/// carries `_<digits>_` before the suffix. A base pak scores 4, so any `_P`
+/// mod at 104 outranks it, and `_p` is accepted just as readily.
 fn ensure_priority_suffix(path: PathBuf) -> PathBuf {
     let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
         return path;
     };
-    if stem.ends_with("_P") {
+    if stem.len() >= 2 && stem[stem.len() - 2..].eq_ignore_ascii_case("_p") {
         return path;
     }
     let extension = path
@@ -6095,10 +6101,17 @@ mod tests {
             ensure_priority_suffix(PathBuf::from("/mods/mymod-WinGDK_P.utoc")),
             PathBuf::from("/mods/mymod-WinGDK_P.utoc")
         );
-        // `_p` is not the same thing to the loader, so it is not treated as one.
+        // The loader folds case before comparing, so a lowercase suffix
+        // already has priority and must not collect a second one.
         assert_eq!(
             ensure_priority_suffix(PathBuf::from("/mods/thing_p.utoc")),
-            PathBuf::from("/mods/thing_p_P.utoc")
+            PathBuf::from("/mods/thing_p.utoc")
+        );
+        // A version before the suffix raises priority further; it is still a
+        // suffixed name and must be left alone.
+        assert_eq!(
+            ensure_priority_suffix(PathBuf::from("/mods/thing_2_P.utoc")),
+            PathBuf::from("/mods/thing_2_P.utoc")
         );
     }
 
