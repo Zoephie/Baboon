@@ -246,7 +246,9 @@ pub(super) struct AudioState {
     event_cache: HashMap<String, Arc<DecodedPcm>>,
     /// Campaign Evolved's legacy `.pak` set, opened on first playback. CE media
     /// is not in IoStore, so this is a separate store from `wwise` above.
-    ce_media: crate::source::ce_audio::CeMediaStore,
+    /// `pub(super)` because binding resolution also needs it: an event whose
+    /// media lives inside a SoundBank is only readable through the pak set.
+    pub(super) ce_media: crate::source::ce_audio::CeMediaStore,
     /// Current playback volume (linear, 0.0..=1.0). Held here so it survives
     /// before the engine is lazily created and seeds it on first play.
     volume: Volume,

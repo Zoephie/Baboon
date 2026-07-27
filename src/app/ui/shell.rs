@@ -1032,6 +1032,10 @@ impl Baboon {
         self.handle_last_opened_windows_prompt(ctx);
         self.process_pending_open(ctx);
         self.apply_field_nav(ctx);
+        // A referenced sound on a container source resolves to its own Wwise
+        // binding first, and queues an ordinary play/extract from there — so it
+        // must run before both drains below, not after.
+        self.process_ce_sound_ref();
         // Drain queued sound-player actions: resolve the permutation against the
         // FMOD banks, decode (cached), and play/stop. Runs every frame so voices
         // are reaped even when idle; the tags root is only cloned when acting.

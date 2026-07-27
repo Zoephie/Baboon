@@ -176,6 +176,45 @@ impl Baboon {
             return None;
         };
         let package = ce_audio::tag_package_for_rel_path(rel_path)?;
+        self.ce_binding_for_package(kit_index, tag_key, &package)
+    }
+
+    /// The Wwise binding of a `sound` tag reached by *reference* rather than by
+    /// browser entry — a `sound_looping` track's component, a dialogue
+    /// vocalization. Resolves the reference against the mounted containers and
+    /// then follows the same walk, memoized under the same per-kit cache.
+    pub(in crate::app) fn ce_sound_binding_for_ref(
+        &mut self,
+        kit_index: usize,
+        group_tag: u32,
+        reference: &str,
+    ) -> Option<std::sync::Arc<crate::source::ce_audio::CeSoundBinding>> {
+        use crate::source::ce_audio;
+
+        let Some(TagSource::IoStoreContainerSet { index, .. }) =
+            self.kits[kit_index].source.as_ref().map(|s| &s.source)
+        else {
+            return None;
+        };
+        let (_, rel_path) = index.lookup(group_tag, reference)?;
+        let package = ce_audio::tag_package_for_rel_path(rel_path)?;
+        let cache_key = format!("ref:{package}");
+        self.ce_binding_for_package(kit_index, &cache_key, &package)
+    }
+
+    /// Walk one cooked package out to its Wwise media, memoized under
+    /// `cache_key` in this kit. Shared by both entry points above.
+    fn ce_binding_for_package(
+        &mut self,
+        kit_index: usize,
+        cache_key: &str,
+        package: &str,
+    ) -> Option<std::sync::Arc<crate::source::ce_audio::CeSoundBinding>> {
+        use crate::source::ce_audio;
+
+        if let Some(hit) = self.kits[kit_index].ce_sound_bindings.get(cache_key) {
+            return Some(hit.clone());
+        }
 
         // Checked before the usmap is parsed, as it always has been: a non-CE
         // source must bail out without paying for the bundled reflection data.
@@ -199,6 +238,7 @@ impl Baboon {
         let usmap = self.ce_usmap.clone()?;
 
         let Some(TagSource::IoStoreContainerSet {
+            root,
             containers,
             packages,
             ..
@@ -207,13 +247,89 @@ impl Baboon {
             return None;
         };
 
+        // `kits` and `audio` are disjoint fields, so the pak set can be handed
+        // to the walk while the container borrow is live. It is needed for
+        // events whose media is cooked inside a SoundBank.
         let binding = std::sync::Arc::new(ce_audio::resolve_sound_binding(
-            containers, packages, &usmap, &package,
+            containers,
+            packages,
+            &usmap,
+            package,
+            Some((root.as_path(), &mut self.audio.ce_media)),
         ));
         self.kits[kit_index]
             .ce_sound_bindings
-            .insert(tag_key.to_owned(), binding.clone());
+            .insert(cache_key.to_owned(), binding.clone());
         Some(binding)
+    }
+
+    /// Drain a queued referenced-sound click from a container source: resolve
+    /// the reference's own Wwise binding, then queue the same playback or
+    /// extraction the primary sound player would.
+    pub(super) fn process_ce_sound_ref(&mut self) {
+        let Some((kit_id, request)) = self.pending_ce_sound_ref.take() else {
+            return;
+        };
+        let Some(kit_index) = self.kit_index(kit_id) else {
+            return;
+        };
+        let paks_root = match self.kits[kit_index].source.as_ref().map(|s| &s.source) {
+            Some(TagSource::IoStoreContainerSet { root, .. }) => root.clone(),
+            _ => return,
+        };
+        let Some(binding) =
+            self.ce_sound_binding_for_ref(kit_index, request.group_tag, &request.reference)
+        else {
+            self.status = format!("{} not found in mounted containers", request.label);
+            return;
+        };
+        if binding.is_empty() {
+            self.status = format!("{} has no audio bound", request.label);
+            return;
+        }
+
+        let language = binding.language_to_show(self.audio.language.as_deref());
+        let media: Vec<crate::source::ce_audio::CeSoundMedia> = binding
+            .media_for_language(&language)
+            .into_iter()
+            .cloned()
+            .collect();
+        if !request.extract {
+            // Play the first permutation, matching the loose-folder player.
+            let Some(first) = media.into_iter().next() else {
+                return;
+            };
+            self.audio.pending = Some(crate::app::audio::SoundAction::PlayCeMedia {
+                paks_root,
+                label: format!("{} \u{00B7} {}", request.label, first.display_name()),
+                media: Box::new(first),
+            });
+            return;
+        }
+        let Some(base) = rfd::FileDialog::new()
+            .set_title(format!("Extract {}", request.label))
+            .pick_folder()
+        else {
+            return;
+        };
+        let items = media
+            .into_iter()
+            .map(|m| crate::app::sound_extract::ExtractItem {
+                out_path: base.join(format!(
+                    "{}.wav",
+                    crate::app::sound_extract::sanitize_component(&m.display_name())
+                )),
+                source: crate::app::sound_extract::ExtractSource::CeMedia {
+                    paks_root: paks_root.clone(),
+                    media: Box::new(m),
+                },
+            })
+            .collect();
+        self.pending_sound_extract = Some(crate::app::sound_extract::ExtractRequest {
+            items,
+            tags_root: None,
+            label: request.label,
+        });
     }
 
     fn push_terminal_line(&mut self, line: String) {

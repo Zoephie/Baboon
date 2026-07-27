@@ -217,6 +217,22 @@ pub fn load_iostore_container(
     build_container_set(root, vec![utoc], fallback_names, definitions_root)
 }
 
+/// Sibling `.utoc`s in `root` that aren't already mounted, opened purely so an
+/// index-less container's chunk ids can be resolved back to paths. Only ones
+/// that carry a directory index are any use as a reference.
+fn sibling_reference_archives(root: &Path, mounted: &[PathBuf]) -> Vec<IoStoreArchive> {
+    let Ok(dir) = std::fs::read_dir(root) else {
+        return Vec::new();
+    };
+    dir.filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("utoc")))
+        .filter(|p| !p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("global.utoc")))
+        .filter(|p| !mounted.contains(p))
+        .filter_map(|p| IoStoreArchive::open(&p).ok())
+        .filter(|archive| !archive.entries().is_empty())
+        .collect()
+}
+
 fn build_container_set(
     root: PathBuf,
     utocs: Vec<PathBuf>,
@@ -236,12 +252,47 @@ fn build_container_set(
     let mut packages = ContainerPackageIndex::default();
     let mut opened_any = false;
 
+    // Open every container up front. A mod/override container addresses its
+    // chunks by id and so ships with no directory index at all; naming its
+    // contents needs the containers it overrides as reference, which may not
+    // have been opened yet at its turn in the list.
+    let mut opened: Vec<(PathBuf, Option<IoStoreArchive>)> = Vec::new();
     for utoc in utocs {
-        let archive = match IoStoreArchive::open(&utoc) {
-            Ok(a) => a,
-            // Skip containers we can't parse (e.g. index-less globals).
-            Err(_) => continue,
-        };
+        // Skip containers we can't parse (e.g. index-less globals).
+        if let Ok(archive) = IoStoreArchive::open(&utoc) {
+            opened.push((utoc, Some(archive)));
+        }
+    }
+    let needs_recovery = |slot: &Option<IoStoreArchive>| {
+        matches!(slot, Some(archive) if archive.entries().is_empty())
+    };
+    // Naming an index-less container's chunks means resolving their ids against
+    // the containers it overrides. On the "open one chunk" path — a mod sitting
+    // in the game's own Paks folder — those aren't in the set, so pull the
+    // siblings in as references. They name chunks and contribute no tags.
+    let references: Vec<IoStoreArchive> = if opened.iter().any(|(_, a)| needs_recovery(a)) {
+        let mounted: Vec<PathBuf> = opened.iter().map(|(p, _)| p.clone()).collect();
+        sibling_reference_archives(&root, &mounted)
+    } else {
+        Vec::new()
+    };
+    for i in 0..opened.len() {
+        if !needs_recovery(&opened[i].1) {
+            continue;
+        }
+        // Lift the target out so the rest can be borrowed as its references.
+        let Some(mut archive) = opened[i].1.take() else { continue };
+        let bases: Vec<&IoStoreArchive> = opened
+            .iter()
+            .filter_map(|(_, a)| a.as_ref())
+            .chain(references.iter())
+            .collect();
+        archive.recover_entries(&bases, None);
+        opened[i].1 = Some(archive);
+    }
+
+    for (utoc, archive) in opened {
+        let Some(archive) = archive else { continue };
         opened_any = true;
         let chunk_label = utoc
             .file_stem()
@@ -927,6 +978,76 @@ mod mod_export_tests {
         assert_ne!(served, original, "the exported container carried the base bytes");
         eprintln!("override verified for {rel_path} ({} bytes)", served.len());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// An exported mod opens EMPTY in the browser: an override container is
+    /// addressed by chunk id and ships with no directory index, so the file list
+    /// it advertises is nothing at all. Assert on what the tag browser actually
+    /// derives — the mounted entries — not on the raw chunks, which were already
+    /// fine while the UI showed an empty tree.
+    #[test]
+    fn a_mod_container_lists_its_tags_when_opened_on_its_own() {
+        if !Path::new(PAKS).exists() {
+            eprintln!("skipping: {PAKS} not present");
+            return;
+        }
+        let defs = Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
+        let names = TagNameIndex::load_from_definitions(&defs);
+        let loaded =
+            load_iostore_container_set(PathBuf::from(PAKS), &names, &defs).expect("mount");
+        let TagSource::IoStoreContainerSet { ref containers, .. } = loaded.source else {
+            panic!("expected a container set");
+        };
+        let (container, rel_path, original) = loaded
+            .entries
+            .iter()
+            .find_map(|entry| match &entry.location {
+                TagEntryLocation::Container { container, rel_path } => {
+                    let archive = &containers.get(*container)?.archive;
+                    let bytes = archive.read(rel_path).ok()?;
+                    (bytes.len() > 64).then(|| (*container, rel_path.clone(), bytes))
+                }
+                _ => None,
+            })
+            .expect("a readable container tag");
+
+        let mut edited = original.clone();
+        let last = edited.len() - 1;
+        edited[last] ^= 0xFF;
+
+        // Write the mod into the game's own Paks folder, which is where mods
+        // live and therefore where they get opened from.
+        let out = PathBuf::from(PAKS).join(format!("baboon-listing-test-{}_P.utoc", std::process::id()));
+        let archive = containers[container].archive.clone();
+        blam_tags::iostore::writer::write_mod_container_ex(
+            &[(archive.as_ref(), rel_path.as_str(), edited.as_slice())],
+            &[],
+            &out,
+        )
+        .expect("write override container");
+
+        let opened = load_iostore_container(out.clone(), &names, &defs);
+        for ext in ["utoc", "ucas", "pak"] {
+            let _ = std::fs::remove_file(out.with_extension(ext));
+        }
+        let opened = opened.expect("mount the exported mod on its own");
+
+        assert!(
+            !opened.entries.is_empty(),
+            "opening a mod container listed no tags at all"
+        );
+        let listed = opened
+            .entries
+            .iter()
+            .any(|entry| match &entry.location {
+                TagEntryLocation::Container { rel_path: p, .. } => *p == rel_path,
+                _ => false,
+            });
+        assert!(listed, "the overridden tag {rel_path} was not listed");
+        eprintln!(
+            "mod container listed {} tag(s); found {rel_path}",
+            opened.entries.len()
+        );
     }
 }
 

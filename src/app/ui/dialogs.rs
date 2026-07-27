@@ -724,6 +724,7 @@ impl Baboon {
             sound_extract_request: &mut sound_extract_request,
             sound_language: None,
             ce_sound: None,
+            ce_sound_ref_request: &mut None,
             ce_paks_root: None,
             tool_import: &mut tool_import,
             bitmap_reimport: &mut bitmap_reimport,

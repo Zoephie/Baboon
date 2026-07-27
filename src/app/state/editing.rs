@@ -244,6 +244,25 @@ pub(in crate::app) struct OpenTagRequest {
     pub(in crate::app) float: bool,
 }
 
+/// A request to play or extract a `.sound` a container-source tag only *refers*
+/// to (`sound_looping` tracks, dialogue vocalizations).
+///
+/// On a loose folder the player loads the referenced tag and reads its samples
+/// on the spot. A Campaign Evolved tag has no samples to read: the audio is
+/// reached by walking the referenced tag's own package imports out to Wwise,
+/// which is the app's job, not the field renderer's. So the click is recorded
+/// here and resolved after the frame.
+#[derive(Clone)]
+pub(in crate::app) struct CeSoundRefRequest {
+    pub(in crate::app) group_tag: u32,
+    /// The reference as stored in the tag (Halo-relative, `\`-separated).
+    pub(in crate::app) reference: String,
+    /// Label for the player's status line.
+    pub(in crate::app) label: String,
+    /// Extract every permutation to a chosen folder instead of playing one.
+    pub(in crate::app) extract: bool,
+}
+
 /// Read-only tag catalog exposed to reference pickers for sources whose tags do
 /// not exist as ordinary files. The group tree's indices address `entries`.
 #[derive(Clone, Copy)]
@@ -437,6 +456,11 @@ pub(in crate::app) struct FieldEditContext<'a> {
     /// The container source's `Paks` directory, where the legacy `.pak`
     /// containers holding Campaign Evolved's Wwise media live.
     pub(in crate::app) ce_paks_root: Option<&'a Path>,
+    /// Set when a player that only holds a `.sound` *reference* (sound_looping,
+    /// dialogue) is asked to play or extract one on a container source. The
+    /// referenced tag carries no audio itself, so the app resolves the
+    /// reference's own Wwise binding after rendering rather than here.
+    pub(in crate::app) ce_sound_ref_request: &'a mut Option<CeSoundRefRequest>,
     /// Set when the user clicks "Import" on a geometry tag-reference row.
     pub(in crate::app) tool_import: &'a mut Option<ToolImportRequest>,
     /// Set when the user clicks "Reimport" on a bitmap tag.
