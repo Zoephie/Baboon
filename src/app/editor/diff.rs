@@ -135,20 +135,64 @@ fn element_identity(element: Option<TagStruct<'_>>, names: &TagNameIndex) -> Opt
         .or_else(|| foundation::first_string_label(element))
 }
 
-/// A cheap fingerprint of an element's own bytes, for matching elements that
+/// How deep a fingerprint follows nested structure before it stops. Deep enough
+/// to reach what distinguishes real elements, bounded so a pathological tag
+/// cannot make aligning one block cost the whole document.
+const FINGERPRINT_DEPTH: usize = 6;
+
+/// A fingerprint of an element's whole contents, for matching elements that
 /// have nothing naming them.
 ///
-/// Only the element's fixed-size data, so two elements differing solely inside
-/// a nested block fingerprint alike -- which is what we want: they are the same
-/// element, and recursing finds what changed within it.
+/// Nested data is included, and that is the point. `raw()` covers only a
+/// struct's fixed-size fields, and for a good many blocks everything that
+/// tells one element from another lives in child blocks -- a `zone set pvs`
+/// element is a version, a mask and some flags, with the checksums and cluster
+/// data underneath. Fingerprinting the fixed part alone made those elements
+/// indistinguishable, so the aligner matched an arbitrary valid subsequence
+/// and every field below a deletion read as changed, each one shifted by
+/// exactly one position.
 fn element_fingerprint(element: Option<TagStruct<'_>>) -> u64 {
-    use std::hash::{Hash, Hasher};
+    use std::hash::Hasher;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     match element {
-        Some(element) => element.raw().hash(&mut hasher),
-        None => 0u8.hash(&mut hasher),
+        Some(element) => hash_struct(&element, &mut hasher, 0),
+        None => hasher.write_u8(0),
     }
     hasher.finish()
+}
+
+fn hash_struct(
+    st: &TagStruct<'_>,
+    hasher: &mut std::collections::hash_map::DefaultHasher,
+    depth: usize,
+) {
+    use std::hash::Hasher;
+    hasher.write(st.raw());
+    if depth >= FINGERPRINT_DEPTH {
+        return;
+    }
+    for field in st.fields_all() {
+        if let Some(block) = field.as_block() {
+            // The count matters: two otherwise identical elements holding
+            // different numbers of children are different elements.
+            hasher.write_usize(block.len());
+            for index in 0..block.len() {
+                if let Some(element) = block.element(index) {
+                    hash_struct(&element, hasher, depth + 1);
+                }
+            }
+        } else if let Some(array) = field.as_array() {
+            for index in 0..array.len() {
+                if let Some(element) = array.element(index) {
+                    hash_struct(&element, hasher, depth + 1);
+                }
+            }
+        } else if let Some(inner) = field.as_struct() {
+            hash_struct(&inner, hasher, depth + 1);
+        } else if let Some(data) = field.as_data() {
+            hasher.write(data);
+        }
+    }
 }
 
 /// Pair elements by content when nothing names them.
@@ -659,6 +703,97 @@ mod base_path_tests {
             rows.iter()
                 .any(|row| row.base_path.is_none() && row.b.starts_with("added")),
             "an added element has no path in the shipped tag: {rows:?}"
+        );
+    }
+}
+#[cfg(test)]
+mod deletion_repro_tests {
+    use super::*;
+
+    const PAKS: &str = "/Users/camden/Halo/halo-campaign-evolved_pc/Meteorite/Content/Paks";
+
+    fn read_a15() -> Option<TagFile> {
+        if !std::path::Path::new(PAKS).exists() {
+            return None;
+        }
+        let defs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
+        let names = crate::format::TagNameIndex::load_from_definitions(&defs);
+        let loaded = crate::source::load_iostore_container_set(
+            std::path::PathBuf::from(PAKS),
+            &names,
+            &defs,
+        )
+        .ok()?;
+        let entry = loaded
+            .entries
+            .iter()
+            .find(|entry| entry.display_path.ends_with("a15.scenario"))?
+            .clone();
+        crate::source::read_entry(&loaded.source, &entry).ok()
+    }
+
+    /// Deleting one `zone set pvs` element reported a screen of changes through
+    /// everything below it, each value shifted by exactly one position -- the
+    /// signature of comparing element n against element n+1.
+    ///
+    /// These elements are a version, a mask and some flags, with everything
+    /// that tells them apart in nested blocks, so a fingerprint of the fixed
+    /// data alone could not distinguish them and the aligner paired the wrong
+    /// ones.
+    #[test]
+    fn deleting_a_zone_set_reports_only_that_deletion() {
+        let (Some(base), Some(mut edited)) = (read_a15(), read_a15()) else {
+            eprintln!("skipping: Campaign Evolved not present");
+            return;
+        };
+        let names = crate::format::TagNameIndex::default();
+        let before = base
+            .root()
+            .fields_all()
+            .find_map(|field| {
+                (field.name() == "zone set pvs")
+                    .then(|| field.as_block())
+                    .flatten()
+                    .map(|block| block.len())
+            })
+            .expect("a zone set pvs block");
+        assert!(before > 4, "need several elements to shift, got {before}");
+
+        let mut dirty = false;
+        crate::app::apply_block_ops(
+            &mut edited,
+            vec![BlockOp {
+                path: "zone set pvs".to_owned(),
+                kind: BlockOpKind::Delete(3),
+            }],
+            &mut dirty,
+        );
+
+        let (rows, _) = diff_tags(&base, &edited, &names, 5000);
+        let removals: Vec<&TagFieldDiff> = rows
+            .iter()
+            .filter(|row| row.b.is_empty() && row.a.starts_with("removed"))
+            .collect();
+        assert_eq!(
+            removals.len(),
+            1,
+            "one element was deleted, so one removal: {:?}",
+            removals.iter().map(|row| &row.path).collect::<Vec<_>>()
+        );
+
+        // Everything else in the tag is untouched by a deletion further up, so
+        // nothing outside the removed element may be reported as changed.
+        let removed = &removals[0].path;
+        let strays: Vec<&String> = rows
+            .iter()
+            .filter(|row| !row.path.starts_with(removed.as_str()))
+            .map(|row| &row.path)
+            .collect();
+        assert!(
+            strays.is_empty(),
+            "{} field(s) outside the deleted element reported as changed, e.g. {:?}",
+            strays.len(),
+            strays.iter().take(5).collect::<Vec<_>>()
         );
     }
 }
