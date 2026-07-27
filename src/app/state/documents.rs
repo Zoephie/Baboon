@@ -369,14 +369,39 @@ pub(in crate::app) struct ModExportDialog {
     pub(in crate::app) diffs: HashMap<String, ModRowDiff>,
 }
 
+/// Fold a mod name into a file-safe stem, keeping its capitalisation.
+///
+/// The name becomes three file names in a folder the user never types, so
+/// spaces and punctuation are separators to normalise rather than characters
+/// to carry through. Anything that is not a letter, digit, hyphen or
+/// underscore becomes a hyphen, runs collapse, and the ends are trimmed --
+/// kebab case, with the user's own casing left alone.
+///
+/// Underscores survive deliberately: `_P` marks a mod's priority, and folding
+/// it to `-P` would leave a second one appended.
+pub(in crate::app) fn sanitize_mod_name(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+            out.push(c);
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    out.trim_matches('-').to_owned()
+}
+
 impl ModExportDialog {
-    /// The file stem the mod will be written under. `_P` is what gives an
-    /// override container priority over the game's own, so it is part of the
-    /// name rather than something the user can leave off.
+    /// The file stem the mod will be written under.
+    ///
+    /// `_P` is what gives an override container priority over the game's own,
+    /// so it is part of the name rather than something the user can leave off.
+    /// The game folds case before comparing, so a name already ending `_p` is
+    /// left as it is.
     pub(in crate::app) fn stem(&self) -> String {
-        let name = self.name.trim();
-        if name.ends_with("_P") {
-            name.to_owned()
+        let name = sanitize_mod_name(&self.name);
+        if name.len() >= 2 && name[name.len() - 2..].eq_ignore_ascii_case("_p") {
+            name
         } else {
             format!("{name}_P")
         }

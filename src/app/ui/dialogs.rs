@@ -448,28 +448,6 @@ impl Baboon {
     /// Destructive-save confirmation for Campaign Evolved container tags. Save
     /// overwrites the shipped pak files in place, so we always confirm and point
     /// the user at Export Mod as the non-destructive alternative.
-    /// Fold a mod name into a file-safe stem, keeping its capitalisation.
-    ///
-    /// The name becomes three file names in a folder the user never types, so
-    /// spaces and punctuation are separators to be normalised rather than
-    /// characters to carry through. Anything that is not a letter, digit,
-    /// hyphen or underscore becomes a hyphen, runs collapse, and the ends are
-    /// trimmed -- kebab case, with the user's own casing left alone.
-    ///
-    /// Underscores survive deliberately: `_P` is what marks a mod's priority,
-    /// and folding it to `-P` would leave `stem` appending a second one.
-    fn sanitize_mod_name(name: &str) -> String {
-        let mut out = String::with_capacity(name.len());
-        for c in name.chars() {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                out.push(c);
-            } else if !out.ends_with('-') {
-                out.push('-');
-            }
-        }
-        out.trim_matches('-').to_owned()
-    }
-
     /// Split a diff path into the element it belongs to and the field within
     /// it, so changes can be grouped under one heading per element.
     ///
@@ -849,6 +827,7 @@ impl Baboon {
         let mut cancel = false;
         let mut export = false;
         let mut browse = false;
+        let mut acknowledge: Option<bool> = None;
         let mut set_all: Option<bool> = None;
         let mut toggled: Option<usize> = None;
         let mut expand_toggled: Option<String> = None;
@@ -1034,16 +1013,29 @@ impl Baboon {
                         RichText::new(format!("Overwrites: {}", existing.join(", ")))
                             .color(egui::Color32::from_rgb(210, 120, 90)),
                     );
+                    // Named and then confirmed. A mod is three files plus its
+                    // sidecar, and replacing someone's existing mod should take
+                    // more than not noticing a line of text.
+                    let mut acknowledged = dialog.overwrite_acknowledged;
+                    if ui
+                        .checkbox(&mut acknowledged, "Replace these files")
+                        .changed()
+                    {
+                        acknowledge = Some(acknowledged);
+                    }
                 }
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
-                    let ready = name_ok && included > 0;
+                    let overwrite_ok = existing.is_empty() || dialog.overwrite_acknowledged;
+                    let ready = name_ok && included > 0 && overwrite_ok;
                     if ui
                         .add_enabled(ready, egui::Button::new("Export"))
-                        .on_disabled_hover_text(if name_ok {
+                        .on_disabled_hover_text(if !name_ok {
+                            "Enter a name for the mod"
+                        } else if included == 0 {
                             "Nothing is selected to export"
                         } else {
-                            "Enter a name for the mod"
+                            "Confirm that the existing files may be replaced"
                         })
                         .clicked()
                     {
@@ -1058,8 +1050,15 @@ impl Baboon {
         // Applied after the window closes its borrow of `self`.
         if let Some(dialog) = self.mod_export.as_mut() {
             if dialog.name != name_edit {
-                dialog.name = Self::sanitize_mod_name(&name_edit);
+                // Kept verbatim. Folding the buffer on every keystroke ate the
+                // space in "My Mod" before the second word could be typed; the
+                // fold belongs to the file name, which `stem` produces and the
+                // dialog shows live beside the field.
+                dialog.name = name_edit;
                 dialog.overwrite_acknowledged = false;
+            }
+            if let Some(value) = acknowledge {
+                dialog.overwrite_acknowledged = value;
             }
             if let Some(value) = set_all {
                 for row in dialog.rows.iter_mut() {
@@ -2103,15 +2102,26 @@ mod mod_export_tests {
     /// carry through -- while the user's own capitalisation is theirs to keep.
     #[test]
     fn a_mod_name_becomes_a_file_safe_stem() {
-        assert_eq!(Baboon::sanitize_mod_name("My Cool Mod"), "My-Cool-Mod");
-        assert_eq!(Baboon::sanitize_mod_name("h2a magnum!"), "h2a-magnum");
-        assert_eq!(Baboon::sanitize_mod_name("  trimmed  "), "trimmed");
+        assert_eq!(sanitize_mod_name("My Cool Mod"), "My-Cool-Mod");
+        assert_eq!(sanitize_mod_name("h2a magnum!"), "h2a-magnum");
+        assert_eq!(sanitize_mod_name("  trimmed  "), "trimmed");
         // Path syntax cannot survive: these become three files somewhere the
         // user did not choose.
-        assert_eq!(Baboon::sanitize_mod_name("../../etc/passwd"), "etc-passwd");
-        assert_eq!(Baboon::sanitize_mod_name("my:mod?"), "my-mod");
+        assert_eq!(sanitize_mod_name("../../etc/passwd"), "etc-passwd");
+        assert_eq!(sanitize_mod_name("my:mod?"), "my-mod");
         // Underscores stay, so `_P` keeps meaning what it means.
-        assert_eq!(Baboon::sanitize_mod_name("my_mod_P"), "my_mod_P");
-        assert_eq!(dialog(&Baboon::sanitize_mod_name("My Mod")).stem(), "My-Mod_P");
+        assert_eq!(sanitize_mod_name("my_mod_P"), "my_mod_P");
+    }
+
+    /// The buffer holds what the user typed; only the file name is folded.
+    /// Folding as they type ate the space in "My Mod" before the second word
+    /// could be reached.
+    #[test]
+    fn a_name_is_folded_only_when_it_becomes_a_file_name() {
+        assert_eq!(dialog("My Mod").stem(), "My-Mod_P");
+        assert_eq!(dialog("My ").stem(), "My_P");
+        // Already suffixed, in either case the game accepts.
+        assert_eq!(dialog("thing_P").stem(), "thing_P");
+        assert_eq!(dialog("thing_p").stem(), "thing_p");
     }
 }
