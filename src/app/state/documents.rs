@@ -338,6 +338,14 @@ pub(in crate::app) enum ModExportChange {
     Unresolved,
 }
 
+/// A modified tag's field-level differences, computed when its row is first
+/// expanded and kept for as long as the review is open.
+pub(in crate::app) struct ModRowDiff {
+    pub(in crate::app) rows: Vec<TagFieldDiff>,
+    pub(in crate::app) truncated: bool,
+    pub(in crate::app) error: Option<String>,
+}
+
 /// Review of what Export Mod is about to write, shown before anything is
 /// written and before a destination is chosen.
 ///
@@ -351,6 +359,11 @@ pub(in crate::app) struct ModExportDialog {
     pub(in crate::app) folder: PathBuf,
     /// True once the user has accepted overwriting the files already there.
     pub(in crate::app) overwrite_acknowledged: bool,
+    /// Rows the user has opened. Diffs are computed on first expansion rather
+    /// than up front: each one costs a container read and two parses, which
+    /// would make opening the review scale with how much is stashed.
+    pub(in crate::app) expanded: HashSet<String>,
+    pub(in crate::app) diffs: HashMap<String, ModRowDiff>,
 }
 
 impl ModExportDialog {

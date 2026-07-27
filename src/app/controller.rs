@@ -3308,7 +3308,51 @@ impl Baboon {
             name: "mymod".to_owned(),
             folder,
             overwrite_acknowledged: false,
+            expanded: HashSet::new(),
+            diffs: HashMap::new(),
         });
+    }
+
+    /// Compute the field differences for one reviewed tag, against the tag as
+    /// the game ships it.
+    ///
+    /// `read_entry` reads from the container, so the baseline is the shipped
+    /// tag rather than anything the workspace has stashed -- which is the
+    /// comparison the reviewer actually wants: what this mod changes about the
+    /// game, not what changed since the last autosave.
+    pub(super) fn diff_reviewed_tag(&self, kit: usize, identity: &str) -> ModRowDiff {
+        const LIMIT: usize = 5000;
+        let failed = |error: String| ModRowDiff {
+            rows: Vec::new(),
+            truncated: false,
+            error: Some(error),
+        };
+        let Some(dialog) = self.mod_export.as_ref() else {
+            return failed("The review is no longer open".to_owned());
+        };
+        let Some(overlay) = dialog.snapshot.overlays.get(identity) else {
+            return failed("This tag is no longer in the export".to_owned());
+        };
+        let Some(entry) = self.campaign_entry_for_identity(kit, identity) else {
+            return failed("This tag is no longer in the source".to_owned());
+        };
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+            return failed("No source loaded".to_owned());
+        };
+        let base = match crate::source::read_entry(&source.source, &entry) {
+            Ok(base) => base,
+            Err(error) => return failed(format!("Could not read the shipped tag: {error}")),
+        };
+        let edited = match TagFile::read_from_bytes(&overlay.bytes) {
+            Ok(edited) => edited,
+            Err(error) => return failed(format!("Could not read the edited tag: {error}")),
+        };
+        let (rows, truncated) = diff_tags(&base, &edited, &self.kits[kit].names, LIMIT);
+        ModRowDiff {
+            rows,
+            truncated,
+            error: None,
+        }
     }
 
     /// Write the reviewed mod. `included` are the identities the user kept.

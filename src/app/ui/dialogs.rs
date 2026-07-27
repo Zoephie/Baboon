@@ -461,6 +461,98 @@ impl Baboon {
             .to_owned()
     }
 
+    /// Split a diff path into the element it belongs to and the field within
+    /// it, so changes can be grouped under one heading per element.
+    ///
+    /// Changes nest -- `weapons[2]/triggers[0]/barrels[1]/damage` -- and the
+    /// innermost element is the one worth heading, with the whole chain shown
+    /// so it is unambiguous which one it is.
+    fn split_element_path(path: &str) -> (&str, &str) {
+        match path.rfind(']') {
+            Some(end) => {
+                let field = &path[end + 1..];
+                (&path[..=end], field.strip_prefix('/').unwrap_or(field))
+            }
+            None => ("", path),
+        }
+    }
+
+    /// One tag's differences, grouped by the element each belongs to.
+    fn draw_mod_export_diff(ui: &mut Ui, diff: &ModRowDiff) {
+        if let Some(error) = diff.error.as_deref() {
+            ui.label(RichText::new(error).color(removed_text()).small());
+            return;
+        }
+        if diff.rows.is_empty() {
+            ui.label(
+                RichText::new("No differences from the shipped tag.")
+                    .color(subtle_dark())
+                    .small(),
+            );
+            return;
+        }
+        let mut current = None;
+        for row in &diff.rows {
+            let (element, field) = Self::split_element_path(&row.path);
+            if current != Some(element) {
+                current = Some(element);
+                if !element.is_empty() {
+                    ui.add_space(4.0);
+                    ui.separator();
+                    ui.label(
+                        RichText::new(element)
+                            .color(modified_text())
+                            .monospace()
+                            .small(),
+                    );
+                }
+            }
+            // A whole element added, removed or moved: the row is about the
+            // element itself, not a field inside it.
+            if field.is_empty() {
+                let (marker, color) = if row.a.is_empty() {
+                    ("+", added_text())
+                } else if row.b.is_empty() {
+                    ("-", removed_text())
+                } else {
+                    ("~", modified_text())
+                };
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(marker).color(color).monospace());
+                    let text = if row.b.is_empty() { &row.a } else { &row.b };
+                    ui.label(RichText::new(text).color(color).small());
+                });
+                continue;
+            }
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(field)
+                        .color(text_dark())
+                        .monospace()
+                        .small(),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if !row.b.is_empty() {
+                        ui.label(RichText::new(&row.b).color(added_text()).small());
+                        ui.label(RichText::new("+").color(added_text()).monospace().small());
+                    }
+                    if !row.a.is_empty() {
+                        ui.label(RichText::new(&row.a).color(removed_text()).small());
+                        ui.label(RichText::new("-").color(removed_text()).monospace().small());
+                    }
+                });
+            });
+        }
+        if diff.truncated {
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new("More differences than can be listed here.")
+                    .color(subtle_dark())
+                    .small(),
+            );
+        }
+    }
+
     /// Review what Export Mod is about to write, and where.
     ///
     /// The save dialog this replaces asked for one file name when the output is
@@ -506,6 +598,7 @@ impl Baboon {
         let mut browse = false;
         let mut set_all: Option<bool> = None;
         let mut toggled: Option<usize> = None;
+        let mut expand_toggled: Option<String> = None;
         let mut name_edit = dialog.name.clone();
 
         egui::Window::new("Export Mod")
@@ -548,7 +641,20 @@ impl Baboon {
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
                         for (index, row) in dialog.rows.iter().enumerate() {
+                            let expandable = row.kind == ModExportChange::Modified;
+                            let expanded = dialog.expanded.contains(&row.identity);
                             ui.horizontal(|ui| {
+                                if expandable {
+                                    if ui
+                                        .small_button(if expanded { "v" } else { ">" })
+                                        .on_hover_text("Show what changed")
+                                        .clicked()
+                                    {
+                                        expand_toggled = Some(row.identity.clone());
+                                    }
+                                } else {
+                                    ui.add_space(18.0);
+                                }
                                 let mut include = row.include;
                                 let enabled = row.kind != ModExportChange::Unresolved;
                                 if ui
@@ -585,6 +691,20 @@ impl Baboon {
                                     },
                                 );
                             });
+                            if expandable && expanded {
+                                ui.indent(("mod_export_diff", index), |ui| {
+                                    match dialog.diffs.get(&row.identity) {
+                                        Some(diff) => Self::draw_mod_export_diff(ui, diff),
+                                        None => {
+                                            ui.label(
+                                                RichText::new("Comparing...")
+                                                    .color(subtle_dark())
+                                                    .small(),
+                                            );
+                                        }
+                                    }
+                                });
+                            }
                         }
                     });
                 ui.add_space(10.0);
@@ -661,6 +781,35 @@ impl Baboon {
                 && let Some(row) = dialog.rows.get_mut(index)
             {
                 row.include = !row.include;
+            }
+            if let Some(identity) = expand_toggled.as_ref() {
+                if !dialog.expanded.remove(identity) {
+                    dialog.expanded.insert(identity.clone());
+                }
+            }
+        }
+        // Computed outside the window, and only for rows that are open and have
+        // no result yet: each one costs a container read and two parses.
+        let pending: Vec<String> = self
+            .mod_export
+            .as_ref()
+            .map(|dialog| {
+                dialog
+                    .expanded
+                    .iter()
+                    .filter(|identity| !dialog.diffs.contains_key(*identity))
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        if !pending.is_empty()
+            && let Some(index) = self.resolve_kit(kit)
+        {
+            for identity in pending {
+                let diff = self.diff_reviewed_tag(index, &identity);
+                if let Some(dialog) = self.mod_export.as_mut() {
+                    dialog.diffs.insert(identity, diff);
+                }
             }
         }
         if browse
@@ -1621,6 +1770,8 @@ mod mod_export_tests {
             name: name.to_owned(),
             folder: PathBuf::from("/tmp"),
             overwrite_acknowledged: false,
+            expanded: Default::default(),
+            diffs: Default::default(),
         }
     }
 
@@ -1632,6 +1783,27 @@ mod mod_export_tests {
         assert_eq!(dialog("h2a_magnum").stem(), "h2a_magnum_P");
         assert_eq!(dialog("h2a_magnum_P").stem(), "h2a_magnum_P");
         assert_eq!(dialog("  spaced  ").stem(), "spaced_P");
+    }
+
+    /// Changes nest, and the innermost element is the one worth heading. The
+    /// whole chain is kept so it is unambiguous which element that is.
+    #[test]
+    fn a_diff_path_splits_into_its_element_and_field() {
+        assert_eq!(
+            Baboon::split_element_path("weapons[2]/triggers[0]/barrels[1]/damage"),
+            ("weapons[2]/triggers[0]/barrels[1]", "damage")
+        );
+        // A row about the element itself -- added, removed or moved -- has no
+        // field part, which is how the renderer tells the two apart.
+        assert_eq!(
+            Baboon::split_element_path("vehicle palette[3]"),
+            ("vehicle palette[3]", "")
+        );
+        // A field at the top level of the tag belongs to no element.
+        assert_eq!(
+            Baboon::split_element_path("flags"),
+            ("", "flags")
+        );
     }
 
     /// The name becomes three files in a folder the user never types, so a

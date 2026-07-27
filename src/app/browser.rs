@@ -76,6 +76,12 @@ pub(in crate::app) fn added_text() -> Color32 {
     Color32::from_rgb(126, 186, 108)
 }
 
+/// Colour for a value or element that is going away. Paired with a `-` marker,
+/// so red and green never carry the meaning by themselves.
+pub(in crate::app) fn removed_text() -> Color32 {
+    Color32::from_rgb(214, 106, 106)
+}
+
 /// Colour for a tag or folder holding edits that are not written into the game.
 /// The same goldenrod the workspace tab is tinted with.
 pub(in crate::app) fn modified_text() -> Color32 {
