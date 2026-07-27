@@ -448,17 +448,26 @@ impl Baboon {
     /// Destructive-save confirmation for Campaign Evolved container tags. Save
     /// overwrites the shipped pak files in place, so we always confirm and point
     /// the user at Export Mod as the non-destructive alternative.
-    /// Strip anything from a mod name that cannot be part of a file name.
+    /// Fold a mod name into a file-safe stem, keeping its capitalisation.
     ///
-    /// The name becomes three files in a folder the user does not type, so a
-    /// separator or a reserved character here is a write failure later rather
-    /// than a different path.
+    /// The name becomes three file names in a folder the user never types, so
+    /// spaces and punctuation are separators to be normalised rather than
+    /// characters to carry through. Anything that is not a letter, digit,
+    /// hyphen or underscore becomes a hyphen, runs collapse, and the ends are
+    /// trimmed -- kebab case, with the user's own casing left alone.
+    ///
+    /// Underscores survive deliberately: `_P` is what marks a mod's priority,
+    /// and folding it to `-P` would leave `stem` appending a second one.
     fn sanitize_mod_name(name: &str) -> String {
-        name.chars()
-            .filter(|c| !matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|'))
-            .collect::<String>()
-            .trim()
-            .to_owned()
+        let mut out = String::with_capacity(name.len());
+        for c in name.chars() {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                out.push(c);
+            } else if !out.ends_with('-') {
+                out.push('-');
+            }
+        }
+        out.trim_matches('-').to_owned()
     }
 
     /// Split a diff path into the element it belongs to and the field within
@@ -2089,12 +2098,20 @@ mod mod_export_tests {
         );
     }
 
-    /// The name becomes three files in a folder the user never types, so a
-    /// separator would be a write failure rather than a different path.
+    /// The name becomes three file names in a folder the user never types, so
+    /// spaces and punctuation are separators to normalise, not characters to
+    /// carry through -- while the user's own capitalisation is theirs to keep.
     #[test]
-    fn a_mod_name_cannot_contain_path_syntax() {
-        assert_eq!(Baboon::sanitize_mod_name("../../etc/passwd"), "....etcpasswd");
-        assert_eq!(Baboon::sanitize_mod_name("my:mod?"), "mymod");
+    fn a_mod_name_becomes_a_file_safe_stem() {
+        assert_eq!(Baboon::sanitize_mod_name("My Cool Mod"), "My-Cool-Mod");
+        assert_eq!(Baboon::sanitize_mod_name("h2a magnum!"), "h2a-magnum");
         assert_eq!(Baboon::sanitize_mod_name("  trimmed  "), "trimmed");
+        // Path syntax cannot survive: these become three files somewhere the
+        // user did not choose.
+        assert_eq!(Baboon::sanitize_mod_name("../../etc/passwd"), "etc-passwd");
+        assert_eq!(Baboon::sanitize_mod_name("my:mod?"), "my-mod");
+        // Underscores stay, so `_P` keeps meaning what it means.
+        assert_eq!(Baboon::sanitize_mod_name("my_mod_P"), "my_mod_P");
+        assert_eq!(dialog(&Baboon::sanitize_mod_name("My Mod")).stem(), "My-Mod_P");
     }
 }
