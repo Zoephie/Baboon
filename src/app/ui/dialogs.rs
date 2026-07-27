@@ -637,7 +637,7 @@ impl Baboon {
         let filter = Self::diff_field_filter(&diff.rows);
 
         // One section per changed element, in the order the tag has them.
-        let mut sections: Vec<(String, Option<String>, String)> = Vec::new();
+        let mut sections: Vec<(String, Option<String>, String, ModExportChange)> = Vec::new();
         for row in &diff.rows {
             let (element, _) = Self::split_element_path(&row.path);
             let base_element = row
@@ -649,29 +649,58 @@ impl Baboon {
             } else {
                 String::new()
             };
+            // What happened to the element as a whole, from the row that is
+            // about the element rather than about a field inside it.
+            let kind = if Self::split_element_path(&row.path).1.is_empty() {
+                if row.a.is_empty() {
+                    ModExportChange::New
+                } else if row.b.is_empty() {
+                    ModExportChange::Unresolved
+                } else {
+                    ModExportChange::Modified
+                }
+            } else {
+                ModExportChange::Modified
+            };
             match sections.last_mut() {
-                Some((last, _, existing)) if last == element => {
+                Some((last, _, existing, existing_kind)) if last == element => {
                     if existing.is_empty() && !label.is_empty() {
                         *existing = label;
+                        *existing_kind = kind;
                     }
                 }
-                _ => sections.push((element.to_owned(), base_element, label)),
+                _ => sections.push((element.to_owned(), base_element, label, kind)),
             }
         }
 
-        for (element, base_element, label) in sections {
+        for (element, base_element, label, kind) in sections {
             ui.add_space(8.0);
             if !element.is_empty() {
                 ui.separator();
+                // `Unresolved` stands in for "gone" here, which is the only
+                // way an element can leave.
+                let (marker, heading) = match kind {
+                    ModExportChange::New => ("+", added_text()),
+                    ModExportChange::Unresolved => ("-", removed_text()),
+                    ModExportChange::Modified => ("~", modified_text()),
+                };
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new(&element).color(modified_text()).monospace());
+                    ui.label(RichText::new(marker).color(heading).monospace().strong());
+                    ui.label(RichText::new(&element).color(heading).monospace());
                     if !label.is_empty() {
-                        ui.label(RichText::new(&label).color(subtle_dark()).small());
+                        ui.label(RichText::new(&label).color(heading).small());
                     }
                 });
             }
             ui.columns(2, |columns| {
                 columns[0].push_id(("diff_before", &element), |ui| {
+                    // Tinted so which side is which is apparent at a glance
+                    // rather than only from the heading above it.
+                    Frame::none()
+                        .fill(removed_wash())
+                        .stroke(Stroke::new(1.0, removed_text().gamma_multiply(0.5)))
+                        .inner_margin(egui::Margin::symmetric(6.0, 6.0))
+                        .show(ui, |ui| {
                     ui.label(RichText::new("before").color(removed_text()).small());
                     match diff.base.as_ref() {
                         Some(base) => Self::draw_diff_side(
@@ -693,8 +722,14 @@ impl Baboon {
                             );
                         }
                     }
+                        });
                 });
                 columns[1].push_id(("diff_after", &element), |ui| {
+                    Frame::none()
+                        .fill(added_wash())
+                        .stroke(Stroke::new(1.0, added_text().gamma_multiply(0.5)))
+                        .inner_margin(egui::Margin::symmetric(6.0, 6.0))
+                        .show(ui, |ui| {
                     ui.label(RichText::new("after").color(added_text()).small());
                     if let Some(edited) = diff.edited.as_ref() {
                         Self::draw_diff_side(
@@ -710,6 +745,7 @@ impl Baboon {
                             &format!("{scope}|after"),
                         );
                     }
+                        });
                 });
             });
         }

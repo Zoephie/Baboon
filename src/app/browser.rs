@@ -76,6 +76,17 @@ pub(in crate::app) fn added_text() -> Color32 {
     Color32::from_rgb(126, 186, 108)
 }
 
+/// Background wash behind the shipped side of a diff, and behind the edited
+/// side. Kept dark: the editor draws its own widgets on top, and a strong fill
+/// would fight them rather than frame them.
+pub(in crate::app) fn removed_wash() -> Color32 {
+    Color32::from_rgb(52, 30, 30)
+}
+
+pub(in crate::app) fn added_wash() -> Color32 {
+    Color32::from_rgb(28, 46, 32)
+}
+
 /// Colour for a value or element that is going away. Paired with a `-` marker,
 /// so red and green never carry the meaning by themselves.
 pub(in crate::app) fn removed_text() -> Color32 {
