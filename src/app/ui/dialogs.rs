@@ -692,87 +692,82 @@ impl Baboon {
                     }
                 });
             }
-            // Each side is given exactly half and scrolls within itself.
-            // The editor's rows are wider than half a dialog, and a resizable
-            // window sized to its contents grows to fit them -- so without a
-            // bound the dialog widens every frame until it is off screen.
+            // Only a modified element has two sides worth comparing. An
+            // element that was added or removed exists on one side only, and a
+            // half-width pane beside an empty twin says less than one full
+            // pane in the colour of what happened.
             let available = ui.available_width();
-            let side_width = ((available - 16.0) / 2.0).max(160.0);
-            ui.horizontal_top(|ui| {
+            let half = ((available - 16.0) / 2.0).max(160.0);
+            let pane = |ui: &mut Ui, width: f32, before: bool, title: &str| {
+                let (wash, accent) = if before {
+                    (removed_wash(), removed_text())
+                } else {
+                    (added_wash(), added_text())
+                };
                 ui.allocate_ui_with_layout(
-                    Vec2::new(side_width, 0.0),
+                    Vec2::new(width, 0.0),
                     egui::Layout::top_down(egui::Align::Min),
                     |ui| {
-                        ui.set_width(side_width);
+                        ui.set_width(width);
                         Frame::none()
-                            .fill(removed_wash())
-                            .stroke(Stroke::new(1.0, removed_text().gamma_multiply(0.5)))
+                            .fill(wash)
+                            .stroke(Stroke::new(1.0, accent.gamma_multiply(0.5)))
                             .inner_margin(egui::Margin::symmetric(6.0, 6.0))
                             .show(ui, |ui| {
-                                ui.label(RichText::new("before").color(removed_text()).small());
+                                ui.label(RichText::new(title).color(accent).small());
+                                // Scrolled within its own pane: an editor row is
+                                // wider than half a dialog, and without this the
+                                // window grows to fit it every frame.
                                 egui::ScrollArea::horizontal()
-                                    .id_salt(("diff_before", &element))
-                                    .auto_shrink([false, false])
-                                    .show(ui, |ui| match diff.base.as_ref() {
-                                        Some(base) => Self::draw_diff_side(
-                                            ui,
-                                            base,
-                                            base_element.as_deref().unwrap_or(&element),
-                                            &filter,
-                                            names,
-                                            group_tag,
-                                            game,
-                                            definitions_root,
-                                            expert_mode,
-                                            &format!("{scope}|before"),
-                                        ),
-                                        // A tag the game does not ship has no before.
-                                        None => {
-                                            ui.label(
-                                                RichText::new("new tag")
-                                                    .color(subtle_dark())
-                                                    .small(),
-                                            );
-                                        }
-                                    });
-                            });
-                    },
-                );
-                ui.separator();
-                ui.allocate_ui_with_layout(
-                    Vec2::new(side_width, 0.0),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        ui.set_width(side_width);
-                        Frame::none()
-                            .fill(added_wash())
-                            .stroke(Stroke::new(1.0, added_text().gamma_multiply(0.5)))
-                            .inner_margin(egui::Margin::symmetric(6.0, 6.0))
-                            .show(ui, |ui| {
-                                ui.label(RichText::new("after").color(added_text()).small());
-                                egui::ScrollArea::horizontal()
-                                    .id_salt(("diff_after", &element))
+                                    .id_salt((title, &element))
                                     .auto_shrink([false, false])
                                     .show(ui, |ui| {
-                                        if let Some(edited) = diff.edited.as_ref() {
-                                            Self::draw_diff_side(
+                                        let (tag, path, side) = if before {
+                                            (
+                                                diff.base.as_ref(),
+                                                base_element.as_deref().unwrap_or(&element),
+                                                "before",
+                                            )
+                                        } else {
+                                            (diff.edited.as_ref(), element.as_str(), "after")
+                                        };
+                                        match tag {
+                                            Some(tag) => Self::draw_diff_side(
                                                 ui,
-                                                edited,
-                                                &element,
+                                                tag,
+                                                path,
                                                 &filter,
                                                 names,
                                                 group_tag,
                                                 game,
                                                 definitions_root,
                                                 expert_mode,
-                                                &format!("{scope}|after"),
-                                            );
+                                                &format!("{scope}|{side}"),
+                                            ),
+                                            None => {
+                                                ui.label(
+                                                    RichText::new("not present")
+                                                        .color(subtle_dark())
+                                                        .small(),
+                                                );
+                                            }
                                         }
                                     });
                             });
                     },
                 );
-            });
+            };
+            match kind {
+                ModExportChange::New => pane(ui, available, false, "added"),
+                ModExportChange::Unresolved => pane(ui, available, true, "removed"),
+                ModExportChange::Modified => {
+                    ui.horizontal_top(|ui| {
+                        pane(ui, half, true, "before");
+                        ui.separator();
+                        pane(ui, half, false, "after");
+                    });
+                }
+            }
         }
         if diff.truncated {
             ui.add_space(4.0);
