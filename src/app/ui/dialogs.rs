@@ -510,6 +510,8 @@ impl Baboon {
             // A whole element added, removed or moved: the row is about the
             // element itself, not a field inside it.
             if field.is_empty() {
+                // Both sides equal names an element whose own fields changed;
+                // one side empty means the element itself came or went.
                 let (marker, color) = if row.a.is_empty() {
                     ("+", added_text())
                 } else if row.b.is_empty() {

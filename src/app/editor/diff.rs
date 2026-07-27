@@ -181,7 +181,26 @@ fn diff_structs(
                         let (Some(ea), Some(eb)) = (ba.element(ai), bb.element(bi)) else {
                             continue;
                         };
+                        let before = out.len();
                         diff_structs(&ea, &eb, &format!("{field_path}[{bi}]"), names, out, limit);
+                        // Name the element, but only once something inside it
+                        // turned out to differ: an index alone says very little
+                        // about which of a hundred palette entries this is.
+                        // Both sides carry the name, which is how the renderer
+                        // tells "this element, unchanged in itself" from one
+                        // that was added or removed.
+                        if out.len() > before
+                            && let Some(label) = ids_b[bi].clone()
+                        {
+                            out.insert(
+                                before,
+                                TagFieldDiff {
+                                    path: format!("{field_path}[{bi}]"),
+                                    a: label.clone(),
+                                    b: label,
+                                },
+                            );
+                        }
                     }
                     // An added or removed element is reported with its
                     // contents: "one more element" says nothing about what is
