@@ -69,6 +69,30 @@ pub(in crate::app) fn browser_modified_tags(ui: &Ui) -> Option<std::sync::Arc<Mo
     ui.data(|data| data.get_temp::<std::sync::Arc<ModifiedTags>>(modified_tags_id()))
 }
 
+/// Colour for a tag that this workspace created, with no counterpart in the
+/// game. Paired with a `+` marker wherever it is used, so the meaning does not
+/// rest on colour alone.
+pub(in crate::app) fn added_text() -> Color32 {
+    Color32::from_rgb(126, 186, 108)
+}
+
+/// Background wash behind the shipped side of a diff, and behind the edited
+/// side. Kept dark: the editor draws its own widgets on top, and a strong fill
+/// would fight them rather than frame them.
+pub(in crate::app) fn removed_wash() -> Color32 {
+    Color32::from_rgb(52, 30, 30)
+}
+
+pub(in crate::app) fn added_wash() -> Color32 {
+    Color32::from_rgb(28, 46, 32)
+}
+
+/// Colour for a value or element that is going away. Paired with a `-` marker,
+/// so red and green never carry the meaning by themselves.
+pub(in crate::app) fn removed_text() -> Color32 {
+    Color32::from_rgb(214, 106, 106)
+}
+
 /// Colour for a tag or folder holding edits that are not written into the game.
 /// The same goldenrod the workspace tab is tinted with.
 pub(in crate::app) fn modified_text() -> Color32 {

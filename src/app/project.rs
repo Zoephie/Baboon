@@ -1084,4 +1084,60 @@ mod tests {
         );
         let _ = fs::remove_file(path);
     }
+
+    /// Export resolves each stashed overlay back to a tag by identity string,
+    /// taking the first entry that produces a match. Two tags sharing an
+    /// identity would therefore send one tag's edited bytes to the other's
+    /// path in the container -- a mod that builds and does the wrong thing, or
+    /// nothing.
+    #[test]
+    fn container_tag_identities_are_unique() {
+        const PAKS: &str = "/Users/camden/Halo/halo-campaign-evolved_pc/Meteorite/Content/Paks";
+        if !std::path::Path::new(PAKS).exists() {
+            eprintln!("skipping: Campaign Evolved not present");
+            return;
+        }
+        let defs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
+        let names = crate::format::TagNameIndex::load_from_definitions(&defs);
+        let loaded = crate::source::load_iostore_container_set(
+            std::path::PathBuf::from(PAKS),
+            &names,
+            &defs,
+        )
+        .expect("mount container set");
+
+        let mut seen: HashMap<String, String> = HashMap::new();
+        let mut collisions = Vec::new();
+        let mut identified = 0usize;
+        for entry in loaded.entries.iter().chain(loaded.all_entries.iter()) {
+            let Some((identity, ..)) = campaign_entry_project_parts(entry) else {
+                continue;
+            };
+            identified += 1;
+            let location = match &entry.location {
+                TagEntryLocation::Container {
+                    container,
+                    rel_path,
+                } => format!("container {container}: {rel_path}"),
+                TagEntryLocation::NewContainer { package, .. } => format!("new: {package}"),
+                _ => "other".to_owned(),
+            };
+            match seen.get(&identity) {
+                Some(existing) if *existing != location => {
+                    collisions.push(format!("{identity}: {existing} vs {location}"));
+                }
+                Some(_) => {}
+                None => {
+                    seen.insert(identity, location);
+                }
+            }
+        }
+        eprintln!("{identified} identified tag(s), {} distinct", seen.len());
+        assert!(
+            collisions.is_empty(),
+            "{} identity collision(s):\n{}",
+            collisions.len(),
+            collisions.iter().take(10).cloned().collect::<Vec<_>>().join("\n")
+        );
+    }
 }

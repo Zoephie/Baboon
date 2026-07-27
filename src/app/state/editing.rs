@@ -625,6 +625,7 @@ pub(in crate::app) enum FieldFilterAction {
 /// Which collapsible nodes a "Search fields" query wants open. Paths are the
 /// canonical field paths with element indices (`[3]`) stripped, so they're
 /// independent of which block element happens to be selected.
+#[derive(Clone)]
 pub(in crate::app) struct FieldFilter {
     /// Canonical paths of every field that should render while searching:
     /// matches, their ancestor containers, and the contents of name-matched

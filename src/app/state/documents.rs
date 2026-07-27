@@ -81,11 +81,6 @@ impl Default for SaveChangesPrompt {
     }
 }
 
-pub(in crate::app) struct ProjectCheckpointPrompt {
-    pub(in crate::app) action: PendingCloseAction,
-    pub(in crate::app) error: String,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::app) enum LastSessionSourceKind {
     SingleFile,
@@ -317,6 +312,129 @@ pub(in crate::app) struct ImportTagDialog {
 /// it overwrites an already-open, dirty document at `target_key`.
 /// Pending "throw away everything this workspace has not written into the
 /// game" confirmation, listing what it is about to drop.
+/// One tag the export is about to write, as reviewed before writing.
+pub(in crate::app) struct ModExportRow {
+    pub(in crate::app) identity: String,
+    pub(in crate::app) display_path: String,
+    pub(in crate::app) group_tag: u32,
+    pub(in crate::app) kind: ModExportChange,
+    pub(in crate::app) include: bool,
+    pub(in crate::app) bytes: usize,
+    /// Why this tag cannot be exported, when it cannot.
+    pub(in crate::app) reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(in crate::app) enum ModExportChange {
+    /// A tag this workspace created, with no counterpart in the game.
+    New,
+    /// An edit to a tag the game ships.
+    Modified,
+    /// In the workspace's project, but no longer resolvable in this source.
+    Unresolved,
+}
+
+/// A modified tag's field-level differences, computed when its row is first
+/// expanded and kept for as long as the review is open.
+pub(in crate::app) struct ModRowDiff {
+    pub(in crate::app) rows: Vec<TagFieldDiff>,
+    /// The two tags the rows were computed from, kept so each change can be
+    /// rendered through the real field editor rather than described.
+    pub(in crate::app) base: Option<blam_tags::TagFile>,
+    pub(in crate::app) edited: Option<blam_tags::TagFile>,
+    pub(in crate::app) truncated: bool,
+    pub(in crate::app) error: Option<String>,
+}
+
+/// Review of what Export Mod is about to write, shown before anything is
+/// written and before a destination is chosen.
+///
+/// Holds the captured snapshot rather than re-deriving one on confirm, so what
+/// was reviewed and what is written cannot disagree.
+pub(in crate::app) struct ModExportDialog {
+    pub(in crate::app) kit: KitId,
+    /// Opened to look rather than to export: the same review without a
+    /// destination or an Export button.
+    pub(in crate::app) review_only: bool,
+    pub(in crate::app) snapshot: CampaignProjectSnapshot,
+    pub(in crate::app) rows: Vec<ModExportRow>,
+    pub(in crate::app) name: String,
+    pub(in crate::app) folder: PathBuf,
+    /// True once the user has accepted overwriting the files already there.
+    pub(in crate::app) overwrite_acknowledged: bool,
+    /// Rows the user has opened. Diffs are computed on first expansion rather
+    /// than up front: each one costs a container read and two parses, which
+    /// would make opening the review scale with how much is stashed.
+    pub(in crate::app) expanded: HashSet<String>,
+    pub(in crate::app) diffs: HashMap<String, ModRowDiff>,
+}
+
+/// Fold a mod name into a file-safe stem, keeping its capitalisation.
+///
+/// The name becomes three file names in a folder the user never types, so
+/// spaces and punctuation are separators to normalise rather than characters
+/// to carry through. Anything that is not a letter, digit, hyphen or
+/// underscore becomes a hyphen, runs collapse, and the ends are trimmed --
+/// kebab case, with the user's own casing left alone.
+///
+/// Underscores survive deliberately: `_P` marks a mod's priority, and folding
+/// it to `-P` would leave a second one appended.
+pub(in crate::app) fn sanitize_mod_name(name: &str) -> String {
+    let mut out = String::with_capacity(name.len());
+    for c in name.chars() {
+        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+            out.push(c);
+        } else if !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    out.trim_matches('-').to_owned()
+}
+
+impl ModExportDialog {
+    /// The file stem the mod will be written under.
+    ///
+    /// `_P` is what gives an override container priority over the game's own,
+    /// so it is part of the name rather than something the user can leave off.
+    /// The game folds case before comparing, so a name already ending `_p` is
+    /// left as it is.
+    pub(in crate::app) fn stem(&self) -> String {
+        let name = sanitize_mod_name(&self.name);
+        if name.len() >= 2 && name[name.len() - 2..].eq_ignore_ascii_case("_p") {
+            name
+        } else {
+            format!("{name}_P")
+        }
+    }
+
+    pub(in crate::app) fn included(&self) -> impl Iterator<Item = &ModExportRow> {
+        self.rows.iter().filter(|row| row.include)
+    }
+
+    /// Files that already exist where this would be written. A mod is three
+    /// files plus its project sidecar, and only the container was ever guarded.
+    pub(in crate::app) fn existing_files(&self) -> Vec<String> {
+        let stem = self.stem();
+        ["utoc", "ucas", "pak", "baboon"]
+            .into_iter()
+            .map(|extension| format!("{stem}.{extension}"))
+            .filter(|name| self.folder.join(name).exists())
+            .collect()
+    }
+}
+
+/// What Export Mod just wrote, so the app can say what to do with it.
+///
+/// A mod is three files, and only the `.pak` looks like one. The status line
+/// used to carry the instruction and no longer did; it also clears itself after
+/// a few seconds, which is not long enough to act on.
+pub(in crate::app) struct ExportedMod {
+    pub(in crate::app) stem: String,
+    pub(in crate::app) directory: PathBuf,
+    pub(in crate::app) count: usize,
+    pub(in crate::app) skipped: usize,
+}
+
 pub(in crate::app) struct ClearStashConfirm {
     pub(in crate::app) kit: KitId,
     pub(in crate::app) stashed: Vec<String>,
@@ -379,8 +497,14 @@ impl Default for NewTagDialog {
     }
 }
 
+#[derive(Debug, Clone)]
 pub(in crate::app) struct TagFieldDiff {
+    /// Path in the edited tag.
     pub(in crate::app) path: String,
+    /// Path in the tag as shipped, when it differs -- deleting an element
+    /// shifts every index below it, so the same field lives at two paths and a
+    /// side-by-side view needs both to find it.
+    pub(in crate::app) base_path: Option<String>,
     pub(in crate::app) a: String,
     pub(in crate::app) b: String,
 }

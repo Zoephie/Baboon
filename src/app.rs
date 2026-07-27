@@ -187,6 +187,10 @@ pub struct Baboon {
     /// Pending confirmation for the Campaign Evolved "clear modifications"
     /// toolbar action, which is irreversible.
     clear_stash_confirm: Option<ClearStashConfirm>,
+    /// Shown after Export Mod, explaining what to do with the files.
+    exported_mod: Option<ExportedMod>,
+    /// Review of a pending Export Mod, before anything is written.
+    mod_export: Option<ModExportDialog>,
     about_open: bool,
     help_panel_tab: HelpPanelTab,
     help_docs: HelpDocsState,
@@ -265,7 +269,6 @@ pub struct Baboon {
     /// Modal close transaction; the pending action is executed only after every
     /// selected dirty document has been saved or discard is confirmed.
     save_changes_prompt: SaveChangesPrompt,
-    project_checkpoint_prompt: Option<ProjectCheckpointPrompt>,
     /// Startup-only prompt reconstructed from the prior session file.
     last_opened_windows: Option<LastOpenedWindowsPrompt>,
     /// Pending destructive block op (delete / delete all) awaiting confirm.
@@ -384,6 +387,8 @@ impl Baboon {
             import_discard_confirm: None,
             overwrite_confirm: None,
             clear_stash_confirm: None,
+            exported_mod: None,
+            mod_export: None,
             about_open: false,
             help_panel_tab: HelpPanelTab::About,
             help_docs: HelpDocsState::load(),
@@ -465,7 +470,6 @@ impl Baboon {
             saved_terminal_open_games: terminal_open_games.clone(),
             terminal_open_games,
             save_changes_prompt: SaveChangesPrompt::default(),
-            project_checkpoint_prompt: None,
             last_opened_windows,
             block_confirm: None,
             audio: audio::AudioState::default(),

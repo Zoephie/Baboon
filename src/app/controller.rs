@@ -45,6 +45,41 @@ const ENTRY_INDEX_REFRESH_INTERVAL_SECS: f64 = 30.0;
 /// Normalize a user-entered container tag path: lowercase, `\`→`/`, collapse
 /// repeated slashes, and trim leading/trailing slashes and any tag extension.
 /// Yields the container-relative logical path (e.g. `objects/foo/bar`).
+/// Walk up from a resolved `Paks` directory to the folder a user would have
+/// picked to open it.
+///
+/// Sessions written before the chosen folder was recorded hold the inner path,
+/// and restoring from it remembers *that* as a recent folder -- so "Paks"
+/// reappeared after every restart however often it was removed. Walking up
+/// while the parent still resolves to the same directory undoes that without
+/// assuming a particular layout.
+fn install_root_for_paks(paks_dir: &Path) -> PathBuf {
+    // The two layouts `find_paks_dir` looks for directly, in its own order.
+    // Probing it instead would walk too far: it also *searches* four levels
+    // down, so distant ancestors resolve to this same directory and the walk
+    // would climb out of the install entirely.
+    for suffix in [
+        ["Meteorite", "Content", "Paks"].as_slice(),
+        ["Content", "Paks"].as_slice(),
+    ] {
+        let mut candidate = paks_dir;
+        let matched = suffix.iter().rev().all(|expected| {
+            let hit = candidate
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case(expected));
+            if hit && let Some(parent) = candidate.parent() {
+                candidate = parent;
+            }
+            hit
+        });
+        if matched {
+            return candidate.to_path_buf();
+        }
+    }
+    paks_dir.to_path_buf()
+}
+
 fn normalize_container_tag_rel(input: &str) -> String {
     let lowered = input.trim().replace('\\', "/").to_ascii_lowercase();
     let mut segments: Vec<&str> = lowered
@@ -77,7 +112,34 @@ fn pick_override_utoc(default_name: &str) -> Option<PathBuf> {
     if output.extension().is_none() {
         output.set_extension("utoc");
     }
-    Some(output)
+    Some(ensure_priority_suffix(output))
+}
+
+/// Force the `_P` suffix onto a mod's file name.
+///
+/// It is what gives an override container priority over the game's own
+/// containers; without it the mod mounts alongside them and the base tag wins,
+/// so the mod builds correctly and does nothing. That is not a naming
+/// preference to be respected -- a mod without it is simply broken -- and it is
+/// exactly what a user renaming the default to something meaningful drops.
+///
+/// Confirmed against the game's own mount path: it compares the last six
+/// characters to `_P.pak` case-insensitively and adds `100 × version` to the
+/// pak order, where the version defaults to 1 and only rises if the name
+/// carries `_<digits>_` before the suffix. A base pak scores 4, so any `_P`
+/// mod at 104 outranks it, and `_p` is accepted just as readily.
+fn ensure_priority_suffix(path: PathBuf) -> PathBuf {
+    let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else {
+        return path;
+    };
+    if stem.len() >= 2 && stem[stem.len() - 2..].eq_ignore_ascii_case("_p") {
+        return path;
+    }
+    let extension = path
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .unwrap_or("utoc");
+    path.with_file_name(format!("{stem}_P.{extension}"))
 }
 
 #[cfg(any(windows, test))]
@@ -1928,7 +1990,7 @@ impl Baboon {
     }
 
     pub(super) fn request_close_action(&mut self, action: PendingCloseAction, ctx: &egui::Context) {
-        if self.save_changes_prompt.visible || self.project_checkpoint_prompt.is_some() {
+        if self.save_changes_prompt.visible {
             return;
         }
         // The save prompt and every save path below it address documents by
@@ -2106,6 +2168,15 @@ impl Baboon {
                 (LastSessionSourceKind::IoStoreContainerSet, root.clone())
             }
         };
+        // Record the folder the user actually chose, not the directory the
+        // source ended up reading from. They differ for exactly the sources
+        // whose root is resolved inwards: a container set mounts from
+        // `<install>/Meteorite/Content/Paks`, and a loose kit from
+        // `<kit>/tags`. Storing the resolved one meant every session restore
+        // reloaded that inner path and remembered *it* as a recent folder, so
+        // "Paks" reappeared in the recents list after each restart however
+        // often it was removed.
+        let source_path = kit.requested_path.clone().unwrap_or(source_path);
         let mut tags = Vec::new();
         for key in ordered_unique_keys(kit.open_tabs.iter()) {
             let Some(entry) = source
@@ -2187,7 +2258,7 @@ impl Baboon {
                 // Upstream added container sources to the session format, so a
                 // Campaign Evolved install now comes back with the rest.
                 LastSessionSourceKind::IoStoreContainerSet => {
-                    self.begin_load_folder_path(source_path, ctx.clone())
+                    self.begin_load_folder_path(install_root_for_paks(&source_path), ctx.clone())
                 }
             }
             // The loaders route to a kit and leave it active, so this stages
@@ -2461,7 +2532,7 @@ impl Baboon {
         Some(self.editing_kit_root()?.join("data"))
     }
 
-    fn open_folder_in_explorer(&mut self, path: PathBuf, label: &str) {
+    pub(super) fn open_folder_in_explorer(&mut self, path: PathBuf, label: &str) {
         if !path.is_dir() {
             self.status = format!("{label} folder not found: {}", path.display());
             return;
@@ -3041,7 +3112,7 @@ impl Baboon {
                     .next()
                     .and_then(|f| f.strip_suffix(".ubulk"))
                     .unwrap_or("tag");
-                let Some(output) = pick_override_utoc(&format!("{stem}-WinGDK_P.utoc")) else {
+                let Some(output) = pick_override_utoc(&format!("{stem}_P.utoc")) else {
                     return Ok(None);
                 };
                 blam_tags::iostore::writer::write_tag_override(
@@ -3062,7 +3133,7 @@ impl Baboon {
                     .ok_or("could not derive source package path")?;
                 let new_pkg = format!("/Game/Tags/{new_rel}-{group}");
                 let leaf = new_rel.rsplit('/').next().unwrap_or("tag");
-                let Some(output) = pick_override_utoc(&format!("{leaf}-{group}-WinGDK_P.utoc"))
+                let Some(output) = pick_override_utoc(&format!("{leaf}-{group}_P.utoc"))
                 else {
                     return Ok(None);
                 };
@@ -3204,7 +3275,7 @@ impl Baboon {
             }
         };
         let leaf = package.rsplit('/').next().unwrap_or("tag");
-        let Some(output) = pick_override_utoc(&format!("{leaf}-WinGDK_P.utoc")) else {
+        let Some(output) = pick_override_utoc(&format!("{leaf}_P.utoc")) else {
             return;
         };
         match blam_tags::iostore::writer::write_new_tag_container(
@@ -3226,7 +3297,21 @@ impl Baboon {
 
     /// Bundle every modified Campaign Evolved project tag into one portable `_P`
     /// overlay and write its `.baboon` recovery project beside the triplet.
+    /// Open the review of what Export Mod would write.
+    ///
+    /// Nothing is written and no destination is chosen here. The snapshot is
+    /// captured now and kept, so what the user reviews and what is written
+    /// cannot drift apart between the two steps.
     pub(super) fn export_mod(&mut self) {
+        self.open_mod_review(false);
+    }
+
+    /// Review what this workspace is carrying, without exporting anything.
+    pub(super) fn review_changes(&mut self) {
+        self.open_mod_review(true);
+    }
+
+    fn open_mod_review(&mut self, review_only: bool) {
         let exporting = self.active;
         let snapshot = match self.capture_campaign_project(exporting, 0.0) {
             Ok(Some(snapshot)) => snapshot,
@@ -3239,6 +3324,210 @@ impl Baboon {
                 return;
             }
         };
+        let mut rows: Vec<ModExportRow> = snapshot
+            .overlays
+            .values()
+            .map(|overlay| {
+                // An overlay whose tag no longer resolves cannot be written.
+                // That was previously counted into a status line and dropped;
+                // it is a row here, so it is at least visible.
+                let resolvable = self
+                    .campaign_entry_for_identity(exporting, &overlay.identity)
+                    .is_some();
+                let kind = match (resolvable, overlay.kind) {
+                    (false, _) => ModExportChange::Unresolved,
+                    (true, CampaignProjectTagKind::New) => ModExportChange::New,
+                    (true, CampaignProjectTagKind::Existing) => ModExportChange::Modified,
+                };
+                ModExportRow {
+                    identity: overlay.identity.clone(),
+                    display_path: overlay.logical_path.clone(),
+                    group_tag: overlay.group_tag,
+                    kind,
+                    include: kind != ModExportChange::Unresolved,
+                    bytes: overlay.bytes.len(),
+                    reason: (kind == ModExportChange::Unresolved)
+                        .then(|| "not in this source".to_owned()),
+                }
+            })
+            .collect();
+        rows.sort_by(|a, b| a.display_path.cmp(&b.display_path));
+
+        // The container source's root is already the game's `Paks` directory,
+        // so a mod exported straight there needs no copying at all.
+        let folder = self
+            .kits[exporting]
+            .source
+            .as_ref()
+            .map(|source| source.source.root_path().to_path_buf())
+            .unwrap_or_default();
+        self.mod_export = Some(ModExportDialog {
+            kit: self.active_kit_id(),
+            review_only,
+            snapshot,
+            rows,
+            name: "mymod".to_owned(),
+            folder,
+            overwrite_acknowledged: false,
+            expanded: HashSet::new(),
+            diffs: HashMap::new(),
+        });
+    }
+
+    /// Compute the field differences for one reviewed tag, against the tag as
+    /// the game ships it.
+    ///
+    /// `read_entry` reads from the container, so the baseline is the shipped
+    /// tag rather than anything the workspace has stashed -- which is the
+    /// comparison the reviewer actually wants: what this mod changes about the
+    /// game, not what changed since the last autosave.
+    pub(super) fn diff_reviewed_tag(&self, kit: usize, identity: &str) -> ModRowDiff {
+        const LIMIT: usize = 5000;
+        let failed = |error: String| ModRowDiff {
+            rows: Vec::new(),
+            base: None,
+            edited: None,
+            truncated: false,
+            error: Some(error),
+        };
+        let Some(dialog) = self.mod_export.as_ref() else {
+            return failed("The review is no longer open".to_owned());
+        };
+        let Some(overlay) = dialog.snapshot.overlays.get(identity) else {
+            return failed("This tag is no longer in the export".to_owned());
+        };
+        let Some(entry) = self.campaign_entry_for_identity(kit, identity) else {
+            return failed("This tag is no longer in the source".to_owned());
+        };
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+            return failed("No source loaded".to_owned());
+        };
+        let edited_tag = match TagFile::read_from_bytes(&overlay.bytes) {
+            Ok(edited) => edited,
+            Err(error) => return failed(format!("Could not read the edited tag: {error}")),
+        };
+        // A tag this workspace created has no shipped counterpart to compare
+        // against, so the whole tag is described instead.
+        if overlay.kind == CampaignProjectTagKind::New {
+            let (rows, truncated) = describe_tag(&edited_tag, &self.kits[kit].names, LIMIT);
+            return ModRowDiff {
+                rows,
+                base: None,
+                edited: Some(edited_tag),
+                truncated,
+                error: None,
+            };
+        }
+        let base = match crate::source::read_entry(&source.source, &entry) {
+            Ok(base) => base,
+            Err(error) => return failed(format!("Could not read the shipped tag: {error}")),
+        };
+        let (rows, truncated) = diff_tags(&base, &edited_tag, &self.kits[kit].names, LIMIT);
+        ModRowDiff {
+            rows,
+            base: Some(base),
+            edited: Some(edited_tag),
+            truncated,
+            error: None,
+        }
+    }
+
+    /// Dump everything the review is working from into `folder`, so a diff
+    /// that looks wrong can be reproduced away from the UI.
+    ///
+    /// Writes the computed rows as JSON, and for every tag both sides as raw
+    /// bytes: the tag as the game ships it and the tag as this workspace has
+    /// it. Those two files are enough to re-run the comparison exactly.
+    pub(super) fn save_review_diagnostic(&mut self, folder: PathBuf) -> Result<usize, String> {
+        let Some(kit) = self
+            .mod_export
+            .as_ref()
+            .map(|dialog| dialog.kit)
+            .and_then(|kit| self.resolve_kit(kit))
+        else {
+            return Err("The review is no longer open".to_owned());
+        };
+        let identities: Vec<String> = self
+            .mod_export
+            .as_ref()
+            .map(|dialog| dialog.rows.iter().map(|row| row.identity.clone()).collect())
+            .unwrap_or_default();
+
+        let mut tags = Vec::new();
+        for identity in identities {
+            // Computed on demand, so a diagnostic does not depend on which rows
+            // the user happened to expand.
+            if !self
+                .mod_export
+                .as_ref()
+                .is_some_and(|dialog| dialog.diffs.contains_key(&identity))
+            {
+                let diff = self.diff_reviewed_tag(kit, &identity);
+                if let Some(dialog) = self.mod_export.as_mut() {
+                    dialog.diffs.insert(identity.clone(), diff);
+                }
+            }
+            let Some(dialog) = self.mod_export.as_ref() else {
+                break;
+            };
+            let Some(diff) = dialog.diffs.get(&identity) else {
+                continue;
+            };
+            let Some(row) = dialog.rows.iter().find(|row| row.identity == identity) else {
+                continue;
+            };
+            let stem: String = identity
+                .chars()
+                .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
+                .collect();
+            for (suffix, tag) in [("base", diff.base.as_ref()), ("edited", diff.edited.as_ref())] {
+                let Some(tag) = tag else { continue };
+                let bytes = tag
+                    .write_to_bytes()
+                    .map_err(|error| format!("Could not serialize {identity}: {error}"))?;
+                std::fs::write(folder.join(format!("{stem}.{suffix}.tag")), bytes)
+                    .map_err(|error| format!("Could not write {stem}.{suffix}.tag: {error}"))?;
+            }
+            tags.push(serde_json::json!({
+                "identity": identity,
+                "path": row.display_path,
+                "kind": match row.kind {
+                    ModExportChange::New => "new",
+                    ModExportChange::Modified => "modified",
+                    ModExportChange::Unresolved => "unresolved",
+                },
+                "bytes": row.bytes,
+                "error": diff.error,
+                "truncated": diff.truncated,
+                "rows": diff
+                    .rows
+                    .iter()
+                    .map(|row| serde_json::json!({
+                        "path": row.path,
+                        "base_path": row.base_path,
+                        "before": row.a,
+                        "after": row.b,
+                    }))
+                    .collect::<Vec<_>>(),
+            }));
+        }
+        let count = tags.len();
+        let document = serde_json::json!({ "tags": tags });
+        let text = serde_json::to_string_pretty(&document)
+            .map_err(|error| format!("Could not encode the diagnostic: {error}"))?;
+        std::fs::write(folder.join("review-diagnostic.json"), text)
+            .map_err(|error| format!("Could not write review-diagnostic.json: {error}"))?;
+        Ok(count)
+    }
+
+    /// Write the reviewed mod. `included` are the identities the user kept.
+    pub(super) fn write_reviewed_mod(
+        &mut self,
+        snapshot: &CampaignProjectSnapshot,
+        included: &HashSet<String>,
+        output: PathBuf,
+    ) {
+        let exporting = self.active;
         let Some(source) = self.source() else {
             self.status = "No source loaded".to_owned();
             return;
@@ -3252,6 +3541,9 @@ impl Baboon {
         let mut new_pkgs: Vec<(Vec<u8>, Vec<u8>, String)> = Vec::new();
         let mut skipped = 0usize;
         for overlay in snapshot.overlays.values() {
+            if !included.contains(&overlay.identity) {
+                continue;
+            }
             let Some(entry) = self.campaign_entry_for_identity(exporting, &overlay.identity) else {
                 skipped += 1;
                 continue;
@@ -3262,11 +3554,7 @@ impl Baboon {
                         skipped += 1;
                         continue;
                     };
-                    overrides.push((
-                        m.archive.clone(),
-                        rel_path.clone(),
-                        overlay.bytes.clone(),
-                    ));
+                    overrides.push((m.archive.clone(), rel_path.clone(), overlay.bytes.clone()));
                 }
                 TagEntryLocation::NewContainer {
                     template_container,
@@ -3289,14 +3577,8 @@ impl Baboon {
         }
         let count = overrides.len() + new_pkgs.len();
         if count == 0 {
-            self.status = "No modified tags to export — edit a tag first".to_owned();
+            self.status = "Nothing selected to export".to_owned();
             return;
-        }
-        let Some(mut output) = pick_override_utoc("mymod-WinGDK_P.utoc") else {
-            return;
-        };
-        if output.extension().is_none() {
-            output.set_extension("utoc");
         }
         let override_refs: Vec<(&blam_tags::iostore::IoStoreArchive, &str, &[u8])> = overrides
             .iter()
@@ -3311,44 +3593,41 @@ impl Baboon {
                 redirect_from: None,
             })
             .collect();
-        match blam_tags::iostore::writer::write_mod_container_ex(&override_refs, &new_refs, &output) {
+        match blam_tags::iostore::writer::write_mod_container_ex(&override_refs, &new_refs, &output)
+        {
             Ok(()) => {
-                let stem = output.file_stem().and_then(|s| s.to_str()).unwrap_or("mod");
+                let stem = output
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or("mod")
+                    .to_owned();
                 let sidecar = output.with_extension("baboon");
-                match save_campaign_project(&sidecar, &snapshot) {
-                    Ok(()) => {
-                        // The sidecar is an export artifact: a copy that travels
-                        // with the mod so it can be resumed or shared. The
-                        // workspace keeps its own project.
-                        //
-                        // Repointing it here sent every later autosave to a file
-                        // beside the exported mod, wherever the user put that,
-                        // and the workspace's own recovery file stopped being
-                        // updated. The next launch then adopted the stale
-                        // recovery file and every tag opened as the game ships
-                        // it -- the edits read as never having been saved.
-                        let _ = self.checkpoint_campaign_project(exporting, 0.0);
-                        self.status = if skipped == 0 {
-                            format!(
-                                "Exported {count} tag(s) → {stem}.utoc/.ucas/.pak/.baboon \
-                                 (base game unchanged)"
-                            )
-                        } else {
-                            format!(
-                                "Exported {count} tag(s) with .baboon recovery; skipped {skipped} \
-                                 unresolved project tag(s)"
-                            )
-                        };
-                    }
-                    Err(error) => {
-                        self.status = format!(
-                            "Exported {count} tag(s) to {stem}.utoc/.ucas/.pak, but the .baboon \
-                             recovery file failed: {error}"
-                        );
-                    }
+                if let Err(error) = save_campaign_project(&sidecar, snapshot) {
+                    self.status = format!(
+                        "Exported {count} tag(s), but the .baboon sidecar failed: {error}"
+                    );
+                }
+                // The sidecar travels with the mod; the workspace keeps its own
+                // project, checkpointed here so it carries what the export did.
+                let _ = self.checkpoint_campaign_project(exporting, 0.0);
+                let directory = output.parent().map(Path::to_path_buf).unwrap_or_default();
+                let in_place = self
+                    .source()
+                    .map(|source| source.source.root_path() == directory)
+                    .unwrap_or(false);
+                self.status = format!("Exported {count} tag(s) as {stem}");
+                // Written straight into the game's own folder: there is nothing
+                // to copy, so the instructions would only be noise.
+                if !in_place {
+                    self.exported_mod = Some(ExportedMod {
+                        stem,
+                        directory,
+                        count,
+                        skipped,
+                    });
                 }
             }
-            Err(e) => self.status = format!("Export Mod failed: {e}"),
+            Err(error) => self.status = format!("Export Mod failed: {error}"),
         }
     }
 
@@ -5601,73 +5880,6 @@ impl Baboon {
         }
     }
 
-    pub(super) fn handle_project_checkpoint_prompt(&mut self, ctx: &egui::Context) {
-        let Some(prompt) = self.project_checkpoint_prompt.as_ref() else {
-            return;
-        };
-        let error = prompt.error.clone();
-        let mut retry = false;
-        let mut discard = false;
-        let mut cancel = false;
-        egui::Window::new("Campaign Project Checkpoint Failed")
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
-            .default_width(520.0)
-            .show(ctx, |ui| {
-                ui.label(
-                    RichText::new(
-                        "Baboon could not preserve the latest Campaign Evolved project state.",
-                    )
-                    .color(text_dark()),
-                );
-                ui.add_space(6.0);
-                ui.label(RichText::new(error).color(Color32::from_rgb(180, 48, 40)));
-                ui.add_space(8.0);
-                ui.label(
-                    RichText::new(
-                        "Retry the checkpoint, explicitly discard the uncheckpointed changes, \
-                         or cancel closing.",
-                    )
-                    .color(subtle_dark()),
-                );
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    retry = ui.button("Retry").clicked();
-                    discard = ui.button("Discard and Close").clicked();
-                    cancel = ui.button("Cancel").clicked();
-                });
-            });
-        if retry {
-            let now = ctx.input(|input| input.time);
-            match self.checkpoint_campaign_project(self.active, now) {
-                Ok(_) => {
-                    let action = self
-                        .project_checkpoint_prompt
-                        .take()
-                        .expect("checkpoint prompt exists")
-                        .action;
-                    self.execute_close_action(action, ctx);
-                }
-                Err(error) => {
-                    if let Some(prompt) = self.project_checkpoint_prompt.as_mut() {
-                        prompt.error = error.clone();
-                    }
-                    self.status = format!("Could not checkpoint Campaign Evolved project: {error}");
-                }
-            }
-        } else if discard {
-            let action = self
-                .project_checkpoint_prompt
-                .take()
-                .expect("checkpoint prompt exists")
-                .action;
-            self.execute_close_action(action, ctx);
-        } else if cancel {
-            self.project_checkpoint_prompt = None;
-        }
-    }
-
     pub(super) fn handle_last_opened_windows_prompt(&mut self, ctx: &egui::Context) {
         let action = render_last_opened_windows_prompt(ctx, self.last_opened_windows.as_mut());
         match action {
@@ -5936,6 +6148,64 @@ fn render_last_opened_windows_prompt(
 
 #[cfg(test)]
 mod tests {
+    use super::ensure_priority_suffix;
+    use std::path::PathBuf;
+
+    /// A mod without `_P` mounts at the same priority as the game's own
+    /// containers and loses, so it builds correctly and does nothing. Renaming
+    /// the default to something meaningful is exactly how it gets dropped --
+    /// which is how one was reported.
+    /// A session written before the chosen folder was recorded holds the
+    /// resolved `Paks` directory. Restoring from it put that directory back
+    /// into the recents list on every launch, which is how "Paks" kept
+    /// reappearing however often it was removed.
+    #[test]
+    fn a_paks_directory_walks_back_up_to_the_opened_folder() {
+        let root = std::env::temp_dir().join(format!("baboon-paks-{}", std::process::id()));
+        let paks = root.join("Meteorite").join("Content").join("Paks");
+        std::fs::create_dir_all(&paks).unwrap();
+        // `find_paks_dir` needs a container present to recognise the folder.
+        std::fs::write(paks.join("pakchunk0-WinGDK.utoc"), []).unwrap();
+
+        assert_eq!(super::install_root_for_paks(&paks), root);
+        // Already the opened folder: nothing to strip.
+        assert_eq!(super::install_root_for_paks(&root), root);
+        // The shorter layout the resolver also accepts.
+        assert_eq!(
+            super::install_root_for_paks(&root.join("Content").join("Paks")),
+            root
+        );
+        // An unfamiliar layout is left exactly as it is rather than guessed at.
+        let odd = root.join("somewhere").join("Paks");
+        assert_eq!(super::install_root_for_paks(&odd), odd);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_mod_always_gets_the_priority_suffix() {
+        assert_eq!(
+            ensure_priority_suffix(PathBuf::from("/mods/h2a_magnum.utoc")),
+            PathBuf::from("/mods/h2a_magnum_P.utoc")
+        );
+        // Already correct, including the platform suffix the game itself uses.
+        assert_eq!(
+            ensure_priority_suffix(PathBuf::from("/mods/mymod-WinGDK_P.utoc")),
+            PathBuf::from("/mods/mymod-WinGDK_P.utoc")
+        );
+        // The loader folds case before comparing, so a lowercase suffix
+        // already has priority and must not collect a second one.
+        assert_eq!(
+            ensure_priority_suffix(PathBuf::from("/mods/thing_p.utoc")),
+            PathBuf::from("/mods/thing_p.utoc")
+        );
+        // A version before the suffix raises priority further; it is still a
+        // suffixed name and must be left alone.
+        assert_eq!(
+            ensure_priority_suffix(PathBuf::from("/mods/thing_2_P.utoc")),
+            PathBuf::from("/mods/thing_2_P.utoc")
+        );
+    }
+
     use super::*;
 
     #[test]
