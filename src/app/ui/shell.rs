@@ -937,7 +937,6 @@ impl Baboon {
         }
         self.handle_block_confirm(ctx);
         self.handle_save_changes_prompt(ctx);
-        self.handle_project_checkpoint_prompt(ctx);
         self.handle_last_opened_windows_prompt(ctx);
         self.process_pending_open(ctx);
         self.apply_field_nav(ctx);

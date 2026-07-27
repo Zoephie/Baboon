@@ -1955,7 +1955,7 @@ impl Baboon {
     }
 
     pub(super) fn request_close_action(&mut self, action: PendingCloseAction, ctx: &egui::Context) {
-        if self.save_changes_prompt.visible || self.project_checkpoint_prompt.is_some() {
+        if self.save_changes_prompt.visible {
             return;
         }
         // The save prompt and every save path below it address documents by
@@ -5745,73 +5745,6 @@ impl Baboon {
                     self.save_changes_prompt.error = Some(message);
                 }
             }
-        }
-    }
-
-    pub(super) fn handle_project_checkpoint_prompt(&mut self, ctx: &egui::Context) {
-        let Some(prompt) = self.project_checkpoint_prompt.as_ref() else {
-            return;
-        };
-        let error = prompt.error.clone();
-        let mut retry = false;
-        let mut discard = false;
-        let mut cancel = false;
-        egui::Window::new("Campaign Project Checkpoint Failed")
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
-            .default_width(520.0)
-            .show(ctx, |ui| {
-                ui.label(
-                    RichText::new(
-                        "Baboon could not preserve the latest Campaign Evolved project state.",
-                    )
-                    .color(text_dark()),
-                );
-                ui.add_space(6.0);
-                ui.label(RichText::new(error).color(Color32::from_rgb(180, 48, 40)));
-                ui.add_space(8.0);
-                ui.label(
-                    RichText::new(
-                        "Retry the checkpoint, explicitly discard the uncheckpointed changes, \
-                         or cancel closing.",
-                    )
-                    .color(subtle_dark()),
-                );
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    retry = ui.button("Retry").clicked();
-                    discard = ui.button("Discard and Close").clicked();
-                    cancel = ui.button("Cancel").clicked();
-                });
-            });
-        if retry {
-            let now = ctx.input(|input| input.time);
-            match self.checkpoint_campaign_project(self.active, now) {
-                Ok(_) => {
-                    let action = self
-                        .project_checkpoint_prompt
-                        .take()
-                        .expect("checkpoint prompt exists")
-                        .action;
-                    self.execute_close_action(action, ctx);
-                }
-                Err(error) => {
-                    if let Some(prompt) = self.project_checkpoint_prompt.as_mut() {
-                        prompt.error = error.clone();
-                    }
-                    self.status = format!("Could not checkpoint Campaign Evolved project: {error}");
-                }
-            }
-        } else if discard {
-            let action = self
-                .project_checkpoint_prompt
-                .take()
-                .expect("checkpoint prompt exists")
-                .action;
-            self.execute_close_action(action, ctx);
-        } else if cancel {
-            self.project_checkpoint_prompt = None;
         }
     }
 

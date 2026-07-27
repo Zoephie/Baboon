@@ -81,11 +81,6 @@ impl Default for SaveChangesPrompt {
     }
 }
 
-pub(in crate::app) struct ProjectCheckpointPrompt {
-    pub(in crate::app) action: PendingCloseAction,
-    pub(in crate::app) error: String,
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::app) enum LastSessionSourceKind {
     SingleFile,

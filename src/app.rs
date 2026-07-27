@@ -269,7 +269,6 @@ pub struct Baboon {
     /// Modal close transaction; the pending action is executed only after every
     /// selected dirty document has been saved or discard is confirmed.
     save_changes_prompt: SaveChangesPrompt,
-    project_checkpoint_prompt: Option<ProjectCheckpointPrompt>,
     /// Startup-only prompt reconstructed from the prior session file.
     last_opened_windows: Option<LastOpenedWindowsPrompt>,
     /// Pending destructive block op (delete / delete all) awaiting confirm.
@@ -471,7 +470,6 @@ impl Baboon {
             saved_terminal_open_games: terminal_open_games.clone(),
             terminal_open_games,
             save_changes_prompt: SaveChangesPrompt::default(),
-            project_checkpoint_prompt: None,
             last_opened_windows,
             block_confirm: None,
             audio: audio::AudioState::default(),
