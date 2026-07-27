@@ -131,6 +131,7 @@ pub(super) fn load_gui_prefs() -> GuiPrefs {
             .map(PathBuf::from),
         editing_kit_paths: load_editing_kit_paths(&value),
         ek_folder_aliases: load_ek_folder_aliases(&value),
+        custom_editing_kit_profiles: load_custom_editing_kit_profiles(&value),
         tool_commands_window_pos: load_pos2(&value, "tool_commands_window_pos"),
         tool_commands_window_size: load_vec2(&value, "tool_commands_window_size"),
         tool_commands_left_width: value
@@ -371,6 +372,87 @@ fn load_ek_folder_aliases(value: &Value) -> Vec<EkFolderAlias> {
         .unwrap_or_default()
 }
 
+fn load_custom_editing_kit_profiles(value: &Value) -> Vec<CustomEditingKitProfile> {
+    let Some(entries) = value
+        .get("custom_editing_kit_profiles")
+        .and_then(Value::as_array)
+    else {
+        return Vec::new();
+    };
+    let mut profiles = Vec::new();
+    let mut ids = HashSet::new();
+    for entry in entries {
+        let Some(id) = entry
+            .get("id")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|id| uuid::Uuid::parse_str(id).is_ok())
+        else {
+            continue;
+        };
+        if !ids.insert(id.to_owned()) {
+            continue;
+        }
+        let Some(name) = entry
+            .get("name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+        else {
+            continue;
+        };
+        let Some(game) = entry
+            .get("game")
+            .and_then(Value::as_str)
+            .and_then(supported_ek_game_id)
+            .filter(|game| *game != "haloce_evolved")
+        else {
+            continue;
+        };
+        let Some(root) = entry
+            .get("root")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|root| !root.is_empty())
+            .map(PathBuf::from)
+        else {
+            continue;
+        };
+        let icon = entry
+            .get("icon")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|icon| !icon.is_empty())
+            .map(PathBuf::from)
+            .filter(|icon| safe_custom_icon_relative_path(icon));
+        profiles.push(CustomEditingKitProfile {
+            id: id.to_owned(),
+            name: name.to_owned(),
+            game: game.to_owned(),
+            root,
+            icon,
+        });
+    }
+    profiles
+}
+
+fn custom_editing_kit_profiles_value(
+    profiles: &[CustomEditingKitProfile],
+) -> Vec<Value> {
+    profiles
+        .iter()
+        .map(|profile| {
+            json!({
+                "id": profile.id,
+                "name": profile.name,
+                "game": profile.game,
+                "root": profile.root.display().to_string(),
+                "icon": profile.icon.as_ref().map(|path| path.display().to_string()),
+            })
+        })
+        .collect()
+}
+
 pub(super) fn save_gui_prefs(
     prefs: &GuiPrefs,
     terminal_open_games: &HashSet<String>,
@@ -418,6 +500,7 @@ pub(super) fn save_gui_prefs(
                 "game": alias.game,
             })
         }).collect::<Vec<_>>(),
+        "custom_editing_kit_profiles": custom_editing_kit_profiles_value(&prefs.custom_editing_kit_profiles),
         "tool_commands_window_pos": prefs.tool_commands_window_pos.map(|pos| vec![pos.x, pos.y]),
         "tool_commands_window_size": prefs.tool_commands_window_size.map(|size| vec![size.x, size.y]),
         "tool_commands_left_width": prefs.tool_commands_left_width,
@@ -573,6 +656,12 @@ fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
         .map(str::trim)
         .filter(|game| !game.is_empty())
         .map(str::to_owned);
+    let profile_id = source
+        .get("profile_id")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned);
     let project_path = source
         .get("project_path")
         .and_then(Value::as_str)
@@ -621,6 +710,7 @@ fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
         source_kind,
         source_path,
         game,
+        profile_id,
         project_path,
         browser_mode,
         browser_sort,
@@ -666,6 +756,7 @@ fn session_value(session: &LastSessionState) -> Value {
                     "kind": kit.source_kind.as_str(),
                     "path": kit.source_path.display().to_string(),
                     "game": kit.game,
+                    "profile_id": kit.profile_id,
                     "project_path": kit.project_path.as_ref().map(|path| path.display().to_string()),
                 },
                 "browser_mode": kit.browser_mode.map(browser_mode_str),
@@ -792,6 +883,49 @@ mod tests {
     }
 
     #[test]
+    fn custom_editing_kit_profiles_round_trip_in_creation_order() {
+        assert!(load_custom_editing_kit_profiles(&json!({})).is_empty());
+        let value = json!({
+            "custom_editing_kit_profiles": [
+                {
+                    "id": "11111111-1111-4111-8111-111111111111",
+                    "name": "Reach Project",
+                    "game": "haloreach_mcc",
+                    "root": "D:/Kits/ReachProject",
+                    "icon": "editing kit icons/reach-11111111/icon-a.png"
+                },
+                {
+                    "id": "22222222-2222-4222-8222-222222222222",
+                    "name": "Second Project",
+                    "game": "halo3_mcc",
+                    "root": "D:/Kits/H3Project",
+                    "icon": "../../unsafe.png"
+                }
+            ]
+        });
+        let profiles = load_custom_editing_kit_profiles(&value);
+        assert_eq!(
+            profiles
+                .iter()
+                .map(|profile| profile.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Reach Project", "Second Project"]
+        );
+        assert_eq!(
+            profiles[0].icon.as_deref(),
+            Some(Path::new(
+                "editing kit icons/reach-11111111/icon-a.png"
+            ))
+        );
+        assert_eq!(profiles[1].icon, None);
+
+        let serialized = json!({
+            "custom_editing_kit_profiles": custom_editing_kit_profiles_value(&profiles)
+        });
+        assert_eq!(load_custom_editing_kit_profiles(&serialized), profiles);
+    }
+
+    #[test]
     fn editing_kit_favorites_are_scoped_by_tags_root() {
         let value = json!({
             "editing_kit_favorites": [
@@ -900,6 +1034,22 @@ mod session_tests {
         assert_eq!(session.kits[1].tags[0].key, "file:/reach/b.weapon");
     }
 
+    #[test]
+    fn custom_profile_identity_survives_session_round_trip() {
+        let mut custom = kit("/custom-reach", Some(BrowserMode::Folders));
+        custom.game = Some("haloreach_mcc".to_owned());
+        custom.profile_id = Some("11111111-1111-4111-8111-111111111111".to_owned());
+        let restored = parse_last_session(&session_value(&LastSessionState {
+            kits: vec![custom],
+        }))
+        .expect("custom profile session parses");
+        assert_eq!(
+            restored.kits[0].profile_id.as_deref(),
+            Some("11111111-1111-4111-8111-111111111111")
+        );
+        assert_eq!(restored.kits[0].game.as_deref(), Some("haloreach_mcc"));
+    }
+
     /// A kit whose tags all failed to parse contributes nothing, and a session
     /// left with no kits at all is no session.
     #[test]
@@ -933,6 +1083,7 @@ mod session_tests {
             source_kind: LastSessionSourceKind::LooseFolder,
             source_path: PathBuf::from(path),
             game: None,
+            profile_id: None,
             project_path: None,
             browser_mode: mode,
             browser_sort: Some(BrowserSort::Name),

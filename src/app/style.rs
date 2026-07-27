@@ -301,14 +301,6 @@ pub(super) fn subtle_dark() -> Color32 {
     }
 }
 
-pub(super) fn placeholder_text() -> Color32 {
-    if is_dark_mode() {
-        Color32::from_rgb(128, 128, 128)
-    } else {
-        Color32::from_rgb(145, 145, 138)
-    }
-}
-
 pub(super) fn function_plot_bg() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(64, 64, 62)

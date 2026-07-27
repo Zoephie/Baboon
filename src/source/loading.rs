@@ -48,27 +48,61 @@ pub fn load_folder(
     aliases: &[EkFolderAlias],
 ) -> Result<LoadedSourceData> {
     let info = resolve_folder_root(&selected_root, aliases)?;
-    let game = info.game.map(str::to_owned);
+    load_resolved_folder(
+        info.scan_root,
+        info.label,
+        info.game.map(str::to_owned),
+        fallback_names,
+        definitions_root,
+    )
+}
+
+/// Loads an explicitly typed editing-kit layout. Custom profile roots cannot be
+/// identified reliably from their folder names, so the Settings-selected engine
+/// is authoritative while the ordinary Open Folder path keeps auto-detection.
+pub fn load_editing_kit_layout(
+    tags_root: PathBuf,
+    label: String,
+    game: String,
+    fallback_names: &TagNameIndex,
+    definitions_root: &Path,
+) -> Result<LoadedSourceData> {
+    load_resolved_folder(
+        tags_root,
+        label,
+        Some(game),
+        fallback_names,
+        definitions_root,
+    )
+}
+
+fn load_resolved_folder(
+    scan_root: PathBuf,
+    label: String,
+    game: Option<String>,
+    fallback_names: &TagNameIndex,
+    definitions_root: &Path,
+) -> Result<LoadedSourceData> {
     let names = game
         .as_deref()
         .and_then(|g| TagNameIndex::load_game(definitions_root, g).ok())
         .unwrap_or_else(|| fallback_names.clone());
     let entries = Vec::new();
-    let tree = build_folder_directory_tree(&info.scan_root)
-        .with_context(|| format!("failed to list folders in {}", info.scan_root.display()))?;
+    let tree = build_folder_directory_tree(&scan_root)
+        .with_context(|| format!("failed to list folders in {}", scan_root.display()))?;
     // Pre-load a saved index so Groups and search work immediately.
     let all_entries = game
         .as_deref()
-        .and_then(|g| load_entry_index(g, &info.scan_root))
+        .and_then(|g| load_entry_index(g, &scan_root))
         .unwrap_or_default();
     let reverse_dependencies = game
         .as_deref()
-        .and_then(|g| load_reverse_dependency_index(g, &info.scan_root));
+        .and_then(|g| load_reverse_dependency_index(g, &scan_root));
     let group_tree = build_group_tree(&all_entries);
     Ok(LoadedSourceData {
-        label: info.label,
+        label,
         source: TagSource::LooseFolder {
-            root: info.scan_root,
+            root: scan_root,
             game: game.clone(),
             definitions_root: definitions_root.to_path_buf(),
         },

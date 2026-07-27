@@ -40,7 +40,7 @@ use crate::format::{TagNameIndex, format_value, group_label};
 use crate::source::{
     DependencyRef, EkFolderAlias, EntryIndexRefresh, LoadedSourceData, ReverseDependencyIndex,
     SUPPORTED_EK_GAMES, TagEntry, TagEntryLocation, TagSource, TagTree, TagTreeNode, load_folder,
-    load_folder_node_entries, load_iostore_container, load_iostore_container_set,
+    load_editing_kit_layout, load_folder_node_entries, load_iostore_container, load_iostore_container_set,
     load_monolithic_blob_index, load_single_file, loose_file_entry, read_entry,
     resolve_folder_root, scan_folder_subtree_entries, scan_folder_subtree_entries_with_progress,
     supported_ek_game_id,
@@ -53,6 +53,8 @@ pub(super) const BABOON_RELEASES_URL: &str = "https://github.com/Zoephie/Baboon/
 
 mod game_assets;
 use game_assets::*;
+mod editing_kits;
+use editing_kits::*;
 mod style;
 use style::*;
 mod state;
@@ -170,8 +172,10 @@ pub struct Baboon {
     pending_ui_scale: f32,
     model_preview_size: f32,
     ek_folder_aliases: Vec<EkFolderAlias>,
-    new_ek_alias_name: String,
-    new_ek_alias_game: String,
+    custom_editing_kit_profiles: Vec<CustomEditingKitProfile>,
+    editing_kit_validation: EditingKitValidationCache,
+    custom_editing_kit_draft: Option<CustomEditingKitDraft>,
+    custom_editing_kit_removal: Option<CustomEditingKitRemoval>,
     saved_prefs: GuiPrefs,
     first_run_wizard: Option<FirstRunWizardState>,
     settings_open: bool,
@@ -292,6 +296,8 @@ pub struct Baboon {
     tag_test_icon: Option<egui::TextureHandle>,
     game_banner_textures: HashMap<String, egui::TextureHandle>,
     game_emblem_textures: HashMap<String, egui::TextureHandle>,
+    custom_editing_kit_textures: HashMap<String, egui::TextureHandle>,
+    custom_editing_kit_texture_failures: HashSet<String>,
     last_pixels_per_point: f32,
     /// Clipboard for copy/paste of a block element between identical tags.
     block_clipboard: Option<BlockClipboard>,
@@ -341,6 +347,10 @@ impl Baboon {
             // Start fresh — never reopen, never ask.
             SessionRestore::Never => (None, None),
         };
+        let editing_kit_validation = EditingKitValidationCache::new(
+            &prefs.editing_kit_paths,
+            &prefs.custom_editing_kit_profiles,
+        );
         let mut app = Self {
             default_names: names.clone(),
             tx,
@@ -374,8 +384,10 @@ impl Baboon {
             pending_ui_scale: prefs.ui_scale,
             model_preview_size: prefs.model_preview_size,
             ek_folder_aliases: prefs.ek_folder_aliases.clone(),
-            new_ek_alias_name: String::new(),
-            new_ek_alias_game: "halo2_mcc".to_owned(),
+            custom_editing_kit_profiles: prefs.custom_editing_kit_profiles.clone(),
+            editing_kit_validation,
+            custom_editing_kit_draft: None,
+            custom_editing_kit_removal: None,
             saved_prefs: prefs.clone(),
             first_run_wizard,
             settings_open: false,
@@ -494,6 +506,8 @@ impl Baboon {
             ),
             game_banner_textures: HashMap::new(),
             game_emblem_textures: HashMap::new(),
+            custom_editing_kit_textures: HashMap::new(),
+            custom_editing_kit_texture_failures: HashSet::new(),
             last_pixels_per_point: cc.egui_ctx.pixels_per_point(),
             block_clipboard: None,
         };
@@ -532,6 +546,37 @@ impl Baboon {
         self.game_emblem_textures.get(game)
     }
 
+    fn custom_editing_kit_texture(
+        &mut self,
+        ctx: &egui::Context,
+        profile: &CustomEditingKitProfile,
+    ) -> Option<&egui::TextureHandle> {
+        let relative = profile.icon.as_deref()?;
+        if self.custom_editing_kit_texture_failures.contains(&profile.id) {
+            return None;
+        }
+        if !self.custom_editing_kit_textures.contains_key(&profile.id) {
+            let texture = resolve_custom_icon_path(relative)
+                .ok()
+                .and_then(|absolute| fs::read(absolute).ok())
+                .and_then(|bytes| {
+                    load_png_texture(
+                        ctx,
+                        &format!("custom_editing_kit_{}", profile.id),
+                        &bytes,
+                    )
+                });
+            let Some(texture) = texture else {
+                self.custom_editing_kit_texture_failures
+                    .insert(profile.id.clone());
+                return None;
+            };
+            self.custom_editing_kit_textures
+                .insert(profile.id.clone(), texture);
+        }
+        self.custom_editing_kit_textures.get(&profile.id)
+    }
+
     fn handle_pixels_per_point_change(&mut self, ctx: &egui::Context) {
         let pixels_per_point = ctx.pixels_per_point();
         if (pixels_per_point - self.last_pixels_per_point).abs() < 0.01 {
@@ -555,6 +600,8 @@ impl Baboon {
         );
         self.game_banner_textures.clear();
         self.game_emblem_textures.clear();
+        self.custom_editing_kit_textures.clear();
+        self.custom_editing_kit_texture_failures.clear();
         ctx.request_repaint();
     }
 }

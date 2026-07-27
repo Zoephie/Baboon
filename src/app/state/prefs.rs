@@ -99,7 +99,6 @@ pub(in crate::app) enum SettingsTab {
     Startup,
     Browser,
     EditingKits,
-    EditingKitAliases,
     Appearance,
     Tools,
 }
@@ -115,6 +114,76 @@ pub(in crate::app) struct EditingKitShortcut {
     pub(in crate::app) label: &'static str,
     pub(in crate::app) game: &'static str,
     pub(in crate::app) fallback: &'static str,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::app) struct CustomEditingKitProfile {
+    pub(in crate::app) id: String,
+    pub(in crate::app) name: String,
+    pub(in crate::app) game: String,
+    pub(in crate::app) root: PathBuf,
+    /// Relative to the executable directory. `None` uses the bundled folder icon.
+    pub(in crate::app) icon: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::app) struct EditingKitProfileIdentity {
+    pub(in crate::app) id: String,
+    pub(in crate::app) name: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::app) enum CustomEditingKitIconDraft {
+    Default,
+    Existing(PathBuf),
+    Selected(PathBuf),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::app) struct CustomEditingKitDraft {
+    pub(in crate::app) editing_id: Option<String>,
+    pub(in crate::app) name: String,
+    pub(in crate::app) game: String,
+    pub(in crate::app) root_input: String,
+    pub(in crate::app) icon: CustomEditingKitIconDraft,
+    pub(in crate::app) error: Option<String>,
+    pub(in crate::app) icon_warning: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::app) struct CustomEditingKitRemoval {
+    pub(in crate::app) id: String,
+    pub(in crate::app) name: String,
+}
+
+impl CustomEditingKitDraft {
+    pub(in crate::app) fn new() -> Self {
+        Self {
+            editing_id: None,
+            name: String::new(),
+            game: "halo2_mcc".to_owned(),
+            root_input: String::new(),
+            icon: CustomEditingKitIconDraft::Default,
+            error: None,
+            icon_warning: None,
+        }
+    }
+
+    pub(in crate::app) fn from_profile(profile: &CustomEditingKitProfile) -> Self {
+        Self {
+            editing_id: Some(profile.id.clone()),
+            name: profile.name.clone(),
+            game: profile.game.clone(),
+            root_input: profile.root.display().to_string(),
+            icon: profile
+                .icon
+                .clone()
+                .map(CustomEditingKitIconDraft::Existing)
+                .unwrap_or(CustomEditingKitIconDraft::Default),
+            error: None,
+            icon_warning: None,
+        }
+    }
 }
 
 pub(in crate::app) const EDITING_KIT_SHORTCUTS: [EditingKitShortcut; 8] = [
@@ -223,6 +292,7 @@ pub(in crate::app) struct GuiPrefs {
     pub(in crate::app) blender_path: Option<PathBuf>,
     pub(in crate::app) editing_kit_paths: HashMap<String, PathBuf>,
     pub(in crate::app) ek_folder_aliases: Vec<EkFolderAlias>,
+    pub(in crate::app) custom_editing_kit_profiles: Vec<CustomEditingKitProfile>,
     pub(in crate::app) tool_commands_window_pos: Option<egui::Pos2>,
     pub(in crate::app) tool_commands_window_size: Option<Vec2>,
     pub(in crate::app) tool_commands_left_width: f32,
@@ -253,6 +323,7 @@ impl Default for GuiPrefs {
             editing_kit_paths: HashMap::new(),
             session_restore: SessionRestore::Ask,
             ek_folder_aliases: Vec::new(),
+            custom_editing_kit_profiles: Vec::new(),
             tool_commands_window_pos: None,
             tool_commands_window_size: None,
             tool_commands_left_width: DEFAULT_TOOL_COMMANDS_LEFT_WIDTH,

@@ -161,6 +161,7 @@ pub(in crate::app) struct LastSessionKit {
     pub(in crate::app) source_kind: LastSessionSourceKind,
     pub(in crate::app) source_path: PathBuf,
     pub(in crate::app) game: Option<String>,
+    pub(in crate::app) profile_id: Option<String>,
     pub(in crate::app) project_path: Option<PathBuf>,
     /// The browser view this kit was in, or `None` when the session predates
     /// per-kit views — the restored kit then falls back to the saved default.
@@ -178,6 +179,7 @@ pub(in crate::app) struct LastSessionState {
 pub(in crate::app) struct RestoreKit {
     pub(in crate::app) source_kind: LastSessionSourceKind,
     pub(in crate::app) source_path: PathBuf,
+    pub(in crate::app) profile_id: Option<String>,
     pub(in crate::app) project_path: Option<PathBuf>,
     /// The browser view this kit was in, or `None` when the session predates
     /// per-kit views — the restored kit then falls back to the saved default.
@@ -197,6 +199,7 @@ pub(in crate::app) struct LastOpenedWindowsKit {
     pub(in crate::app) source_kind: LastSessionSourceKind,
     pub(in crate::app) source_path: PathBuf,
     pub(in crate::app) game: Option<String>,
+    pub(in crate::app) profile_id: Option<String>,
     pub(in crate::app) source_available: bool,
     pub(in crate::app) project_path: Option<PathBuf>,
     /// The browser view this kit was in, or `None` when the session predates
@@ -257,6 +260,7 @@ impl LastOpenedWindowsKit {
             source_kind: saved.source_kind,
             source_path: saved.source_path,
             game: saved.game,
+            profile_id: saved.profile_id,
             source_available,
             project_path: saved.project_path,
             browser_mode: saved.browser_mode,
@@ -303,6 +307,7 @@ impl LastOpenedWindowsPrompt {
                 (!tags.is_empty() || kit.project_path.is_some()).then(|| RestoreKit {
                     source_kind: kit.source_kind,
                     source_path: kit.source_path.clone(),
+                    profile_id: kit.profile_id.clone(),
                     project_path: kit.project_path.clone(),
                     browser_mode: kit.browser_mode,
                     browser_sort: kit.browser_sort,

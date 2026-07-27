@@ -2213,6 +2213,7 @@ impl Baboon {
             source_kind,
             source_path,
             game: source.game.clone(),
+            profile_id: kit.profile.as_ref().map(|profile| profile.id.clone()),
             project_path: kit.campaign_project.as_ref().map(|project| project.path.clone()),
             browser_mode: Some(kit.browser_mode),
             browser_sort: Some(kit.browser_sort),
@@ -2231,6 +2232,7 @@ impl Baboon {
         for RestoreKit {
             source_kind,
             source_path,
+            profile_id,
             project_path,
             browser_mode,
             browser_sort,
@@ -2245,7 +2247,19 @@ impl Baboon {
                     self.begin_load_single_path(source_path, ctx.clone())
                 }
                 LastSessionSourceKind::LooseFolder => {
-                    self.begin_load_folder_path(source_path, ctx.clone())
+                    let started = if let Some(profile) = profile_id
+                        .as_deref()
+                        .and_then(|id| self.custom_editing_kit_profiles.iter().find(|profile| profile.id == id))
+                        .cloned()
+                    {
+                        self.load_custom_editing_kit_profile(profile, ctx.clone())
+                    } else {
+                        self.begin_load_folder_path(source_path, ctx.clone());
+                        true
+                    };
+                    if !started {
+                        continue;
+                    }
                 }
                 LastSessionSourceKind::MonolithicCache => {
                     let blob_index = if source_path.is_dir() {
@@ -5116,6 +5130,7 @@ impl Baboon {
             blender_path: self.blender_path.clone(),
             editing_kit_paths: self.editing_kit_paths.clone(),
             ek_folder_aliases: self.ek_folder_aliases.clone(),
+            custom_editing_kit_profiles: self.custom_editing_kit_profiles.clone(),
             tool_commands_window_pos: self.tool_commands_window_pos,
             tool_commands_window_size: Some(self.tool_commands_window_size),
             tool_commands_left_width: self.tool_commands_left_width,
@@ -5125,48 +5140,6 @@ impl Baboon {
             custom_color_swatches: self.custom_color_swatches.clone(),
             palette_last_dir: self.palette_last_dir.clone(),
         }
-    }
-
-    pub(super) fn reapply_current_folder_profile(&mut self) {
-        let kit_index = self.active;
-        let Some(TagSource::LooseFolder {
-            root,
-            game,
-            definitions_root,
-        }) = self.kits[kit_index].source.as_ref().map(|s| &s.source)
-        else {
-            return;
-        };
-        let Ok(info) = resolve_folder_root(root, &self.ek_folder_aliases) else {
-            return;
-        };
-        let new_game = info.game.map(str::to_owned);
-        let definitions_root = definitions_root.clone();
-        let source_game = self.kits[kit_index].source.as_ref().and_then(|s| s.game.clone());
-        if source_game == new_game && *game == new_game {
-            return;
-        }
-
-        let names = new_game
-            .as_deref()
-            .and_then(|game| TagNameIndex::load_game(&definitions_root, game).ok())
-            .unwrap_or_else(|| self.default_names.clone());
-        self.kits[kit_index].names = names.clone();
-        let Some(source) = self.kits[kit_index].source.as_mut() else {
-            return;
-        };
-        if let TagSource::LooseFolder { game, .. } = &mut source.source {
-            *game = new_game.clone();
-        }
-        source.label = info.label;
-        source.game = new_game.clone();
-        source.names = names;
-        source.group_tree = crate::source::build_group_tree(&source.all_entries);
-        self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
-        self.status = match new_game {
-            Some(game) => format!("Current folder now uses {game} definitions"),
-            None => "Current folder no longer has a detected game profile".to_owned(),
-        };
     }
 
     pub(super) fn editing_kit_root(&self) -> Option<PathBuf> {
@@ -5382,14 +5355,118 @@ impl Baboon {
             );
             return;
         };
-        if !path.is_dir() {
+        let status = self
+            .editing_kit_validation
+            .refresh_builtin(shortcut, Some(&path));
+        let Some(layout) = status.layout().cloned() else {
             self.prompt_for_editing_kit_path(
                 shortcut,
-                format!("{} folder not found: {}", shortcut.label, path.display()),
+                status.message(),
             );
             return;
+        };
+        if shortcut.game == "haloce_evolved" {
+            self.begin_load_folder_path(path, ctx);
+        } else {
+            self.begin_load_editing_kit_layout(
+                layout,
+                shortcut.game.to_owned(),
+                game_display_name(shortcut.game).to_owned(),
+                None,
+                ctx,
+            );
         }
-        self.begin_load_folder_path(path, ctx);
+    }
+
+    pub(super) fn load_custom_editing_kit_profile(
+        &mut self,
+        profile: CustomEditingKitProfile,
+        ctx: egui::Context,
+    ) -> bool {
+        let layout = match self.editing_kit_validation.refresh_custom(&profile) {
+            Ok(layout) => layout,
+            Err(error) => {
+                self.status = format!("{} is unavailable: {error}", profile.name);
+                return false;
+            }
+        };
+        self.begin_load_editing_kit_layout(
+            layout,
+            profile.game.clone(),
+            profile.name.clone(),
+            Some(EditingKitProfileIdentity {
+                id: profile.id,
+                name: profile.name,
+            }),
+            ctx,
+        );
+        true
+    }
+
+    fn begin_load_editing_kit_layout(
+        &mut self,
+        layout: EditingKitLayout,
+        game: String,
+        label: String,
+        profile: Option<EditingKitProfileIdentity>,
+        ctx: egui::Context,
+    ) {
+        if let Some(profile_identity) = profile.as_ref() {
+            if let Some(index) = self.kits.iter().position(|kit| {
+                kit.profile.as_ref().map(|open| open.id.as_str())
+                    == Some(profile_identity.id.as_str())
+            }) {
+                self.active = index;
+                self.status = format!("Switched to {}", label);
+                return;
+            }
+            if let Some(index) = self.kits.iter().position(|kit| {
+                kit.requested_path
+                    .as_deref()
+                    .is_some_and(|open| same_recent_path(open, &layout.root))
+                    && kit
+                        .source
+                        .as_ref()
+                        .and_then(|source| source.game.as_deref())
+                        == Some(game.as_str())
+            }) {
+                self.active = index;
+                self.kits[index].profile = Some(profile_identity.clone());
+                self.status = format!("Switched to {}", label);
+                return;
+            }
+            if !self.kits[self.active].is_empty_workspace() {
+                self.add_kit();
+            }
+            self.kits[self.active].requested_path = Some(layout.root.clone());
+        } else if self.open_kit_for(&layout.root) {
+            self.status = format!("Switched to {}", label);
+            return;
+        }
+        self.kits[self.active].profile = profile;
+        let tx = self.tx.clone();
+        let kit = self.active_kit_id();
+        let names = self.default_names.clone();
+        let definitions_root = locate_definitions_root();
+        let tags_root = layout.tags;
+        let recent_path = layout.root.clone();
+        self.status = format!("Indexing {} as {game}", tags_root.display());
+        thread::spawn(move || {
+            let result = load_editing_kit_layout(
+                tags_root,
+                label,
+                game,
+                &names,
+                &definitions_root,
+            )
+            .map_err(|error| error.to_string());
+            let _ = tx.send(WorkerMessage::SourceLoaded {
+                kit,
+                result,
+                recent_path: Some(recent_path),
+            });
+            ctx.request_repaint();
+        });
     }
 
     pub(super) fn choose_editing_kit_path(&mut self, shortcut: EditingKitShortcut) {
@@ -5415,6 +5492,7 @@ impl Baboon {
                 self.editing_kit_path_attention = None;
             }
             self.status = format!("{} path set to {}", shortcut.label, path.display());
+            self.refresh_builtin_editing_kit_validation(shortcut);
         }
     }
 
@@ -5426,6 +5504,7 @@ impl Baboon {
             &mut self.editing_kit_path_attention,
             &detected,
         );
+        self.refresh_editing_kit_validation();
         self.status = if added == 0 {
             "No new editing kit paths detected".to_owned()
         } else {

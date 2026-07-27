@@ -16,6 +16,7 @@ enum WelcomeAction {
     ForgetRecent(std::path::PathBuf),
     ForgetAllRecents,
     LoadKit(EditingKitShortcut),
+    LoadCustomKit(CustomEditingKitProfile),
     OpenSettings,
 }
 
@@ -36,10 +37,10 @@ impl Baboon {
     ) {
         let mut action = None;
         let recents = self.recent_folders.clone();
-        let configured: Vec<EditingKitShortcut> = EDITING_KIT_SHORTCUTS
-            .into_iter()
-            .filter(|shortcut| self.editing_kit_paths.contains_key(shortcut.game))
-            .collect();
+        let editing_kits = visible_editing_kit_menu_entries(
+            &self.custom_editing_kit_profiles,
+            &self.editing_kit_validation,
+        );
 
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
@@ -86,37 +87,95 @@ impl Baboon {
                             action = Some(WelcomeAction::LoadContainer);
                         }
 
-                        if !configured.is_empty() {
+                        if !editing_kits.is_empty() {
                             ui.add_space(24.0);
                             section_heading(ui, "Editing kits");
-                            for shortcut in &configured {
-                                let texture = self.game_emblem_texture(ctx, shortcut.game).cloned();
-                                let path = self.editing_kit_paths.get(shortcut.game).cloned();
-                                let clicked = ui
-                                    .horizontal(|ui| {
-                                        match texture {
-                                            Some(texture) => {
-                                                ui.add(egui::Image::new(
-                                                    egui::load::SizedTexture::new(
-                                                        texture.id(),
+                            for entry in &editing_kits {
+                                match entry {
+                                    EditingKitMenuEntry::Custom(profile) => {
+                                        let validation =
+                                            self.editing_kit_validation.custom(&profile.id);
+                                        let enabled = validation.is_ok();
+                                        let tooltip = validation
+                                            .as_ref()
+                                            .map(|layout| layout.root.display().to_string())
+                                            .unwrap_or_else(|error| {
+                                                format!("{} is unavailable: {error}", profile.name)
+                                            });
+                                        let texture =
+                                            self.custom_editing_kit_texture(ctx, profile).cloned();
+                                        let clicked = ui
+                                            .horizontal(|ui| {
+                                                if let Some(texture) = texture {
+                                                    ui.add(egui::Image::new(
+                                                        egui::load::SizedTexture::new(
+                                                            texture.id(),
+                                                            Vec2::splat(16.0),
+                                                        ),
+                                                    ));
+                                                } else {
+                                                    let (rect, _) = ui.allocate_exact_size(
                                                         Vec2::splat(16.0),
-                                                    ),
-                                                ));
-                                            }
-                                            None => ui.add_space(16.0),
+                                                        Sense::hover(),
+                                                    );
+                                                    paint_button_icon_at(
+                                                        ui,
+                                                        ButtonIcon::FolderOpen,
+                                                        rect,
+                                                        text_dark(),
+                                                    );
+                                                }
+                                                let response = ui.add_enabled(
+                                                    enabled,
+                                                    egui::Link::new(&profile.name),
+                                                );
+                                                let response = if enabled {
+                                                    response.on_hover_text(tooltip)
+                                                } else {
+                                                    response.on_disabled_hover_text(tooltip)
+                                                };
+                                                response.clicked()
+                                            })
+                                            .inner;
+                                        if clicked {
+                                            action = Some(WelcomeAction::LoadCustomKit(
+                                                profile.clone(),
+                                            ));
                                         }
-                                        let label = ui.link(game_display_name(shortcut.game));
-                                        match &path {
-                                            Some(path) => {
-                                                label.on_hover_text(path.display().to_string())
-                                            }
-                                            None => label,
+                                    }
+                                    EditingKitMenuEntry::BuiltIn(shortcut) => {
+                                        let texture = self
+                                            .game_emblem_texture(ctx, shortcut.game)
+                                            .cloned();
+                                        let path =
+                                            self.editing_kit_paths.get(shortcut.game).cloned();
+                                        let clicked = ui
+                                            .horizontal(|ui| {
+                                                match texture {
+                                                    Some(texture) => {
+                                                        ui.add(egui::Image::new(
+                                                            egui::load::SizedTexture::new(
+                                                                texture.id(),
+                                                                Vec2::splat(16.0),
+                                                            ),
+                                                        ));
+                                                    }
+                                                    None => ui.add_space(16.0),
+                                                }
+                                                let label =
+                                                    ui.link(game_display_name(shortcut.game));
+                                                match &path {
+                                                    Some(path) => label
+                                                        .on_hover_text(path.display().to_string()),
+                                                    None => label,
+                                                }
+                                                .clicked()
+                                            })
+                                            .inner;
+                                        if clicked {
+                                            action = Some(WelcomeAction::LoadKit(*shortcut));
                                         }
-                                        .clicked()
-                                    })
-                                    .inner;
-                                if clicked {
-                                    action = Some(WelcomeAction::LoadKit(*shortcut));
+                                    }
                                 }
                             }
                         }
@@ -196,7 +255,13 @@ impl Baboon {
             Some(WelcomeAction::LoadKit(shortcut)) => {
                 self.load_editing_kit_shortcut(shortcut, ctx.clone())
             }
-            Some(WelcomeAction::OpenSettings) => self.settings_open = true,
+            Some(WelcomeAction::LoadCustomKit(profile)) => {
+                self.load_custom_editing_kit_profile(profile, ctx.clone());
+            }
+            Some(WelcomeAction::OpenSettings) => {
+                self.settings_tab = SettingsTab::EditingKits;
+                self.settings_open = true;
+            }
             None => {}
         }
     }

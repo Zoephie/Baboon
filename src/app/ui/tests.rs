@@ -2,7 +2,7 @@
 //! It owns test-only characterization and does not participate in runtime application behavior.
 
 use super::*;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 #[test]
 fn editing_kit_menu_uses_each_shortcut_once_in_reverse_engine_order() {
@@ -44,6 +44,85 @@ fn editing_kit_menu_uses_each_shortcut_once_in_reverse_engine_order() {
         games.len()
     );
     assert_eq!(games.len(), EDITING_KIT_SHORTCUTS.len());
+}
+
+#[test]
+fn editing_kit_menu_filters_invalid_built_ins_without_reordering_valid_ones() {
+    let root = std::env::temp_dir().join(format!(
+        "baboon-visible-kits-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let h2 = root.join("h2");
+    let h4 = root.join("h4");
+    let invalid = root.join("h3");
+    std::fs::create_dir_all(h2.join("tags")).unwrap();
+    std::fs::create_dir_all(h4.join("tags")).unwrap();
+    std::fs::create_dir_all(&invalid).unwrap();
+    let paths = HashMap::from([
+        ("halo2_mcc".to_owned(), h2),
+        ("halo4_mcc".to_owned(), h4),
+        ("halo3_mcc".to_owned(), invalid),
+    ]);
+
+    let validation = EditingKitValidationCache::new(&paths, &[]);
+    let games = visible_builtin_editing_kit_shortcuts(&validation)
+        .into_iter()
+        .map(|shortcut| shortcut.game)
+        .collect::<Vec<_>>();
+    assert_eq!(games, vec!["halo4_mcc", "halo2_mcc"]);
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn shared_menu_entries_put_custom_profiles_first_in_creation_order() {
+    let root = std::env::temp_dir().join(format!(
+        "baboon-menu-order-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let h2 = root.join("h2");
+    std::fs::create_dir_all(h2.join("tags")).unwrap();
+    let profiles = vec![
+        CustomEditingKitProfile {
+            id: "one".to_owned(),
+            name: "First".to_owned(),
+            game: "halo3_mcc".to_owned(),
+            root: root.join("temporarily-missing-one"),
+            icon: None,
+        },
+        CustomEditingKitProfile {
+            id: "two".to_owned(),
+            name: "Second".to_owned(),
+            game: "haloreach_mcc".to_owned(),
+            root: root.join("temporarily-missing-two"),
+            icon: None,
+        },
+    ];
+    let paths = HashMap::from([("halo2_mcc".to_owned(), h2)]);
+    let validation = EditingKitValidationCache::new(&paths, &profiles);
+    let entries = visible_editing_kit_menu_entries(&profiles, &validation);
+
+    assert!(matches!(
+        &entries[0],
+        EditingKitMenuEntry::Custom(profile) if profile.id == "one"
+    ));
+    assert!(matches!(
+        &entries[1],
+        EditingKitMenuEntry::Custom(profile) if profile.id == "two"
+    ));
+    assert!(matches!(
+        entries[2],
+        EditingKitMenuEntry::BuiltIn(shortcut) if shortcut.game == "halo2_mcc"
+    ));
+    assert_eq!(entries.len(), 3);
+    let _ = std::fs::remove_dir_all(root);
 }
 
 #[test]
@@ -95,13 +174,16 @@ fn editing_kit_menu_rows_keep_icons_aligned_and_separators_outside_click_targets
             |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     ui.set_min_width(EDITING_KIT_MENU_MIN_WIDTH);
-                    first_row = editing_kit_menu_row(ui, "Halo 4", "H4", None).rect;
+                    first_row =
+                        editing_kit_menu_row(ui, "Halo 4", "H4", None, false, true).rect;
                     separator = ui.separator().rect;
                     second_row = editing_kit_menu_row(
                         ui,
                         "Halo 2 Anniversary Multiplayer",
                         "H2A",
                         None,
+                        false,
+                        true,
                     )
                     .rect;
                 });

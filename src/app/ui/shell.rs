@@ -512,32 +512,93 @@ impl Baboon {
                     });
                     ui.menu_button("Editing Kits", |ui| {
                         ui.set_min_width(EDITING_KIT_MENU_MIN_WIDTH);
-                        for (index, shortcut) in editing_kit_menu_shortcuts().enumerate() {
-                            let texture =
-                                self.game_banner_texture(ui.ctx(), shortcut.game).cloned();
-                            let configured_path = self.editing_kit_paths.get(shortcut.game);
-                            let tooltip = configured_path
-                                .map(|path| {
-                                    format!("Load {} from {}", shortcut.label, path.display())
-                                })
-                                .unwrap_or_else(|| {
-                                    format!("Set {} path in Settings", shortcut.label)
-                                });
-                            if editing_kit_menu_row(
-                                ui,
-                                game_display_name(shortcut.game),
-                                shortcut.fallback,
-                                texture.as_ref(),
-                            )
-                            .on_hover_text(tooltip)
-                            .clicked()
-                            {
-                                ui.close_menu();
-                                self.load_editing_kit_shortcut(shortcut, ctx.clone());
+                        let entries = visible_editing_kit_menu_entries(
+                            &self.custom_editing_kit_profiles,
+                            &self.editing_kit_validation,
+                        );
+                        let total_rows = entries.len();
+                        for (index, entry) in entries.into_iter().enumerate() {
+                            match entry {
+                                EditingKitMenuEntry::Custom(profile) => {
+                                    let validation =
+                                        self.editing_kit_validation.custom(&profile.id);
+                                    let enabled = validation.is_ok();
+                                    let tooltip = validation
+                                        .as_ref()
+                                        .map(|layout| {
+                                            format!(
+                                                "Load {} from {}",
+                                                profile.name,
+                                                layout.root.display()
+                                            )
+                                        })
+                                        .unwrap_or_else(|error| {
+                                            format!("{} is unavailable: {error}", profile.name)
+                                        });
+                                    let texture = self
+                                        .custom_editing_kit_texture(ui.ctx(), &profile)
+                                        .cloned();
+                                    let response = editing_kit_menu_row(
+                                        ui,
+                                        &profile.name,
+                                        "EK",
+                                        texture.as_ref(),
+                                        profile.icon.is_none() || texture.is_none(),
+                                        enabled,
+                                    );
+                                    let response = if enabled {
+                                        response.on_hover_text(tooltip)
+                                    } else {
+                                        response.on_disabled_hover_text(tooltip)
+                                    };
+                                    if response.clicked() {
+                                        ui.close_menu();
+                                        self.load_custom_editing_kit_profile(
+                                            profile,
+                                            ctx.clone(),
+                                        );
+                                    }
+                                }
+                                EditingKitMenuEntry::BuiltIn(shortcut) => {
+                                    let texture =
+                                        self.game_banner_texture(ui.ctx(), shortcut.game).cloned();
+                                    let configured_path = self
+                                        .editing_kit_paths
+                                        .get(shortcut.game)
+                                        .expect("validated built-in path");
+                                    let tooltip = format!(
+                                        "Load {} from {}",
+                                        shortcut.label,
+                                        configured_path.display()
+                                    );
+                                    if editing_kit_menu_row(
+                                        ui,
+                                        game_display_name(shortcut.game),
+                                        shortcut.fallback,
+                                        texture.as_ref(),
+                                        false,
+                                        true,
+                                    )
+                                    .on_hover_text(tooltip)
+                                    .clicked()
+                                    {
+                                        ui.close_menu();
+                                        self.load_editing_kit_shortcut(shortcut, ctx.clone());
+                                    }
+                                }
                             }
-                            if index + 1 < EDITING_KIT_SHORTCUTS.len() {
+                            if index + 1 < total_rows {
                                 ui.separator();
                             }
+                        }
+                        if total_rows == 0 {
+                            ui.add_enabled(false, egui::Button::new("No configured editing kits"));
+                        }
+                        ui.separator();
+                        if ui.button("Editing Kit Settings...").clicked() {
+                            self.settings_tab = SettingsTab::EditingKits;
+                            self.settings_open = true;
+                            ui.close_menu();
                         }
                     });
                     self.draw_tool_launcher_buttons(ui);

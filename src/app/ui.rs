@@ -51,6 +51,36 @@ fn editing_kit_menu_shortcuts() -> impl Iterator<Item = EditingKitShortcut> {
     EDITING_KIT_SHORTCUTS.into_iter().rev()
 }
 
+fn visible_builtin_editing_kit_shortcuts(
+    validation: &EditingKitValidationCache,
+) -> Vec<EditingKitShortcut> {
+    editing_kit_menu_shortcuts()
+        .filter(|shortcut| validation.builtin(*shortcut).layout().is_some())
+        .collect()
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum EditingKitMenuEntry {
+    Custom(CustomEditingKitProfile),
+    BuiltIn(EditingKitShortcut),
+}
+
+fn visible_editing_kit_menu_entries(
+    profiles: &[CustomEditingKitProfile],
+    validation: &EditingKitValidationCache,
+) -> Vec<EditingKitMenuEntry> {
+    profiles
+        .iter()
+        .cloned()
+        .map(EditingKitMenuEntry::Custom)
+        .chain(
+            visible_builtin_editing_kit_shortcuts(validation)
+                .into_iter()
+                .map(EditingKitMenuEntry::BuiltIn),
+        )
+        .collect()
+}
+
 const EDITING_KIT_MENU_MIN_WIDTH: f32 = 240.0;
 const EDITING_KIT_MENU_ICON_SIZE: f32 = 24.0;
 const EDITING_KIT_MENU_HORIZONTAL_PADDING: f32 = 8.0;
@@ -89,15 +119,17 @@ fn editing_kit_menu_row(
     label: &str,
     fallback: &str,
     texture: Option<&egui::TextureHandle>,
+    default_project_icon: bool,
+    enabled: bool,
 ) -> egui::Response {
     let row_height = ui
         .spacing()
         .interact_size
         .y
         .max(EDITING_KIT_MENU_ICON_SIZE + 4.0);
-    let response = ui.add_sized(
-        Vec2::new(EDITING_KIT_MENU_MIN_WIDTH, row_height),
-        egui::Button::new(""),
+    let response = ui.add_enabled(
+        enabled,
+        egui::Button::new("").min_size(Vec2::new(EDITING_KIT_MENU_MIN_WIDTH, row_height)),
     );
     response.widget_info(|| {
         egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), label)
@@ -120,6 +152,8 @@ fn editing_kit_menu_row(
             egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
             Color32::WHITE,
         );
+    } else if default_project_icon {
+        paint_button_icon_at(ui, ButtonIcon::FolderOpen, layout.icon_rect, text_dark());
     } else {
         ui.painter()
             .with_clip_rect(layout.icon_rect)
@@ -320,13 +354,6 @@ const MONITOR_COMMANDS_BY_GAME: &[(&str, &[&str])] = &[
     ("halo4_mcc", &["monitor-bitmaps", "monitor-strings"]),
     ("haloce_mcc", &[]),
 ];
-
-fn ek_game_label(game: &str) -> &str {
-    SUPPORTED_EK_GAMES
-        .iter()
-        .find_map(|(label, id)| (*id == game).then_some(*label))
-        .unwrap_or(game)
-}
 
 fn monitor_commands_for_game(game: Option<&str>) -> &'static [&'static str] {
     let Some(game) = game else {

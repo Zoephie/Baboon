@@ -129,6 +129,8 @@ pub(super) struct Kit {
     /// Matching on the requested path is what lets a repeat open of the same
     /// folder focus this kit instead of loading a duplicate.
     pub(super) requested_path: Option<PathBuf>,
+    /// First-class custom profile associated with this workspace, if any.
+    pub(super) profile: Option<EditingKitProfileIdentity>,
 
     /// This kit's Campaign Evolved recovery/project database, if its source
     /// has one. Per kit because a project belongs to a source — two Campaign
@@ -179,6 +181,7 @@ impl Kit {
             terminal_open: false,
             terminal_work_dir: None,
             requested_path: None,
+            profile: None,
             campaign_project: None,
             pending_campaign_project: None,
             pending_restore_tags: Vec::new(),
@@ -397,6 +400,7 @@ impl Baboon {
         // The requested path outlives the load it started, so a later open of
         // the same folder can find this kit.
         let requested_path = self.kits[index].requested_path.clone();
+        let profile = self.kits[index].profile.clone();
         let pending_restore_tags = std::mem::take(&mut self.kits[index].pending_restore_tags);
         let pending_campaign_project =
             std::mem::take(&mut self.kits[index].pending_campaign_project);
@@ -409,6 +413,7 @@ impl Baboon {
             source: Some(source),
             names,
             requested_path,
+            profile,
             browser_mode,
             browser_sort,
             pending_restore_tags,
@@ -428,6 +433,9 @@ pub(super) fn kit_strip_label(kit: &Kit) -> String {
     let Some(source) = kit.source.as_ref() else {
         return "New workspace".to_owned();
     };
+    if let Some(profile) = &kit.profile {
+        return profile.name.clone();
+    }
     match source.game.as_deref() {
         Some(game) => game_display_name(game).to_owned(),
         None => source.label.clone(),
