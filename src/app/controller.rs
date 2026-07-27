@@ -45,6 +45,41 @@ const ENTRY_INDEX_REFRESH_INTERVAL_SECS: f64 = 30.0;
 /// Normalize a user-entered container tag path: lowercase, `\`→`/`, collapse
 /// repeated slashes, and trim leading/trailing slashes and any tag extension.
 /// Yields the container-relative logical path (e.g. `objects/foo/bar`).
+/// Walk up from a resolved `Paks` directory to the folder a user would have
+/// picked to open it.
+///
+/// Sessions written before the chosen folder was recorded hold the inner path,
+/// and restoring from it remembers *that* as a recent folder -- so "Paks"
+/// reappeared after every restart however often it was removed. Walking up
+/// while the parent still resolves to the same directory undoes that without
+/// assuming a particular layout.
+fn install_root_for_paks(paks_dir: &Path) -> PathBuf {
+    // The two layouts `find_paks_dir` looks for directly, in its own order.
+    // Probing it instead would walk too far: it also *searches* four levels
+    // down, so distant ancestors resolve to this same directory and the walk
+    // would climb out of the install entirely.
+    for suffix in [
+        ["Meteorite", "Content", "Paks"].as_slice(),
+        ["Content", "Paks"].as_slice(),
+    ] {
+        let mut candidate = paks_dir;
+        let matched = suffix.iter().rev().all(|expected| {
+            let hit = candidate
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name.eq_ignore_ascii_case(expected));
+            if hit && let Some(parent) = candidate.parent() {
+                candidate = parent;
+            }
+            hit
+        });
+        if matched {
+            return candidate.to_path_buf();
+        }
+    }
+    paks_dir.to_path_buf()
+}
+
 fn normalize_container_tag_rel(input: &str) -> String {
     let lowered = input.trim().replace('\\', "/").to_ascii_lowercase();
     let mut segments: Vec<&str> = lowered
@@ -2133,6 +2168,15 @@ impl Baboon {
                 (LastSessionSourceKind::IoStoreContainerSet, root.clone())
             }
         };
+        // Record the folder the user actually chose, not the directory the
+        // source ended up reading from. They differ for exactly the sources
+        // whose root is resolved inwards: a container set mounts from
+        // `<install>/Meteorite/Content/Paks`, and a loose kit from
+        // `<kit>/tags`. Storing the resolved one meant every session restore
+        // reloaded that inner path and remembered *it* as a recent folder, so
+        // "Paks" reappeared in the recents list after each restart however
+        // often it was removed.
+        let source_path = kit.requested_path.clone().unwrap_or(source_path);
         let mut tags = Vec::new();
         for key in ordered_unique_keys(kit.open_tabs.iter()) {
             let Some(entry) = source
@@ -2214,7 +2258,7 @@ impl Baboon {
                 // Upstream added container sources to the session format, so a
                 // Campaign Evolved install now comes back with the rest.
                 LastSessionSourceKind::IoStoreContainerSet => {
-                    self.begin_load_folder_path(source_path, ctx.clone())
+                    self.begin_load_folder_path(install_root_for_paks(&source_path), ctx.clone())
                 }
             }
             // The loaders route to a kit and leave it active, so this stages
@@ -6023,6 +6067,32 @@ mod tests {
     /// containers and loses, so it builds correctly and does nothing. Renaming
     /// the default to something meaningful is exactly how it gets dropped --
     /// which is how one was reported.
+    /// A session written before the chosen folder was recorded holds the
+    /// resolved `Paks` directory. Restoring from it put that directory back
+    /// into the recents list on every launch, which is how "Paks" kept
+    /// reappearing however often it was removed.
+    #[test]
+    fn a_paks_directory_walks_back_up_to_the_opened_folder() {
+        let root = std::env::temp_dir().join(format!("baboon-paks-{}", std::process::id()));
+        let paks = root.join("Meteorite").join("Content").join("Paks");
+        std::fs::create_dir_all(&paks).unwrap();
+        // `find_paks_dir` needs a container present to recognise the folder.
+        std::fs::write(paks.join("pakchunk0-WinGDK.utoc"), []).unwrap();
+
+        assert_eq!(super::install_root_for_paks(&paks), root);
+        // Already the opened folder: nothing to strip.
+        assert_eq!(super::install_root_for_paks(&root), root);
+        // The shorter layout the resolver also accepts.
+        assert_eq!(
+            super::install_root_for_paks(&root.join("Content").join("Paks")),
+            root
+        );
+        // An unfamiliar layout is left exactly as it is rather than guessed at.
+        let odd = root.join("somewhere").join("Paks");
+        assert_eq!(super::install_root_for_paks(&odd), odd);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn a_mod_always_gets_the_priority_suffix() {
         assert_eq!(
