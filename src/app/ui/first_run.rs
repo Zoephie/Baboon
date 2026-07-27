@@ -91,9 +91,12 @@ impl Baboon {
     }
 
     fn draw_first_run_interface(&mut self, ui: &mut Ui) {
-        ui.heading("Blender and interface");
+        ui.heading("Updates and interface");
         ui.label("Blender is optional. You can change any of these settings later.");
         ui.add_space(10.0);
+        ui.label(RichText::new("Updates").strong());
+        self.draw_update_channel_picker(ui);
+        ui.add_space(12.0);
         ui.label(RichText::new("Blender executable").strong());
         ui.horizontal(|ui| {
             if ui

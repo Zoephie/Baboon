@@ -259,6 +259,59 @@ impl SessionRestore {
     }
 }
 
+/// Which build track Baboon checks against and points people at.
+///
+/// The two tracks are what `release.yml` publishes: `v*` tags, and a `dev`
+/// prerelease that is deleted and recreated on every push to `main`. Because
+/// the development release always carries the same tag, the two are compared
+/// against different things — a version number for [`UpdateChannel::Stable`],
+/// the build commit for [`UpdateChannel::Development`].
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub(in crate::app) enum UpdateChannel {
+    #[default]
+    Stable,
+    Development,
+}
+
+impl UpdateChannel {
+    pub(in crate::app) const ALL: [UpdateChannel; 2] =
+        [UpdateChannel::Stable, UpdateChannel::Development];
+
+    pub(in crate::app) fn as_str(self) -> &'static str {
+        match self {
+            UpdateChannel::Stable => "stable",
+            UpdateChannel::Development => "development",
+        }
+    }
+
+    pub(in crate::app) fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "stable" => Some(UpdateChannel::Stable),
+            "development" => Some(UpdateChannel::Development),
+            _ => None,
+        }
+    }
+
+    pub(in crate::app) fn label(self) -> &'static str {
+        match self {
+            UpdateChannel::Stable => "Stable releases",
+            UpdateChannel::Development => "Development builds",
+        }
+    }
+
+    pub(in crate::app) fn help(self) -> &'static str {
+        match self {
+            UpdateChannel::Stable => {
+                "Only published, versioned releases — the tested build most people want"
+            }
+            UpdateChannel::Development => {
+                "The rolling build from the latest commit, rebuilt on every change — \
+                 newer features, less testing"
+            }
+        }
+    }
+}
+
 /// Memoized search results for the tag browser.
 ///
 /// Filtering the full tag set (100k+ entries) and lowercasing each name is far
@@ -281,6 +334,8 @@ pub(in crate::app) struct GuiPrefs {
     pub(in crate::app) folders_before_tags: bool,
     pub(in crate::app) double_click_to_open_tags: bool,
     pub(in crate::app) session_restore: SessionRestore,
+    pub(in crate::app) update_channel: UpdateChannel,
+    pub(in crate::app) check_updates_on_startup: bool,
     pub(in crate::app) show_block_sizes: bool,
     pub(in crate::app) scroll_to_cycle_dropdowns: bool,
     /// Warn before Save overwrites Campaign Evolved pak files in place.
@@ -322,6 +377,8 @@ impl Default for GuiPrefs {
             blender_path: None,
             editing_kit_paths: HashMap::new(),
             session_restore: SessionRestore::Ask,
+            update_channel: UpdateChannel::default(),
+            check_updates_on_startup: true,
             ek_folder_aliases: Vec::new(),
             custom_editing_kit_profiles: Vec::new(),
             tool_commands_window_pos: None,
@@ -364,6 +421,15 @@ mod tests {
                 ("Campaign Evolved", "haloce_evolved"),
             ]
         );
+    }
+
+    #[test]
+    fn update_channel_round_trips_through_its_stored_string() {
+        for channel in UpdateChannel::ALL {
+            assert_eq!(UpdateChannel::from_str(channel.as_str()), Some(channel));
+        }
+        assert_eq!(UpdateChannel::from_str("nightly"), None);
+        assert_eq!(UpdateChannel::default(), UpdateChannel::Stable);
     }
 }
 

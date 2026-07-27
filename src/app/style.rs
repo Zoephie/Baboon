@@ -301,6 +301,17 @@ pub(super) fn subtle_dark() -> Color32 {
     }
 }
 
+/// Green for good news worth noticing in passing — an available update sitting
+/// in the status bar. Darkened for the light theme so it stays legible against
+/// a pale background.
+pub(super) fn good_news() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(126, 205, 133)
+    } else {
+        Color32::from_rgb(22, 116, 51)
+    }
+}
+
 pub(super) fn function_plot_bg() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(64, 64, 62)

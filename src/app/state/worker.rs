@@ -80,8 +80,12 @@ pub(in crate::app) enum WorkerMessage {
     TerminalDone {
         run_id: u64,
     },
-    // GitHub latest-release lookup finished.
-    UpdateCheckFinished(Result<UpdateCheckResult, String>),
+    // GitHub release lookup finished. `silent` marks the automatic check made
+    // at startup, which stays quiet unless it actually found an update.
+    UpdateCheckFinished {
+        silent: bool,
+        result: Result<UpdateCheckResult, String>,
+    },
     // Background field-value search finished; the stamp discards results for
     // a kit that has since closed or reloaded.
     FieldValueSearchFinished {
@@ -156,9 +160,36 @@ pub(in crate::app) struct FolderConversionProgress {
     pub(in crate::app) failed: usize,
 }
 
+#[derive(Clone, Debug)]
 pub(in crate::app) struct UpdateCheckResult {
+    pub(in crate::app) channel: UpdateChannel,
     pub(in crate::app) latest_tag: String,
     pub(in crate::app) release_url: String,
+    /// The release's `target_commitish`. The only thing that distinguishes one
+    /// development build from the next, since they share the `dev` tag.
+    pub(in crate::app) commit: String,
+}
+
+impl UpdateCheckResult {
+    /// A short, human-sized name for this release: the tag for a stable
+    /// release, the abbreviated commit for a development build.
+    pub(in crate::app) fn short_name(&self) -> String {
+        match self.channel {
+            UpdateChannel::Stable => self.latest_tag.clone(),
+            UpdateChannel::Development => short_commit(&self.commit),
+        }
+    }
+}
+
+/// Abbreviates a commit hash for display, leaving anything that is not one
+/// (an empty string, a branch name) alone.
+pub(in crate::app) fn short_commit(commit: &str) -> String {
+    let (hash, dirty) = match commit.strip_suffix("-dirty") {
+        Some(hash) => (hash, "-dirty"),
+        None => (commit, ""),
+    };
+    let short = hash.get(..7).unwrap_or(hash);
+    format!("{short}{dirty}")
 }
 
 #[derive(Clone, Debug)]

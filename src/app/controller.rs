@@ -344,8 +344,8 @@ impl Baboon {
                 WorkerMessage::TerminalLine(line) => self.handle_terminal_line(line),
                 WorkerMessage::TerminalLogError(error) => self.handle_terminal_log_error(error),
                 WorkerMessage::TerminalDone { run_id } => self.handle_terminal_done(run_id),
-                WorkerMessage::UpdateCheckFinished(result) => {
-                    self.handle_update_check_finished(result)
+                WorkerMessage::UpdateCheckFinished { silent, result } => {
+                    self.handle_update_check_finished(silent, result)
                 }
                 WorkerMessage::FieldValueSearchFinished {
                     stamp,
@@ -1701,14 +1701,26 @@ impl Baboon {
     }
 
     /// Starts the non-blocking release lookup and returns its result through `WorkerMessage`.
-    pub(super) fn begin_check_for_updates(&mut self, ctx: egui::Context) {
-        self.status = "Checking for updates...".to_owned();
+    ///
+    /// A `silent` check announces neither its start nor an uneventful result —
+    /// that is the automatic startup check, which must not spend the status
+    /// line on "up to date" or on a failure the user never asked about.
+    pub(super) fn begin_check_for_updates(&mut self, ctx: egui::Context, silent: bool) {
+        if !silent {
+            self.status = "Checking for updates...".to_owned();
+        }
+        let channel = self.update_channel;
         let tx = self.tx.clone();
         thread::spawn(move || {
-            let result = fetch_latest_release();
-            let _ = tx.send(WorkerMessage::UpdateCheckFinished(result));
+            let result = fetch_latest_release(channel);
+            let _ = tx.send(WorkerMessage::UpdateCheckFinished { silent, result });
             ctx.request_repaint();
         });
+    }
+
+    /// Whether the automatic startup check should run.
+    pub(super) fn should_check_updates_on_startup(&self) -> bool {
+        self.check_updates_on_startup
     }
 
     pub(super) fn begin_terminal_command(&mut self, ctx: egui::Context) {
@@ -5236,6 +5248,8 @@ impl Baboon {
             folders_before_tags: self.folders_before_tags,
             double_click_to_open_tags: self.double_click_to_open_tags,
             session_restore: self.session_restore,
+            update_channel: self.update_channel,
+            check_updates_on_startup: self.check_updates_on_startup,
             show_block_sizes: self.show_block_sizes,
             scroll_to_cycle_dropdowns: self.scroll_to_cycle_dropdowns,
             confirm_container_overwrite: self.confirm_container_overwrite,
