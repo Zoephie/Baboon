@@ -1,8 +1,10 @@
 {
-  "version": 1,
+  "version": 3,
   "tutorials": [
     {
       "game": "haloce_evolved",
+      "category": "3d",
+      "kind": "video",
       "title": "Halo Campaign Evolved - How to use ANY vehicle with Baboon (Tutorial)",
       "creator": "Unseen Halo - Corbin",
       "url": "https://www.youtube.com/watch?v=2xL2AiuaFwE",
@@ -10,10 +12,102 @@
     },
     {
       "game": "haloce_evolved",
+      "category": "3d",
+      "kind": "video",
       "title": "Halo Campaign Evolved - Mark IV in the Main Campaign",
       "creator": "Unseen Halo - Corbin",
       "url": "https://www.youtube.com/watch?v=Vc_uxtYe-2U",
       "thumbnail": "tutorials/Vc_uxtYe-2U.png"
+    },
+    {
+      "game": "haloce_evolved",
+      "category": "sound",
+      "kind": "article",
+      "title": "Campaign Evolved Audio Replacement Guide",
+      "title_url": "https://discord.com/channels/615301822474878977/1531551984577155212",
+      "creator": "ellaviolet",
+      "blocks": [
+        {
+          "kind": "heading",
+          "text": "Tools"
+        },
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "Download "
+            },
+            {
+              "text": "FusionTools",
+              "url": "https://www.nexusmods.com/site/mods/1812"
+            }
+          ]
+        },
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "I also made this "
+            },
+            {
+              "text": "zip",
+              "url": "https://drive.google.com/file/d/1XGGJC45ISYHR0yBbW27BpnkWSFdpqXgn/view?usp=sharing"
+            },
+            {
+              "text": " to help finding related .wem files easier. If you find one .wem file for the audio you wanna replace, use something like "
+            },
+            {
+              "text": "grepWin",
+              "url": "https://grepwin.com/"
+            },
+            {
+              "text": " to search those .txtp files for that wem, and it'll give you every txtp file it's contained in. Typically the wems in the txtp files are grouped with each other, so it'll help you find all related wems"
+            }
+          ]
+        },
+        {
+          "kind": "heading",
+          "text": "Guide"
+        },
+        {
+          "kind": "numbered_steps",
+          "items": [
+            [
+              {
+                "text": "Find the audio you want to replace in the game files. The easiest way is typically to find the wwise event file corresponding to your audio and checking what .wem files are inside. This part is kinda trial and error as some names aren't as conventional as others"
+              }
+            ],
+            [
+              {
+                "text": "In the Fmodel tab for your event, find the .bnk file that it references and open that file in FusionTools"
+              }
+            ],
+            [
+              {
+                "text": "Use the \"Create WEM\" button at the top of the app to create .wem files with your .wavs. I've had success leaving all these settings default but disabling \"Use Seektable\""
+              }
+            ],
+            [
+              {
+                "text": "Use the search box to find your .wem file names, right click them, and click \"Replace (Trimmed)\" (idk if non trimmed works I've only used trimmed personally)"
+              }
+            ],
+            [
+              {
+                "text": "Once all of your .wems are replaced, go to File > Save As and save your .bnk"
+              }
+            ]
+          ]
+        },
+        {
+          "kind": "paragraph",
+          "spans": [
+            {
+              "text": "Now just package your mod with something like unrealpak, which if you're modding this game I assume you know how to do"
+            }
+          ]
+        }
+      ]
     }
   ]
 }

@@ -44,7 +44,12 @@ impl Baboon {
                     HelpPanelTab::About => draw_about_tab(ui),
                     HelpPanelTab::Doc => draw_doc_tab(ui, &self.help_docs),
                     HelpPanelTab::Tutorials => {
-                        draw_tutorials_tab(ui, &self.tutorials, &mut self.tutorials_game)
+                        draw_tutorials_tab(
+                            ui,
+                            &self.tutorials,
+                            &mut self.tutorials_game,
+                            &mut self.tutorials_category,
+                        )
                     }
                     HelpPanelTab::ScriptDoc => self.draw_script_doc_tab(ui),
                     HelpPanelTab::MapNames => draw_map_names_tab(ui, &mut self.map_names_game_tab),
@@ -386,7 +391,12 @@ fn draw_doc_tab(ui: &mut Ui, docs: &HelpDocsState) {
         });
 }
 
-fn draw_tutorials_tab(ui: &mut Ui, tutorials: &TutorialsState, selected_game: &mut String) {
+fn draw_tutorials_tab(
+    ui: &mut Ui,
+    tutorials: &TutorialsState,
+    selected_game: &mut String,
+    selected_category: &mut TutorialCategory,
+) {
     let available = ui.available_size();
     ui.horizontal_top(|ui| {
         ui.allocate_ui_with_layout(
@@ -420,17 +430,28 @@ fn draw_tutorials_tab(ui: &mut Ui, tutorials: &TutorialsState, selected_game: &m
             |ui| {
                 ui.heading(RichText::new(game_display_name(selected_game)).color(text_dark()));
                 ui.add_space(6.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new("Category").color(subtle_dark()).strong());
+                    for category in TUTORIAL_CATEGORIES {
+                        ui.selectable_value(selected_category, category, category.label());
+                    }
+                });
+                ui.add_space(6.0);
+                ui.separator();
+                ui.add_space(6.0);
                 ScrollArea::vertical()
                     .id_salt("tutorial_cards")
                     .auto_shrink([false, false])
                     .show(ui, |ui| match tutorials {
                         TutorialsState::Loaded(catalog) => {
-                            let entries =
-                                catalog.entries_for_game(selected_game).collect::<Vec<_>>();
+                            let entries = catalog
+                                .entries_for(selected_game, *selected_category)
+                                .collect::<Vec<_>>();
                             if entries.is_empty() {
                                 ui.label(
                                     RichText::new(format!(
-                                        "No tutorials are available for {} yet.",
+                                        "No {} tutorials are available for {} yet.",
+                                        selected_category.label(),
                                         game_display_name(selected_game)
                                     ))
                                     .color(subtle_dark()),
@@ -464,60 +485,124 @@ fn draw_tutorial_card(ui: &mut Ui, tutorial: &TutorialEntry) {
                     .color(subtle_dark())
                     .strong(),
             );
-            ui.add(
-                egui::Label::new(
-                    RichText::new(&tutorial.title)
-                        .color(foundation_blue())
-                        .font(FontId::proportional(18.0))
-                        .strong(),
-                )
-                .wrap(),
-            );
+            let title = RichText::new(&tutorial.title)
+                .color(foundation_blue())
+                .font(FontId::proportional(18.0))
+                .strong();
+            if let Some(title_url) = tutorial.title_url.as_deref() {
+                ui.hyperlink_to(title, title_url);
+            } else {
+                ui.add(egui::Label::new(title).wrap());
+            }
             ui.add_space(8.0);
 
-            let thumbnail_width = ui.available_width().min(720.0).max(1.0);
-            let thumbnail_size = Vec2::new(thumbnail_width, thumbnail_width * 9.0 / 16.0);
-            let response = match &tutorial.thumbnail_texture {
-                Some(texture) => ui.add(
-                    egui::Image::new(egui::load::SizedTexture::new(
-                        texture.id(),
-                        texture.size_vec2(),
-                    ))
-                    .fit_to_exact_size(thumbnail_size)
-                    .rounding(6.0)
-                    .sense(Sense::click()),
-                ),
-                None => {
-                    let (rect, response) = ui.allocate_exact_size(thumbnail_size, Sense::click());
-                    ui.painter()
-                        .rect_filled(rect, 6.0, ui.visuals().extreme_bg_color);
-                    ui.painter().text(
-                        rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        "Thumbnail unavailable",
-                        FontId::proportional(14.0),
-                        subtle_dark(),
-                    );
-                    response
-                }
-            };
-
-            draw_tutorial_play_overlay(ui, response.rect, response.hovered());
-            let mut response = response
-                .on_hover_cursor(egui::CursorIcon::PointingHand)
-                .on_hover_text("Watch on YouTube");
-            if let Some(error) = tutorial.thumbnail_error.as_deref() {
-                response = response.on_hover_text(error);
-            }
-            if response.clicked() {
-                open_tutorial_url(ui.ctx(), &tutorial.url);
-            }
-
-            ui.add_space(8.0);
-            if ui.button("Watch on YouTube").clicked() {
-                open_tutorial_url(ui.ctx(), &tutorial.url);
+            match tutorial.kind {
+                TutorialKind::Video => draw_video_tutorial_body(ui, tutorial),
+                TutorialKind::Article => draw_article_tutorial_body(ui, &tutorial.blocks),
             }
         });
+}
+
+fn draw_video_tutorial_body(ui: &mut Ui, tutorial: &TutorialEntry) {
+    let Some(url) = tutorial.url.as_deref() else {
+        return;
+    };
+    let thumbnail_width = ui.available_width().min(720.0).max(1.0);
+    let thumbnail_size = Vec2::new(thumbnail_width, thumbnail_width * 9.0 / 16.0);
+    let response = match &tutorial.thumbnail_texture {
+        Some(texture) => ui.add(
+            egui::Image::new(egui::load::SizedTexture::new(
+                texture.id(),
+                texture.size_vec2(),
+            ))
+            .fit_to_exact_size(thumbnail_size)
+            .rounding(6.0)
+            .sense(Sense::click()),
+        ),
+        None => {
+            let (rect, response) = ui.allocate_exact_size(thumbnail_size, Sense::click());
+            ui.painter()
+                .rect_filled(rect, 6.0, ui.visuals().extreme_bg_color);
+            ui.painter().text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                "Thumbnail unavailable",
+                FontId::proportional(14.0),
+                subtle_dark(),
+            );
+            response
+        }
+    };
+
+    draw_tutorial_play_overlay(ui, response.rect, response.hovered());
+    let mut response = response
+        .on_hover_cursor(egui::CursorIcon::PointingHand)
+        .on_hover_text("Watch on YouTube");
+    if let Some(error) = tutorial.thumbnail_error.as_deref() {
+        response = response.on_hover_text(error);
+    }
+    if response.clicked() {
+        open_tutorial_url(ui.ctx(), url);
+    }
+
+    ui.add_space(8.0);
+    if ui.button("Watch on YouTube").clicked() {
+        open_tutorial_url(ui.ctx(), url);
+    }
+}
+
+fn draw_article_tutorial_body(ui: &mut Ui, blocks: &[TutorialBlock]) {
+    for block in blocks {
+        match block {
+            TutorialBlock::Heading { text } => {
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(text)
+                        .color(foundation_blue())
+                        .font(FontId::proportional(15.0))
+                        .strong(),
+                );
+            }
+            TutorialBlock::Paragraph { spans } => {
+                draw_tutorial_spans(ui, spans);
+            }
+            TutorialBlock::NumberedSteps { items } => {
+                for (index, spans) in items.iter().enumerate() {
+                    ui.horizontal_top(|ui| {
+                        ui.add_sized(
+                            Vec2::new(24.0, 18.0),
+                            egui::Label::new(
+                                RichText::new(format!("{}.", index + 1))
+                                    .color(subtle_dark())
+                                    .strong(),
+                            ),
+                        );
+                        ui.vertical(|ui| {
+                            ui.set_width(ui.available_width());
+                            draw_tutorial_spans(ui, spans);
+                        });
+                    });
+                    ui.add_space(4.0);
+                }
+            }
+        }
+        ui.add_space(6.0);
+    }
+}
+
+fn draw_tutorial_spans(ui: &mut Ui, spans: &[TutorialSpan]) {
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        for span in spans {
+            for chunk in span.text.split_inclusive(char::is_whitespace) {
+                if let Some(url) = span.url.as_deref() {
+                    ui.hyperlink_to(RichText::new(chunk).color(foundation_blue()), url);
+                } else {
+                    ui.label(RichText::new(chunk).color(text_dark()));
+                }
+            }
+        }
+    });
 }
 
 fn draw_tutorial_play_overlay(ui: &Ui, rect: egui::Rect, hovered: bool) {
@@ -602,22 +687,30 @@ mod tutorial_ui_tests {
 
         for visuals in [egui::Visuals::dark(), egui::Visuals::light()] {
             ctx.set_visuals(visuals);
-            let mut selected_game = "haloce_evolved".to_owned();
-            let output = ctx.run(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        Vec2::new(520.0, 360.0),
-                    )),
-                    ..Default::default()
-                },
-                |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| {
-                        draw_tutorials_tab(ui, &tutorials, &mut selected_game);
-                    });
-                },
-            );
-            assert!(!output.shapes.is_empty());
+            for category in TUTORIAL_CATEGORIES {
+                let mut selected_game = "haloce_evolved".to_owned();
+                let mut selected_category = category;
+                let output = ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            Vec2::new(520.0, 360.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| {
+                            draw_tutorials_tab(
+                                ui,
+                                &tutorials,
+                                &mut selected_game,
+                                &mut selected_category,
+                            );
+                        });
+                    },
+                );
+                assert!(!output.shapes.is_empty());
+            }
         }
     }
 
