@@ -611,6 +611,32 @@ impl Baboon {
         self.custom_editing_kit_textures.get(&profile.id)
     }
 
+    /// Resolve the image shown in a loaded workspace's browser header.
+    ///
+    /// A custom profile's selected image takes precedence over the built-in
+    /// engine artwork. Looking the profile up by its stable ID keeps restored
+    /// workspaces connected to later name/icon edits without copying a
+    /// potentially stale icon path into session state.
+    fn workspace_banner_texture(
+        &mut self,
+        ctx: &egui::Context,
+        game: &str,
+        profile_id: Option<&str>,
+    ) -> Option<egui::TextureHandle> {
+        let profile = profile_id.and_then(|profile_id| {
+            self.custom_editing_kit_profiles
+                .iter()
+                .find(|profile| profile.id == profile_id)
+                .cloned()
+        });
+        if let Some(profile) = profile
+            && let Some(texture) = self.custom_editing_kit_texture(ctx, &profile).cloned()
+        {
+            return Some(texture);
+        }
+        self.game_banner_texture(ctx, game).cloned()
+    }
+
     fn handle_pixels_per_point_change(&mut self, ctx: &egui::Context) {
         let pixels_per_point = ctx.pixels_per_point();
         if (pixels_per_point - self.last_pixels_per_point).abs() < 0.01 {

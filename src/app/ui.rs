@@ -231,13 +231,19 @@ fn draw_index_progress_bar(ui: &mut Ui, width: f32, fraction: Option<f32>, text:
 /// least as wide as its content's minimum, so the card *allocates* only what
 /// is available and *draws* at its natural size into a clipped painter: the
 /// layout never sees the overflow, and the card keeps one shape.
-fn draw_game_banner_header(ui: &mut Ui, app: &mut Baboon, game: &str, path_label: &str) {
+fn draw_game_banner_header(
+    ui: &mut Ui,
+    app: &mut Baboon,
+    game: &str,
+    path_label: &str,
+    profile_id: Option<&str>,
+) {
     const EMBLEM: f32 = 72.0;
     const MARGIN: f32 = 8.0;
     const GAP: f32 = 4.0;
     const TITLE_TOP: f32 = 8.0;
 
-    let texture = app.game_banner_texture(ui.ctx(), game).cloned();
+    let texture = app.workspace_banner_texture(ui.ctx(), game, profile_id);
     let title = egui::WidgetText::from(
         RichText::new(format!(
             "Tags - {} ({})",

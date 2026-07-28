@@ -32,13 +32,17 @@ impl Baboon {
                 source.game.clone(),
                 source.source.origin_label(),
                 sidebar_source_path_label(&source.source),
+                self.kits[kit_index]
+                    .profile
+                    .as_ref()
+                    .map(|profile| profile.id.clone()),
             )
         });
-        if let Some((Some(game), _origin, path_label)) = sidebar_header.as_ref() {
-            draw_game_banner_header(ui, self, game, path_label);
+        if let Some((Some(game), _origin, path_label, profile_id)) = sidebar_header.as_ref() {
+            draw_game_banner_header(ui, self, game, path_label, profile_id.as_deref());
         } else {
             ui.heading(RichText::new("Tags").color(text_dark()));
-            if let Some((_, origin, _)) = sidebar_header.as_ref() {
+            if let Some((_, origin, _, _)) = sidebar_header.as_ref() {
                 ui.small(RichText::new(origin).color(subtle_dark()));
                 ui.add_space(8.0);
             }
