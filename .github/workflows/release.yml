@@ -53,8 +53,10 @@ jobs:
         run: |
           sudo apt-get update
           # libasound2-dev: ALSA headers for rodio's Linux backend (cpal/alsa-sys).
+          # libxcb1-dev: links the `xcb` crate, which window_state uses to read
+          # X11 work areas. The runners ship libxcb1 but not its .so symlink.
           # libopus is NOT needed — it's vendored + statically compiled.
-          sudo apt-get install -y libxkbcommon-dev libasound2-dev
+          sudo apt-get install -y libxkbcommon-dev libasound2-dev libxcb1-dev
 
       - name: Build release
         run: cargo build --release

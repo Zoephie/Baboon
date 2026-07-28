@@ -797,14 +797,34 @@ mod tests {
         }
     }
 
+    /// How far inside the frame origin the fixture window's content starts —
+    /// a left border and a title bar.
+    const DECORATION_INSET: [f32; 2] = [8.0, 32.0];
+    /// Total size the fixture window's decorations add around its content:
+    /// a border on both sides, and the title bar plus a bottom border.
+    const DECORATION_SIZE: [f32; 2] = [16.0, 40.0];
+
+    /// `restore_viewport` returns whatever `ViewportBuilder::with_position`
+    /// expects, and winit reads that as the *content* top-left on macOS but the
+    /// *frame* top-left on Windows and X11. Turn a frame origin into the value
+    /// the platform under test should produce.
+    fn expected_position(frame_origin: [f32; 2]) -> Option<[f32; 2]> {
+        let mut position = frame_origin;
+        if cfg!(target_os = "macos") {
+            position[0] += DECORATION_INSET[0];
+            position[1] += DECORATION_INSET[1];
+        }
+        Some(position)
+    }
+
     fn state(mode: WindowMode, position: [f32; 2], size: [f32; 2]) -> PersistedWindowState {
         PersistedWindowState {
             schema_version: SCHEMA_VERSION,
             mode,
             normal: NormalWindowBounds {
                 inner_position_px: Some(Point {
-                    x: position[0] + 8.0,
-                    y: position[1] + 32.0,
+                    x: position[0] + DECORATION_INSET[0],
+                    y: position[1] + DECORATION_INSET[1],
                 }),
                 outer_position_px: Some(Point {
                     x: position[0],
@@ -815,8 +835,8 @@ mod tests {
                     height: size[1],
                 },
                 outer_size_logical: Size {
-                    width: size[0] + 16.0,
-                    height: size[1] + 40.0,
+                    width: size[0] + DECORATION_SIZE[0],
+                    height: size[1] + DECORATION_SIZE[1],
                 },
                 native_scale_factor: 1.0,
                 monitor_name: Some("primary".to_owned()),
@@ -922,18 +942,18 @@ mod tests {
         let mut saved = state(WindowMode::Normal, [-1400.0, 100.0], [900.0, 600.0]);
         saved.normal.monitor_name = Some("left".to_owned());
         let restored = restore_viewport(&saved, &monitors).unwrap();
-        assert_eq!(restored.position, Some([-1400.0, 100.0]));
+        assert_eq!(restored.position, expected_position([-1400.0, 100.0]));
     }
 
     #[test]
     fn disconnected_or_barely_visible_window_is_centered_on_primary() {
         let disconnected = state(WindowMode::Normal, [4000.0, 300.0], [1000.0, 700.0]);
         let restored = restore_viewport(&disconnected, &[primary_monitor()]).unwrap();
-        assert_eq!(restored.position, Some([452.0, 150.0]));
+        assert_eq!(restored.position, expected_position([452.0, 150.0]));
 
         let barely_visible = state(WindowMode::Normal, [1910.0, 100.0], [1000.0, 700.0]);
         let restored = restore_viewport(&barely_visible, &[primary_monitor()]).unwrap();
-        assert_eq!(restored.position, Some([452.0, 150.0]));
+        assert_eq!(restored.position, expected_position([452.0, 150.0]));
 
         let secondary = monitor(
             "secondary",
@@ -945,7 +965,7 @@ mod tests {
         let mut stale_secondary = state(WindowMode::Normal, [5000.0, 300.0], [1000.0, 700.0]);
         stale_secondary.normal.monitor_name = Some("secondary".to_owned());
         let restored = restore_viewport(&stale_secondary, &[primary_monitor(), secondary]).unwrap();
-        assert_eq!(restored.position, Some([452.0, 150.0]));
+        assert_eq!(restored.position, expected_position([452.0, 150.0]));
     }
 
     #[test]
@@ -961,7 +981,7 @@ mod tests {
         );
         let restored = restore_viewport(&saved, &[scaled]).unwrap();
         assert_eq!(restored.inner_size, [900.0, 600.0]);
-        assert_eq!(restored.position, Some([50.0, 50.0]));
+        assert_eq!(restored.position, expected_position([50.0, 50.0]));
     }
 
     #[test]
@@ -976,7 +996,7 @@ mod tests {
                 &[primary_monitor()],
             )
             .unwrap();
-            assert_eq!(restored.position, Some([120.0, 80.0]));
+            assert_eq!(restored.position, expected_position([120.0, 80.0]));
             assert_eq!(restored.inner_size, [1000.0, 700.0]);
             assert_eq!(restored.maximized, maximized);
         }
