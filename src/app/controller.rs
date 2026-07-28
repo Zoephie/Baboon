@@ -96,6 +96,23 @@ fn normalize_container_tag_rel(input: &str) -> String {
     segments.join("/")
 }
 
+/// The UE package path a brand-new tag will be written at, from its normalized
+/// container-relative path and group name (`objects/foo/bar` + `camera_track`
+/// → `/Game/Tags/objects/foo/bar-camera_track`).
+///
+/// Shared by creation and rename on purpose: the entry key derives from this,
+/// and a rename that derived either differently would produce an entry the save
+/// and project-overlay paths no longer recognize as the same tag.
+fn new_container_package(logical: &str, group_name: &str) -> String {
+    format!("/Game/Tags/{logical}-{group_name}")
+}
+
+/// The browser/document key for a new tag at `package`. Prefixed so it cannot
+/// collide with a mounted container tag's key.
+fn new_container_key(package: &str) -> String {
+    format!("newtag:{package}")
+}
+
 fn container_rel_to_package_path(rel: &str) -> Option<String> {
     let no_ext = rel.strip_suffix(".ubulk").unwrap_or(rel);
     let after = no_ext.strip_prefix("Meteorite/Content/").unwrap_or(no_ext);
@@ -919,8 +936,8 @@ impl Baboon {
                 "No existing {group_name} tag in the mounted paks to use as a template"
             ));
         };
-        let package = format!("/Game/Tags/{logical}-{group_name}");
-        let key = format!("newtag:{package}");
+        let package = new_container_package(logical, group_name);
+        let key = new_container_key(&package);
         if self.kits[self.active].parsed_tags.contains_key(&key)
             || self.source().is_some_and(|s| {
                 s.entries
@@ -945,6 +962,107 @@ impl Baboon {
         };
         self.register_in_memory_tag(entry, tag);
         Ok(())
+    }
+
+    /// Rename/move (`duplicate == false`) or copy (`duplicate == true`) a
+    /// brand-new container tag to `new_rel`. Nothing is written: a new tag lives
+    /// only in its document until Save/Export Mod, so this rewrites the entry
+    /// (and re-homes the document under the new key) in memory. Returns the
+    /// status line to show.
+    fn apply_new_container_rename(
+        &mut self,
+        key: &str,
+        new_rel: &str,
+        duplicate: bool,
+    ) -> Result<String, String> {
+        let Some(entry) = self.entry_for_key(key).cloned() else {
+            return Err("Tag is no longer in the source".to_owned());
+        };
+        let TagEntryLocation::NewContainer {
+            template_container,
+            template_rel,
+            group_tag,
+            ..
+        } = &entry.location
+        else {
+            return Err("Not a new Campaign Evolved tag".to_owned());
+        };
+        let (template_container, template_rel, group_tag) =
+            (*template_container, template_rel.clone(), *group_tag);
+        if new_rel.is_empty() {
+            return Err("Enter a tag path (e.g. objects/foo/bar)".to_owned());
+        }
+        let group_name = entry
+            .group_name
+            .clone()
+            .unwrap_or_else(|| format_group_tag(entry.group_tag));
+        let extension = entry
+            .display_path
+            .rsplit_once('.')
+            .map(|(_, ext)| ext.to_owned())
+            .unwrap_or_else(|| group_name.clone());
+
+        if duplicate {
+            // `TagFile` is not `Clone`; a round-trip through its own bytes is
+            // how a document is copied, and it is exactly what Save would have
+            // written anyway.
+            let bytes = self.kits[self.active]
+                .parsed_tags
+                .get(key)
+                .ok_or("Load the tag before copying it")?
+                .tag
+                .write_to_bytes()
+                .map_err(|error| format!("Could not serialize the tag: {error}"))?;
+            let copy = TagFile::read_from_bytes(&bytes)
+                .map_err(|error| format!("Could not re-read the copied tag: {error}"))?;
+            self.add_new_container_tag(new_rel, group_tag, &group_name, &extension, copy)?;
+            return Ok(format!("Copied to {new_rel}.{extension} (unsaved)"));
+        }
+
+        let package = new_container_package(new_rel, &group_name);
+        let new_key = new_container_key(&package);
+        if new_key == key {
+            return Ok(format!("{} is already at that path", entry.display_path));
+        }
+        if self.kits[self.active].parsed_tags.contains_key(&new_key)
+            || self.source().is_some_and(|source| {
+                source
+                    .entries
+                    .iter()
+                    .chain(source.all_entries.iter())
+                    .any(|existing| existing.key == new_key)
+            })
+        {
+            return Err(format!("A tag already exists at {new_rel}"));
+        }
+        let Some(document) = self.kits[self.active].parsed_tags.remove(key) else {
+            return Err("Load the tag before renaming it".to_owned());
+        };
+        // The project stashes overlays under the package path, so the old
+        // identity has to go — otherwise the checkpoint keeps a copy of the tag
+        // at its previous path and restores it as a second tag next session.
+        let kit = self.active;
+        self.forget_campaign_overlay(kit, key);
+        self.forget_new_container_entry(kit, key);
+        let old_display = entry.display_path.clone();
+        self.register_in_memory_tag(
+            TagEntry {
+                key: new_key,
+                display_path: format!("{new_rel}.{extension}"),
+                group_tag: entry.group_tag,
+                group_name: Some(group_name),
+                location: TagEntryLocation::NewContainer {
+                    template_container,
+                    template_rel,
+                    package,
+                    group_tag,
+                },
+            },
+            document.tag,
+        );
+        Ok(format!(
+            "Renamed {old_display} → {new_rel}.{extension} (unsaved)"
+        ))
     }
 
     /// Open the "Import tag" dialog: pick a self-describing MCC/Reach tag file,
@@ -1219,6 +1337,21 @@ impl Baboon {
             source.group_tree = group_tree;
         }
         self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
+        // Index what the new tag points at. Nothing else can: the reverse-
+        // dependency builder reads tags from their source, and this one has no
+        // source — so without this the tag is invisible to reference queries in
+        // both directions, and to the tag tree's children view.
+        let dependencies = {
+            let mut refs = Vec::new();
+            collect_tag_dependency_refs(tag.root(), &mut refs);
+            refs
+        };
+        if let Some(index) = self
+            .source_mut()
+            .and_then(|source| source.reverse_dependencies.as_mut())
+        {
+            index.set_tag_dependencies(key.clone(), dependencies);
+        }
         self.kits[self.active].parsed_tags
             .insert(key.clone(), TagDocument::modified(tag));
         self.kits[self.active].open_tag_pane(&key);
@@ -2009,12 +2142,59 @@ impl Baboon {
                 return;
             }
         }
+        // A brand-new tag has no source to reload from — the document that was
+        // just dropped WAS the tag. Take its browser entry with it instead of
+        // leaving a row that errors on every reopen.
+        if self.forget_new_container_entry(kit, key) {
+            self.status = format!("Discarded the unsaved new tag {label}");
+            return;
+        }
         // Still open: reload it as the source has it, rather than leaving an
         // empty pane behind.
         if self.kits[kit].open_tabs.iter().any(|open| open == key) {
             self.select_entry(key.to_owned(), ctx.clone());
         }
         self.status = format!("Discarded unsaved changes to {label}");
+    }
+
+    /// Drop a brand-new (never-saved) container tag's browser entry, closing its
+    /// pane and dropping everything derived from it. No-op — returning `false` —
+    /// for any other kind of entry.
+    ///
+    /// Load-bearing for every path that discards a new tag's document: the
+    /// document is the tag's ONLY copy (there is no `.ubulk` behind it), so an
+    /// entry that outlives it is a row whose every reopen fails in `read_entry`
+    /// with "unsaved new tag is no longer loaded".
+    pub(super) fn forget_new_container_entry(&mut self, kit: usize, key: &str) -> bool {
+        if !matches!(
+            self.entry_for_key_in(kit, key).map(|entry| &entry.location),
+            Some(TagEntryLocation::NewContainer { .. })
+        ) {
+            return false;
+        }
+        self.kits[kit].close_tag_pane(key);
+        let kit_state = &mut self.kits[kit];
+        kit_state.parsed_tags.remove(key);
+        kit_state.loading_tags.remove(key);
+        kit_state.bitmap_previews.remove(key);
+        kit_state.model_previews.remove(key);
+        kit_state.field_search.remove(key);
+        kit_state.field_search_applied.remove(key);
+        kit_state.edit_buffers.forget_tag(key);
+        if kit_state.selected_key.as_deref() == Some(key) {
+            kit_state.selected_key = None;
+        }
+        if let Some(source) = kit_state.source.as_mut() {
+            source.entries.retain(|entry| entry.key != key);
+            source.all_entries.retain(|entry| entry.key != key);
+            source.tree = crate::source::build_tree(&source.entries);
+            source.group_tree = crate::source::build_group_tree(&source.entries);
+            if let Some(index) = source.reverse_dependencies.as_mut() {
+                index.clear_tag(key);
+            }
+        }
+        kit_state.generation = kit_state.generation.wrapping_add(1);
+        true
     }
 
     /// Whether `key` has anything to discard — unsaved edits, or bytes stashed
@@ -2070,6 +2250,16 @@ impl Baboon {
         else {
             return;
         };
+        // A new tag reaching here has lost its document and its project overlay
+        // (`select_entry` tries the overlay first), so there is nothing left to
+        // read — `read_entry` would only fail on the worker thread. Retire the
+        // entry here instead of leaving a row that fails forever.
+        if matches!(entry.location, TagEntryLocation::NewContainer { .. }) {
+            let kit = self.active;
+            self.forget_new_container_entry(kit, &key);
+            self.status = format!("The unsaved new tag {} was discarded", entry.display_path);
+            return;
+        }
         let source_kind = source.source.clone();
         let tx = self.tx.clone();
         let kit = self.active_kit_id();
@@ -3912,7 +4102,9 @@ impl Baboon {
     }
 
     /// Open the rename dialog in "duplicate" mode (Save As for a container tag —
-    /// writes a new tag with no redirect).
+    /// writes a new tag with no redirect). For a tag that has never been saved
+    /// there is nothing to write yet, so the copy is made in memory and both
+    /// tags stay unsaved until Save/Export Mod.
     pub(super) fn open_container_duplicate(&mut self, key: &str) {
         self.open_rename_or_duplicate(key, false);
     }
@@ -3921,7 +4113,9 @@ impl Baboon {
         let Some(entry) = self.entry_for_key(key).cloned() else {
             return;
         };
-        let is_container = matches!(entry.location, TagEntryLocation::Container { .. });
+        let is_new_container = matches!(entry.location, TagEntryLocation::NewContainer { .. });
+        let is_container =
+            is_new_container || matches!(entry.location, TagEntryLocation::Container { .. });
         if !is_container && !matches!(entry.location, TagEntryLocation::LooseFile(_)) {
             self.status = "Only loose-folder or container tags can be renamed".to_owned();
             return;
@@ -3931,7 +4125,13 @@ impl Baboon {
             Some((stem, ext)) => (stem.to_owned(), ext.to_owned()),
             None => (display.clone(), String::new()),
         };
-        let name = stem.rsplit(['/', '\\']).next().unwrap_or(&stem).to_owned();
+        // A new tag edits its whole path (rename and move are the same in-memory
+        // operation for it); everything else edits the leaf name only.
+        let name = if is_new_container {
+            stem.clone()
+        } else {
+            stem.rsplit(['/', '\\']).next().unwrap_or(&stem).to_owned()
+        };
         let (referrers, referrers_unavailable) = match self.references_to_entry(&entry) {
             Some(list) => (
                 list.iter()
@@ -3951,6 +4151,7 @@ impl Baboon {
             referrers_unavailable,
             is_container,
             redirect,
+            is_new_container,
         });
     }
 
@@ -3969,7 +4170,7 @@ impl Baboon {
             self.status = "The workspace this rename came from is closed".to_owned();
             return;
         }
-        let Some((key, old_display, new_name_raw, is_container, redirect)) =
+        let Some((key, old_display, new_name_raw, is_container, redirect, is_new_container)) =
             self.rename_tag.as_ref().map(|s| {
                 (
                     s.key.clone(),
@@ -3977,6 +4178,7 @@ impl Baboon {
                     s.new_path_input.clone(),
                     s.is_container,
                     s.redirect,
+                    s.is_new_container,
                 )
             })
         else {
@@ -3987,7 +4189,9 @@ impl Baboon {
             self.status = "Enter a new tag name".to_owned();
             return;
         }
-        if new_name.contains(['/', '\\']) {
+        // A new tag's whole path is editable, so a separator is the move half of
+        // the operation rather than a mistake.
+        if !is_new_container && new_name.contains(['/', '\\']) {
             self.status = "Enter a name only; use Move to choose a folder".to_owned();
             return;
         }
@@ -3995,15 +4199,30 @@ impl Baboon {
             self.status = "Enter a name without an extension".to_owned();
             return;
         }
-        let parent = old_display
-            .rsplit_once('/')
-            .map(|(parent, _)| parent)
-            .unwrap_or("");
-        let new_rel = if parent.is_empty() {
-            new_name
+        let new_rel = if is_new_container {
+            normalize_container_tag_rel(&new_name)
         } else {
-            format!("{parent}/{new_name}")
+            let parent = old_display
+                .rsplit_once('/')
+                .map(|(parent, _)| parent)
+                .unwrap_or("");
+            if parent.is_empty() {
+                new_name
+            } else {
+                format!("{parent}/{new_name}")
+            }
         };
+
+        // A brand-new tag has no container to override — it exists only as the
+        // open document, so both rename and duplicate are in-memory edits.
+        if is_new_container {
+            self.rename_tag = None;
+            match self.apply_new_container_rename(&key, &new_rel, !redirect) {
+                Ok(message) => self.status = message,
+                Err(error) => self.status = error,
+            }
+            return;
+        }
 
         // Container tags: write an override container (rename adds a redirect,
         // duplicate does not) instead of moving a loose file.
@@ -4048,6 +4267,16 @@ impl Baboon {
     /// Starts a filesystem refactoring transaction from a captured source snapshot.
     /// Progress and the final replacement tree are applied only through worker messages.
     pub(super) fn begin_move_tag(&mut self, key: &str) {
+        // A new tag has no file to move and no folder to browse to: its whole
+        // container-relative path is editable in the rename dialog, so Move and
+        // Rename are the same in-memory operation for it.
+        if matches!(
+            self.entry_for_key(key).map(|entry| &entry.location),
+            Some(TagEntryLocation::NewContainer { .. })
+        ) {
+            self.open_rename_tag(key);
+            return;
+        }
         if self.folder_refactor.is_some() {
             self.status = "A move/rename is already running".to_owned();
             return;
@@ -6014,6 +6243,10 @@ impl Baboon {
                     // bytes stayed behind and came back on reopen.
                     self.forget_campaign_overlay(kit, tag_id);
                     self.kits[kit].edit_buffers.forget_tag(tag_id);
+                    // Declining to save a brand-new tag discards the tag, not
+                    // just its edits: nothing backs it but the document the
+                    // close is about to drop. Its browser entry goes with it.
+                    self.forget_new_container_entry(kit, tag_id);
                 }
                 let now = ctx.input(|input| input.time);
                 if let Err(error) = self.checkpoint_campaign_project(kit, now) {
@@ -8478,6 +8711,97 @@ mod dependency_tests {
             )
             .is_none()
         );
+    }
+
+    /// A tag created this session is a reference target like any other: it is
+    /// addressed by the same logical path, and "Open referenced tag" resolves
+    /// through this lookup. Excluding it reported the tag as missing.
+    #[test]
+    fn container_reference_resolution_finds_an_unsaved_new_tag() {
+        let names = TagNameIndex::default();
+        let camera_track = parse_group_tag("trak").unwrap();
+        let entries = vec![new_container_entry(
+            "test/example.camera_track",
+            camera_track,
+            "camera_track",
+        )];
+
+        let found = container_entry_for_reference(
+            &entries,
+            camera_track,
+            r"test\example.camera_track",
+            &names,
+        )
+        .expect("a new tag should resolve as a reference target");
+        assert_eq!(found.key, "newtag:/Game/Tags/test/example-camera_track");
+    }
+
+    /// The capability matrix for a brand-new container tag, in one place: what
+    /// it can do, and the two things it deliberately cannot. Every one of these
+    /// gates gets its answer from a `match` on `TagEntryLocation`, and each one
+    /// that forgot the `NewContainer` arm broke the tag in a different way —
+    /// the editability gate made every field and block button inert.
+    #[test]
+    fn a_new_container_tag_has_the_expected_capabilities() {
+        let camera_track = parse_group_tag("trak").unwrap();
+        let entry = new_container_entry("test/example.camera_track", camera_track, "camera_track");
+        let tag = TagFile::new("definitions/haloce_evolved/camera_track.json").unwrap();
+
+        assert!(
+            crate::app::is_editable_tag(&entry, &tag),
+            "fields and block controls must be live for a new tag"
+        );
+        assert!(
+            crate::app::supports_rename_menu(&entry),
+            "rename/move is the only way to correct a mistyped new-tag path"
+        );
+        // No `.ubulk` behind it, so there is nothing to pull out.
+        assert!(
+            !crate::app::is_embedded_tag_entry(&entry),
+            "a new tag has no embedded payload to extract"
+        );
+    }
+
+    fn new_container_entry(display_path: &str, group_tag: u32, group_name: &str) -> TagEntry {
+        let logical = display_path
+            .rsplit_once('.')
+            .map(|(stem, _)| stem)
+            .unwrap_or(display_path);
+        let package = new_container_package(logical, group_name);
+        TagEntry {
+            key: new_container_key(&package),
+            display_path: display_path.to_owned(),
+            group_tag,
+            group_name: Some(group_name.to_owned()),
+            location: TagEntryLocation::NewContainer {
+                template_container: 0,
+                template_rel: "Tags/other-camera_track.uasset".to_owned(),
+                package,
+                group_tag,
+            },
+        }
+    }
+
+    /// Renaming a new tag must land on exactly the key and package that
+    /// creating it at that path would have produced — the save and project-
+    /// overlay paths identify the tag by them, so a second derivation that
+    /// drifted would strand the renamed tag.
+    #[test]
+    fn renaming_a_new_tag_derives_the_same_identity_as_creating_it_there() {
+        let created = new_container_package("objects/foo/bar", "camera_track");
+        assert_eq!(created, "/Game/Tags/objects/foo/bar-camera_track");
+        assert_eq!(
+            new_container_key(&created),
+            "newtag:/Game/Tags/objects/foo/bar-camera_track"
+        );
+
+        // The rename path normalizes its input first — backslashes, case, and
+        // stray separators must not fork the identity.
+        let renamed = new_container_package(
+            &normalize_container_tag_rel("/Objects\\Foo//Bar/"),
+            "camera_track",
+        );
+        assert_eq!(renamed, created);
     }
 
     #[test]

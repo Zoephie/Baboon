@@ -6,9 +6,17 @@ use super::*;
 pub(in crate::app) fn is_editable_tag(entry: &TagEntry, tag: &TagFile) -> bool {
     // Loose tags are edited in place; container (Campaign Evolved) tags are
     // edited in memory and written out as an override on Save/Save As/Rename.
+    // A brand-new container tag (New Tag / Import of a new path) has no backing
+    // `.ubulk` at all — the in-memory document IS the tag — so it is the most
+    // editable of the three, not the least. Leaving it out made every new CE
+    // tag render read-only: no field could be typed into and no block element
+    // added, until the user exported it as a mod and remounted it as a real
+    // `Container` entry.
     matches!(
         entry.location,
-        TagEntryLocation::LooseFile(_) | TagEntryLocation::Container { .. }
+        TagEntryLocation::LooseFile(_)
+            | TagEntryLocation::Container { .. }
+            | TagEntryLocation::NewContainer { .. }
     ) && (tag.classic_engine().is_some() || tag.endian == Endian::Le)
 }
 

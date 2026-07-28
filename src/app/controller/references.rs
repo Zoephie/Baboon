@@ -240,8 +240,13 @@ pub(super) fn container_entry_for_reference<'a>(
 ) -> Option<&'a TagEntry> {
     let target = normalized_reference_lookup_path(rel_path, group_tag, names);
     entries.iter().find(|entry| {
-        matches!(&entry.location, TagEntryLocation::Container { .. })
-            && entry.group_tag == group_tag
+        // A tag created this session is a legitimate reference target — it is
+        // addressed by the same logical path a saved one is, and "Open
+        // referenced tag" reported it missing while it was excluded here.
+        matches!(
+            &entry.location,
+            TagEntryLocation::Container { .. } | TagEntryLocation::NewContainer { .. }
+        ) && entry.group_tag == group_tag
             && normalized_reference_lookup_path(&entry.display_path, entry.group_tag, names)
                 == target
     })

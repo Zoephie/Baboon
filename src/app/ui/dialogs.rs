@@ -1696,10 +1696,11 @@ impl Baboon {
         let mut cancel = false;
         {
             let state = self.rename_tag.as_mut().expect("checked above");
-            let title = if state.is_container && !state.redirect {
-                "Save Tag As (New Copy)"
-            } else {
-                "Rename Tag"
+            let title = match (state.is_new_container, state.redirect) {
+                (true, true) => "Rename / Move New Tag",
+                (true, false) => "Copy New Tag",
+                (false, false) if state.is_container => "Save Tag As (New Copy)",
+                _ => "Rename Tag",
             };
             egui::Window::new(title)
                 .id(egui::Id::new("rename_tag"))
@@ -1714,9 +1715,13 @@ impl Baboon {
                     );
                     ui.add_space(6.0);
                     ui.label(
-                        RichText::new("New name (extension is fixed)")
-                            .color(subtle_dark())
-                            .small(),
+                        RichText::new(if state.is_new_container {
+                            "New path (folders allowed; extension is fixed)"
+                        } else {
+                            "New name (extension is fixed)"
+                        })
+                        .color(subtle_dark())
+                        .small(),
                     );
                     ui.horizontal(|ui| {
                         ui.add(
@@ -1728,11 +1733,17 @@ impl Baboon {
                             RichText::new(format!(".{}", state.extension)).color(subtle_dark()),
                         );
                     });
-                    let preview_parent = state
-                        .old_display
-                        .rsplit_once('/')
-                        .map(|(parent, _)| parent)
-                        .unwrap_or("");
+                    // A new tag edits its whole path, so it keeps no parent from
+                    // the old one — what is typed IS the destination.
+                    let preview_parent = if state.is_new_container {
+                        ""
+                    } else {
+                        state
+                            .old_display
+                            .rsplit_once('/')
+                            .map(|(parent, _)| parent)
+                            .unwrap_or("")
+                    };
                     let preview_name = state.new_path_input.trim();
                     let preview = if preview_name.is_empty() {
                         "(enter a new name)".to_owned()
@@ -1750,7 +1761,26 @@ impl Baboon {
                             .small(),
                     );
                     ui.add_space(8.0);
-                    if state.is_container {
+                    if state.is_new_container {
+                        ui.label(
+                            RichText::new(if state.redirect {
+                                "This tag has not been saved yet, so it simply moves to the new \
+                                 path — nothing is written."
+                            } else {
+                                "Creates a second unsaved tag with a copy of this one's contents."
+                            })
+                            .color(text_dark()),
+                        );
+                        ui.label(
+                            RichText::new(if state.redirect {
+                                "It is written when you Save it or Export Mod."
+                            } else {
+                                "Both tags are written only when you Save them or Export Mod."
+                            })
+                            .color(subtle_dark())
+                            .small(),
+                        );
+                    } else if state.is_container {
                         if state.redirect {
                             ui.label(
                                 RichText::new(
@@ -1812,7 +1842,11 @@ impl Baboon {
                                 !state.new_path_input.trim().is_empty(),
                                 egui::Button::new("Apply"),
                             )
-                            .on_hover_text(if state.is_container {
+                            .on_hover_text(if state.is_new_container && state.redirect {
+                                "Move this unsaved tag to the new path (nothing is written yet)"
+                            } else if state.is_new_container {
+                                "Copy this unsaved tag to the new path (nothing is written yet)"
+                            } else if state.is_container {
                                 "Write a higher-priority overlay container (base game unchanged)"
                             } else {
                                 "Move the file on disk and rewrite all references"

@@ -1691,4 +1691,43 @@ mod tag_diff_tests {
             "an added element has no previous value: {diffs:?}"
         );
     }
+
+    /// A brand-new Campaign Evolved tag must be editable the moment it is
+    /// created. `is_editable_tag` drives `FieldEditContext::editable`, which
+    /// gates every value widget and every block grow/shrink button, so a
+    /// `NewContainer` entry missing from the match rendered the whole tag
+    /// read-only until it was exported as a mod and remounted.
+    #[test]
+    fn a_new_container_tag_is_editable() {
+        let tag = TagFile::new("definitions/haloce_evolved/camera_track.json").unwrap();
+        let entry = TagEntry {
+            key: "newtag:/Game/Tags/test/example-camera_track".into(),
+            display_path: "test/example.camera_track".into(),
+            group_tag: tag.header.group_tag,
+            group_name: Some("camera_track".into()),
+            location: TagEntryLocation::NewContainer {
+                template_container: 0,
+                template_rel: "Tags/other-camera_track.uasset".into(),
+                package: "/Game/Tags/test/example-camera_track".into(),
+                group_tag: tag.header.group_tag,
+            },
+        };
+
+        assert!(
+            is_editable_tag(&entry, &tag),
+            "a newly created container tag must be editable"
+        );
+
+        // And the block op the UI defers actually appends to the fresh tag.
+        let mut tag = tag;
+        let index = add_block_element(&mut tag, "control points").unwrap();
+        assert_eq!(index, 0);
+        assert_eq!(
+            tag.root()
+                .field_path("control points")
+                .and_then(|field| field.as_block())
+                .map(|block| block.len()),
+            Some(1)
+        );
+    }
 }
