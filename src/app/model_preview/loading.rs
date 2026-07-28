@@ -752,9 +752,13 @@ fn ce_decode_metahuman_table(
     let mut usmap = Usmap::meteorite().ok()?;
     let sbytes = ce_find_uasset_by_basename(containers, struct_basename)?;
     let shdr = FZenPackageHeader::deserialize(&mut Cursor::new(&sbytes[..]), None, CE_CV, CE_HV, None).ok()?;
+    let sctx = blam_tags::iostore::unversioned::ExportContext::new(&[]);
     let props = blam_tags::iostore::unversioned::read_userdefined_struct_layout(
         ce_export0_bytes(&sbytes, &shdr)?,
         &shdr.name_map.copy_raw_names(),
+        &usmap,
+        shdr.export_map.first()?.object_flags,
+        &sctx,
     )
     .ok()?;
     usmap.register_struct(struct_name, None, props);
@@ -765,6 +769,7 @@ fn ce_decode_metahuman_table(
         &dhdr.name_map.copy_raw_names(),
         &usmap,
         struct_name,
+        dhdr.export_map.first()?.object_flags,
     )
     .ok()
 }
