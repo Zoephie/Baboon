@@ -3518,12 +3518,15 @@ impl Baboon {
                 return;
             }
         };
-        let utoc_path = {
+        let (root, utoc_path, archive) = {
             let Some(source) = self.source() else {
                 self.status = "No source loaded".to_owned();
                 return;
             };
-            let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+            let TagSource::IoStoreContainerSet {
+                root, containers, ..
+            } = &source.source
+            else {
                 self.status = "Source is not a container".to_owned();
                 return;
             };
@@ -3531,30 +3534,56 @@ impl Baboon {
                 self.status = "Container provenance is stale".to_owned();
                 return;
             };
-            m.utoc_path.clone()
+            (root.clone(), m.utoc_path.clone(), m.archive.clone())
         };
-        if let Err(e) =
-            blam_tags::iostore::writer::overwrite_tag_in_place(&utoc_path, &rel_path, &bytes)
-        {
-            self.status = format!("Overwrite failed: {e}");
+        // Resolve against the MOUNTED archive, not a fresh handle: an override
+        // container (an exported mod the user then reloaded) ships no directory
+        // index, and only the mounted handle has the rebuilt file list that can
+        // name `rel_path`.
+        if let Err(e) = blam_tags::iostore::writer::overwrite_tag_in_place_with(
+            &archive, &utoc_path, &rel_path, &bytes,
+        ) {
+            // A mod exported by an older build carries the tag alone, so there
+            // is no `.uasset` chunk to rewrite the declared length into and
+            // nothing can be added to a container in place.
+            let hint = if e.to_string().contains("no paired .uasset") {
+                " — export this mod again instead of saving into it"
+            } else {
+                ""
+            };
+            self.status = format!("Overwrite failed: {e}{hint}");
             return;
         }
+        drop(archive);
         // Hot-swap the pak's archive so subsequent reads see the new bytes.
-        match blam_tags::iostore::IoStoreArchive::open(&utoc_path) {
-            Ok(a) => {
-                if let Some(source) = self.source_mut()
-                    && let TagSource::IoStoreContainerSet { containers, .. } = &mut source.source
-                    && let Some(m) = containers.get_mut(container_idx)
-                {
-                    m.archive = std::sync::Arc::new(a);
+        let containers = match self.source().map(|s| &s.source) {
+            Some(TagSource::IoStoreContainerSet { containers, .. }) => containers.clone(),
+            _ => Vec::new(),
+        };
+        let reload_error =
+            match crate::source::reopen_container_archive(&root, &containers, container_idx)
+            {
+                Ok(a) => {
+                    if let Some(source) = self.source_mut()
+                        && let TagSource::IoStoreContainerSet { containers, .. } = &mut source.source
+                        && let Some(m) = containers.get_mut(container_idx)
+                    {
+                        m.archive = std::sync::Arc::new(a);
+                    }
+                    None
                 }
-            }
-            Err(e) => self.status = format!("Saved, but reloading the pak failed: {e}"),
-        }
+                Err(e) => Some(e),
+            };
         if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(key) {
             doc.dirty.clear();
         }
-        self.status = format!("Saved into {} (game files modified)", utoc_path.display());
+        self.status = match reload_error {
+            Some(e) => format!(
+                "Saved into {}, but reloading the pak failed: {e}",
+                utoc_path.display()
+            ),
+            None => format!("Saved into {} (game files modified)", utoc_path.display()),
+        };
     }
 
     /// Save a brand-new (in-memory) container tag as a new `_P` override
