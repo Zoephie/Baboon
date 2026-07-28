@@ -1046,10 +1046,7 @@ pub(in crate::app) fn draw_entry(
     response.context_menu(|ui| {
         style_tag_context_menu(ui);
 
-        let rename_enabled = matches!(
-            entry.location,
-            TagEntryLocation::LooseFile(_) | TagEntryLocation::Container { .. }
-        );
+        let rename_enabled = supports_rename_menu(entry);
         let extract_enabled = supports_tag_extract_menu(entry.group_tag);
         ui.horizontal(|ui| {
             if context_menu_primary_button(ui, "Rename", rename_enabled).clicked() {
@@ -1225,6 +1222,19 @@ pub(in crate::app) fn is_embedded_tag_entry(entry: &TagEntry) -> bool {
     matches!(
         entry.location,
         TagEntryLocation::Monolithic { .. } | TagEntryLocation::Container { .. }
+    )
+}
+
+/// Whether the tag can be renamed or moved. A loose tag moves on disk, a
+/// container tag writes a renamed override container, and a brand-new container
+/// tag rewrites its in-memory entry — the only way to correct a path typed into
+/// the New Tag dialog. A monolithic cache tag has no writable path at all.
+pub(in crate::app) fn supports_rename_menu(entry: &TagEntry) -> bool {
+    matches!(
+        entry.location,
+        TagEntryLocation::LooseFile(_)
+            | TagEntryLocation::Container { .. }
+            | TagEntryLocation::NewContainer { .. }
     )
 }
 

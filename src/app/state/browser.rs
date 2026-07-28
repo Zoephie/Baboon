@@ -61,6 +61,11 @@ pub(in crate::app) struct RenameTagState {
     /// Container-only: rename (redirect old references to the new tag) vs.
     /// duplicate (Save As — no redirect). Ignored for loose sources.
     pub(in crate::app) redirect: bool,
+    /// Source is a brand-new (never-saved) Campaign Evolved tag: apply rewrites
+    /// the in-memory entry rather than writing any container, so the whole
+    /// destination path is editable — this is how a new tag is moved as well as
+    /// renamed. Implies `is_container`.
+    pub(in crate::app) is_new_container: bool,
 }
 
 /// Results of a tag query (find-references / unreferenced), shown in a floating
