@@ -102,7 +102,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         RichText::new(text).color(text_dark()).into()
     }
 
-    fn is_tab_closable(&self, _tiles: &egui_tiles::Tiles<String>, _tile_id: egui_tiles::TileId) -> bool {
+    fn is_tab_closable(&self, _tiles: &egui_tiles::Tiles<String>, _tile_id: egui_tiles::TileId,) -> bool {
         true
     }
 
@@ -334,7 +334,7 @@ impl Baboon {
         // it hashes all 24,000 keys rather than comparing a few thousand that
         // mostly differ early.
         for tile in tree.tiles.tiles() {
-            let egui_tiles::Tile::Pane(key) = tile else { continue };
+            let egui_tiles::Tile::Pane(key) = tile else { continue; };
             if labels.contains_key(key) {
                 continue;
             }

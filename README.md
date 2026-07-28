@@ -415,6 +415,22 @@ choice in *File → Settings* — **Ask** which windows to reopen, **Always** re
 automatically, or **Never** — and the prompt itself carries a *Don't ask again*
 option (OK remembers *Always*, Cancel remembers *Never*).
 
+The main native window's last normal bounds and its distinct normal, maximized,
+or fullscreen mode are stored separately in a versioned `window-state.json`:
+
+- Windows: `%APPDATA%\Baboon\config\window-state.json`
+- Linux: `$XDG_CONFIG_HOME/baboon/window-state.json` (or
+  `~/.config/baboon/window-state.json`)
+- macOS: `~/Library/Application Support/Baboon/window-state.json`
+
+Baboon restores this state before creating the first visible viewport. Saved
+bounds are checked against the connected displays and their work areas, then
+clamped or centered on the primary display if necessary. Portable mode does not
+redirect this machine-specific file. On Wayland, portable APIs generally do
+not expose absolute window positions or desktop work areas; Baboon still
+restores size and mode, uses full monitor bounds for validation, and leaves
+placement to the compositor when coordinates are unavailable.
+
 ---
 
 ## Technical overview

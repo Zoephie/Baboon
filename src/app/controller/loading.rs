@@ -140,7 +140,7 @@ impl Baboon {
                         let entries = source.all_entries.clone();
                         let tx = self.tx.clone();
                         let ctx = ctx.clone();
-                        let stamp = KitStamp { kit: kit.id, generation: kit.generation };
+                        let stamp = KitStamp { kit: kit.id, generation: kit.generation, };
                         let path = crate::source::index_db_path();
                         thread::spawn(move || {
                             let result = crate::source::save_entry_index(&game, &root, &entries)

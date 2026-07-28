@@ -593,8 +593,13 @@ impl Baboon {
 
 impl eframe::App for Baboon {
     fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        self.window_state.observe(ctx);
         self.draw_root_ui(ctx, frame);
         self.run_deferred_file_action(ctx);
         self.maybe_autosave_campaign_projects(ctx);
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.window_state.persist_now();
     }
 }

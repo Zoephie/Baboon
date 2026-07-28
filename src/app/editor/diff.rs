@@ -558,13 +558,13 @@ fn dump_struct(
         if let Some(block) = field.as_block() {
             for i in 0..block.len() {
                 if let Some(element) = block.element(i) {
-                    dump_struct(&element, &format!("{field_path}[{i}]"), names, out, limit, added);
+                    dump_struct(&element, &format!("{field_path}[{i}]"), names, out, limit, added,);
                 }
             }
         } else if let Some(array) = field.as_array() {
             for i in 0..array.len() {
                 if let Some(element) = array.element(i) {
-                    dump_struct(&element, &format!("{field_path}[{i}]"), names, out, limit, added);
+                    dump_struct(&element, &format!("{field_path}[{i}]"), names, out, limit, added,);
                 }
             }
         } else if let Some(inner) = field.as_struct() {

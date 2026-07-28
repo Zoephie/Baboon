@@ -66,12 +66,11 @@ impl EditingKitValidationCache {
             .collect();
         self.custom_icon_errors = profiles
             .iter()
-            .map(|profile| {
+            .map(|profile|
                 (
                     profile.id.clone(),
-                    custom_profile_icon_error(profile),
-                )
-            })
+                    custom_profile_icon_error(profile)
+                ))
             .collect();
     }
 
@@ -277,7 +276,7 @@ fn find_first_named_directory(root: &Path, expected: &str) -> Option<PathBuf> {
 fn push_layout_candidate(
     candidates: &mut Vec<EditingKitLayout>,
     root: &Path,
-    require_data: bool,
+    require_data: bool
 ) {
     let Some(tags) = find_named_child(root, "tags") else {
         return;
@@ -350,7 +349,7 @@ fn resolve_custom_icon_path_at(base: &Path, relative: &Path) -> Result<PathBuf, 
 }
 
 pub(super) fn custom_profile_icon_error(
-    profile: &CustomEditingKitProfile,
+    profile: &CustomEditingKitProfile
 ) -> Option<String> {
     let relative = profile.icon.as_deref()?;
     let absolute = match resolve_custom_icon_path(relative) {
@@ -430,7 +429,8 @@ fn copy_custom_icon_at(
     if !destination.is_file() {
         let temporary = parent.join(format!(".icon-{}.tmp", &hash[..12]));
         fs::write(&temporary, &bytes)
-            .map_err(|error| format!("Could not write custom icon beside the executable: {error}"))?;
+            .map_err(|error| { format!("Could not write custom icon beside the executable: {error}")
+        })?;
         fs::rename(&temporary, &destination).map_err(|error| {
             let _ = fs::remove_file(&temporary);
             format!("Could not finish writing the custom icon: {error}")
@@ -446,7 +446,7 @@ pub(super) fn remove_unreferenced_custom_icon(
     remove_unreferenced_custom_icon_at(
         &executable_directory()?,
         relative,
-        profiles,
+        profiles
     )
 }
 
@@ -464,7 +464,8 @@ fn remove_unreferenced_custom_icon_at(
     let absolute = resolve_custom_icon_path_at(base, relative)?;
     if absolute.is_file() {
         fs::remove_file(&absolute)
-            .map_err(|error| format!("Profile was saved, but its old icon could not be deleted: {error}"))?;
+            .map_err(|error| { format!("Profile was saved, but its old icon could not be deleted: {error}")
+        })?;
     }
     if let Some(parent) = absolute.parent()
         && parent

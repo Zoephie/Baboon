@@ -282,7 +282,7 @@ impl Baboon {
                 // and `make_active` leaves a pane that is not in a tab group
                 // alone.
                 self.kit_tree
-                    .make_active(|_, tile| matches!(tile, egui_tiles::Tile::Pane(id) if *id == kit));
+                    .make_active(|_, tile| matches!(tile, egui_tiles::Tile::Pane(id) if *id == kit),);
                 true
             }
             None => false,
@@ -456,7 +456,7 @@ fn active_after_removal(active: usize, removed: usize, new_len: usize) -> usize 
 
 #[cfg(test)]
 mod tests {
-    use super::{active_after_removal, Kit, KitId};
+    use super::{ Kit, KitId, active_after_removal};
     use std::collections::HashMap;
 
     /// A folder move rewrites tag keys underneath the open tabs. The tree is

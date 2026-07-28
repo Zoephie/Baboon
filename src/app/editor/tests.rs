@@ -50,15 +50,17 @@ mod tests {
         let mut utocs: Vec<PathBuf> = std::fs::read_dir(&root)
             .expect("read paks dir")
             .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("utoc")))
-            .filter(|p| !p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("global.utoc")))
+            .filter(|p| { p.extension().is_some_and(|x| x.eq_ignore_ascii_case("utoc"))
+            })
+            .filter(|p| { !p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("global.utoc"))
+            })
             .collect();
         utocs.sort();
 
         let mut containers = Vec::new();
         let mut packages = ContainerPackageIndex::default();
         for utoc in utocs {
-            let Ok(archive) = IoStoreArchive::open(&utoc) else { continue };
+            let Ok(archive) = IoStoreArchive::open(&utoc) else { continue; };
             let idx = containers.len();
             for e in archive.entries() {
                 if let Some(pkg) = container_package_name(&e.path) {
@@ -117,9 +119,8 @@ mod tests {
             assert_eq!(&bytes[0..4], b"RIFF", "{} is not a RIFF", path.display());
             assert_eq!(&bytes[8..12], b"WAVE", "{} is not a WAVE", path.display());
             // Real audio, not a buffer of zeroes.
-            let loud = bytes[44..].chunks_exact(2).any(|s| {
-                i16::from_le_bytes([s[0], s[1]]).unsigned_abs() > 64
-            });
+            let loud = bytes[44..].chunks_exact(2).any(|s|
+                i16::from_le_bytes([s[0], s[1]]).unsigned_abs() > 64);
             assert!(loud, "{} decoded to silence", path.display());
             println!("wrote {} ({} bytes)", path.display(), bytes.len());
         }

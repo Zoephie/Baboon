@@ -267,7 +267,8 @@ impl Baboon {
                 .find
                 .occurrences
                 .iter()
-                .filter(|hit| self.kits[self.active].parsed_tags.contains_key(&hit.tag_key))
+                .filter(|hit| { self.kits[self.active].parsed_tags.contains_key(&hit.tag_key)
+                })
                 .map(|hit| (hit.tag_key.clone(), hit.field_path.clone(), hit.kind))
                 .collect();
             data.insert_temp(

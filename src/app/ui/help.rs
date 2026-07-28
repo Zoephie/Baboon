@@ -43,14 +43,13 @@ impl Baboon {
                 match self.help_panel_tab {
                     HelpPanelTab::About => draw_about_tab(ui),
                     HelpPanelTab::Doc => draw_doc_tab(ui, &self.help_docs),
-                    HelpPanelTab::Tutorials => {
+                    HelpPanelTab::Tutorials =>
                         draw_tutorials_tab(
                             ui,
                             &self.tutorials,
                             &mut self.tutorials_game,
                             &mut self.tutorials_category,
-                        )
-                    }
+                        ),
                     HelpPanelTab::ScriptDoc => self.draw_script_doc_tab(ui),
                     HelpPanelTab::MapNames => draw_map_names_tab(ui, &mut self.map_names_game_tab),
                 }

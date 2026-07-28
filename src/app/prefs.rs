@@ -465,7 +465,7 @@ fn load_custom_editing_kit_profiles(value: &Value) -> Vec<CustomEditingKitProfil
 }
 
 fn custom_editing_kit_profiles_value(
-    profiles: &[CustomEditingKitProfile],
+    profiles: &[CustomEditingKitProfile]
 ) -> Vec<Value> {
     profiles
         .iter()
@@ -1100,7 +1100,7 @@ mod session_tests {
         custom.game = Some("haloreach_mcc".to_owned());
         custom.profile_id = Some("11111111-1111-4111-8111-111111111111".to_owned());
         let restored = parse_last_session(&session_value(&LastSessionState {
-            kits: vec![custom],
+            kits: vec![custom]
         }))
         .expect("custom profile session parses");
         assert_eq!(

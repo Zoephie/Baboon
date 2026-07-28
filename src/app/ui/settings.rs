@@ -35,14 +35,13 @@ impl Baboon {
                 });
                 ui.separator();
                 ui.add_space(8.0);
-                ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui|
                     match self.settings_tab {
                         SettingsTab::Startup => self.draw_settings_startup_tab(ui),
                         SettingsTab::Browser => self.draw_settings_browser_tab(ui),
                         SettingsTab::EditingKits => self.draw_settings_editing_kits_tab(ui),
                         SettingsTab::Appearance => self.draw_settings_appearance_tab(ui),
                         SettingsTab::Tools => self.draw_settings_tools_tab(ui),
-                    }
                 });
             });
         if !open {
@@ -345,7 +344,7 @@ impl Baboon {
                     ui.horizontal(|ui| {
                         ui.add_sized(
                             Vec2::new(220.0, 20.0),
-                            egui::Label::new(RichText::new(&profile.name).color(text_dark()).strong()),
+                            egui::Label::new(RichText::new(&profile.name).color(text_dark()).strong(),),
                         );
                         ui.label(
                             RichText::new(game_display_name(&profile.game)).color(subtle_dark()),
@@ -551,7 +550,7 @@ impl Baboon {
 
     fn commit_custom_editing_kit_draft(
         &mut self,
-        draft: &mut CustomEditingKitDraft,
+        draft: &mut CustomEditingKitDraft
     ) -> bool {
         let name = draft.name.trim().to_owned();
         if name.is_empty() {
@@ -643,7 +642,7 @@ impl Baboon {
             {
                 let _ = remove_unreferenced_custom_icon(
                     icon,
-                    &self.custom_editing_kit_profiles,
+                    &self.custom_editing_kit_profiles
                 );
             }
             draft.error = Some(error);

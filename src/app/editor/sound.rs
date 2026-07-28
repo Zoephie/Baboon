@@ -906,7 +906,7 @@ fn draw_wwise_event_player(
 /// point: the alternative is a player that looks playable and never is.
 fn draw_ce_unbound_note(ui: &mut Ui) {
     egui::CollapsingHeader::new(
-        RichText::new("Sound \u{2014} no audio bound").color(text_dark()),
+        RichText::new("Sound \u{2014} no audio bound").color(text_dark())
     )
     .default_open(true)
     .show(ui, |ui| {

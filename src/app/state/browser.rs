@@ -10,10 +10,10 @@ pub(in crate::app) enum BrowserAction {
     DumpJson(String),
     OpenInExplorer(String),
     DumpLoadedFolderJson(Vec<String>),
-    DumpLooseFolderJson { rel_path: PathBuf, label: String },
-    MoveLooseFolder { rel_path: PathBuf, label: String },
-    CopyLooseFolder { rel_path: PathBuf, label: String },
-    ConvertLooseFolder { rel_path: PathBuf, label: String },
+    DumpLooseFolderJson { rel_path: PathBuf, label: String, },
+    MoveLooseFolder { rel_path: PathBuf, label: String, },
+    CopyLooseFolder { rel_path: PathBuf, label: String, },
+    ConvertLooseFolder { rel_path: PathBuf, label: String, },
     ExtractRaw(String),
     ExtractBitmap(String),
     ExtractBitmapFolder(Vec<String>),
@@ -30,9 +30,9 @@ pub(in crate::app) enum BrowserAction {
     MoveTag(String),
     /// Import a tag file into a Campaign Evolved container, at `folder_rel`
     /// (`None` = root).
-    ImportTagInFolder { folder_rel: Option<String> },
+    ImportTagInFolder { folder_rel: Option<String>, },
     /// Create a new Campaign Evolved tag at `folder_rel` (`None` = root).
-    NewTagInFolder { folder_rel: Option<String> },
+    NewTagInFolder { folder_rel: Option<String>, },
 }
 
 /// The "Rename / Move tag (fix references)" dialog. Shows the referrers that

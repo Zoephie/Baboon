@@ -2500,7 +2500,7 @@ mod palette_repro_tests {
         let cases = [
             ("halo3_mcc", "levels/multi/riverworld/riverworld.scenario"),
             ("haloreach_mcc", "levels/multi/35_island/35_island.scenario"),
-            ("halo2_mcc", "scenarios/solo/05a_deltaapproach/05a_deltaapproach.scenario"),
+            ("halo2_mcc", "scenarios/solo/05a_deltaapproach/05a_deltaapproach.scenario",),
             ("haloce_mcc", "levels/d40/d40.scenario"),
         ];
         let defs = std::path::Path::new("definitions");
@@ -2642,8 +2642,8 @@ mod palette_repro_tests {
         let defs = std::path::Path::new("definitions");
         let names = crate::format::TagNameIndex::default();
         let cases = [
-            ("halo3_mcc", "levels/multi/riverworld/riverworld.scenario", *b"scnr"),
-            ("haloreach_mcc", "levels/multi/35_island/35_island.scenario", *b"scnr"),
+            ("halo3_mcc", "levels/multi/riverworld/riverworld.scenario", *b"scnr",),
+            ("haloreach_mcc", "levels/multi/35_island/35_island.scenario", *b"scnr",),
         ];
         let mut failures = Vec::new();
         let mut checked = 0usize;
@@ -2737,9 +2737,9 @@ mod palette_repro_tests {
     fn adding_an_element_grows_the_blocks_own_length() {
         let defs = std::path::Path::new("definitions");
         let cases = [
-            ("halo3_mcc", "levels/multi/riverworld/riverworld.scenario", *b"scnr"),
-            ("haloreach_mcc", "levels/multi/35_island/35_island.scenario", *b"scnr"),
-            ("halo2_mcc", "scenarios/solo/05a_deltaapproach/05a_deltaapproach.scenario", *b"scnr"),
+            ("halo3_mcc", "levels/multi/riverworld/riverworld.scenario", *b"scnr",),
+            ("haloreach_mcc", "levels/multi/35_island/35_island.scenario", *b"scnr",),
+            ("halo2_mcc", "scenarios/solo/05a_deltaapproach/05a_deltaapproach.scenario", *b"scnr",),
             ("haloce_mcc", "levels/d40/d40.scenario", *b"scnr"),
         ];
         let mut failures = Vec::new();

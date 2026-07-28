@@ -157,7 +157,8 @@ impl CeSoundBinding {
     /// arbitrarily land on Chinese).
     pub fn language_to_show(&self, preferred: Option<&str>) -> String {
         let languages = self.languages();
-        let has = |name: &str| languages.iter().find(|l| l.eq_ignore_ascii_case(name)).cloned();
+        let has = |name: &str| { languages.iter().find(|l| l.eq_ignore_ascii_case(name)).cloned()
+        };
 
         preferred
             .and_then(has)
@@ -188,7 +189,7 @@ fn read_package(
     let archive = &containers.get(container)?.archive;
     let bytes = archive.read(rel).ok()?;
     let header =
-        FZenPackageHeader::deserialize(&mut Cursor::new(&bytes), None, TOC_VERSION, HEADER_VERSION, None)
+        FZenPackageHeader::deserialize(&mut Cursor::new(&bytes), None, TOC_VERSION, HEADER_VERSION, None,)
             .ok()?;
     Some((header, bytes))
 }
@@ -202,7 +203,7 @@ fn read_package(
 /// unbinds every tag that reaches through it. The export class is the thing
 /// that actually defines an event.
 fn exports_ak_audio_event(header: &FZenPackageHeader) -> bool {
-    header.exports_class(FPackageObjectIndex::create_script_import(AK_AUDIO_EVENT_CLASS))
+    header.exports_class(FPackageObjectIndex::create_script_import(AK_AUDIO_EVENT_CLASS,))
 }
 
 /// The native `AkAudioEvent` UClass, as it appears in a cooked package's
@@ -249,7 +250,7 @@ pub fn resolve_sound_binding(
         if visits > MAX_PACKAGE_VISITS {
             break;
         }
-        let Some((header, bytes)) = read_package(containers, packages, &package) else { continue };
+        let Some((header, bytes)) = read_package(containers, packages, &package) else { continue; };
         // An event is a leaf: it holds the media, and nothing further to walk.
         if exports_ak_audio_event(&header) {
             event_packages.push((header, bytes));
@@ -269,15 +270,15 @@ pub fn resolve_sound_binding(
     let mut banks = banks;
     for (header, bytes) in &event_packages {
         let Some(export) = header
-            .find_export_of_class(FPackageObjectIndex::create_script_import(AK_AUDIO_EVENT_CLASS))
+            .find_export_of_class(FPackageObjectIndex::create_script_import(AK_AUDIO_EVENT_CLASS,))
         else {
             continue;
         };
         let start = header.summary.header_size as usize + export.cooked_serial_offset as usize;
         let end = start + export.cooked_serial_size as usize;
-        let Some(body) = bytes.get(start..end) else { continue };
+        let Some(body) = bytes.get(start..end) else { continue; };
         let names = header.name_map.copy_raw_names();
-        let Ok(cooked) = read_event_cooked_data(body, &names, usmap) else { continue };
+        let Ok(cooked) = read_event_cooked_data(body, &names, usmap) else { continue; };
 
         for m in &cooked.media {
             binding.media.push(CeSoundMedia {
@@ -433,9 +434,8 @@ impl CeMediaStore {
             CeMediaLocation::Bank(bank_path) => {
                 let bnk = self.read_bank(paks_root, bank_path)?;
                 bnk.embedded_wem(media.media_id)
-                    .ok_or_else(|| {
-                        anyhow!("{} holds no media {}", bank_path, media.media_id)
-                    })?
+                    .ok_or_else(||
+                        anyhow!("{} holds no media {}", bank_path, media.media_id))?
                     .to_vec()
             }
         };
@@ -483,7 +483,7 @@ mod tests {
             location: CeMediaLocation::Loose("Media/1/1.wem".into()),
             source_name: String::new(),
         };
-        let binding = CeSoundBinding { events: Vec::new(), media: vec![sfx] };
+        let binding = CeSoundBinding { events: Vec::new(), media: vec![sfx], };
         // A non-localized event has no English(US) entry; asking for one must
         // still play rather than silently returning nothing.
         assert_eq!(binding.media_for_language("English(US)").len(), 1);
@@ -531,7 +531,7 @@ mod tests {
     /// language, which must not blank it either.
     #[test]
     fn sfx_only_binding_ignores_a_localized_selection() {
-        let binding = CeSoundBinding { events: Vec::new(), media: vec![media("SFX", 1)] };
+        let binding = CeSoundBinding { events: Vec::new(), media: vec![media("SFX", 1)], };
         assert_eq!(binding.language_to_show(Some("German")), "SFX");
         assert_eq!(binding.media_for_language("German").len(), 1);
     }
@@ -567,15 +567,17 @@ mod tests {
         let mut utocs: Vec<PathBuf> = std::fs::read_dir(&root)
             .expect("read paks dir")
             .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("utoc")))
-            .filter(|p| !p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("global.utoc")))
+            .filter(|p| { p.extension().is_some_and(|x| x.eq_ignore_ascii_case("utoc"))
+            })
+            .filter(|p| { !p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("global.utoc"))
+            })
             .collect();
         utocs.sort();
 
         let mut containers = Vec::new();
         let mut packages = ContainerPackageIndex::default();
         for utoc in utocs {
-            let Ok(archive) = IoStoreArchive::open(&utoc) else { continue };
+            let Ok(archive) = IoStoreArchive::open(&utoc) else { continue; };
             let idx = containers.len();
             for e in archive.entries() {
                 if let Some(pkg) = super::super::container_package_name(&e.path) {
@@ -703,12 +705,14 @@ mod tests {
         use std::sync::Arc;
 
         let root =
-            PathBuf::from(std::env::var("CE_PAKS").expect("set CE_PAKS to the game's Content/Paks"));
+            PathBuf::from(std::env::var("CE_PAKS").expect("set CE_PAKS to the game's Content/Paks"),);
         let mut utocs: Vec<PathBuf> = std::fs::read_dir(&root)
             .expect("read paks dir")
             .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("utoc")))
-            .filter(|p| !p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("global.utoc")))
+            .filter(|p| { p.extension().is_some_and(|x| x.eq_ignore_ascii_case("utoc"))
+            })
+            .filter(|p| { !p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("global.utoc"))
+            })
             .collect();
         utocs.sort();
 
@@ -716,7 +720,7 @@ mod tests {
         let mut packages = ContainerPackageIndex::default();
         let mut tag_packages: Vec<String> = Vec::new();
         for utoc in utocs {
-            let Ok(archive) = IoStoreArchive::open(&utoc) else { continue };
+            let Ok(archive) = IoStoreArchive::open(&utoc) else { continue; };
             let idx = containers.len();
             for e in archive.entries() {
                 if let Some(pkg) = super::super::container_package_name(&e.path) {
@@ -745,7 +749,7 @@ mod tests {
         let mut from_banks = 0usize;
         for pkg in &tag_packages {
             let binding =
-                resolve_sound_binding(&containers, &packages, &usmap, pkg, Some((root.as_path(), &mut store)));
+                resolve_sound_binding(&containers, &packages, &usmap, pkg, Some((root.as_path(), &mut store)),);
             if binding.is_empty() {
                 continue;
             }

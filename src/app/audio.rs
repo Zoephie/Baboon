@@ -566,7 +566,7 @@ impl AudioState {
                 }
                 return;
             }
-            SoundAction::PlayCeMedia { paks_root, media, label } => {
+            SoundAction::PlayCeMedia { paks_root, media, label, } => {
                 self.wwise_deferred = None; // this playback supersedes any wait
                 match self.ce_media.decode(&paks_root, &media) {
                     Ok(pcm) => self.play_decoded(&pcm, &label),

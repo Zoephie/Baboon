@@ -134,6 +134,7 @@ pub(super) fn test_definition_path(rel: &str) -> PathBuf {
 /// Subsystem modules implement focused operations on this state; this type is
 /// intentionally the composition root rather than a domain model.
 pub struct Baboon {
+    window_state: crate::window_state::WindowStateTracker,
     default_names: TagNameIndex,
     /// Cloneable sender given to background jobs; every completion is funneled
     /// back through the receive loop so UI state mutates only on the UI thread.
@@ -346,7 +347,10 @@ pub struct Baboon {
 }
 
 impl Baboon {
-    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub fn new(
+        cc: &eframe::CreationContext<'_>,
+        window_state: crate::window_state::WindowStateTracker,
+    ) -> Self {
         let storage = crate::storage::initialize();
         cc.egui_ctx.set_fonts(foundation_fonts());
         cc.egui_ctx.set_style(foundation_style());
@@ -379,6 +383,7 @@ impl Baboon {
             &prefs.custom_editing_kit_profiles,
         );
         let mut app = Self {
+            window_state,
             default_names: names.clone(),
             tx,
             rx,

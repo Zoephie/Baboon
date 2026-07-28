@@ -1569,7 +1569,7 @@ impl Baboon {
                         .max_height(160.0)
                         .show(ui, |ui| {
                             for path in &stashed {
-                                ui.label(RichText::new(path).color(text_dark()).monospace().small());
+                                ui.label(RichText::new(path).color(text_dark()).monospace().small(),);
                             }
                         });
                 }
@@ -2205,7 +2205,7 @@ impl Baboon {
         // dialog mutably for rendering (the banner lags edits by one frame).
         let (folder_snapshot, name_snapshot, group_tag) = {
             let dialog = self.import_tag_dialog.as_ref().unwrap();
-            (dialog.folder_rel.clone(), dialog.name.clone(), dialog.group_tag)
+            (dialog.folder_rel.clone(), dialog.name.clone(), dialog.group_tag,)
         };
         let overwrite_logical =
             self.import_overwrite_target(&folder_snapshot, &name_snapshot, group_tag);

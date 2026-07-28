@@ -10,6 +10,7 @@ mod format;
 mod source;
 mod storage;
 mod tool_commands;
+mod window_state;
 
 use anyhow::Result;
 
@@ -21,10 +22,23 @@ unsafe extern "system" {
 
 fn main() -> Result<()> {
     set_windows_app_user_model_id();
+    let window_state::StartupWindowState { restored, tracker } =
+        window_state::load_startup_state();
     let mut viewport = eframe::egui::ViewportBuilder::default()
-        .with_inner_size([1280.0, 800.0])
-        .with_min_inner_size([520.0, 360.0])
+        .with_inner_size(window_state::DEFAULT_INNER_SIZE)
+        .with_min_inner_size(window_state::MIN_INNER_SIZE)
         .with_title("Baboon");
+    if let Some(restored) = restored {
+        viewport = viewport
+            .with_inner_size(restored.inner_size)
+            .with_maximized(restored.maximized);
+        // Fullscreen is issued by WindowStateTracker during eframe's hidden
+        // first frame. winit 0.30 can cache a ViewportBuilder fullscreen flag
+        // without applying the native transition, making later retries no-ops.
+        if let Some(position) = restored.position {
+            viewport = viewport.with_position(position);
+        }
+    }
     if let Some(icon) = app_icon() {
         viewport = viewport.with_icon(icon);
     }
@@ -38,7 +52,7 @@ fn main() -> Result<()> {
     eframe::run_native(
         "Baboon",
         native_options,
-        Box::new(|cc| Ok(Box::new(app::Baboon::new(cc)))),
+        Box::new(move |cc| Ok(Box::new(app::Baboon::new(cc, tracker)))),
     )
     .map_err(|e| anyhow::anyhow!("{e}"))
 }

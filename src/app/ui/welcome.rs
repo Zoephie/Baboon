@@ -139,7 +139,7 @@ impl Baboon {
                                             .inner;
                                         if clicked {
                                             action = Some(WelcomeAction::LoadCustomKit(
-                                                profile.clone(),
+                                                profile.clone()
                                             ));
                                         }
                                     }

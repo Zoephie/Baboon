@@ -257,7 +257,7 @@ pub(super) fn save_campaign_project(
             for identity in on_disk.keys() {
                 if !snapshot.overlays.contains_key(identity) {
                     transaction
-                        .execute("DELETE FROM overlays WHERE identity = ?1", params![identity])
+                        .execute("DELETE FROM overlays WHERE identity = ?1", params![identity],)
                         .map_err(|error| {
                             format!("Could not drop project tag {identity}: {error}")
                         })?;
@@ -468,7 +468,7 @@ impl Baboon {
             .is_some_and(|source| matches!(source.source, TagSource::IoStoreContainerSet { .. }))
     }
 
-    pub(super) fn campaign_entry_for_identity(&self, kit: usize, identity: &str) -> Option<TagEntry> {
+    pub(super) fn campaign_entry_for_identity(&self, kit: usize, identity: &str,) -> Option<TagEntry> {
         let source = self.kits[kit].source.as_ref()?;
         source
             .entries
@@ -766,7 +766,7 @@ impl Baboon {
         };
     }
 
-    pub(super) fn checkpoint_campaign_project(&mut self, kit: usize, now: f64) -> Result<bool, String> {
+    pub(super) fn checkpoint_campaign_project(&mut self, kit: usize, now: f64,) -> Result<bool, String> {
         let Some(snapshot) = self.capture_campaign_project(kit, now)? else {
             return Ok(false);
         };

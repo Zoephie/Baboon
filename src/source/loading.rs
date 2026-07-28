@@ -225,8 +225,10 @@ fn sibling_reference_archives(root: &Path, mounted: &[PathBuf]) -> Vec<IoStoreAr
         return Vec::new();
     };
     dir.filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("utoc")))
-        .filter(|p| !p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("global.utoc")))
+        .filter(|p| { p.extension().is_some_and(|x| x.eq_ignore_ascii_case("utoc"))
+        })
+        .filter(|p| { !p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("global.utoc"))
+        })
         .filter(|p| !mounted.contains(p))
         .filter_map(|p| IoStoreArchive::open(&p).ok())
         .filter(|archive| !archive.entries().is_empty())
@@ -263,9 +265,8 @@ fn build_container_set(
             opened.push((utoc, Some(archive)));
         }
     }
-    let needs_recovery = |slot: &Option<IoStoreArchive>| {
-        matches!(slot, Some(archive) if archive.entries().is_empty())
-    };
+    let needs_recovery = |slot: &Option<IoStoreArchive>|
+        matches!(slot, Some(archive) if archive.entries().is_empty());
     // Naming an index-less container's chunks means resolving their ids against
     // the containers it overrides. On the "open one chunk" path — a mod sitting
     // in the game's own Paks folder — those aren't in the set, so pull the
@@ -281,7 +282,7 @@ fn build_container_set(
             continue;
         }
         // Lift the target out so the rest can be borrowed as its references.
-        let Some(mut archive) = opened[i].1.take() else { continue };
+        let Some(mut archive) = opened[i].1.take() else { continue; };
         let bases: Vec<&IoStoreArchive> = opened
             .iter()
             .filter_map(|(_, a)| a.as_ref())
@@ -767,7 +768,7 @@ mod container_tests {
         let hlmt = u32::from_be_bytes(*b"hlmt");
         let mut checked = false;
         for entry in loaded.entries.iter().filter(|e| e.group_tag == hlmt) {
-            let Ok(model) = read_entry(&loaded.source, entry) else { continue };
+            let Ok(model) = read_entry(&loaded.source, entry) else { continue; };
             let root = model.root();
             let (Some((_, jmad_ref)), Some((_, skel_ref))) = (
                 root.read_tag_ref_with_group("animation"),
@@ -1002,7 +1003,7 @@ mod mod_export_tests {
             .entries
             .iter()
             .find_map(|entry| match &entry.location {
-                TagEntryLocation::Container { container, rel_path } => {
+                TagEntryLocation::Container { container, rel_path, } => {
                     let archive = &containers.get(*container)?.archive;
                     let bytes = archive.read(rel_path).ok()?;
                     (bytes.len() > 64).then(|| (*container, rel_path.clone(), bytes))
