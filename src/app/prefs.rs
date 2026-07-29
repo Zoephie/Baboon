@@ -124,6 +124,10 @@ fn prefs_from_value(value: &Value) -> GuiPrefs {
             .get("confirm_container_overwrite")
             .and_then(Value::as_bool)
             .unwrap_or(true),
+        confirm_runtime_poke: value
+            .get("confirm_runtime_poke")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
         expert_mode: value
             .get("expert_mode")
             .and_then(Value::as_bool)
@@ -532,6 +536,7 @@ fn prefs_to_value(
         "show_block_sizes": prefs.show_block_sizes,
         "scroll_to_cycle_dropdowns": prefs.scroll_to_cycle_dropdowns,
         "confirm_container_overwrite": prefs.confirm_container_overwrite,
+        "confirm_runtime_poke": prefs.confirm_runtime_poke,
         "expert_mode": prefs.expert_mode,
         "dark_mode": prefs.dark_mode,
         "ui_scale": prefs.ui_scale,

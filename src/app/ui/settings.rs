@@ -114,6 +114,22 @@ impl Baboon {
 
         ui.add_space(10.0);
         ui.separator();
+        ui.label(RichText::new("Runtime poking").color(text_dark()).strong());
+        ui.add_space(4.0);
+        ui.checkbox(
+            &mut self.confirm_runtime_poke,
+            "Confirm before poking the running game",
+        );
+        ui.label(
+            RichText::new(
+                "File \u{2192} Poke Current Tag\u{2026} (Ctrl+P) shows the preflight plan and waits for confirmation. Turn this off to write to the running game as soon as the poke is requested.",
+            )
+            .color(subtle_dark())
+            .small(),
+        );
+
+        ui.add_space(10.0);
+        ui.separator();
         ui.label(RichText::new("Updates").color(text_dark()).strong());
         ui.add_space(4.0);
         self.draw_update_channel_picker(ui);

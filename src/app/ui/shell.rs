@@ -108,10 +108,10 @@ impl Baboon {
                             if ui
                                 .add_enabled(
                                     self.can_poke_current_tag(),
-                                    egui::Button::new("Poke Current Tag..."),
+                                    egui::Button::new("Poke Current Tag...    Ctrl+P"),
                                 )
                                 .on_hover_text(
-                                    "Apply supported changes to this already-loaded tag in the verified Campaign Evolved CU2 process",
+                                    "Apply supported changes to this already-loaded tag in the verified Campaign Evolved process",
                                 )
                                 .clicked()
                             {
@@ -1159,12 +1159,7 @@ impl Baboon {
         match self.deferred_file_action.take() {
             Some(DeferredFileAction::SaveCurrentTag) => self.save_current_tag(),
             Some(DeferredFileAction::ExportMod) => self.export_mod(),
-            Some(DeferredFileAction::PokeCurrentTag) => {
-                self.begin_poke_current_tag(ctx.clone())
-            }
-            Some(DeferredFileAction::PokeCurrentTagDirect) => {
-                self.begin_poke_current_tag_direct(ctx.clone())
-            }
+            Some(DeferredFileAction::PokeCurrentTag) => self.begin_poke_current_tag(ctx.clone()),
             Some(DeferredFileAction::Close(action)) => self.request_close_action(action, ctx),
             None => {}
         }
@@ -1202,7 +1197,7 @@ impl Baboon {
             self.defer_file_action(DeferredFileAction::SaveCurrentTag, ctx);
         }
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::P)) {
-            self.defer_file_action(DeferredFileAction::PokeCurrentTagDirect, ctx);
+            self.defer_file_action(DeferredFileAction::PokeCurrentTag, ctx);
         }
         // Undo: Ctrl+Z. Redo: Ctrl+Shift+Z or Ctrl+Y.
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Z)) {
