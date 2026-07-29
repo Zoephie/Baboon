@@ -420,6 +420,22 @@ impl Baboon {
                     self.handle_bitmap_reimport_finished(kit, key, result)
                 }
                 WorkerMessage::ExportFinished(result) => self.handle_export_finished(result),
+                WorkerMessage::PokePreflightFinished { kit, key, result } => {
+                    self.handle_poke_preflight(kit, key, result);
+                    false
+                }
+                WorkerMessage::PokeWriteFinished { kit, key, result } => {
+                    self.handle_poke_write(kit, key, result);
+                    false
+                }
+                WorkerMessage::PokeDirectFinished { kit, key, result } => {
+                    self.handle_poke_direct(kit, key, result);
+                    false
+                }
+                WorkerMessage::PokeUndoFinished { result } => {
+                    self.handle_poke_undo(result);
+                    false
+                }
                 WorkerMessage::CampaignProjectSaved {
                     revision,
                     path,

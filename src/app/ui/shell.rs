@@ -107,6 +107,33 @@ impl Baboon {
                         if self.current_source_is_container() {
                             if ui
                                 .add_enabled(
+                                    self.can_poke_current_tag(),
+                                    egui::Button::new("Poke Current Tag..."),
+                                )
+                                .on_hover_text(
+                                    "Apply supported changes to this already-loaded tag in the verified Campaign Evolved CU2 process",
+                                )
+                                .clicked()
+                            {
+                                ui.close_menu();
+                                self.defer_file_action(DeferredFileAction::PokeCurrentTag, ctx);
+                            }
+                            if self.last_poke.is_some()
+                                && ui
+                                    .add_enabled(
+                                        !self.poke_undo_running,
+                                        egui::Button::new("Undo Last Poke"),
+                                    )
+                                    .on_hover_text(
+                                        "Restore the bytes from Baboon's last verified runtime poke",
+                                    )
+                                    .clicked()
+                            {
+                                ui.close_menu();
+                                self.begin_undo_last_poke(ctx.clone());
+                            }
+                            if ui
+                                .add_enabled(
                                     self.kits[self.active].parsed_tags.values().any(|d| d.dirty.is_set())
                                         || self.kits[self.active]
                                             .campaign_project
@@ -1132,6 +1159,12 @@ impl Baboon {
         match self.deferred_file_action.take() {
             Some(DeferredFileAction::SaveCurrentTag) => self.save_current_tag(),
             Some(DeferredFileAction::ExportMod) => self.export_mod(),
+            Some(DeferredFileAction::PokeCurrentTag) => {
+                self.begin_poke_current_tag(ctx.clone())
+            }
+            Some(DeferredFileAction::PokeCurrentTagDirect) => {
+                self.begin_poke_current_tag_direct(ctx.clone())
+            }
             Some(DeferredFileAction::Close(action)) => self.request_close_action(action, ctx),
             None => {}
         }
@@ -1168,6 +1201,9 @@ impl Baboon {
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::S)) {
             self.defer_file_action(DeferredFileAction::SaveCurrentTag, ctx);
         }
+        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::P)) {
+            self.defer_file_action(DeferredFileAction::PokeCurrentTagDirect, ctx);
+        }
         // Undo: Ctrl+Z. Redo: Ctrl+Shift+Z or Ctrl+Y.
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Z)) {
             self.undo_current_tag();
@@ -1202,6 +1238,7 @@ impl Baboon {
         self.draw_clear_stash_confirm_window(ctx);
         self.draw_mod_export_window(ctx);
         self.draw_exported_mod_window(ctx);
+        self.draw_poke_window(ctx);
         self.draw_tag_conversion_window(ctx);
         self.draw_folder_conversion_window(ctx);
         self.draw_about_window(ctx);

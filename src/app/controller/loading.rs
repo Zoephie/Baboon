@@ -43,10 +43,21 @@ impl Baboon {
         // which is what replaces the old explicit clearing of document state.
         // Everything scoped to the new source must therefore be applied after
         // it, not before, or it would be wiped on the way in.
+        let runtime_source_changed =
+            matches!(&loaded.source, TagSource::IoStoreContainerSet { .. })
+                || self.kits[self.active]
+                    .source
+                    .as_ref()
+                    .is_some_and(|source| {
+                        matches!(&source.source, TagSource::IoStoreContainerSet { .. })
+                    });
         let initial_tag = loaded.initial_tag.take();
         let game = loaded.game.clone();
         if let Some(path) = recent_path {
             self.remember_recent_folder(path);
+        }
+        if runtime_source_changed {
+            self.reset_runtime_poke_source_state();
         }
         self.status = loaded_source_status(&loaded);
         self.install_loaded_source(loaded);

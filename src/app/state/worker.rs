@@ -27,6 +27,24 @@ pub(in crate::app) enum WorkerMessage {
         result: Result<TagFile, String>,
     },
     ExportFinished(Result<String, String>),
+    PokePreflightFinished {
+        kit: KitId,
+        key: String,
+        result: Result<PokePlan, String>,
+    },
+    PokeWriteFinished {
+        kit: KitId,
+        key: String,
+        result: Result<(LastPoke, PokeReport), String>,
+    },
+    PokeDirectFinished {
+        kit: KitId,
+        key: String,
+        result: Result<Option<(LastPoke, PokeReport)>, String>,
+    },
+    PokeUndoFinished {
+        result: Result<PokeReport, String>,
+    },
     CampaignProjectSaved {
         revision: u64,
         path: PathBuf,

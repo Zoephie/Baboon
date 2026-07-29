@@ -151,7 +151,7 @@ const FINGERPRINT_DEPTH: usize = 6;
 /// indistinguishable, so the aligner matched an arbitrary valid subsequence
 /// and every field below a deletion read as changed, each one shifted by
 /// exactly one position.
-fn element_fingerprint(element: Option<TagStruct<'_>>) -> u64 {
+pub(in crate::app) fn element_fingerprint(element: Option<TagStruct<'_>>) -> u64 {
     use std::hash::Hasher;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     match element {
@@ -164,7 +164,7 @@ fn element_fingerprint(element: Option<TagStruct<'_>>) -> u64 {
 /// An element by its own fixed fields only, ignoring everything nested. Two
 /// elements matching here are the same element even if something inside one of
 /// them was edited.
-fn shallow_fingerprint(element: Option<TagStruct<'_>>) -> u64 {
+pub(in crate::app) fn shallow_fingerprint(element: Option<TagStruct<'_>>) -> u64 {
     use std::hash::Hasher;
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     match element {

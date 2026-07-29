@@ -345,6 +345,13 @@ impl Baboon {
         let Some(index) = self.kit_index(id) else {
             return;
         };
+        let closing_campaign_evolved = self.kits[index]
+            .source
+            .as_ref()
+            .is_some_and(|source| matches!(&source.source, TagSource::IoStoreContainerSet { .. }));
+        if closing_campaign_evolved {
+            self.reset_runtime_poke_source_state();
+        }
         self.kits.remove(index);
         if self.kits.is_empty() {
             let kit = self.empty_kit();

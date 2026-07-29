@@ -121,6 +121,8 @@ use editor::*;
 mod audio;
 mod sound_extract;
 use sound_extract::*;
+mod runtime_poke;
+use runtime_poke::*;
 mod controller;
 mod ui;
 
@@ -218,6 +220,12 @@ pub struct Baboon {
     exported_mod: Option<ExportedMod>,
     /// Review of a pending Export Mod, before anything is written.
     mod_export: Option<ModExportDialog>,
+    /// Read-only preflight and confirmation for a transient CU2 runtime poke.
+    poke_dialog: Option<PokeDialog>,
+    /// One guarded, process-bound undo record. Never persisted to a project.
+    last_poke: Option<LastPoke>,
+    poke_direct_running: bool,
+    poke_undo_running: bool,
     about_open: bool,
     help_panel_tab: HelpPanelTab,
     help_docs: HelpDocsState,
@@ -436,6 +444,10 @@ impl Baboon {
             clear_stash_confirm: None,
             exported_mod: None,
             mod_export: None,
+            poke_dialog: None,
+            last_poke: None,
+            poke_direct_running: false,
+            poke_undo_running: false,
             about_open: false,
             help_panel_tab: HelpPanelTab::About,
             help_docs: HelpDocsState::load(),
