@@ -42,6 +42,29 @@ pub(in crate::app) struct RuntimeBuildProfile {
     string_id_builtin_table_rva: u64,
 }
 
+/// Every build the runtime poker knows how to address, newest first.
+///
+/// A build is only ever identified by the SHA-256 of the host executable and
+/// the tag module; the RVAs below were measured against those exact files and
+/// mean nothing for any other pair.
+const PROFILES: &[RuntimeBuildProfile] = &[NEXT_PROFILE, CU2_PROFILE];
+
+/// Tag module built 2026-07-25 (the update that shipped after CU2). The game
+/// embeds no build number, so the label carries the tag module's PE date.
+const NEXT_PROFILE: RuntimeBuildProfile = RuntimeBuildProfile {
+    label: "Steam post-CU2 (tag module 2026.07.25)",
+    host_sha256: "4D20DC56611B29CD710D591C86CF5DE55B914EB986838C42E719B82CCD367753",
+    dll_sha256: "82B8A3A006BA3F981D6857DC7F4E4E929AE5282587F31F92F77A3FA78F4B2DAC",
+    tag_table_pointer_rva: 0x0182_D1E8,
+    segment_table_rva: 0x02C2_CCC0,
+    string_id_storage_rva: 0x0135_7490,
+    string_id_storage_used_rva: 0x0135_7498,
+    string_id_strings_rva: 0x0135_74A0,
+    string_id_count_rva: 0x0135_74A8,
+    string_id_mapping_table_rva: 0x0135_74C0,
+    string_id_builtin_table_rva: 0x0082_F0A0,
+};
+
 const CU2_PROFILE: RuntimeBuildProfile = RuntimeBuildProfile {
     label: "Steam CU2 2026.06.26.1097863.1",
     host_sha256: "0670FAA751E2553940B90DF6BE43D3B0FF59EA87F22155CF3C3FE9D439367F1D",
@@ -55,6 +78,21 @@ const CU2_PROFILE: RuntimeBuildProfile = RuntimeBuildProfile {
     string_id_mapping_table_rva: 0x0135_84A0,
     string_id_builtin_table_rva: 0x0083_0060,
 };
+
+impl RuntimeBuildProfile {
+    fn rvas(&self) -> [u64; 8] {
+        [
+            self.tag_table_pointer_rva,
+            self.segment_table_rva,
+            self.string_id_storage_rva,
+            self.string_id_storage_used_rva,
+            self.string_id_strings_rva,
+            self.string_id_count_rva,
+            self.string_id_mapping_table_rva,
+            self.string_id_builtin_table_rva,
+        ]
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct RuntimeIdentity {
@@ -1532,6 +1570,7 @@ fn root_data_address(
 
 fn compile_plan(
     memory: &dyn RuntimeMemory,
+    profile: RuntimeBuildProfile,
     index: RuntimeTagIndex,
     string_ids: &RuntimeStringIdIndex,
     baseline: &TagFile,
@@ -1592,7 +1631,7 @@ fn compile_plan(
         })
         .collect();
     Ok(PokePlan {
-        profile: CU2_PROFILE,
+        profile,
         identity: index.identity.clone(),
         tag_path: normalized_path,
         group_tag,
@@ -1644,11 +1683,23 @@ mod platform {
     struct ProcessMemory {
         handle: OwnedHandle,
         identity: RuntimeIdentity,
+        profile: RuntimeBuildProfile,
         segment_table: u64,
     }
 
     static RUNTIME_INDEX_CACHE: OnceLock<Mutex<Option<RuntimeTagIndex>>> = OnceLock::new();
-    static VERIFIED_PROCESS_CACHE: OnceLock<Mutex<Option<(u32, u64, u64)>>> = OnceLock::new();
+    static VERIFIED_PROCESS_CACHE: OnceLock<Mutex<Option<VerifiedProcess>>> = OnceLock::new();
+
+    /// A process whose two binaries have already been hashed, so a repeat
+    /// attach can skip re-hashing 245 MiB. The profile is cached alongside the
+    /// identity because it is the result of that hashing.
+    #[derive(Clone, Copy)]
+    struct VerifiedProcess {
+        process_id: u32,
+        creation_time: u64,
+        module_base: u64,
+        profile: RuntimeBuildProfile,
+    }
 
     fn index_cache() -> &'static Mutex<Option<RuntimeTagIndex>> {
         RUNTIME_INDEX_CACHE.get_or_init(|| Mutex::new(None))
@@ -1660,22 +1711,40 @@ mod platform {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
-    fn verified_process_cache() -> &'static Mutex<Option<(u32, u64, u64)>> {
+    fn verified_process_cache() -> &'static Mutex<Option<VerifiedProcess>> {
         VERIFIED_PROCESS_CACHE.get_or_init(|| Mutex::new(None))
     }
 
-    fn verified_process_matches(process_id: u32, creation_time: u64, module_base: u64) -> bool {
-        *verified_process_cache()
+    fn verified_profile(
+        process_id: u32,
+        creation_time: u64,
+        module_base: u64,
+    ) -> Option<RuntimeBuildProfile> {
+        verified_process_cache()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            == Some((process_id, creation_time, module_base))
+            .filter(|verified| {
+                verified.process_id == process_id
+                    && verified.creation_time == creation_time
+                    && verified.module_base == module_base
+            })
+            .map(|verified| verified.profile)
     }
 
-    fn store_verified_process(process_id: u32, creation_time: u64, module_base: u64) {
+    fn store_verified_process(
+        process_id: u32,
+        creation_time: u64,
+        module_base: u64,
+        profile: RuntimeBuildProfile,
+    ) {
         *verified_process_cache()
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner) =
-            Some((process_id, creation_time, module_base));
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(VerifiedProcess {
+            process_id,
+            creation_time,
+            module_base,
+            profile,
+        });
     }
 
     fn cached_index(identity: &RuntimeIdentity) -> Option<RuntimeTagIndex> {
@@ -1927,29 +1996,24 @@ mod platform {
                 .map_err(|error| format!("could not open game process: {error}"))?
         });
         let creation_time = creation_time(handle.0)?;
-        if !verified_process_matches(process_id, creation_time, dll.base) {
-            clear_cached_index();
-            if sha256(&host.path)? != CU2_PROFILE.host_sha256
-                || sha256(&dll.path)? != CU2_PROFILE.dll_sha256
-            {
-                return Err("unsupported game build".to_owned());
+        let profile = match verified_profile(process_id, creation_time, dll.base) {
+            Some(profile) => profile,
+            None => {
+                clear_cached_index();
+                let host_sha256 = sha256(&host.path)?;
+                let dll_sha256 = sha256(&dll.path)?;
+                let profile = *PROFILES
+                    .iter()
+                    .find(|profile| {
+                        profile.host_sha256 == host_sha256 && profile.dll_sha256 == dll_sha256
+                    })
+                    .ok_or_else(|| "unsupported game build".to_owned())?;
+                store_verified_process(process_id, creation_time, dll.base, profile);
+                profile
             }
-            store_verified_process(process_id, creation_time, dll.base);
-        }
-        let table_pointer = checked_add(dll.base, CU2_PROFILE.tag_table_pointer_rva)?;
-        if [
-            CU2_PROFILE.tag_table_pointer_rva,
-            CU2_PROFILE.segment_table_rva,
-            CU2_PROFILE.string_id_storage_rva,
-            CU2_PROFILE.string_id_storage_used_rva,
-            CU2_PROFILE.string_id_strings_rva,
-            CU2_PROFILE.string_id_count_rva,
-            CU2_PROFILE.string_id_mapping_table_rva,
-            CU2_PROFILE.string_id_builtin_table_rva,
-        ]
-        .iter()
-        .any(|rva| *rva >= dll.size as u64)
-        {
+        };
+        let table_pointer = checked_add(dll.base, profile.tag_table_pointer_rva)?;
+        if profile.rvas().iter().any(|rva| *rva >= dll.size as u64) {
             return Err("unsupported tag module layout".to_owned());
         }
         let provisional = ProcessMemory {
@@ -1960,7 +2024,8 @@ mod platform {
                 module_base: dll.base,
                 tag_table: 0,
             },
-            segment_table: checked_add(dll.base, CU2_PROFILE.segment_table_rva)?,
+            profile,
+            segment_table: checked_add(dll.base, profile.segment_table_rva)?,
         };
         let tag_table = read_u64(&provisional, table_pointer)?;
         if tag_table == 0 {
@@ -2143,12 +2208,12 @@ mod platform {
         memory: &ProcessMemory,
     ) -> Result<RuntimeStringIdIndex, String> {
         let address = |rva| checked_add(memory.identity.module_base, rva);
-        let storage_address = read_u64(memory, address(CU2_PROFILE.string_id_storage_rva)?)?;
+        let storage_address = read_u64(memory, address(memory.profile.string_id_storage_rva)?)?;
         let storage_used =
-            read_u32(memory, address(CU2_PROFILE.string_id_storage_used_rva)?)? as usize;
-        let strings_address = read_u64(memory, address(CU2_PROFILE.string_id_strings_rva)?)?;
-        let count = read_u32(memory, address(CU2_PROFILE.string_id_count_rva)?)? as usize;
-        let table_address = read_u64(memory, address(CU2_PROFILE.string_id_mapping_table_rva)?)?;
+            read_u32(memory, address(memory.profile.string_id_storage_used_rva)?)? as usize;
+        let strings_address = read_u64(memory, address(memory.profile.string_id_strings_rva)?)?;
+        let count = read_u32(memory, address(memory.profile.string_id_count_rva)?)? as usize;
+        let table_address = read_u64(memory, address(memory.profile.string_id_mapping_table_rva)?)?;
         if storage_address == 0 || strings_address == 0 || table_address == 0 || count == 0 {
             return Err("runtime string id registry is not initialized".to_owned());
         }
@@ -2191,7 +2256,7 @@ mod platform {
             .checked_mul(8)
             .ok_or_else(|| "runtime string id pointer table size overflow".to_owned())?;
         let strings = memory.read(strings_address, strings_size)?;
-        let builtins_address = address(CU2_PROFILE.string_id_builtin_table_rva)?;
+        let builtins_address = address(memory.profile.string_id_builtin_table_rva)?;
         let builtins = memory.read(
             builtins_address,
             STRING_ID_BUILTIN_COUNT
@@ -2255,6 +2320,7 @@ mod platform {
         if let Some(index) = cached_index(&memory.identity) {
             match compile_plan(
                 &memory,
+                memory.profile,
                 index,
                 &string_ids,
                 &baseline,
@@ -2283,6 +2349,7 @@ mod platform {
         store_cached_index(index.clone());
         compile_plan(
             &memory,
+            memory.profile,
             index,
             &string_ids,
             &baseline,
