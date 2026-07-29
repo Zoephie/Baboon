@@ -1322,7 +1322,18 @@ impl Baboon {
     /// container index plus its `.uasset` container path — the package template
     /// for a new tag of the same group.
     pub(super) fn find_container_template(&self, group_tag: u32) -> Option<(usize, String)> {
-        let source = self.source()?;
+        self.find_container_template_in(self.active, group_tag)
+    }
+
+    /// A specific kit's template. Project recovery names its kit: the container
+    /// a stashed new tag is modelled on has to come from the source that tag
+    /// belongs to, not from whichever kit happens to be focused.
+    pub(super) fn find_container_template_in(
+        &self,
+        kit: usize,
+        group_tag: u32,
+    ) -> Option<(usize, String)> {
+        let source = self.kits.get(kit)?.source.as_ref()?;
         source
             .entries
             .iter()
@@ -1342,6 +1353,18 @@ impl Baboon {
     /// entries, rebuild the folder + group trees so it shows up, open it in a
     /// **dirty** tab, and select it. Used by New Tag and Import for CE.
     pub(super) fn register_in_memory_tag(&mut self, entry: TagEntry, tag: TagFile) {
+        let key = entry.key.clone();
+        self.stash_in_memory_tag(entry, tag);
+        self.kits[self.active].open_tag_pane(&key);
+        self.kits[self.active].selected_key = Some(key);
+    }
+
+    /// The same registration without opening or selecting the tag.
+    ///
+    /// Recovering a stashed new tag at startup has to put it back in the browser
+    /// without deciding what the user is looking at: adopting two of them would
+    /// otherwise open two tabs and steal the selection on every launch.
+    pub(super) fn stash_in_memory_tag(&mut self, entry: TagEntry, tag: TagFile) {
         let key = entry.key.clone();
         if let Some(source) = self.source_mut() {
             source.entries.retain(|existing| existing.key != key);
@@ -1369,10 +1392,9 @@ impl Baboon {
         {
             index.set_tag_dependencies(key.clone(), dependencies);
         }
-        self.kits[self.active].parsed_tags
-            .insert(key.clone(), TagDocument::modified(tag));
-        self.kits[self.active].open_tag_pane(&key);
-        self.kits[self.active].selected_key = Some(key.clone());
+        self.kits[self.active]
+            .parsed_tags
+            .insert(key, TagDocument::modified(tag));
     }
 
     pub(super) fn loaded_tags_root(&self) -> Option<PathBuf> {
@@ -3751,6 +3773,7 @@ impl Baboon {
             overwrite_acknowledged: false,
             expanded: HashSet::new(),
             diffs: HashMap::new(),
+            controls_height: 0.0,
         });
     }
 

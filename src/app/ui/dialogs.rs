@@ -1096,6 +1096,7 @@ impl Baboon {
         let mut set_all: Option<bool> = None;
         let mut toggled: Option<usize> = None;
         let mut expand_toggled: Option<String> = None;
+        let mut measured_controls: Option<f32> = None;
         let mut name_edit = dialog.name.clone();
 
         let review_only = dialog.review_only;
@@ -1110,7 +1111,13 @@ impl Baboon {
             .resizable(true)
             .default_width(1100.0)
             .default_height(640.0)
-            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            // Centred on first open, and draggable after that. `anchor` looks
+            // like the way to centre a window and is not: it calls
+            // `movable(false)` internally and re-pins the window every frame, so
+            // the review -- the one dialog a reader wants to slide aside to look
+            // at the tag underneath -- could be resized but never moved.
+            .pivot(egui::Align2::CENTER_CENTER)
+            .default_pos(ctx.screen_rect().center())
             .show(ctx, |ui| {
                 let Some(dialog) = self.mod_export.as_ref() else {
                     return;
@@ -1140,11 +1147,26 @@ impl Baboon {
                     }
                 });
                 ui.add_space(6.0);
-                // Grows with the window: the naming and buttons below need a
-                // fixed slice, and the list takes whatever is left, so making
-                // the dialog taller shows more of the diff rather than more
-                // empty space.
-                let list_height = (ui.available_height() - 120.0).max(120.0);
+                // Grows with the window: the naming and buttons below keep the
+                // slice they measured last frame, and the list takes whatever is
+                // left, so making the dialog taller shows more of the diff
+                // rather than more empty space.
+                //
+                // The slice is measured rather than assumed. It was 120px, and
+                // the block below is 141px once the overwrite warning and the
+                // in-game-folder note are both showing -- so the contents came
+                // out 21px taller than the window, every frame, and a resizable
+                // egui window expands to fit its contents and never shrinks
+                // back. The dialog grew until it was larger than the screen,
+                // showing the extra height as empty list.
+                let reserve = if dialog.controls_height > 0.0 {
+                    dialog.controls_height
+                } else {
+                    // First frame, nothing measured yet. Over-reserving costs
+                    // one frame of a shorter list; under-reserving is the bug.
+                    160.0
+                };
+                let list_height = (ui.available_height() - reserve).max(120.0);
                 egui::ScrollArea::vertical()
                     .max_height(list_height)
                     .auto_shrink([false, false])
@@ -1233,6 +1255,11 @@ impl Baboon {
                             }
                         }
                     });
+                // Everything from here down is what `reserve` covers. Taken from
+                // the list's own bottom rather than from the cursor, so the
+                // spacing between them is inside the figure -- a few pixels
+                // short is the same runaway, only slower.
+                let controls_top = ui.min_rect().bottom();
                 if review_only {
                     ui.add_space(10.0);
                     ui.horizontal(|ui| {
@@ -1247,6 +1274,7 @@ impl Baboon {
                             save_diagnostic = true;
                         }
                     });
+                    measured_controls = Some(ui.min_rect().bottom() - controls_top);
                     return;
                 }
                 ui.add_space(10.0);
@@ -1324,6 +1352,7 @@ impl Baboon {
                         save_diagnostic = true;
                     }
                 });
+                measured_controls = Some(ui.min_rect().bottom() - controls_top);
             });
 
         // Applied after the window closes its borrow of `self`.
@@ -1355,6 +1384,14 @@ impl Baboon {
                 if !dialog.expanded.remove(identity) {
                     dialog.expanded.insert(identity.clone());
                 }
+            }
+            if let Some(height) = measured_controls {
+                // The tallest seen, not the latest. The overwrite warning comes
+                // and goes as the name is typed, and a reserve that tracked it
+                // downwards would under-reserve the frame it comes back --
+                // which, since the window cannot shrink, is a bump it keeps.
+                // Over-reserving only costs a few pixels of list.
+                dialog.controls_height = dialog.controls_height.max(height.max(0.0));
             }
         }
         // Computed outside the window, and only for rows that are open and have
@@ -2495,6 +2532,7 @@ mod mod_export_tests {
             overwrite_acknowledged: false,
             expanded: Default::default(),
             diffs: Default::default(),
+            controls_height: 0.0,
         }
     }
 
