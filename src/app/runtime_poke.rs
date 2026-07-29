@@ -17,6 +17,15 @@ const MAX_RUNTIME_TAGS: usize = 0x1_0000;
 const MAX_RUNTIME_NAME: usize = 4096;
 const RUNTIME_PAGE_SIZE: u64 = 0x1000;
 const MAX_RUNTIME_NAME_POOL_SPAN: usize = 64 * 1024 * 1024;
+const STRING_ID_BUCKET_COUNT: usize = 1_046_528;
+const STRING_ID_MAX_ENTRIES: usize = 523_264;
+const STRING_ID_VALUE_SIZE: usize = 4;
+const STRING_ID_TABLE_HEADER_SIZE: usize = 0x38;
+const STRING_ID_NODE_SIZE: usize = 0x1c;
+const STRING_ID_STORAGE_CAPACITY: usize = 26_163_200;
+const STRING_ID_MAX_NAME_BYTES: usize = 127;
+const STRING_ID_BUILTIN_COUNT: usize = 2_678;
+const STRING_ID_SET_ZERO_BUILTIN_COUNT: u32 = 1_068;
 
 #[derive(Clone, Copy, Debug)]
 pub(in crate::app) struct RuntimeBuildProfile {
@@ -25,6 +34,12 @@ pub(in crate::app) struct RuntimeBuildProfile {
     dll_sha256: &'static str,
     tag_table_pointer_rva: u64,
     segment_table_rva: u64,
+    string_id_storage_rva: u64,
+    string_id_storage_used_rva: u64,
+    string_id_strings_rva: u64,
+    string_id_count_rva: u64,
+    string_id_mapping_table_rva: u64,
+    string_id_builtin_table_rva: u64,
 }
 
 const CU2_PROFILE: RuntimeBuildProfile = RuntimeBuildProfile {
@@ -33,6 +48,12 @@ const CU2_PROFILE: RuntimeBuildProfile = RuntimeBuildProfile {
     dll_sha256: "8EE1A37F6F0BC89241F47946546EDCA798962F81E2D06B386196BC75DE991705",
     tag_table_pointer_rva: 0x0182_E1E8,
     segment_table_rva: 0x02C2_DCC0,
+    string_id_storage_rva: 0x0135_8470,
+    string_id_storage_used_rva: 0x0135_8478,
+    string_id_strings_rva: 0x0135_8480,
+    string_id_count_rva: 0x0135_8488,
+    string_id_mapping_table_rva: 0x0135_84A0,
+    string_id_builtin_table_rva: 0x0083_0060,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -57,6 +78,25 @@ struct RuntimeTag {
 pub(in crate::app) struct RuntimeTagIndex {
     identity: RuntimeIdentity,
     tags: Vec<RuntimeTag>,
+}
+
+#[derive(Clone, Debug)]
+struct RuntimeStringIdIndex {
+    by_name: HashMap<Vec<u8>, u32>,
+}
+
+impl RuntimeStringIdIndex {
+    fn resolve(&self, name: &str) -> Result<u32, String> {
+        let Some(normalized) = normalize_string_id_name(name)? else {
+            return Ok(u32::MAX);
+        };
+        self.by_name.get(&normalized).copied().ok_or_else(|| {
+            let normalized = String::from_utf8_lossy(&normalized);
+            format!(
+                "'{normalized}' is not registered in the running game; it cannot be poked (restart into a build that loads it)"
+            )
+        })
+    }
 }
 
 impl RuntimeTagIndex {
@@ -429,6 +469,169 @@ fn field_debug_value(field: TagField<'_>) -> String {
     format!("{:?}", field.value())
 }
 
+fn string_id_text(field: TagField<'_>) -> Result<String, String> {
+    match field.value() {
+        Some(TagFieldData::StringId(value)) | Some(TagFieldData::OldStringId(value)) => {
+            Ok(value.string)
+        }
+        _ => Err(format!(
+            "missing string-id value at {}",
+            field.display_name()
+        )),
+    }
+}
+
+fn normalize_string_id_bytes(name: &[u8]) -> Result<Option<Vec<u8>>, String> {
+    if name.is_empty() {
+        return Ok(None);
+    }
+    if name.len() > STRING_ID_MAX_NAME_BYTES {
+        return Err(format!(
+            "string id name is longer than {STRING_ID_MAX_NAME_BYTES} bytes"
+        ));
+    }
+    let mut bytes = name.to_vec();
+    for byte in &mut bytes {
+        *byte = match *byte {
+            b'A'..=b'Z' => *byte + (b'a' - b'A'),
+            b' ' | b'-' => b'_',
+            byte => byte,
+        };
+    }
+    Ok(Some(bytes))
+}
+
+fn normalize_string_id_name(name: &str) -> Result<Option<Vec<u8>>, String> {
+    normalize_string_id_bytes(name.as_bytes())
+}
+
+fn string_id_storage_name(storage: &[u8], offset: u32) -> Result<&[u8], String> {
+    let offset =
+        usize::try_from(offset).map_err(|_| "string id storage offset overflow".to_owned())?;
+    let tail = storage
+        .get(offset..)
+        .ok_or_else(|| "string id storage offset is outside the name blob".to_owned())?;
+    let length = tail
+        .iter()
+        .take(STRING_ID_MAX_NAME_BYTES + 1)
+        .position(|byte| *byte == 0)
+        .ok_or_else(|| "runtime string id name is not terminated within 128 bytes".to_owned())?;
+    Ok(&tail[..length])
+}
+
+fn parse_runtime_string_id_table(
+    table_address: u64,
+    table: &[u8],
+    storage: &[u8],
+    expected_count: usize,
+) -> Result<RuntimeStringIdIndex, String> {
+    if table.len() < STRING_ID_TABLE_HEADER_SIZE {
+        return Err("runtime string id mapping table header is truncated".to_owned());
+    }
+    let bucket_count = u32::from_le_bytes(table[0..4].try_into().unwrap()) as usize;
+    let max_entries = u32::from_le_bytes(table[4..8].try_into().unwrap()) as usize;
+    let value_size = u64::from_le_bytes(table[8..16].try_into().unwrap()) as usize;
+    if bucket_count != STRING_ID_BUCKET_COUNT
+        || max_entries != STRING_ID_MAX_ENTRIES
+        || value_size != STRING_ID_VALUE_SIZE
+    {
+        return Err("unsupported runtime string id mapping-table layout".to_owned());
+    }
+    if expected_count == 0 {
+        return Err("runtime string id registry is not initialized".to_owned());
+    }
+    if expected_count > max_entries {
+        return Err("runtime string id count exceeds the mapping-table capacity".to_owned());
+    }
+    let buckets_size = bucket_count
+        .checked_mul(8)
+        .ok_or_else(|| "runtime string id table size overflow".to_owned())?;
+    let nodes_start = STRING_ID_TABLE_HEADER_SIZE
+        .checked_add(buckets_size)
+        .ok_or_else(|| "runtime string id table size overflow".to_owned())?;
+    let allocation_size = nodes_start
+        .checked_add(
+            max_entries
+                .checked_mul(STRING_ID_NODE_SIZE)
+                .ok_or_else(|| "runtime string id table size overflow".to_owned())?,
+        )
+        .ok_or_else(|| "runtime string id table size overflow".to_owned())?;
+    if table.len() != allocation_size {
+        return Err("runtime string id mapping-table allocation is truncated".to_owned());
+    }
+
+    let mut visited = HashSet::with_capacity(expected_count);
+    let mut by_name = HashMap::with_capacity(expected_count);
+    for bucket in 0..bucket_count {
+        let bucket_offset = STRING_ID_TABLE_HEADER_SIZE + bucket * 8;
+        let mut node_address =
+            u64::from_le_bytes(table[bucket_offset..bucket_offset + 8].try_into().unwrap());
+        while node_address != 0 {
+            if visited.len() >= max_entries || !visited.insert(node_address) {
+                return Err("runtime string id mapping table contains a corrupt chain".to_owned());
+            }
+            let node_offset = usize::try_from(
+                node_address
+                    .checked_sub(table_address)
+                    .ok_or_else(|| "runtime string id node precedes its allocation".to_owned())?,
+            )
+            .map_err(|_| "runtime string id node offset overflow".to_owned())?;
+            if node_offset < nodes_start
+                || (node_offset - nodes_start) % STRING_ID_NODE_SIZE != 0
+                || node_offset
+                    .checked_add(STRING_ID_NODE_SIZE)
+                    .is_none_or(|end| end > table.len())
+            {
+                return Err("runtime string id node is outside its allocation".to_owned());
+            }
+            let key = u64::from_le_bytes(table[node_offset..node_offset + 8].try_into().unwrap());
+            let id = u32::try_from(key)
+                .map_err(|_| "runtime string id mapping key exceeds 32 bits".to_owned())?;
+            node_address = u64::from_le_bytes(
+                table[node_offset + 0x10..node_offset + 0x18]
+                    .try_into()
+                    .unwrap(),
+            );
+            let storage_offset = u32::from_le_bytes(
+                table[node_offset + 0x18..node_offset + 0x1c]
+                    .try_into()
+                    .unwrap(),
+            );
+            let name = string_id_storage_name(storage, storage_offset).map_err(|error| {
+                let offset = storage_offset as usize;
+                let preview = storage
+                    .get(offset..offset.saturating_add(32).min(storage.len()))
+                    .unwrap_or_default();
+                format!(
+                    "{error} for string id 0x{id:08X} at storage offset 0x{storage_offset:08X}: {preview:02X?}"
+                )
+            })?;
+            let normalized = normalize_string_id_bytes(name)?.unwrap_or_default();
+            if normalized != name {
+                let name = String::from_utf8_lossy(name);
+                return Err(format!(
+                    "runtime string id registry contains an unnormalized name: {name}"
+                ));
+            }
+            if let Some(previous) = by_name.insert(normalized.clone(), id)
+                && previous != id
+            {
+                let normalized = String::from_utf8_lossy(&normalized);
+                return Err(format!(
+                    "runtime string id registry maps '{normalized}' to multiple ids"
+                ));
+            }
+        }
+    }
+    if visited.len() != expected_count || by_name.len() != expected_count {
+        return Err(format!(
+            "runtime string id registry count mismatch: expected {expected_count}, found {}",
+            by_name.len()
+        ));
+    }
+    Ok(RuntimeStringIdIndex { by_name })
+}
+
 fn resources_equal(before: TagResource<'_>, after: TagResource<'_>) -> bool {
     std::mem::discriminant(&before.kind()) == std::mem::discriminant(&after.kind())
         && before.inline_bytes() == after.inline_bytes()
@@ -637,6 +840,33 @@ fn append_patch(
     Ok(())
 }
 
+fn append_string_id_patch(
+    memory: &dyn RuntimeMemory,
+    patches: &mut Vec<PokePatch>,
+    prior: Option<&LastPoke>,
+    string_ids: &RuntimeStringIdIndex,
+    address: u64,
+    before: &str,
+    after: &str,
+    path: &str,
+) -> Result<(), String> {
+    let expected = string_ids
+        .resolve(before)
+        .map_err(|error| format!("shipped {error} at {path}"))?;
+    let edited = string_ids
+        .resolve(after)
+        .map_err(|error| format!("{error} at {path}"))?;
+    append_patch(
+        memory,
+        patches,
+        prior,
+        address,
+        &expected.to_le_bytes(),
+        &edited.to_le_bytes(),
+        path,
+    )
+}
+
 fn rollback<M: RuntimeWriteMemory + ?Sized>(
     memory: &M,
     completed: &[(u64, Vec<u8>)],
@@ -836,6 +1066,7 @@ fn undo_transaction<M: RuntimeWriteMemory + ?Sized>(
 struct Planner<'a> {
     memory: &'a dyn RuntimeMemory,
     index: &'a RuntimeTagIndex,
+    string_ids: &'a RuntimeStringIdIndex,
     prior: Option<&'a LastPoke>,
     patches: Vec<PokePatch>,
 }
@@ -899,12 +1130,49 @@ impl Planner<'_> {
                         return Err(format!("pageable-resource edit cannot be poked at {path}"));
                     }
                 }
+                TagFieldType::StringId | TagFieldType::OldStringId => {
+                    let before = string_id_text(before_field)?;
+                    let after = string_id_text(after_field)?;
+                    if before != after {
+                        append_string_id_patch(
+                            self.memory,
+                            &mut self.patches,
+                            self.prior,
+                            self.string_ids,
+                            field_address,
+                            &before,
+                            &after,
+                            &path,
+                        )?;
+                    } else if let Some((_, original)) = self.prior.and_then(|last| {
+                        last.plan
+                            .patches
+                            .iter()
+                            .enumerate()
+                            .find(|(_, patch)| {
+                                patch.address == field_address
+                                    && patch.field_path == path
+                                    && patch.edited.len() == 4
+                            })
+                            .and_then(|(index, patch)| {
+                                last.originals.get(index).map(|original| (patch, original))
+                            })
+                    }) {
+                        append_patch(
+                            self.memory,
+                            &mut self.patches,
+                            self.prior,
+                            field_address,
+                            original,
+                            original,
+                            &path,
+                        )?;
+                    }
+                }
                 TagFieldType::ApiInterop
                 | TagFieldType::VertexBuffer
                 | TagFieldType::Pointer
                 | TagFieldType::NonCacheRuntimeValue
-                | TagFieldType::StringId
-                | TagFieldType::OldStringId
                 | TagFieldType::Custom
                 | TagFieldType::Unknown => {
                     let before = raw_span(baseline, offset, span)?;
@@ -1265,6 +1533,7 @@ fn root_data_address(
 fn compile_plan(
     memory: &dyn RuntimeMemory,
     index: RuntimeTagIndex,
+    string_ids: &RuntimeStringIdIndex,
     baseline: &TagFile,
     edited: &TagFile,
     tag_path: &str,
@@ -1288,6 +1557,7 @@ fn compile_plan(
     let mut planner = Planner {
         memory,
         index: &index,
+        string_ids,
         prior,
         patches: Vec::new(),
     };
@@ -1667,8 +1937,18 @@ mod platform {
             store_verified_process(process_id, creation_time, dll.base);
         }
         let table_pointer = checked_add(dll.base, CU2_PROFILE.tag_table_pointer_rva)?;
-        if CU2_PROFILE.tag_table_pointer_rva >= dll.size as u64
-            || CU2_PROFILE.segment_table_rva >= dll.size as u64
+        if [
+            CU2_PROFILE.tag_table_pointer_rva,
+            CU2_PROFILE.segment_table_rva,
+            CU2_PROFILE.string_id_storage_rva,
+            CU2_PROFILE.string_id_storage_used_rva,
+            CU2_PROFILE.string_id_strings_rva,
+            CU2_PROFILE.string_id_count_rva,
+            CU2_PROFILE.string_id_mapping_table_rva,
+            CU2_PROFILE.string_id_builtin_table_rva,
+        ]
+        .iter()
+        .any(|rva| *rva >= dll.size as u64)
         {
             return Err("unsupported tag module layout".to_owned());
         }
@@ -1859,6 +2139,100 @@ mod platform {
         Ok(())
     }
 
+    fn build_runtime_string_id_index(
+        memory: &ProcessMemory,
+    ) -> Result<RuntimeStringIdIndex, String> {
+        let address = |rva| checked_add(memory.identity.module_base, rva);
+        let storage_address = read_u64(memory, address(CU2_PROFILE.string_id_storage_rva)?)?;
+        let storage_used =
+            read_u32(memory, address(CU2_PROFILE.string_id_storage_used_rva)?)? as usize;
+        let strings_address = read_u64(memory, address(CU2_PROFILE.string_id_strings_rva)?)?;
+        let count = read_u32(memory, address(CU2_PROFILE.string_id_count_rva)?)? as usize;
+        let table_address = read_u64(memory, address(CU2_PROFILE.string_id_mapping_table_rva)?)?;
+        if storage_address == 0 || strings_address == 0 || table_address == 0 || count == 0 {
+            return Err("runtime string id registry is not initialized".to_owned());
+        }
+        if storage_used == 0 || storage_used > STRING_ID_STORAGE_CAPACITY {
+            return Err("runtime string id name storage has an invalid size".to_owned());
+        }
+        if count < STRING_ID_BUILTIN_COUNT || count > STRING_ID_MAX_ENTRIES {
+            return Err(
+                "runtime string id registry count is outside the supported range".to_owned(),
+            );
+        }
+
+        let header = memory.read(table_address, STRING_ID_TABLE_HEADER_SIZE)?;
+        let bucket_count = u32::from_le_bytes(header[0..4].try_into().unwrap()) as usize;
+        let max_entries = u32::from_le_bytes(header[4..8].try_into().unwrap()) as usize;
+        let value_size = u64::from_le_bytes(header[8..16].try_into().unwrap()) as usize;
+        if bucket_count != STRING_ID_BUCKET_COUNT
+            || max_entries != STRING_ID_MAX_ENTRIES
+            || value_size != STRING_ID_VALUE_SIZE
+        {
+            return Err("unsupported runtime string id mapping-table layout".to_owned());
+        }
+        let allocation_size = STRING_ID_TABLE_HEADER_SIZE
+            .checked_add(
+                bucket_count
+                    .checked_mul(8)
+                    .ok_or_else(|| "runtime string id table size overflow".to_owned())?,
+            )
+            .and_then(|size| {
+                max_entries
+                    .checked_mul(STRING_ID_NODE_SIZE)
+                    .and_then(|nodes| size.checked_add(nodes))
+            })
+            .ok_or_else(|| "runtime string id table size overflow".to_owned())?;
+        let table = memory.read(table_address, allocation_size)?;
+        let storage = memory.read(storage_address, storage_used)?;
+        let index = parse_runtime_string_id_table(table_address, &table, &storage, count)?;
+
+        let strings_size = count
+            .checked_mul(8)
+            .ok_or_else(|| "runtime string id pointer table size overflow".to_owned())?;
+        let strings = memory.read(strings_address, strings_size)?;
+        let builtins_address = address(CU2_PROFILE.string_id_builtin_table_rva)?;
+        let builtins = memory.read(
+            builtins_address,
+            STRING_ID_BUILTIN_COUNT
+                .checked_mul(16)
+                .ok_or_else(|| "runtime built-in string id table size overflow".to_owned())?,
+        )?;
+        for registration_index in 0..count {
+            let pointer_offset = registration_index * 8;
+            let name_pointer = u64::from_le_bytes(
+                strings[pointer_offset..pointer_offset + 8]
+                    .try_into()
+                    .unwrap(),
+            );
+            let storage_offset =
+                u32::try_from(name_pointer.checked_sub(storage_address).ok_or_else(|| {
+                    "runtime string id pointer precedes the name storage".to_owned()
+                })?)
+                .map_err(|_| "runtime string id pointer is outside the name storage".to_owned())?;
+            let name = string_id_storage_name(&storage, storage_offset)?;
+            let expected = if registration_index < STRING_ID_BUILTIN_COUNT {
+                let offset = registration_index * 16;
+                u32::from_le_bytes(builtins[offset..offset + 4].try_into().unwrap())
+            } else {
+                STRING_ID_SET_ZERO_BUILTIN_COUNT
+                    .checked_add(
+                        u32::try_from(registration_index - STRING_ID_BUILTIN_COUNT)
+                            .map_err(|_| "dynamic string id index overflow".to_owned())?,
+                    )
+                    .ok_or_else(|| "dynamic string id index overflow".to_owned())?
+            };
+            let normalized = normalize_string_id_bytes(name)?.unwrap_or_default();
+            if index.by_name.get(&normalized) != Some(&expected) {
+                let normalized = String::from_utf8_lossy(&normalized);
+                return Err(format!(
+                    "runtime string id registration cross-check failed at index {registration_index} ({normalized})"
+                ));
+            }
+        }
+        Ok(index)
+    }
+
     pub(super) fn prepare(
         source: TagSource,
         entries: Vec<TagEntry>,
@@ -1877,10 +2251,12 @@ mod platform {
         }
         validate_poke_structure(baseline.root(), edited.root(), "")?;
         let (memory, _) = attach(false)?;
+        let string_ids = build_runtime_string_id_index(&memory)?;
         if let Some(index) = cached_index(&memory.identity) {
             match compile_plan(
                 &memory,
                 index,
+                &string_ids,
                 &baseline,
                 &edited,
                 &entry.display_path,
@@ -1908,6 +2284,7 @@ mod platform {
         compile_plan(
             &memory,
             index,
+            &string_ids,
             &baseline,
             &edited,
             &entry.display_path,
@@ -1958,6 +2335,19 @@ mod platform {
     pub(super) fn manual_read_only_discovery() -> Result<usize, String> {
         let (memory, _) = attach(false)?;
         discover_index(&memory).map(|index| index.tags.len())
+    }
+
+    #[cfg(test)]
+    pub(super) fn manual_read_only_string_id_index_diagnostic() -> Result<String, String> {
+        let (memory, _) = attach(false)?;
+        let index = build_runtime_string_id_index(&memory)?;
+        let warthog = index.resolve("warthog_d")?;
+        let fork = index.resolve("fork_d")?;
+        Ok(format!(
+            "{} registered string ids; warthog_d=0x{warthog:08X}; fork_d=0x{fork:08X}; all {} built-ins cross-checked",
+            index.by_name.len(),
+            STRING_ID_BUILTIN_COUNT
+        ))
     }
 
     #[cfg(test)]

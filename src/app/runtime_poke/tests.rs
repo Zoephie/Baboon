@@ -401,6 +401,110 @@ fn trusted_previous_poke_can_be_replaced_or_reverted() {
 }
 
 #[test]
+fn string_id_patch_uses_verified_runtime_values() {
+    let memory = MockMemory::new(0x0000_17d2u32.to_le_bytes().to_vec());
+    let string_ids = RuntimeStringIdIndex {
+        by_name: HashMap::from([
+            (b"warthog_d".to_vec(), 0x0000_17d2),
+            (b"fork_d".to_vec(), 0x0000_1677),
+        ]),
+    };
+    let mut patches = Vec::new();
+    append_string_id_patch(
+        &memory,
+        &mut patches,
+        None,
+        &string_ids,
+        0,
+        "warthog_d",
+        "fork_d",
+        "unit/seats[0]/label",
+    )
+    .unwrap();
+
+    assert_eq!(patches.len(), 1);
+    assert_eq!(patches[0].expected, 0x0000_17d2u32.to_le_bytes());
+    assert_eq!(patches[0].edited, 0x0000_1677u32.to_le_bytes());
+}
+
+#[test]
+fn string_id_patch_rejects_unloaded_or_conflicting_values() {
+    let string_ids = RuntimeStringIdIndex {
+        by_name: HashMap::from([(b"warthog_d".to_vec(), 0x0000_17d2)]),
+    };
+    let memory = MockMemory::new(0x0000_17d2u32.to_le_bytes().to_vec());
+    let missing = append_string_id_patch(
+        &memory,
+        &mut Vec::new(),
+        None,
+        &string_ids,
+        0,
+        "warthog_d",
+        "not_loaded",
+        "label",
+    )
+    .unwrap_err();
+    assert!(missing.contains("is not registered"), "{missing}");
+
+    let string_ids = RuntimeStringIdIndex {
+        by_name: HashMap::from([
+            (b"warthog_d".to_vec(), 0x0000_17d2),
+            (b"fork_d".to_vec(), 0x0000_1677),
+        ]),
+    };
+    let memory = MockMemory::new(0x0000_2222u32.to_le_bytes().to_vec());
+    let conflict = append_string_id_patch(
+        &memory,
+        &mut Vec::new(),
+        None,
+        &string_ids,
+        0,
+        "warthog_d",
+        "fork_d",
+        "label",
+    )
+    .unwrap_err();
+    assert!(conflict.contains("live value conflicts"), "{conflict}");
+}
+
+#[test]
+fn string_id_names_use_engine_normalization_and_none_encoding() {
+    let string_ids = RuntimeStringIdIndex {
+        by_name: HashMap::from([(b"fork_d".to_vec(), 0x0000_1677)]),
+    };
+    assert_eq!(string_ids.resolve("FORK-D").unwrap(), 0x0000_1677);
+    assert_eq!(string_ids.resolve("fork d").unwrap(), 0x0000_1677);
+    assert_eq!(string_ids.resolve("").unwrap(), u32::MAX);
+    assert!(string_ids.resolve(&"x".repeat(128)).is_err());
+}
+
+#[test]
+fn engine_string_id_hashtable_parser_walks_nodes_and_rejects_corrupt_chains() {
+    let table_address = 0x0000_0001_0000_0000u64;
+    let buckets_size = STRING_ID_BUCKET_COUNT * 8;
+    let nodes_start = STRING_ID_TABLE_HEADER_SIZE + buckets_size;
+    let allocation_size = nodes_start + STRING_ID_MAX_ENTRIES * STRING_ID_NODE_SIZE;
+    let mut table = vec![0u8; allocation_size];
+    table[0..4].copy_from_slice(&(STRING_ID_BUCKET_COUNT as u32).to_le_bytes());
+    table[4..8].copy_from_slice(&(STRING_ID_MAX_ENTRIES as u32).to_le_bytes());
+    table[8..16].copy_from_slice(&(STRING_ID_VALUE_SIZE as u64).to_le_bytes());
+
+    let node_address = table_address + nodes_start as u64;
+    table[STRING_ID_TABLE_HEADER_SIZE..STRING_ID_TABLE_HEADER_SIZE + 8]
+        .copy_from_slice(&node_address.to_le_bytes());
+    table[nodes_start..nodes_start + 8].copy_from_slice(&0x0000_1677u64.to_le_bytes());
+    table[nodes_start + 0x18..nodes_start + 0x1c].copy_from_slice(&0u32.to_le_bytes());
+
+    let parsed = parse_runtime_string_id_table(table_address, &table, b"fork_d\0", 1).unwrap();
+    assert_eq!(parsed.by_name.len(), 1);
+    assert_eq!(parsed.resolve("fork_d").unwrap(), 0x0000_1677);
+
+    table[nodes_start + 0x10..nodes_start + 0x18].copy_from_slice(&node_address.to_le_bytes());
+    let error = parse_runtime_string_id_table(table_address, &table, b"fork_d\0", 1).unwrap_err();
+    assert!(error.contains("corrupt chain"), "{error}");
+}
+
+#[test]
 fn previous_poke_does_not_allow_an_unrelated_live_value() {
     let prior = last_poke_for_test(
         PokePatch {
@@ -547,6 +651,16 @@ fn manual_cu2_reuses_validated_runtime_address_cache_without_writing() {
 
 #[cfg(windows)]
 #[test]
+#[ignore = "requires the exact supported Campaign Evolved CU2 build with a mission loaded"]
+fn manual_cu2_reads_and_cross_checks_engine_string_id_registry_without_writing() {
+    eprintln!(
+        "{}",
+        platform::manual_read_only_string_id_index_diagnostic().unwrap()
+    );
+}
+
+#[cfg(windows)]
+#[test]
 #[ignore = "temporarily writes and immediately restores the live CU2 assault-rifle projectile reference"]
 fn manual_cu2_pokes_and_undoes_assault_rifle_projectile_reference() {
     fn find_reference_path(st: TagStruct<'_>, parent: &str, wanted_name: &str) -> Option<String> {
@@ -675,4 +789,74 @@ fn manual_cu2_pokes_and_undoes_assault_rifle_projectile_reference() {
     assert!(first_report.written_fields <= 1);
     assert_eq!(second_report.written_fields, 1);
     assert_eq!(undo_report.written_fields, 1);
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "requires Campaign Evolved containers and the exact supported CU2 build"]
+fn manual_cu2_pokes_and_undoes_loaded_string_id() {
+    use std::time::Instant;
+
+    let paks = std::env::var_os("CE_PAKS")
+        .map(PathBuf::from)
+        .expect("set CE_PAKS to Meteorite/Content/Paks");
+    let definitions = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("definitions");
+    let names = TagNameIndex::load_from_definitions(&definitions);
+    let loaded = crate::source::load_iostore_container_set(paks, &names, &definitions)
+        .expect("mount Campaign Evolved containers");
+    let vehicle_group = u32::from_be_bytes(*b"vehi");
+    let entry = loaded
+        .entries
+        .iter()
+        .find(|entry| {
+            entry.group_tag == vehicle_group
+                && normalize_tag_path(&entry.display_path)
+                    == "objects/vehicles/human/warthog/warthog"
+        })
+        .cloned()
+        .expect("find warthog vehicle tag");
+    let baseline = read_entry(&loaded.source, &entry).expect("read warthog vehicle tag");
+    let original_bytes = baseline
+        .write_to_bytes()
+        .expect("snapshot shipped warthog tag");
+    let mut edited = TagFile::read_from_bytes(&original_bytes).expect("copy warthog vehicle tag");
+    apply_field_edit(&mut edited, "unit#0/seats#79[0]/label#1", "fork_d")
+        .expect("edit warthog driver seat label");
+
+    platform::clear_runtime_cache();
+    let started = Instant::now();
+    let plan = platform::prepare(
+        loaded.source.clone(),
+        loaded.entries.clone(),
+        entry.clone(),
+        edited.write_to_bytes().expect("snapshot warthog tag"),
+        None,
+    )
+    .expect("prepare warthog string-id poke");
+    let preflight = started.elapsed();
+    assert_eq!(plan.patches.len(), 1);
+    assert_eq!(plan.byte_count(), 4);
+    assert_eq!(plan.patches[0].expected, 0x0000_17d2u32.to_le_bytes());
+    assert_eq!(plan.patches[0].edited, 0x0000_1677u32.to_le_bytes());
+
+    let (first_last, first_report) =
+        platform::execute(plan).expect("poke warthog driver seat label");
+    let revert = platform::prepare(
+        loaded.source.clone(),
+        loaded.entries.clone(),
+        entry,
+        original_bytes,
+        Some(first_last),
+    )
+    .expect("prepare chained string-id revert");
+    assert_eq!(revert.patches.len(), 1);
+    assert_eq!(revert.patches[0].expected, 0x0000_1677u32.to_le_bytes());
+    assert_eq!(revert.patches[0].edited, 0x0000_17d2u32.to_le_bytes());
+    let (last, revert_report) =
+        platform::execute(revert).expect("restore warthog driver seat label");
+    let undo = platform::undo(last).expect("verify chained string-id undo");
+    assert_eq!(first_report.written_fields, 1);
+    assert_eq!(revert_report.written_fields, 1);
+    assert_eq!(undo.written_fields, 0);
+    eprintln!("cold string-id preflight: {}ms", preflight.as_millis());
 }
