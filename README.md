@@ -497,3 +497,17 @@ editing-kit `tags/` directory), or a Halo 4 monolithic cache (`blob_index.dat`).
 Browse or search in the left panel, click a tag to open it in a tab, and edit
 inline. Save loose little-endian tags back to disk from the editor. The toolbar
 buttons launch the kit's Sapien / tag_test and Blender.
+
+Tags can also be opened from a terminal by passing an editing-kit flag followed
+by one or more tag paths:
+
+```text
+Baboon.exe -HREK objects/weapons/assault_rifle/assault_rifle.weapon objects/vehicles/warthog/warthog.vehicle
+```
+
+Supported flags are `-HCEEK`/`-H1EK`, `-H2EK`, `-H3EK`, `-H3ODSTEK`, `-HREK`,
+`-H4EK`, and `-H2AMPEK`/`-H2AEK`; flags are case-insensitive. Relative paths
+are resolved beneath the configured editing kit's `tags` folder. Absolute paths
+are accepted only when they point inside that same folder. Quote any path that
+contains spaces. A command-line launch ignores the previous session and opens
+only the requested tags.

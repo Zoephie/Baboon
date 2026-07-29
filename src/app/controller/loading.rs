@@ -23,6 +23,7 @@ impl Baboon {
             Ok(loaded) => loaded,
             Err(error) => {
                 self.kits[self.active].pending_restore_tags.clear();
+                self.kits[self.active].pending_launch_tags = None;
                 self.status = error;
                 return false;
             }
@@ -93,6 +94,7 @@ impl Baboon {
             self.schedule_next_entry_index_refresh(ctx);
         }
         self.finish_pending_session_restore(ctx.clone());
+        self.finish_pending_command_line_launch(ctx.clone());
         false
     }
 

@@ -22,6 +22,7 @@ unsafe extern "system" {
 
 fn main() -> Result<()> {
     set_windows_app_user_model_id();
+    let startup_arguments = app::parse_startup_arguments(std::env::args_os().skip(1));
     let window_state::StartupWindowState { restored, tracker } =
         window_state::load_startup_state();
     let mut viewport = eframe::egui::ViewportBuilder::default()
@@ -52,7 +53,13 @@ fn main() -> Result<()> {
     eframe::run_native(
         "Baboon",
         native_options,
-        Box::new(move |cc| Ok(Box::new(app::Baboon::new(cc, tracker)))),
+        Box::new(move |cc| {
+            Ok(Box::new(app::Baboon::new(
+                cc,
+                tracker,
+                startup_arguments,
+            )))
+        }),
     )
     .map_err(|e| anyhow::anyhow!("{e}"))
 }

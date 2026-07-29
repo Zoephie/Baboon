@@ -144,6 +144,9 @@ pub(super) struct Kit {
     /// finishes loading. Held per kit rather than in one shared slot so
     /// several kits can restore concurrently and finish in any order.
     pub(super) pending_restore_tags: Vec<LastSessionTag>,
+    /// Loose tag paths requested on the command line, drained after this kit's
+    /// editing-kit source finishes loading.
+    pub(super) pending_launch_tags: Option<Vec<PathBuf>>,
 }
 
 impl Kit {
@@ -185,6 +188,7 @@ impl Kit {
             campaign_project: None,
             pending_campaign_project: None,
             pending_restore_tags: Vec::new(),
+            pending_launch_tags: None,
         }
     }
 
@@ -409,6 +413,7 @@ impl Baboon {
         let requested_path = self.kits[index].requested_path.clone();
         let profile = self.kits[index].profile.clone();
         let pending_restore_tags = std::mem::take(&mut self.kits[index].pending_restore_tags);
+        let pending_launch_tags = self.kits[index].pending_launch_tags.take();
         let pending_campaign_project =
             std::mem::take(&mut self.kits[index].pending_campaign_project);
         // The browser view belongs to the workspace, not to the source in it:
@@ -424,6 +429,7 @@ impl Baboon {
             browser_mode,
             browser_sort,
             pending_restore_tags,
+            pending_launch_tags,
             pending_campaign_project,
             ..Kit::empty(id, self.default_names.clone())
         };

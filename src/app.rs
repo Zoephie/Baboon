@@ -66,6 +66,9 @@ mod game_assets;
 use game_assets::*;
 mod editing_kits;
 use editing_kits::*;
+mod launch;
+pub(crate) use launch::{parse_startup_arguments, StartupArguments};
+use launch::{resolve_launch_tag_entries, CommandLineLaunch};
 mod style;
 use style::*;
 mod state;
@@ -358,6 +361,7 @@ impl Baboon {
     pub fn new(
         cc: &eframe::CreationContext<'_>,
         window_state: crate::window_state::WindowStateTracker,
+        startup_arguments: StartupArguments,
     ) -> Self {
         let storage = crate::storage::initialize();
         cc.egui_ctx.set_fonts(foundation_fonts());
@@ -365,14 +369,14 @@ impl Baboon {
         egui_extras::install_image_loaders(&cc.egui_ctx);
         let prefs = load_gui_prefs();
         let terminal_open_games = load_terminal_open_games();
-        let first_run_wizard =
-            (!load_first_run_complete()).then(|| FirstRunWizardState::new(storage.mode));
+        let suppress_startup_popups = startup_arguments.suppresses_startup_popups();
+        let first_run_wizard = (!suppress_startup_popups && !load_first_run_complete())
+            .then(|| FirstRunWizardState::new(storage.mode));
         set_dark_mode(prefs.dark_mode);
         cc.egui_ctx.set_visuals(foundation_visuals());
         let names = TagNameIndex::load_from_definitions(&locate_definitions_root());
         let (tx, rx) = mpsc::channel();
-        let last_session = first_run_wizard
-            .is_none()
+        let last_session = (!suppress_startup_popups && first_run_wizard.is_none())
             .then(load_last_session)
             .flatten()
             .and_then(LastOpenedWindowsPrompt::from_session);
@@ -563,6 +567,15 @@ impl Baboon {
         };
         if let Some(kits) = auto_restore_session {
             app.begin_last_session_restore(kits, cc.egui_ctx.clone());
+        }
+        match startup_arguments {
+            StartupArguments::Normal => {}
+            StartupArguments::Launch(launch) => {
+                app.begin_command_line_launch(launch, cc.egui_ctx.clone())
+            }
+            StartupArguments::Invalid(error) => {
+                app.status = format!("Command line: {error}");
+            }
         }
         if app.should_check_updates_on_startup() {
             app.begin_check_for_updates(cc.egui_ctx.clone(), true);

@@ -5785,6 +5785,109 @@ impl Baboon {
         }
     }
 
+    pub(super) fn begin_command_line_launch(
+        &mut self,
+        launch: CommandLineLaunch,
+        ctx: egui::Context,
+    ) {
+        let Some(shortcut) = EDITING_KIT_SHORTCUTS
+            .iter()
+            .copied()
+            .find(|shortcut| shortcut.game == launch.game)
+        else {
+            self.status = format!(
+                "Command line: {} is not a supported MCC editing kit",
+                launch.kit_label
+            );
+            return;
+        };
+        let Some(path) = self.editing_kit_paths.get(shortcut.game).cloned() else {
+            self.status = format!(
+                "Command line: set the {} path in Settings before launching tags",
+                launch.kit_label
+            );
+            return;
+        };
+        let status = self
+            .editing_kit_validation
+            .refresh_builtin(shortcut, Some(&path));
+        let Some(layout) = status.layout().cloned() else {
+            self.status = format!("Command line: {}", status.message());
+            return;
+        };
+        self.kits[self.active].pending_launch_tags = Some(launch.tag_paths);
+        self.begin_load_editing_kit_layout(
+            layout,
+            shortcut.game.to_owned(),
+            game_display_name(shortcut.game).to_owned(),
+            None,
+            ctx,
+        );
+    }
+
+    fn finish_pending_command_line_launch(&mut self, ctx: egui::Context) {
+        let Some(requested) = self.kits[self.active].pending_launch_tags.take() else {
+            return;
+        };
+        // Command-line startup deliberately remains popup-free. Indexing still
+        // runs in the background and remains visible in the status bar.
+        self.show_entry_index_wait_notice = false;
+        let Some(source) = self.source() else {
+            self.status = "Command line: the editing-kit source did not load".to_owned();
+            return;
+        };
+        let TagSource::LooseFolder { root, .. } = &source.source else {
+            self.status = "Command line: the selected source is not a loose editing kit".to_owned();
+            return;
+        };
+        let root = root.clone();
+        let names = source.names.clone();
+        let resolved = match resolve_launch_tag_entries(&root, &requested, &names) {
+            Ok(resolved) => resolved,
+            Err(error) => {
+                self.status = format!("Command line: {error}");
+                return;
+            }
+        };
+        let errors = resolved.errors;
+        let entries = resolved.entries;
+        if let Some(source) = self.source_mut() {
+            for entry in &entries {
+                if !source
+                    .entries
+                    .iter()
+                    .any(|existing| existing.key == entry.key)
+                {
+                    source.entries.push(entry.clone());
+                }
+                if !source.all_entries.is_empty()
+                    && !source
+                        .all_entries
+                        .iter()
+                        .any(|existing| existing.key == entry.key)
+                {
+                    source.all_entries.push(entry.clone());
+                }
+            }
+            if !source.all_entries.is_empty() {
+                source
+                    .all_entries
+                    .sort_by(|a, b| a.display_path.cmp(&b.display_path));
+                source.group_tree = crate::source::build_group_tree(&source.all_entries);
+            }
+        }
+        for entry in &entries {
+            self.select_entry(entry.key.clone(), ctx.clone());
+        }
+        self.status = match (entries.len(), errors.len()) {
+            (opened, 0) => format!("Opened {opened} command-line tag(s)"),
+            (opened, skipped) => format!(
+                "Opened {opened} command-line tag(s); skipped {skipped}: {}",
+                errors.join("; ")
+            ),
+        };
+    }
+
     pub(super) fn load_custom_editing_kit_profile(
         &mut self,
         profile: CustomEditingKitProfile,
