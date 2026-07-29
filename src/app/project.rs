@@ -127,6 +127,18 @@ pub(super) struct ActiveCampaignProject {
     pub(super) save_in_flight: Option<u64>,
     pub(super) write_lock: Arc<Mutex<()>>,
     pub(super) latest_write_revision: Arc<AtomicU64>,
+    /// Stashed *new* tags adopted from the recovery file that still have no
+    /// entry in the browser.
+    ///
+    /// A new tag exists only in memory, so a recovered overlay is all that is
+    /// left of one -- and adopting the file's overlays without recreating those
+    /// entries left the tag nowhere: absent from the tree, unresolvable, and
+    /// listed in Export Mod as "not in this source" forever, because the
+    /// overlays table is written back out every autosave. Held as a queue rather
+    /// than adopted on the spot: the recovery file is picked up as soon as the
+    /// source mounts, which can be before the names and container templates the
+    /// entry needs are loaded.
+    pub(super) pending_new_overlays: Vec<CampaignProjectOverlay>,
 }
 
 impl ActiveCampaignProject {
@@ -143,6 +155,7 @@ impl ActiveCampaignProject {
             save_in_flight: None,
             write_lock: Arc::new(Mutex::new(())),
             latest_write_revision: Arc::new(AtomicU64::new(0)),
+            pending_new_overlays: Vec::new(),
         }
     }
 
@@ -169,6 +182,12 @@ impl ActiveCampaignProject {
             save_in_flight: None,
             write_lock: Arc::new(Mutex::new(())),
             latest_write_revision: Arc::new(AtomicU64::new(0)),
+            pending_new_overlays: snapshot
+                .overlays
+                .values()
+                .filter(|overlay| overlay.kind == CampaignProjectTagKind::New)
+                .cloned()
+                .collect(),
         }
     }
 }
@@ -529,6 +548,116 @@ impl Baboon {
         }
     }
 
+    /// Rebuild the browser entry for a stashed new tag, and parse its bytes.
+    ///
+    /// `None` when this kit cannot place it: the group name, the template
+    /// container and the parse all have to succeed, and the first two depend on
+    /// how far the source has loaded. Shared by both restore paths -- the
+    /// recovery file adopted at mount and `File > Open Baboon Project` -- because
+    /// the entry a new tag is registered under decides whether it resolves at
+    /// export, and two copies of that derivation is how one path came to build it
+    /// and the other not to.
+    fn new_overlay_entry(
+        &self,
+        kit: usize,
+        overlay: &CampaignProjectOverlay,
+    ) -> Option<(TagEntry, TagFile)> {
+        let group_name = self.kits[kit]
+            .names
+            .name_for(overlay.group_tag)
+            .map(str::to_owned)?;
+        let (template_container, template_rel) =
+            self.find_container_template_in(kit, overlay.group_tag)?;
+        let tag = TagFile::read_from_bytes(&overlay.bytes).ok()?;
+        let extension = group_tag_to_extension(overlay.group_tag)
+            .unwrap_or(group_name.as_str())
+            .to_owned();
+        let package = overlay
+            .package
+            .clone()
+            .unwrap_or_else(|| format!("/Game/Tags/{}-{group_name}", overlay.logical_path));
+        Some((
+            TagEntry {
+                key: format!("newtag:{package}"),
+                display_path: format!("{}.{}", overlay.logical_path, extension),
+                group_tag: overlay.group_tag,
+                group_name: Some(group_name),
+                location: TagEntryLocation::NewContainer {
+                    template_container,
+                    template_rel,
+                    package,
+                    group_tag: overlay.group_tag,
+                },
+            },
+            tag,
+        ))
+    }
+
+    /// Put stashed new tags back into the browser.
+    ///
+    /// Runs until each queued overlay is either placed or already there. An
+    /// overlay is left queued while the source is still loading -- the names and
+    /// the template container are read from it -- and dropped once it resolves,
+    /// so a tag adopted by `File > Open Baboon Project`, which registers them
+    /// itself, is not registered twice.
+    ///
+    /// Scoped to the focused kit: registration writes through the active source.
+    /// A background kit's queue waits until that kit is focused, which is before
+    /// anything can be exported from it.
+    fn adopt_pending_new_overlays(&mut self, kit: usize) {
+        if kit != self.active
+            || self.kits[kit]
+                .campaign_project
+                .as_ref()
+                .is_none_or(|project| project.pending_new_overlays.is_empty())
+        {
+            return;
+        }
+        let queued = self.kits[kit]
+            .campaign_project
+            .as_ref()
+            .map(|project| project.pending_new_overlays.clone())
+            .unwrap_or_default();
+        let mut adopted = 0usize;
+        let mut still_pending = Vec::new();
+        for overlay in queued {
+            if self
+                .campaign_entry_for_identity(kit, &overlay.identity)
+                .is_some()
+            {
+                continue;
+            }
+            let Some((entry, tag)) = self.new_overlay_entry(kit, &overlay) else {
+                // The names and the template come off a source that may still be
+                // loading, so this is a "not yet" rather than a "no".
+                still_pending.push(overlay);
+                continue;
+            };
+            let key = entry.key.clone();
+            self.stash_in_memory_tag(entry, tag);
+            // The document was parsed from the overlay's own bytes, so the
+            // project already holds its serialization -- recording that spares
+            // the next autosave from writing every adopted tag out again.
+            if let Some(revision) = self.kits[kit]
+                .parsed_tags
+                .get(&key)
+                .map(|document| document.dirty.revision())
+            {
+                if let Some(project) = self.kits[kit].campaign_project.as_mut() {
+                    project.captured_revisions.insert(key, revision);
+                }
+            }
+            adopted += 1;
+        }
+        if let Some(project) = self.kits[kit].campaign_project.as_mut() {
+            project.pending_new_overlays = still_pending;
+        }
+        if adopted > 0 {
+            self.status =
+                format!("Restored {adopted} stashed new tag(s) from this workspace's last session");
+        }
+    }
+
     pub(super) fn capture_campaign_project(
         &mut self,
         kit: usize,
@@ -814,6 +943,7 @@ impl Baboon {
         }
         let now = ctx.input(|input| input.time);
         self.ensure_campaign_project(kit, now);
+        self.adopt_pending_new_overlays(kit);
         let due = self.kits[kit]
             .campaign_project
             .as_ref()
@@ -1012,40 +1142,11 @@ impl Baboon {
             .cloned()
             .collect::<Vec<_>>();
         for overlay in new_overlays {
-            let Some(group_name) = self.kits[kit].names.name_for(overlay.group_tag).map(str::to_owned) else {
+            let Some((entry, tag)) = self.new_overlay_entry(kit, &overlay) else {
                 missing += 1;
                 continue;
             };
-            let extension = group_tag_to_extension(overlay.group_tag)
-                .unwrap_or(group_name.as_str())
-                .to_owned();
-            let Ok(tag) = TagFile::read_from_bytes(&overlay.bytes) else {
-                missing += 1;
-                continue;
-            };
-            let Some((template_container, template_rel)) =
-                self.find_container_template(overlay.group_tag)
-            else {
-                missing += 1;
-                continue;
-            };
-            let package = overlay
-                .package
-                .clone()
-                .unwrap_or_else(|| format!("/Game/Tags/{}-{group_name}", overlay.logical_path));
-            let key = format!("newtag:{package}");
-            let entry = TagEntry {
-                key: key.clone(),
-                display_path: format!("{}.{}", overlay.logical_path, extension),
-                group_tag: overlay.group_tag,
-                group_name: Some(group_name),
-                location: TagEntryLocation::NewContainer {
-                    template_container,
-                    template_rel,
-                    package,
-                    group_tag: overlay.group_tag,
-                },
-            };
+            let key = entry.key.clone();
             self.register_in_memory_tag(entry, tag);
             identity_to_key.insert(overlay.identity.clone(), key);
         }
