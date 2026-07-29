@@ -5530,6 +5530,7 @@ impl Baboon {
             show_block_sizes: self.show_block_sizes,
             scroll_to_cycle_dropdowns: self.scroll_to_cycle_dropdowns,
             confirm_container_overwrite: self.confirm_container_overwrite,
+            confirm_runtime_poke: self.confirm_runtime_poke,
             expert_mode: self.expert_mode,
             dark_mode: self.dark_mode,
             ui_scale: self.ui_scale,

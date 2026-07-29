@@ -340,6 +340,9 @@ pub(in crate::app) struct GuiPrefs {
     pub(in crate::app) scroll_to_cycle_dropdowns: bool,
     /// Warn before Save overwrites Campaign Evolved pak files in place.
     pub(in crate::app) confirm_container_overwrite: bool,
+    /// Show the preflight plan and wait for confirmation before a runtime poke.
+    /// Cleared, a poke writes to the running game as soon as it is requested.
+    pub(in crate::app) confirm_runtime_poke: bool,
     pub(in crate::app) expert_mode: bool,
     pub(in crate::app) dark_mode: bool,
     pub(in crate::app) ui_scale: f32,
@@ -370,6 +373,7 @@ impl Default for GuiPrefs {
             show_block_sizes: false,
             scroll_to_cycle_dropdowns: true,
             confirm_container_overwrite: true,
+            confirm_runtime_poke: true,
             expert_mode: false,
             dark_mode: false,
             ui_scale: DEFAULT_UI_SCALE,

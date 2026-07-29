@@ -194,6 +194,8 @@ pub struct Baboon {
     scroll_to_cycle_dropdowns: bool,
     /// Warn before Save overwrites Campaign Evolved pak files in place.
     confirm_container_overwrite: bool,
+    /// Show the preflight plan and wait for confirmation before a runtime poke.
+    confirm_runtime_poke: bool,
     expert_mode: bool,
     dark_mode: bool,
     ui_scale: f32,
@@ -426,6 +428,7 @@ impl Baboon {
             show_block_sizes: prefs.show_block_sizes,
             scroll_to_cycle_dropdowns: prefs.scroll_to_cycle_dropdowns,
             confirm_container_overwrite: prefs.confirm_container_overwrite,
+            confirm_runtime_poke: prefs.confirm_runtime_poke,
             expert_mode: prefs.expert_mode,
             dark_mode: prefs.dark_mode,
             ui_scale: prefs.ui_scale,

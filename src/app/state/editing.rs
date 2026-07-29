@@ -7,7 +7,6 @@ pub(in crate::app) enum DeferredFileAction {
     SaveCurrentTag,
     ExportMod,
     PokeCurrentTag,
-    PokeCurrentTagDirect,
     Close(PendingCloseAction),
 }
 

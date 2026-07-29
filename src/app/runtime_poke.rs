@@ -2582,7 +2582,14 @@ impl Baboon {
         })
     }
 
+    /// The single entry point for File → Poke Current Tag and Ctrl+P. Whether
+    /// the preflight plan is shown for confirmation first is the user's
+    /// `confirm_runtime_poke` preference, not a property of how it was invoked.
     pub(super) fn begin_poke_current_tag(&mut self, ctx: egui::Context) {
+        if !self.confirm_runtime_poke {
+            self.begin_poke_current_tag_direct(ctx);
+            return;
+        }
         if self.poke_direct_running || self.poke_undo_running {
             self.status = "A runtime poke or undo is already in progress".to_owned();
             return;
@@ -2604,6 +2611,7 @@ impl Baboon {
             prior,
         } = request;
         let tx = self.tx.clone();
+        self.status = "Preparing runtime poke…".to_owned();
         self.poke_dialog = Some(PokeDialog {
             kit,
             key: key.clone(),
@@ -2665,6 +2673,7 @@ impl Baboon {
         let kit = dialog.kit;
         let key = dialog.key.clone();
         dialog.state = PokeDialogState::Writing;
+        self.status = "Poking current tag…".to_owned();
         let tx = self.tx.clone();
         thread::spawn(move || {
             let result = platform::execute(plan);
@@ -2697,16 +2706,37 @@ impl Baboon {
         key: String,
         result: Result<PokePlan, String>,
     ) {
-        let Some(dialog) = self.poke_dialog.as_mut() else {
+        let Some(dialog) = self.poke_dialog.as_ref() else {
             return;
         };
         if dialog.kit != kit || dialog.key != key {
             return;
         }
-        dialog.state = match result {
-            Ok(plan) => PokeDialogState::Ready(plan),
-            Err(error) => PokeDialogState::Error(error),
+        // Mirror the outcome to the status line as well as the dialog, so the
+        // two poke paths report the same way and the result survives the
+        // dialog being dismissed.
+        let (state, status) = match result {
+            Ok(plan) => {
+                let status = if plan.patches.is_empty() {
+                    "Runtime poke preflight: no changed fields".to_owned()
+                } else {
+                    format!(
+                        "Runtime poke ready: {} field change(s), {} byte(s)",
+                        plan.patches.len(),
+                        plan.byte_count()
+                    )
+                };
+                (PokeDialogState::Ready(plan), status)
+            }
+            Err(error) => {
+                let status = format!("Poke failed: {error}");
+                (PokeDialogState::Error(error), status)
+            }
         };
+        if let Some(dialog) = self.poke_dialog.as_mut() {
+            dialog.state = state;
+        }
+        self.status = status;
     }
 
     pub(super) fn handle_poke_write(
@@ -2729,6 +2759,7 @@ impl Baboon {
                 self.poke_dialog = None;
             }
             Err(error) => {
+                self.status = format!("Poke failed: {error}");
                 if let Some(dialog) = self.poke_dialog.as_mut() {
                     dialog.state = PokeDialogState::Error(error);
                 }
@@ -2778,9 +2809,16 @@ impl Baboon {
     }
 
     pub(super) fn draw_poke_window(&mut self, ctx: &egui::Context) {
+        let mut dont_ask = !self.confirm_runtime_poke;
         let Some(dialog) = self.poke_dialog.as_ref() else {
             return;
         };
+        // A poke that never ran reports as cancelled; an error already put its
+        // own message on the status line, so closing that must not erase it.
+        let cancellable = matches!(
+            dialog.state,
+            PokeDialogState::Scanning | PokeDialogState::Ready(_)
+        );
         let mut open = true;
         let mut confirm = false;
         let mut close = false;
@@ -2794,7 +2832,7 @@ impl Baboon {
                     ui.horizontal(|ui| {
                         ui.spinner();
                         ui.label(
-                            "Resolving the live tag, validating CU2, and building a read-only plan…",
+                            "Resolving the live tag, validating the game build, and building a read-only plan…",
                         );
                     });
                 }
@@ -2843,6 +2881,8 @@ impl Baboon {
                         });
                     }
                     ui.separator();
+                    ui.checkbox(&mut dont_ask, "Don't ask again (changeable in Settings)");
+                    ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         if ui
                             .add_enabled(!plan.patches.is_empty(), egui::Button::new("Poke"))
@@ -2858,7 +2898,16 @@ impl Baboon {
             });
         if !open || close {
             self.poke_dialog = None;
+            if cancellable {
+                self.status = "Runtime poke cancelled".to_owned();
+            }
         } else if confirm {
+            // Apply the opt-out only when the user commits to the poke, so
+            // cancelling out of the dialog never disarms the next one.
+            if dont_ask && self.confirm_runtime_poke {
+                self.confirm_runtime_poke = false;
+                self.persist_prefs_if_changed();
+            }
             self.confirm_poke(ctx.clone());
         }
     }
