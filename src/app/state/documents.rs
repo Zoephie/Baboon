@@ -409,6 +409,16 @@ pub(in crate::app) struct ModExportDialog {
     /// would make opening the review scale with how much is stashed.
     pub(in crate::app) expanded: HashSet<String>,
     pub(in crate::app) diffs: HashMap<String, ModRowDiff>,
+    /// Height of everything drawn below the list, measured on the previous
+    /// frame.
+    ///
+    /// The list is sized as "the window, less this", so the figure has to be the
+    /// real one: a hardcoded guess that came out too small grew the window by
+    /// the difference every frame, because a resizable egui window expands to
+    /// fit its contents and never shrinks back. The naming lines and the
+    /// overwrite warning appear conditionally, so there is no one number to
+    /// guess -- measuring settles in a frame and cannot run away.
+    pub(in crate::app) controls_height: f32,
 }
 
 /// Fold a mod name into a file-safe stem, keeping its capitalisation.
