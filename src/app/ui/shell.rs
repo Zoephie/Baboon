@@ -59,6 +59,44 @@ impl Baboon {
                             ui.close_menu();
                             self.begin_open_campaign_project(ctx.clone());
                         }
+                        // A workspace's edits are autosaved to a recovery file
+                        // whether or not they are ever saved anywhere else, so
+                        // these write a copy the user owns and can move, back up
+                        // or hand to someone. Before them, the only way to get a
+                        // `.baboon` out of Baboon was to export a mod.
+                        let can_save_project =
+                            self.current_source_is_campaign_project_capable(self.active);
+                        let project_target = self.kits[self.active]
+                            .campaign_project
+                            .as_ref()
+                            .and_then(|project| project.project_path.clone());
+                        if ui
+                            .add_enabled(
+                                can_save_project,
+                                egui::Button::new("Save Baboon Project"),
+                            )
+                            .on_hover_text(match project_target.as_deref() {
+                                Some(path) => format!("Write this workspace's changes to {}", path.display()),
+                                None => "Choose a .baboon file to keep this workspace's changes in".to_owned(),
+                            })
+                            .on_disabled_hover_text(
+                                "Baboon projects hold changes to Campaign Evolved containers",
+                            )
+                            .clicked()
+                        {
+                            ui.close_menu();
+                            self.defer_file_action(DeferredFileAction::SaveProject, ctx);
+                        }
+                        if ui
+                            .add_enabled(
+                                can_save_project,
+                                egui::Button::new("Save Baboon Project As..."),
+                            )
+                            .clicked()
+                        {
+                            ui.close_menu();
+                            self.defer_file_action(DeferredFileAction::SaveProjectAs, ctx);
+                        }
                         ui.separator();
                         let has_loaded_folder = self.loaded_tags_root().is_some();
                         if ui
@@ -142,7 +180,7 @@ impl Baboon {
                                     egui::Button::new("Export Mod..."),
                                 )
                                 .on_hover_text(
-                                    "Bundle every modified project tag into one portable mod overlay and .baboon recovery file",
+                                    "Bundle every modified project tag into one portable mod overlay, with a copy of this project saved beside it",
                                 )
                                 .clicked()
                             {
@@ -710,29 +748,63 @@ impl Baboon {
                     // status line expires on a timer, so an update found by the
                     // silent startup check would otherwise scroll past unread;
                     // this link stays until the next check clears it.
-                    if let Some(update) = self.available_update.as_ref() {
-                        let label = format!("Update available: {}", update.short_name());
-                        let url = update.release_url.clone();
-                        let hover = match update.channel {
-                            UpdateChannel::Stable => "Open the release page on GitHub",
-                            UpdateChannel::Development => {
-                                "Open the latest development build on GitHub"
-                            }
-                        };
+                    let update = self.available_update.clone();
+                    // Which `.baboon` this workspace's changes belong to, and
+                    // where they are actually being kept. Autosave and Save write
+                    // different files, and a workspace that has never been saved
+                    // writes only the recovery file — none of which was visible
+                    // anywhere before.
+                    let project = self
+                        .current_source_is_campaign_project_capable(self.active)
+                        .then(|| self.kits[self.active].campaign_project.as_ref())
+                        .flatten()
+                        // A workspace with neither a project file nor a stash has
+                        // nothing to say here, and saying it anyway on every
+                        // Campaign Evolved kit would just be furniture.
+                        .filter(|project| {
+                            project.project_path.is_some() || !project.overlays.is_empty()
+                        })
+                        .map(|project| {
+                            let mut hover = match project.project_path.as_deref() {
+                                Some(path) => format!("Baboon project: {}", path.display()),
+                                None => "This workspace has no saved Baboon project yet — use \
+                                         File > Save Baboon Project"
+                                    .to_owned(),
+                            };
+                            hover.push_str(&format!(
+                                "\nAutosaved to {}",
+                                project.recovery_path.display()
+                            ));
+                            (format!("Project: {}", project.label()), hover)
+                        });
+                    if update.is_some() || project.is_some() {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            // An explicit colour beats the app-wide
-                            // `override_text_color`, which would otherwise
-                            // flatten both this and the link colour to
-                            // ordinary body text. `strong()` only brightens;
-                            // the weight comes from the bold family, at the
-                            // body size of the row it sits in.
-                            ui.hyperlink_to(
-                                RichText::new(label)
-                                    .font(bold_font(12.0))
-                                    .color(good_news()),
-                                &url,
-                            )
-                            .on_hover_text(hover);
+                            if let Some(update) = update {
+                                let label = format!("Update available: {}", update.short_name());
+                                let hover = match update.channel {
+                                    UpdateChannel::Stable => "Open the release page on GitHub",
+                                    UpdateChannel::Development => {
+                                        "Open the latest development build on GitHub"
+                                    }
+                                };
+                                // An explicit colour beats the app-wide
+                                // `override_text_color`, which would otherwise
+                                // flatten both this and the link colour to
+                                // ordinary body text. `strong()` only brightens;
+                                // the weight comes from the bold family, at the
+                                // body size of the row it sits in.
+                                ui.hyperlink_to(
+                                    RichText::new(label)
+                                        .font(bold_font(12.0))
+                                        .color(good_news()),
+                                    &update.release_url,
+                                )
+                                .on_hover_text(hover);
+                            }
+                            if let Some((label, hover)) = project {
+                                ui.label(RichText::new(label).small().color(subtle_dark()))
+                                    .on_hover_text(hover);
+                            }
                         });
                     }
                 });
@@ -1158,6 +1230,14 @@ impl Baboon {
     pub(super) fn run_deferred_file_action(&mut self, ctx: &egui::Context) {
         match self.deferred_file_action.take() {
             Some(DeferredFileAction::SaveCurrentTag) => self.save_current_tag(),
+            Some(DeferredFileAction::SaveProject) => {
+                let (kit, now) = (self.active, ctx.input(|input| input.time));
+                self.save_campaign_project_file(kit, now);
+            }
+            Some(DeferredFileAction::SaveProjectAs) => {
+                let (kit, now) = (self.active, ctx.input(|input| input.time));
+                self.save_campaign_project_file_as(kit, now);
+            }
             Some(DeferredFileAction::ExportMod) => self.export_mod(),
             Some(DeferredFileAction::PokeCurrentTag) => self.begin_poke_current_tag(ctx.clone()),
             Some(DeferredFileAction::Close(action)) => self.request_close_action(action, ctx),

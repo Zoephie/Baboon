@@ -714,6 +714,13 @@ fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
         .map(str::trim)
         .filter(|path| !path.is_empty())
         .map(PathBuf::from);
+    // Absent in sessions written while `project_path` still meant "the file this
+    // workspace autosaves to", which was set for every workspace that had a
+    // project at all — so its presence is exactly what this flag now records.
+    let has_project = source
+        .get("has_project")
+        .and_then(Value::as_bool)
+        .unwrap_or(project_path.is_some());
     // Absent in sessions written before the browser view became per-kit, and
     // in every version-1 and version-2 file. `None` means "use the default".
     let browser_mode = browser_mode_from_str(value.get("browser_mode").and_then(Value::as_str));
@@ -749,7 +756,7 @@ fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
             path,
         });
     }
-    if tags.is_empty() && project_path.is_none() {
+    if tags.is_empty() && !has_project {
         return None;
     }
     Some(LastSessionKit {
@@ -758,6 +765,7 @@ fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
         game,
         profile_id,
         project_path,
+        has_project,
         browser_mode,
         browser_sort,
         tags,
@@ -804,6 +812,7 @@ fn session_value(session: &LastSessionState) -> Value {
                     "game": kit.game,
                     "profile_id": kit.profile_id,
                     "project_path": kit.project_path.as_ref().map(|path| path.display().to_string()),
+                    "has_project": kit.has_project,
                 },
                 "browser_mode": kit.browser_mode.map(browser_mode_str),
                 "browser_sort": kit.browser_sort.map(browser_sort_str),
@@ -1150,6 +1159,7 @@ mod session_tests {
             game: None,
             profile_id: None,
             project_path: None,
+            has_project: false,
             browser_mode: mode,
             browser_sort: Some(BrowserSort::Name),
             tags: vec![LastSessionTag {
@@ -1201,6 +1211,7 @@ mod session_tests {
     fn a_projects_path_survives_the_round_trip() {
         let mut project_kit = kit("/evolved", None);
         project_kit.project_path = Some(PathBuf::from("/evolved/work.baboon"));
+        project_kit.has_project = true;
         project_kit.tags.clear();
         let session = LastSessionState {
             kits: vec![project_kit],
@@ -1210,5 +1221,43 @@ mod session_tests {
             restored.kits[0].project_path,
             Some(PathBuf::from("/evolved/work.baboon"))
         );
+        assert!(restored.kits[0].has_project);
+    }
+
+    /// A workspace whose only content is its stash records no project path — its
+    /// edits live in the recovery file, which is found from the source root — so
+    /// "carries a project" cannot be inferred from that path any more. Reading it
+    /// that way would drop such a kit from the session entirely and lose the
+    /// stash with it.
+    #[test]
+    fn a_stash_only_kit_survives_the_round_trip() {
+        let mut stash_kit = kit("/evolved", None);
+        stash_kit.has_project = true;
+        stash_kit.tags.clear();
+        let session = LastSessionState { kits: vec![stash_kit] };
+        let restored = parse_last_session(&session_value(&session)).expect("round trip");
+        assert_eq!(restored.kits[0].project_path, None);
+        assert!(restored.kits[0].has_project);
+    }
+
+    /// Sessions written before the recovery file and the project file were
+    /// separate recorded the recovery path as `project_path`, and set it for every
+    /// workspace that had a project at all. That is what `has_project` now means,
+    /// so its absence reads straight off the old field.
+    #[test]
+    fn a_legacy_sessions_recovery_path_still_restores_the_workspace() {
+        let value = serde_json::json!({
+            "version": 3,
+            "kits": [{
+                "source": {
+                    "kind": "iostore_container_set",
+                    "path": "/evolved",
+                    "project_path": "/data/campaign_evolved_recovery-abc123.baboon",
+                },
+                "tags": [],
+            }],
+        });
+        let session = parse_last_session(&value).expect("session parses");
+        assert!(session.kits[0].has_project, "the kit is still restored");
     }
 }

@@ -103,6 +103,16 @@ pub(in crate::app) struct SaveChangesPrompt {
     pub(in crate::app) pending_action: PendingCloseAction,
     pub(in crate::app) error: Option<String>,
     pub(in crate::app) allow_app_close_once: bool,
+    /// Where discarding would delete from, and how many of the listed tags have
+    /// a stashed copy there. Discarding on a stashing workspace is not "close
+    /// without writing anything" — it deletes rows out of a file that persists
+    /// across sessions — so the prompt has to be able to name both.
+    pub(in crate::app) stash_file: Option<PathBuf>,
+    pub(in crate::app) stashed: usize,
+    /// Set by the first click on Discard. The second click is the one that acts,
+    /// which is what keeps a one-click "no thanks" on a quit dialog from
+    /// deleting work the user believed was already exported.
+    pub(in crate::app) confirm_discard: bool,
 }
 
 impl Default for SaveChangesPrompt {
@@ -114,6 +124,9 @@ impl Default for SaveChangesPrompt {
             pending_action: PendingCloseAction::CloseApp,
             error: None,
             allow_app_close_once: false,
+            stash_file: None,
+            stashed: 0,
+            confirm_discard: false,
         }
     }
 }
@@ -162,7 +175,13 @@ pub(in crate::app) struct LastSessionKit {
     pub(in crate::app) source_path: PathBuf,
     pub(in crate::app) game: Option<String>,
     pub(in crate::app) profile_id: Option<String>,
+    /// The `.baboon` this kit had open, to reattach as its save target. `None`
+    /// for a workspace whose edits only ever lived in its recovery file.
     pub(in crate::app) project_path: Option<PathBuf>,
+    /// Whether this kit carried a Baboon project at all. A workspace with a
+    /// stash but no named project file is still worth reopening — the project
+    /// *is* the session — and that no longer follows from `project_path`.
+    pub(in crate::app) has_project: bool,
     /// The browser view this kit was in, or `None` when the session predates
     /// per-kit views — the restored kit then falls back to the saved default.
     pub(in crate::app) browser_mode: Option<BrowserMode>,
@@ -181,6 +200,7 @@ pub(in crate::app) struct RestoreKit {
     pub(in crate::app) source_path: PathBuf,
     pub(in crate::app) profile_id: Option<String>,
     pub(in crate::app) project_path: Option<PathBuf>,
+    pub(in crate::app) has_project: bool,
     /// The browser view this kit was in, or `None` when the session predates
     /// per-kit views — the restored kit then falls back to the saved default.
     pub(in crate::app) browser_mode: Option<BrowserMode>,
@@ -202,6 +222,7 @@ pub(in crate::app) struct LastOpenedWindowsKit {
     pub(in crate::app) profile_id: Option<String>,
     pub(in crate::app) source_available: bool,
     pub(in crate::app) project_path: Option<PathBuf>,
+    pub(in crate::app) has_project: bool,
     /// The browser view this kit was in, or `None` when the session predates
     /// per-kit views — the restored kit then falls back to the saved default.
     pub(in crate::app) browser_mode: Option<BrowserMode>,
@@ -253,7 +274,7 @@ impl LastOpenedWindowsKit {
                 }
             })
             .collect::<Vec<_>>();
-        if entries.is_empty() && saved.project_path.is_none() {
+        if entries.is_empty() && !saved.has_project {
             return None;
         }
         Some(Self {
@@ -263,6 +284,7 @@ impl LastOpenedWindowsKit {
             profile_id: saved.profile_id,
             source_available,
             project_path: saved.project_path,
+            has_project: saved.has_project,
             browser_mode: saved.browser_mode,
             browser_sort: saved.browser_sort,
             entries,
@@ -304,11 +326,12 @@ impl LastOpenedWindowsPrompt {
             .iter()
             .filter_map(|kit| {
                 let tags = kit.checked_tags();
-                (!tags.is_empty() || kit.project_path.is_some()).then(|| RestoreKit {
+                (!tags.is_empty() || kit.has_project).then(|| RestoreKit {
                     source_kind: kit.source_kind,
                     source_path: kit.source_path.clone(),
                     profile_id: kit.profile_id.clone(),
                     project_path: kit.project_path.clone(),
+                    has_project: kit.has_project,
                     browser_mode: kit.browser_mode,
                     browser_sort: kit.browser_sort,
                     tags,
@@ -320,7 +343,7 @@ impl LastOpenedWindowsPrompt {
     pub(in crate::app) fn has_checked_tags(&self) -> bool {
         self.kits
             .iter()
-            .any(|kit| !kit.checked_tags().is_empty() || kit.project_path.is_some())
+            .any(|kit| !kit.checked_tags().is_empty() || kit.has_project)
     }
 }
 
