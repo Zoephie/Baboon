@@ -99,7 +99,11 @@ pub(in crate::app) fn parse_gui_field_value(
         TagFieldType::Tag => parse_group_tag(trimmed)
             .map(TagFieldData::Tag)
             .ok_or_else(|| "expected 1..=4 ASCII group tag".to_owned()),
-        TagFieldType::Angle => parse_value(trimmed, "f32").map(TagFieldData::Angle),
+        // Typed in degrees, stored in radians. The display side
+        // (`foundation::fmt_degrees`) is the other half of this; the two are kept
+        // honest by `angle_fields_round_trip_through_degrees`.
+        TagFieldType::Angle => parse_value(trimmed, "f32")
+            .map(|degrees: f32| TagFieldData::Angle(degrees.to_radians())),
         TagFieldType::ShortIntegerBounds => {
             let (lower, upper) = parse_short_bounds(trimmed, "short bounds")?;
             Ok(TagFieldData::ShortIntegerBounds(
@@ -109,8 +113,8 @@ pub(in crate::app) fn parse_gui_field_value(
         TagFieldType::AngleBounds => {
             let (lower, upper) = parse_float_bounds(trimmed, "angle bounds")?;
             Ok(TagFieldData::AngleBounds(blam_tags::math::AngleBounds {
-                lower,
-                upper,
+                lower: lower.to_radians(),
+                upper: upper.to_radians(),
             }))
         }
         TagFieldType::RealBounds => {
@@ -162,16 +166,24 @@ pub(in crate::app) fn parse_gui_field_value(
                 blam_tags::math::RealQuaternion { i, j, k, w },
             ))
         }
+        // Euler angles are angles: degrees in, radians stored.
         TagFieldType::RealEulerAngles2d => {
             let [yaw, pitch] = parse_float_channels::<2>(trimmed, "real euler angles 2d")?;
             Ok(TagFieldData::RealEulerAngles2d(
-                blam_tags::math::RealEulerAngles2d { yaw, pitch },
+                blam_tags::math::RealEulerAngles2d {
+                    yaw: yaw.to_radians(),
+                    pitch: pitch.to_radians(),
+                },
             ))
         }
         TagFieldType::RealEulerAngles3d => {
             let [yaw, pitch, roll] = parse_float_channels::<3>(trimmed, "real euler angles 3d")?;
             Ok(TagFieldData::RealEulerAngles3d(
-                blam_tags::math::RealEulerAngles3d { yaw, pitch, roll },
+                blam_tags::math::RealEulerAngles3d {
+                    yaw: yaw.to_radians(),
+                    pitch: pitch.to_radians(),
+                    roll: roll.to_radians(),
+                },
             ))
         }
         TagFieldType::Real => parse_value(trimmed, "f32").map(TagFieldData::Real),

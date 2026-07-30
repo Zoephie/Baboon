@@ -70,6 +70,9 @@ mod tests {
             containers.push(MountedContainer {
                 utoc_path: utoc.clone(),
                 chunk_label: utoc.file_stem().unwrap().to_string_lossy().into_owned(),
+                // Nothing on this path layers shipped against modded — it mounts
+                // everything to resolve one lookup.
+                is_mod: false,
                 archive: Arc::new(archive),
             });
         }
@@ -1304,6 +1307,149 @@ mod tests {
         assert_eq!(field_suffix(&m, "real"), "seconds [0.1-1]");
     }
 
+    /// Angle-typed fields hold radians and are edited in degrees, as Guerilla
+    /// presents them and as their own `:degrees` field names say.
+    ///
+    /// The numbers are the ones from the report that found this: an ODST weapon
+    /// whose `minimum error` read `0.01` in Guerilla and `0` in Baboon, and which
+    /// after typing `0.15` into Baboon read `8.59437` in Guerilla — a factor of
+    /// 180/π, applied to every angle field in every game.
+    #[test]
+    fn angle_fields_are_edited_in_degrees_and_stored_in_radians() {
+        use crate::app::foundation::{
+            foundation_bounds_values, format_foundation_scalar_value,
+        };
+        let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
+        let root = tag.root();
+        let names = TagNameIndex::default();
+
+        // Typing 0.15 means 0.15 degrees, not 0.15 radians.
+        let angle = root.field("angle").unwrap();
+        let TagFieldData::Angle(stored) = parse_gui_field_value(&angle, "0.15").unwrap() else {
+            panic!("expected an angle");
+        };
+        assert!(
+            (stored - 0.15f32.to_radians()).abs() < 1e-7,
+            "0.15 degrees stored as {stored} radians"
+        );
+
+        // And the reverse, against Guerilla's own reading of the same tag: the
+        // 0.15 radians Baboon used to write shows as 8.59437 degrees.
+        assert_eq!(
+            format_foundation_scalar_value(&names, &TagFieldData::Angle(0.15)),
+            "8.59437"
+        );
+        // The value the reporter saw as `0` — 0.01 degrees is 0.000175 radians,
+        // which the old two-decimal display rounded away entirely.
+        assert_eq!(
+            format_foundation_scalar_value(&names, &TagFieldData::Angle(0.01f32.to_radians())),
+            "0.01"
+        );
+
+        // Bounds are two angles, and get the same treatment.
+        let bounds = root.field("angle bounds").unwrap();
+        let TagFieldData::AngleBounds(stored) =
+            parse_gui_field_value(&bounds, "0.05..0.5").unwrap()
+        else {
+            panic!("expected angle bounds");
+        };
+        assert!((stored.lower - 0.05f32.to_radians()).abs() < 1e-7);
+        assert!((stored.upper - 0.5f32.to_radians()).abs() < 1e-7);
+        assert_eq!(
+            foundation_bounds_values(&TagFieldData::AngleBounds(blam_tags::math::AngleBounds {
+                lower: 0.25,
+                upper: 2.0,
+            })),
+            Some(("14.3239".to_owned(), "114.592".to_owned())),
+            "the other two values Guerilla showed for the same tag"
+        );
+    }
+
+    /// Editing an angle repeatedly must not walk it: degrees are shown to six
+    /// significant digits, so the display has to be a fixed point of
+    /// parse-then-format even though rad↔deg is not exact.
+    #[test]
+    fn angle_display_survives_repeated_edits() {
+        use crate::app::foundation::format_foundation_scalar_value;
+        let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
+        let field = tag.root().field("angle").unwrap();
+        let names = TagNameIndex::default();
+
+        for typed in ["0.01", "0.15", "20", "45", "70", "360", "1440", "-90", "8.59437"] {
+            let TagFieldData::Angle(stored) = parse_gui_field_value(&field, typed).unwrap() else {
+                panic!("expected an angle");
+            };
+            let shown = format_foundation_scalar_value(&names, &TagFieldData::Angle(stored));
+            assert_eq!(shown, typed, "{typed} degrees came back as {shown}");
+
+            // And again, from what was shown — the fixed point that matters when a
+            // field is opened, committed, reopened and committed again.
+            let TagFieldData::Angle(second) = parse_gui_field_value(&field, &shown).unwrap()
+            else {
+                panic!("expected an angle");
+            };
+            assert_eq!(
+                format_foundation_scalar_value(&names, &TagFieldData::Angle(second)),
+                typed,
+                "{typed} drifted on the second edit"
+            );
+        }
+    }
+
+    /// Only angle-typed fields convert. A `real` labelled `:degrees` — the ODST
+    /// weapon's `distribution angle` is one — is already in whatever unit its name
+    /// claims, which is why it was the one field in that group both tools agreed
+    /// on.
+    #[test]
+    fn plain_reals_are_left_alone() {
+        use crate::app::foundation::{
+            foundation_bounds_values, format_foundation_scalar_value,
+        };
+        let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
+        let root = tag.root();
+        let names = TagNameIndex::default();
+
+        let real = root.field("real").unwrap();
+        let TagFieldData::Real(stored) = parse_gui_field_value(&real, "0.15").unwrap() else {
+            panic!("expected a real");
+        };
+        assert_eq!(stored, 0.15);
+        assert_eq!(
+            format_foundation_scalar_value(&names, &TagFieldData::Real(0.15)),
+            "0.15"
+        );
+
+        let bounds = root.field("real bounds").unwrap();
+        let TagFieldData::RealBounds(stored) = parse_gui_field_value(&bounds, "0.05..0.5").unwrap()
+        else {
+            panic!("expected real bounds");
+        };
+        assert_eq!((stored.lower, stored.upper), (0.05, 0.5));
+        assert_eq!(
+            foundation_bounds_values(&TagFieldData::RealBounds(blam_tags::math::RealBounds {
+                lower: 0.25,
+                upper: 2.0,
+            })),
+            Some(("0.25".to_owned(), "2".to_owned()))
+        );
+    }
+
+    /// The editable text is what a commit writes back, so it cannot be a rounded
+    /// version of the value. Two decimals meant every real under 0.01 displayed as
+    /// `0` and became `0` the moment the field was touched.
+    #[test]
+    fn small_reals_are_not_displayed_as_zero() {
+        use crate::app::foundation::fmt_real;
+        for value in [0.001f32, 0.0001, 0.75, 1e-7, 0.123456, -0.005] {
+            let shown = fmt_real(value);
+            let parsed: f32 = shown.parse().expect("editable text parses back");
+            assert_eq!(parsed, value, "{value} displayed as {shown}");
+        }
+        assert_eq!(fmt_real(0.0), "0");
+        assert_eq!(fmt_real(-0.0), "0");
+        assert_eq!(fmt_real(70.0), "70");
+    }
+
     #[test]
     fn euler_angle_parser_accepts_complete_tuples_and_rejects_invalid_input() {
         let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
@@ -1311,22 +1457,23 @@ mod tests {
         let euler2d = root.field("real euler angles 2d").unwrap();
         let euler3d = root.field("real euler angles 3d").unwrap();
 
+        // Typed in degrees, stored in radians — the editor's angle contract.
         let TagFieldData::RealEulerAngles2d(value) =
             parse_gui_field_value(&euler2d, "0.25, -0.5").unwrap()
         else {
             panic!("expected real euler angles 2d");
         };
-        assert!((value.yaw - 0.25).abs() < 0.0001);
-        assert!((value.pitch + 0.5).abs() < 0.0001);
+        assert!((value.yaw - 0.25f32.to_radians()).abs() < 0.0001);
+        assert!((value.pitch + 0.5f32.to_radians()).abs() < 0.0001);
 
         let TagFieldData::RealEulerAngles3d(value) =
             parse_gui_field_value(&euler3d, "-0.65 0 1.25").unwrap()
         else {
             panic!("expected real euler angles 3d");
         };
-        assert!((value.yaw + 0.65).abs() < 0.0001);
+        assert!((value.yaw + 0.65f32.to_radians()).abs() < 0.0001);
         assert!(value.pitch.abs() < 0.0001);
-        assert!((value.roll - 1.25).abs() < 0.0001);
+        assert!((value.roll - 1.25f32.to_radians()).abs() < 0.0001);
 
         for invalid in ["1, 2", "1, 2, 3, 4", "yaw, pitch, roll"] {
             assert!(
@@ -1370,9 +1517,10 @@ mod tests {
         let TagFieldData::RealEulerAngles3d(value) = value else {
             panic!("expected real euler angles 3d");
         };
-        assert!((value.yaw + 0.65).abs() < 0.0001);
+        // The typed degrees survive as the radians they mean.
+        assert!((value.yaw + 0.65f32.to_radians()).abs() < 0.0001);
         assert!(value.pitch.abs() < 0.0001);
-        assert!((value.roll - 1.25).abs() < 0.0001);
+        assert!((value.roll - 1.25f32.to_radians()).abs() < 0.0001);
     }
 
     #[test]
