@@ -376,6 +376,10 @@ fn monitor_commands_for_game(game: Option<&str>) -> &'static [&'static str] {
 #[path = "ui/tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "../app/tests/shader_option_reads.rs"]
+mod shader_option_read_tests;
+
 /// A clickable tag entry row in the Content Explorer. Returns true on click.
 fn explorer_entry_row(ui: &mut Ui, entry: &TagEntry) -> bool {
     ui.add(
