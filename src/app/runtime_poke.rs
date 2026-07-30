@@ -1211,7 +1211,6 @@ impl Planner<'_> {
                 | TagFieldType::VertexBuffer
                 | TagFieldType::Pointer
                 | TagFieldType::NonCacheRuntimeValue
-                | TagFieldType::Custom
                 | TagFieldType::Unknown => {
                     let before = raw_span(baseline, offset, span)?;
                     let after = raw_span(edited, offset, span)?;
@@ -1225,6 +1224,7 @@ impl Planner<'_> {
                 | TagFieldType::UselessPad
                 | TagFieldType::Skip
                 | TagFieldType::Explanation
+                | TagFieldType::Custom
                 | TagFieldType::Terminator => {}
                 _ => {
                     let before = raw_span(baseline, offset, span)?;
