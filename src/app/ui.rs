@@ -377,6 +377,10 @@ fn monitor_commands_for_game(game: Option<&str>) -> &'static [&'static str] {
 mod tests;
 
 #[cfg(test)]
+#[path = "../app/tests/ui_scale_slider.rs"]
+mod ui_scale_slider_tests;
+
+#[cfg(test)]
 #[path = "../app/tests/shader_option_reads.rs"]
 mod shader_option_read_tests;
 

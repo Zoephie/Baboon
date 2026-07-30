@@ -2,6 +2,24 @@
 
 use super::*;
 
+/// Whether the scale the slider is showing should be applied to the window yet.
+///
+/// The value this slider edits is the zoom factor of the window the slider is
+/// drawn in, so applying it every frame of a drag rescaled the slider under the
+/// pointer: the handle slid away from the cursor and the value could not be aimed
+/// at all. Deferring to the end of the interaction fixes that.
+///
+/// Phrased as "the two disagree and nothing is holding the widget" rather than as
+/// an event, because the events do not cover it. `drag_stopped()` never fires for
+/// a click that moves the handle without crossing the drag threshold, and
+/// `changed()` is true only on the frame the value moves — which for a click is
+/// the frame the button is still down. Either one alone leaves a value showing in
+/// the slider that never reaches the window. A difference, by contrast, cannot be
+/// missed: whatever frame the pointer comes up on, it is applied then.
+pub(super) fn commit_ui_scale_now(response: &egui::Response, pending: f32, live: f32) -> bool {
+    pending != live && !response.is_pointer_button_down_on()
+}
+
 impl Baboon {
     pub(super) fn draw_first_run_wizard(&mut self, ctx: &egui::Context) {
         let Some(page) = self.first_run_wizard.as_ref().map(|state| state.page) else {
@@ -122,13 +140,11 @@ impl Baboon {
         ui.checkbox(&mut self.dark_mode, "Dark mode");
         ui.horizontal(|ui| {
             ui.label("UI scale");
-            if ui
-                .add(egui::Slider::new(
-                    &mut self.pending_ui_scale,
-                    MIN_UI_SCALE..=MAX_UI_SCALE,
-                ))
-                .changed()
-            {
+            let response = ui.add(egui::Slider::new(
+                &mut self.pending_ui_scale,
+                MIN_UI_SCALE..=MAX_UI_SCALE,
+            ));
+            if commit_ui_scale_now(&response, self.pending_ui_scale, self.ui_scale) {
                 self.ui_scale = self.pending_ui_scale;
             }
         });
