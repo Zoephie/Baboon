@@ -4224,6 +4224,9 @@ impl Baboon {
                 tag_bytes: bytes.as_slice(),
                 new_package_path: package.as_str(),
                 redirect_from: None,
+                // A new tag's wrapper is built from the template with the
+                // donor's own bindings stripped; nothing here chooses one.
+                asset_reference: None,
             },)
             .collect();
         let written =
