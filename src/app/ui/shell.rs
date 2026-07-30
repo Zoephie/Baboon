@@ -121,10 +121,17 @@ impl Baboon {
                             self.apply_recent_action(action, ctx);
                         }
                         ui.separator();
+                        let save_label = if self.enable_chimp
+                            && self.kits[self.active].surface == KitSurface::Chimp
+                        {
+                            "Build Chimp Mod    Ctrl+S"
+                        } else {
+                            "Save Current Tag    Ctrl+S"
+                        };
                         if icon_text_button(
                             ui,
                             ButtonIcon::Save,
-                            "Save Current Tag    Ctrl+S",
+                            save_label,
                             true,
                         )
                         .clicked()
@@ -1229,6 +1236,12 @@ impl Baboon {
 
     pub(super) fn run_deferred_file_action(&mut self, ctx: &egui::Context) {
         match self.deferred_file_action.take() {
+            Some(DeferredFileAction::SaveCurrentTag)
+                if self.enable_chimp
+                    && self.kits[self.active].surface == KitSurface::Chimp =>
+            {
+                self.build_chimp_mod(self.active, ctx.clone())
+            }
             Some(DeferredFileAction::SaveCurrentTag) => self.save_current_tag(),
             Some(DeferredFileAction::SaveProject) => {
                 let (kit, now) = (self.active, ctx.input(|input| input.time));

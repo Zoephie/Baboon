@@ -16,6 +16,15 @@ pub(in crate::app) enum WorkerMessage {
         result: Result<LoadedSourceData, String>,
         recent_path: Option<PathBuf>,
     },
+    ChimpMounted {
+        stamp: KitStamp,
+        result: Result<Arc<blam_tags::iostore::world::World>, String>,
+    },
+    ChimpPackageLoaded {
+        stamp: KitStamp,
+        package: String,
+        result: Result<ChimpDocument, String>,
+    },
     TagLoaded {
         kit: KitId,
         key: String,

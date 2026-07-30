@@ -772,11 +772,24 @@ fn ce_decode_metahuman_table(
         dhdr.export_map.first()?.object_flags,
     )
     .ok()
+    .map(|rows| {
+        rows.into_iter()
+            .map(|(name, block)| {
+                (
+                    name,
+                    block
+                        .iter()
+                        .map(|(name, value)| (name.to_owned(), value.clone()))
+                        .collect(),
+                )
+            })
+            .collect()
+    })
 }
 
 /// A non-empty soft-object path as `(package, asset)`.
 fn ce_soft(sp: &blam_tags::iostore::unversioned::SoftObjectPath) -> Option<(String, String)> {
-    (!sp.is_empty()).then(|| (sp.package.clone(), sp.asset.clone()))
+    (!sp.is_empty()).then(|| (sp.package.to_string(), sp.asset.to_string()))
 }
 
 /// Decode `DT_MetaHumanHeads` → per-row face + facial-hair mesh references.

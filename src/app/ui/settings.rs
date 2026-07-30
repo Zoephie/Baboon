@@ -114,6 +114,80 @@ impl Baboon {
 
         ui.add_space(10.0);
         ui.separator();
+        ui.label(
+            RichText::new("Chimp — Unreal packages")
+                .color(text_dark())
+                .strong(),
+        );
+        ui.add_space(4.0);
+        let chimp_changed = ui
+            .checkbox(
+                &mut self.enable_chimp,
+                "Enable Chimp workspace for Campaign Evolved",
+            )
+            .changed();
+        ui.label(
+            RichText::new(
+                "Chimp shares Campaign Evolved's configured path and writes supported property edits to a separate _P mod container.",
+            )
+            .color(subtle_dark())
+            .small(),
+        );
+        ui.horizontal(|ui| {
+            let output = self
+                .chimp_output_dir
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| "Default: Paks/~mods/Chimp".to_owned());
+            ui.label(RichText::new(output).color(subtle_dark()).small());
+            if ui.button("Output folder…").clicked()
+                && let Some(path) = rfd::FileDialog::new()
+                    .set_title("Choose Chimp mod output folder")
+                    .pick_folder()
+            {
+                self.chimp_output_dir = Some(path);
+            }
+            if self.chimp_output_dir.is_some() && ui.button("Use default").clicked() {
+                self.chimp_output_dir = None;
+            }
+        });
+        if chimp_changed {
+            let dirty = self
+                .kits
+                .iter()
+                .any(|kit| kit.chimp.documents.values().any(|document| document.dirty));
+            if !self.enable_chimp && dirty {
+                self.enable_chimp = true;
+                self.status =
+                    "Build the Chimp mod before disabling a workspace with recovered edits."
+                        .to_owned();
+                return;
+            }
+            if self.enable_chimp {
+                let indices: Vec<usize> = self
+                    .kits
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, kit)| {
+                        kit.source.as_ref().is_some_and(|source| {
+                            matches!(&source.source, TagSource::IoStoreContainerSet { .. })
+                        })
+                    })
+                    .map(|(index, _)| index)
+                    .collect();
+                for index in indices {
+                    self.begin_chimp_mount(index, ui.ctx().clone());
+                }
+            } else {
+                for kit in &mut self.kits {
+                    kit.surface = KitSurface::Tags;
+                    kit.chimp = ChimpState::default();
+                }
+            }
+        }
+
+        ui.add_space(10.0);
+        ui.separator();
         ui.label(RichText::new("Runtime poking").color(text_dark()).strong());
         ui.add_space(4.0);
         ui.checkbox(

@@ -74,6 +74,16 @@ impl Baboon {
         self.apply_pending_campaign_project(installed, ctx.input(|input| input.time), ctx);
         self.refresh_favorite_entries_for(installed);
         self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
+        let campaign_evolved = self.kits[installed]
+            .source
+            .as_ref()
+            .is_some_and(|source| {
+                matches!(&source.source, TagSource::IoStoreContainerSet { .. })
+            });
+        if campaign_evolved && self.enable_chimp {
+            self.kits[installed].surface = KitSurface::Chimp;
+            self.begin_chimp_mount(installed, ctx.clone());
+        }
         self.refreshing_entry_index = false;
         self.building_reverse_dependencies = false;
         self.building_reference_for_entry_index = false;

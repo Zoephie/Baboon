@@ -128,6 +128,15 @@ fn prefs_from_value(value: &Value) -> GuiPrefs {
             .get("confirm_runtime_poke")
             .and_then(Value::as_bool)
             .unwrap_or(true),
+        enable_chimp: value
+            .get("enable_chimp")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
+        chimp_output_dir: value
+            .get("chimp_output_dir")
+            .and_then(Value::as_str)
+            .filter(|path| !path.trim().is_empty())
+            .map(PathBuf::from),
         expert_mode: value
             .get("expert_mode")
             .and_then(Value::as_bool)
@@ -537,6 +546,8 @@ fn prefs_to_value(
         "scroll_to_cycle_dropdowns": prefs.scroll_to_cycle_dropdowns,
         "confirm_container_overwrite": prefs.confirm_container_overwrite,
         "confirm_runtime_poke": prefs.confirm_runtime_poke,
+        "enable_chimp": prefs.enable_chimp,
+        "chimp_output_dir": prefs.chimp_output_dir.as_ref().map(|path| path.display().to_string()),
         "expert_mode": prefs.expert_mode,
         "dark_mode": prefs.dark_mode,
         "ui_scale": prefs.ui_scale,
@@ -1065,6 +1076,34 @@ mod nested_default_tests {
         // whole preferences load.
         assert_eq!(nested_default_from_str(None), None);
         assert_eq!(nested_default_from_str(Some("nonsense")), None);
+    }
+}
+
+#[cfg(test)]
+mod chimp_pref_tests {
+    use super::*;
+
+    #[test]
+    fn chimp_is_enabled_for_preferences_written_before_it_existed() {
+        let prefs = prefs_from_value(&json!({}));
+        assert!(prefs.enable_chimp);
+        assert_eq!(prefs.chimp_output_dir, None);
+    }
+
+    #[test]
+    fn chimp_visibility_and_output_directory_round_trip() {
+        let prefs = GuiPrefs {
+            enable_chimp: false,
+            chimp_output_dir: Some(PathBuf::from("D:/Mods/Chimp")),
+            ..GuiPrefs::default()
+        };
+        let value = prefs_to_value(&prefs, &HashSet::new(), true);
+        let restored = prefs_from_value(&value);
+        assert!(!restored.enable_chimp);
+        assert_eq!(
+            restored.chimp_output_dir,
+            Some(PathBuf::from("D:/Mods/Chimp"))
+        );
     }
 }
 

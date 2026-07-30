@@ -140,6 +140,11 @@ pub(super) struct Kit {
     /// Project contents staged until this kit's source finishes mounting.
     pub(super) pending_campaign_project: Option<PendingCampaignProject>,
 
+    /// CE-only nested surface. Chimp is not an editing kit and does not enter
+    /// the top-level kit registry; it lives beside the Tags surface here.
+    pub(super) surface: KitSurface,
+    pub(super) chimp: ChimpState,
+
     /// Tags staged by a session restore, drained once this kit's source
     /// finishes loading. Held per kit rather than in one shared slot so
     /// several kits can restore concurrently and finish in any order.
@@ -187,6 +192,8 @@ impl Kit {
             profile: None,
             campaign_project: None,
             pending_campaign_project: None,
+            surface: KitSurface::Tags,
+            chimp: ChimpState::default(),
             pending_restore_tags: Vec::new(),
             pending_launch_tags: None,
         }
@@ -200,6 +207,7 @@ impl Kit {
     /// left the dot showing while the colour went back to clean.
     pub(super) fn has_unwritten_modifications(&self) -> bool {
         self.parsed_tags.values().any(|document| document.dirty.is_set())
+            || self.chimp.documents.values().any(|document| document.dirty)
             || self
                 .campaign_project
                 .as_ref()
@@ -438,6 +446,7 @@ impl Baboon {
 
 fn kit_has_dirty_documents(kit: &Kit) -> bool {
     kit.parsed_tags.values().any(|document| document.dirty.is_set())
+        || kit.chimp.documents.values().any(|document| document.dirty)
 }
 
 /// Label for a kit in the kit strip: the game's display name where one was

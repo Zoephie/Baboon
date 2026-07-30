@@ -126,6 +126,8 @@ mod sound_extract;
 use sound_extract::*;
 mod runtime_poke;
 use runtime_poke::*;
+mod chimp;
+use chimp::*;
 mod controller;
 mod ui;
 
@@ -196,6 +198,10 @@ pub struct Baboon {
     confirm_container_overwrite: bool,
     /// Show the preflight plan and wait for confirmation before a runtime poke.
     confirm_runtime_poke: bool,
+    /// Whether the CE-only Unreal package workspace is visible and mounted.
+    enable_chimp: bool,
+    /// Optional directory for Chimp's non-destructive `_P` output.
+    chimp_output_dir: Option<PathBuf>,
     expert_mode: bool,
     dark_mode: bool,
     ui_scale: f32,
@@ -429,6 +435,8 @@ impl Baboon {
             scroll_to_cycle_dropdowns: prefs.scroll_to_cycle_dropdowns,
             confirm_container_overwrite: prefs.confirm_container_overwrite,
             confirm_runtime_poke: prefs.confirm_runtime_poke,
+            enable_chimp: prefs.enable_chimp,
+            chimp_output_dir: prefs.chimp_output_dir.clone(),
             expert_mode: prefs.expert_mode,
             dark_mode: prefs.dark_mode,
             ui_scale: prefs.ui_scale,

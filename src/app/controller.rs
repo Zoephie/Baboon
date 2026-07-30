@@ -414,6 +414,14 @@ impl Baboon {
                     result,
                     recent_path,
                 } => self.handle_source_loaded(kit, result, recent_path, ctx),
+                WorkerMessage::ChimpMounted { stamp, result } => {
+                    self.handle_chimp_mounted(stamp, result)
+                }
+                WorkerMessage::ChimpPackageLoaded {
+                    stamp,
+                    package,
+                    result,
+                } => self.handle_chimp_package_loaded(stamp, package, result),
                 WorkerMessage::TagLoaded { kit, key, result } => { self.handle_tag_loaded(kit, key, result)
                 }
                 WorkerMessage::BitmapReimportFinished { kit, key, result } => {
@@ -4042,7 +4050,7 @@ impl Baboon {
     /// the archive — better a named refusal than a write that fails at the OS with
     /// `ERROR_USER_MAPPED_FILE` and nothing to connect it to the mod being
     /// installed.
-    fn release_export_target_mappings(
+    pub(super) fn release_export_target_mappings(
         &mut self,
         kit: usize,
         output: &Path,
@@ -4089,7 +4097,11 @@ impl Baboon {
     /// index, and `reopen_container_archive` is what rebuilds its file list from
     /// the containers it overrides. Falls back to remapping the archive that is
     /// already there, which at least leaves the mount readable.
-    fn restore_released_mappings(&mut self, kit: usize, released: &[usize]) -> Vec<String> {
+    pub(super) fn restore_released_mappings(
+        &mut self,
+        kit: usize,
+        released: &[usize],
+    ) -> Vec<String> {
         if released.is_empty() {
             return Vec::new();
         }
@@ -4224,6 +4236,7 @@ impl Baboon {
                 tag_bytes: bytes.as_slice(),
                 new_package_path: package.as_str(),
                 redirect_from: None,
+                asset_reference: None,
             },)
             .collect();
         let written =
@@ -5807,6 +5820,8 @@ impl Baboon {
             scroll_to_cycle_dropdowns: self.scroll_to_cycle_dropdowns,
             confirm_container_overwrite: self.confirm_container_overwrite,
             confirm_runtime_poke: self.confirm_runtime_poke,
+            enable_chimp: self.enable_chimp,
+            chimp_output_dir: self.chimp_output_dir.clone(),
             expert_mode: self.expert_mode,
             dark_mode: self.dark_mode,
             ui_scale: self.ui_scale,

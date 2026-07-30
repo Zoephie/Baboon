@@ -53,6 +53,45 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
             self.app.draw_welcome_screen(ui, &self.ctx, kit_index);
             return egui_tiles::UiResponse::None;
         }
+        let campaign_evolved = self.app.kits[kit_index]
+            .source
+            .as_ref()
+            .is_some_and(|source| {
+                matches!(&source.source, TagSource::IoStoreContainerSet { .. })
+            });
+        if campaign_evolved && self.app.enable_chimp {
+            Frame::none()
+                .fill(menu_bar())
+                .inner_margin(egui::Margin {
+                    left: 8.0,
+                    right: 8.0,
+                    top: 4.0,
+                    bottom: 4.0,
+                })
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Campaign Evolved").strong());
+                        ui.separator();
+                        ui.selectable_value(
+                            &mut self.app.kits[kit_index].surface,
+                            KitSurface::Chimp,
+                            "Chimp",
+                        )
+                        .on_hover_text("Browse and edit Unreal Engine packages");
+                        ui.selectable_value(
+                            &mut self.app.kits[kit_index].surface,
+                            KitSurface::Tags,
+                            "Tags",
+                        )
+                        .on_hover_text("Browse and edit Halo tags");
+                    });
+                });
+            if self.app.kits[kit_index].surface == KitSurface::Chimp {
+                self.app
+                    .draw_chimp_workspace(ui, &self.ctx, kit_index);
+                return egui_tiles::UiResponse::None;
+            }
+        }
         // Each workspace carries its own browser, so two games side by side can
         // be browsed independently rather than sharing one panel that
         // retargets as focus moves.
