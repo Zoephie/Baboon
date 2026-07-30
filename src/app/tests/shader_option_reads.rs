@@ -5,8 +5,6 @@
 //! surfaces. That made three of the H3 kit's own option tags unreadable, and in a
 //! GUI an unreadable option tag is a dead process rather than a message.
 
-use super::*;
-
 const H3_SHADERS: &str = "/Users/camden/Halo/halo3_mcc/tags/shaders";
 
 /// Every `render_method_option` in the kit must decode through the typed reader

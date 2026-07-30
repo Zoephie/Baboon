@@ -1548,49 +1548,4 @@ mod ce_repro_tests {
         }
     }
 
-    /// Export a CE model to JMS through the real render-extraction path and write
-    /// it to the scratchpad (set `CE_MODEL`, default johnson). Verifies the
-    /// MetaHuman head is fused in (a non-empty `head` region). Skips without paks.
-    #[test]
-    fn ce_render_jms_export() {
-        let paks = PathBuf::from(
-            "/Users/camden/Halo/halo-campaign-evolved_pc/Meteorite/Content/Paks"
-        );
-        if !paks.exists() {
-            eprintln!("skip: CE paks not found");
-            return;
-        }
-        let defs = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("definitions");
-        let loaded = crate::source::load_iostore_container_set(paks, &TagNameIndex::default(), &defs)
-            .expect("mount CE container set");
-        let source = &loaded.source;
-        let hlmt = u32::from_be_bytes(*b"hlmt");
-        let want = std::env::var("CE_MODEL").unwrap_or_else(|_| "johnson/johnson".into());
-        let entry = loaded
-            .entries
-            .iter()
-            .chain(loaded.all_entries.iter())
-            .find(|e| e.group_tag == hlmt && e.display_path.to_ascii_lowercase().contains(&want))
-            .expect("model entry")
-            .clone();
-        let tag = read_entry(source, &entry).expect("read model");
-        let (_, skel_ref) = tag.root().read_tag_ref_with_group("skeleton model").expect("skel ref");
-        let jms = campaign_evolved_render_jms(&tag, &entry, source, &skel_ref).expect("build JMS");
-        let n_head: usize = jms
-            .materials
-            .iter()
-            .filter(|m| m.material_name.to_ascii_lowercase().contains(" head"))
-            .count();
-        eprintln!(
-            "[TEST] JMS: {} verts, {} tris, {} materials, {} head-region materials",
-            jms.vertices.len(), jms.triangles.len(), jms.materials.len(), n_head
-        );
-        let out = format!(
-            "/private/tmp/claude-501/-Users-camden-Source-Baboon-local/4803b682-de10-4887-907a-9f81ad3d13d0/scratchpad/ce_jms_{}.jms",
-            want.replace('/', "_")
-        );
-        let mut f = std::io::BufWriter::new(std::fs::File::create(&out).unwrap());
-        jms.write(&mut f, 8213).unwrap();
-        eprintln!("[TEST] wrote {out}");
-    }
 }
