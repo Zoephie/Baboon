@@ -184,9 +184,54 @@ pub fn load_iostore_container_set(
     fallback_names: &TagNameIndex,
     definitions_root: &Path,
 ) -> Result<LoadedSourceData> {
-    let mut utocs: Vec<PathBuf> = std::fs::read_dir(&paks_dir)
-        .with_context(|| format!("failed to read {}", paks_dir.display()))?
-        .filter_map(|e| e.ok().map(|e| e.path()))
+    if !paks_dir.is_dir() {
+        anyhow::bail!("failed to read {}", paks_dir.display());
+    }
+    let mut utocs = utocs_under(&paks_dir);
+    // Mount base chunk first, then level chunks by number, so higher/patch
+    // chunks win on any collision (mirrors UE's FIoDispatcher last-wins). A mod
+    // is not named `pakchunkN`, so it sorts last and overrides what it patches.
+    utocs.sort_by_key(|p| (chunk_number(p), p.clone()));
+    build_container_set(paks_dir, utocs, fallback_names, definitions_root)
+}
+
+/// Mounts a single IoStore container (`.utoc`) — the "open one chunk" path. The
+/// resulting source is still a set (of one).
+///
+/// `pak_root` is the install's `Paks` directory when the caller knows it (it is
+/// configured in Settings), and it is what the container is mounted against. A
+/// mod ships no directory index, so naming its chunks means reading the base
+/// containers it overrides — and those are up in `Paks` when the mod itself is
+/// installed in `Paks/~mods`. Rooting at the folder holding the `.utoc` left the
+/// mod naming its own chunks off their package headers, under paths that
+/// disagree with the base game's; that is the fallback when no root is known.
+pub fn load_iostore_container(
+    utoc: PathBuf,
+    pak_root: Option<PathBuf>,
+    fallback_names: &TagNameIndex,
+    definitions_root: &Path,
+) -> Result<LoadedSourceData> {
+    let root = pak_root.unwrap_or_else(|| {
+        utoc.parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| utoc.clone())
+    });
+    build_container_set(root, vec![utoc], fallback_names, definitions_root)
+}
+
+/// Every mountable `.utoc` at or beneath `dir`.
+///
+/// Recursive because UE's own discovery is: `FPakPlatformFile::FindPakFilesInDirectory`
+/// walks the pak folder with `IterateDirectoryRecursively`, which is what makes
+/// the `~mods` convention work in game. A flat scan mounted the base game and
+/// silently ignored every mod installed one directory down — the mod's tags were
+/// simply absent from the browser.
+fn utocs_under(dir: &Path) -> Vec<PathBuf> {
+    WalkDir::new(dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().is_file())
+        .map(walkdir::DirEntry::into_path)
         .filter(|p| {
             p.extension()
                 .is_some_and(|x| x.eq_ignore_ascii_case("utoc"))
@@ -196,39 +241,15 @@ pub fn load_iostore_container_set(
             !p.file_name()
                 .is_some_and(|n| n.eq_ignore_ascii_case("global.utoc"))
         })
-        .collect();
-    // Mount base chunk first, then level chunks by number, so higher/patch
-    // chunks win on any collision (mirrors UE's FIoDispatcher last-wins).
-    utocs.sort_by_key(|p| (chunk_number(p), p.clone()));
-    build_container_set(paks_dir, utocs, fallback_names, definitions_root)
+        .collect()
 }
 
-/// Mounts a single IoStore container (`.utoc`) — the "open one chunk" path. The
-/// resulting source is still a set (of one).
-pub fn load_iostore_container(
-    utoc: PathBuf,
-    fallback_names: &TagNameIndex,
-    definitions_root: &Path,
-) -> Result<LoadedSourceData> {
-    let root = utoc
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| utoc.clone());
-    build_container_set(root, vec![utoc], fallback_names, definitions_root)
-}
-
-/// Sibling `.utoc`s in `root` that aren't already mounted, opened purely so an
-/// index-less container's chunk ids can be resolved back to paths. Only ones
-/// that carry a directory index are any use as a reference.
+/// Other `.utoc`s in the pak tree at `root` that aren't already mounted, opened
+/// purely so an index-less container's chunk ids can be resolved back to paths.
+/// Only ones that carry a directory index are any use as a reference.
 fn sibling_reference_archives(root: &Path, mounted: &[PathBuf]) -> Vec<IoStoreArchive> {
-    let Ok(dir) = std::fs::read_dir(root) else {
-        return Vec::new();
-    };
-    dir.filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| { p.extension().is_some_and(|x| x.eq_ignore_ascii_case("utoc"))
-        })
-        .filter(|p| { !p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("global.utoc"))
-        })
+    utocs_under(root)
+        .into_iter()
         .filter(|p| !mounted.contains(p))
         .filter_map(|p| IoStoreArchive::open(&p).ok())
         .filter(|archive| !archive.entries().is_empty())
@@ -1069,7 +1090,8 @@ mod mod_export_tests {
         )
         .expect("write override container");
 
-        let opened = load_iostore_container(out.clone(), &names, &defs);
+        // No install root known: the container has only the folder it is in.
+        let opened = load_iostore_container(out.clone(), None, &names, &defs);
         for ext in ["utoc", "ucas", "pak"] {
             let _ = std::fs::remove_file(out.with_extension(ext));
         }
@@ -1091,6 +1113,111 @@ mod mod_export_tests {
             "mod container listed {} tag(s); found {rel_path}",
             opened.entries.len()
         );
+    }
+
+    /// Mods are commonly installed in a folder under `Paks` — `~mods`, `~.mods`
+    /// — not loose beside the game's own paks. The game finds them there because
+    /// UE scans the pak folder recursively; a flat scan mounted the base game
+    /// and reported no sign of the mod at all.
+    ///
+    /// Both ways in are covered: mounting the install, and opening the mod's own
+    /// `.utoc` against the install root the app already knows.
+    #[test]
+    fn a_mod_installed_below_the_paks_folder_is_mounted() {
+        if !Path::new(PAKS).exists() {
+            eprintln!("skipping: {PAKS} not present");
+            return;
+        }
+        let defs = Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
+        let names = TagNameIndex::load_from_definitions(&defs);
+        let loaded =
+            load_iostore_container_set(PathBuf::from(PAKS), &names, &defs).expect("mount");
+        let TagSource::IoStoreContainerSet { ref containers, .. } = loaded.source else {
+            panic!("expected a container set");
+        };
+        let (container, rel_path, original) = loaded
+            .entries
+            .iter()
+            .find_map(|entry| match &entry.location {
+                TagEntryLocation::Container { container, rel_path } => {
+                    let archive = &containers.get(*container)?.archive;
+                    let bytes = archive.read(rel_path).ok()?;
+                    (bytes.len() > 64).then(|| (*container, rel_path.clone(), bytes))
+                }
+                _ => None,
+            })
+            .expect("a readable container tag");
+
+        let mut edited = original.clone();
+        let last = edited.len() - 1;
+        edited[last] ^= 0xFF;
+
+        let mods_dir = PathBuf::from(PAKS).join("~mods");
+        std::fs::create_dir_all(&mods_dir).expect("create the mod folder");
+        let out = mods_dir.join(format!("baboon-submod-test-{}_P.utoc", std::process::id()));
+        blam_tags::iostore::writer::write_mod_container_ex(
+            &[(
+                containers[container].archive.as_ref(),
+                rel_path.as_str(),
+                edited.as_slice(),
+            )],
+            &[],
+            &out,
+        )
+        .expect("write override container");
+
+        // Everything from here has to clean up after itself: the mod is sitting
+        // in the user's install and must not outlive the test.
+        let result = std::panic::catch_unwind(|| {
+            // Mounting the install must serve the tag out of the mod, not the
+            // base pak it overrides.
+            let with_mod = load_iostore_container_set(PathBuf::from(PAKS), &names, &defs)
+                .expect("remount the install");
+            let TagSource::IoStoreContainerSet { containers: ref mounted, .. } = with_mod.source
+            else {
+                panic!("expected a container set");
+            };
+            let served = with_mod
+                .entries
+                .iter()
+                .find_map(|entry| match &entry.location {
+                    TagEntryLocation::Container { container, rel_path: p } if *p == rel_path => {
+                        let mounted = mounted.get(*container)?;
+                        Some((mounted.utoc_path.clone(), mounted.archive.read(p).ok()?))
+                    }
+                    _ => None,
+                })
+                .expect("the overridden tag is in the mounted set");
+            assert_eq!(
+                served.0, out,
+                "{rel_path} is still served by {}, not the mod under ~mods",
+                served.0.display()
+            );
+            assert_eq!(served.1, edited, "the mod's bytes were not the ones served");
+
+            // Opening the mod alone, against the install root the app knows.
+            let opened =
+                load_iostore_container(out.clone(), Some(PathBuf::from(PAKS)), &names, &defs)
+                    .expect("mount the mod against the install");
+            let listed = opened.entries.iter().any(|entry| match &entry.location {
+                TagEntryLocation::Container { rel_path: p, .. } => *p == rel_path,
+                _ => false,
+            });
+            assert!(
+                listed,
+                "the mod listed {} tag(s), none of them {rel_path}",
+                opened.entries.len()
+            );
+        });
+
+        for ext in ["utoc", "ucas", "pak"] {
+            let _ = std::fs::remove_file(out.with_extension(ext));
+        }
+        let _ = std::fs::remove_dir(&mods_dir);
+        if let Err(payload) = result {
+            std::panic::resume_unwind(payload);
+        }
+        eprintln!("a mod under ~mods served {rel_path}");
     }
 
     /// Save a tag that is being served by an already-exported mod: edit, export,
@@ -1145,7 +1272,7 @@ mod mod_export_tests {
         // Everything from here has to clean up after itself: the mod is sitting
         // in the user's install and must not outlive the test.
         let result = std::panic::catch_unwind(|| {
-            let opened = load_iostore_container(out.clone(), &names, &defs)
+            let opened = load_iostore_container(out.clone(), None, &names, &defs)
                 .expect("mount the exported mod");
             let TagSource::IoStoreContainerSet {
                 ref root,
