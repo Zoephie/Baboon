@@ -612,6 +612,23 @@ impl Baboon {
         self.begin_load_iostore_container_path(path, ctx);
     }
 
+    /// The `Paks` directory of the Campaign Evolved install this session is
+    /// working with — an already-mounted container set's own root, else the
+    /// install configured in Settings. `None` when neither is known, which is
+    /// the only case where a container has to be mounted on its own.
+    fn campaign_evolved_pak_root(&self) -> Option<PathBuf> {
+        let mounted = self.kits.iter().find_map(|kit| {
+            match kit.source.as_ref().map(|source| &source.source) {
+                Some(TagSource::IoStoreContainerSet { root, .. }) => Some(root.clone()),
+                _ => None,
+            }
+        });
+        mounted.or_else(|| {
+            let configured = self.editing_kit_paths.get("haloce_evolved")?;
+            crate::source::find_paks_dir(configured)
+        })
+    }
+
     /// Mounts a single IoStore container (`.utoc`) off the UI thread; completion
     /// is reported through `WorkerMessage::SourceLoaded` like the other loaders.
     pub(super) fn begin_load_iostore_container_path(&mut self, path: PathBuf, ctx: egui::Context) {
@@ -623,11 +640,15 @@ impl Baboon {
         let kit = self.active_kit_id();
         let names = self.default_names.clone();
         let definitions_root = locate_definitions_root();
+        // Mount the container against the install's `Paks` directory. A mod
+        // installed in `Paks/~mods` carries no directory index of its own, and
+        // only the base containers it overrides can name its chunks.
+        let pak_root = self.campaign_evolved_pak_root();
         self.status = format!("Mounting {}", path.display());
         let recent_path = clean_recent_path(path.clone());
         thread::spawn(move || {
-            let result =
-                load_iostore_container(path, &names, &definitions_root).map_err(|e| e.to_string());
+            let result = load_iostore_container(path, pak_root, &names, &definitions_root)
+                .map_err(|e| e.to_string());
             let _ = tx.send(WorkerMessage::SourceLoaded {
                 kit,
                 result,
