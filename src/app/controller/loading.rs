@@ -241,6 +241,26 @@ pub(super) fn loaded_source_status(source: &LoadedSourceData) -> String {
                 source.label
             )
         }
+        // A mounted mod overrides the game's own tags, exactly as it does in
+        // game, so the browser is showing its values rather than the shipped
+        // ones. Say which mods, at the one moment the user is looking: silently
+        // serving a mod's tags as the base game is indistinguishable from the
+        // base game having those values.
+        TagSource::IoStoreContainerSet { containers, .. }
+            if containers.iter().any(|container| container.is_mod) =>
+        {
+            let mods = containers
+                .iter()
+                .filter(|container| container.is_mod)
+                .map(|container| container.chunk_label.as_str())
+                .collect::<Vec<_>>();
+            format!(
+                "Loaded {} tag(s) from {} — overridden by mounted mod(s): {}",
+                source.entries.len(),
+                source.label,
+                mods.join(", ")
+            )
+        }
         _ => format!(
             "Loaded {} tag(s) from {}",
             source.entries.len(),

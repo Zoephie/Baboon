@@ -3775,6 +3775,7 @@ impl Baboon {
                     (true, CampaignProjectTagKind::New) => ModExportChange::New,
                     (true, CampaignProjectTagKind::Existing) => ModExportChange::Modified,
                 };
+                let overridden_by = self.mod_serving_tag(exporting, &overlay.identity);
                 ModExportRow {
                     identity: overlay.identity.clone(),
                     display_path: overlay.logical_path.clone(),
@@ -3784,6 +3785,7 @@ impl Baboon {
                     bytes: overlay.bytes.len(),
                     reason: (kind == ModExportChange::Unresolved)
                         .then(|| "not in this source".to_owned()),
+                    overridden_by,
                 }
             })
             .collect();
@@ -3814,10 +3816,11 @@ impl Baboon {
     /// Compute the field differences for one reviewed tag, against the tag as
     /// the game ships it.
     ///
-    /// `read_entry` reads from the container, so the baseline is the shipped
-    /// tag rather than anything the workspace has stashed -- which is the
-    /// comparison the reviewer actually wants: what this mod changes about the
-    /// game, not what changed since the last autosave.
+    /// The baseline comes from the *shipped* containers, not from whatever the
+    /// mount resolved the tag to -- which is the comparison the reviewer actually
+    /// wants: what this mod changes about the game, not what changed since the
+    /// last autosave, and not "nothing" because an earlier export of this very
+    /// mod is installed under `Paks` and now serves the tag.
     pub(super) fn diff_reviewed_tag(&self, kit: usize, identity: &str) -> ModRowDiff {
         const LIMIT: usize = 5000;
         let failed = |error: String| ModRowDiff {
@@ -3845,18 +3848,25 @@ impl Baboon {
         };
         // A tag this workspace created has no shipped counterpart to compare
         // against, so the whole tag is described instead.
-        if overlay.kind == CampaignProjectTagKind::New {
-            let (rows, truncated) = describe_tag(&edited_tag, &self.kits[kit].names, LIMIT);
-            return ModRowDiff {
+        let describe_whole = |edited_tag: TagFile, names: &TagNameIndex| {
+            let (rows, truncated) = describe_tag(&edited_tag, names, LIMIT);
+            ModRowDiff {
                 rows,
                 base: None,
                 edited: Some(edited_tag),
                 truncated,
                 error: None,
-            };
+            }
+        };
+        if overlay.kind == CampaignProjectTagKind::New {
+            return describe_whole(edited_tag, &self.kits[kit].names);
         }
-        let base = match crate::source::read_entry(&source.source, &entry) {
-            Ok(base) => base,
+        let base = match crate::source::read_shipped_entry(&source.source, &entry) {
+            Ok(Some(base)) => base,
+            // Only a mod carries this tag, so there is no shipped version to
+            // difference against — describing it whole is the honest answer, and
+            // it is what the reviewer needs to see either way.
+            Ok(None) => return describe_whole(edited_tag, &self.kits[kit].names),
             Err(error) => return failed(format!("Could not read the shipped tag: {error}")),
         };
         let (rows, truncated) = diff_tags(&base, &edited_tag, &self.kits[kit].names, LIMIT);
@@ -3957,6 +3967,170 @@ impl Baboon {
         Ok(count)
     }
 
+    /// The mounted mod currently serving this tag, if the mount resolved it to
+    /// one rather than to the game's own pack.
+    pub(super) fn mod_serving_tag(&self, kit: usize, identity: &str) -> Option<String> {
+        let source = self.kits.get(kit)?.source.as_ref()?;
+        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+            return None;
+        };
+        let entry = self.campaign_entry_for_identity(kit, identity)?;
+        let TagEntryLocation::Container { container, .. } = &entry.location else {
+            return None;
+        };
+        containers
+            .get(*container)
+            .filter(|container| container.is_mod)
+            .map(|container| container.chunk_label.clone())
+    }
+
+    /// The container a tag would be written into, and whether it is a mod.
+    pub(super) fn container_label_for_tag(&self, kit: usize, key: &str) -> Option<(String, bool)> {
+        let source = self.kits.get(kit)?.source.as_ref()?;
+        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+            return None;
+        };
+        let TagEntryLocation::Container { container, .. } = &self.entry_for_key_in(kit, key)?.location
+        else {
+            return None;
+        };
+        containers
+            .get(*container)
+            .map(|container| (container.chunk_label.clone(), container.is_mod))
+    }
+
+    /// Every mod this workspace has mounted, by container label.
+    pub(super) fn mounted_mod_labels(&self, kit: usize) -> Vec<String> {
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+            return Vec::new();
+        };
+        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+            return Vec::new();
+        };
+        containers
+            .iter()
+            .filter(|container| container.is_mod)
+            .map(|container| container.chunk_label.clone())
+            .collect()
+    }
+
+    /// The mounted containers an export to `output` would replace, by label.
+    ///
+    /// A mod installed under `Paks` is mounted like any other container, and
+    /// mounting memory-maps its `.ucas`. Replacing that file means releasing the
+    /// mapping first — Windows refuses to truncate a file with a mapped section
+    /// open — so this is what the review dialog says out loud and what the export
+    /// releases before it writes.
+    pub(super) fn export_replaces_mounted(&self, kit: usize, output: &Path) -> Vec<String> {
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+            return Vec::new();
+        };
+        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+            return Vec::new();
+        };
+        crate::source::mounted_containers_at(&source.source, output)
+            .into_iter()
+            .filter_map(|index| containers.get(index))
+            .map(|container| container.chunk_label.clone())
+            .collect()
+    }
+
+    /// Release the `.ucas` mapping of every mounted container an export to
+    /// `output` is about to replace, so the writer can truncate the file.
+    ///
+    /// `Err` when a mapping cannot be released because something else still holds
+    /// the archive — better a named refusal than a write that fails at the OS with
+    /// `ERROR_USER_MAPPED_FILE` and nothing to connect it to the mod being
+    /// installed.
+    fn release_export_target_mappings(
+        &mut self,
+        kit: usize,
+        output: &Path,
+    ) -> Result<Vec<usize>, String> {
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+            return Ok(Vec::new());
+        };
+        let targets = crate::source::mounted_containers_at(&source.source, output);
+        if targets.is_empty() {
+            return Ok(Vec::new());
+        }
+        let Some(source) = self.kits.get_mut(kit).and_then(|kit| kit.source.as_mut()) else {
+            return Ok(Vec::new());
+        };
+        let TagSource::IoStoreContainerSet { containers, .. } = &mut source.source else {
+            return Ok(Vec::new());
+        };
+        let mut released = Vec::new();
+        for index in targets {
+            let Some(mounted) = containers.get_mut(index) else {
+                continue;
+            };
+            let label = mounted.chunk_label.clone();
+            // Only the mount may hold this archive. A surviving clone — a preview
+            // still reading, a worker mid-scan — keeps the mapping alive whatever
+            // this does, and the write would fail anyway.
+            let Some(archive) = std::sync::Arc::get_mut(&mut mounted.archive) else {
+                return Err(format!(
+                    "Export Mod failed: {label} is being read by this workspace right now, so it \
+                     cannot be replaced. Try again in a moment, or export under a different name."
+                ));
+            };
+            archive.release_partition();
+            released.push(index);
+        }
+        Ok(released)
+    }
+
+    /// Put back what [`Self::release_export_target_mappings`] released, once the
+    /// files it was protecting have been rewritten.
+    ///
+    /// The container on disk is a different file now, so its index is reopened
+    /// rather than the old one remapped: an override container ships no directory
+    /// index, and `reopen_container_archive` is what rebuilds its file list from
+    /// the containers it overrides. Falls back to remapping the archive that is
+    /// already there, which at least leaves the mount readable.
+    fn restore_released_mappings(&mut self, kit: usize, released: &[usize]) -> Vec<String> {
+        if released.is_empty() {
+            return Vec::new();
+        }
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+            return Vec::new();
+        };
+        let TagSource::IoStoreContainerSet {
+            root, containers, ..
+        } = &source.source
+        else {
+            return Vec::new();
+        };
+        let (root, containers) = (root.clone(), containers.clone());
+        let mut failures = Vec::new();
+        for &index in released {
+            let reopened = crate::source::reopen_container_archive(&root, &containers, index);
+            let Some(source) = self.kits.get_mut(kit).and_then(|kit| kit.source.as_mut()) else {
+                continue;
+            };
+            let TagSource::IoStoreContainerSet { containers, .. } = &mut source.source else {
+                continue;
+            };
+            let Some(mounted) = containers.get_mut(index) else {
+                continue;
+            };
+            match reopened {
+                Ok(archive) => mounted.archive = std::sync::Arc::new(archive),
+                Err(error) => {
+                    if let Some(archive) = std::sync::Arc::get_mut(&mut mounted.archive)
+                        && archive.remap_partition().is_ok()
+                    {
+                        failures.push(format!("{}: {error}", mounted.chunk_label));
+                        continue;
+                    }
+                    failures.push(format!("{}: {error}", mounted.chunk_label));
+                }
+            }
+        }
+        failures
+    }
+
     /// Write the reviewed mod. `included` are the identities the user kept.
     pub(super) fn write_reviewed_mod(
         &mut self,
@@ -3969,7 +4143,12 @@ impl Baboon {
             self.status = "No source loaded".to_owned();
             return;
         };
-        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+        let TagSource::IoStoreContainerSet {
+            containers,
+            shipped,
+            ..
+        } = &source.source
+        else {
             self.status = "Export Mod is only for Campaign Evolved containers".to_owned();
             return;
         };
@@ -3987,7 +4166,13 @@ impl Baboon {
             };
             match &entry.location {
                 TagEntryLocation::Container { container, rel_path, } => {
-                    let Some(m) = containers.get(*container) else {
+                    // The base an override is built against is the game's own
+                    // pack, not whatever the mount resolved this tag to. With a
+                    // mod installed under `Paks`, the latter is that mod — so the
+                    // export read its chunk layout out of the very file it was
+                    // about to replace.
+                    let base = shipped.container_for(rel_path).unwrap_or(*container);
+                    let Some(m) = containers.get(base) else {
                         skipped += 1;
                         continue;
                     };
@@ -4017,6 +4202,17 @@ impl Baboon {
             self.status = "Nothing selected to export".to_owned();
             return;
         }
+        // The writer truncates the three files it writes, and a container this
+        // workspace has mounted has its `.ucas` mapped — which Windows will not
+        // let anyone truncate. Releasing has to happen after the bases above are
+        // collected (they are other containers) and before the writer runs.
+        let released = match self.release_export_target_mappings(exporting, &output) {
+            Ok(released) => released,
+            Err(error) => {
+                self.status = error;
+                return;
+            }
+        };
         let override_refs: Vec<(&blam_tags::iostore::IoStoreArchive, &str, &[u8])> = overrides
             .iter()
             .map(|(a, p, b)| (a.as_ref(), p.as_str(), b.as_slice()))
@@ -4030,8 +4226,14 @@ impl Baboon {
                 redirect_from: None,
             },)
             .collect();
-        match blam_tags::iostore::writer::write_mod_container_ex(&override_refs, &new_refs, &output)
-        {
+        let written =
+            blam_tags::iostore::writer::write_mod_container_ex(&override_refs, &new_refs, &output);
+        // Before anything reads through the mount again, and whether or not the
+        // write worked: a released partition refuses every payload read.
+        drop(override_refs);
+        drop(overrides);
+        let reopen_failures = self.restore_released_mappings(exporting, &released);
+        match written {
             Ok(()) => {
                 let stem = output
                     .file_stem()
@@ -4054,7 +4256,24 @@ impl Baboon {
                     .source()
                     .map(|source| source.source.root_path() == directory)
                     .unwrap_or(false);
-                self.status = format!("Exported {count} tag(s) as {stem}");
+                self.status = if !reopen_failures.is_empty() {
+                    // The mod was written; what failed is picking it back up.
+                    format!(
+                        "Exported {count} tag(s) as {stem}, but remounting failed ({}) — reload \
+                         the source",
+                        reopen_failures.join("; ")
+                    )
+                } else if released.is_empty() {
+                    format!("Exported {count} tag(s) as {stem}")
+                } else {
+                    // The container it replaced is mounted, so the browser is now
+                    // showing the mod it just wrote. Anything that mod used to
+                    // carry and no longer does still has an entry pointing at it.
+                    format!(
+                        "Exported {count} tag(s) as {stem}, replacing the mounted copy — reload \
+                         the source if its tag list changed"
+                    )
+                };
                 // Written straight into the game's own folder: there is nothing
                 // to copy, so the instructions would only be noise.
                 if !in_place {
@@ -6618,6 +6837,10 @@ mod browser_refresh_tests;
 #[cfg(test)]
 #[path = "tests/save_changes_prompt.rs"]
 mod save_changes_prompt_tests;
+
+#[cfg(test)]
+#[path = "tests/mod_overrides.rs"]
+mod mod_override_tests;
 
 enum SaveChangesPromptAction {
     None,

@@ -387,6 +387,19 @@ pub(in crate::app) struct ModExportRow {
     pub(in crate::app) bytes: usize,
     /// Why this tag cannot be exported, when it cannot.
     pub(in crate::app) reason: Option<String>,
+    /// The mounted mod currently serving this tag, if one is. The comparison
+    /// below the row is against the game's own pack either way, so without this
+    /// there is nothing to explain why the editor is showing the mod's values.
+    pub(in crate::app) overridden_by: Option<String>,
+}
+
+impl ModExportDialog {
+    /// The container this export would write, which may be one this workspace has
+    /// mounted — that is what makes a re-export of an installed mod impossible
+    /// while it is open.
+    pub(in crate::app) fn output_utoc(&self) -> PathBuf {
+        self.folder.join(format!("{}.utoc", self.stem()))
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
