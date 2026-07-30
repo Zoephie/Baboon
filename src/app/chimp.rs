@@ -5,6 +5,7 @@
 //! state; none of those concepts are forced through the editing-kit/tag model.
 
 use super::*;
+use std::collections::BTreeMap;
 use std::io::Cursor;
 
 use blam_tags::iostore::container::writer::{PackageOverride, write_package_mod_container};
@@ -41,8 +42,95 @@ impl Default for ChimpMount {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum ChimpBrowser {
     #[default]
+    Folders,
+    Archives,
     Packages,
     Files,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ChimpArchive {
+    IoStore(usize),
+    Pak(usize),
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ChimpFolderSelection {
+    #[default]
+    Package,
+    File,
+}
+
+enum ChimpTreeClick {
+    Package(String),
+    File(String),
+}
+
+#[derive(Default)]
+struct ChimpFolderNode {
+    folders: BTreeMap<String, ChimpFolderNode>,
+    packages: Vec<ChimpPackageLeaf>,
+    files: Vec<ChimpFileLeaf>,
+    package_count: usize,
+    file_count: usize,
+}
+
+struct ChimpPackageLeaf {
+    name: String,
+    package: usize,
+}
+
+struct ChimpFileLeaf {
+    name: String,
+    file: usize,
+}
+
+impl ChimpFolderNode {
+    fn insert_package(&mut self, package: usize, path: &str) {
+        let mut segments = path
+            .trim_matches('/')
+            .split('/')
+            .filter(|segment| !segment.is_empty())
+            .peekable();
+        let mut node = self;
+        node.package_count += 1;
+        while let Some(segment) = segments.next() {
+            if segments.peek().is_none() {
+                node.packages.push(ChimpPackageLeaf {
+                    name: segment.to_owned(),
+                    package,
+                });
+                return;
+            }
+            node = node.folders.entry(segment.to_owned()).or_default();
+            node.package_count += 1;
+        }
+    }
+
+    fn insert_file(&mut self, file: usize, path: &str) {
+        let normalized = path.replace('\\', "/");
+        let mut segments = normalized
+            .split('/')
+            .filter(|segment| !segment.is_empty() && *segment != "." && *segment != "..")
+            .peekable();
+        let mut node = self;
+        node.file_count += 1;
+        while let Some(segment) = segments.next() {
+            if segments.peek().is_none() {
+                node.files.push(ChimpFileLeaf {
+                    name: segment.to_owned(),
+                    file,
+                });
+                return;
+            }
+            node = node.folders.entry(segment.to_owned()).or_default();
+            node.file_count += 1;
+        }
+    }
+
+    fn entry_count(&self) -> usize {
+        self.package_count + self.file_count
+    }
 }
 
 #[derive(Default)]
@@ -53,6 +141,9 @@ pub(super) struct ChimpState {
     filtered_for: Option<String>,
     filtered_packages: Vec<usize>,
     filtered_files: Vec<usize>,
+    content_tree: ChimpFolderNode,
+    selected_archive: Option<ChimpArchive>,
+    folder_selection: ChimpFolderSelection,
     pub(super) selected_package: Option<String>,
     selected_file: Option<String>,
     pub(super) open_packages: Vec<String>,
@@ -93,6 +184,7 @@ impl ChimpState {
         if self.filter_is_current(&query) {
             return;
         }
+        let selected_archive = self.selected_archive;
         self.filtered_for = Some(query.clone());
         self.filtered_packages.clear();
         self.filtered_files.clear();
@@ -102,15 +194,24 @@ impl ChimpState {
                 .iter()
                 .enumerate()
                 .filter(|(_, package)| {
-                    query.is_empty()
-                        || package.name.to_ascii_lowercase().contains(&query)
-                        || package.providers.iter().any(|provider| {
-                            world.containers()[provider.container]
-                                .path
-                                .to_string_lossy()
-                                .to_ascii_lowercase()
-                                .contains(&query)
-                        })
+                    let archive_matches = match selected_archive {
+                        None => true,
+                        Some(ChimpArchive::IoStore(container)) => package
+                            .providers
+                            .iter()
+                            .any(|provider| provider.container == container),
+                        Some(ChimpArchive::Pak(_)) => false,
+                    };
+                    archive_matches
+                        && (query.is_empty()
+                            || package.name.to_ascii_lowercase().contains(&query)
+                            || package.providers.iter().any(|provider| {
+                                world.containers()[provider.container]
+                                    .path
+                                    .to_string_lossy()
+                                    .to_ascii_lowercase()
+                                    .contains(&query)
+                            }))
                 })
                 .map(|(index, _)| index),
         );
@@ -120,24 +221,43 @@ impl ChimpState {
                 .iter()
                 .enumerate()
                 .filter(|(_, file)| {
-                    query.is_empty()
-                        || file.path.to_ascii_lowercase().contains(&query)
-                        || file.providers.iter().any(|provider| {
-                            world.pak_containers()[provider.container]
-                                .path
-                                .to_string_lossy()
-                                .to_ascii_lowercase()
-                                .contains(&query)
-                        })
+                    let archive_matches = match selected_archive {
+                        None => true,
+                        Some(ChimpArchive::Pak(container)) => file
+                            .providers
+                            .iter()
+                            .any(|provider| provider.container == container),
+                        Some(ChimpArchive::IoStore(_)) => false,
+                    };
+                    archive_matches
+                        && (query.is_empty()
+                            || file.path.to_ascii_lowercase().contains(&query)
+                            || file.providers.iter().any(|provider| {
+                                world.pak_containers()[provider.container]
+                                    .path
+                                    .to_string_lossy()
+                                    .to_ascii_lowercase()
+                                    .contains(&query)
+                            }))
                 })
                 .map(|(index, _)| index),
         );
+        self.content_tree = ChimpFolderNode::default();
+        for &index in &self.filtered_packages {
+            self.content_tree
+                .insert_package(index, &world.packages()[index].name);
+        }
+        for &index in &self.filtered_files {
+            self.content_tree
+                .insert_file(index, &world.pak_files()[index].path);
+        }
     }
 
     fn reset_filter(&mut self) {
         self.filtered_for = None;
         self.filtered_packages.clear();
         self.filtered_files.clear();
+        self.content_tree = ChimpFolderNode::default();
     }
 }
 
@@ -443,6 +563,7 @@ impl Baboon {
             self.kits[kit_index].chimp.selected_package = Some(package);
             return;
         }
+        self.kits[kit_index].chimp.selected_package = Some(package.clone());
         if !self.kits[kit_index]
             .chimp
             .loading_packages
@@ -524,7 +645,20 @@ impl Baboon {
             .show_inside(ui, |ui| {
                 if ready {
                     match self.kits[kit_index].chimp.browser {
+                        ChimpBrowser::Folders => {
+                            match self.kits[kit_index].chimp.folder_selection {
+                                ChimpFolderSelection::Package => {
+                                    self.draw_chimp_document(ui, kit_index)
+                                }
+                                ChimpFolderSelection::File => self.draw_chimp_file(ui, kit_index),
+                            }
+                        }
                         ChimpBrowser::Packages => self.draw_chimp_document(ui, kit_index),
+                        ChimpBrowser::Archives => {
+                            ui.centered_and_justified(|ui| {
+                                ui.label("Select an archive to browse its folder hierarchy.");
+                            });
+                        }
                         ChimpBrowser::Files => self.draw_chimp_file(ui, kit_index),
                     }
                 } else {
@@ -568,6 +702,16 @@ impl Baboon {
 
     fn draw_chimp_browser(&mut self, ui: &mut Ui, ctx: &egui::Context, kit_index: usize) {
         ui.horizontal(|ui| {
+            ui.selectable_value(
+                &mut self.kits[kit_index].chimp.browser,
+                ChimpBrowser::Archives,
+                "Archives",
+            );
+            ui.selectable_value(
+                &mut self.kits[kit_index].chimp.browser,
+                ChimpBrowser::Folders,
+                "Folders",
+            );
             ui.selectable_value(
                 &mut self.kits[kit_index].chimp.browser,
                 ChimpBrowser::Packages,
@@ -617,8 +761,16 @@ impl Baboon {
                 }
             });
         }
+        if self.kits[kit_index].chimp.browser == ChimpBrowser::Archives {
+            self.draw_chimp_archives(ui, &world, kit_index);
+            return;
+        }
         if self.kits[kit_index].chimp.browser == ChimpBrowser::Files {
             self.draw_chimp_pak_files(ui, &world, kit_index);
+            return;
+        }
+        if self.kits[kit_index].chimp.browser == ChimpBrowser::Folders {
+            self.draw_chimp_folders(ui, ctx, &world, kit_index);
             return;
         }
         let indices = self.kits[kit_index].chimp.filtered_packages.clone();
@@ -648,13 +800,163 @@ impl Baboon {
                         response
                     };
                     if response.clicked() {
-                        self.kits[kit_index].chimp.selected_package = Some(package.name.clone());
-                    }
-                    if response.double_clicked() {
                         self.begin_chimp_open_package(kit_index, package.name.clone(), ctx.clone());
                     }
                 }
             });
+    }
+
+    fn draw_chimp_archives(&mut self, ui: &mut Ui, world: &World, kit_index: usize) {
+        let selected = self.kits[kit_index].chimp.selected_archive;
+        egui::ScrollArea::vertical()
+            .id_salt(("chimp_archives", self.kits[kit_index].id.0))
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                if ui
+                    .selectable_label(selected.is_none(), "All mounted archives")
+                    .clicked()
+                {
+                    let chimp = &mut self.kits[kit_index].chimp;
+                    chimp.selected_archive = None;
+                    chimp.browser = ChimpBrowser::Folders;
+                    chimp.folder_selection = ChimpFolderSelection::Package;
+                    chimp.filter.clear();
+                    chimp.reset_filter();
+                }
+                ui.add_space(4.0);
+                ui.label(RichText::new("IoStore").strong());
+                for container in world.containers() {
+                    let name = container
+                        .path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("container.utoc");
+                    let response = ui
+                        .selectable_label(
+                            selected == Some(ChimpArchive::IoStore(container.index)),
+                            format!("{name}  ·  {} packages", container.package_count),
+                        )
+                        .on_hover_text(format!(
+                            "{}\nMount order: {}{}",
+                            container.path.display(),
+                            container.read_order,
+                            if container.recovered_directory_index {
+                                "\nRecovered directory index"
+                            } else {
+                                ""
+                            }
+                        ));
+                    if response.clicked() {
+                        let chimp = &mut self.kits[kit_index].chimp;
+                        chimp.selected_archive = Some(ChimpArchive::IoStore(container.index));
+                        chimp.browser = ChimpBrowser::Folders;
+                        chimp.folder_selection = ChimpFolderSelection::Package;
+                        chimp.filter.clear();
+                        chimp.reset_filter();
+                    }
+                }
+                ui.add_space(6.0);
+                ui.label(RichText::new("Legacy pak").strong());
+                for container in world.pak_containers() {
+                    let name = container
+                        .path
+                        .file_name()
+                        .and_then(|name| name.to_str())
+                        .unwrap_or("container.pak");
+                    let response = ui
+                        .selectable_label(
+                            selected == Some(ChimpArchive::Pak(container.index)),
+                            format!("{name}  ·  {} files", container.file_count),
+                        )
+                        .on_hover_text(format!(
+                            "{}\nMount order: {}",
+                            container.path.display(),
+                            container.read_order
+                        ));
+                    if response.clicked() {
+                        let chimp = &mut self.kits[kit_index].chimp;
+                        chimp.selected_archive = Some(ChimpArchive::Pak(container.index));
+                        chimp.browser = ChimpBrowser::Folders;
+                        chimp.folder_selection = ChimpFolderSelection::File;
+                        chimp.filter.clear();
+                        chimp.reset_filter();
+                    }
+                }
+                if !world.diagnostics().is_empty() {
+                    ui.add_space(6.0);
+                    ui.label(RichText::new("Unavailable or empty").strong());
+                    for diagnostic in world.diagnostics() {
+                        let name = diagnostic
+                            .path
+                            .file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("archive");
+                        ui.colored_label(Color32::from_rgb(210, 150, 70), name)
+                            .on_hover_text(format!(
+                                "{}\n{}",
+                                diagnostic.path.display(),
+                                diagnostic.message
+                            ));
+                    }
+                }
+            });
+    }
+
+    fn draw_chimp_folders(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &egui::Context,
+        world: &World,
+        kit_index: usize,
+    ) {
+        let selected_archive = self.kits[kit_index].chimp.selected_archive;
+        if let Some(archive) = selected_archive {
+            ui.horizontal(|ui| {
+                let path = match archive {
+                    ChimpArchive::IoStore(index) => &world.containers()[index].path,
+                    ChimpArchive::Pak(index) => &world.pak_containers()[index].path,
+                };
+                let name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or("archive");
+                ui.label(RichText::new(name).strong());
+                if ui.small_button("Show all").clicked() {
+                    let chimp = &mut self.kits[kit_index].chimp;
+                    chimp.selected_archive = None;
+                    chimp.reset_filter();
+                }
+            });
+            ui.separator();
+        }
+        let selected_package = self.kits[kit_index].chimp.selected_package.clone();
+        let selected_file = self.kits[kit_index].chimp.selected_file.clone();
+        let clicked = egui::ScrollArea::vertical()
+            .id_salt(("chimp_folders", self.kits[kit_index].id.0))
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                draw_chimp_folder_node(
+                    ui,
+                    &self.kits[kit_index].chimp.content_tree,
+                    world,
+                    selected_package.as_deref(),
+                    selected_file.as_deref(),
+                    "",
+                )
+            })
+            .inner;
+        match clicked {
+            Some(ChimpTreeClick::Package(package)) => {
+                self.kits[kit_index].chimp.folder_selection = ChimpFolderSelection::Package;
+                self.begin_chimp_open_package(kit_index, package, ctx.clone());
+            }
+            Some(ChimpTreeClick::File(file)) => {
+                let chimp = &mut self.kits[kit_index].chimp;
+                chimp.folder_selection = ChimpFolderSelection::File;
+                chimp.selected_file = Some(file);
+            }
+            None => {}
+        }
     }
 
     fn draw_chimp_pak_files(&mut self, ui: &mut Ui, world: &World, kit_index: usize) {
@@ -800,7 +1102,7 @@ impl Baboon {
 
         let Some(package) = self.kits[kit_index].chimp.selected_package.clone() else {
             ui.centered_and_justified(|ui| {
-                ui.label("Double-click a package to inspect it.");
+                ui.label("Select a package to inspect it.");
             });
             return;
         };
@@ -1163,6 +1465,78 @@ impl Baboon {
     }
 }
 
+fn draw_chimp_folder_node(
+    ui: &mut Ui,
+    node: &ChimpFolderNode,
+    world: &World,
+    selected_package: Option<&str>,
+    selected_file: Option<&str>,
+    parent: &str,
+) -> Option<ChimpTreeClick> {
+    let mut clicked = None;
+    for (name, child) in &node.folders {
+        let path = if parent.is_empty() {
+            name.clone()
+        } else {
+            format!("{parent}/{name}")
+        };
+        let child_clicked =
+            egui::CollapsingHeader::new(format!("{name}  ·  {}", child.entry_count()))
+                .id_salt(("chimp_folder", path.clone()))
+                .show(ui, |ui| {
+                    draw_chimp_folder_node(ui, child, world, selected_package, selected_file, &path)
+                })
+                .body_returned
+                .flatten();
+        if clicked.is_none() {
+            clicked = child_clicked;
+        }
+    }
+    for leaf in &node.packages {
+        let package = &world.packages()[leaf.package];
+        let mut label = leaf.name.clone();
+        if package.providers.len() > 1 {
+            label.push_str("  ⧉");
+        }
+        let response = ui.selectable_label(selected_package == Some(package.name.as_str()), label);
+        let response = if let Some(provider) = package.active_provider() {
+            response.on_hover_text(format!(
+                "{}\n{}\n{} provider(s)",
+                package.name,
+                world.containers()[provider.container].path.display(),
+                package.providers.len()
+            ))
+        } else {
+            response
+        };
+        if response.clicked() {
+            clicked = Some(ChimpTreeClick::Package(package.name.clone()));
+        }
+    }
+    for leaf in &node.files {
+        let file = &world.pak_files()[leaf.file];
+        let mut label = leaf.name.clone();
+        if file.providers.len() > 1 {
+            label.push_str("  ⧉");
+        }
+        let response = ui.selectable_label(selected_file == Some(file.path.as_str()), label);
+        let response = if let Some(provider) = file.active_provider() {
+            response.on_hover_text(format!(
+                "{}\n{}\n{} provider(s)",
+                file.path,
+                world.pak_containers()[provider.container].path.display(),
+                file.providers.len()
+            ))
+        } else {
+            response
+        };
+        if response.clicked() {
+            clicked = Some(ChimpTreeClick::File(file.path.clone()));
+        }
+    }
+    clicked
+}
+
 fn triplet(path: &Path) -> [PathBuf; 3] {
     [
         path.with_extension("utoc"),
@@ -1427,11 +1801,42 @@ mod tests {
     fn chimp_is_idle_and_unfiltered_by_default() {
         let state = ChimpState::default();
         assert!(matches!(state.mount, ChimpMount::Idle));
+        assert_eq!(state.browser, ChimpBrowser::Folders);
         assert!(state.filter.is_empty());
         assert!(state.open_packages.is_empty());
         assert!(
             !state.filter_is_current(""),
             "the initial empty query must populate the browser once"
+        );
+    }
+
+    #[test]
+    fn package_tree_groups_every_path_segment_and_counts_descendants() {
+        let mut tree = ChimpFolderNode::default();
+        tree.insert_package(0, "/Game/UI/Menu");
+        tree.insert_package(1, "/Game/UI/Hud");
+        tree.insert_package(2, "/Engine/Config");
+        tree.insert_file(0, "../../../Meteorite/Content/Audio/menu.bnk");
+        assert_eq!(tree.package_count, 3);
+        assert_eq!(tree.file_count, 1);
+        assert_eq!(tree.entry_count(), 4);
+        let game = tree.folders.get("Game").unwrap();
+        assert_eq!(game.package_count, 2);
+        let ui = game.folders.get("UI").unwrap();
+        assert_eq!(ui.package_count, 2);
+        assert_eq!(
+            ui.packages
+                .iter()
+                .map(|leaf| leaf.name.as_str())
+                .collect::<Vec<_>>(),
+            ["Menu", "Hud"]
+        );
+        let engine = &tree.folders["Engine"];
+        assert_eq!(engine.package_count, 1);
+        assert_eq!(engine.packages[0].name, "Config");
+        assert_eq!(
+            tree.folders["Meteorite"].folders["Content"].folders["Audio"].files[0].name,
+            "menu.bnk"
         );
     }
 
@@ -1489,6 +1894,45 @@ mod tests {
         browser.refresh_filter(&world);
         assert_eq!(browser.filtered_packages.len(), world.packages().len());
         assert_eq!(browser.filtered_files.len(), world.pak_files().len());
+        assert_eq!(
+            browser.content_tree.package_count,
+            browser.filtered_packages.len()
+        );
+        assert_eq!(
+            browser.content_tree.file_count,
+            browser.filtered_files.len()
+        );
+        let container = world
+            .containers()
+            .iter()
+            .find(|container| container.package_count > 0)
+            .expect("an IoStore container with packages");
+        browser.selected_archive = Some(ChimpArchive::IoStore(container.index));
+        browser.reset_filter();
+        browser.refresh_filter(&world);
+        assert!(!browser.filtered_packages.is_empty());
+        assert!(browser.filtered_packages.iter().all(|&index| {
+            world.packages()[index]
+                .providers
+                .iter()
+                .any(|provider| provider.container == container.index)
+        }));
+        let pak = world
+            .pak_containers()
+            .iter()
+            .find(|container| container.file_count > 0)
+            .expect("a legacy pak with files");
+        browser.selected_archive = Some(ChimpArchive::Pak(pak.index));
+        browser.reset_filter();
+        browser.refresh_filter(&world);
+        assert!(browser.filtered_packages.is_empty());
+        assert!(!browser.filtered_files.is_empty());
+        assert!(browser.filtered_files.iter().all(|&index| {
+            world.pak_files()[index]
+                .providers
+                .iter()
+                .any(|provider| provider.container == pak.index)
+        }));
         assert!(
             !world.pak_files().is_empty(),
             "the real mount should index legacy .pak files too"
