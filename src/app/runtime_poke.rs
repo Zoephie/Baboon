@@ -47,7 +47,7 @@ pub(in crate::app) struct RuntimeBuildProfile {
 /// A build is only ever identified by the SHA-256 of the host executable and
 /// the tag module; the RVAs below were measured against those exact files and
 /// mean nothing for any other pair.
-const PROFILES: &[RuntimeBuildProfile] = &[NEXT_PROFILE, CU2_PROFILE];
+const PROFILES: &[RuntimeBuildProfile] = &[NEXT_PROFILE, CU2_PROFILE, CU2_XBOXAPP_PROFILE];
 
 /// Tag module built 2026-07-25 (the update that shipped after CU2). The game
 /// embeds no build number, so the label carries the tag module's PE date.
@@ -55,6 +55,20 @@ const NEXT_PROFILE: RuntimeBuildProfile = RuntimeBuildProfile {
     label: "Steam post-CU2 (tag module 2026.07.25)",
     host_sha256: "4D20DC56611B29CD710D591C86CF5DE55B914EB986838C42E719B82CCD367753",
     dll_sha256: "82B8A3A006BA3F981D6857DC7F4E4E929AE5282587F31F92F77A3FA78F4B2DAC",
+    tag_table_pointer_rva: 0x0182_D1E8,
+    segment_table_rva: 0x02C2_CCC0,
+    string_id_storage_rva: 0x0135_7490,
+    string_id_storage_used_rva: 0x0135_7498,
+    string_id_strings_rva: 0x0135_74A0,
+    string_id_count_rva: 0x0135_74A8,
+    string_id_mapping_table_rva: 0x0135_74C0,
+    string_id_builtin_table_rva: 0x0082_F0A0,
+};
+
+const CU2_XBOXAPP_PROFILE: RuntimeBuildProfile = RuntimeBuildProfile {
+    label: "XboxApp post-CU2 (tag module 2026.07.25)",
+    host_sha256: "n/a",
+    dll_sha256: "6F34B317BB5CDDE87A1A0DB4D5CAFADC78C3C2C9EC6658819FAE11D9F666C595",
     tag_table_pointer_rva: 0x0182_D1E8,
     segment_table_rva: 0x02C2_CCC0,
     string_id_storage_rva: 0x0135_7490,
@@ -78,6 +92,7 @@ const CU2_PROFILE: RuntimeBuildProfile = RuntimeBuildProfile {
     string_id_mapping_table_rva: 0x0135_84A0,
     string_id_builtin_table_rva: 0x0083_0060,
 };
+
 
 impl RuntimeBuildProfile {
     fn rvas(&self) -> [u64; 8] {
@@ -2000,14 +2015,23 @@ mod platform {
             Some(profile) => profile,
             None => {
                 clear_cached_index();
-                let host_sha256 = sha256(&host.path)?;
+                let host_sha256 = modules
+                    .iter()
+                    .find(|module| module.name.eq_ignore_ascii_case(PROCESS_NAME))
+                    .and_then(|module| sha256(&module.path).ok());
                 let dll_sha256 = sha256(&dll.path)?;
+                println!("Game executable SHA256: {}", host_sha256.as_deref().unwrap_or("unknown"));
+                println!("Tag module SHA256: {}", dll_sha256);
                 let profile = *PROFILES
                     .iter()
                     .find(|profile| {
-                        profile.host_sha256 == host_sha256 && profile.dll_sha256 == dll_sha256
+                        profile.dll_sha256 == dll_sha256
                     })
-                    .ok_or_else(|| "unsupported game build".to_owned())?;
+                    .ok_or_else(|| {
+                        format!("Unsupported game build, please check you have the latest game and Baboon version.")
+                    })?;
+
+                println!("Profile selected: {}", profile.label);
                 store_verified_process(process_id, creation_time, dll.base, profile);
                 profile
             }
