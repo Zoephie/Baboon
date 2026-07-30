@@ -50,7 +50,7 @@ pub(super) struct ChimpState {
     pub(super) mount: ChimpMount,
     browser: ChimpBrowser,
     pub(super) filter: String,
-    filtered_for: String,
+    filtered_for: Option<String>,
     filtered_packages: Vec<usize>,
     filtered_files: Vec<usize>,
     pub(super) selected_package: Option<String>,
@@ -84,12 +84,16 @@ pub(super) struct ChimpExport {
 }
 
 impl ChimpState {
+    fn filter_is_current(&self, query: &str) -> bool {
+        self.filtered_for.as_deref() == Some(query)
+    }
+
     fn refresh_filter(&mut self, world: &World) {
         let query = self.filter.trim().to_ascii_lowercase();
-        if query == self.filtered_for && self.filtered_packages.len() <= world.packages().len() {
+        if self.filter_is_current(&query) {
             return;
         }
-        self.filtered_for = query.clone();
+        self.filtered_for = Some(query.clone());
         self.filtered_packages.clear();
         self.filtered_files.clear();
         self.filtered_packages.extend(
@@ -131,7 +135,7 @@ impl ChimpState {
     }
 
     fn reset_filter(&mut self) {
-        self.filtered_for.clear();
+        self.filtered_for = None;
         self.filtered_packages.clear();
         self.filtered_files.clear();
     }
@@ -1425,6 +1429,10 @@ mod tests {
         assert!(matches!(state.mount, ChimpMount::Idle));
         assert!(state.filter.is_empty());
         assert!(state.open_packages.is_empty());
+        assert!(
+            !state.filter_is_current(""),
+            "the initial empty query must populate the browser once"
+        );
     }
 
     #[test]
@@ -1477,6 +1485,10 @@ mod tests {
     fn real_package_rebuilds_into_a_readable_overlay() {
         let root = std::env::var_os("CE_PAKS").expect("set CE_PAKS");
         let world = World::open(root, Usmap::meteorite().unwrap()).unwrap();
+        let mut browser = ChimpState::default();
+        browser.refresh_filter(&world);
+        assert_eq!(browser.filtered_packages.len(), world.packages().len());
+        assert_eq!(browser.filtered_files.len(), world.pak_files().len());
         assert!(
             !world.pak_files().is_empty(),
             "the real mount should index legacy .pak files too"
