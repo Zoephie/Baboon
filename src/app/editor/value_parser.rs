@@ -48,8 +48,21 @@ pub(in crate::app) fn append_field_path_for(prefix: &str, field: &TagField<'_>) 
     }
 }
 
+/// A field name as a path segment the resolver will accept.
+///
+/// The path grammar has **no escapes**: a segment is the field's *clean* name,
+/// and `blam_tags::field_name` is what defines that — including normalising a `/`
+/// inside a name to `\`, precisely so the name cannot split a path. Asking the
+/// engine is therefore the whole job.
+///
+/// This used to invent an escape, writing `int/bool` as `int\/bool`. Nothing
+/// parses that: the `/` still separated, leaving the nonsense segments `int\` and
+/// `bool`, so every write to a field with a slash in its name failed with "field
+/// path no longer resolves" — which in the shader grid meant no bool or int
+/// parameter could be created at all, since they are stored in a field named
+/// `int/bool`.
 pub(in crate::app) fn escape_field_path_segment(field_name: &str) -> String {
-    field_name.replace('\\', "\\\\").replace('/', "\\/")
+    blam_tags::field_name::clean_field_name(field_name).into_owned()
 }
 
 pub(in crate::app) fn is_text_editable_value(value: &TagFieldData) -> bool {
@@ -99,7 +112,11 @@ pub(in crate::app) fn parse_gui_field_value(
         TagFieldType::Tag => parse_group_tag(trimmed)
             .map(TagFieldData::Tag)
             .ok_or_else(|| "expected 1..=4 ASCII group tag".to_owned()),
-        TagFieldType::Angle => parse_value(trimmed, "f32").map(TagFieldData::Angle),
+        // Typed in degrees, stored in radians. The display side
+        // (`foundation::fmt_degrees`) is the other half of this; the two are kept
+        // honest by `angle_fields_round_trip_through_degrees`.
+        TagFieldType::Angle => parse_value(trimmed, "f32")
+            .map(|degrees: f32| TagFieldData::Angle(degrees.to_radians())),
         TagFieldType::ShortIntegerBounds => {
             let (lower, upper) = parse_short_bounds(trimmed, "short bounds")?;
             Ok(TagFieldData::ShortIntegerBounds(
@@ -109,8 +126,8 @@ pub(in crate::app) fn parse_gui_field_value(
         TagFieldType::AngleBounds => {
             let (lower, upper) = parse_float_bounds(trimmed, "angle bounds")?;
             Ok(TagFieldData::AngleBounds(blam_tags::math::AngleBounds {
-                lower,
-                upper,
+                lower: lower.to_radians(),
+                upper: upper.to_radians(),
             }))
         }
         TagFieldType::RealBounds => {
@@ -162,16 +179,24 @@ pub(in crate::app) fn parse_gui_field_value(
                 blam_tags::math::RealQuaternion { i, j, k, w },
             ))
         }
+        // Euler angles are angles: degrees in, radians stored.
         TagFieldType::RealEulerAngles2d => {
             let [yaw, pitch] = parse_float_channels::<2>(trimmed, "real euler angles 2d")?;
             Ok(TagFieldData::RealEulerAngles2d(
-                blam_tags::math::RealEulerAngles2d { yaw, pitch },
+                blam_tags::math::RealEulerAngles2d {
+                    yaw: yaw.to_radians(),
+                    pitch: pitch.to_radians(),
+                },
             ))
         }
         TagFieldType::RealEulerAngles3d => {
             let [yaw, pitch, roll] = parse_float_channels::<3>(trimmed, "real euler angles 3d")?;
             Ok(TagFieldData::RealEulerAngles3d(
-                blam_tags::math::RealEulerAngles3d { yaw, pitch, roll },
+                blam_tags::math::RealEulerAngles3d {
+                    yaw: yaw.to_radians(),
+                    pitch: pitch.to_radians(),
+                    roll: roll.to_radians(),
+                },
             ))
         }
         TagFieldType::Real => parse_value(trimmed, "f32").map(TagFieldData::Real),

@@ -116,6 +116,12 @@ pub enum TagSource {
         /// Cooked package-name lookup over the same containers, for following
         /// UE package imports (Campaign Evolved's audio binding).
         packages: Arc<ContainerPackageIndex>,
+        /// Where the *game's own* copy of each mounted tag lives, ignoring any
+        /// mod mounted over it. The mount layers mods last-wins, exactly as the
+        /// game does, so without this the only reachable copy of a modded tag is
+        /// the mod's — and every "what does this change about the game?"
+        /// question answered itself with "nothing".
+        shipped: Arc<ShippedTagIndex>,
     },
 }
 
@@ -127,7 +133,44 @@ pub struct MountedContainer {
     pub utoc_path: PathBuf,
     /// e.g. `pakchunk240-WinGDK` — the pak this tag was read from.
     pub chunk_label: String,
+    /// Whether this is a mod rather than one of the game's own packs. Mods mount
+    /// last and win every collision, so this is what separates "the game ships
+    /// it this way" from "something installed here changed it".
+    pub is_mod: bool,
     pub archive: Arc<IoStoreArchive>,
+}
+
+/// The game's own copy of each mounted tag payload: container-relative path
+/// (lowercased) → the highest-priority **non-mod** container carrying it.
+///
+/// Keyed by path rather than by tag identity because a mod's entries are
+/// recovered from the very containers it overrides, so both sides name the same
+/// payload by the same path. A path absent here is a tag that only a mod
+/// provides — there is nothing shipped to compare it against.
+#[derive(Default)]
+pub struct ShippedTagIndex {
+    by_path: HashMap<String, usize>,
+}
+
+impl ShippedTagIndex {
+    /// Record a payload carried by one of the game's own packs. Later inserts
+    /// win, matching the mount loop's later-pack override.
+    pub fn insert(&mut self, rel_path: &str, container: usize) {
+        self.by_path
+            .insert(rel_path.to_ascii_lowercase(), container);
+    }
+
+    pub fn container_for(&self, rel_path: &str) -> Option<usize> {
+        self.by_path.get(&rel_path.to_ascii_lowercase()).copied()
+    }
+
+    pub fn len(&self) -> usize {
+        self.by_path.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_path.is_empty()
+    }
 }
 
 /// Maps a tag reference (group + Halo-relative path) to the container payload

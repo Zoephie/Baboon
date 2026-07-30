@@ -2368,10 +2368,17 @@ fn classic_shader_row_edit(
         }),
         TagFieldData::Real(value)
         | TagFieldData::RealSlider(value)
-        | TagFieldData::RealFraction(value)
-        | TagFieldData::Angle(value) => Some(ShaderRowEdit {
+        | TagFieldData::RealFraction(value) => Some(ShaderRowEdit {
             path: path.to_owned(),
             current: value.to_string(),
+            kind: ShaderRowEditKind::Scalar,
+        }),
+        // Degrees, like every other angle box in the editor. This grid commits
+        // through the same parser, so showing the stored radians here would mean
+        // typing back what was shown divided the value by 57.3.
+        TagFieldData::Angle(value) => Some(ShaderRowEdit {
+            path: path.to_owned(),
+            current: crate::app::foundation::fmt_degrees(*value),
             kind: ShaderRowEditKind::Scalar,
         }),
         TagFieldData::CharInteger(value) => classic_int_edit(path, *value as i64, formatted),

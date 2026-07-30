@@ -587,6 +587,9 @@ mod tests {
             containers.push(MountedContainer {
                 utoc_path: utoc.clone(),
                 chunk_label: utoc.file_stem().unwrap().to_string_lossy().into_owned(),
+                // Nothing on this path layers shipped against modded — it mounts
+                // everything to resolve one lookup.
+                is_mod: false,
                 archive: Arc::new(archive),
             });
         }
@@ -737,6 +740,9 @@ mod tests {
             containers.push(MountedContainer {
                 utoc_path: utoc.clone(),
                 chunk_label: utoc.file_stem().unwrap().to_string_lossy().into_owned(),
+                // Nothing on this path layers shipped against modded — it mounts
+                // everything to resolve one lookup.
+                is_mod: false,
                 archive: Arc::new(archive),
             });
         }

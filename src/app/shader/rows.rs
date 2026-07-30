@@ -103,7 +103,9 @@ pub(in crate::app) fn shader_param_field_path(
     field: &str,
 ) -> Option<String> {
     let i = param_index?;
-    let escaped = field.replace('/', "\\/");
+    // `int/bool` is a real field name; the resolver takes clean names, in which
+    // that slash is a backslash. Anything else leaves the slash separating.
+    let escaped = escape_field_path_segment(field);
     Some(append_field_path(
         prefix,
         &format!("parameters[{i}]/{escaped}"),

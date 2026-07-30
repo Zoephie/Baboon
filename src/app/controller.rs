@@ -2260,23 +2260,11 @@ impl Baboon {
     /// Whether `key` has anything to discard — unsaved edits, or bytes stashed
     /// in this kit's project from an earlier session.
     pub(super) fn tag_has_discardable_changes(&self, kit: usize, key: &str) -> bool {
-        if self.kits[kit]
+        self.kits[kit]
             .parsed_tags
             .get(key)
             .is_some_and(|document| document.dirty.is_set())
-        {
-            return true;
-        }
-        let Some(entry) = self.entry_for_key_in(kit, key) else {
-            return false;
-        };
-        let Some((identity, ..)) = campaign_entry_project_parts(entry) else {
-            return false;
-        };
-        self.kits[kit]
-            .campaign_project
-            .as_ref()
-            .is_some_and(|project| project.overlays.contains_key(&identity))
+            || self.tag_has_stashed_overlay(kit, key)
     }
 
     pub(super) fn select_entry(&mut self, key: String, ctx: egui::Context) {
@@ -2400,6 +2388,18 @@ impl Baboon {
             self.execute_close_action(action, ctx);
             return;
         }
+        // What discarding would cost, resolved here rather than described in the
+        // abstract: these edits were stashed into the workspace's project within
+        // a second of being typed, so declining to save deletes them from a file
+        // that outlives the session.
+        let stashed = dirty_tags
+            .iter()
+            .filter(|entry| self.tag_has_stashed_overlay(self.active, &entry.tag_id))
+            .count();
+        let stash_file = self.kits[self.active]
+            .campaign_project
+            .as_ref()
+            .map(|project| project.recovery_path.clone());
         self.save_changes_prompt = SaveChangesPrompt {
             visible: true,
             can_stash,
@@ -2407,6 +2407,9 @@ impl Baboon {
             pending_action: action,
             error: None,
             allow_app_close_once: self.save_changes_prompt.allow_app_close_once,
+            stash_file,
+            stashed,
+            confirm_discard: false,
         };
     }
 
@@ -2593,7 +2596,13 @@ impl Baboon {
             source_path,
             game: source.game.clone(),
             profile_id: kit.profile.as_ref().map(|profile| profile.id.clone()),
-            project_path: kit.campaign_project.as_ref().map(|project| project.path.clone()),
+            // The `.baboon` this workspace has open, if any — not its recovery
+            // file, which the next session finds from the source root anyway.
+            project_path: kit
+                .campaign_project
+                .as_ref()
+                .and_then(|project| project.project_path.clone()),
+            has_project: kit.campaign_project.is_some(),
             browser_mode: Some(kit.browser_mode),
             browser_sort: Some(kit.browser_sort),
             tags,
@@ -2613,12 +2622,15 @@ impl Baboon {
             source_path,
             profile_id,
             project_path,
+            has_project,
             browser_mode,
             browser_sort,
             tags,
         } in kits
         {
-            if tags.is_empty() && project_path.is_none() {
+            // A workspace whose only content is its stash still has to be
+            // reopened, so that its recovery file is picked back up.
+            if tags.is_empty() && !has_project {
                 continue;
             }
             match source_kind {
@@ -2667,11 +2679,12 @@ impl Baboon {
             if let Some(sort) = browser_sort {
                 self.kits[self.active].browser_sort = sort;
             }
-            // Its project is queued the same way, and opens once the source
-            // this session recorded has finished mounting.
+            // The project file it had open is queued the same way, and is
+            // attached as this workspace's save target once the source has
+            // mounted. The edits themselves come back from the recovery file.
             if let Some(project_path) = project_path {
                 let restoring = self.active;
-                self.queue_campaign_project(restoring, project_path);
+                self.queue_campaign_project_target(restoring, project_path);
             }
         }
     }
@@ -3762,6 +3775,7 @@ impl Baboon {
                     (true, CampaignProjectTagKind::New) => ModExportChange::New,
                     (true, CampaignProjectTagKind::Existing) => ModExportChange::Modified,
                 };
+                let overridden_by = self.mod_serving_tag(exporting, &overlay.identity);
                 ModExportRow {
                     identity: overlay.identity.clone(),
                     display_path: overlay.logical_path.clone(),
@@ -3771,6 +3785,7 @@ impl Baboon {
                     bytes: overlay.bytes.len(),
                     reason: (kind == ModExportChange::Unresolved)
                         .then(|| "not in this source".to_owned()),
+                    overridden_by,
                 }
             })
             .collect();
@@ -3801,10 +3816,11 @@ impl Baboon {
     /// Compute the field differences for one reviewed tag, against the tag as
     /// the game ships it.
     ///
-    /// `read_entry` reads from the container, so the baseline is the shipped
-    /// tag rather than anything the workspace has stashed -- which is the
-    /// comparison the reviewer actually wants: what this mod changes about the
-    /// game, not what changed since the last autosave.
+    /// The baseline comes from the *shipped* containers, not from whatever the
+    /// mount resolved the tag to -- which is the comparison the reviewer actually
+    /// wants: what this mod changes about the game, not what changed since the
+    /// last autosave, and not "nothing" because an earlier export of this very
+    /// mod is installed under `Paks` and now serves the tag.
     pub(super) fn diff_reviewed_tag(&self, kit: usize, identity: &str) -> ModRowDiff {
         const LIMIT: usize = 5000;
         let failed = |error: String| ModRowDiff {
@@ -3832,18 +3848,25 @@ impl Baboon {
         };
         // A tag this workspace created has no shipped counterpart to compare
         // against, so the whole tag is described instead.
-        if overlay.kind == CampaignProjectTagKind::New {
-            let (rows, truncated) = describe_tag(&edited_tag, &self.kits[kit].names, LIMIT);
-            return ModRowDiff {
+        let describe_whole = |edited_tag: TagFile, names: &TagNameIndex| {
+            let (rows, truncated) = describe_tag(&edited_tag, names, LIMIT);
+            ModRowDiff {
                 rows,
                 base: None,
                 edited: Some(edited_tag),
                 truncated,
                 error: None,
-            };
+            }
+        };
+        if overlay.kind == CampaignProjectTagKind::New {
+            return describe_whole(edited_tag, &self.kits[kit].names);
         }
-        let base = match crate::source::read_entry(&source.source, &entry) {
-            Ok(base) => base,
+        let base = match crate::source::read_shipped_entry(&source.source, &entry) {
+            Ok(Some(base)) => base,
+            // Only a mod carries this tag, so there is no shipped version to
+            // difference against — describing it whole is the honest answer, and
+            // it is what the reviewer needs to see either way.
+            Ok(None) => return describe_whole(edited_tag, &self.kits[kit].names),
             Err(error) => return failed(format!("Could not read the shipped tag: {error}")),
         };
         let (rows, truncated) = diff_tags(&base, &edited_tag, &self.kits[kit].names, LIMIT);
@@ -3944,6 +3967,170 @@ impl Baboon {
         Ok(count)
     }
 
+    /// The mounted mod currently serving this tag, if the mount resolved it to
+    /// one rather than to the game's own pack.
+    pub(super) fn mod_serving_tag(&self, kit: usize, identity: &str) -> Option<String> {
+        let source = self.kits.get(kit)?.source.as_ref()?;
+        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+            return None;
+        };
+        let entry = self.campaign_entry_for_identity(kit, identity)?;
+        let TagEntryLocation::Container { container, .. } = &entry.location else {
+            return None;
+        };
+        containers
+            .get(*container)
+            .filter(|container| container.is_mod)
+            .map(|container| container.chunk_label.clone())
+    }
+
+    /// The container a tag would be written into, and whether it is a mod.
+    pub(super) fn container_label_for_tag(&self, kit: usize, key: &str) -> Option<(String, bool)> {
+        let source = self.kits.get(kit)?.source.as_ref()?;
+        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+            return None;
+        };
+        let TagEntryLocation::Container { container, .. } = &self.entry_for_key_in(kit, key)?.location
+        else {
+            return None;
+        };
+        containers
+            .get(*container)
+            .map(|container| (container.chunk_label.clone(), container.is_mod))
+    }
+
+    /// Every mod this workspace has mounted, by container label.
+    pub(super) fn mounted_mod_labels(&self, kit: usize) -> Vec<String> {
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+            return Vec::new();
+        };
+        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+            return Vec::new();
+        };
+        containers
+            .iter()
+            .filter(|container| container.is_mod)
+            .map(|container| container.chunk_label.clone())
+            .collect()
+    }
+
+    /// The mounted containers an export to `output` would replace, by label.
+    ///
+    /// A mod installed under `Paks` is mounted like any other container, and
+    /// mounting memory-maps its `.ucas`. Replacing that file means releasing the
+    /// mapping first — Windows refuses to truncate a file with a mapped section
+    /// open — so this is what the review dialog says out loud and what the export
+    /// releases before it writes.
+    pub(super) fn export_replaces_mounted(&self, kit: usize, output: &Path) -> Vec<String> {
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+            return Vec::new();
+        };
+        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+            return Vec::new();
+        };
+        crate::source::mounted_containers_at(&source.source, output)
+            .into_iter()
+            .filter_map(|index| containers.get(index))
+            .map(|container| container.chunk_label.clone())
+            .collect()
+    }
+
+    /// Release the `.ucas` mapping of every mounted container an export to
+    /// `output` is about to replace, so the writer can truncate the file.
+    ///
+    /// `Err` when a mapping cannot be released because something else still holds
+    /// the archive — better a named refusal than a write that fails at the OS with
+    /// `ERROR_USER_MAPPED_FILE` and nothing to connect it to the mod being
+    /// installed.
+    fn release_export_target_mappings(
+        &mut self,
+        kit: usize,
+        output: &Path,
+    ) -> Result<Vec<usize>, String> {
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+            return Ok(Vec::new());
+        };
+        let targets = crate::source::mounted_containers_at(&source.source, output);
+        if targets.is_empty() {
+            return Ok(Vec::new());
+        }
+        let Some(source) = self.kits.get_mut(kit).and_then(|kit| kit.source.as_mut()) else {
+            return Ok(Vec::new());
+        };
+        let TagSource::IoStoreContainerSet { containers, .. } = &mut source.source else {
+            return Ok(Vec::new());
+        };
+        let mut released = Vec::new();
+        for index in targets {
+            let Some(mounted) = containers.get_mut(index) else {
+                continue;
+            };
+            let label = mounted.chunk_label.clone();
+            // Only the mount may hold this archive. A surviving clone — a preview
+            // still reading, a worker mid-scan — keeps the mapping alive whatever
+            // this does, and the write would fail anyway.
+            let Some(archive) = std::sync::Arc::get_mut(&mut mounted.archive) else {
+                return Err(format!(
+                    "Export Mod failed: {label} is being read by this workspace right now, so it \
+                     cannot be replaced. Try again in a moment, or export under a different name."
+                ));
+            };
+            archive.release_partition();
+            released.push(index);
+        }
+        Ok(released)
+    }
+
+    /// Put back what [`Self::release_export_target_mappings`] released, once the
+    /// files it was protecting have been rewritten.
+    ///
+    /// The container on disk is a different file now, so its index is reopened
+    /// rather than the old one remapped: an override container ships no directory
+    /// index, and `reopen_container_archive` is what rebuilds its file list from
+    /// the containers it overrides. Falls back to remapping the archive that is
+    /// already there, which at least leaves the mount readable.
+    fn restore_released_mappings(&mut self, kit: usize, released: &[usize]) -> Vec<String> {
+        if released.is_empty() {
+            return Vec::new();
+        }
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+            return Vec::new();
+        };
+        let TagSource::IoStoreContainerSet {
+            root, containers, ..
+        } = &source.source
+        else {
+            return Vec::new();
+        };
+        let (root, containers) = (root.clone(), containers.clone());
+        let mut failures = Vec::new();
+        for &index in released {
+            let reopened = crate::source::reopen_container_archive(&root, &containers, index);
+            let Some(source) = self.kits.get_mut(kit).and_then(|kit| kit.source.as_mut()) else {
+                continue;
+            };
+            let TagSource::IoStoreContainerSet { containers, .. } = &mut source.source else {
+                continue;
+            };
+            let Some(mounted) = containers.get_mut(index) else {
+                continue;
+            };
+            match reopened {
+                Ok(archive) => mounted.archive = std::sync::Arc::new(archive),
+                Err(error) => {
+                    if let Some(archive) = std::sync::Arc::get_mut(&mut mounted.archive)
+                        && archive.remap_partition().is_ok()
+                    {
+                        failures.push(format!("{}: {error}", mounted.chunk_label));
+                        continue;
+                    }
+                    failures.push(format!("{}: {error}", mounted.chunk_label));
+                }
+            }
+        }
+        failures
+    }
+
     /// Write the reviewed mod. `included` are the identities the user kept.
     pub(super) fn write_reviewed_mod(
         &mut self,
@@ -3956,7 +4143,12 @@ impl Baboon {
             self.status = "No source loaded".to_owned();
             return;
         };
-        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+        let TagSource::IoStoreContainerSet {
+            containers,
+            shipped,
+            ..
+        } = &source.source
+        else {
             self.status = "Export Mod is only for Campaign Evolved containers".to_owned();
             return;
         };
@@ -3974,7 +4166,13 @@ impl Baboon {
             };
             match &entry.location {
                 TagEntryLocation::Container { container, rel_path, } => {
-                    let Some(m) = containers.get(*container) else {
+                    // The base an override is built against is the game's own
+                    // pack, not whatever the mount resolved this tag to. With a
+                    // mod installed under `Paks`, the latter is that mod — so the
+                    // export read its chunk layout out of the very file it was
+                    // about to replace.
+                    let base = shipped.container_for(rel_path).unwrap_or(*container);
+                    let Some(m) = containers.get(base) else {
                         skipped += 1;
                         continue;
                     };
@@ -4004,6 +4202,17 @@ impl Baboon {
             self.status = "Nothing selected to export".to_owned();
             return;
         }
+        // The writer truncates the three files it writes, and a container this
+        // workspace has mounted has its `.ucas` mapped — which Windows will not
+        // let anyone truncate. Releasing has to happen after the bases above are
+        // collected (they are other containers) and before the writer runs.
+        let released = match self.release_export_target_mappings(exporting, &output) {
+            Ok(released) => released,
+            Err(error) => {
+                self.status = error;
+                return;
+            }
+        };
         let override_refs: Vec<(&blam_tags::iostore::IoStoreArchive, &str, &[u8])> = overrides
             .iter()
             .map(|(a, p, b)| (a.as_ref(), p.as_str(), b.as_slice()))
@@ -4017,8 +4226,14 @@ impl Baboon {
                 redirect_from: None,
             },)
             .collect();
-        match blam_tags::iostore::writer::write_mod_container_ex(&override_refs, &new_refs, &output)
-        {
+        let written =
+            blam_tags::iostore::writer::write_mod_container_ex(&override_refs, &new_refs, &output);
+        // Before anything reads through the mount again, and whether or not the
+        // write worked: a released partition refuses every payload read.
+        drop(override_refs);
+        drop(overrides);
+        let reopen_failures = self.restore_released_mappings(exporting, &released);
+        match written {
             Ok(()) => {
                 let stem = output
                     .file_stem()
@@ -4041,7 +4256,24 @@ impl Baboon {
                     .source()
                     .map(|source| source.source.root_path() == directory)
                     .unwrap_or(false);
-                self.status = format!("Exported {count} tag(s) as {stem}");
+                self.status = if !reopen_failures.is_empty() {
+                    // The mod was written; what failed is picking it back up.
+                    format!(
+                        "Exported {count} tag(s) as {stem}, but remounting failed ({}) — reload \
+                         the source",
+                        reopen_failures.join("; ")
+                    )
+                } else if released.is_empty() {
+                    format!("Exported {count} tag(s) as {stem}")
+                } else {
+                    // The container it replaced is mounted, so the browser is now
+                    // showing the mod it just wrote. Anything that mod used to
+                    // carry and no longer does still has an entry pointing at it.
+                    format!(
+                        "Exported {count} tag(s) as {stem}, replacing the mounted copy — reload \
+                         the source if its tag list changed"
+                    )
+                };
                 // Written straight into the game's own folder: there is nothing
                 // to copy, so the instructions would only be noise.
                 if !in_place {
@@ -6388,6 +6620,11 @@ impl Baboon {
                 self.save_changes_prompt.visible = false;
                 self.save_changes_prompt.dirty_tags.clear();
                 self.save_changes_prompt.error = None;
+                self.save_changes_prompt.confirm_discard = false;
+            }
+            // Arming, not acting: the click that deletes is the next one.
+            SaveChangesPromptAction::ConfirmDiscard => {
+                self.save_changes_prompt.confirm_discard = true;
             }
             SaveChangesPromptAction::StashForMod => {
                 let action = self.save_changes_prompt.pending_action.clone();
@@ -6408,7 +6645,20 @@ impl Baboon {
                         self.save_changes_prompt.visible = false;
                         self.save_changes_prompt.dirty_tags.clear();
                         self.save_changes_prompt.error = None;
-                        self.status = "Stashed for Export Mod".to_owned();
+                        self.save_changes_prompt.confirm_discard = false;
+                        self.status = match self.kits[self.active]
+                            .campaign_project
+                            .as_ref()
+                            .and_then(|project| project.project_path.clone())
+                        {
+                            // Named, because the file the user thinks of as their
+                            // project is not the one this wrote.
+                            Some(path) => format!(
+                                "Stashed for Export Mod. {} is unchanged until you save it",
+                                path.display()
+                            ),
+                            None => "Stashed for Export Mod".to_owned(),
+                        };
                         self.execute_close_action(action, ctx);
                     }
                     Err(error) => {
@@ -6422,6 +6672,12 @@ impl Baboon {
                 // Discarding is explicit, so drop the dirty flags the prompt
                 // listed. Without this, a CloseApp that spans several kits
                 // would see the same unsaved work again and re-prompt forever.
+                //
+                // On a stashing workspace this also deletes the stashed copies —
+                // which is why the button is named Discard there and takes a
+                // second, confirming click. What it deletes from is the
+                // workspace's own recovery file; a `.baboon` the user opened or
+                // saved is never written by a close.
                 let kit = self.active;
                 let tag_ids: Vec<String> = self
                     .save_changes_prompt
@@ -6451,6 +6707,7 @@ impl Baboon {
                 self.save_changes_prompt.visible = false;
                 self.save_changes_prompt.dirty_tags.clear();
                 self.save_changes_prompt.error = None;
+                self.save_changes_prompt.confirm_discard = false;
                 self.execute_close_action(action, ctx);
             }
             SaveChangesPromptAction::Save(tag_ids) => {
@@ -6513,6 +6770,9 @@ impl Baboon {
                     let pending_action = self.save_changes_prompt.pending_action.clone();
                     self.save_changes_prompt.dirty_tags =
                         self.dirty_tags_for_close_action(&pending_action);
+                    // A failed save leaves the prompt up, and an armed discard
+                    // has no business surviving into it.
+                    self.save_changes_prompt.confirm_discard = false;
                     self.status = message.clone();
                     self.save_changes_prompt.error = Some(message);
                 }
@@ -6574,14 +6834,47 @@ fn reset_lazy_folder_browser(
 #[path = "tests/browser_refresh.rs"]
 mod browser_refresh_tests;
 
+#[cfg(test)]
+#[path = "tests/save_changes_prompt.rs"]
+mod save_changes_prompt_tests;
+
+#[cfg(test)]
+#[path = "tests/mod_overrides.rs"]
+mod mod_override_tests;
+
 enum SaveChangesPromptAction {
     None,
     Save(Vec<String>),
     /// Keep the edits in this workspace's Baboon project, ready for Export
     /// Mod, without writing anything into the game's own files.
     StashForMod,
+    /// Arm the discard. Only raised on a stashing workspace, where discarding
+    /// deletes stashed bytes rather than just dropping an in-memory edit.
+    ConfirmDiscard,
     DontSave,
     Cancel,
+}
+
+struct DiscardButton {
+    label: &'static str,
+    width: f32,
+    /// Whether this click only arms the discard. False means it deletes.
+    arming: bool,
+}
+
+/// What the prompt's discard button says and does.
+///
+/// On a workspace that stashes, this button deletes bytes that persist across
+/// sessions — an edit is stashed within a second of being typed, and exporting a
+/// mod does not clear it — so it is named for what it does and takes a second,
+/// confirming click. A loose kit has no stash to lose and keeps the one-click
+/// "Don't Save" every editor has.
+fn discard_button(can_stash: bool, confirmed: bool) -> DiscardButton {
+    match (can_stash, confirmed) {
+        (false, _) => DiscardButton { label: "Don't Save", width: 78.0, arming: false },
+        (true, false) => DiscardButton { label: "Discard...", width: 96.0, arming: true },
+        (true, true) => DiscardButton { label: "Delete Stashed Edits", width: 150.0, arming: false },
+    }
 }
 
 fn render_save_changes_prompt(
@@ -6609,7 +6902,8 @@ fn render_save_changes_prompt(
                 ui.label(
                     RichText::new(
                         "Save overwrites the game's own pak files in place. Stash for Mod keeps \
-                         the edits in this workspace's project instead, ready for Export Mod.",
+                         the edits in this workspace's project instead, ready for Export Mod. \
+                         Discard throws them away, including the copy the project is holding.",
                     )
                     .small()
                     .color(subtle_dark()),
@@ -6618,6 +6912,31 @@ fn render_save_changes_prompt(
             ui.add_space(8.0);
             if let Some(error) = prompt.error.as_deref() {
                 ui.label(RichText::new(error).color(Color32::from_rgb(180, 48, 40)));
+                ui.add_space(6.0);
+            }
+            // Spelling out what the destructive button costs, and where from.
+            // Exporting a mod does not clear these edits — the mod is a copy —
+            // so this is the prompt an exporter sees on every exit, and it used
+            // to delete the stash on one unlabelled click.
+            if prompt.confirm_discard {
+                ui.label(
+                    RichText::new(match (prompt.stashed, prompt.stash_file.as_deref()) {
+                        (0, _) => "Discard these edits? They are not stashed anywhere, so they \
+                                   cannot be recovered."
+                            .to_owned(),
+                        (count, Some(file)) => format!(
+                            "Discard deletes the stashed copy of {count} tag(s) from {}. Other \
+                             stashed tags in this workspace, and mods you have already exported, \
+                             are not affected.",
+                            file.display()
+                        ),
+                        (count, None) => format!(
+                            "Discard deletes the stashed copy of {count} tag(s). Mods you have \
+                             already exported are not affected."
+                        ),
+                    })
+                    .color(Color32::from_rgb(210, 120, 90)),
+                );
                 ui.add_space(6.0);
             }
             ScrollArea::both().max_height(150.0).show(ui, |ui| {
@@ -6636,11 +6955,20 @@ fn render_save_changes_prompt(
                 {
                     action = SaveChangesPromptAction::Cancel;
                 }
+                let DiscardButton {
+                    label,
+                    width,
+                    arming,
+                } = discard_button(prompt.can_stash, prompt.confirm_discard);
                 if ui
-                    .add(egui::Button::new("Don't Save").min_size(Vec2::new(78.0, 24.0)))
+                    .add(egui::Button::new(label).min_size(Vec2::new(width, 24.0)))
                     .clicked()
                 {
-                    action = SaveChangesPromptAction::DontSave;
+                    action = if arming {
+                        SaveChangesPromptAction::ConfirmDiscard
+                    } else {
+                        SaveChangesPromptAction::DontSave
+                    };
                 }
                 if prompt.can_stash
                     && ui
@@ -6728,6 +7056,19 @@ fn render_last_opened_windows_prompt(
                             RichText::new(format!("Missing source: {}", kit.source_path.display()))
                                 .color(Color32::from_rgb(180, 48, 40)),
                         );
+                    }
+                    // Why a workspace is listed with nothing under it: its
+                    // session is its stash, which comes back from its own
+                    // recovery file rather than from a list of tabs.
+                    if kit.entries.is_empty() && kit.has_project {
+                        ui.horizontal(|ui| {
+                            ui.add_space(10.0);
+                            ui.label(
+                                RichText::new("Unsaved changes stashed in this workspace")
+                                    .color(subtle_dark())
+                                    .small(),
+                            );
+                        });
                     }
                     for entry in &mut kit.entries {
                         ui.add_enabled_ui(entry.available, |ui| {

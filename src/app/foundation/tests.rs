@@ -18,28 +18,30 @@ mod tests {
         assert_eq!(block_index_value(&LongInteger(7)), None);
     }
 
+    /// Named components, and each one shown in degrees: euler angles are stored
+    /// in radians, and the editor edits degrees like every other Halo tool.
     #[test]
     fn euler_angles_use_editable_named_components() {
         let parts = foundation_editable_component_parts(&TagFieldData::RealEulerAngles2d(
             blam_tags::math::RealEulerAngles2d {
-                yaw: 0.25,
-                pitch: -0.5,
+                yaw: 45f32.to_radians(),
+                pitch: (-90f32).to_radians(),
             },
         ))
         .unwrap();
         assert_eq!(
             parts,
             vec![
-                ("yaw".to_owned(), "0.25".to_owned()),
-                ("pitch".to_owned(), "-0.5".to_owned()),
+                ("yaw".to_owned(), "45".to_owned()),
+                ("pitch".to_owned(), "-90".to_owned()),
             ]
         );
 
         let parts = foundation_editable_component_parts(&TagFieldData::RealEulerAngles3d(
             blam_tags::math::RealEulerAngles3d {
-                yaw: -0.65,
+                yaw: (-0.65f32).to_radians(),
                 pitch: 0.0,
-                roll: 1.25,
+                roll: 1.25f32.to_radians(),
             },
         ))
         .unwrap();
@@ -421,6 +423,7 @@ mod tests {
                 containers: Vec::new(),
                 index: std::sync::Arc::new(crate::source::ContainerTagIndex::default()),
                 packages: std::sync::Arc::new(crate::source::ContainerPackageIndex::default()),
+                shipped: std::sync::Arc::new(crate::source::ShippedTagIndex::default()),
             },
             names: TagNameIndex::default(),
             game: Some("haloce_evolved".to_owned()),

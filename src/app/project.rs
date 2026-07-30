@@ -110,14 +110,31 @@ impl CampaignProjectSnapshot {
 }
 
 pub(super) struct ActiveCampaignProject {
-    pub(super) path: PathBuf,
+    /// Where this workspace autosaves. Always derived from the mounted source
+    /// — never a file the user picked.
+    ///
+    /// The two paths are kept apart because they were once one field, and
+    /// opening a `.baboon` therefore made *that* file the autosave target: an
+    /// exported mod's sidecar became a live, self-overwriting file the moment it
+    /// was opened, and declining to save at exit deleted the stashed rows out of
+    /// it. Autosave now only ever writes the recovery file.
+    pub(super) recovery_path: PathBuf,
+    /// The `.baboon` this workspace is associated with: what `File > Open
+    /// Baboon Project` opened, or where `Save Baboon Project As...` last wrote.
+    /// It is the target of `File > Save Baboon Project`, and nothing else
+    /// writes to it.
+    pub(super) project_path: Option<PathBuf>,
     pub(super) overlays: HashMap<String, CampaignProjectOverlay>,
     /// Document key -> the `Dirty` revision its overlay bytes were written
     /// from, so an untouched document is never serialized twice.
     pub(super) captured_revisions: HashMap<String, u64>,
-    /// What is actually on disk, by identity, so a save writes only the rows
+    /// What the recovery file holds, by identity, so a save writes only the rows
     /// whose bytes changed instead of replacing every overlay.
-    pub(super) saved_digests: HashMap<String, [u8; 32]>,
+    ///
+    /// `None` when that is unknown — a fresh workspace, or a project imported
+    /// from a file the recovery has never seen — and the next write then
+    /// replaces every row rather than merging into whatever was there.
+    pub(super) saved_digests: Option<HashMap<String, [u8; 32]>>,
     /// What an in-flight write will leave on disk, promoted to `saved_digests`
     /// once it reports success.
     pub(super) pending_digests: Option<HashMap<String, [u8; 32]>>,
@@ -142,12 +159,15 @@ pub(super) struct ActiveCampaignProject {
 }
 
 impl ActiveCampaignProject {
-    pub(super) fn fresh(path: PathBuf, now: f64) -> Self {
+    pub(super) fn fresh(recovery_path: PathBuf, now: f64) -> Self {
         Self {
-            path,
+            recovery_path,
+            project_path: None,
             overlays: HashMap::new(),
             captured_revisions: HashMap::new(),
-            saved_digests: HashMap::new(),
+            // Nothing is known about whatever file may be sitting at the
+            // recovery path, so the first write replaces it outright.
+            saved_digests: None,
             pending_digests: None,
             last_saved_fingerprint: Vec::new(),
             next_autosave_at: now + CAMPAIGN_PROJECT_AUTOSAVE_SECS,
@@ -159,24 +179,52 @@ impl ActiveCampaignProject {
         }
     }
 
-    pub(super) fn from_snapshot(
-        path: PathBuf,
+    /// The recovery file's own contents, picked back up. Its digests are exactly
+    /// what is stored there, and it needs no rewrite until something changes.
+    pub(super) fn adopted(
+        recovery_path: PathBuf,
         snapshot: &CampaignProjectSnapshot,
         now: f64,
     ) -> Self {
         Self {
-            path,
-            // Restored overlays came off disk, so that is exactly what is
-            // stored there.
-            saved_digests: snapshot
-                .overlays
-                .iter()
-                .map(|(identity, overlay)| (identity.clone(), overlay.digest))
-                .collect(),
+            saved_digests: Some(snapshot.digests()),
+            last_saved_fingerprint: snapshot.fingerprint(),
+            ..Self::from_snapshot_parts(recovery_path, snapshot, now)
+        }
+    }
+
+    /// A project read from a `.baboon` the user pointed at. The recovery file has
+    /// never held these bytes, so neither the digests nor the fingerprint may
+    /// claim otherwise: leaving either behind would let the first autosave
+    /// conclude there was nothing to write and merge these overlays into
+    /// whatever the last workspace left at that path.
+    pub(super) fn imported(
+        recovery_path: PathBuf,
+        project_path: PathBuf,
+        snapshot: &CampaignProjectSnapshot,
+        now: f64,
+    ) -> Self {
+        Self {
+            project_path: Some(project_path),
+            saved_digests: None,
+            last_saved_fingerprint: Vec::new(),
+            ..Self::from_snapshot_parts(recovery_path, snapshot, now)
+        }
+    }
+
+    fn from_snapshot_parts(
+        recovery_path: PathBuf,
+        snapshot: &CampaignProjectSnapshot,
+        now: f64,
+    ) -> Self {
+        Self {
+            recovery_path,
+            project_path: None,
+            saved_digests: None,
             overlays: snapshot.overlays.clone(),
             captured_revisions: HashMap::new(),
             pending_digests: None,
-            last_saved_fingerprint: snapshot.fingerprint(),
+            last_saved_fingerprint: Vec::new(),
             next_autosave_at: now + CAMPAIGN_PROJECT_AUTOSAVE_SECS,
             revision: 0,
             save_in_flight: None,
@@ -190,11 +238,29 @@ impl ActiveCampaignProject {
                 .collect(),
         }
     }
+
+    /// What to show as this workspace's project, and where its edits actually
+    /// live. The recovery file is not something the user named, so it is
+    /// described rather than presented as an open document.
+    pub(super) fn label(&self) -> String {
+        match self.project_path.as_deref() {
+            Some(path) => path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.display().to_string()),
+            None => "unsaved".to_owned(),
+        }
+    }
 }
 
 pub(super) struct PendingCampaignProject {
     pub(super) path: PathBuf,
-    pub(super) snapshot: CampaignProjectSnapshot,
+    /// The project to open once the source mounts. `None` stages the path as
+    /// this workspace's save target *without* reading it back in, which is what
+    /// a session restore wants: the workspace's recovery file is always the
+    /// fresher copy of the same edits, so re-importing the `.baboon` the user
+    /// happened to have open would overwrite newer work with older.
+    pub(super) snapshot: Option<CampaignProjectSnapshot>,
 }
 
 /// Where a Campaign Evolved kit autosaves its recovery project.
@@ -211,7 +277,19 @@ pub(super) fn campaign_recovery_path(source_root: Option<&Path>) -> PathBuf {
     hasher.update(root.to_string_lossy().as_bytes());
     let digest = hasher.finalize();
     let tag = digest[..6].iter().map(|b| format!("{b:02x}")).collect::<String>();
-    crate::storage::data_path(&format!("campaign_evolved_recovery-{tag}.baboon"))
+    crate::storage::data_path(&format!("{CAMPAIGN_RECOVERY_STEM}-{tag}.baboon"))
+}
+
+pub(super) const CAMPAIGN_RECOVERY_STEM: &str = "campaign_evolved_recovery";
+
+/// Whether `path` is one of Baboon's own recovery files rather than a `.baboon`
+/// the user named. Recovery files are an implementation detail of a workspace —
+/// they are not offered as a save target, and a session that recorded one back
+/// when the two were the same file must not be read as having a project open.
+pub(super) fn is_campaign_recovery_file(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.starts_with(CAMPAIGN_RECOVERY_STEM))
 }
 
 /// Write the project to `path`.
@@ -534,7 +612,7 @@ impl Baboon {
             _ => None,
         };
         self.kits[kit].campaign_project = Some(match &restored {
-            Some(snapshot) => ActiveCampaignProject::from_snapshot(path, snapshot, now),
+            Some(snapshot) => ActiveCampaignProject::adopted(path, snapshot, now),
             None => ActiveCampaignProject::fresh(path, now),
         });
         if let Some(count) = restored
@@ -835,6 +913,21 @@ impl Baboon {
             .is_some_and(|project| project.overlays.remove(&identity).is_some())
     }
 
+    /// Whether this kit's project has bytes stashed for `key` — that is, whether
+    /// discarding the document would also delete something from disk.
+    pub(super) fn tag_has_stashed_overlay(&self, kit: usize, key: &str) -> bool {
+        let Some(entry) = self.entry_for_key_in(kit, key) else {
+            return false;
+        };
+        let Some((identity, ..)) = campaign_entry_project_parts(entry) else {
+            return false;
+        };
+        self.kits[kit]
+            .campaign_project
+            .as_ref()
+            .is_some_and(|project| project.overlays.contains_key(&identity))
+    }
+
     /// Forget every stashed overlay in this kit's project, returning how many
     /// tags were carrying one.
     pub(super) fn forget_all_campaign_overlays(&mut self, kit: usize) -> usize {
@@ -903,7 +996,7 @@ impl Baboon {
         let Some(project) = self.kits[kit].campaign_project.as_mut() else {
             return Ok(false);
         };
-        if fingerprint == project.last_saved_fingerprint && project.path.is_file() {
+        if fingerprint == project.last_saved_fingerprint && project.recovery_path.is_file() {
             project.next_autosave_at = now + CAMPAIGN_PROJECT_AUTOSAVE_SECS;
             return Ok(false);
         }
@@ -918,8 +1011,8 @@ impl Baboon {
             .lock()
             .map_err(|_| "Campaign project writer lock was poisoned".to_owned())?;
         let on_disk = project.saved_digests.clone();
-        save_campaign_project(&project.path, &snapshot, Some(&on_disk))?;
-        project.saved_digests = snapshot.digests();
+        save_campaign_project(&project.recovery_path, &snapshot, on_disk.as_ref())?;
+        project.saved_digests = Some(snapshot.digests());
         project.last_saved_fingerprint = fingerprint;
         project.next_autosave_at = now + CAMPAIGN_PROJECT_AUTOSAVE_SECS;
         if let Some(session) = self.current_session_state() {
@@ -976,12 +1069,12 @@ impl Baboon {
             let Some(project) = self.kits[kit].campaign_project.as_mut() else {
                 return;
             };
-            if fingerprint == project.last_saved_fingerprint && project.path.is_file() {
+            if fingerprint == project.last_saved_fingerprint && project.recovery_path.is_file() {
                 project.next_autosave_at = now + CAMPAIGN_PROJECT_AUTOSAVE_SECS;
             } else {
                 project.revision = project.revision.wrapping_add(1);
                 let revision = project.revision;
-                let path = project.path.clone();
+                let path = project.recovery_path.clone();
                 let write_lock = project.write_lock.clone();
                 let latest_write_revision = project.latest_write_revision.clone();
                 latest_write_revision.store(revision, Ordering::SeqCst);
@@ -1000,7 +1093,7 @@ impl Baboon {
                             if latest_write_revision.load(Ordering::SeqCst) != revision {
                                 Ok(())
                             } else {
-                                save_campaign_project(&path, &snapshot, Some(&on_disk))
+                                save_campaign_project(&path, &snapshot, on_disk.as_ref())
                             }
                         });
                     let _ = tx.send(WorkerMessage::CampaignProjectSaved {
@@ -1028,7 +1121,7 @@ impl Baboon {
         // outlives its kit is dropped instead of landing on another one.
         let Some(kit) = self.kits.iter().position(|kit| {
             kit.campaign_project.as_ref().is_some_and(|project| {
-                project.path == path && project.save_in_flight == Some(revision)
+                project.recovery_path == path && project.save_in_flight == Some(revision)
             })
         }) else {
             return true;
@@ -1045,7 +1138,7 @@ impl Baboon {
                 // the previous belief in place, so the next save reconciles
                 // against what actually got there.
                 if let Some(digests) = pending {
-                    project.saved_digests = digests;
+                    project.saved_digests = Some(digests);
                 }
                 if let Some(session) = self.current_session_state() {
                     let _ = save_last_session(&session);
@@ -1069,17 +1162,114 @@ impl Baboon {
         self.begin_open_campaign_project_path(path, ctx);
     }
 
-    /// Stage a project to be applied when a source load already in flight
-    /// completes. Session restore uses this: the kit's source is being loaded
-    /// by the restore itself, so opening the project must not start a second
-    /// load of its own.
-    pub(super) fn queue_campaign_project(&mut self, kit: usize, path: PathBuf) {
-        match load_campaign_project(&path) {
-            Ok(snapshot) => {
-                self.kits[kit].pending_campaign_project = Some(PendingCampaignProject { path, snapshot })
-            }
-            Err(error) => self.status = error,
+    /// Stage the `.baboon` a restored session had open as that workspace's save
+    /// target, to be attached once the source finishes mounting.
+    ///
+    /// Deliberately *not* an import: the workspace autosaves to its recovery
+    /// file, which is therefore at least as fresh as the project file and
+    /// usually fresher. Reading the `.baboon` back in would replace this
+    /// session's stashed edits with whatever state the file was last explicitly
+    /// saved in.
+    pub(super) fn queue_campaign_project_target(&mut self, kit: usize, path: PathBuf) {
+        // Sessions written before the recovery file and the project file were
+        // separate recorded the recovery path here. It is not a project the user
+        // named, and offering it as a save target would be wrong.
+        if is_campaign_recovery_file(&path) {
+            return;
         }
+        self.kits[kit].pending_campaign_project =
+            Some(PendingCampaignProject { path, snapshot: None });
+    }
+
+    /// Write this workspace's project to its associated `.baboon`, asking for a
+    /// destination when it has none yet.
+    pub(super) fn save_campaign_project_file(&mut self, kit: usize, now: f64) {
+        let Some(path) = self.kits[kit]
+            .campaign_project
+            .as_ref()
+            .and_then(|project| project.project_path.clone())
+        else {
+            self.save_campaign_project_file_as(kit, now);
+            return;
+        };
+        self.write_campaign_project_file(kit, path, now);
+    }
+
+    pub(super) fn save_campaign_project_file_as(&mut self, kit: usize, now: f64) {
+        if !self.current_source_is_campaign_project_capable(kit) {
+            self.status = "Baboon projects require a Campaign Evolved container source".to_owned();
+            return;
+        }
+        let current = self.kits[kit]
+            .campaign_project
+            .as_ref()
+            .and_then(|project| project.project_path.clone());
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("Save Baboon Project As")
+            .add_filter("Baboon project", &["baboon"])
+            .set_file_name(
+                current
+                    .as_deref()
+                    .and_then(Path::file_name)
+                    .map(|name| name.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "campaign-evolved.baboon".to_owned()),
+            );
+        // Next to the project it is replacing, else beside the game it edits.
+        if let Some(folder) = current
+            .as_deref()
+            .and_then(Path::parent)
+            .map(Path::to_path_buf)
+            .or_else(|| {
+                self.kits[kit]
+                    .source
+                    .as_ref()
+                    .map(|source| source.source.root_path().to_path_buf())
+            })
+        {
+            dialog = dialog.set_directory(folder);
+        }
+        let Some(path) = dialog.save_file() else {
+            return;
+        };
+        // A dialog that returns an extensionless name would otherwise write a
+        // project that `Open Baboon Project` cannot see.
+        let path = match path.extension() {
+            Some(_) => path,
+            None => path.with_extension("baboon"),
+        };
+        self.write_campaign_project_file(kit, path, now);
+    }
+
+    fn write_campaign_project_file(&mut self, kit: usize, path: PathBuf, now: f64) {
+        let snapshot = match self.capture_campaign_project(kit, now) {
+            Ok(Some(snapshot)) => snapshot,
+            Ok(None) => {
+                self.status =
+                    "Baboon projects require a Campaign Evolved container source".to_owned();
+                return;
+            }
+            Err(error) => {
+                self.status = format!("Could not save the Baboon project: {error}");
+                return;
+            }
+        };
+        // Nothing here knows what is in a file the user named, and it may be an
+        // older project entirely, so it is replaced rather than merged into.
+        if let Err(error) = save_campaign_project(&path, &snapshot, None) {
+            self.status = error;
+            return;
+        }
+        let count = snapshot.overlays.len();
+        if let Some(project) = self.kits[kit].campaign_project.as_mut() {
+            project.project_path = Some(path.clone());
+        }
+        // The recovery file stays the live copy, so it is brought level with what
+        // was just written out.
+        if let Err(error) = self.checkpoint_campaign_project(kit, now) {
+            self.status = format!("Saved {}, but the recovery file failed: {error}", path.display());
+            return;
+        }
+        self.status = format!("Saved {count} modified tag(s) to {}", path.display());
     }
 
     pub(super) fn begin_open_campaign_project_path(&mut self, path: PathBuf, ctx: egui::Context) {
@@ -1109,8 +1299,10 @@ impl Baboon {
         self.begin_load_folder_path(source_path, ctx);
         // Staged after the load starts: the loader has routed to a kit and
         // left it active, so this lands on the kit the source will mount into.
-        self.kits[self.active].pending_campaign_project =
-            Some(PendingCampaignProject { path, snapshot });
+        self.kits[self.active].pending_campaign_project = Some(PendingCampaignProject {
+            path,
+            snapshot: Some(snapshot),
+        });
     }
 
     pub(super) fn apply_pending_campaign_project(
@@ -1127,6 +1319,17 @@ impl Baboon {
             self.status = "Baboon projects require a Campaign Evolved container source".to_owned();
             return;
         }
+        // A restored session stages its project file as a save target only; the
+        // recovery file this workspace has been autosaving to is the live copy,
+        // and `ensure_campaign_project` has just picked it back up.
+        let Some(snapshot) = pending.snapshot else {
+            self.ensure_campaign_project(kit, now);
+            if let Some(project) = self.kits[kit].campaign_project.as_mut() {
+                project.project_path = Some(pending.path);
+            }
+            return;
+        };
+        let project_path = pending.path;
 
         let mut identity_to_key = HashMap::<String, String>::new();
         let mut restored_revisions = HashMap::<String, u64>::new();
@@ -1134,8 +1337,7 @@ impl Baboon {
 
         // Recreate new project tags first, including ones that are currently
         // closed but must remain part of future exports.
-        let new_overlays = pending
-            .snapshot
+        let new_overlays = snapshot
             .overlays
             .values()
             .filter(|overlay| overlay.kind == CampaignProjectTagKind::New)
@@ -1151,7 +1353,7 @@ impl Baboon {
             identity_to_key.insert(overlay.identity.clone(), key);
         }
 
-        for tab in &pending.snapshot.tabs {
+        for tab in &snapshot.tabs {
             if identity_to_key.contains_key(&tab.identity) {
                 continue;
             }
@@ -1168,11 +1370,11 @@ impl Baboon {
         self.kits[kit].tag_tree = egui_tiles::Tree::empty(tag_tree_id(kit_id));
         self.kits[kit].open_tabs.clear();
         self.kits[kit].selected_key = None;
-        for tab in &pending.snapshot.tabs {
+        for tab in &snapshot.tabs {
             let Some(key) = identity_to_key.get(&tab.identity).cloned() else {
                 continue;
             };
-            if let Some(overlay) = pending.snapshot.overlays.get(&tab.identity) {
+            if let Some(overlay) = snapshot.overlays.get(&tab.identity) {
                 if let Ok(tag) = TagFile::read_from_bytes(&overlay.bytes) {
                     let document = TagDocument::modified(tag);
                     // The document was parsed from the overlay's own bytes, so
@@ -1190,8 +1392,7 @@ impl Baboon {
             }
             self.kits[kit].open_tag_pane(&key);
         }
-        self.kits[kit].selected_key = pending
-            .snapshot
+        self.kits[kit].selected_key = snapshot
             .selected_identity
             .as_ref()
             .and_then(|identity| identity_to_key.get(identity))
@@ -1202,15 +1403,27 @@ impl Baboon {
         if let Some(key) = self.kits[kit].selected_key.clone() {
             self.kits[kit].open_tag_pane(&key);
         }
-        let mut project = ActiveCampaignProject::from_snapshot(pending.path, &pending.snapshot, now);
+        let root = self.kits[kit]
+            .source
+            .as_ref()
+            .map(|source| source.source.root_path().to_path_buf());
+        let recovery_path = campaign_recovery_path(root.as_deref());
+        let mut project =
+            ActiveCampaignProject::imported(recovery_path, project_path, &snapshot, now);
         project.captured_revisions = restored_revisions;
+        let tabs = snapshot.tabs.len();
+        let stashed = snapshot.overlays.len();
         self.kits[kit].campaign_project = Some(project);
+        // These overlays have only ever existed in the file the user opened. The
+        // recovery file is what every later autosave writes and what the next
+        // session picks up, so it is brought level with them now rather than at
+        // the mercy of whether anything is edited afterwards.
+        if let Err(error) = self.checkpoint_campaign_project(kit, now) {
+            self.status = format!("Opened the project, but its recovery file failed: {error}");
+            return;
+        }
         self.status = if missing == 0 {
-            format!(
-                "Restored Campaign Evolved project ({} tab(s), {} modified tag(s))",
-                pending.snapshot.tabs.len(),
-                pending.snapshot.overlays.len()
-            )
+            format!("Restored Campaign Evolved project ({tabs} tab(s), {stashed} modified tag(s))")
         } else {
             format!(
                 "Restored Campaign Evolved project; skipped {missing} missing or incompatible item(s)"
@@ -1347,6 +1560,115 @@ mod tests {
         let changed = snapshot_of(vec![overlay("a", b"other")]);
         assert_eq!(before.fingerprint(), same.fingerprint());
         assert_ne!(before.fingerprint(), changed.fingerprint());
+    }
+
+    fn temp_project(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "baboon-{name}-{}-{}.baboon",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    fn identities_in(path: &Path) -> Vec<String> {
+        let mut identities: Vec<String> = load_campaign_project(path)
+            .unwrap()
+            .overlays
+            .into_keys()
+            .collect();
+        identities.sort();
+        identities
+    }
+
+    /// A `.baboon` the user opened is not what the workspace writes to. It was,
+    /// and so an exported mod's sidecar became a live file the moment it was
+    /// opened: autosave rewrote it, and declining to save at exit deleted the
+    /// stashed rows straight out of it — which is how an exported mod's project
+    /// came back empty two sessions later.
+    #[test]
+    fn an_opened_project_is_never_the_autosave_target() {
+        let recovery = temp_project("recovery");
+        let opened = temp_project("opened");
+        let snapshot = snapshot_of(vec![overlay("a", b"one")]);
+        let project =
+            ActiveCampaignProject::imported(recovery.clone(), opened.clone(), &snapshot, 0.0);
+        assert_eq!(project.recovery_path, recovery);
+        assert_eq!(project.project_path, Some(opened.clone()));
+        assert_eq!(
+            project.label(),
+            opened.file_name().unwrap().to_string_lossy(),
+            "the workspace is labelled with the project the user opened"
+        );
+    }
+
+    /// An imported project's overlays have never been in the recovery file, so
+    /// neither the digests nor the fingerprint may claim they have. Either one
+    /// would let the first autosave decide there was nothing to write — leaving
+    /// the workspace's live copy as whatever the last session left there.
+    #[test]
+    fn an_imported_project_replaces_a_stale_recovery_file() {
+        let recovery = temp_project("stale-recovery");
+        // What an earlier session of this workspace left behind.
+        save_campaign_project(&recovery, &snapshot_of(vec![overlay("old", b"x")]), None).unwrap();
+
+        let imported = snapshot_of(vec![overlay("new", b"y")]);
+        let project = ActiveCampaignProject::imported(
+            recovery.clone(),
+            temp_project("opened"),
+            &imported,
+            0.0,
+        );
+        assert!(
+            project.saved_digests.is_none(),
+            "nothing is known about the recovery file, so it must be replaced whole"
+        );
+        assert_ne!(
+            project.last_saved_fingerprint,
+            imported.fingerprint(),
+            "the recovery file does not hold these bytes yet, so a write is due"
+        );
+        // Exactly what `checkpoint_campaign_project` then does with them.
+        save_campaign_project(&recovery, &imported, project.saved_digests.as_ref()).unwrap();
+        assert_eq!(
+            identities_in(&recovery),
+            vec!["new"],
+            "the stale row was replaced, not merged into"
+        );
+        let _ = fs::remove_file(&recovery);
+    }
+
+    /// The recovery file the workspace autosaves to is picked back up as-is, so
+    /// it needs neither a rewrite nor a full replace until something changes.
+    #[test]
+    fn an_adopted_recovery_file_is_believed() {
+        let recovery = temp_project("adopted");
+        let snapshot = snapshot_of(vec![overlay("a", b"one")]);
+        let project = ActiveCampaignProject::adopted(recovery, &snapshot, 0.0);
+        assert_eq!(project.saved_digests, Some(snapshot.digests()));
+        assert_eq!(project.last_saved_fingerprint, snapshot.fingerprint());
+        assert_eq!(project.project_path, None);
+        assert_eq!(
+            project.label(),
+            "unsaved",
+            "a recovery file is not a project the user named"
+        );
+    }
+
+    /// Baboon's own recovery files are not save targets, and a session that
+    /// recorded one — every session written while the two were the same file —
+    /// must not come back reading as though the user had a project open.
+    #[test]
+    fn recovery_files_are_recognized_as_baboons_own() {
+        assert!(is_campaign_recovery_file(&campaign_recovery_path(Some(
+            Path::new("/games/evolved/Paks")
+        ))));
+        assert!(is_campaign_recovery_file(&campaign_recovery_path(None)));
+        assert!(!is_campaign_recovery_file(Path::new(
+            "/games/evolved/Paks/~mods/mymod_P.baboon"
+        )));
     }
 
     #[test]

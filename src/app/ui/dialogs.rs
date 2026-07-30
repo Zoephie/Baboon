@@ -1086,6 +1086,24 @@ impl Baboon {
                 _ => None,
             });
         let expert_mode = self.expert_mode;
+        // Mods installed under `Paks` are mounted like any other container, so
+        // they serve their tags in place of the game's. Both facts below follow
+        // from that and neither was visible: comparisons here are against the
+        // game's own packs, and the file this would write may be one of those
+        // mounts — which cannot be replaced while it is mapped.
+        let export_target = self
+            .mod_export
+            .as_ref()
+            .filter(|dialog| !dialog.review_only)
+            .map(ModExportDialog::output_utoc);
+        let mounted_mods = kit_index
+            .map(|index| self.mounted_mod_labels(index))
+            .unwrap_or_default();
+        let replaces_mounted = export_target
+            .as_deref()
+            .zip(kit_index)
+            .map(|(target, index)| self.export_replaces_mounted(index, target))
+            .unwrap_or_default();
 
         let mut open = true;
         let mut cancel = false;
@@ -1146,6 +1164,19 @@ impl Baboon {
                         });
                     }
                 });
+                if !mounted_mods.is_empty() {
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new(format!(
+                            "Mounted mod(s) in this install: {}. Changes are compared against the \
+                             game's own packs, so a tag one of these already provides still shows \
+                             what it changes.",
+                            mounted_mods.join(", ")
+                        ))
+                        .small()
+                        .color(subtle_dark()),
+                    );
+                }
                 ui.add_space(6.0);
                 // Grows with the window: the naming and buttons below keep the
                 // slice they measured last frame, and the list takes whatever is
@@ -1226,6 +1257,21 @@ impl Baboon {
                                             ui.label(
                                                 RichText::new(reason).color(subtle_dark()).small(),
                                             );
+                                        }
+                                        // The editor is showing this mod's values
+                                        // for this tag, which is why an edit can
+                                        // look like it was already there.
+                                        if let Some(mod_label) = row.overridden_by.as_deref() {
+                                            ui.label(
+                                                RichText::new(format!("in {mod_label}"))
+                                                    .color(modified_text())
+                                                    .small(),
+                                            )
+                                            .on_hover_text(format!(
+                                                "This install's {mod_label} already provides this \
+                                                 tag, so the editor reads its values. The \
+                                                 comparison below is against the game's own pack.",
+                                            ));
                                         }
                                     },
                                 );
@@ -1323,6 +1369,21 @@ impl Baboon {
                     {
                         acknowledge = Some(acknowledged);
                     }
+                }
+                // Said as the name is typed, because it is the difference between
+                // writing a new mod and replacing one this workspace is reading
+                // from. The export releases the mapping to do it, and the browser
+                // then shows what was just written.
+                if !replaces_mounted.is_empty() {
+                    ui.label(
+                        RichText::new(format!(
+                            "Replaces {}, which is mounted here — the browser will show what this \
+                             writes. Reload the source afterwards if the tag list changed.",
+                            replaces_mounted.join(", ")
+                        ))
+                        .small()
+                        .color(egui::Color32::from_rgb(210, 120, 90)),
+                    );
                 }
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
@@ -1653,6 +1714,12 @@ impl Baboon {
         let mut do_export = false;
         let mut cancel = false;
         let mut dont_ask = !self.confirm_container_overwrite;
+        // Which container this would actually be written into. With a mod mounted
+        // over the tag, that is the mod — not the game's shipped pak, which is
+        // what this dialog used to promise in every case.
+        let target = self
+            .resolve_kit(kit)
+            .and_then(|index| self.container_label_for_tag(index, &key));
         egui::Window::new("Overwrite game files?")
             .id(egui::Id::new("overwrite_confirm"))
             .open(&mut open)
@@ -1662,8 +1729,19 @@ impl Baboon {
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 ui.label(
-                    RichText::new("Save will overwrite this tag inside the game's shipped pak files, in place:")
-                        .color(text_dark()),
+                    RichText::new(match target.as_ref() {
+                        Some((label, true)) => format!(
+                            "Save will overwrite this tag inside the mounted mod {label}, in place:"
+                        ),
+                        Some((label, false)) => format!(
+                            "Save will overwrite this tag inside the game's shipped pak {label}, \
+                             in place:"
+                        ),
+                        None => "Save will overwrite this tag inside the game's shipped pak files, \
+                                 in place:"
+                            .to_owned(),
+                    })
+                    .color(text_dark()),
                 );
                 ui.add_space(5.0);
                 ui.label(RichText::new(&key).color(text_dark()).monospace());

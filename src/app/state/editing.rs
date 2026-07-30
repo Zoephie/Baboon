@@ -5,6 +5,11 @@ use super::*;
 
 pub(in crate::app) enum DeferredFileAction {
     SaveCurrentTag,
+    /// Write this workspace's Baboon project to the `.baboon` it is associated
+    /// with, asking for one when it has none. Deferred like the other saves, so
+    /// an edit still focused in the editor is committed before the capture.
+    SaveProject,
+    SaveProjectAs,
     ExportMod,
     PokeCurrentTag,
     Close(PendingCloseAction),

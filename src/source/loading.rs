@@ -305,6 +305,8 @@ fn build_container_set(
     let mut index = ContainerTagIndex::default();
     // Cooked package names over the same containers, for following UE imports.
     let mut packages = ContainerPackageIndex::default();
+    // The same payloads as the game's own packs have them, mods excluded.
+    let mut shipped = ShippedTagIndex::default();
     let mut opened_any = false;
 
     // Open every container up front. A mod/override container addresses its
@@ -320,6 +322,15 @@ fn build_container_set(
     }
     let needs_recovery = |slot: &Option<IoStoreArchive>|
         matches!(slot, Some(archive) if archive.entries().is_empty());
+    // Which of these are mods, decided before recovery fills in the missing
+    // names: shipping no directory index at all is the strongest signal there
+    // is, and it is gone the moment `recover_entries` runs.
+    let is_mod: Vec<bool> = opened
+        .iter()
+        .map(|(utoc, archive)| {
+            needs_recovery(archive) || !is_shipped_container_path(&root, utoc)
+        })
+        .collect();
     // Naming an index-less container's chunks means resolving their ids against
     // the containers it overrides. On the "open one chunk" path — a mod sitting
     // in the game's own Paks folder — those aren't in the set, so pull the
@@ -345,8 +356,9 @@ fn build_container_set(
         opened[i].1 = Some(archive);
     }
 
-    for (utoc, archive) in opened {
+    for (position, (utoc, archive)) in opened.into_iter().enumerate() {
         let Some(archive) = archive else { continue };
+        let is_mod = is_mod.get(position).copied().unwrap_or(false);
         opened_any = true;
         let chunk_label = utoc
             .file_stem()
@@ -408,6 +420,11 @@ fn build_container_set(
             let dedup_key = format!("{group_tag:08x}:{logical}");
             // Later packs win, matching the `entries[existing] = entry` override.
             index.insert(dedup_key.clone(), container_index, e.path.clone());
+            // The shipped layer records only the game's own packs, so a mod
+            // taking over a tag leaves the base copy reachable.
+            if !is_mod {
+                shipped.insert(&e.path, container_index);
+            }
             match seen.get(&dedup_key) {
                 Some(&existing) => {
                     // Overlap should be near-zero; note it rather than hide it.
@@ -432,6 +449,7 @@ fn build_container_set(
             containers.push(MountedContainer {
                 utoc_path: utoc,
                 chunk_label,
+                is_mod,
                 archive,
             });
         }
@@ -442,12 +460,18 @@ fn build_container_set(
     }
 
     entries.sort_by(|a, b| natural_key(&a.display_path).cmp(&natural_key(&b.display_path)));
+    let mods = containers.iter().filter(|c| c.is_mod).count();
     let label = format!(
-        "{} ({} packs)",
+        "{} ({} packs{})",
         root.file_name()
             .and_then(|s| s.to_str())
             .unwrap_or("Campaign Evolved"),
-        containers.len()
+        containers.len(),
+        match mods {
+            0 => String::new(),
+            1 => ", 1 mod".to_owned(),
+            n => format!(", {n} mods"),
+        }
     );
     let tree = build_tree(&entries);
     let group_tree = build_group_tree(&entries);
@@ -458,6 +482,7 @@ fn build_container_set(
             containers,
             index: Arc::new(index),
             packages: Arc::new(packages),
+            shipped: Arc::new(shipped),
         },
         names,
         game: Some(CAMPAIGN_EVOLVED_GAME.to_string()),
@@ -539,6 +564,112 @@ fn strip_tags_root(path: &str) -> &str {
 
 /// Parse the chunk id from a `pakchunk<N>-...utoc` filename (u32::MAX if none),
 /// so `pakchunk0` sorts first as the base.
+/// Whether `utoc` looks like one of the game's own containers rather than a mod
+/// installed into the same tree.
+///
+/// Two independent signals, both of which a mod fails: the game's packs are named
+/// `pakchunk<N>[-platform]`, and they sit directly in `Paks`. Mods are named
+/// whatever their author chose — and the convention the game itself relies on is
+/// to drop them in a subfolder like `~mods`, which is why they are found at all.
+/// A third and stronger signal (shipping no directory index) is checked at the
+/// mount, where it is still observable.
+fn is_shipped_container_path(paks_root: &Path, utoc: &Path) -> bool {
+    chunk_number(utoc) != u32::MAX
+        && utoc
+            .parent()
+            .is_some_and(|parent| paths_are_same_dir(parent, paks_root))
+}
+
+/// Directory comparison that survives the two forms the same folder arrives in:
+/// the walked path under a mounted root, and the root the caller configured.
+fn paths_are_same_dir(left: &Path, right: &Path) -> bool {
+    if left == right {
+        return true;
+    }
+    match (left.canonicalize(), right.canonicalize()) {
+        (Ok(left), Ok(right)) => left == right,
+        _ => false,
+    }
+}
+
+/// Whether two paths name the same file, including when it does not exist yet —
+/// which is the case that matters for an export about to create one.
+pub fn paths_are_same_file(left: &Path, right: &Path) -> bool {
+    // Names first, because they decide it without touching the disk: this runs
+    // once per mounted container on every frame the export review is open, and
+    // an install can mount ninety of them.
+    match (left.file_name(), right.file_name()) {
+        (Some(left_name), Some(right_name)) if left_name.eq_ignore_ascii_case(right_name) => {}
+        _ => return false,
+    }
+    if left == right {
+        return true;
+    }
+    if let (Ok(left), Ok(right)) = (left.canonicalize(), right.canonicalize()) {
+        return left == right;
+    }
+    // The target does not exist yet, so compare the directories instead. Names
+    // are compared case-insensitively throughout: Windows, the only platform
+    // where writing over a mapped container fails at all, folds case, and
+    // erring towards "same file" refuses an export rather than breaking one.
+    match (left.parent(), right.parent()) {
+        (Some(left_dir), Some(right_dir)) => paths_are_same_dir(left_dir, right_dir),
+        _ => false,
+    }
+}
+
+/// Read a container tag as the **game's own packs** have it, ignoring any mod
+/// mounted over it.
+///
+/// `Ok(None)` for a tag no shipped pack carries: a mod added it, so there is
+/// nothing to compare against rather than nothing changed. Every "what does this
+/// change about the game?" answer has to come from here, because [`read_entry`]
+/// deliberately reads what the *game* would load, mods included.
+pub fn read_shipped_entry(source: &TagSource, entry: &TagEntry) -> Result<Option<TagFile>> {
+    let (
+        TagEntryLocation::Container { rel_path, .. },
+        TagSource::IoStoreContainerSet {
+            containers,
+            shipped,
+            ..
+        },
+    ) = (&entry.location, source)
+    else {
+        return Ok(None);
+    };
+    let Some(index) = shipped.container_for(rel_path) else {
+        return Ok(None);
+    };
+    let mounted = containers
+        .get(index)
+        .context("shipped container index out of range")?;
+    let bytes = mounted
+        .archive
+        .read(rel_path)
+        .map_err(|e| anyhow!("failed to read {rel_path} from {}: {e}", mounted.chunk_label))?;
+    TagFile::read_from_bytes(&bytes)
+        .map(Some)
+        .map_err(|e| anyhow!("failed to parse {}: {e}", entry.display_path))
+}
+
+/// The mounted containers an export to `out_utoc` would overwrite.
+///
+/// Mounting maps a container's `.ucas` into memory, and the export replaces that
+/// file wholesale; on Windows, truncating a mapped file fails outright
+/// (`ERROR_USER_MAPPED_FILE`, os error 1224). Since mods installed under `Paks`
+/// are mounted, re-exporting a mod over itself is exactly that collision.
+pub fn mounted_containers_at(source: &TagSource, out_utoc: &Path) -> Vec<usize> {
+    let TagSource::IoStoreContainerSet { containers, .. } = source else {
+        return Vec::new();
+    };
+    containers
+        .iter()
+        .enumerate()
+        .filter(|(_, container)| paths_are_same_file(&container.utoc_path, out_utoc))
+        .map(|(index, _)| index)
+        .collect()
+}
+
 fn chunk_number(utoc: &Path) -> u32 {
     utoc.file_stem()
         .and_then(|s| s.to_str())
