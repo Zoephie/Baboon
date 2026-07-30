@@ -408,6 +408,14 @@ pub(in crate::app) enum ModExportChange {
     New,
     /// An edit to a tag the game ships.
     Modified,
+    /// In the workspace's stash, but byte-identical to what the game ships.
+    ///
+    /// Reaching this state does not require the user to have undone anything
+    /// deliberately: a value nudged and put back, or an edit that re-encodes to
+    /// the same bytes, leaves the document flagged as modified with nothing to
+    /// show for it. Listing that as an unexported change is how a review ends up
+    /// asserting the user made a change they did not.
+    Unchanged,
     /// In the workspace's project, but no longer resolvable in this source.
     Unresolved,
 }

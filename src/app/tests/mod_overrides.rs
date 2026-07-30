@@ -281,3 +281,37 @@ fn an_export_over_a_mounted_container_is_detected() {
         "an unused name is free to write"
     );
 }
+
+/// A tag stashed as modified whose bytes turn out to be exactly what the game
+/// ships is not an unexported change.
+///
+/// From a user report: the export review listed seven modified tags, one of
+/// which had byte-identical content to the shipped copy and produced an empty
+/// diff. Listing it asserts the user made a change they did not make, and it
+/// would have been written into the mod as a redundant override. Reaching that
+/// state needs no deliberate undo — a value nudged and put back, or an edit that
+/// re-encodes identically, leaves the document flagged with nothing to show.
+#[test]
+fn an_overlay_identical_to_the_shipped_tag_is_not_a_change() {
+    use super::super::controller::classify_overlay;
+
+    assert_eq!(
+        classify_overlay(true, CampaignProjectTagKind::Existing, true),
+        ModExportChange::Unchanged
+    );
+    assert_eq!(
+        classify_overlay(true, CampaignProjectTagKind::Existing, false),
+        ModExportChange::Modified
+    );
+    // A tag this workspace created has no shipped counterpart, so it can never
+    // be "identical to the game's copy" -- there is no copy.
+    assert_eq!(
+        classify_overlay(true, CampaignProjectTagKind::New, true),
+        ModExportChange::New
+    );
+    // Unresolvable wins over everything: it cannot be written at all.
+    assert_eq!(
+        classify_overlay(false, CampaignProjectTagKind::Existing, true),
+        ModExportChange::Unresolved
+    );
+}

@@ -167,6 +167,25 @@ fn explorer_select_args(path: &Path) -> [std::ffi::OsString; 2] {
     ]
 }
 
+/// What a stashed overlay is, for the export review.
+///
+/// Pure so the rule can be tested without a mounted game, which is what
+/// reproducing the report needed: a tag stashed as modified whose bytes turn
+/// out to equal the game's own copy.
+pub(in crate::app) fn classify_overlay(
+    resolvable: bool,
+    kind: CampaignProjectTagKind,
+    matches_shipped: bool,
+) -> ModExportChange {
+    match (resolvable, kind) {
+        (false, _) => ModExportChange::Unresolved,
+        (true, CampaignProjectTagKind::New) => ModExportChange::New,
+        (true, CampaignProjectTagKind::Existing) if matches_shipped => ModExportChange::Unchanged,
+        (true, CampaignProjectTagKind::Existing) => ModExportChange::Modified,
+    }
+}
+
+
 impl Baboon {
     /// Resolve (and cache) the Wwise media a Campaign Evolved `sound` tag binds
     /// to. Returns `None` for every other game and source kind.
@@ -3770,21 +3789,33 @@ impl Baboon {
                 let resolvable = self
                     .campaign_entry_for_identity(exporting, &overlay.identity)
                     .is_some();
-                let kind = match (resolvable, overlay.kind) {
-                    (false, _) => ModExportChange::Unresolved,
-                    (true, CampaignProjectTagKind::New) => ModExportChange::New,
-                    (true, CampaignProjectTagKind::Existing) => ModExportChange::Modified,
-                };
+                let kind = classify_overlay(
+                    resolvable,
+                    overlay.kind,
+                    // Only asked where the answer can matter, so a review does
+                    // not read shipped payloads it has no use for.
+                    resolvable
+                        && overlay.kind == CampaignProjectTagKind::Existing
+                        && self.overlay_matches_shipped(exporting, overlay),
+                );
                 let overridden_by = self.mod_serving_tag(exporting, &overlay.identity);
                 ModExportRow {
                     identity: overlay.identity.clone(),
                     display_path: overlay.logical_path.clone(),
                     group_tag: overlay.group_tag,
                     kind,
-                    include: kind != ModExportChange::Unresolved,
+                    include: !matches!(
+                        kind,
+                        ModExportChange::Unresolved | ModExportChange::Unchanged
+                    ),
                     bytes: overlay.bytes.len(),
-                    reason: (kind == ModExportChange::Unresolved)
-                        .then(|| "not in this source".to_owned()),
+                    reason: match kind {
+                        ModExportChange::Unresolved => Some("not in this source".to_owned()),
+                        ModExportChange::Unchanged => {
+                            Some("identical to the game's copy".to_owned())
+                        }
+                        _ => None,
+                    },
                     overridden_by,
                 }
             })
@@ -3811,6 +3842,28 @@ impl Baboon {
             diffs: HashMap::new(),
             controls_height: 0.0,
         });
+    }
+
+    /// Whether a stashed overlay is byte-for-byte what the game already ships.
+    ///
+    /// Answered on bytes rather than by diffing parsed tags: a diff can come
+    /// back empty for two tags that are not identical (a field the differ does
+    /// not reach), and "nothing to export" has to mean *nothing*, not "nothing
+    /// I looked at".
+    ///
+    /// A tag only a mod provides has no shipped counterpart, so it is never
+    /// unchanged -- there is nothing for it to be identical to.
+    fn overlay_matches_shipped(&self, kit: usize, overlay: &CampaignProjectOverlay) -> bool {
+        let Some(entry) = self.campaign_entry_for_identity(kit, &overlay.identity) else {
+            return false;
+        };
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+            return false;
+        };
+        matches!(
+            crate::source::read_shipped_entry_bytes(&source.source, &entry),
+            Ok(Some(bytes)) if bytes == *overlay.bytes
+        )
     }
 
     /// Compute the field differences for one reviewed tag, against the tag as
@@ -3942,6 +3995,7 @@ impl Baboon {
                     ModExportChange::New => "new",
                     ModExportChange::Modified => "modified",
                     ModExportChange::Unresolved => "unresolved",
+                    ModExportChange::Unchanged => "unchanged",
                 },
                 "bytes": row.bytes,
                 "error": diff.error,
@@ -4224,6 +4278,9 @@ impl Baboon {
                 tag_bytes: bytes.as_slice(),
                 new_package_path: package.as_str(),
                 redirect_from: None,
+                // A new tag's wrapper is built from the template with the
+                // donor's own bindings stripped; nothing here chooses one.
+                asset_reference: None,
             },)
             .collect();
         let written =

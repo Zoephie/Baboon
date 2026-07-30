@@ -1267,6 +1267,9 @@ impl Baboon {
         set_dark_mode(self.dark_mode);
         ctx.set_visuals(foundation_visuals());
         set_combo_scroll_cycle_enabled(ctx, self.scroll_to_cycle_dropdowns);
+        // Opened before any pane draws and settled after the last one, so a
+        // dropdown can only claim a gesture on the frame it began.
+        begin_wheel_gesture(ctx);
         self.handle_app_close_request(ctx);
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::F)) {
             self.find.open = true;
@@ -1325,6 +1328,7 @@ impl Baboon {
         self.draw_find_window(ctx);
         self.draw_tsv_paste_window(ctx);
         self.draw_rename_tag_window(ctx);
+        end_wheel_gesture(ctx);
     }
 }
 

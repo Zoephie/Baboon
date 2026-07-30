@@ -625,6 +625,32 @@ pub fn paths_are_same_file(left: &Path, right: &Path) -> bool {
 /// nothing to compare against rather than nothing changed. Every "what does this
 /// change about the game?" answer has to come from here, because [`read_entry`]
 /// deliberately reads what the *game* would load, mods included.
+/// The shipped payload bytes for `entry`, without parsing them.
+///
+/// Parsing a 7 MB scenario to answer "is this byte-identical to what ships?" is
+/// most of the cost of the question. Used by the export review, which asks it
+/// for every stashed tag.
+pub fn read_shipped_entry_bytes(source: &TagSource, entry: &TagEntry) -> Result<Option<Vec<u8>>> {
+    let (
+        TagEntryLocation::Container { rel_path, .. },
+        TagSource::IoStoreContainerSet { containers, shipped, .. },
+    ) = (&entry.location, source)
+    else {
+        return Ok(None);
+    };
+    let Some(index) = shipped.container_for(rel_path) else {
+        return Ok(None);
+    };
+    let mounted = containers
+        .get(index)
+        .context("shipped container index out of range")?;
+    mounted
+        .archive
+        .read(rel_path)
+        .map(Some)
+        .map_err(|e| anyhow!("failed to read {rel_path} from {}: {e}", mounted.chunk_label))
+}
+
 pub fn read_shipped_entry(source: &TagSource, entry: &TagEntry) -> Result<Option<TagFile>> {
     let (
         TagEntryLocation::Container { rel_path, .. },
