@@ -48,8 +48,21 @@ pub(in crate::app) fn append_field_path_for(prefix: &str, field: &TagField<'_>) 
     }
 }
 
+/// A field name as a path segment the resolver will accept.
+///
+/// The path grammar has **no escapes**: a segment is the field's *clean* name,
+/// and `blam_tags::field_name` is what defines that — including normalising a `/`
+/// inside a name to `\`, precisely so the name cannot split a path. Asking the
+/// engine is therefore the whole job.
+///
+/// This used to invent an escape, writing `int/bool` as `int\/bool`. Nothing
+/// parses that: the `/` still separated, leaving the nonsense segments `int\` and
+/// `bool`, so every write to a field with a slash in its name failed with "field
+/// path no longer resolves" — which in the shader grid meant no bool or int
+/// parameter could be created at all, since they are stored in a field named
+/// `int/bool`.
 pub(in crate::app) fn escape_field_path_segment(field_name: &str) -> String {
-    field_name.replace('\\', "\\\\").replace('/', "\\/")
+    blam_tags::field_name::clean_field_name(field_name).into_owned()
 }
 
 pub(in crate::app) fn is_text_editable_value(value: &TagFieldData) -> bool {
