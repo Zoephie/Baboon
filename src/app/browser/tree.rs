@@ -1114,13 +1114,31 @@ pub(in crate::app) fn draw_entry(
             });
         });
 
-        // Whole-tag operations, inline. Per-asset extraction lives in the
-        // Extract submenu above instead.
-        if is_embedded_tag_entry(entry) {
+        // Whole-tag operations, inline: the raw payload, and the scenario's
+        // script source. Per-asset extraction lives in the Extract submenu
+        // above instead.
+        // Campaign Evolved only for the script pair: the scenario keeps its
+        // original `.hsc` source, and replacing it is only meaningful where that
+        // round-trip is known to hold.
+        let scenario_scripts =
+            is_scenario_group(entry.group_tag) && browser_game_is_campaign_evolved(ui);
+        if is_embedded_tag_entry(entry) || scenario_scripts {
             context_menu_separator(ui);
-            if context_menu_button(ui, "Extract raw tag...").clicked() {
+            if is_embedded_tag_entry(entry)
+                && context_menu_button(ui, "Extract raw tag...").clicked()
+            {
                 action = Some(BrowserAction::ExtractRaw(entry.key.clone()));
                 ui.close_menu();
+            }
+            if scenario_scripts {
+                if context_menu_button(ui, "Extract scripts...").clicked() {
+                    action = Some(BrowserAction::ExtractScenarioScripts(entry.key.clone()));
+                    ui.close_menu();
+                }
+                if context_menu_button(ui, "Import scripts...").clicked() {
+                    action = Some(BrowserAction::ImportScenarioScripts(entry.key.clone()));
+                    ui.close_menu();
+                }
             }
         }
 

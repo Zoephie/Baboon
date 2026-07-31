@@ -2865,6 +2865,10 @@ impl Baboon {
             BrowserAction::ExtractHlslIncludeFolder(keys) => {
                 self.begin_extract_hlsl_include_folder(keys, ctx)
             }
+            BrowserAction::ExtractScenarioScripts(key) => {
+                self.begin_extract_scenario_scripts(key, ctx)
+            }
+            BrowserAction::ImportScenarioScripts(key) => self.import_scenario_scripts(&key),
             BrowserAction::RenameTag(key) => self.open_rename_tag(&key),
             BrowserAction::FindReferences(key) => self.show_references_for(&key),
             BrowserAction::ExploreReferences(key) => self.open_content_explorer(&key),
@@ -3348,6 +3352,101 @@ impl Baboon {
             let _ = tx.send(WorkerMessage::ExportFinished(result));
             ctx.request_repaint();
         });
+    }
+
+    /// Starts potentially expensive source or export work off the UI thread.
+    /// The worker owns cloned inputs and reports status without mutating UI state.
+    pub(super) fn begin_extract_scenario_scripts(&mut self, key: String, ctx: egui::Context) {
+        if !self.active_game_is_campaign_evolved() {
+            self.status = "Script extraction is only available for Campaign Evolved".to_owned();
+            return;
+        }
+        let Some((source, entry)) = self.export_context(&key) else {
+            return;
+        };
+        let Some(output) = rfd::FileDialog::new()
+            .set_title("Extract Scripts")
+            .pick_folder()
+        else {
+            return;
+        };
+        self.status = format!("Extracting scripts from {}", entry.display_path);
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let result =
+                extract_scenario_scripts(&source, &entry, &output).map_err(|e| e.to_string());
+            let _ = tx.send(WorkerMessage::ExportFinished(result));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Replace a scenario's `source files` block from a folder of `.hsc` files.
+    ///
+    /// Runs on the UI thread because it edits the loaded document: the tag is
+    /// left **modified, not saved**, so the change goes through the same review
+    /// and save path as any other edit. If the tag is not open yet it is read
+    /// first — synchronously, since the result has to be mutated in the same
+    /// step rather than handed to a worker.
+    pub(super) fn import_scenario_scripts(&mut self, key: &str) {
+        if !self.active_game_is_campaign_evolved() {
+            self.status = "Script import is only available for Campaign Evolved".to_owned();
+            return;
+        }
+        let Some(entry) = self.entry_for_key(key).cloned() else {
+            self.status = "Tag is no longer in the browser".to_owned();
+            return;
+        };
+        if !is_scenario_group(entry.group_tag) {
+            self.status = "Script import is only available for scenario tags".to_owned();
+            return;
+        }
+        let Some(folder) = rfd::FileDialog::new()
+            .set_title("Import Scripts")
+            .pick_folder()
+        else {
+            return;
+        };
+
+        if !self.kits[self.active].parsed_tags.contains_key(key) {
+            let Some(source) = self.source().map(|source| source.source.clone()) else {
+                self.status = "No tag source is loaded".to_owned();
+                return;
+            };
+            self.status = format!("Loading {}", entry.display_path);
+            match read_entry(&source, &entry) {
+                Ok(tag) => {
+                    self.kits[self.active]
+                        .parsed_tags
+                        .insert(key.to_owned(), TagDocument::clean(tag));
+                }
+                Err(error) => {
+                    self.status = format!("Could not load {}: {error:#}", entry.display_path);
+                    return;
+                }
+            }
+        }
+
+        let Some(document) = self.kits[self.active].parsed_tags.get_mut(key) else {
+            self.status = "Load the tag before importing scripts".to_owned();
+            return;
+        };
+        match replace_scenario_scripts(&mut document.tag, &folder) {
+            Ok(message) => {
+                document.dirty.touch();
+                self.kits[self.active].open_tag_pane(key);
+                self.kits[self.active].selected_key = Some(key.to_owned());
+                self.status = format!("{message} (unsaved)");
+            }
+            // A failed read leaves the block untouched — `replace_scenario_scripts`
+            // reads the whole folder before it clears anything.
+            Err(error) => self.status = format!("Could not import scripts: {error:#}"),
+        }
+    }
+
+    pub(super) fn active_game_is_campaign_evolved(&self) -> bool {
+        self.source()
+            .and_then(|source| source.game.as_deref())
+            .is_some_and(|game| game == "haloce_evolved")
     }
 
     /// Starts potentially expensive source or export work off the UI thread.

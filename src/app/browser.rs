@@ -69,6 +69,22 @@ pub(in crate::app) fn browser_modified_tags(ui: &Ui) -> Option<std::sync::Arc<Mo
     ui.data(|data| data.get_temp::<std::sync::Arc<ModifiedTags>>(modified_tags_id()))
 }
 
+/// Game id of the kit currently being drawn, published the same way and for the
+/// same reason as the modified set: menu items that only apply to one game need
+/// it, and the tree's drawing functions have no other route to it.
+fn browser_game_id() -> egui::Id {
+    egui::Id::new("browser_game_id")
+}
+
+pub(in crate::app) fn set_browser_game(ui: &Ui, game: Option<String>) {
+    ui.data_mut(|data| data.insert_temp(browser_game_id(), game.unwrap_or_default()));
+}
+
+pub(in crate::app) fn browser_game_is_campaign_evolved(ui: &Ui) -> bool {
+    ui.data(|data| data.get_temp::<String>(browser_game_id()))
+        .is_some_and(|game| game == "haloce_evolved")
+}
+
 /// Colour for a tag that this workspace created, with no counterpart in the
 /// game. Paired with a `+` marker wherever it is used, so the meaning does not
 /// rest on colour alone.
