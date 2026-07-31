@@ -417,6 +417,9 @@ impl Baboon {
                 WorkerMessage::ChimpMounted { stamp, result } => {
                     self.handle_chimp_mounted(stamp, result)
                 }
+                WorkerMessage::ChimpTypesIndexed { stamp, index } => {
+                    self.handle_chimp_types_indexed(stamp, index)
+                }
                 WorkerMessage::ChimpPackageLoaded {
                     stamp,
                     package,

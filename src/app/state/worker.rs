@@ -20,6 +20,10 @@ pub(in crate::app) enum WorkerMessage {
         stamp: KitStamp,
         result: Result<Arc<blam_tags::iostore::world::World>, String>,
     },
+    ChimpTypesIndexed {
+        stamp: KitStamp,
+        index: ChimpTypeIndex,
+    },
     ChimpPackageLoaded {
         stamp: KitStamp,
         package: String,
