@@ -3272,17 +3272,54 @@ mod tests {
                 .all(|index| { browser.package_types[*index].as_deref() == Some("Texture2D") })
         );
 
-        let package = world.packages()[textures[0]].name.clone();
+        let target = std::env::var("CE_TEXTURE_PACKAGE").ok();
+        let package_index = match target.as_deref() {
+            Some(target) => {
+                let target = target.to_ascii_lowercase();
+                textures
+                    .iter()
+                    .copied()
+                    .find(|index| {
+                        world.packages()[*index]
+                            .name
+                            .to_ascii_lowercase()
+                            .contains(&target)
+                    })
+                    .unwrap_or_else(|| panic!("target Texture2D package {target:?} was not found"))
+            }
+            None => textures[0],
+        };
+        let package = world.packages()[package_index].name.clone();
         let document = load_chimp_document(&world, &package).unwrap();
         assert_eq!(document.view, ChimpDocumentView::Texture);
-        assert!(
-            document.texture_previews.iter().any(|preview| preview
-                .preview
-                .decoded
-                .as_ref()
-                .is_some_and(Result::is_ok)),
-            "{package} should decode at least one Texture2D preview"
+        let decoded = document
+            .texture_previews
+            .iter()
+            .find_map(|preview| {
+                preview
+                    .preview
+                    .decoded
+                    .as_ref()
+                    .and_then(|decoded| decoded.as_ref().ok())
+            })
+            .unwrap_or_else(|| panic!("{package} should decode at least one Texture2D preview"));
+        assert_eq!(
+            decoded.rgba.len(),
+            decoded.width as usize * decoded.height as usize * 4
         );
+        if package
+            .to_ascii_lowercase()
+            .ends_with("/t_odst_williams_default_d")
+        {
+            assert_eq!((decoded.width, decoded.height), (4096, 1024));
+            assert!(
+                decoded
+                    .rgba
+                    .chunks_exact(4)
+                    .any(|pixel| pixel[0] != pixel[1] || pixel[1] != pixel[2]),
+                "target virtual texture should contain decoded colour data"
+            );
+        }
         let output =
             std::env::temp_dir().join(format!("baboon-chimp-texture-{}.tif", uuid::Uuid::new_v4()));
         write_chimp_texture_tiff(&world, &package, &output).unwrap();
