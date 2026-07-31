@@ -3888,4 +3888,126 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    #[ignore = "requires a Campaign Evolved install; set CE_PAKS"]
+    fn real_spiritdropship_nanite_export_is_complete() {
+        let root = std::env::var_os("CE_PAKS").expect("set CE_PAKS");
+        let world = World::open(root, Usmap::meteorite().unwrap()).unwrap();
+        let package = world
+            .packages()
+            .iter()
+            .find(|package| {
+                package
+                    .name
+                    .to_ascii_lowercase()
+                    .contains("sm_spiritdropship")
+            })
+            .unwrap_or_else(|| panic!("sm_spiritdropship was not found"));
+        let document = load_chimp_document(&world, &package.name).unwrap();
+        assert_eq!(document.mesh_kind, Some(ChimpMeshKind::Static));
+
+        let archive = &world.archives()[document.provider.container];
+        let chunk = archive
+            .chunk_index_for(&document.provider.entry_path)
+            .expect("static mesh package has an IoStore chunk");
+        let bulk = archive
+            .read_bulk_for(chunk, 0)
+            .expect("Nanite static mesh has readable bulk data");
+        let resources = blam_tags::iostore::nanite::NaniteResources::parse(
+            &document.original,
+            document.header.summary.header_size as usize,
+        )
+        .expect("static mesh has Nanite resources");
+        let nanite = blam_tags::iostore::nanite::decode_nanite(
+            &document.original,
+            &bulk,
+            &resources,
+        );
+        let mut miswound_triangles = 0usize;
+        for triangle in &nanite.triangles {
+            let [a, b, c] = triangle.map(|index| nanite.positions[index as usize]);
+            let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+            let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+            let face = [
+                ab[1] * ac[2] - ab[2] * ac[1],
+                ab[2] * ac[0] - ab[0] * ac[2],
+                ab[0] * ac[1] - ab[1] * ac[0],
+            ];
+            let normal = triangle.iter().fold([0.0; 3], |mut total, index| {
+                let normal = nanite.normals[*index as usize];
+                total[0] += normal[0];
+                total[1] += normal[1];
+                total[2] += normal[2];
+                total
+            });
+            if face[0] * normal[0] + face[1] * normal[1] + face[2] * normal[2] > 0.0 {
+                miswound_triangles += 1;
+            }
+        }
+        let converted = StaticMesh::from_nanite(&nanite);
+        let mut converted_miswound_triangles = 0usize;
+        for triangle in converted.indices.chunks_exact(3) {
+            let a = converted.vertices[triangle[0] as usize].position;
+            let b = converted.vertices[triangle[1] as usize].position;
+            let c = converted.vertices[triangle[2] as usize].position;
+            let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+            let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+            let face = [
+                ab[1] * ac[2] - ab[2] * ac[1],
+                ab[2] * ac[0] - ab[0] * ac[2],
+                ab[0] * ac[1] - ab[1] * ac[0],
+            ];
+            let normal = triangle.iter().fold([0.0; 3], |mut total, index| {
+                let normal = converted.vertices[*index as usize].normal;
+                total[0] += normal[0];
+                total[1] += normal[1];
+                total[2] += normal[2];
+                total
+            });
+            if face[0] * normal[0] + face[1] * normal[1] + face[2] * normal[2] > 0.0 {
+                converted_miswound_triangles += 1;
+            }
+        }
+        eprintln!(
+            "{}: input_triangles={}, decoded_triangles={}, miswound_before={}, miswound_after={}, unresolved_vertices={}",
+            package.name,
+            resources.num_input_triangles,
+            nanite.triangles.len(),
+            miswound_triangles,
+            converted_miswound_triangles,
+            nanite.unresolved_vertices,
+        );
+        assert_eq!(nanite.unresolved_vertices, 0);
+        assert_eq!(nanite.triangles.len(), resources.num_input_triangles as usize);
+        assert!(miswound_triangles > 0, "fixture should exercise the regression");
+        assert_eq!(converted_miswound_triangles, 0);
+
+        let expected_faces = nanite
+            .triangles
+            .iter()
+            .filter(|triangle| {
+                triangle[0] != triangle[1]
+                    && triangle[1] != triangle[2]
+                    && triangle[0] != triangle[2]
+            })
+            .count();
+        let output = std::env::temp_dir().join(format!(
+            "baboon-spiritdropship-{}.pskx",
+            uuid::Uuid::new_v4()
+        ));
+        write_chimp_mesh(&world, &package.name, &output, ChimpMeshFormat::Pskx).unwrap();
+        let bytes = std::fs::read(&output).unwrap();
+        let face_chunk = bytes
+            .windows(8)
+            .position(|window| window == b"FACE3200")
+            .expect("PSKX contains its 32-bit face chunk");
+        let face_count = i32::from_le_bytes(
+            bytes[face_chunk + 28..face_chunk + 32]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        assert_eq!(face_count, expected_faces);
+        std::fs::remove_file(output).unwrap();
+    }
 }
