@@ -7,6 +7,28 @@ use super::*;
 mod tests {
     use super::*;
 
+    #[test]
+    fn bitmap_channel_filter_supports_rgb_and_alpha_views() {
+        let data = BitmapPreviewData {
+            width: 1,
+            height: 1,
+            image_count: 1,
+            mip_count: 1,
+            format_name: "RGBA8".to_owned(),
+            type_name: "Texture2D".to_owned(),
+            rgba: vec![10, 20, 30, 40],
+        };
+        let mut preview = BitmapPreviewState::default();
+        preview.show_green = false;
+        preview.show_alpha = false;
+        assert_eq!(filtered_bitmap_rgba(&data, &preview), [10, 0, 30, 255]);
+
+        preview.show_red = false;
+        preview.show_blue = false;
+        preview.show_alpha = true;
+        assert_eq!(filtered_bitmap_rgba(&data, &preview), [40, 40, 40, 255]);
+    }
+
     /// The extract-layout default-range detector matches the tool's `|default|`
     /// rule plus our synthesized placeholder for unnamed ranges.
     #[test]

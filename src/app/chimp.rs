@@ -8,7 +8,7 @@ use super::*;
 use std::collections::BTreeMap;
 use std::io::Cursor;
 
-use blam_tags::iostore::asset::texture2d::{Texture2dPreview, decode_texture2d_preview};
+use blam_tags::iostore::asset::texture2d::decode_texture2d_preview;
 use blam_tags::iostore::container::writer::{PackageOverride, write_package_mod_container};
 use blam_tags::iostore::object::archive::ExportContext;
 use blam_tags::iostore::object::export::{Export, ExportBlock, read_export_in, write_export_in};
@@ -46,6 +46,7 @@ impl Default for ChimpMount {
 enum ChimpBrowser {
     #[default]
     Folders,
+    Groups,
     Archives,
     Packages,
     Files,
@@ -151,15 +152,13 @@ pub(super) struct ChimpState {
     browser: ChimpBrowser,
     pub(super) filter: String,
     filtered_for: Option<String>,
-    filtered_type_for: Option<Option<String>>,
     filtered_archive_for: Option<Option<ChimpArchive>>,
     filtered_packages: Vec<usize>,
     filtered_files: Vec<usize>,
+    filtered_groups: BTreeMap<String, Vec<usize>>,
     content_tree: ChimpFolderNode,
     selected_archive: Option<ChimpArchive>,
-    selected_type: Option<String>,
     package_types: Vec<Option<String>>,
-    type_counts: BTreeMap<String, usize>,
     type_indexing: bool,
     folder_selection: ChimpFolderSelection,
     pub(super) selected_package: Option<String>,
@@ -196,11 +195,7 @@ pub(super) struct ChimpTypeIndex {
 
 struct ChimpTexturePreview {
     export_index: usize,
-    decoded: Result<Texture2dPreview, String>,
-    texture: Option<egui::TextureHandle>,
-    zoom: f32,
-    pan: Vec2,
-    zoom_initialized: bool,
+    preview: BitmapPreviewState,
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -218,7 +213,6 @@ pub(super) struct ChimpExport {
 impl ChimpState {
     fn filter_is_current(&self, query: &str) -> bool {
         self.filtered_for.as_deref() == Some(query)
-            && self.filtered_type_for.as_ref() == Some(&self.selected_type)
             && self.filtered_archive_for == Some(self.selected_archive)
     }
 
@@ -228,12 +222,11 @@ impl ChimpState {
             return;
         }
         let selected_archive = self.selected_archive;
-        let selected_type = self.selected_type.as_deref();
         self.filtered_for = Some(query.clone());
-        self.filtered_type_for = Some(self.selected_type.clone());
         self.filtered_archive_for = Some(selected_archive);
         self.filtered_packages.clear();
         self.filtered_files.clear();
+        self.filtered_groups.clear();
         self.filtered_packages.extend(
             world
                 .packages()
@@ -248,12 +241,14 @@ impl ChimpState {
                             .any(|provider| provider.container == container),
                         Some(ChimpArchive::Pak(_)) => false,
                     };
-                    let type_matches = selected_type.is_none_or(|selected| {
-                        self.package_types.get(*index).and_then(Option::as_deref) == Some(selected)
-                    });
+                    let type_matches = self
+                        .package_types
+                        .get(*index)
+                        .and_then(Option::as_deref)
+                        .is_some_and(|kind| kind.to_ascii_lowercase().contains(&query));
                     archive_matches
-                        && type_matches
                         && (query.is_empty()
+                            || type_matches
                             || package.name.to_ascii_lowercase().contains(&query)
                             || package.providers.iter().any(|provider| {
                                 world.containers()[provider.container]
@@ -296,6 +291,16 @@ impl ChimpState {
         for &index in &self.filtered_packages {
             self.content_tree
                 .insert_package(index, &world.packages()[index].name);
+            self.filtered_groups
+                .entry(
+                    self.package_types
+                        .get(index)
+                        .and_then(Option::as_deref)
+                        .unwrap_or("Unknown")
+                        .to_owned(),
+                )
+                .or_default()
+                .push(index);
         }
         for &index in &self.filtered_files {
             self.content_tree
@@ -305,10 +310,10 @@ impl ChimpState {
 
     fn reset_filter(&mut self) {
         self.filtered_for = None;
-        self.filtered_type_for = None;
         self.filtered_archive_for = None;
         self.filtered_packages.clear();
         self.filtered_files.clear();
+        self.filtered_groups.clear();
         self.content_tree = ChimpFolderNode::default();
     }
 }
@@ -469,13 +474,19 @@ fn decode_chimp_texture_previews(
                 })
                 .map_err(|error| error.to_string())
             })();
+            let mut preview = BitmapPreviewState::default();
+            preview.decoded = Some(decoded.map(|decoded| BitmapPreviewData {
+                width: decoded.width,
+                height: decoded.height,
+                image_count: 1,
+                mip_count: 1,
+                format_name: decoded.pixel_format,
+                type_name: format!("Texture2D • mip {}", decoded.mip_level),
+                rgba: decoded.rgba8,
+            }));
             ChimpTexturePreview {
                 export_index,
-                decoded,
-                texture: None,
-                zoom: 1.0,
-                pan: Vec2::ZERO,
-                zoom_initialized: false,
+                preview,
             }
         })
         .collect()
@@ -646,8 +657,6 @@ impl Baboon {
                 self.kits[index].chimp.mount = ChimpMount::Ready(world.clone());
                 self.kits[index].chimp.type_indexing = true;
                 self.kits[index].chimp.package_types.clear();
-                self.kits[index].chimp.type_counts.clear();
-                self.kits[index].chimp.selected_type = None;
                 self.status = if diagnostics == 0 {
                     format!("Chimp indexed {packages} Unreal packages and {files} pak files")
                 } else {
@@ -680,7 +689,6 @@ impl Baboon {
         let kinds = type_index.type_counts.len();
         let chimp = &mut self.kits[index].chimp;
         chimp.package_types = type_index.package_types;
-        chimp.type_counts = type_index.type_counts;
         chimp.type_indexing = false;
         chimp.reset_filter();
         self.status =
@@ -912,6 +920,7 @@ impl Baboon {
                                 ChimpFolderSelection::File => self.draw_chimp_file(ui, kit_index),
                             }
                         }
+                        ChimpBrowser::Groups => self.draw_chimp_document(ui, kit_index),
                         ChimpBrowser::Packages => self.draw_chimp_document(ui, kit_index),
                         ChimpBrowser::Archives => {
                             ui.centered_and_justified(|ui| {
@@ -973,6 +982,11 @@ impl Baboon {
             );
             ui.selectable_value(
                 &mut self.kits[kit_index].chimp.browser,
+                ChimpBrowser::Groups,
+                "Groups",
+            );
+            ui.selectable_value(
+                &mut self.kits[kit_index].chimp.browser,
                 ChimpBrowser::Packages,
                 "Packages",
             );
@@ -993,48 +1007,6 @@ impl Baboon {
         );
         if response.changed() {
             self.kits[kit_index].chimp.reset_filter();
-        }
-        let show_type_filter = matches!(
-            self.kits[kit_index].chimp.browser,
-            ChimpBrowser::Folders | ChimpBrowser::Packages
-        ) && !matches!(
-            self.kits[kit_index].chimp.selected_archive,
-            Some(ChimpArchive::Pak(_))
-        );
-        if show_type_filter {
-            let selected_type = self.kits[kit_index].chimp.selected_type.clone();
-            let type_counts = self.kits[kit_index].chimp.type_counts.clone();
-            let type_indexing = self.kits[kit_index].chimp.type_indexing;
-            let mut replacement = selected_type.clone();
-            ui.horizontal(|ui| {
-                egui::ComboBox::from_id_salt(("chimp_type_filter", self.kits[kit_index].id.0))
-                    .selected_text(
-                        selected_type
-                            .as_deref()
-                            .map(|kind| format!("File type: {kind}"))
-                            .unwrap_or_else(|| "File type: All".to_owned()),
-                    )
-                    .width(ui.available_width() - if type_indexing { 24.0 } else { 0.0 })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut replacement, None, "All file types");
-                        for (kind, count) in &type_counts {
-                            ui.selectable_value(
-                                &mut replacement,
-                                Some(kind.clone()),
-                                format!("{kind}  ({count})"),
-                            );
-                        }
-                    });
-                if type_indexing {
-                    ui.spinner()
-                        .on_hover_text("Indexing Unreal package file types");
-                }
-            });
-            if replacement != selected_type {
-                let chimp = &mut self.kits[kit_index].chimp;
-                chimp.selected_type = replacement;
-                chimp.reset_filter();
-            }
         }
         ui.add_space(4.0);
 
@@ -1074,6 +1046,10 @@ impl Baboon {
             self.draw_chimp_folders(ui, ctx, &world, kit_index);
             return;
         }
+        if self.kits[kit_index].chimp.browser == ChimpBrowser::Groups {
+            self.draw_chimp_groups(ui, ctx, &world, kit_index);
+            return;
+        }
         let indices = self.kits[kit_index].chimp.filtered_packages.clone();
         let selected = self.kits[kit_index].chimp.selected_package.clone();
         egui::ScrollArea::vertical()
@@ -1103,6 +1079,68 @@ impl Baboon {
                     if response.clicked() {
                         self.begin_chimp_open_package(kit_index, package.name.clone(), ctx.clone());
                     }
+                }
+            });
+    }
+
+    fn draw_chimp_groups(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &egui::Context,
+        world: &World,
+        kit_index: usize,
+    ) {
+        if self.kits[kit_index].chimp.type_indexing {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(
+                    RichText::new("Indexing Unreal package types…")
+                        .small()
+                        .color(subtle_dark()),
+                );
+            });
+            ui.add_space(4.0);
+        }
+
+        let groups = self.kits[kit_index].chimp.filtered_groups.clone();
+        let selected = self.kits[kit_index].chimp.selected_package.clone();
+        let searching = !self.kits[kit_index].chimp.filter.trim().is_empty();
+        if groups.is_empty() && !self.kits[kit_index].chimp.type_indexing {
+            ui.label(RichText::new("No matching Unreal packages.").color(subtle_dark()));
+            return;
+        }
+
+        egui::ScrollArea::vertical()
+            .id_salt(("chimp_groups", self.kits[kit_index].id.0))
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                for (kind, indices) in groups {
+                    egui::CollapsingHeader::new(format!("{kind}  ·  {}", indices.len()))
+                        .id_salt(("chimp_group", self.kits[kit_index].id.0, &kind))
+                        .default_open(searching)
+                        .show(ui, |ui| {
+                            for index in indices {
+                                let package = &world.packages()[index];
+                                let label = package
+                                    .name
+                                    .rsplit('/')
+                                    .next()
+                                    .unwrap_or(&package.name);
+                                let response = ui
+                                    .selectable_label(
+                                        selected.as_deref() == Some(&package.name),
+                                        label,
+                                    )
+                                    .on_hover_text(&package.name);
+                                if response.clicked() {
+                                    self.begin_chimp_open_package(
+                                        kit_index,
+                                        package.name.clone(),
+                                        ctx.clone(),
+                                    );
+                                }
+                            }
+                        });
                 }
             });
     }
@@ -1964,143 +2002,12 @@ fn draw_chimp_texture_preview(ui: &mut Ui, document: &mut ChimpDocument) {
         ui.label("This package has no Texture2D export to preview.");
         return;
     };
-    let decoded = match &preview.decoded {
-        Ok(decoded) => decoded,
-        Err(error) => {
-            ui.colored_label(
-                Color32::from_rgb(210, 150, 70),
-                "This texture cannot currently be previewed.",
-            );
-            ui.label(error);
-            return;
-        }
-    };
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(format!(
-                "{} × {}  •  {}  •  mip {}",
-                decoded.width, decoded.height, decoded.pixel_format, decoded.mip_level
-            ))
-            .color(subtle_dark()),
-        );
-        if ui.small_button("Fit").clicked() {
-            preview.zoom_initialized = false;
-            preview.pan = Vec2::ZERO;
-        }
-        ui.label(
-            RichText::new("Scroll to zoom • drag to pan")
-                .small()
-                .color(subtle_dark()),
-        );
-    });
-    ui.add_space(4.0);
-
-    if preview.texture.is_none() {
-        let image = egui::ColorImage::from_rgba_unmultiplied(
-            [decoded.width as usize, decoded.height as usize],
-            &decoded.rgba8,
-        );
-        preview.texture = Some(ui.ctx().load_texture(
-            format!(
-                "chimp_texture_{}_{}",
-                document.package, preview.export_index
-            ),
-            image,
-            egui::TextureOptions::LINEAR,
-        ));
-    }
-    let Some(texture) = preview.texture.as_ref() else {
-        return;
-    };
-    let image_size = texture.size_vec2();
-    let canvas_size = ui.available_size();
-    let (canvas_rect, response) = ui.allocate_exact_size(canvas_size, Sense::click_and_drag());
-    let fit_zoom = if canvas_rect.width() > 1.0
-        && canvas_rect.height() > 1.0
-        && image_size.x > 0.0
-        && image_size.y > 0.0
-    {
-        (canvas_rect.width() / image_size.x)
-            .min(canvas_rect.height() / image_size.y)
-            .min(1.0)
-            .max(0.001)
-    } else {
-        0.001
-    };
-    if !preview.zoom_initialized && fit_zoom > 0.001 {
-        preview.zoom = fit_zoom;
-        preview.pan = Vec2::ZERO;
-        preview.zoom_initialized = true;
-    }
-    if response.hovered() {
-        let scroll = ui.input(|input| input.raw_scroll_delta.y);
-        if scroll.abs() > f32::EPSILON {
-            let old_zoom = preview.zoom;
-            let new_zoom = (old_zoom * (scroll / 240.0).exp()).clamp(fit_zoom, 32.0);
-            if let Some(pointer) = ui.input(|input| input.pointer.hover_pos()) {
-                let old_top_left = canvas_rect.center() + preview.pan - image_size * old_zoom * 0.5;
-                let image_pixel = (pointer - old_top_left) / old_zoom;
-                let new_top_left = pointer - image_pixel * new_zoom;
-                preview.pan = new_top_left - canvas_rect.center() + image_size * new_zoom * 0.5;
-            }
-            preview.zoom = new_zoom;
-        }
-    }
-    if response.dragged() {
-        preview.pan += response.drag_delta();
-    }
-    let draw_size = image_size * preview.zoom;
-    let half_extra_x = ((draw_size.x - canvas_rect.width()) * 0.5).max(0.0);
-    let half_extra_y = ((draw_size.y - canvas_rect.height()) * 0.5).max(0.0);
-    preview.pan.x = preview.pan.x.clamp(-half_extra_x, half_extra_x);
-    preview.pan.y = preview.pan.y.clamp(-half_extra_y, half_extra_y);
-
-    let painter = ui.painter();
-    painter.rect_filled(canvas_rect, 0.0, Color32::from_rgb(30, 31, 34));
-    let tile = 16.0;
-    let columns = (canvas_rect.width() / tile).ceil() as usize;
-    let rows = (canvas_rect.height() / tile).ceil() as usize;
-    for row in 0..rows {
-        for column in 0..columns {
-            if (row + column) % 2 == 0 {
-                let min = canvas_rect.min + Vec2::new(column as f32 * tile, row as f32 * tile);
-                let rect = egui::Rect::from_min_size(min, Vec2::splat(tile)).intersect(canvas_rect);
-                painter.rect_filled(rect, 0.0, Color32::from_rgb(42, 43, 47));
-            }
-        }
-    }
-    let image_top_left = canvas_rect.center() + preview.pan - draw_size * 0.5;
-    let image_rect = egui::Rect::from_min_size(image_top_left, draw_size);
-    painter.with_clip_rect(canvas_rect).image(
-        texture.id(),
-        image_rect,
-        egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
-        Color32::WHITE,
+    let texture_key = format!(
+        "chimp_texture_{}_{}",
+        document.package, preview.export_index
     );
-    painter.rect_stroke(canvas_rect, 0.0, Stroke::new(1.0, grid_line()));
-
-    if let Some(pointer) = response.hover_pos() {
-        let image_pixel = (pointer - image_top_left) / preview.zoom;
-        let x = image_pixel.x.floor() as i64;
-        let y = image_pixel.y.floor() as i64;
-        if x >= 0 && y >= 0 && x < decoded.width as i64 && y < decoded.height as i64 {
-            let offset = (y as usize * decoded.width as usize + x as usize) * 4;
-            if let Some(rgba) = decoded.rgba8.get(offset..offset + 4) {
-                let label = format!(
-                    "({x}, {y})  R{} G{} B{} A{}",
-                    rgba[0], rgba[1], rgba[2], rgba[3]
-                );
-                let galley =
-                    painter.layout_no_wrap(label, egui::FontId::monospace(12.0), Color32::WHITE);
-                let rect = egui::Rect::from_min_size(
-                    canvas_rect.left_bottom() + Vec2::new(6.0, -galley.size().y - 18.0),
-                    galley.size() + Vec2::new(12.0, 10.0),
-                );
-                painter.rect_filled(rect, 3.0, Color32::from_black_alpha(210));
-                painter.galley(rect.min + Vec2::new(6.0, 5.0), galley, Color32::WHITE);
-            }
-        }
-    }
+    let ctx = ui.ctx().clone();
+    draw_bitmap_preview_data(ui, &ctx, &texture_key, &mut preview.preview, false);
 }
 
 #[derive(Clone, Copy)]
@@ -2988,27 +2895,28 @@ mod tests {
 
         let mut browser = ChimpState {
             package_types: index.package_types,
-            type_counts: index.type_counts,
-            selected_type: Some("Texture2D".to_owned()),
+            filter: "Texture2D".to_owned(),
             ..Default::default()
         };
         browser.refresh_filter(&world);
         assert!(!browser.filtered_packages.is_empty());
+        let textures = &browser.filtered_groups["Texture2D"];
+        assert!(!textures.is_empty());
         assert!(
-            browser
-                .filtered_packages
+            textures
                 .iter()
                 .all(|index| { browser.package_types[*index].as_deref() == Some("Texture2D") })
         );
 
-        let package = world.packages()[browser.filtered_packages[0]].name.clone();
+        let package = world.packages()[textures[0]].name.clone();
         let document = load_chimp_document(&world, &package).unwrap();
         assert_eq!(document.view, ChimpDocumentView::Texture);
         assert!(
-            document
-                .texture_previews
-                .iter()
-                .any(|preview| preview.decoded.is_ok()),
+            document.texture_previews.iter().any(|preview| preview
+                .preview
+                .decoded
+                .as_ref()
+                .is_some_and(Result::is_ok)),
             "{package} should decode at least one Texture2D preview"
         );
     }

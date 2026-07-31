@@ -78,6 +78,20 @@ pub(in crate::app) fn draw_bitmap_preview(
         preview.texture_dirty = true;
     }
 
+    draw_bitmap_preview_data(ui, ctx, &entry.key, preview, true);
+}
+
+/// Render an already-decoded RGBA preview with the same controls and canvas as
+/// Baboon's bitmap editor. Other asset systems (such as Chimp's Texture2D
+/// packages) use this entry point so channel toggles, zooming, backgrounds and
+/// pixel inspection stay identical rather than drifting into parallel viewers.
+pub(in crate::app) fn draw_bitmap_preview_data(
+    ui: &mut Ui,
+    ctx: &egui::Context,
+    texture_key: &str,
+    preview: &mut BitmapPreviewState,
+    supports_image_selection: bool,
+) {
     let Some(decoded) = preview.decoded.as_ref() else {
         return;
     };
@@ -169,7 +183,7 @@ pub(in crate::app) fn draw_bitmap_preview(
         ui.label(RichText::new(format!("Zoom {:.0}%", preview.zoom * 100.0)).color(subtle_dark()));
         let (_, zoom_wheel_delta) = combo_box_with_scroll(
             ui,
-            egui::ComboBox::from_id_salt(("bitmap_zoom_preset", &entry.key))
+            egui::ComboBox::from_id_salt(("bitmap_zoom_preset", texture_key))
                 .selected_text("Set…")
                 .width(58.0),
             |ui| {
@@ -219,7 +233,7 @@ pub(in crate::app) fn draw_bitmap_preview(
         ui.label(RichText::new("BG").color(subtle_dark()));
         let (_, bg_wheel_delta) = combo_box_with_scroll(
             ui,
-            egui::ComboBox::from_id_salt(("bitmap_bg", &entry.key))
+            egui::ComboBox::from_id_salt(("bitmap_bg", texture_key))
                 .selected_text(preview.bg.label())
                 .width(86.0),
             |ui| {
@@ -254,7 +268,7 @@ pub(in crate::app) fn draw_bitmap_preview(
             texture.set(image, egui::TextureOptions::NEAREST);
         } else {
             preview.texture = Some(ctx.load_texture(
-                format!("bitmap_preview_{}", entry.key),
+                format!("bitmap_preview_{texture_key}"),
                 image,
                 egui::TextureOptions::NEAREST,
             ));
@@ -389,7 +403,7 @@ pub(in crate::app) fn draw_bitmap_preview(
     }
 
     // Apply a deferred image/mip change now that `data`'s borrow has ended.
-    if redecode {
+    if redecode && supports_image_selection {
         preview.decoded = None;
         preview.texture_dirty = true;
     }
