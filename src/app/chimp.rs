@@ -3960,6 +3960,9 @@ mod tests {
         let mut converted_miswound_triangles = 0usize;
         let mut severe_uv_stretch_triangles = 0usize;
         let mut maximum_uv_per_cm = 0.0f32;
+        let mut long_uv_edge_triangles = 0usize;
+        let mut negative_wrap_span_triangles = 0usize;
+        let mut maximum_uv_edge = 0.0f32;
         for triangle in converted.indices.chunks_exact(3) {
             let a = converted.vertices[triangle[0] as usize].position;
             let b = converted.vertices[triangle[1] as usize].position;
@@ -3982,6 +3985,7 @@ mod tests {
                 converted_miswound_triangles += 1;
             }
             let mut severe_uv_stretch = false;
+            let mut long_uv_edge = false;
             for [left, right] in [[0usize, 1usize], [1, 2], [2, 0]] {
                 let left = &converted.vertices[triangle[left] as usize];
                 let right = &converted.vertices[triangle[right] as usize];
@@ -3994,12 +3998,32 @@ mod tests {
                 }
                 let du = left.uv[0] - right.uv[0];
                 let dv = left.uv[1] - right.uv[1];
+                let uv_edge = (du * du + dv * dv).sqrt();
+                maximum_uv_edge = maximum_uv_edge.max(uv_edge);
+                long_uv_edge |= uv_edge > 2.0;
                 let uv_per_cm = ((du * du + dv * dv) / position_distance_squared).sqrt();
                 maximum_uv_per_cm = maximum_uv_per_cm.max(uv_per_cm);
                 severe_uv_stretch |= uv_per_cm > 10.0;
             }
             severe_uv_stretch_triangles += usize::from(severe_uv_stretch);
+            long_uv_edge_triangles += usize::from(long_uv_edge);
+            for axis in 0..2 {
+                let coordinates = [triangle[0], triangle[1], triangle[2]]
+                    .map(|index| converted.vertices[index as usize].uv[axis]);
+                let minimum = coordinates.iter().copied().fold(f32::INFINITY, f32::min);
+                let maximum = coordinates
+                    .iter()
+                    .copied()
+                    .fold(f32::NEG_INFINITY, f32::max);
+                if minimum < -1.0 && maximum < 0.0 && maximum - minimum > 1.0 {
+                    negative_wrap_span_triangles += 1;
+                    break;
+                }
+            }
         }
+        eprintln!(
+            "UV wrap diagnostics: long_edges={long_uv_edge_triangles}, negative_wrap_spans={negative_wrap_span_triangles}, maximum_edge={maximum_uv_edge}"
+        );
         let mut position_ids = std::collections::HashMap::<[u32; 3], u32>::new();
         let mut canonical_vertices = Vec::with_capacity(converted.vertices.len());
         for vertex in &converted.vertices {
@@ -4165,6 +4189,11 @@ mod tests {
             "repaired Nanite faces must remain on their local UV seams"
         );
         assert!(maximum_uv_per_cm < 5.0);
+        assert_eq!(
+            negative_wrap_span_triangles, 0,
+            "negative repeating UV faces should be split at wrap boundaries"
+        );
+        assert_eq!(long_uv_edge_triangles, 0);
         assert!(
             triangular_boundary_loops <= 1,
             "the Nanite repair should remove the mass triangular-hole pattern"
