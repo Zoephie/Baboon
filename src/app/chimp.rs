@@ -13,6 +13,7 @@ use blam_tags::iostore::object::archive::ExportContext;
 use blam_tags::iostore::object::export::{Export, ExportBlock, read_export_in, write_export_in};
 use blam_tags::iostore::object::value::{PropValue, PropertyBlock};
 use blam_tags::iostore::package::builder::{read_payloads, write_package};
+use blam_tags::iostore::package::ue_types::{FPackageObjectIndex, FPackageObjectIndexType};
 use blam_tags::iostore::package::zen::FZenPackageHeader;
 use blam_tags::iostore::usmap::Usmap;
 use blam_tags::iostore::world::{CE_HEADER_VERSION, CE_TOC_VERSION, PackageProvider, World};
@@ -170,7 +171,11 @@ pub(super) struct ChimpDocument {
     pub(super) dirty: bool,
     view: ChimpDocumentView,
     document_text: String,
+    document_line_numbers: String,
     document_text_dirty: bool,
+    metadata_text: String,
+    metadata_line_numbers: String,
+    metadata_text_dirty: bool,
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -351,9 +356,14 @@ fn decode_chimp_document(
         dirty: false,
         view: ChimpDocumentView::default(),
         document_text: String::new(),
+        document_line_numbers: String::new(),
         document_text_dirty: true,
+        metadata_text: String::new(),
+        metadata_line_numbers: String::new(),
+        metadata_text_dirty: true,
     };
     refresh_chimp_document_text(&mut document);
+    refresh_chimp_metadata_text(&mut document, world);
     Ok(document)
 }
 
@@ -1214,29 +1224,14 @@ impl Baboon {
                 if document.document_text_dirty {
                     refresh_chimp_document_text(document);
                 }
-                ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("Decoded Unreal package document")
-                            .strong()
-                            .color(subtle_dark()),
-                    );
-                    if ui.small_button("Copy JSON").clicked() {
-                        ui.output_mut(|output| {
-                            output.copied_text = document.document_text.clone();
-                        });
-                    }
-                });
-                egui::ScrollArea::both()
-                    .id_salt(("chimp_document_text", package.clone()))
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        ui.add(
-                            egui::TextEdit::multiline(&mut document.document_text)
-                                .code_editor()
-                                .interactive(false)
-                                .desired_width(f32::INFINITY),
-                        );
-                    });
+                draw_chimp_json_document(
+                    ui,
+                    ("chimp_document_text", package.clone()),
+                    "Decoded Unreal package document",
+                    "Copy JSON",
+                    &document.document_text,
+                    &document.document_line_numbers,
+                );
                 false
             }
             ChimpDocumentView::Properties => {
@@ -1270,13 +1265,24 @@ impl Baboon {
                     .inner
             }
             ChimpDocumentView::Metadata => {
-                draw_chimp_metadata(ui, document, &world, &package);
+                if document.metadata_text_dirty {
+                    refresh_chimp_metadata_text(document, &world);
+                }
+                draw_chimp_json_document(
+                    ui,
+                    ("chimp_metadata_text", package.clone()),
+                    "Decoded package metadata",
+                    "Copy metadata JSON",
+                    &document.metadata_text,
+                    &document.metadata_line_numbers,
+                );
                 false
             }
         };
         if changed {
             document.dirty = true;
             document.document_text_dirty = true;
+            document.metadata_text_dirty = true;
         }
         let _ = document;
         if changed {
@@ -1629,53 +1635,238 @@ impl Kit {
     }
 }
 
-fn draw_chimp_metadata(ui: &mut Ui, document: &ChimpDocument, world: &World, package: &str) {
-    ui.heading("Package metadata and dependencies");
-    ui.label(format!(
-        "Name map: {} names",
-        document.header.name_map.copy_raw_names().len()
-    ));
-    ui.label(format!(
-        "Imported package references: {}",
-        document.header.imported_package_names.len()
-    ));
-    egui::ScrollArea::vertical()
-        .id_salt(("chimp_metadata", package))
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            for imported in &document.header.imported_package_names {
-                ui.monospace(imported);
+#[derive(Clone, Copy)]
+struct ChimpJsonPalette {
+    plain: Color32,
+    key: Color32,
+    string: Color32,
+    path: Color32,
+    number: Color32,
+    literal: Color32,
+    punctuation: Color32,
+}
+
+impl ChimpJsonPalette {
+    fn for_dark_mode(dark_mode: bool) -> Self {
+        if dark_mode {
+            Self {
+                plain: Color32::from_rgb(210, 214, 222),
+                key: Color32::from_rgb(244, 191, 92),
+                string: Color32::from_rgb(190, 235, 125),
+                path: Color32::from_rgb(232, 157, 222),
+                number: Color32::from_rgb(242, 139, 130),
+                literal: Color32::from_rgb(105, 190, 255),
+                punctuation: Color32::from_rgb(105, 210, 225),
             }
-            ui.add_space(8.0);
-            ui.label(format!(
-                "External dependency records: {}",
-                document.header.external_package_dependencies.len()
-            ));
-            for dependency in &document.header.external_package_dependencies {
-                ui.monospace(format!("{dependency:?}"));
+        } else {
+            Self {
+                plain: Color32::from_rgb(45, 50, 58),
+                key: Color32::from_rgb(145, 91, 0),
+                string: Color32::from_rgb(55, 112, 15),
+                path: Color32::from_rgb(154, 52, 136),
+                number: Color32::from_rgb(185, 62, 48),
+                literal: Color32::from_rgb(0, 104, 178),
+                punctuation: Color32::from_rgb(0, 112, 128),
             }
-            ui.add_space(12.0);
-            ui.heading(format!(
-                "Physical providers ({})",
-                world
-                    .package(&document.package)
-                    .map_or(0, |record| record.providers.len())
-            ));
-            if let Some(record) = world.package(&document.package) {
-                for provider in record.providers.iter().rev() {
-                    let active = record.active_provider() == Some(provider);
-                    ui.label(format!(
-                        "{}{}",
-                        if active {
-                            "Active — "
+        }
+    }
+}
+
+#[derive(Default)]
+struct ChimpJsonHighlighter;
+
+impl egui::util::cache::ComputerMut<(&egui::FontId, &str, bool), egui::text::LayoutJob>
+    for ChimpJsonHighlighter
+{
+    fn compute(
+        &mut self,
+        (font_id, text, dark_mode): (&egui::FontId, &str, bool),
+    ) -> egui::text::LayoutJob {
+        chimp_json_layout_job(text, font_id.clone(), dark_mode)
+    }
+}
+
+fn chimp_json_highlight(ui: &Ui, text: &str) -> egui::text::LayoutJob {
+    type HighlightCache =
+        egui::util::cache::FrameCache<egui::text::LayoutJob, ChimpJsonHighlighter>;
+
+    let font_id = TextStyle::Monospace.resolve(ui.style());
+    let dark_mode = ui.visuals().dark_mode;
+    ui.ctx().memory_mut(|memory| {
+        memory
+            .caches
+            .cache::<HighlightCache>()
+            .get((&font_id, text, dark_mode))
+    })
+}
+
+fn chimp_json_layout_job(
+    text: &str,
+    font_id: egui::FontId,
+    dark_mode: bool,
+) -> egui::text::LayoutJob {
+    let palette = ChimpJsonPalette::for_dark_mode(dark_mode);
+    let mut job = egui::text::LayoutJob::default();
+    job.wrap.max_width = f32::INFINITY;
+    let bytes = text.as_bytes();
+    let mut offset = 0;
+    let mut active_key = String::new();
+
+    while offset < bytes.len() {
+        let start = offset;
+        let (end, color) = match bytes[offset] {
+            b'"' => {
+                offset += 1;
+                while offset < bytes.len() {
+                    match bytes[offset] {
+                        b'\\' => offset = (offset + 2).min(bytes.len()),
+                        b'"' => {
+                            offset += 1;
+                            break;
+                        }
+                        _ => offset += 1,
+                    }
+                }
+                let mut after = offset;
+                while after < bytes.len() && bytes[after].is_ascii_whitespace() {
+                    after += 1;
+                }
+                if after < bytes.len() && bytes[after] == b':' {
+                    if offset >= start + 2 {
+                        active_key = text[start + 1..offset - 1].to_owned();
+                    }
+                    (offset, palette.key)
+                } else {
+                    let path_value = active_key.to_ascii_lowercase().contains("path")
+                        || active_key.to_ascii_lowercase().contains("package");
+                    (
+                        offset,
+                        if path_value {
+                            palette.path
                         } else {
-                            "Shadowed — "
+                            palette.string
                         },
-                        world.containers()[provider.container].path.display()
-                    ));
-                    ui.monospace(&provider.entry_path);
+                    )
                 }
             }
+            b'{' | b'}' | b'[' | b']' | b':' | b',' => {
+                offset += 1;
+                (offset, palette.punctuation)
+            }
+            b'-' | b'0'..=b'9' => {
+                offset += 1;
+                while offset < bytes.len()
+                    && matches!(
+                        bytes[offset],
+                        b'0'..=b'9' | b'.' | b'e' | b'E' | b'+' | b'-'
+                    )
+                {
+                    offset += 1;
+                }
+                (offset, palette.number)
+            }
+            _ if text[start..].starts_with("true") => {
+                offset += 4;
+                (offset, palette.literal)
+            }
+            _ if text[start..].starts_with("false") => {
+                offset += 5;
+                (offset, palette.literal)
+            }
+            _ if text[start..].starts_with("null") => {
+                offset += 4;
+                (offset, palette.literal)
+            }
+            byte if byte.is_ascii_whitespace() => {
+                offset += 1;
+                while offset < bytes.len() && bytes[offset].is_ascii_whitespace() {
+                    offset += 1;
+                }
+                (offset, palette.plain)
+            }
+            _ => {
+                offset += text[start..].chars().next().map_or(1, char::len_utf8);
+                (offset, palette.plain)
+            }
+        };
+        job.append(
+            &text[start..end],
+            0.0,
+            egui::TextFormat {
+                font_id: font_id.clone(),
+                color,
+                ..Default::default()
+            },
+        );
+    }
+    job
+}
+
+fn chimp_line_numbers(text: &str) -> String {
+    let count = text.lines().count().max(1);
+    let width = count.to_string().len();
+    (1..=count)
+        .map(|line| format!("{line:>width$}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn draw_chimp_json_document(
+    ui: &mut Ui,
+    id: impl std::hash::Hash,
+    title: &str,
+    copy_label: &str,
+    text: &str,
+    line_numbers: &str,
+) {
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(title).strong().color(subtle_dark()));
+        if ui.small_button(copy_label).clicked() {
+            ui.output_mut(|output| output.copied_text = text.to_owned());
+        }
+        ui.label(
+            RichText::new(format!("{} lines", text.lines().count().max(1)))
+                .small()
+                .color(subtle_dark()),
+        );
+    });
+    egui::ScrollArea::both()
+        .id_salt(id)
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            let highlighted = chimp_json_highlight(ui, text);
+            let font_id = TextStyle::Monospace.resolve(ui.style());
+            ui.spacing_mut().item_spacing.x = 0.0;
+            ui.horizontal_top(|ui| {
+                Frame::none()
+                    .fill(ui.visuals().faint_bg_color)
+                    .inner_margin(egui::Margin {
+                        left: 6.0,
+                        right: 8.0,
+                        top: 4.0,
+                        bottom: 4.0,
+                    })
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(line_numbers)
+                                    .font(font_id.clone())
+                                    .color(ui.visuals().weak_text_color()),
+                            )
+                            .selectable(false),
+                        );
+                    });
+                Frame::none()
+                    .inner_margin(egui::Margin {
+                        left: 8.0,
+                        right: 8.0,
+                        top: 4.0,
+                        bottom: 4.0,
+                    })
+                    .show(ui, |ui| {
+                        ui.add(egui::Label::new(highlighted).selectable(true));
+                    });
+            });
         });
 }
 
@@ -1819,6 +2010,51 @@ fn chimp_class_display_name(class: Option<&str>) -> &str {
         .unwrap_or("Unknown")
 }
 
+fn chimp_object_index_json(
+    document: &ChimpDocument,
+    world: &World,
+    index: FPackageObjectIndex,
+) -> Value {
+    let object_path = match index.kind() {
+        FPackageObjectIndexType::ScriptImport => world
+            .class_path(index.raw_index())
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("script import #{:016X}", index.raw_index())),
+        FPackageObjectIndexType::PackageImport => index
+            .package_import()
+            .and_then(|reference| {
+                let package = document
+                    .header
+                    .imported_package_names
+                    .get(reference.imported_package_index as usize)?;
+                let hash = document
+                    .header
+                    .imported_public_export_hashes
+                    .get(reference.imported_public_export_hash_index as usize)?;
+                Some(format!("{package}#{hash:016X}"))
+            })
+            .unwrap_or_else(|| format!("package import #{:016X}", index.raw_index())),
+        FPackageObjectIndexType::Export => document
+            .header
+            .export_map
+            .get(index.raw_index() as usize)
+            .map(|export| {
+                format!(
+                    "{}.{}",
+                    document.package,
+                    document.header.name_map.get(export.object_name)
+                )
+            })
+            .unwrap_or_else(|| format!("export #{}", index.raw_index())),
+        FPackageObjectIndexType::Null => "None".to_owned(),
+    };
+    json!({
+        "Kind": format!("{:?}", index.kind()),
+        "RawIndex": format!("0x{:016X}", index.raw_index()),
+        "ObjectPath": object_path,
+    })
+}
+
 fn chimp_document_json(document: &ChimpDocument) -> Value {
     json!({
         "Package": document.package,
@@ -1848,10 +2084,131 @@ fn chimp_document_json(document: &ChimpDocument) -> Value {
     })
 }
 
+fn chimp_metadata_json(document: &ChimpDocument, world: &World) -> Value {
+    let header = &document.header;
+    let summary = &header.summary;
+    let record = world.package(&document.package);
+    json!({
+        "Summary": {
+            "Package": document.package,
+            "SourcePackage": header.source_package_name(),
+            "PackageFlags": format!("0x{:08X}", summary.package_flags),
+            "HeaderSize": summary.header_size,
+            "CookedHeaderSize": summary.cooked_header_size,
+            "OriginalSize": document.original.len(),
+            "HasVersioningInfo": summary.has_versioning_info != 0,
+            "IsUnversioned": header.is_unversioned,
+            "ContainerHeaderVersion": format!("{:?}", header.container_header_version),
+            "ExportCount": header.export_map.len(),
+            "ImportCount": header.import_map.len(),
+            "NameCount": header.name_map.copy_raw_names().len(),
+            "BulkDataCount": header.bulk_data.len(),
+            "ImportedPackageCount": header.imported_package_names.len(),
+            "ExternalDependencyCount": header.external_package_dependencies.len(),
+        },
+        "Versioning": {
+            "ZenVersion": format!("{:?}", header.versioning_info.zen_version),
+            "FileVersionUE4": header.versioning_info.package_file_version.file_version_ue4,
+            "FileVersionUE5": header.versioning_info.package_file_version.file_version_ue5,
+            "LicenseeVersion": header.versioning_info.licensee_version,
+            "CustomVersions": header.versioning_info.custom_versions.iter().map(|version| {
+                json!({
+                    "Key": format!("{:?}", version.key),
+                    "Version": version.version,
+                })
+            }).collect::<Vec<_>>(),
+        },
+        "SectionOffsets": summary.section_offsets().iter().map(|(section, offset)| {
+            json!({
+                "Section": section,
+                "Offset": offset,
+            })
+        }).collect::<Vec<_>>(),
+        "NameMap": header.name_map.copy_raw_names(),
+        "ImportedPackageNames": header.imported_package_names,
+        "ImportedPublicExportHashes": header.imported_public_export_hashes.iter()
+            .map(|hash| format!("0x{hash:016X}"))
+            .collect::<Vec<_>>(),
+        "ImportMap": header.import_map.iter().enumerate().map(|(index, object)| {
+            json!({
+                "Index": index,
+                "Object": chimp_object_index_json(document, world, *object),
+            })
+        }).collect::<Vec<_>>(),
+        "ExportMap": header.export_map.iter().enumerate().map(|(index, export)| {
+            json!({
+                "Index": index,
+                "ObjectName": header.name_map.get(export.object_name).to_string(),
+                "Class": world.class_key(header, export.class_index),
+                "Outer": chimp_object_index_json(document, world, export.outer_index),
+                "Super": chimp_object_index_json(document, world, export.super_index),
+                "Template": chimp_object_index_json(document, world, export.template_index),
+                "SerialOffset": export.cooked_serial_offset,
+                "SerialSize": export.cooked_serial_size,
+                "PublicExportHash": format!("0x{:016X}", export.public_export_hash),
+                "ObjectFlags": format!("0x{:08X}", export.object_flags),
+                "FilterFlags": format!("{:?}", export.filter_flags),
+            })
+        }).collect::<Vec<_>>(),
+        "BulkDataMap": header.bulk_data.iter().enumerate().map(|(index, entry)| {
+            json!({
+                "Index": index,
+                "SerialOffset": entry.serial_offset,
+                "DuplicateSerialOffset": entry.duplicate_serial_offset,
+                "SerialSize": entry.serial_size,
+                "Flags": format!("0x{:08X}", entry.flags),
+                "CookedIndex": entry.cooked_index,
+            })
+        }).collect::<Vec<_>>(),
+        "ExternalPackageDependencies": header.external_package_dependencies.iter()
+            .map(|dependency| {
+                json!({
+                    "FromPackageId": format!("0x{:016X}", dependency.from_package_id.0),
+                    "ExternalArcs": dependency.external_dependency_arcs.iter().map(|arc| {
+                        json!({
+                            "FromImportIndex": arc.from_import_index,
+                            "FromCommandType": format!("{:?}", arc.from_command_type),
+                            "ToExportBundleIndex": arc.to_export_bundle_index,
+                        })
+                    }).collect::<Vec<_>>(),
+                    "LegacyArcs": dependency.legacy_dependency_arcs.iter().map(|arc| {
+                        json!({
+                            "FromExportBundleIndex": arc.from_export_bundle_index,
+                            "ToExportBundleIndex": arc.to_export_bundle_index,
+                        })
+                    }).collect::<Vec<_>>(),
+                })
+            }).collect::<Vec<_>>(),
+        "ShaderMapHashes": header.shader_map_hashes.iter()
+            .map(|hash| format!("{hash:?}"))
+            .collect::<Vec<_>>(),
+        "PhysicalProviders": record.map(|record| {
+            record.providers.iter().rev().map(|provider| {
+                let container = &world.containers()[provider.container];
+                json!({
+                    "Active": record.active_provider() == Some(provider),
+                    "Container": container.path.display().to_string(),
+                    "EntryPath": provider.entry_path,
+                    "ReadOrder": provider.read_order,
+                    "RecoveredDirectoryIndex": container.recovered_directory_index,
+                })
+            }).collect::<Vec<_>>()
+        }).unwrap_or_default(),
+    })
+}
+
 fn refresh_chimp_document_text(document: &mut ChimpDocument) {
     document.document_text = serde_json::to_string_pretty(&chimp_document_json(document))
         .unwrap_or_else(|error| format!("Could not render package document: {error}"));
+    document.document_line_numbers = chimp_line_numbers(&document.document_text);
     document.document_text_dirty = false;
+}
+
+fn refresh_chimp_metadata_text(document: &mut ChimpDocument, world: &World) {
+    document.metadata_text = serde_json::to_string_pretty(&chimp_metadata_json(document, world))
+        .unwrap_or_else(|error| format!("Could not render package metadata: {error}"));
+    document.metadata_line_numbers = chimp_line_numbers(&document.metadata_text);
+    document.metadata_text_dirty = false;
 }
 
 fn chimp_block_json(block: &PropertyBlock) -> Value {
@@ -1959,6 +2316,24 @@ mod tests {
             "BlueprintGeneratedClass"
         );
         assert_eq!(chimp_class_display_name(None), "Unknown");
+    }
+
+    #[test]
+    fn json_documents_have_line_numbers_and_semantic_colours() {
+        let text = "{\n  \"Name\": \"Probe\",\n  \"ObjectPath\": \"/Game/Probe.0\",\n  \"Count\": 3,\n  \"Enabled\": true,\n  \"Missing\": null\n}";
+        assert_eq!(chimp_line_numbers(text), "1\n2\n3\n4\n5\n6\n7");
+        let job = chimp_json_layout_job(text, egui::FontId::monospace(12.0), true);
+        assert_eq!(job.text, text);
+        let mut colors = Vec::new();
+        for section in &job.sections {
+            if !colors.contains(&section.format.color) {
+                colors.push(section.format.color);
+            }
+        }
+        assert!(
+            colors.len() >= 7,
+            "keys, strings, paths, numbers, literals, punctuation, and whitespace need distinct colours"
+        );
     }
 
     #[test]
@@ -2078,6 +2453,30 @@ mod tests {
         assert!(export.get("Type").is_some());
         assert!(export.get("Name").is_some());
         assert!(export.get("Properties").is_some());
+        assert_eq!(
+            document.document_line_numbers.lines().count(),
+            document.document_text.lines().count()
+        );
+        let metadata: Value =
+            serde_json::from_str(&document.metadata_text).expect("metadata document is valid JSON");
+        assert_eq!(metadata["Summary"]["Package"], package);
+        assert_eq!(
+            metadata["NameMap"].as_array().map(Vec::len),
+            Some(document.header.name_map.copy_raw_names().len())
+        );
+        assert_eq!(
+            metadata["ExportMap"].as_array().map(Vec::len),
+            Some(document.header.export_map.len())
+        );
+        assert!(
+            metadata["PhysicalProviders"]
+                .as_array()
+                .is_some_and(|providers| !providers.is_empty())
+        );
+        assert_eq!(
+            document.metadata_line_numbers.lines().count(),
+            document.metadata_text.lines().count()
+        );
         let (bytes, store) = rebuild_chimp_document(&world, &document).unwrap();
         FZenPackageHeader::deserialize(
             &mut Cursor::new(&bytes),
