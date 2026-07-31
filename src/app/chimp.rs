@@ -3958,6 +3958,8 @@ mod tests {
         }
         let converted = StaticMesh::from_nanite(&nanite);
         let mut converted_miswound_triangles = 0usize;
+        let mut severe_uv_stretch_triangles = 0usize;
+        let mut maximum_uv_per_cm = 0.0f32;
         for triangle in converted.indices.chunks_exact(3) {
             let a = converted.vertices[triangle[0] as usize].position;
             let b = converted.vertices[triangle[1] as usize].position;
@@ -3979,6 +3981,24 @@ mod tests {
             if face[0] * normal[0] + face[1] * normal[1] + face[2] * normal[2] > 0.0 {
                 converted_miswound_triangles += 1;
             }
+            let mut severe_uv_stretch = false;
+            for [left, right] in [[0usize, 1usize], [1, 2], [2, 0]] {
+                let left = &converted.vertices[triangle[left] as usize];
+                let right = &converted.vertices[triangle[right] as usize];
+                let dx = left.position[0] - right.position[0];
+                let dy = left.position[1] - right.position[1];
+                let dz = left.position[2] - right.position[2];
+                let position_distance_squared = dx * dx + dy * dy + dz * dz;
+                if position_distance_squared <= 1.0e-12 {
+                    continue;
+                }
+                let du = left.uv[0] - right.uv[0];
+                let dv = left.uv[1] - right.uv[1];
+                let uv_per_cm = ((du * du + dv * dv) / position_distance_squared).sqrt();
+                maximum_uv_per_cm = maximum_uv_per_cm.max(uv_per_cm);
+                severe_uv_stretch |= uv_per_cm > 10.0;
+            }
+            severe_uv_stretch_triangles += usize::from(severe_uv_stretch);
         }
         let mut position_ids = std::collections::HashMap::<[u32; 3], u32>::new();
         let mut canonical_vertices = Vec::with_capacity(converted.vertices.len());
@@ -4120,7 +4140,7 @@ mod tests {
             }
         }
         eprintln!(
-            "{}: input_triangles={}, decoded_triangles={}, duplicate_index_triangles={}, zero_area_triangles={}, miswound_before={}, miswound_after={}, boundary_edges={}, triangular_boundary_loops={}, paired_degenerate_triangles={}, paired_zero_area_holes={}, unresolved_vertices={}",
+            "{}: input_triangles={}, decoded_triangles={}, duplicate_index_triangles={}, zero_area_triangles={}, miswound_before={}, miswound_after={}, severe_uv_stretch_triangles={}, maximum_uv_per_cm={}, boundary_edges={}, triangular_boundary_loops={}, paired_degenerate_triangles={}, paired_zero_area_holes={}, unresolved_vertices={}",
             package.name,
             resources.num_input_triangles,
             nanite.triangles.len(),
@@ -4128,6 +4148,8 @@ mod tests {
             zero_area_triangles,
             miswound_triangles,
             converted_miswound_triangles,
+            severe_uv_stretch_triangles,
+            maximum_uv_per_cm,
             boundary_edges.len(),
             triangular_boundary_loops,
             paired_degenerate_triangles,
@@ -4138,6 +4160,11 @@ mod tests {
         assert_eq!(nanite.triangles.len(), resources.num_input_triangles as usize);
         assert!(miswound_triangles > 0, "fixture should exercise the regression");
         assert_eq!(converted_miswound_triangles, 0);
+        assert_eq!(
+            severe_uv_stretch_triangles, 0,
+            "repaired Nanite faces must remain on their local UV seams"
+        );
+        assert!(maximum_uv_per_cm < 5.0);
         assert!(
             triangular_boundary_loops <= 1,
             "the Nanite repair should remove the mass triangular-hole pattern"
