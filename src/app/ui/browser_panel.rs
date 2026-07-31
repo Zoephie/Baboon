@@ -63,6 +63,13 @@ impl Baboon {
         // is in memory during this tree's draw is this kit's own set.
         self.refresh_modified_tags(kit_index);
         set_browser_modified_tags(ui, std::sync::Arc::clone(&self.kits[kit_index].modified_tags),);
+        set_browser_game(
+            ui,
+            self.kits[kit_index]
+                .source
+                .as_ref()
+                .and_then(|source| source.game.clone()),
+        );
         let kit = &mut self.kits[kit_index];
         if let Some(source) = kit.source.as_mut() {
             ui.add_space(8.0);
