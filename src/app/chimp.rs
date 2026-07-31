@@ -771,6 +771,7 @@ fn decode_chimp_mesh_preview(
     });
     let mut state = ModelPreviewState::default();
     if kind.is_some() {
+        state.show_backfaces = true;
         state.region_selections.insert(
             "mesh".to_owned(),
             ModelRegionSelection {
@@ -3405,6 +3406,40 @@ fn chimp_value_json(value: &PropValue) -> Value {
 mod tests {
     use super::*;
 
+    fn preview_normal_alignment(preview: &ModelPreviewData) -> (f32, f32) {
+        // Unreal's source winding is left-handed, so the sign relative to this
+        // right-handed cross product is expected to be negative. Magnitude is
+        // the useful regression signal: broken packed normals are incoherent.
+        let mut signed = 0.0;
+        let mut absolute = 0.0;
+        let mut count = 0usize;
+        for triangle in &preview.draw_triangles {
+            let [a, b, c] = triangle.positions;
+            let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+            let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+            let face = [
+                ab[1] * ac[2] - ab[2] * ac[1],
+                ab[2] * ac[0] - ab[0] * ac[2],
+                ab[0] * ac[1] - ab[1] * ac[0],
+            ];
+            let length = (face[0] * face[0] + face[1] * face[1] + face[2] * face[2]).sqrt();
+            if length <= 1.0e-6 {
+                continue;
+            }
+            let face = [face[0] / length, face[1] / length, face[2] / length];
+            for normal in triangle.normals {
+                let dot = face[0] * normal[0] + face[1] * normal[1] + face[2] * normal[2];
+                signed += dot;
+                absolute += dot.abs();
+                count += 1;
+            }
+        }
+        if count == 0 {
+            return (0.0, 0.0);
+        }
+        (signed / count as f32, absolute / count as f32)
+    }
+
     #[test]
     fn chimp_is_idle_and_unfiltered_by_default() {
         let state = ChimpState::default();
@@ -3774,7 +3809,11 @@ mod tests {
             ("SkeletalMesh", ChimpMeshKind::Skeletal),
             ("StaticMesh", ChimpMeshKind::Static),
         ] {
-            let package = world
+            let preferred_suffix = match expected_kind {
+                ChimpMeshKind::Skeletal => "/SK_Elite_Common_Body",
+                ChimpMeshKind::Static => "",
+            };
+            let mut candidates = world
                 .packages()
                 .iter()
                 .enumerate()
@@ -3785,7 +3824,17 @@ mod tests {
                         .and_then(Option::as_deref)
                         == Some(type_name)
                 })
-                .find_map(|(_, package)| {
+                .map(|(_, package)| package)
+                .collect::<Vec<_>>();
+            candidates.sort_by_key(|package| {
+                !package
+                    .name
+                    .to_ascii_lowercase()
+                    .ends_with(&preferred_suffix.to_ascii_lowercase())
+            });
+            let package = candidates
+                .into_iter()
+                .find_map(|package| {
                     let document = load_chimp_document(&world, &package.name).ok()?;
                     document.mesh_preview.as_ref()?.as_ref().ok()?;
                     Some(package.name.clone())
@@ -3798,6 +3847,14 @@ mod tests {
             assert!(!preview.preview.vertices.is_empty());
             assert!(!preview.preview.indices.is_empty());
             assert!(!preview.draw_triangles.is_empty());
+            let (signed_alignment, absolute_alignment) = preview_normal_alignment(preview);
+            eprintln!(
+                "{package}: winding-signed normal alignment {signed_alignment:.3}, magnitude {absolute_alignment:.3}"
+            );
+            assert!(
+                absolute_alignment > 0.45,
+                "{package} normals do not follow the decoded surface ({absolute_alignment:.3})"
+            );
 
             let formats = if expected_kind == ChimpMeshKind::Skeletal
                 && preview.preview.vertices.len() <= 65_536

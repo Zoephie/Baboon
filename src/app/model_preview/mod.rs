@@ -278,6 +278,10 @@ pub(in crate::app) fn draw_standalone_mesh_preview(
     data: &ModelPreviewData,
     state: &mut ModelPreviewState,
 ) {
+    // Chimp presents raw Unreal sections, including intentionally two-sided
+    // surfaces. Keep backfaces visible unconditionally; classic tag viewers
+    // continue to use their own independent toggle in draw_model_preview_panel.
+    state.show_backfaces = true;
     ui.horizontal(|ui| {
         ui.label(RichText::new("Scale").color(subtle_dark()));
         ui.add(
@@ -305,7 +309,11 @@ pub(in crate::app) fn draw_standalone_mesh_preview(
                     ui.selectable_value(&mut state.render_mode, mode, mode.label());
                 }
             });
-        ui.checkbox(&mut state.show_backfaces, "Backfaces");
+        ui.add_enabled(
+            false,
+            egui::Checkbox::new(&mut state.show_backfaces, "Backfaces"),
+        )
+        .on_hover_text("Chimp always displays backfaces");
     });
     let size = Vec2::new(
         ui.available_width().max(280.0),
