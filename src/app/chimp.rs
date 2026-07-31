@@ -76,6 +76,7 @@ enum ChimpDocumentView {
 
 enum ChimpTreeClick {
     Package(String),
+    ExtractTexture(String),
     File(String),
 }
 
@@ -164,6 +165,7 @@ pub(super) struct ChimpState {
     pub(super) selected_package: Option<String>,
     selected_file: Option<String>,
     pub(super) open_packages: Vec<String>,
+    document_tree: Option<egui_tiles::Tree<String>>,
     pub(super) documents: HashMap<String, ChimpDocument>,
     pub(super) loading_packages: HashSet<String>,
 }
@@ -210,7 +212,228 @@ pub(super) struct ChimpExport {
     pub(super) decoded: Result<Export, String>,
 }
 
+struct ChimpPaneBehavior<'a> {
+    app: &'a mut Baboon,
+    kit_index: usize,
+    close_requests: Vec<String>,
+    focused: Option<String>,
+    close_all: bool,
+    close_all_but: Option<String>,
+    extract_texture: Option<String>,
+}
+
+impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_> {
+    fn pane_ui(
+        &mut self,
+        ui: &mut Ui,
+        tile_id: egui_tiles::TileId,
+        pane: &mut String,
+    ) -> egui_tiles::UiResponse {
+        if ui.input(|input| input.pointer.any_pressed()) && ui.rect_contains_pointer(ui.max_rect())
+        {
+            self.focused = Some(pane.clone());
+        }
+        self.app.draw_chimp_document_pane(
+            ui,
+            self.kit_index,
+            pane,
+            &format!("chimp_tile_{}", tile_id.0),
+        );
+        egui_tiles::UiResponse::None
+    }
+
+    fn tab_title_for_pane(&mut self, pane: &String) -> egui::WidgetText {
+        let dirty = self.app.kits[self.kit_index]
+            .chimp
+            .documents
+            .get(pane)
+            .is_some_and(|document| document.dirty);
+        let label = pane.rsplit('/').next().unwrap_or(pane);
+        RichText::new(if dirty {
+            format!("• {label}")
+        } else {
+            label.to_owned()
+        })
+        .color(text_dark())
+        .into()
+    }
+
+    fn is_tab_closable(
+        &self,
+        _tiles: &egui_tiles::Tiles<String>,
+        _tile_id: egui_tiles::TileId,
+    ) -> bool {
+        true
+    }
+
+    fn on_tab_close(
+        &mut self,
+        tiles: &mut egui_tiles::Tiles<String>,
+        tile_id: egui_tiles::TileId,
+    ) -> bool {
+        if let Some(egui_tiles::Tile::Pane(package)) = tiles.get(tile_id) {
+            self.close_requests.push(package.clone());
+        }
+        false
+    }
+
+    fn on_tab_button(
+        &mut self,
+        tiles: &egui_tiles::Tiles<String>,
+        tile_id: egui_tiles::TileId,
+        button_response: egui::Response,
+    ) -> egui::Response {
+        let Some(egui_tiles::Tile::Pane(package)) = tiles.get(tile_id) else {
+            return button_response;
+        };
+        let package = package.clone();
+        if button_response.clicked() {
+            self.focused = Some(package.clone());
+        }
+        if button_response.middle_clicked() {
+            self.close_requests.push(package.clone());
+        }
+        let has_texture = self.app.kits[self.kit_index]
+            .chimp
+            .documents
+            .get(&package)
+            .is_some_and(|document| !document.texture_previews.is_empty());
+        button_response.context_menu(|ui| {
+            if ui.button("Close").clicked() {
+                self.close_requests.push(package.clone());
+                ui.close_menu();
+            }
+            if ui.button("Close all but this").clicked() {
+                self.close_all_but = Some(package.clone());
+                ui.close_menu();
+            }
+            if ui.button("Close all").clicked() {
+                self.close_all = true;
+                ui.close_menu();
+            }
+            if has_texture {
+                ui.separator();
+                if ui.button("Extract Texture2D as TIFF…").clicked() {
+                    self.extract_texture = Some(package.clone());
+                    ui.close_menu();
+                }
+            }
+        });
+        button_response
+    }
+
+    fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
+        egui_tiles::SimplificationOptions {
+            all_panes_must_have_tabs: true,
+            ..Default::default()
+        }
+    }
+
+    fn tab_bar_color(&self, _visuals: &egui::Visuals) -> Color32 {
+        row_type()
+    }
+
+    fn tab_bg_color(
+        &self,
+        _visuals: &egui::Visuals,
+        tiles: &egui_tiles::Tiles<String>,
+        tile_id: egui_tiles::TileId,
+        state: &egui_tiles::TabState,
+    ) -> Color32 {
+        let base = if state.active { menu_bar() } else { row_type() };
+        let dirty = matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Pane(package))
+            if self.app.kits[self.kit_index]
+                .chimp
+                .documents
+                .get(package)
+                .is_some_and(|document| document.dirty));
+        if dirty {
+            chimp_tint_toward(base, Color32::from_rgb(184, 134, 11), 0.20)
+        } else {
+            base
+        }
+    }
+
+    fn tab_text_color(
+        &self,
+        _visuals: &egui::Visuals,
+        _tiles: &egui_tiles::Tiles<String>,
+        _tile_id: egui_tiles::TileId,
+        _state: &egui_tiles::TabState,
+    ) -> Color32 {
+        text_dark()
+    }
+}
+
 impl ChimpState {
+    fn ensure_document_tree(&mut self, kit: KitId) -> &mut egui_tiles::Tree<String> {
+        self.document_tree
+            .get_or_insert_with(|| egui_tiles::Tree::empty(chimp_tree_id(kit)))
+    }
+
+    fn open_document_pane(&mut self, kit: KitId, package: &str) {
+        let tree = self.ensure_document_tree(kit);
+        let existing = tree.tiles.iter().find_map(|(id, tile)| match tile {
+            egui_tiles::Tile::Pane(open) if open == package => Some(*id),
+            _ => None,
+        });
+        if let Some(tile_id) = existing {
+            tree.make_active(|id, _| id == tile_id);
+        } else {
+            let tile_id = tree.tiles.insert_pane(package.to_owned());
+            match tree.root() {
+                Some(root) => {
+                    if let Some(egui_tiles::Tile::Container(container)) = tree.tiles.get_mut(root) {
+                        container.add_child(tile_id);
+                    } else {
+                        let tabs = tree.tiles.insert_tab_tile(vec![root, tile_id]);
+                        tree.root = Some(tabs);
+                    }
+                }
+                None => tree.root = Some(tile_id),
+            }
+            tree.make_active(|id, _| id == tile_id);
+        }
+        self.selected_package = Some(package.to_owned());
+        self.sync_open_packages();
+    }
+
+    fn close_document_pane(&mut self, package: &str) {
+        if let Some(tree) = self.document_tree.as_mut() {
+            let tile_id = tree.tiles.iter().find_map(|(id, tile)| match tile {
+                egui_tiles::Tile::Pane(open) if open == package => Some(*id),
+                _ => None,
+            });
+            if let Some(tile_id) = tile_id {
+                tree.remove_recursively(tile_id);
+            }
+        }
+        self.sync_open_packages();
+    }
+
+    fn sync_open_packages(&mut self) {
+        self.open_packages = self
+            .document_tree
+            .as_ref()
+            .map(|tree| {
+                tree.tiles
+                    .tiles()
+                    .filter_map(|tile| match tile {
+                        egui_tiles::Tile::Pane(package) => Some(package.clone()),
+                        egui_tiles::Tile::Container(_) => None,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        if self
+            .selected_package
+            .as_ref()
+            .is_some_and(|package| !self.open_packages.contains(package))
+        {
+            self.selected_package = self.open_packages.first().cloned();
+        }
+    }
+
     fn filter_is_current(&self, query: &str) -> bool {
         self.filtered_for.as_deref() == Some(query)
             && self.filtered_archive_for == Some(self.selected_archive)
@@ -316,6 +539,21 @@ impl ChimpState {
         self.filtered_groups.clear();
         self.content_tree = ChimpFolderNode::default();
     }
+}
+
+fn chimp_tree_id(kit: KitId) -> egui::Id {
+    egui::Id::new(("chimp_document_tree", kit.0))
+}
+
+fn chimp_tint_toward(base: Color32, accent: Color32, amount: f32) -> Color32 {
+    let mix =
+        |base: u8, accent: u8| (base as f32 + (accent as f32 - base as f32) * amount).round() as u8;
+    Color32::from_rgba_premultiplied(
+        mix(base.r(), accent.r()),
+        mix(base.g(), accent.g()),
+        mix(base.b(), accent.b()),
+        base.a(),
+    )
 }
 
 pub(super) fn load_chimp_document(world: &World, package: &str) -> Result<ChimpDocument, String> {
@@ -747,17 +985,14 @@ impl Baboon {
                 continue;
             };
             document.dirty = true;
-            if !self.kits[kit_index].chimp.open_packages.contains(&package) {
-                self.kits[kit_index]
-                    .chimp
-                    .open_packages
-                    .push(package.clone());
-            }
             self.kits[kit_index]
                 .chimp
                 .documents
                 .insert(package.clone(), document);
-            self.kits[kit_index].chimp.selected_package = Some(package);
+            let kit_id = self.kits[kit_index].id;
+            self.kits[kit_index]
+                .chimp
+                .open_document_pane(kit_id, &package);
             restored += 1;
         }
         if restored > 0 {
@@ -827,7 +1062,10 @@ impl Baboon {
 
     fn begin_chimp_open_package(&mut self, kit_index: usize, package: String, ctx: egui::Context) {
         if self.kits[kit_index].documents_contains_chimp(&package) {
-            self.kits[kit_index].chimp.selected_package = Some(package);
+            let kit_id = self.kits[kit_index].id;
+            self.kits[kit_index]
+                .chimp
+                .open_document_pane(kit_id, &package);
             return;
         }
         self.kits[kit_index].chimp.selected_package = Some(package.clone());
@@ -871,11 +1109,9 @@ impl Baboon {
         chimp.loading_packages.remove(&package);
         match result {
             Ok(document) => {
-                if !chimp.open_packages.contains(&package) {
-                    chimp.open_packages.push(package.clone());
-                }
                 chimp.documents.insert(package.clone(), document);
-                chimp.selected_package = Some(package);
+                let kit_id = self.kits[index].id;
+                self.kits[index].chimp.open_document_pane(kit_id, &package);
             }
             Err(error) => self.status = error,
         }
@@ -915,13 +1151,13 @@ impl Baboon {
                         ChimpBrowser::Folders => {
                             match self.kits[kit_index].chimp.folder_selection {
                                 ChimpFolderSelection::Package => {
-                                    self.draw_chimp_document(ui, kit_index)
+                                    self.draw_chimp_tiles(ui, ctx, kit_index)
                                 }
                                 ChimpFolderSelection::File => self.draw_chimp_file(ui, kit_index),
                             }
                         }
-                        ChimpBrowser::Groups => self.draw_chimp_document(ui, kit_index),
-                        ChimpBrowser::Packages => self.draw_chimp_document(ui, kit_index),
+                        ChimpBrowser::Groups => self.draw_chimp_tiles(ui, ctx, kit_index),
+                        ChimpBrowser::Packages => self.draw_chimp_tiles(ui, ctx, kit_index),
                         ChimpBrowser::Archives => {
                             ui.centered_and_justified(|ui| {
                                 ui.label("Select an archive to browse its folder hierarchy.");
@@ -1052,6 +1288,7 @@ impl Baboon {
         }
         let indices = self.kits[kit_index].chimp.filtered_packages.clone();
         let selected = self.kits[kit_index].chimp.selected_package.clone();
+        let mut extract_texture = None;
         egui::ScrollArea::vertical()
             .id_salt(("chimp_packages", self.kits[kit_index].id.0))
             .auto_shrink([false, false])
@@ -1076,11 +1313,28 @@ impl Baboon {
                     } else {
                         response
                     };
+                    let is_texture = self.kits[kit_index]
+                        .chimp
+                        .package_types
+                        .get(indices[row])
+                        .and_then(Option::as_deref)
+                        == Some("Texture2D");
+                    if is_texture {
+                        response.context_menu(|ui| {
+                            if ui.button("Extract Texture2D as TIFF…").clicked() {
+                                extract_texture = Some(package.name.clone());
+                                ui.close_menu();
+                            }
+                        });
+                    }
                     if response.clicked() {
                         self.begin_chimp_open_package(kit_index, package.name.clone(), ctx.clone());
                     }
                 }
             });
+        if let Some(package) = extract_texture {
+            self.begin_extract_chimp_texture_tiff(kit_index, &package, ctx.clone());
+        }
     }
 
     fn draw_chimp_groups(
@@ -1105,6 +1359,7 @@ impl Baboon {
         let groups = self.kits[kit_index].chimp.filtered_groups.clone();
         let selected = self.kits[kit_index].chimp.selected_package.clone();
         let searching = !self.kits[kit_index].chimp.filter.trim().is_empty();
+        let mut extract_texture = None;
         if groups.is_empty() && !self.kits[kit_index].chimp.type_indexing {
             ui.label(RichText::new("No matching Unreal packages.").color(subtle_dark()));
             return;
@@ -1121,17 +1376,22 @@ impl Baboon {
                         .show(ui, |ui| {
                             for index in indices {
                                 let package = &world.packages()[index];
-                                let label = package
-                                    .name
-                                    .rsplit('/')
-                                    .next()
-                                    .unwrap_or(&package.name);
+                                let label =
+                                    package.name.rsplit('/').next().unwrap_or(&package.name);
                                 let response = ui
                                     .selectable_label(
                                         selected.as_deref() == Some(&package.name),
                                         label,
                                     )
                                     .on_hover_text(&package.name);
+                                if kind == "Texture2D" {
+                                    response.context_menu(|ui| {
+                                        if ui.button("Extract Texture2D as TIFF…").clicked() {
+                                            extract_texture = Some(package.name.clone());
+                                            ui.close_menu();
+                                        }
+                                    });
+                                }
                                 if response.clicked() {
                                     self.begin_chimp_open_package(
                                         kit_index,
@@ -1143,6 +1403,9 @@ impl Baboon {
                         });
                 }
             });
+        if let Some(package) = extract_texture {
+            self.begin_extract_chimp_texture_tiff(kit_index, &package, ctx.clone());
+        }
     }
 
     fn draw_chimp_archives(&mut self, ui: &mut Ui, world: &World, kit_index: usize) {
@@ -1270,6 +1533,7 @@ impl Baboon {
         }
         let selected_package = self.kits[kit_index].chimp.selected_package.clone();
         let selected_file = self.kits[kit_index].chimp.selected_file.clone();
+        let package_types = self.kits[kit_index].chimp.package_types.clone();
         let clicked = egui::ScrollArea::vertical()
             .id_salt(("chimp_folders", self.kits[kit_index].id.0))
             .auto_shrink([false, false])
@@ -1278,6 +1542,7 @@ impl Baboon {
                     ui,
                     &self.kits[kit_index].chimp.content_tree,
                     world,
+                    &package_types,
                     selected_package.as_deref(),
                     selected_file.as_deref(),
                     "",
@@ -1288,6 +1553,9 @@ impl Baboon {
             Some(ChimpTreeClick::Package(package)) => {
                 self.kits[kit_index].chimp.folder_selection = ChimpFolderSelection::Package;
                 self.begin_chimp_open_package(kit_index, package, ctx.clone());
+            }
+            Some(ChimpTreeClick::ExtractTexture(package)) => {
+                self.begin_extract_chimp_texture_tiff(kit_index, &package, ctx.clone());
             }
             Some(ChimpTreeClick::File(file)) => {
                 let chimp = &mut self.kits[kit_index].chimp;
@@ -1390,79 +1658,91 @@ impl Baboon {
         }
     }
 
-    fn draw_chimp_document(&mut self, ui: &mut Ui, kit_index: usize) {
-        let selected = self.kits[kit_index].chimp.selected_package.clone();
-        let open = self.kits[kit_index].chimp.open_packages.clone();
-        let mut close = None;
-        ui.horizontal_wrapped(|ui| {
-            for package in &open {
-                let dirty = self.kits[kit_index]
-                    .chimp
-                    .documents
-                    .get(package)
-                    .is_some_and(|document| document.dirty);
-                let label = if dirty {
-                    format!("• {}", package.rsplit('/').next().unwrap_or(package))
-                } else {
-                    package.rsplit('/').next().unwrap_or(package).to_owned()
-                };
-                if ui
-                    .selectable_label(selected.as_deref() == Some(package), label)
-                    .clicked()
-                {
-                    self.kits[kit_index].chimp.selected_package = Some(package.clone());
-                }
-                if ui.small_button("×").clicked() {
-                    close = Some(package.clone());
-                }
-            }
-        });
-        ui.separator();
-        if let Some(package) = close {
+    fn draw_chimp_tiles(&mut self, ui: &mut Ui, ctx: &egui::Context, kit_index: usize) {
+        let Some(mut tree) = self.kits[kit_index].chimp.document_tree.take() else {
+            ui.centered_and_justified(|ui| {
+                ui.label("Select a package to inspect it.");
+            });
+            return;
+        };
+        if tree.is_empty() {
+            self.kits[kit_index].chimp.document_tree = Some(tree);
+            ui.centered_and_justified(|ui| {
+                ui.label("Select a package to inspect it.");
+            });
+            return;
+        }
+
+        let mut behavior = ChimpPaneBehavior {
+            app: self,
+            kit_index,
+            close_requests: Vec::new(),
+            focused: None,
+            close_all: false,
+            close_all_but: None,
+            extract_texture: None,
+        };
+        tree.ui(&mut behavior, ui);
+        let close_requests = std::mem::take(&mut behavior.close_requests);
+        let focused = behavior.focused.take();
+        let close_all = behavior.close_all;
+        let close_all_but = behavior.close_all_but.take();
+        let extract_texture = behavior.extract_texture.take();
+        self.kits[kit_index].chimp.document_tree = Some(tree);
+        self.kits[kit_index].chimp.sync_open_packages();
+        if let Some(package) = focused {
+            self.kits[kit_index].chimp.selected_package = Some(package);
+        }
+
+        let mut requested = if close_all {
+            self.kits[kit_index].chimp.open_packages.clone()
+        } else if let Some(keep) = close_all_but {
+            self.kits[kit_index]
+                .chimp
+                .open_packages
+                .iter()
+                .filter(|package| *package != &keep)
+                .cloned()
+                .collect()
+        } else {
+            close_requests
+        };
+        requested.sort();
+        requested.dedup();
+        let mut blocked = false;
+        for package in requested {
             if self.kits[kit_index]
                 .chimp
                 .documents
                 .get(&package)
                 .is_some_and(|document| document.dirty)
             {
-                self.status =
-                    "Build the Chimp mod before closing this modified package.".to_owned();
-                return;
+                blocked = true;
+                continue;
             }
-            self.kits[kit_index]
-                .chimp
-                .open_packages
-                .retain(|open| open != &package);
+            self.kits[kit_index].chimp.close_document_pane(&package);
             self.kits[kit_index].chimp.documents.remove(&package);
-            self.kits[kit_index].chimp.selected_package =
-                self.kits[kit_index].chimp.open_packages.last().cloned();
-            return;
         }
+        if blocked {
+            self.status = "Build the Chimp mod before closing modified packages.".to_owned();
+        }
+        if let Some(package) = extract_texture {
+            self.begin_extract_chimp_texture_tiff(kit_index, &package, ctx.clone());
+        }
+    }
 
-        let Some(package) = self.kits[kit_index].chimp.selected_package.clone() else {
-            ui.centered_and_justified(|ui| {
-                ui.label("Select a package to inspect it.");
-            });
-            return;
-        };
-        if self.kits[kit_index]
-            .chimp
-            .loading_packages
-            .contains(&package)
-        {
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label(format!("Opening {package}…"));
-            });
+    fn draw_chimp_document_pane(
+        &mut self,
+        ui: &mut Ui,
+        kit_index: usize,
+        package: &str,
+        scope: &str,
+    ) {
+        if !self.kits[kit_index].chimp.documents.contains_key(package) {
+            ui.label("This package is no longer loaded.");
             return;
         }
-        if !self.kits[kit_index].chimp.documents.contains_key(&package) {
-            ui.heading(&package);
-            if ui.button("Open package").clicked() {
-                self.begin_chimp_open_package(kit_index, package, ui.ctx().clone());
-            }
-            return;
-        }
+        let package = package.to_owned();
 
         let mut save_mod = false;
         let mut extract_package = false;
@@ -1543,7 +1823,7 @@ impl Baboon {
                 }
                 draw_chimp_json_document(
                     ui,
-                    ("chimp_document_text", package.clone()),
+                    ("chimp_document_text", scope.to_owned(), package.clone()),
                     "Decoded Unreal package document",
                     "Copy JSON",
                     &document.document_text,
@@ -1556,31 +1836,30 @@ impl Baboon {
                 false
             }
             ChimpDocumentView::Properties => {
-                egui::SidePanel::left(egui::Id::new(("chimp_exports", package.clone())))
-                    .resizable(true)
-                    .default_width(220.0)
-                    .show_inside(ui, |ui| {
-                        ui.label(RichText::new("Exports").strong());
-                        egui::ScrollArea::vertical().show(ui, |ui| {
-                            for (index, export) in document.exports.iter().enumerate() {
-                                let supported = export.decoded.is_ok();
-                                let label = format!(
-                                    "{}  {}",
-                                    if supported { "●" } else { "○" },
-                                    export.object
-                                );
-                                if ui
-                                    .selectable_label(document.selected_export == index, label)
-                                    .on_hover_text(
-                                        export.class.as_deref().unwrap_or("Unknown class"),
-                                    )
-                                    .clicked()
-                                {
-                                    document.selected_export = index;
-                                }
+                egui::SidePanel::left(egui::Id::new((
+                    "chimp_exports",
+                    scope.to_owned(),
+                    package.clone(),
+                )))
+                .resizable(true)
+                .default_width(220.0)
+                .show_inside(ui, |ui| {
+                    ui.label(RichText::new("Exports").strong());
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        for (index, export) in document.exports.iter().enumerate() {
+                            let supported = export.decoded.is_ok();
+                            let label =
+                                format!("{}  {}", if supported { "●" } else { "○" }, export.object);
+                            if ui
+                                .selectable_label(document.selected_export == index, label)
+                                .on_hover_text(export.class.as_deref().unwrap_or("Unknown class"))
+                                .clicked()
+                            {
+                                document.selected_export = index;
                             }
-                        });
+                        }
                     });
+                });
                 egui::CentralPanel::default()
                     .show_inside(ui, |ui| draw_chimp_export_editor(ui, document))
                     .inner
@@ -1591,7 +1870,7 @@ impl Baboon {
                 }
                 draw_chimp_json_document(
                     ui,
-                    ("chimp_metadata_text", package.clone()),
+                    ("chimp_metadata_text", scope.to_owned(), package.clone()),
                     "Decoded package metadata",
                     "Copy metadata JSON",
                     &document.metadata_text,
@@ -1816,12 +2095,58 @@ impl Baboon {
             Err(error) => self.status = format!("Could not write {}: {error}", path.display()),
         }
     }
+
+    fn begin_extract_chimp_texture_tiff(
+        &mut self,
+        kit_index: usize,
+        package: &str,
+        ctx: egui::Context,
+    ) {
+        let suggested = format!("{}.tif", package.rsplit('/').next().unwrap_or("texture"));
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Extract Texture2D as TIFF")
+            .add_filter("TIFF image", &["tif", "tiff"])
+            .set_file_name(&suggested)
+            .save_file()
+        else {
+            return;
+        };
+        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+            return;
+        };
+        let world = world.clone();
+        let package = package.to_owned();
+        let tx = self.tx.clone();
+        self.status = format!("Extracting {package}…");
+        thread::spawn(move || {
+            let result = write_chimp_texture_tiff(&world, &package, &path);
+            let _ = tx.send(WorkerMessage::ExportFinished(result));
+            ctx.request_repaint();
+        });
+    }
+}
+
+fn write_chimp_texture_tiff(world: &World, package: &str, output: &Path) -> Result<String, String> {
+    let document = load_chimp_document(world, package)?;
+    let data = document
+        .texture_previews
+        .iter()
+        .find_map(|texture| texture.preview.decoded.as_ref()?.as_ref().ok())
+        .ok_or_else(|| format!("{package} has no decodable Texture2D image"))?;
+    let mut file = fs::File::create(output)
+        .map_err(|error| format!("Could not create {}: {error}", output.display()))?;
+    // Export the decoder's straight RGBA buffer. Viewer channel masks,
+    // backgrounds and colour presentation are deliberately not applied.
+    blam_tags::bitmap::tiff::write_rgba8_tiff(&mut file, data.width, data.height, &data.rgba)
+        .map_err(|error| format!("Could not encode {}: {error}", output.display()))?;
+    Ok(format!("Extracted {package} to {}", output.display()))
 }
 
 fn draw_chimp_folder_node(
     ui: &mut Ui,
     node: &ChimpFolderNode,
     world: &World,
+    package_types: &[Option<String>],
     selected_package: Option<&str>,
     selected_file: Option<&str>,
     parent: &str,
@@ -1837,7 +2162,15 @@ fn draw_chimp_folder_node(
             egui::CollapsingHeader::new(format!("{name}  ·  {}", child.entry_count()))
                 .id_salt(("chimp_folder", path.clone()))
                 .show(ui, |ui| {
-                    draw_chimp_folder_node(ui, child, world, selected_package, selected_file, &path)
+                    draw_chimp_folder_node(
+                        ui,
+                        child,
+                        world,
+                        package_types,
+                        selected_package,
+                        selected_file,
+                        &path,
+                    )
                 })
                 .body_returned
                 .flatten();
@@ -1862,6 +2195,14 @@ fn draw_chimp_folder_node(
         } else {
             response
         };
+        if package_types.get(leaf.package).and_then(Option::as_deref) == Some("Texture2D") {
+            response.context_menu(|ui| {
+                if ui.button("Extract Texture2D as TIFF…").clicked() {
+                    clicked = Some(ChimpTreeClick::ExtractTexture(package.name.clone()));
+                    ui.close_menu();
+                }
+            });
+        }
         if response.clicked() {
             clicked = Some(ChimpTreeClick::Package(package.name.clone()));
         }
@@ -2646,6 +2987,29 @@ mod tests {
     }
 
     #[test]
+    fn chimp_document_tree_tracks_open_close_and_selection() {
+        let mut state = ChimpState::default();
+        let kit = KitId(7);
+        state.open_document_pane(kit, "/Game/Textures/A");
+        state.open_document_pane(kit, "/Game/Textures/B");
+        assert_eq!(state.open_packages.len(), 2);
+        assert_eq!(state.selected_package.as_deref(), Some("/Game/Textures/B"));
+        assert!(
+            state
+                .document_tree
+                .as_ref()
+                .is_some_and(|tree| !tree.is_empty())
+        );
+
+        state.close_document_pane("/Game/Textures/B");
+        assert_eq!(state.open_packages, ["/Game/Textures/A"]);
+        assert_eq!(state.selected_package.as_deref(), Some("/Game/Textures/A"));
+        state.close_document_pane("/Game/Textures/A");
+        assert!(state.open_packages.is_empty());
+        assert!(state.selected_package.is_none());
+    }
+
+    #[test]
     fn package_tree_groups_every_path_segment_and_counts_descendants() {
         let mut tree = ChimpFolderNode::default();
         tree.insert_package(0, "/Game/UI/Menu");
@@ -2919,5 +3283,14 @@ mod tests {
                 .is_some_and(Result::is_ok)),
             "{package} should decode at least one Texture2D preview"
         );
+        let output =
+            std::env::temp_dir().join(format!("baboon-chimp-texture-{}.tif", uuid::Uuid::new_v4()));
+        write_chimp_texture_tiff(&world, &package, &output).unwrap();
+        let bytes = std::fs::read(&output).unwrap();
+        assert!(
+            bytes.starts_with(b"II*") || bytes.starts_with(b"MM\0*"),
+            "Texture2D extraction should produce a TIFF file"
+        );
+        std::fs::remove_file(output).unwrap();
     }
 }
