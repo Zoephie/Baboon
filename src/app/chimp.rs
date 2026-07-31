@@ -61,6 +61,14 @@ enum ChimpFolderSelection {
     File,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ChimpDocumentView {
+    #[default]
+    Document,
+    Properties,
+    Metadata,
+}
+
 enum ChimpTreeClick {
     Package(String),
     File(String),
@@ -160,6 +168,9 @@ pub(super) struct ChimpDocument {
     pub(super) exports: Vec<ChimpExport>,
     pub(super) selected_export: usize,
     pub(super) dirty: bool,
+    view: ChimpDocumentView,
+    document_text: String,
+    document_text_dirty: bool,
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -329,7 +340,7 @@ fn decode_chimp_document(
             }
         })
         .collect();
-    Ok(ChimpDocument {
+    let mut document = ChimpDocument {
         package: header.package_name(),
         provider,
         original: bytes,
@@ -338,7 +349,12 @@ fn decode_chimp_document(
         exports,
         selected_export: 0,
         dirty: false,
-    })
+        view: ChimpDocumentView::default(),
+        document_text: String::new(),
+        document_text_dirty: true,
+    };
+    refresh_chimp_document_text(&mut document);
+    Ok(document)
 }
 
 fn rebuild_chimp_document(
@@ -1142,7 +1158,7 @@ impl Baboon {
                     .add_enabled(document.dirty, egui::Button::new("Build Chimp mod"))
                     .clicked();
                 extract_package = ui.button("Extract package…").clicked();
-                extract_json = ui.button("Property dump…").clicked();
+                extract_json = ui.button("Export JSON…").clicked();
                 extract_export = ui.button("Extract selected export…").clicked();
             });
         }
@@ -1179,78 +1195,88 @@ impl Baboon {
             ))
             .color(subtle_dark()),
         );
-        egui::CollapsingHeader::new("Package metadata and dependencies")
-            .id_salt(("chimp_metadata", package.clone()))
-            .show(ui, |ui| {
-                ui.label(format!(
-                    "Name map: {} names",
-                    document.header.name_map.copy_raw_names().len()
-                ));
-                ui.label(format!(
-                    "Imported package references: {}",
-                    document.header.imported_package_names.len()
-                ));
-                for imported in &document.header.imported_package_names {
-                    ui.monospace(imported);
-                }
-                ui.label(format!(
-                    "External dependency records: {}",
-                    document.header.external_package_dependencies.len()
-                ));
-                for dependency in &document.header.external_package_dependencies {
-                    ui.monospace(format!("{dependency:?}"));
-                }
-            });
-        egui::CollapsingHeader::new(format!(
-            "Physical providers ({})",
-            world
-                .package(&document.package)
-                .map_or(0, |record| record.providers.len())
-        ))
-        .id_salt(("chimp_providers", package.clone()))
-        .show(ui, |ui| {
-            if let Some(record) = world.package(&document.package) {
-                for provider in record.providers.iter().rev() {
-                    let active = record.active_provider() == Some(provider);
-                    ui.label(format!(
-                        "{}{}",
-                        if active {
-                            "Active — "
-                        } else {
-                            "Shadowed — "
-                        },
-                        world.containers()[provider.container].path.display()
-                    ));
-                    ui.monospace(&provider.entry_path);
-                }
-            }
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut document.view, ChimpDocumentView::Document, "Document")
+                .on_hover_text("Readable JSON representation of the complete decoded package");
+            ui.selectable_value(
+                &mut document.view,
+                ChimpDocumentView::Properties,
+                "Properties",
+            )
+            .on_hover_text("Inspect exports and edit supported reflected scalar properties");
+            ui.selectable_value(&mut document.view, ChimpDocumentView::Metadata, "Metadata")
+                .on_hover_text("Package dependencies and physical archive providers");
         });
         ui.separator();
-        egui::SidePanel::left(egui::Id::new(("chimp_exports", package.clone())))
-            .resizable(true)
-            .default_width(220.0)
-            .show_inside(ui, |ui| {
-                ui.label(RichText::new("Exports").strong());
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for (index, export) in document.exports.iter().enumerate() {
-                        let supported = export.decoded.is_ok();
-                        let label =
-                            format!("{}  {}", if supported { "●" } else { "○" }, export.object);
-                        if ui
-                            .selectable_label(document.selected_export == index, label)
-                            .on_hover_text(export.class.as_deref().unwrap_or("Unknown class"))
-                            .clicked()
-                        {
-                            document.selected_export = index;
-                        }
+
+        let changed = match document.view {
+            ChimpDocumentView::Document => {
+                if document.document_text_dirty {
+                    refresh_chimp_document_text(document);
+                }
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("Decoded Unreal package document")
+                            .strong()
+                            .color(subtle_dark()),
+                    );
+                    if ui.small_button("Copy JSON").clicked() {
+                        ui.output_mut(|output| {
+                            output.copied_text = document.document_text.clone();
+                        });
                     }
                 });
-            });
-        let changed = egui::CentralPanel::default()
-            .show_inside(ui, |ui| draw_chimp_export_editor(ui, document))
-            .inner;
+                egui::ScrollArea::both()
+                    .id_salt(("chimp_document_text", package.clone()))
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut document.document_text)
+                                .code_editor()
+                                .interactive(false)
+                                .desired_width(f32::INFINITY),
+                        );
+                    });
+                false
+            }
+            ChimpDocumentView::Properties => {
+                egui::SidePanel::left(egui::Id::new(("chimp_exports", package.clone())))
+                    .resizable(true)
+                    .default_width(220.0)
+                    .show_inside(ui, |ui| {
+                        ui.label(RichText::new("Exports").strong());
+                        egui::ScrollArea::vertical().show(ui, |ui| {
+                            for (index, export) in document.exports.iter().enumerate() {
+                                let supported = export.decoded.is_ok();
+                                let label = format!(
+                                    "{}  {}",
+                                    if supported { "●" } else { "○" },
+                                    export.object
+                                );
+                                if ui
+                                    .selectable_label(document.selected_export == index, label)
+                                    .on_hover_text(
+                                        export.class.as_deref().unwrap_or("Unknown class"),
+                                    )
+                                    .clicked()
+                                {
+                                    document.selected_export = index;
+                                }
+                            }
+                        });
+                    });
+                egui::CentralPanel::default()
+                    .show_inside(ui, |ui| draw_chimp_export_editor(ui, document))
+                    .inner
+            }
+            ChimpDocumentView::Metadata => {
+                draw_chimp_metadata(ui, document, &world, &package);
+                false
+            }
+        };
         if changed {
             document.dirty = true;
+            document.document_text_dirty = true;
         }
         let _ = document;
         if changed {
@@ -1603,6 +1629,56 @@ impl Kit {
     }
 }
 
+fn draw_chimp_metadata(ui: &mut Ui, document: &ChimpDocument, world: &World, package: &str) {
+    ui.heading("Package metadata and dependencies");
+    ui.label(format!(
+        "Name map: {} names",
+        document.header.name_map.copy_raw_names().len()
+    ));
+    ui.label(format!(
+        "Imported package references: {}",
+        document.header.imported_package_names.len()
+    ));
+    egui::ScrollArea::vertical()
+        .id_salt(("chimp_metadata", package))
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            for imported in &document.header.imported_package_names {
+                ui.monospace(imported);
+            }
+            ui.add_space(8.0);
+            ui.label(format!(
+                "External dependency records: {}",
+                document.header.external_package_dependencies.len()
+            ));
+            for dependency in &document.header.external_package_dependencies {
+                ui.monospace(format!("{dependency:?}"));
+            }
+            ui.add_space(12.0);
+            ui.heading(format!(
+                "Physical providers ({})",
+                world
+                    .package(&document.package)
+                    .map_or(0, |record| record.providers.len())
+            ));
+            if let Some(record) = world.package(&document.package) {
+                for provider in record.providers.iter().rev() {
+                    let active = record.active_provider() == Some(provider);
+                    ui.label(format!(
+                        "{}{}",
+                        if active {
+                            "Active — "
+                        } else {
+                            "Shadowed — "
+                        },
+                        world.containers()[provider.container].path.display()
+                    ));
+                    ui.monospace(&provider.entry_path);
+                }
+            }
+        });
+}
+
 fn draw_chimp_export_editor(ui: &mut Ui, document: &mut ChimpDocument) -> bool {
     let Some(export) = document.exports.get_mut(document.selected_export) else {
         ui.label("This package has no exports.");
@@ -1733,22 +1809,49 @@ fn draw_chimp_value(
     }
 }
 
+fn chimp_class_display_name(class: Option<&str>) -> &str {
+    class
+        .and_then(|class| {
+            class
+                .rsplit(|character| character == '.' || character == '/')
+                .find(|segment| !segment.is_empty())
+        })
+        .unwrap_or("Unknown")
+}
+
 fn chimp_document_json(document: &ChimpDocument) -> Value {
     json!({
-        "package": document.package,
-        "provider": document.provider.entry_path,
-        "imports": document.header.imported_package_names,
-        "exports": document.exports.iter().map(|export| {
+        "Package": document.package,
+        "Source": document.provider.entry_path,
+        "Summary": {
+            "Exports": document.header.export_map.len(),
+            "Imports": document.header.import_map.len(),
+            "Names": document.header.name_map.copy_raw_names().len(),
+            "OriginalSize": document.original.len(),
+        },
+        "Imports": document.header.imported_package_names,
+        "ExternalDependencies": document.header.external_package_dependencies
+            .iter()
+            .map(|dependency| format!("{dependency:?}"))
+            .collect::<Vec<_>>(),
+        "Exports": document.exports.iter().map(|export| {
             json!({
-                "object": export.object,
-                "class": export.class,
-                "properties": export.decoded.as_ref().ok()
+                "Type": chimp_class_display_name(export.class.as_deref()),
+                "Name": export.object,
+                "Class": export.class,
+                "Properties": export.decoded.as_ref().ok()
                     .and_then(Export::properties)
                     .map(chimp_block_json),
-                "decode_error": export.decoded.as_ref().err(),
+                "DecodeError": export.decoded.as_ref().err(),
             })
         }).collect::<Vec<_>>(),
     })
+}
+
+fn refresh_chimp_document_text(document: &mut ChimpDocument) {
+    document.document_text = serde_json::to_string_pretty(&chimp_document_json(document))
+        .unwrap_or_else(|error| format!("Could not render package document: {error}"));
+    document.document_text_dirty = false;
 }
 
 fn chimp_block_json(block: &PropertyBlock) -> Value {
@@ -1849,6 +1952,16 @@ mod tests {
     }
 
     #[test]
+    fn readable_documents_are_the_default_view() {
+        assert_eq!(ChimpDocumentView::default(), ChimpDocumentView::Document);
+        assert_eq!(
+            chimp_class_display_name(Some("/Script/Engine.BlueprintGeneratedClass")),
+            "BlueprintGeneratedClass"
+        );
+        assert_eq!(chimp_class_display_name(None), "Unknown");
+    }
+
+    #[test]
     fn output_triplet_replacement_replaces_all_files_and_cleans_backups() {
         let directory = std::env::temp_dir().join(format!("baboon-chimp-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&directory).unwrap();
@@ -1945,6 +2058,26 @@ mod tests {
             .name
             .clone();
         let document = load_chimp_document(&world, &package).unwrap();
+        assert_eq!(document.view, ChimpDocumentView::Document);
+        assert!(!document.document_text_dirty);
+        assert!(
+            !document.exports.is_empty(),
+            "the real package should expose at least one readable export"
+        );
+        let readable: Value =
+            serde_json::from_str(&document.document_text).expect("readable document is valid JSON");
+        assert_eq!(readable["Package"], package);
+        assert_eq!(
+            readable["Exports"].as_array().map(Vec::len),
+            Some(document.exports.len())
+        );
+        let export = readable["Exports"]
+            .as_array()
+            .and_then(|exports| exports.first())
+            .expect("the JSON document should contain its first export");
+        assert!(export.get("Type").is_some());
+        assert!(export.get("Name").is_some());
+        assert!(export.get("Properties").is_some());
         let (bytes, store) = rebuild_chimp_document(&world, &document).unwrap();
         FZenPackageHeader::deserialize(
             &mut Cursor::new(&bytes),
