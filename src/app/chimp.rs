@@ -6,7 +6,7 @@
 
 use super::*;
 use std::collections::BTreeMap;
-use std::io::Cursor;
+use std::io::{Cursor, Write};
 
 use blam_tags::iostore::asset::texture2d::decode_texture2d_preview;
 use blam_tags::iostore::container::writer::{PackageOverride, write_package_mod_container};
@@ -17,6 +17,8 @@ use blam_tags::iostore::object::value::{PropValue, PropertyBlock};
 use blam_tags::iostore::package::builder::{read_payloads, write_package};
 use blam_tags::iostore::package::ue_types::{FPackageObjectIndex, FPackageObjectIndexType};
 use blam_tags::iostore::package::zen::FZenPackageHeader;
+use blam_tags::iostore::skeletal_mesh::SkeletalMesh;
+use blam_tags::iostore::static_mesh::StaticMesh;
 use blam_tags::iostore::usmap::Usmap;
 use blam_tags::iostore::world::{CE_HEADER_VERSION, CE_TOC_VERSION, PackageProvider, World};
 use serde::{Deserialize, Serialize};
@@ -70,6 +72,7 @@ enum ChimpDocumentView {
     #[default]
     Document,
     Texture,
+    Mesh,
     Properties,
     Metadata,
 }
@@ -77,7 +80,39 @@ enum ChimpDocumentView {
 enum ChimpTreeClick {
     Package(String),
     ExtractTexture(String),
+    ExtractMesh(String, ChimpMeshFormat),
     File(String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ChimpMeshKind {
+    Skeletal,
+    Static,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ChimpMeshFormat {
+    Jms,
+    Psk,
+    Pskx,
+}
+
+impl ChimpMeshFormat {
+    fn extension(self) -> &'static str {
+        match self {
+            Self::Jms => "jms",
+            Self::Psk => "psk",
+            Self::Pskx => "pskx",
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Jms => "JMS",
+            Self::Psk => "ActorX PSK",
+            Self::Pskx => "ActorX PSKX",
+        }
+    }
 }
 
 #[derive(Default)]
@@ -178,6 +213,9 @@ pub(super) struct ChimpDocument {
     pub(super) payloads: Vec<Vec<u8>>,
     pub(super) exports: Vec<ChimpExport>,
     texture_previews: Vec<ChimpTexturePreview>,
+    mesh_kind: Option<ChimpMeshKind>,
+    mesh_preview: Option<Result<ModelPreviewData, String>>,
+    mesh_preview_state: ModelPreviewState,
     pub(super) selected_export: usize,
     pub(super) dirty: bool,
     view: ChimpDocumentView,
@@ -220,6 +258,7 @@ struct ChimpPaneBehavior<'a> {
     close_all: bool,
     close_all_but: Option<String>,
     extract_texture: Option<String>,
+    extract_mesh: Option<(String, ChimpMeshFormat)>,
 }
 
 impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_> {
@@ -298,6 +337,11 @@ impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_> {
             .documents
             .get(&package)
             .is_some_and(|document| !document.texture_previews.is_empty());
+        let has_mesh = self.app.kits[self.kit_index]
+            .chimp
+            .documents
+            .get(&package)
+            .is_some_and(|document| document.mesh_kind.is_some());
         button_response.context_menu(|ui| {
             if ui.button("Close").clicked() {
                 self.close_requests.push(package.clone());
@@ -317,6 +361,21 @@ impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_> {
                     self.extract_texture = Some(package.clone());
                     ui.close_menu();
                 }
+            }
+            if has_mesh {
+                ui.separator();
+                ui.menu_button("Extract mesh", |ui| {
+                    for format in [
+                        ChimpMeshFormat::Jms,
+                        ChimpMeshFormat::Psk,
+                        ChimpMeshFormat::Pskx,
+                    ] {
+                        if ui.button(format.label()).clicked() {
+                            self.extract_mesh = Some((package.clone(), format));
+                            ui.close_menu();
+                        }
+                    }
+                });
             }
         });
         button_response
@@ -627,10 +686,14 @@ fn decode_chimp_document(
     let texture_previews = decode_chimp_texture_previews(
         world, &provider, &header, &payloads, &names, &resolver, &bulk, &exports,
     );
-    let initial_view = if texture_previews.is_empty() {
-        ChimpDocumentView::default()
-    } else {
+    let (mesh_kind, mesh_preview, mesh_preview_state) =
+        decode_chimp_mesh_preview(&bytes, &header, &exports);
+    let initial_view = if !texture_previews.is_empty() {
         ChimpDocumentView::Texture
+    } else if mesh_kind.is_some() {
+        ChimpDocumentView::Mesh
+    } else {
+        ChimpDocumentView::default()
     };
     let mut document = ChimpDocument {
         package: header.package_name(),
@@ -640,6 +703,9 @@ fn decode_chimp_document(
         payloads,
         exports,
         texture_previews,
+        mesh_kind,
+        mesh_preview,
+        mesh_preview_state,
         selected_export: 0,
         dirty: false,
         view: initial_view,
@@ -653,6 +719,149 @@ fn decode_chimp_document(
     refresh_chimp_document_text(&mut document);
     refresh_chimp_metadata_text(&mut document, world);
     Ok(document)
+}
+
+fn chimp_material_names(header: &FZenPackageHeader) -> Vec<String> {
+    header
+        .imported_package_names
+        .iter()
+        .map(|path| path.rsplit('/').next().unwrap_or(path).to_owned())
+        .filter(|name| name.starts_with("MI_") || name.starts_with("M_"))
+        .collect()
+}
+
+fn decode_chimp_mesh_preview(
+    bytes: &[u8],
+    header: &FZenPackageHeader,
+    exports: &[ChimpExport],
+) -> (
+    Option<ChimpMeshKind>,
+    Option<Result<ModelPreviewData, String>>,
+    ModelPreviewState,
+) {
+    let kind = if exports
+        .iter()
+        .any(|export| export.class.as_deref() == Some("SkeletalMesh"))
+    {
+        Some(ChimpMeshKind::Skeletal)
+    } else if exports
+        .iter()
+        .any(|export| export.class.as_deref() == Some("StaticMesh"))
+    {
+        Some(ChimpMeshKind::Static)
+    } else {
+        None
+    };
+    let preview = kind.map(|kind| {
+        let header_size = header.summary.header_size as usize;
+        let preview = match kind {
+            ChimpMeshKind::Skeletal => {
+                SkeletalMesh::from_package(bytes, &header.name_map.copy_raw_names(), header_size)
+                    .map(chimp_skeletal_mesh_preview)
+            }
+            ChimpMeshKind::Static => {
+                StaticMesh::from_package(bytes, header_size).map(chimp_static_mesh_preview)
+            }
+        }
+        .map_err(|error| format!("Could not decode mesh geometry: {error:#}"))?;
+        Ok(model_preview::standalone_mesh_preview(
+            header.package_name(),
+            preview,
+        ))
+    });
+    let mut state = ModelPreviewState::default();
+    if kind.is_some() {
+        state.region_selections.insert(
+            "mesh".to_owned(),
+            ModelRegionSelection {
+                enabled: true,
+                permutation: "default".to_owned(),
+            },
+        );
+    }
+    (kind, preview, state)
+}
+
+fn chimp_skeletal_mesh_preview(mesh: SkeletalMesh) -> RenderModelPreview {
+    let mut preview = chimp_mesh_preview_base(
+        mesh.vertices
+            .iter()
+            .map(|vertex| (vertex.position, vertex.normal)),
+        mesh.indices,
+    );
+    for section in mesh.sections {
+        let index_start = section.base_index.min(preview.indices.len() as u32);
+        let index_count =
+            (section.num_triangles * 3).min(preview.indices.len() as u32 - index_start);
+        if index_count > 0 {
+            preview.batches.push(RenderModelPreviewBatch {
+                region_name: "mesh".to_owned(),
+                permutation_name: "default".to_owned(),
+                material_index: section.material_index,
+                index_start,
+                index_count,
+            });
+        }
+    }
+    if preview.batches.is_empty() && !preview.indices.is_empty() {
+        preview.batches.push(RenderModelPreviewBatch {
+            region_name: "mesh".to_owned(),
+            permutation_name: "default".to_owned(),
+            material_index: 0,
+            index_start: 0,
+            index_count: preview.indices.len() as u32,
+        });
+    }
+    preview
+}
+
+fn chimp_static_mesh_preview(mesh: StaticMesh) -> RenderModelPreview {
+    let mut preview = chimp_mesh_preview_base(
+        mesh.vertices
+            .iter()
+            .map(|vertex| (vertex.position, vertex.normal)),
+        mesh.indices,
+    );
+    if !preview.indices.is_empty() {
+        preview.batches.push(RenderModelPreviewBatch {
+            region_name: "mesh".to_owned(),
+            permutation_name: "default".to_owned(),
+            material_index: 0,
+            index_start: 0,
+            index_count: preview.indices.len() as u32,
+        });
+    }
+    preview
+}
+
+fn chimp_mesh_preview_base(
+    vertices: impl IntoIterator<Item = ([f32; 3], [f32; 3])>,
+    indices: Vec<u32>,
+) -> RenderModelPreview {
+    let mut preview = RenderModelPreview {
+        regions: vec![RenderModelPreviewRegion {
+            name: "mesh".to_owned(),
+            permutations: vec!["default".to_owned()],
+        }],
+        indices,
+        bounds_min: [f32::INFINITY; 3],
+        bounds_max: [f32::NEG_INFINITY; 3],
+        ..Default::default()
+    };
+    for (position, normal) in vertices {
+        for axis in 0..3 {
+            preview.bounds_min[axis] = preview.bounds_min[axis].min(position[axis]);
+            preview.bounds_max[axis] = preview.bounds_max[axis].max(position[axis]);
+        }
+        preview
+            .vertices
+            .push(RenderModelPreviewVertex { position, normal });
+    }
+    if preview.vertices.is_empty() {
+        preview.bounds_min = [-1.0; 3];
+        preview.bounds_max = [1.0; 3];
+    }
+    preview
 }
 
 fn decode_chimp_texture_previews(
@@ -1289,6 +1498,7 @@ impl Baboon {
         let indices = self.kits[kit_index].chimp.filtered_packages.clone();
         let selected = self.kits[kit_index].chimp.selected_package.clone();
         let mut extract_texture = None;
+        let mut extract_mesh = None;
         egui::ScrollArea::vertical()
             .id_salt(("chimp_packages", self.kits[kit_index].id.0))
             .auto_shrink([false, false])
@@ -1319,11 +1529,22 @@ impl Baboon {
                         .get(indices[row])
                         .and_then(Option::as_deref)
                         == Some("Texture2D");
-                    if is_texture {
+                    let is_mesh = matches!(
+                        self.kits[kit_index]
+                            .chimp
+                            .package_types
+                            .get(indices[row])
+                            .and_then(Option::as_deref),
+                        Some("SkeletalMesh" | "StaticMesh")
+                    );
+                    if is_texture || is_mesh {
                         response.context_menu(|ui| {
-                            if ui.button("Extract Texture2D as TIFF…").clicked() {
+                            if is_texture && ui.button("Extract Texture2D as TIFF…").clicked() {
                                 extract_texture = Some(package.name.clone());
                                 ui.close_menu();
+                            }
+                            if is_mesh {
+                                chimp_mesh_export_menu(ui, &package.name, &mut extract_mesh);
                             }
                         });
                     }
@@ -1334,6 +1555,9 @@ impl Baboon {
             });
         if let Some(package) = extract_texture {
             self.begin_extract_chimp_texture_tiff(kit_index, &package, ctx.clone());
+        }
+        if let Some((package, format)) = extract_mesh {
+            self.begin_extract_chimp_mesh(kit_index, &package, format, ctx.clone());
         }
     }
 
@@ -1360,6 +1584,7 @@ impl Baboon {
         let selected = self.kits[kit_index].chimp.selected_package.clone();
         let searching = !self.kits[kit_index].chimp.filter.trim().is_empty();
         let mut extract_texture = None;
+        let mut extract_mesh = None;
         if groups.is_empty() && !self.kits[kit_index].chimp.type_indexing {
             ui.label(RichText::new("No matching Unreal packages.").color(subtle_dark()));
             return;
@@ -1384,11 +1609,23 @@ impl Baboon {
                                         label,
                                     )
                                     .on_hover_text(&package.name);
-                                if kind == "Texture2D" {
+                                if kind == "Texture2D"
+                                    || kind == "SkeletalMesh"
+                                    || kind == "StaticMesh"
+                                {
                                     response.context_menu(|ui| {
-                                        if ui.button("Extract Texture2D as TIFF…").clicked() {
+                                        if kind == "Texture2D"
+                                            && ui.button("Extract Texture2D as TIFF…").clicked()
+                                        {
                                             extract_texture = Some(package.name.clone());
                                             ui.close_menu();
+                                        }
+                                        if kind == "SkeletalMesh" || kind == "StaticMesh" {
+                                            chimp_mesh_export_menu(
+                                                ui,
+                                                &package.name,
+                                                &mut extract_mesh,
+                                            );
                                         }
                                     });
                                 }
@@ -1405,6 +1642,9 @@ impl Baboon {
             });
         if let Some(package) = extract_texture {
             self.begin_extract_chimp_texture_tiff(kit_index, &package, ctx.clone());
+        }
+        if let Some((package, format)) = extract_mesh {
+            self.begin_extract_chimp_mesh(kit_index, &package, format, ctx.clone());
         }
     }
 
@@ -1557,6 +1797,9 @@ impl Baboon {
             Some(ChimpTreeClick::ExtractTexture(package)) => {
                 self.begin_extract_chimp_texture_tiff(kit_index, &package, ctx.clone());
             }
+            Some(ChimpTreeClick::ExtractMesh(package, format)) => {
+                self.begin_extract_chimp_mesh(kit_index, &package, format, ctx.clone());
+            }
             Some(ChimpTreeClick::File(file)) => {
                 let chimp = &mut self.kits[kit_index].chimp;
                 chimp.folder_selection = ChimpFolderSelection::File;
@@ -1681,6 +1924,7 @@ impl Baboon {
             close_all: false,
             close_all_but: None,
             extract_texture: None,
+            extract_mesh: None,
         };
         tree.ui(&mut behavior, ui);
         let close_requests = std::mem::take(&mut behavior.close_requests);
@@ -1688,6 +1932,7 @@ impl Baboon {
         let close_all = behavior.close_all;
         let close_all_but = behavior.close_all_but.take();
         let extract_texture = behavior.extract_texture.take();
+        let extract_mesh = behavior.extract_mesh.take();
         self.kits[kit_index].chimp.document_tree = Some(tree);
         self.kits[kit_index].chimp.sync_open_packages();
         if let Some(package) = focused {
@@ -1728,6 +1973,9 @@ impl Baboon {
         }
         if let Some(package) = extract_texture {
             self.begin_extract_chimp_texture_tiff(kit_index, &package, ctx.clone());
+        }
+        if let Some((package, format)) = extract_mesh {
+            self.begin_extract_chimp_mesh(kit_index, &package, format, ctx.clone());
         }
     }
 
@@ -1805,6 +2053,10 @@ impl Baboon {
                 ui.selectable_value(&mut document.view, ChimpDocumentView::Texture, "Texture")
                     .on_hover_text("Decoded Texture2D image preview");
             }
+            if document.mesh_kind.is_some() {
+                ui.selectable_value(&mut document.view, ChimpDocumentView::Mesh, "Mesh")
+                    .on_hover_text("Decoded Unreal mesh in Baboon's 3D viewer");
+            }
             ui.selectable_value(
                 &mut document.view,
                 ChimpDocumentView::Properties,
@@ -1833,6 +2085,22 @@ impl Baboon {
             }
             ChimpDocumentView::Texture => {
                 draw_chimp_texture_preview(ui, document);
+                false
+            }
+            ChimpDocumentView::Mesh => {
+                match document.mesh_preview.as_ref() {
+                    Some(Ok(preview)) => model_preview::draw_standalone_mesh_preview(
+                        ui,
+                        preview,
+                        &mut document.mesh_preview_state,
+                    ),
+                    Some(Err(error)) => {
+                        ui.colored_label(Color32::from_rgb(150, 56, 44), error);
+                    }
+                    None => {
+                        ui.label(RichText::new("No mesh geometry found.").color(subtle_dark()));
+                    }
+                }
                 false
             }
             ChimpDocumentView::Properties => {
@@ -2124,6 +2392,40 @@ impl Baboon {
             ctx.request_repaint();
         });
     }
+
+    fn begin_extract_chimp_mesh(
+        &mut self,
+        kit_index: usize,
+        package: &str,
+        format: ChimpMeshFormat,
+        ctx: egui::Context,
+    ) {
+        let suggested = format!(
+            "{}.{}",
+            package.rsplit('/').next().unwrap_or("mesh"),
+            format.extension()
+        );
+        let Some(path) = rfd::FileDialog::new()
+            .set_title(format!("Extract mesh as {}", format.label()))
+            .add_filter(format.label(), &[format.extension()])
+            .set_file_name(&suggested)
+            .save_file()
+        else {
+            return;
+        };
+        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+            return;
+        };
+        let world = world.clone();
+        let package = package.to_owned();
+        let tx = self.tx.clone();
+        self.status = format!("Extracting {package} as {}…", format.label());
+        thread::spawn(move || {
+            let result = write_chimp_mesh(&world, &package, &path, format);
+            let _ = tx.send(WorkerMessage::ExportFinished(result));
+            ctx.request_repaint();
+        });
+    }
 }
 
 fn write_chimp_texture_tiff(world: &World, package: &str, output: &Path) -> Result<String, String> {
@@ -2140,6 +2442,96 @@ fn write_chimp_texture_tiff(world: &World, package: &str, output: &Path) -> Resu
     blam_tags::bitmap::tiff::write_rgba8_tiff(&mut file, data.width, data.height, &data.rgba)
         .map_err(|error| format!("Could not encode {}: {error}", output.display()))?;
     Ok(format!("Extracted {package} to {}", output.display()))
+}
+
+fn write_chimp_mesh(
+    world: &World,
+    package: &str,
+    output: &Path,
+    format: ChimpMeshFormat,
+) -> Result<String, String> {
+    let document = load_chimp_document(world, package)?;
+    let kind = document
+        .mesh_kind
+        .ok_or_else(|| format!("{package} is not a StaticMesh or SkeletalMesh"))?;
+    let materials = chimp_material_names(&document.header);
+    let mut writer = std::io::BufWriter::new(
+        fs::File::create(output)
+            .map_err(|error| format!("Could not create {}: {error}", output.display()))?,
+    );
+    match kind {
+        ChimpMeshKind::Skeletal => {
+            let mesh = SkeletalMesh::from_package(
+                &document.original,
+                &document.header.name_map.copy_raw_names(),
+                document.header.summary.header_size as usize,
+            )
+            .map_err(|error| format!("Could not decode {package}: {error:#}"))?;
+            match format {
+                ChimpMeshFormat::Jms => {
+                    blam_tags::iostore::actorx::skeletal_mesh_to_jms(&mesh, &materials)
+                        .write(&mut writer, 8213)
+                        .map_err(|error| error.to_string())?
+                }
+                ChimpMeshFormat::Psk => blam_tags::iostore::actorx::write_skeletal_mesh(
+                    &mesh,
+                    &materials,
+                    blam_tags::iostore::actorx::ActorXFormat::Psk,
+                    &mut writer,
+                )
+                .map_err(|error| error.to_string())?,
+                ChimpMeshFormat::Pskx => blam_tags::iostore::actorx::write_skeletal_mesh(
+                    &mesh,
+                    &materials,
+                    blam_tags::iostore::actorx::ActorXFormat::Pskx,
+                    &mut writer,
+                )
+                .map_err(|error| error.to_string())?,
+            }
+        }
+        ChimpMeshKind::Static => {
+            let archive = &world.archives()[document.provider.container];
+            let bulk = archive
+                .chunk_index_for(&document.provider.entry_path)
+                .ok()
+                .and_then(|chunk| archive.read_bulk_for(chunk, 0).ok());
+            let mesh = StaticMesh::from_package_preferring_nanite(
+                &document.original,
+                document.header.summary.header_size as usize,
+                bulk.as_deref(),
+            )
+            .map_err(|error| format!("Could not decode {package}: {error:#}"))?;
+            match format {
+                ChimpMeshFormat::Jms => {
+                    blam_tags::iostore::actorx::static_mesh_to_jms(&mesh, &materials)
+                        .write(&mut writer, 8213)
+                        .map_err(|error| error.to_string())?
+                }
+                ChimpMeshFormat::Psk => blam_tags::iostore::actorx::write_static_mesh(
+                    &mesh,
+                    &materials,
+                    blam_tags::iostore::actorx::ActorXFormat::Psk,
+                    &mut writer,
+                )
+                .map_err(|error| error.to_string())?,
+                ChimpMeshFormat::Pskx => blam_tags::iostore::actorx::write_static_mesh(
+                    &mesh,
+                    &materials,
+                    blam_tags::iostore::actorx::ActorXFormat::Pskx,
+                    &mut writer,
+                )
+                .map_err(|error| error.to_string())?,
+            }
+        }
+    }
+    writer
+        .flush()
+        .map_err(|error| format!("Could not finish {}: {error}", output.display()))?;
+    Ok(format!(
+        "Extracted {package} as {} to {}",
+        format.label(),
+        output.display()
+    ))
 }
 
 fn draw_chimp_folder_node(
@@ -2195,11 +2587,32 @@ fn draw_chimp_folder_node(
         } else {
             response
         };
-        if package_types.get(leaf.package).and_then(Option::as_deref) == Some("Texture2D") {
+        let package_type = package_types.get(leaf.package).and_then(Option::as_deref);
+        if matches!(
+            package_type,
+            Some("Texture2D" | "SkeletalMesh" | "StaticMesh")
+        ) {
             response.context_menu(|ui| {
-                if ui.button("Extract Texture2D as TIFF…").clicked() {
+                if package_type == Some("Texture2D")
+                    && ui.button("Extract Texture2D as TIFF…").clicked()
+                {
                     clicked = Some(ChimpTreeClick::ExtractTexture(package.name.clone()));
                     ui.close_menu();
+                }
+                if matches!(package_type, Some("SkeletalMesh" | "StaticMesh")) {
+                    ui.menu_button("Extract mesh", |ui| {
+                        for format in [
+                            ChimpMeshFormat::Jms,
+                            ChimpMeshFormat::Psk,
+                            ChimpMeshFormat::Pskx,
+                        ] {
+                            if ui.button(format.label()).clicked() {
+                                clicked =
+                                    Some(ChimpTreeClick::ExtractMesh(package.name.clone(), format));
+                                ui.close_menu();
+                            }
+                        }
+                    });
                 }
             });
         }
@@ -2229,6 +2642,25 @@ fn draw_chimp_folder_node(
         }
     }
     clicked
+}
+
+fn chimp_mesh_export_menu(
+    ui: &mut Ui,
+    package: &str,
+    requested: &mut Option<(String, ChimpMeshFormat)>,
+) {
+    ui.menu_button("Extract mesh", |ui| {
+        for format in [
+            ChimpMeshFormat::Jms,
+            ChimpMeshFormat::Psk,
+            ChimpMeshFormat::Pskx,
+        ] {
+            if ui.button(format.label()).clicked() {
+                *requested = Some((package.to_owned(), format));
+                ui.close_menu();
+            }
+        }
+    });
 }
 
 fn triplet(path: &Path) -> [PathBuf; 3] {
@@ -3329,5 +3761,74 @@ mod tests {
             "Texture2D extraction should produce a TIFF file"
         );
         std::fs::remove_file(output).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires a Campaign Evolved install; set CE_PAKS"]
+    fn real_meshes_preview_and_extract_to_jms_and_actorx() {
+        let root = std::env::var_os("CE_PAKS").expect("set CE_PAKS");
+        let world = World::open(root, Usmap::meteorite().unwrap()).unwrap();
+        let type_index = index_chimp_package_types(&world);
+
+        for (type_name, expected_kind) in [
+            ("SkeletalMesh", ChimpMeshKind::Skeletal),
+            ("StaticMesh", ChimpMeshKind::Static),
+        ] {
+            let package = world
+                .packages()
+                .iter()
+                .enumerate()
+                .filter(|(package_index, _)| {
+                    type_index
+                        .package_types
+                        .get(*package_index)
+                        .and_then(Option::as_deref)
+                        == Some(type_name)
+                })
+                .find_map(|(_, package)| {
+                    let document = load_chimp_document(&world, &package.name).ok()?;
+                    document.mesh_preview.as_ref()?.as_ref().ok()?;
+                    Some(package.name.clone())
+                })
+                .unwrap_or_else(|| panic!("no decodable {type_name} package"));
+            let document = load_chimp_document(&world, &package).unwrap();
+            assert_eq!(document.view, ChimpDocumentView::Mesh);
+            assert_eq!(document.mesh_kind, Some(expected_kind));
+            let preview = document.mesh_preview.as_ref().unwrap().as_ref().unwrap();
+            assert!(!preview.preview.vertices.is_empty());
+            assert!(!preview.preview.indices.is_empty());
+            assert!(!preview.draw_triangles.is_empty());
+
+            let formats = if expected_kind == ChimpMeshKind::Skeletal
+                && preview.preview.vertices.len() <= 65_536
+            {
+                vec![
+                    ChimpMeshFormat::Jms,
+                    ChimpMeshFormat::Psk,
+                    ChimpMeshFormat::Pskx,
+                ]
+            } else {
+                vec![ChimpMeshFormat::Jms, ChimpMeshFormat::Pskx]
+            };
+            for format in formats {
+                let output = std::env::temp_dir().join(format!(
+                    "baboon-chimp-mesh-{}.{}",
+                    uuid::Uuid::new_v4(),
+                    format.extension()
+                ));
+                write_chimp_mesh(&world, &package, &output, format).unwrap();
+                let bytes = std::fs::read(&output).unwrap();
+                match format {
+                    ChimpMeshFormat::Jms => assert!(bytes.starts_with(b";### VERSION ###")),
+                    ChimpMeshFormat::Psk => {
+                        assert!(bytes.windows(8).any(|window| window == b"FACE0000"))
+                    }
+                    ChimpMeshFormat::Pskx => {
+                        assert!(bytes.windows(8).any(|window| window == b"FACE3200"))
+                    }
+                }
+                std::fs::remove_file(output).unwrap();
+            }
+        }
     }
 }

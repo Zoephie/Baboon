@@ -254,6 +254,74 @@ fn draw_model_viewport_with_stats(
     );
 }
 
+/// Build the renderer's camera-independent data for a standalone mesh, such as
+/// a Chimp StaticMesh/SkeletalMesh document.
+pub(in crate::app) fn standalone_mesh_preview(
+    source_key: String,
+    preview: RenderModelPreview,
+) -> ModelPreviewData {
+    let max_edge = preview_edge_limit(preview.bounds_min, preview.bounds_max);
+    let draw_triangles = build_model_source_triangles(&preview, max_edge);
+    ModelPreviewData {
+        render_model_path: source_key.clone(),
+        source_key,
+        preview,
+        draw_triangles,
+        variants: Vec::new(),
+    }
+}
+
+/// Draw a standalone mesh with the same camera, shading, wireframe and
+/// backface controls as Baboon's tag model viewer.
+pub(in crate::app) fn draw_standalone_mesh_preview(
+    ui: &mut Ui,
+    data: &ModelPreviewData,
+    state: &mut ModelPreviewState,
+) {
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Scale").color(subtle_dark()));
+        ui.add(
+            egui::Slider::new(&mut state.scale, 0.05..=5.0)
+                .show_value(false)
+                .clamping(egui::SliderClamping::Always),
+        );
+        ui.add(
+            egui::DragValue::new(&mut state.scale)
+                .range(0.05..=5.0)
+                .speed(0.01)
+                .max_decimals(2)
+                .suffix("×"),
+        );
+        if ui.button("Reset view").clicked() {
+            state.yaw = -0.45;
+            state.pitch = 0.25;
+            state.pan = Vec2::ZERO;
+            state.scale = 1.0;
+        }
+        egui::ComboBox::from_id_salt(("standalone_model_render_mode", &data.source_key))
+            .selected_text(state.render_mode.label())
+            .show_ui(ui, |ui| {
+                for mode in ModelRenderMode::ALL {
+                    ui.selectable_value(&mut state.render_mode, mode, mode.label());
+                }
+            });
+        ui.checkbox(&mut state.show_backfaces, "Backfaces");
+    });
+    let size = Vec2::new(
+        ui.available_width().max(280.0),
+        ui.available_height().max(300.0),
+    );
+    draw_model_viewport(ui, data, state, size);
+    ui.small(
+        RichText::new(format!(
+            "{} vertices, {} triangles",
+            data.preview.vertices.len(),
+            data.preview.indices.len() / 3
+        ))
+        .color(subtle_dark()),
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
