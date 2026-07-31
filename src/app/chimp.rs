@@ -3901,9 +3901,9 @@ mod tests {
                 package
                     .name
                     .to_ascii_lowercase()
-                    .contains("sm_spiritdropship")
+                    .contains("sm_spiritdropship_body")
             })
-            .unwrap_or_else(|| panic!("sm_spiritdropship was not found"));
+            .unwrap_or_else(|| panic!("SM_SpiritDropShip_Body was not found"));
         let document = load_chimp_document(&world, &package.name).unwrap();
         assert_eq!(document.mesh_kind, Some(ChimpMeshKind::Static));
 
@@ -3925,7 +3925,15 @@ mod tests {
             &resources,
         );
         let mut miswound_triangles = 0usize;
+        let mut duplicate_index_triangles = 0usize;
+        let mut zero_area_triangles = 0usize;
         for triangle in &nanite.triangles {
+            if triangle[0] == triangle[1]
+                || triangle[1] == triangle[2]
+                || triangle[0] == triangle[2]
+            {
+                duplicate_index_triangles += 1;
+            }
             let [a, b, c] = triangle.map(|index| nanite.positions[index as usize]);
             let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
             let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
@@ -3934,6 +3942,9 @@ mod tests {
                 ab[2] * ac[0] - ab[0] * ac[2],
                 ab[0] * ac[1] - ab[1] * ac[0],
             ];
+            if face[0] * face[0] + face[1] * face[1] + face[2] * face[2] <= 1.0e-12 {
+                zero_area_triangles += 1;
+            }
             let normal = triangle.iter().fold([0.0; 3], |mut total, index| {
                 let normal = nanite.normals[*index as usize];
                 total[0] += normal[0];
@@ -3969,29 +3980,183 @@ mod tests {
                 converted_miswound_triangles += 1;
             }
         }
+        let mut position_ids = std::collections::HashMap::<[u32; 3], u32>::new();
+        let mut canonical_vertices = Vec::with_capacity(converted.vertices.len());
+        for vertex in &converted.vertices {
+            let key = vertex.position.map(|value| {
+                if value == 0.0 { 0 } else { value.to_bits() }
+            });
+            let next = position_ids.len() as u32;
+            canonical_vertices.push(*position_ids.entry(key).or_insert(next));
+        }
+        let mut edges = Vec::with_capacity(converted.indices.len());
+        for triangle in converted.indices.chunks_exact(3) {
+            let ids = [
+                canonical_vertices[triangle[0] as usize],
+                canonical_vertices[triangle[1] as usize],
+                canonical_vertices[triangle[2] as usize],
+            ];
+            if ids[0] == ids[1] || ids[1] == ids[2] || ids[0] == ids[2] {
+                continue;
+            }
+            for [a, b] in [[ids[0], ids[1]], [ids[1], ids[2]], [ids[2], ids[0]]] {
+                let [lo, hi] = if a < b { [a, b] } else { [b, a] };
+                edges.push((u64::from(lo) << 32) | u64::from(hi));
+            }
+        }
+        edges.sort_unstable();
+        let mut boundary_edges = Vec::new();
+        let mut cursor = 0usize;
+        while cursor < edges.len() {
+            let edge = edges[cursor];
+            let mut end = cursor + 1;
+            while end < edges.len() && edges[end] == edge {
+                end += 1;
+            }
+            if end - cursor == 1 {
+                boundary_edges.push(edge);
+            }
+            cursor = end;
+        }
+        let mut boundary_adjacency = std::collections::HashMap::<u32, Vec<u32>>::new();
+        for edge in &boundary_edges {
+            let a = (edge >> 32) as u32;
+            let b = *edge as u32;
+            boundary_adjacency.entry(a).or_default().push(b);
+            boundary_adjacency.entry(b).or_default().push(a);
+        }
+        let mut visited = std::collections::HashSet::new();
+        let mut triangular_boundary_loops = 0usize;
+        let mut triangular_hole_edges = std::collections::HashMap::<u64, u32>::new();
+        for &start in boundary_adjacency.keys() {
+            if !visited.insert(start) {
+                continue;
+            }
+            let mut stack = vec![start];
+            let mut vertices = 0usize;
+            let mut degree_sum = 0usize;
+            let mut component = Vec::new();
+            while let Some(vertex) = stack.pop() {
+                vertices += 1;
+                component.push(vertex);
+                let neighbours = &boundary_adjacency[&vertex];
+                degree_sum += neighbours.len();
+                for &neighbour in neighbours {
+                    if visited.insert(neighbour) {
+                        stack.push(neighbour);
+                    }
+                }
+            }
+            if vertices == 3 && degree_sum == 6 {
+                triangular_boundary_loops += 1;
+                for index in 0..3 {
+                    let a = component[index];
+                    let b = component[(index + 1) % 3];
+                    let third = component[(index + 2) % 3];
+                    let [lo, hi] = if a < b { [a, b] } else { [b, a] };
+                    triangular_hole_edges.insert((u64::from(lo) << 32) | u64::from(hi), third);
+                }
+            }
+        }
+        let mut paired_degenerate_triangles = 0usize;
+        let mut paired_zero_area_holes = std::collections::HashSet::<[u32; 3]>::new();
+        for triangle in converted.indices.chunks_exact(3) {
+            let ids = [
+                canonical_vertices[triangle[0] as usize],
+                canonical_vertices[triangle[1] as usize],
+                canonical_vertices[triangle[2] as usize],
+            ];
+            let mut distinct = ids;
+            distinct.sort_unstable();
+            let distinct_len = if distinct[0] == distinct[2] {
+                1
+            } else if distinct[0] == distinct[1] || distinct[1] == distinct[2] {
+                2
+            } else {
+                3
+            };
+            if distinct_len == 2 {
+                let a = distinct[0];
+                let b = distinct[2];
+                let edge = (u64::from(a) << 32) | u64::from(b);
+                paired_degenerate_triangles +=
+                    usize::from(triangular_hole_edges.contains_key(&edge));
+            }
+
+            let positions = [
+                converted.vertices[triangle[0] as usize].position,
+                converted.vertices[triangle[1] as usize].position,
+                converted.vertices[triangle[2] as usize].position,
+            ];
+            let ab = [
+                positions[1][0] - positions[0][0],
+                positions[1][1] - positions[0][1],
+                positions[1][2] - positions[0][2],
+            ];
+            let ac = [
+                positions[2][0] - positions[0][0],
+                positions[2][1] - positions[0][1],
+                positions[2][2] - positions[0][2],
+            ];
+            let cross = [
+                ab[1] * ac[2] - ab[2] * ac[1],
+                ab[2] * ac[0] - ab[0] * ac[2],
+                ab[0] * ac[1] - ab[1] * ac[0],
+            ];
+            if cross[0] * cross[0] + cross[1] * cross[1] + cross[2] * cross[2] > 1.0e-12 {
+                continue;
+            }
+            for [x, y] in [[ids[0], ids[1]], [ids[1], ids[2]], [ids[2], ids[0]]] {
+                if x == y {
+                    continue;
+                }
+                let [lo, hi] = if x < y { [x, y] } else { [y, x] };
+                let edge = (u64::from(lo) << 32) | u64::from(hi);
+                if let Some(&third) = triangular_hole_edges.get(&edge) {
+                    let mut hole = [lo, hi, third];
+                    hole.sort_unstable();
+                    paired_zero_area_holes.insert(hole);
+                }
+            }
+        }
         eprintln!(
-            "{}: input_triangles={}, decoded_triangles={}, miswound_before={}, miswound_after={}, unresolved_vertices={}",
+            "{}: input_triangles={}, decoded_triangles={}, duplicate_index_triangles={}, zero_area_triangles={}, miswound_before={}, miswound_after={}, boundary_edges={}, triangular_boundary_loops={}, paired_degenerate_triangles={}, paired_zero_area_holes={}, unresolved_vertices={}",
             package.name,
             resources.num_input_triangles,
             nanite.triangles.len(),
+            duplicate_index_triangles,
+            zero_area_triangles,
             miswound_triangles,
             converted_miswound_triangles,
+            boundary_edges.len(),
+            triangular_boundary_loops,
+            paired_degenerate_triangles,
+            paired_zero_area_holes.len(),
             nanite.unresolved_vertices,
         );
         assert_eq!(nanite.unresolved_vertices, 0);
         assert_eq!(nanite.triangles.len(), resources.num_input_triangles as usize);
         assert!(miswound_triangles > 0, "fixture should exercise the regression");
         assert_eq!(converted_miswound_triangles, 0);
+        assert!(
+            triangular_boundary_loops <= 1,
+            "the Nanite repair should remove the mass triangular-hole pattern"
+        );
 
-        let expected_faces = nanite
-            .triangles
-            .iter()
+        let expected_faces = converted
+            .indices
+            .chunks_exact(3)
             .filter(|triangle| {
                 triangle[0] != triangle[1]
                     && triangle[1] != triangle[2]
                     && triangle[0] != triangle[2]
             })
             .count();
+        let jms = blam_tags::iostore::actorx::static_mesh_to_jms(&converted, &[]);
+        assert_eq!(jms.triangles.len(), expected_faces);
+        let mut jms_bytes = Vec::new();
+        jms.write(&mut jms_bytes, 8213).unwrap();
+        assert!(jms_bytes.starts_with(b";### VERSION ###"));
         let output = std::env::temp_dir().join(format!(
             "baboon-spiritdropship-{}.pskx",
             uuid::Uuid::new_v4()
