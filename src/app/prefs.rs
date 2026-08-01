@@ -137,6 +137,11 @@ fn prefs_from_value(value: &Value) -> GuiPrefs {
             .and_then(Value::as_str)
             .filter(|path| !path.trim().is_empty())
             .map(PathBuf::from),
+        chimp_usmap_path: value
+            .get("chimp_usmap_path")
+            .and_then(Value::as_str)
+            .filter(|path| !path.trim().is_empty())
+            .map(PathBuf::from),
         expert_mode: value
             .get("expert_mode")
             .and_then(Value::as_bool)
@@ -477,9 +482,7 @@ fn load_custom_editing_kit_profiles(value: &Value) -> Vec<CustomEditingKitProfil
     profiles
 }
 
-fn custom_editing_kit_profiles_value(
-    profiles: &[CustomEditingKitProfile]
-) -> Vec<Value> {
+fn custom_editing_kit_profiles_value(profiles: &[CustomEditingKitProfile]) -> Vec<Value> {
     profiles
         .iter()
         .map(|profile| {
@@ -548,6 +551,7 @@ fn prefs_to_value(
         "confirm_runtime_poke": prefs.confirm_runtime_poke,
         "enable_chimp": prefs.enable_chimp,
         "chimp_output_dir": prefs.chimp_output_dir.as_ref().map(|path| path.display().to_string()),
+        "chimp_usmap_path": prefs.chimp_usmap_path.as_ref().map(|path| path.display().to_string()),
         "expert_mode": prefs.expert_mode,
         "dark_mode": prefs.dark_mode,
         "ui_scale": prefs.ui_scale,
@@ -681,8 +685,9 @@ fn parse_last_session(value: &Value) -> Option<LastSessionState> {
         // kit. They are both accepted because they were both written: v1 by
         // released Baboon, v2 by the build that added `.baboon` projects.
         1 | 2 => vec![parse_session_kit(value)?],
-        // Version 3 is that same per-kit object, once per open kit.
-        3 => value
+        // Versions 3 and 4 are that same per-kit object, once per open kit.
+        // Version 4 adds optional Chimp package tabs.
+        3 | 4 => value
             .get("kits")?
             .as_array()?
             .iter()
@@ -737,7 +742,12 @@ fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
     let browser_mode = browser_mode_from_str(value.get("browser_mode").and_then(Value::as_str));
     let browser_sort = browser_sort_from_str(value.get("browser_sort").and_then(Value::as_str));
     let mut tags = Vec::new();
-    for item in value.get("tags")?.as_array()? {
+    for item in value
+        .get("tags")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+    {
         let Some(key) = item
             .get("key")
             .and_then(Value::as_str)
@@ -767,7 +777,23 @@ fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
             path,
         });
     }
-    if tags.is_empty() && !has_project {
+    let chimp_packages = value
+        .get("chimp_packages")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|package| !package.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    let active_chimp_package = value
+        .get("active_chimp_package")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|package| chimp_packages.iter().any(|open| open == package))
+        .map(str::to_owned);
+    if tags.is_empty() && chimp_packages.is_empty() && !has_project {
         return None;
     }
     Some(LastSessionKit {
@@ -780,6 +806,8 @@ fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
         browser_mode,
         browser_sort,
         tags,
+        chimp_packages,
+        active_chimp_package,
     })
 }
 
@@ -828,11 +856,13 @@ fn session_value(session: &LastSessionState) -> Value {
                 "browser_mode": kit.browser_mode.map(browser_mode_str),
                 "browser_sort": kit.browser_sort.map(browser_sort_str),
                 "tags": tags,
+                "chimp_packages": kit.chimp_packages,
+                "active_chimp_package": kit.active_chimp_package,
             })
         })
         .collect::<Vec<_>>();
     json!({
-        "version": 3,
+        "version": 4,
         "kits": kits,
     })
 }
@@ -849,7 +879,7 @@ mod tests {
     fn last_session_v1_remains_compatible() {
         let session = parse_last_session(
             &serde_json::from_str::<Value>(
-            r#"{
+                r#"{
                 "version": 1,
                 "source": {
                     "kind": "loose_folder",
@@ -868,7 +898,10 @@ mod tests {
         .expect("version 1 session");
         // A single-source file loads as one kit.
         assert_eq!(session.kits.len(), 1);
-        assert_eq!(session.kits[0].source_kind, LastSessionSourceKind::LooseFolder);
+        assert_eq!(
+            session.kits[0].source_kind,
+            LastSessionSourceKind::LooseFolder
+        );
         assert_eq!(session.kits[0].project_path, None);
         assert_eq!(session.kits[0].tags.len(), 1);
     }
@@ -877,7 +910,7 @@ mod tests {
     fn project_pointer_survives_with_no_open_tabs() {
         let session = parse_last_session(
             &serde_json::from_str::<Value>(
-            r#"{
+                r#"{
                 "version": 2,
                 "source": {
                     "kind": "iostore_container_set",
@@ -996,9 +1029,7 @@ mod tests {
         );
         assert_eq!(
             profiles[0].icon.as_deref(),
-            Some(Path::new(
-                "editing kit icons/reach-11111111/icon-a.png"
-            ))
+            Some(Path::new("editing kit icons/reach-11111111/icon-a.png"))
         );
         assert_eq!(profiles[1].icon, None);
         #[cfg(windows)]
@@ -1088,6 +1119,7 @@ mod chimp_pref_tests {
         let prefs = prefs_from_value(&json!({}));
         assert!(prefs.enable_chimp);
         assert_eq!(prefs.chimp_output_dir, None);
+        assert_eq!(prefs.chimp_usmap_path, None);
     }
 
     #[test]
@@ -1095,6 +1127,7 @@ mod chimp_pref_tests {
         let prefs = GuiPrefs {
             enable_chimp: false,
             chimp_output_dir: Some(PathBuf::from("D:/Mods/Chimp")),
+            chimp_usmap_path: Some(PathBuf::from("D:/Mappings/Meteorite.usmap")),
             ..GuiPrefs::default()
         };
         let value = prefs_to_value(&prefs, &HashSet::new(), true);
@@ -1103,6 +1136,10 @@ mod chimp_pref_tests {
         assert_eq!(
             restored.chimp_output_dir,
             Some(PathBuf::from("D:/Mods/Chimp"))
+        );
+        assert_eq!(
+            restored.chimp_usmap_path,
+            Some(PathBuf::from("D:/Mappings/Meteorite.usmap"))
         );
     }
 }
@@ -1152,10 +1189,8 @@ mod session_tests {
         let mut custom = kit("/custom-reach", Some(BrowserMode::Folders));
         custom.game = Some("haloreach_mcc".to_owned());
         custom.profile_id = Some("11111111-1111-4111-8111-111111111111".to_owned());
-        let restored = parse_last_session(&session_value(&LastSessionState {
-            kits: vec![custom]
-        }))
-        .expect("custom profile session parses");
+        let restored = parse_last_session(&session_value(&LastSessionState { kits: vec![custom] }))
+            .expect("custom profile session parses");
         assert_eq!(
             restored.kits[0].profile_id.as_deref(),
             Some("11111111-1111-4111-8111-111111111111")
@@ -1207,7 +1242,37 @@ mod session_tests {
                 group_tag: 1,
                 path: None,
             }],
+            chimp_packages: Vec::new(),
+            active_chimp_package: None,
         }
+    }
+
+    #[test]
+    fn chimp_packages_round_trip_and_keep_an_otherwise_empty_kit() {
+        let session = LastSessionState {
+            kits: vec![LastSessionKit {
+                source_kind: LastSessionSourceKind::IoStoreContainerSet,
+                source_path: PathBuf::from("C:/game"),
+                game: Some("campaignevolved".to_owned()),
+                profile_id: None,
+                project_path: None,
+                has_project: false,
+                browser_mode: Some(BrowserMode::Folders),
+                browser_sort: Some(BrowserSort::Name),
+                tags: Vec::new(),
+                chimp_packages: vec!["/Game/Vehicles/Warthog".to_owned()],
+                active_chimp_package: Some("/Game/Vehicles/Warthog".to_owned()),
+            }],
+        };
+        let value = session_value(&session);
+        assert_eq!(value["version"], 4);
+        let restored = parse_last_session(&value).expect("session parses");
+        assert_eq!(restored.kits.len(), 1);
+        assert_eq!(restored.kits[0].chimp_packages, ["/Game/Vehicles/Warthog"]);
+        assert_eq!(
+            restored.kits[0].active_chimp_package.as_deref(),
+            Some("/Game/Vehicles/Warthog")
+        );
     }
 
     /// Each workspace keeps its own browser view, so a session holding a kit
@@ -1273,7 +1338,9 @@ mod session_tests {
         let mut stash_kit = kit("/evolved", None);
         stash_kit.has_project = true;
         stash_kit.tags.clear();
-        let session = LastSessionState { kits: vec![stash_kit] };
+        let session = LastSessionState {
+            kits: vec![stash_kit],
+        };
         let restored = parse_last_session(&session_value(&session)).expect("round trip");
         assert_eq!(restored.kits[0].project_path, None);
         assert!(restored.kits[0].has_project);

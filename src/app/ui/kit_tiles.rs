@@ -1,8 +1,8 @@
 //! Tiled layout of loaded kits: the toplevel game tabs and their splits.
 //! It owns which kit workspaces are visible and how they are arranged; one workspace's contents belong to the browser and tag-tile modules.
 
-use super::*;
 use super::recents::{RecentAction, draw_recent_folders_menu};
+use super::*;
 
 /// Which loader the "+" menu on the kit tab bar should start.
 #[derive(Clone, Copy)]
@@ -56,9 +56,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
         let campaign_evolved = self.app.kits[kit_index]
             .source
             .as_ref()
-            .is_some_and(|source| {
-                matches!(&source.source, TagSource::IoStoreContainerSet { .. })
-            });
+            .is_some_and(|source| matches!(&source.source, TagSource::IoStoreContainerSet { .. }));
         if campaign_evolved && self.app.enable_chimp {
             Frame::none()
                 .fill(menu_bar())
@@ -72,23 +70,18 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new("Campaign Evolved").strong());
                         ui.separator();
-                        ui.selectable_value(
-                            &mut self.app.kits[kit_index].surface,
-                            KitSurface::Chimp,
-                            "Chimp",
-                        )
-                        .on_hover_text("Browse and edit Unreal Engine packages");
-                        ui.selectable_value(
-                            &mut self.app.kits[kit_index].surface,
-                            KitSurface::Tags,
-                            "Tags",
-                        )
-                        .on_hover_text("Browse and edit Halo tags");
+                        for (surface, label, hover) in KitSurface::TABS {
+                            ui.selectable_value(
+                                &mut self.app.kits[kit_index].surface,
+                                surface,
+                                label,
+                            )
+                            .on_hover_text(hover);
+                        }
                     });
                 });
             if self.app.kits[kit_index].surface == KitSurface::Chimp {
-                self.app
-                    .draw_chimp_workspace(ui, &self.ctx, kit_index);
+                self.app.draw_chimp_workspace(ui, &self.ctx, kit_index);
                 return egui_tiles::UiResponse::None;
             }
         }
@@ -127,11 +120,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
         let kit = &self.app.kits[index];
         let dirty = kit.has_unwritten_modifications();
         let label = kit_strip_label(kit);
-        let text = if dirty {
-            format!("• {label}")
-        } else {
-            label
-        };
+        let text = if dirty { format!("• {label}") } else { label };
         RichText::new(text).color(text_dark()).strong().into()
     }
 
@@ -219,7 +208,11 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
         tile_id: egui_tiles::TileId,
         state: &egui_tiles::TabState,
     ) -> Color32 {
-        let base = if state.active { menu_bar() } else { left_panel() };
+        let base = if state.active {
+            menu_bar()
+        } else {
+            left_panel()
+        };
         let dirty = matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Pane(kit_id))
             if self.app.kit_index(*kit_id)
                 .is_some_and(|index| self.app.kits[index].has_unwritten_modifications()));

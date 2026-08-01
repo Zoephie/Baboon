@@ -39,11 +39,11 @@ use serde_json::{Value, json};
 use crate::format::{TagNameIndex, format_value, group_label};
 use crate::source::{
     DependencyRef, EkFolderAlias, EntryIndexRefresh, LoadedSourceData, ReverseDependencyIndex,
-    SUPPORTED_EK_GAMES, TagEntry, TagEntryLocation, TagSource, TagTree, TagTreeNode, load_folder,
-    load_editing_kit_layout, load_folder_node_entries, load_iostore_container, load_iostore_container_set,
-    load_monolithic_blob_index, load_single_file, loose_file_entry, read_entry,
-    resolve_folder_root, scan_folder_subtree_entries, scan_folder_subtree_entries_with_progress,
-    supported_ek_game_id,
+    SUPPORTED_EK_GAMES, TagEntry, TagEntryLocation, TagSource, TagTree, TagTreeNode,
+    load_editing_kit_layout, load_folder, load_folder_node_entries, load_iostore_container,
+    load_iostore_container_set, load_monolithic_blob_index, load_single_file, loose_file_entry,
+    read_entry, resolve_folder_root, scan_folder_subtree_entries,
+    scan_folder_subtree_entries_with_progress, supported_ek_game_id,
 };
 
 pub(super) const BABOON_GITHUB_URL: &str = "https://github.com/Zoephie/Baboon";
@@ -67,8 +67,8 @@ use game_assets::*;
 mod editing_kits;
 use editing_kits::*;
 mod launch;
-pub(crate) use launch::{parse_startup_arguments, StartupArguments};
-use launch::{resolve_launch_tag_entries, CommandLineLaunch};
+use launch::{CommandLineLaunch, resolve_launch_tag_entries};
+pub(crate) use launch::{StartupArguments, parse_startup_arguments};
 mod style;
 use style::*;
 mod state;
@@ -202,6 +202,9 @@ pub struct Baboon {
     enable_chimp: bool,
     /// Optional directory for Chimp's non-destructive `_P` output.
     chimp_output_dir: Option<PathBuf>,
+    /// Optional external Unreal mappings used when Chimp mounts CE packages.
+    chimp_usmap_path: Option<PathBuf>,
+    chimp_usmap_path_input: String,
     expert_mode: bool,
     dark_mode: bool,
     ui_scale: f32,
@@ -437,6 +440,12 @@ impl Baboon {
             confirm_runtime_poke: prefs.confirm_runtime_poke,
             enable_chimp: prefs.enable_chimp,
             chimp_output_dir: prefs.chimp_output_dir.clone(),
+            chimp_usmap_path: prefs.chimp_usmap_path.clone(),
+            chimp_usmap_path_input: prefs
+                .chimp_usmap_path
+                .as_ref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_default(),
             expert_mode: prefs.expert_mode,
             dark_mode: prefs.dark_mode,
             ui_scale: prefs.ui_scale,
@@ -629,7 +638,10 @@ impl Baboon {
         profile: &CustomEditingKitProfile,
     ) -> Option<&egui::TextureHandle> {
         let relative = profile.icon.as_deref()?;
-        if self.custom_editing_kit_texture_failures.contains(&profile.id) {
+        if self
+            .custom_editing_kit_texture_failures
+            .contains(&profile.id)
+        {
             return None;
         }
         if !self.custom_editing_kit_textures.contains_key(&profile.id) {
@@ -637,11 +649,7 @@ impl Baboon {
                 .ok()
                 .and_then(|absolute| fs::read(absolute).ok())
                 .and_then(|bytes| {
-                    load_png_texture(
-                        ctx,
-                        &format!("custom_editing_kit_{}", profile.id),
-                        &bytes,
-                    )
+                    load_png_texture(ctx, &format!("custom_editing_kit_{}", profile.id), &bytes)
                 });
             let Some(texture) = texture else {
                 self.custom_editing_kit_texture_failures
@@ -779,8 +787,7 @@ fn load_png_texture(ctx: &egui::Context, name: &str, bytes: &[u8]) -> Option<egu
     Some(ctx.load_texture(
         name,
         color,
-        egui::TextureOptions::LINEAR
-            .with_mipmap_mode(Some(egui::TextureFilter::Linear)),
+        egui::TextureOptions::LINEAR.with_mipmap_mode(Some(egui::TextureFilter::Linear)),
     ))
 }
 

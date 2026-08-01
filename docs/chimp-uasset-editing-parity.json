@@ -1,0 +1,30 @@
+{
+  "scope": "Campaign Evolved UE5.5 packages decoded with the selected USMAP",
+  "references": {
+    "UAssetAPI": "33ef77e5a309062ea80b4a939f34ae8579c2d3bb",
+    "UAssetGUI": "1338f79defb0db5a0b98918780f59686400e4cf1"
+  },
+  "policy": "A value is editable only when Chimp has a typed decoder, validator, symmetric writer, and reopen coverage. Unknown bytes remain read-only and byte-preserved.",
+  "property_coverage": {
+    "scalars": "editable",
+    "names_and_strings": "editable_with_name_interning_and_encoding_preservation",
+    "object_references": "editable_as_package_index; searchable cross-package rebinding remains tracked",
+    "soft_object_references": "editable",
+    "reflected_structs": "editable",
+    "native_structs": "editable",
+    "hand_written_structures": "editable_for_typed_fields; embedded_unknown_byte_payloads_read_only",
+    "arrays_sets_maps": "editable_with_schema_aware_insertion_reorder_and_duplicate_validation",
+    "optional_delegate_multicast_field_path": "editable",
+    "static_arrays_and_cooker_omissions": "editable_through_schema_slot_insertion",
+    "unknown_or_untyped_bytes": "read_only_preserved"
+  },
+  "save_coverage": {
+    "ctrl_s_surface_routing": "implemented",
+    "all_dirty_export_mod": "implemented_with_priority_suffix_collision_confirmation_and_reopen_validation",
+    "all_dirty_source_overwrite": "implemented_with_per_container_batching_validation_and_cross_container_utoc_rollback",
+    "specialized_export_payloads": "tracked",
+    "package_name_import_export_metadata": "tracked",
+    "data_tables_and_property_bags": "typed_fields_editable; corpus parity tracked",
+    "structured_kismet_instructions": "tracked"
+  }
+}

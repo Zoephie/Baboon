@@ -1,8 +1,8 @@
 //! Main application shell: menus, toolbar, sidebar, tabs, terminal, and status areas.
 //! It owns immediate-mode presentation and request collection; tag mutation, persistence, and source I/O belong to their owning subsystems.
 
-use super::*;
 use super::recents::draw_recent_folders_menu;
+use super::*;
 
 impl Baboon {
     pub(super) fn draw_root_ui(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
@@ -124,7 +124,7 @@ impl Baboon {
                         let save_label = if self.enable_chimp
                             && self.kits[self.active].surface == KitSurface::Chimp
                         {
-                            "Build Chimp Mod    Ctrl+S"
+                            "Save Chimp Changes...    Ctrl+S"
                         } else {
                             "Save Current Tag    Ctrl+S"
                         };
@@ -1206,7 +1206,6 @@ impl Baboon {
         self.process_pending_tool_import(ctx);
     }
 
-
     /// Clear the status line once its message has been up for a while.
     ///
     /// Runs after the worker drain so a message set this frame is timed from
@@ -1237,10 +1236,9 @@ impl Baboon {
     pub(super) fn run_deferred_file_action(&mut self, ctx: &egui::Context) {
         match self.deferred_file_action.take() {
             Some(DeferredFileAction::SaveCurrentTag)
-                if self.enable_chimp
-                    && self.kits[self.active].surface == KitSurface::Chimp =>
+                if self.enable_chimp && self.kits[self.active].surface == KitSurface::Chimp =>
             {
-                self.build_chimp_mod(self.active, ctx.clone())
+                self.open_chimp_save_dialog(self.active)
             }
             Some(DeferredFileAction::SaveCurrentTag) => self.save_current_tag(),
             Some(DeferredFileAction::SaveProject) => {
@@ -1323,6 +1321,7 @@ impl Baboon {
         self.draw_import_tag_window(ctx);
         self.draw_import_discard_confirm(ctx);
         self.draw_overwrite_confirm_window(ctx);
+        self.draw_chimp_save_window(ctx);
         self.draw_clear_stash_confirm_window(ctx);
         self.draw_mod_export_window(ctx);
         self.draw_exported_mod_window(ctx);

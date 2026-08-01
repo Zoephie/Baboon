@@ -113,7 +113,7 @@ pub(in crate::app) struct BitmapPreviewData {
 
 /// One differing leaf field between two compared tags (Tag Diff).
 
-/// Cross-frame model selection, camera, and projected-geometry cache.
+/// Cross-frame model selection and camera state.
 /// `loaded_key` prevents data and variant choices from being reused for a newly
 /// selected document whose preview has not yet been resolved.
 pub(in crate::app) struct ModelPreviewState {
@@ -124,14 +124,13 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) new_variant_name: String,
     pub(in crate::app) selected_variant: Option<usize>,
     pub(in crate::app) region_selections: HashMap<String, ModelRegionSelection>,
-    pub(in crate::app) projected_triangles: Vec<ModelProjectedTriangle>,
     pub(in crate::app) show_markers: bool,
     /// Case-insensitive substring filter on marker names (empty = show all).
     /// Only applied while `show_markers` is on.
     pub(in crate::app) marker_filter: String,
     /// Campaign Evolved only: decode the full-resolution **Nanite** geometry for
-    /// static mesh pieces instead of the coarse LOD fallback. Off by default —
-    /// a full model can be millions of triangles (slow to decode + render).
+    /// static mesh pieces instead of the coarse LOD fallback. On by default for
+    /// faithful previews; users can disable it for unusually heavy models.
     pub(in crate::app) high_detail: bool,
     /// The `high_detail` value the cached `data` was built with, so toggling it
     /// invalidates the cache and reloads.
@@ -154,10 +153,9 @@ impl Default for ModelPreviewState {
             new_variant_name: String::new(),
             selected_variant: None,
             region_selections: HashMap::new(),
-            projected_triangles: Vec::new(),
             show_markers: false,
             marker_filter: String::new(),
-            high_detail: false,
+            high_detail: true,
             loaded_high_detail: false,
             render_mode: ModelRenderMode::Shaded,
             show_backfaces: false,
@@ -231,13 +229,16 @@ pub(in crate::app) struct ModelRegionSelection {
 }
 
 #[derive(Clone)]
-/// Source geometry and resolved variants used to rebuild projected triangles.
-/// It remains independent of camera state so view changes do not reload tags.
+/// Source geometry and resolved variants used by the shared GPU renderer.
 pub(in crate::app) struct ModelPreviewData {
     pub(in crate::app) source_key: String,
     pub(in crate::app) render_model_path: String,
-    pub(in crate::app) preview: RenderModelPreview,
-    pub(in crate::app) draw_triangles: Vec<ModelSourceTriangle>,
+    /// Shared so the deferred Glow callback can retain the immutable source
+    /// geometry without cloning dense vertex/index buffers every frame.
+    pub(in crate::app) preview: std::sync::Arc<RenderModelPreview>,
+    /// Monotonic identity used by the shared GL upload cache. Unlike a pointer,
+    /// it cannot be accidentally reused after a preview reload.
+    pub(in crate::app) geometry_id: u64,
     pub(in crate::app) variants: Vec<ModelVariantPreview>,
 }
 
@@ -253,18 +254,4 @@ pub(in crate::app) struct ModelVariantPreview {
     /// back to its base permutation (e.g. major elite helmet → base), rather than
     /// being hidden. Distinguishes "removed" from "not customised".
     pub(in crate::app) listed_regions: std::collections::HashSet<String>,
-}
-
-#[derive(Clone, Copy)]
-pub(in crate::app) struct ModelSourceTriangle {
-    pub(in crate::app) batch_index: usize,
-    pub(in crate::app) positions: [[f32; 3]; 3],
-    pub(in crate::app) normals: [[f32; 3]; 3],
-    pub(in crate::app) fill: Color32,
-}
-
-pub(in crate::app) struct ModelProjectedTriangle {
-    pub(in crate::app) points: [egui::Pos2; 3],
-    pub(in crate::app) depth: f32,
-    pub(in crate::app) fills: [Color32; 3],
 }

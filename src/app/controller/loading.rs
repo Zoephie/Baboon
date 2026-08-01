@@ -77,12 +77,15 @@ impl Baboon {
         let campaign_evolved = self.kits[installed]
             .source
             .as_ref()
-            .is_some_and(|source| {
-                matches!(&source.source, TagSource::IoStoreContainerSet { .. })
-            });
-        if campaign_evolved && self.enable_chimp {
-            self.kits[installed].surface = KitSurface::Chimp;
-            self.begin_chimp_mount(installed, ctx.clone());
+            .is_some_and(|source| matches!(&source.source, TagSource::IoStoreContainerSet { .. }));
+        if campaign_evolved {
+            // Tags is the primary Campaign Evolved workspace. Chimp still
+            // mounts eagerly when enabled so it is ready if the user selects
+            // it, but loading a project must not switch surfaces implicitly.
+            self.kits[installed].surface = campaign_evolved_surface_on_load();
+            if self.enable_chimp {
+                self.begin_chimp_mount(installed, ctx.clone());
+            }
         }
         self.refreshing_entry_index = false;
         self.building_reverse_dependencies = false;
@@ -92,7 +95,8 @@ impl Baboon {
         let loose_folder_source = self.source().is_some_and(|source| {
             source.game.is_some() && matches!(source.source, TagSource::LooseFolder { .. })
         });
-        let has_cached_entries = self.source()
+        let has_cached_entries = self
+            .source()
             .is_some_and(|source| !source.all_entries.is_empty());
         if loose_folder_source {
             if has_cached_entries {
@@ -163,7 +167,10 @@ impl Baboon {
                         let entries = source.all_entries.clone();
                         let tx = self.tx.clone();
                         let ctx = ctx.clone();
-                        let stamp = KitStamp { kit: kit.id, generation: kit.generation, };
+                        let stamp = KitStamp {
+                            kit: kit.id,
+                            generation: kit.generation,
+                        };
                         let path = crate::source::index_db_path();
                         thread::spawn(move || {
                             let result = crate::source::save_entry_index(&game, &root, &entries)
@@ -236,6 +243,20 @@ impl Baboon {
             Err(error) => self.status = format!("Index refresh failed: {error}"),
         }
         false
+    }
+}
+
+fn campaign_evolved_surface_on_load() -> KitSurface {
+    KitSurface::Tags
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn campaign_evolved_projects_open_on_tags() {
+        assert_eq!(campaign_evolved_surface_on_load(), KitSurface::Tags);
     }
 }
 

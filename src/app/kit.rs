@@ -149,6 +149,11 @@ pub(super) struct Kit {
     /// finishes loading. Held per kit rather than in one shared slot so
     /// several kits can restore concurrently and finish in any order.
     pub(super) pending_restore_tags: Vec<LastSessionTag>,
+    /// Chimp packages staged by session restore until the Unreal container
+    /// world has mounted. Kept separate from tag restoration so Tags remains
+    /// the initial surface.
+    pub(super) pending_restore_chimp_packages: Vec<String>,
+    pub(super) pending_restore_active_chimp_package: Option<String>,
     /// Loose tag paths requested on the command line, drained after this kit's
     /// editing-kit source finishes loading.
     pub(super) pending_launch_tags: Option<Vec<PathBuf>>,
@@ -195,6 +200,8 @@ impl Kit {
             surface: KitSurface::Tags,
             chimp: ChimpState::default(),
             pending_restore_tags: Vec::new(),
+            pending_restore_chimp_packages: Vec::new(),
+            pending_restore_active_chimp_package: None,
             pending_launch_tags: None,
         }
     }
@@ -206,7 +213,9 @@ impl Kit {
     /// computed separately and drifted apart — closing the last stashed tag
     /// left the dot showing while the colour went back to clean.
     pub(super) fn has_unwritten_modifications(&self) -> bool {
-        self.parsed_tags.values().any(|document| document.dirty.is_set())
+        self.parsed_tags
+            .values()
+            .any(|document| document.dirty.is_set())
             || self.chimp.documents.values().any(|document| document.dirty)
             || self
                 .campaign_project
@@ -293,8 +302,9 @@ impl Baboon {
                 // A split needs no help here — both panes are already visible,
                 // and `make_active` leaves a pane that is not in a tab group
                 // alone.
-                self.kit_tree
-                    .make_active(|_, tile| matches!(tile, egui_tiles::Tile::Pane(id) if *id == kit),);
+                self.kit_tree.make_active(
+                    |_, tile| matches!(tile, egui_tiles::Tile::Pane(id) if *id == kit),
+                );
                 true
             }
             None => false,
@@ -421,6 +431,10 @@ impl Baboon {
         let requested_path = self.kits[index].requested_path.clone();
         let profile = self.kits[index].profile.clone();
         let pending_restore_tags = std::mem::take(&mut self.kits[index].pending_restore_tags);
+        let pending_restore_chimp_packages =
+            std::mem::take(&mut self.kits[index].pending_restore_chimp_packages);
+        let pending_restore_active_chimp_package =
+            self.kits[index].pending_restore_active_chimp_package.take();
         let pending_launch_tags = self.kits[index].pending_launch_tags.take();
         let pending_campaign_project =
             std::mem::take(&mut self.kits[index].pending_campaign_project);
@@ -437,6 +451,8 @@ impl Baboon {
             browser_mode,
             browser_sort,
             pending_restore_tags,
+            pending_restore_chimp_packages,
+            pending_restore_active_chimp_package,
             pending_launch_tags,
             pending_campaign_project,
             ..Kit::empty(id, self.default_names.clone())
@@ -445,7 +461,9 @@ impl Baboon {
 }
 
 fn kit_has_dirty_documents(kit: &Kit) -> bool {
-    kit.parsed_tags.values().any(|document| document.dirty.is_set())
+    kit.parsed_tags
+        .values()
+        .any(|document| document.dirty.is_set())
         || kit.chimp.documents.values().any(|document| document.dirty)
 }
 
@@ -478,7 +496,7 @@ fn active_after_removal(active: usize, removed: usize, new_len: usize) -> usize 
 
 #[cfg(test)]
 mod tests {
-    use super::{ Kit, KitId, active_after_removal};
+    use super::{Kit, KitId, active_after_removal};
     use std::collections::HashMap;
 
     /// A folder move rewrites tag keys underneath the open tabs. The tree is
@@ -634,7 +652,10 @@ impl Kit {
         let tile_id = self.tag_tree.tiles.insert_pane(key.to_owned());
         match self.tag_tree.root() {
             Some(root) => {
-                let split = self.tag_tree.tiles.insert_horizontal_tile(vec![root, tile_id]);
+                let split = self
+                    .tag_tree
+                    .tiles
+                    .insert_horizontal_tile(vec![root, tile_id]);
                 self.tag_tree.root = Some(split);
             }
             None => self.tag_tree.root = Some(tile_id),
@@ -652,9 +673,12 @@ impl Kit {
     }
 
     fn tile_for_key(&self, key: &str) -> Option<egui_tiles::TileId> {
-        self.tag_tree.tiles.iter().find_map(|(id, tile)| match tile {
-            egui_tiles::Tile::Pane(pane) if pane == key => Some(*id),
-            _ => None,
-        })
+        self.tag_tree
+            .tiles
+            .iter()
+            .find_map(|(id, tile)| match tile {
+                egui_tiles::Tile::Pane(pane) if pane == key => Some(*id),
+                _ => None,
+            })
     }
 }

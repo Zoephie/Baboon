@@ -23,8 +23,7 @@ unsafe extern "system" {
 fn main() -> Result<()> {
     set_windows_app_user_model_id();
     let startup_arguments = app::parse_startup_arguments(std::env::args_os().skip(1));
-    let window_state::StartupWindowState { restored, tracker } =
-        window_state::load_startup_state();
+    let window_state::StartupWindowState { restored, tracker } = window_state::load_startup_state();
     let mut viewport = eframe::egui::ViewportBuilder::default()
         .with_inner_size(window_state::DEFAULT_INNER_SIZE)
         .with_min_inner_size(window_state::MIN_INNER_SIZE)
@@ -47,19 +46,16 @@ fn main() -> Result<()> {
     let native_options = eframe::NativeOptions {
         viewport,
         renderer: eframe::Renderer::Glow,
+        // The shared model viewport renders through an egui Glow callback and
+        // relies on hardware depth testing for dense, overlapping geometry.
+        depth_buffer: 24,
         ..Default::default()
     };
 
     eframe::run_native(
         "Baboon",
         native_options,
-        Box::new(move |cc| {
-            Ok(Box::new(app::Baboon::new(
-                cc,
-                tracker,
-                startup_arguments,
-            )))
-        }),
+        Box::new(move |cc| Ok(Box::new(app::Baboon::new(cc, tracker, startup_arguments)))),
     )
     .map_err(|e| anyhow::anyhow!("{e}"))
 }

@@ -68,15 +68,12 @@ pub(super) fn load_model_preview(
         if preview.batches.is_empty() {
             return Err("This render tag has no previewable draw batches.".to_owned());
         }
-        let max_preview_edge = preview_edge_limit(preview.bounds_min, preview.bounds_max);
-        let draw_triangles = build_model_source_triangles(&preview, max_preview_edge);
-        return Ok(ModelPreviewData {
-            source_key: entry.key.clone(),
-            render_model_path: entry.display_path.clone(),
+        return Ok(model_preview_data(
+            entry.key.clone(),
+            entry.display_path.clone(),
             preview,
-            draw_triangles,
-            variants: Vec::new(),
-        });
+            Vec::new(),
+        ));
     }
 
     // Halo: Campaign Evolved — the `.model` (hlmt) has no `render model` ref;
@@ -124,15 +121,12 @@ pub(super) fn load_model_preview(
     if preview.batches.is_empty() {
         return Err("Referenced render_model has no previewable draw batches.".to_owned());
     }
-    let max_preview_edge = preview_edge_limit(preview.bounds_min, preview.bounds_max);
-    let draw_triangles = build_model_source_triangles(&preview, max_preview_edge);
-    Ok(ModelPreviewData {
-        source_key: render_entry.key,
-        render_model_path: normalized,
+    Ok(model_preview_data(
+        render_entry.key,
+        normalized,
         preview,
-        draw_triangles,
-        variants: read_model_variants(model_tag),
-    })
+        read_model_variants(model_tag),
+    ))
 }
 
 /// Build preview geometry from a render-geometry tag — a `render_model`
@@ -172,7 +166,12 @@ pub(super) fn load_campaign_evolved_preview(
         return None;
     }
     Some(build_campaign_evolved_preview(
-        model_tag, entry, src, containers, &skel_ref, high_detail,
+        model_tag,
+        entry,
+        src,
+        containers,
+        &skel_ref,
+        high_detail,
     ))
 }
 
@@ -203,7 +202,8 @@ fn build_campaign_evolved_preview(
     // 3. Read the hlmt variants (region→permutation): the set of
     //    (region, perm) pairs any variant activates.
     let variants = read_model_variants(model_tag);
-    let mut needed: std::collections::BTreeSet<(String, String)> = std::collections::BTreeSet::new();
+    let mut needed: std::collections::BTreeSet<(String, String)> =
+        std::collections::BTreeSet::new();
     for v in &variants {
         for (region, perm) in &v.regions {
             if !perm.is_empty() {
@@ -220,7 +220,10 @@ fn build_campaign_evolved_preview(
         Some(regions) => {
             // `high_detail` decodes the full-resolution Nanite geometry (slow,
             // millions of tris); otherwise the coarse LOD fallback (fast).
-            (ce_collect_parts_from_regions(containers, &regions, &needed, high_detail), format!("meshsync:{model_key}"),)
+            (
+                ce_collect_parts_from_regions(containers, &regions, &needed, high_detail),
+                format!("meshsync:{model_key}"),
+            )
         }
         None => (CeMeshes::default(), String::new()),
     };
@@ -241,7 +244,13 @@ fn build_campaign_evolved_preview(
             }
         })?;
         let skeletal = ce_load_variant_meshes(containers, &char_root, &needed);
-        (CeMeshes { skeletal, ..Default::default() }, char_root,)
+        (
+            CeMeshes {
+                skeletal,
+                ..Default::default()
+            },
+            char_root,
+        )
     } else {
         (meshes, render_path)
     };
@@ -249,7 +258,14 @@ fn build_campaign_evolved_preview(
     // (DT_MetaHumanHeads), not the mesh-sync path — resolve and fuse it in.
     let mut meshes = meshes;
     let head_node = ce_head_node_name(&skel);
-    ce_add_metahuman_head(containers, &model_key, &needed, &head_node, &mut meshes);
+    ce_add_metahuman_head(
+        containers,
+        &model_key,
+        &needed,
+        &head_node,
+        high_detail,
+        &mut meshes,
+    );
     if meshes.is_empty() {
         return Err("No UE meshes resolved for this model.".to_owned());
     }
@@ -267,38 +283,52 @@ fn build_campaign_evolved_preview(
     let static_parts: Vec<UeStaticPart> = meshes
         .statics
         .iter()
-        .map(|(region, perm, name, mesh, bone, mats, xf, wa)| UeStaticPart {
-            mesh: &**mesh,
-            bone_name: bone.clone(),
-            region: region.clone(),
-            permutation: perm.clone(),
-            name: name.clone(),
-            material_names: mats.clone(),
-            rel_transform: *xf,
-            world_anchor: *wa,
-        },)
+        .map(
+            |(region, perm, name, mesh, bone, mats, xf, wa)| UeStaticPart {
+                mesh: &**mesh,
+                bone_name: bone.clone(),
+                region: region.clone(),
+                permutation: perm.clone(),
+                name: name.clone(),
+                material_names: mats.clone(),
+                rel_transform: *xf,
+                world_anchor: *wa,
+            },
+        )
         .collect();
     let world_parts: Vec<UeWorldPart> = meshes
         .world
         .iter()
-        .map(|(region, perm, name, mesh, node, mats, anchor)| UeWorldPart {
-            mesh: &**mesh,
-            node_name: node.clone(),
-            head_anchor: *anchor,
-            region: region.clone(),
-            permutation: perm.clone(),
-            name: name.clone(),
-            material_names: mats.clone(),
-        },)
+        .map(
+            |(region, perm, name, mesh, node, mats, anchor)| UeWorldPart {
+                mesh: &**mesh,
+                node_name: node.clone(),
+                head_anchor: *anchor,
+                region: region.clone(),
+                permutation: perm.clone(),
+                name: name.clone(),
+                material_names: mats.clone(),
+            },
+        )
         .collect();
 
     // 5. Reconstruct the cross-game RenderModel and run the standard pipeline.
     let (render_model, render_meshes) =
-        RenderModel::from_ue_meshes(&parts, &static_parts, &world_parts, &skel).map_err(|e| e.to_string())?;
+        RenderModel::from_ue_meshes(&parts, &static_parts, &world_parts, &skel)
+            .map_err(|e| e.to_string())?;
     if std::env::var("CE_DEBUG").is_ok() {
-        let skel_nodes = skel.root().field_path("nodes").and_then(|f| f.as_block()).map(|b| b.len()).unwrap_or(0);
+        let skel_nodes = skel
+            .root()
+            .field_path("nodes")
+            .and_then(|f| f.as_block())
+            .map(|b| b.len())
+            .unwrap_or(0);
         eprintln!("[CE] skel_ref='{skel_ref}' skel_nodes={skel_nodes}");
-        eprintln!("[CE] skeletal parts: {}, static parts: {}", parts.len(), static_parts.len());
+        eprintln!(
+            "[CE] skeletal parts: {}, static parts: {}",
+            parts.len(),
+            static_parts.len()
+        );
         for (i, m) in render_meshes.iter().enumerate() {
             let (mut mn, mut mx) = ([f32::MAX; 3], [f32::MIN; 3]);
             for v in &m.vertices {
@@ -311,14 +341,21 @@ fn build_campaign_evolved_preview(
             eprintln!(
                 "[CE] mesh[{i}] {} verts center[{:.2} {:.2} {:.2}] extent[{:.2} {:.2} {:.2}] rigid_node={:?}",
                 m.vertices.len(),
-                (mn[0] + mx[0]) / 2.0, (mn[1] + mx[1]) / 2.0, (mn[2] + mx[2]) / 2.0,
-                mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2],
+                (mn[0] + mx[0]) / 2.0,
+                (mn[1] + mx[1]) / 2.0,
+                (mn[2] + mx[2]) / 2.0,
+                mx[0] - mn[0],
+                mx[1] - mn[1],
+                mx[2] - mn[2],
                 m.rigid_node_index,
             );
         }
         for r in &render_model.regions {
             for p in &r.permutations {
-                eprintln!("[CE] region '{}' perm '{}' idx={} count={}", r.name, p.name, p.mesh_index, p.mesh_count);
+                eprintln!(
+                    "[CE] region '{}' perm '{}' idx={} count={}",
+                    r.name, p.name, p.mesh_index, p.mesh_count
+                );
             }
         }
     }
@@ -326,15 +363,12 @@ fn build_campaign_evolved_preview(
     if preview.batches.is_empty() {
         return Err("Reconstructed CE model has no previewable geometry.".to_owned());
     }
-    let max_preview_edge = preview_edge_limit(preview.bounds_min, preview.bounds_max);
-    let draw_triangles = build_model_source_triangles(&preview, max_preview_edge);
-    Ok(ModelPreviewData {
-        source_key: entry.key.clone(),
-        render_model_path: render_path,
+    Ok(model_preview_data(
+        entry.key.clone(),
+        render_path,
         preview,
-        draw_triangles,
         variants,
-    })
+    ))
 }
 
 /// Build a full-resolution JMS for a Campaign Evolved `hlmt` model by fusing
@@ -364,7 +398,8 @@ pub(in crate::app) fn campaign_evolved_render_jms(
     let model_key = stem.rsplit("tags/").next().unwrap_or(stem).to_string();
 
     let variants = read_model_variants(model_tag);
-    let mut needed: std::collections::BTreeSet<(String, String)> = std::collections::BTreeSet::new();
+    let mut needed: std::collections::BTreeSet<(String, String)> =
+        std::collections::BTreeSet::new();
     for v in &variants {
         for (region, perm) in &v.regions {
             if !perm.is_empty() {
@@ -378,8 +413,8 @@ pub(in crate::app) fn campaign_evolved_render_jms(
         None => CeMeshes::default(),
     };
     let meshes = if meshes.is_empty() {
-        let char_root = ce_find_character_root(containers, &model_key).ok_or_else(||
-            "No MeshSynchronization data asset references this model.".to_owned())?;
+        let char_root = ce_find_character_root(containers, &model_key)
+            .ok_or_else(|| "No MeshSynchronization data asset references this model.".to_owned())?;
         CeMeshes {
             skeletal: ce_load_variant_meshes(containers, &char_root, &needed),
             ..Default::default()
@@ -389,7 +424,14 @@ pub(in crate::app) fn campaign_evolved_render_jms(
     };
     let mut meshes = meshes;
     let head_node = ce_head_node_name(&skel);
-    ce_add_metahuman_head(containers, &model_key, &needed, &head_node, &mut meshes);
+    ce_add_metahuman_head(
+        containers,
+        &model_key,
+        &needed,
+        &head_node,
+        true,
+        &mut meshes,
+    );
     if meshes.is_empty() {
         return Err("No UE meshes resolved for this model.".to_owned());
     }
@@ -408,33 +450,95 @@ pub(in crate::app) fn campaign_evolved_render_jms(
     let static_parts: Vec<UeStaticPart> = meshes
         .statics
         .iter()
-        .map(|(region, perm, name, mesh, bone, mats, xf, wa)| UeStaticPart {
-            mesh: &**mesh,
-            bone_name: bone.clone(),
-            region: region.clone(),
-            permutation: perm.clone(),
-            name: name.clone(),
-            material_names: mats.clone(),
-            rel_transform: *xf,
-            world_anchor: *wa,
-        },)
+        .map(
+            |(region, perm, name, mesh, bone, mats, xf, wa)| UeStaticPart {
+                mesh: &**mesh,
+                bone_name: bone.clone(),
+                region: region.clone(),
+                permutation: perm.clone(),
+                name: name.clone(),
+                material_names: mats.clone(),
+                rel_transform: *xf,
+                world_anchor: *wa,
+            },
+        )
         .collect();
     let world_parts: Vec<UeWorldPart> = meshes
         .world
         .iter()
-        .map(|(region, perm, name, mesh, node, mats, anchor)| UeWorldPart {
-            mesh: &**mesh,
-            node_name: node.clone(),
-            head_anchor: *anchor,
-            region: region.clone(),
-            permutation: perm.clone(),
-            name: name.clone(),
-            material_names: mats.clone(),
-        },)
+        .map(
+            |(region, perm, name, mesh, node, mats, anchor)| UeWorldPart {
+                mesh: &**mesh,
+                node_name: node.clone(),
+                head_anchor: *anchor,
+                region: region.clone(),
+                permutation: perm.clone(),
+                name: name.clone(),
+                material_names: mats.clone(),
+            },
+        )
         .collect();
 
-    blam_tags::jms::JmsFile::from_ue_meshes(&parts, &static_parts, &world_parts, &skel)
-        .map_err(|e| e.to_string())
+    let mut jms =
+        blam_tags::jms::JmsFile::from_ue_meshes(&parts, &static_parts, &world_parts, &skel)
+            .map_err(|e| e.to_string())?;
+    apply_chimp_jms_uv_conventions(&mut jms, &meshes)?;
+    Ok(jms)
+}
+
+/// The composite CE exporter must retain its classic skeleton retargeting and
+/// region/permutation material cells. UV orientation and wrapping are safe to
+/// take directly from Chimp's standalone converters; positions, normals and
+/// weights remain assembly-specific because they must be retargeted to the tag
+/// skeleton. The composite builder emits vertices in the same part order used
+/// here.
+fn apply_chimp_jms_uv_conventions(
+    target: &mut blam_tags::jms::JmsFile,
+    meshes: &CeMeshes,
+) -> Result<(), String> {
+    let mut vertex_offset = 0usize;
+
+    for (_, _, _, mesh, materials) in &meshes.skeletal {
+        let source = crate::app::chimp::chimp_skeletal_mesh_to_jms(mesh, materials);
+        copy_chimp_jms_uvs(target, vertex_offset, &source)?;
+        vertex_offset = vertex_offset.saturating_add(source.vertices.len());
+    }
+    for (_, _, _, mesh, _, materials, _, _) in &meshes.statics {
+        let source = crate::app::chimp::chimp_static_mesh_to_jms(mesh, materials);
+        copy_chimp_jms_uvs(target, vertex_offset, &source)?;
+        vertex_offset = vertex_offset.saturating_add(source.vertices.len());
+    }
+    for (_, _, _, mesh, _, materials, _) in &meshes.world {
+        let source = crate::app::chimp::chimp_skeletal_mesh_to_jms(mesh, materials);
+        copy_chimp_jms_uvs(target, vertex_offset, &source)?;
+        vertex_offset = vertex_offset.saturating_add(source.vertices.len());
+    }
+
+    if vertex_offset != target.vertices.len() {
+        return Err(format!(
+            "Chimp JMS vertex layout mismatch: converted {vertex_offset}, composite has {}",
+            target.vertices.len()
+        ));
+    }
+    Ok(())
+}
+
+fn copy_chimp_jms_uvs(
+    target: &mut blam_tags::jms::JmsFile,
+    vertex_offset: usize,
+    source: &blam_tags::jms::JmsFile,
+) -> Result<(), String> {
+    let end = vertex_offset
+        .checked_add(source.vertices.len())
+        .ok_or_else(|| "Chimp JMS vertex range overflowed".to_owned())?;
+    let target_vertices = target
+        .vertices
+        .get_mut(vertex_offset..end)
+        .ok_or_else(|| "Chimp JMS vertex range does not match the composite model".to_owned())?;
+    for (target, source) in target_vertices.iter_mut().zip(&source.vertices) {
+        target.uvs.clone_from(&source.uvs);
+    }
+    Ok(())
 }
 
 /// Find a character's UE asset root by locating the `*MeshSynchronization`
@@ -455,14 +559,22 @@ fn ce_find_character_root(containers: &[MountedContainer], model_key: &str) -> O
             if !(norm.ends_with(".uasset") && norm.contains("meshsync")) {
                 continue;
             }
-            let Ok(bytes) = c.archive.read(&e.path) else { continue; };
-            let Ok(hdr) =
-                FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None,)
-            else {
+            let Ok(bytes) = c.archive.read(&e.path) else {
+                continue;
+            };
+            let Ok(hdr) = FZenPackageHeader::deserialize(
+                &mut Cursor::new(&bytes[..]),
+                None,
+                CE_CV,
+                CE_HV,
+                None,
+            ) else {
                 continue;
             };
             let hit = hdr.imported_package_names.iter().any(|p| {
-                p.to_ascii_lowercase().replace('\\', "/").ends_with(model_key)
+                p.to_ascii_lowercase()
+                    .replace('\\', "/")
+                    .ends_with(model_key)
             });
             if !hit {
                 continue;
@@ -489,14 +601,17 @@ const CE_MESHSYNC_COMP_BASE_CLASS: &str =
     "/Script/BlamSynchronization.BlamMeshSynchronizationComponentBase";
 
 /// Precomputed class indices `(mesh-sync DA, component, component base)`.
-static CE_CLASSES: LazyLock<(FPackageObjectIndex, FPackageObjectIndex, FPackageObjectIndex,)> =
-    LazyLock::new(|| {
-        (
-            FPackageObjectIndex::create_script_import(CE_MESHSYNC_DA_CLASS),
-            FPackageObjectIndex::create_script_import(CE_MESHSYNC_COMP_CLASS),
-            FPackageObjectIndex::create_script_import(CE_MESHSYNC_COMP_BASE_CLASS),
-        )
-    });
+static CE_CLASSES: LazyLock<(
+    FPackageObjectIndex,
+    FPackageObjectIndex,
+    FPackageObjectIndex,
+)> = LazyLock::new(|| {
+    (
+        FPackageObjectIndex::create_script_import(CE_MESHSYNC_DA_CLASS),
+        FPackageObjectIndex::create_script_import(CE_MESHSYNC_COMP_CLASS),
+        FPackageObjectIndex::create_script_import(CE_MESHSYNC_COMP_BASE_CLASS),
+    )
+});
 
 /// One actor Blueprint that owns a mesh-sync component (identified by class).
 #[derive(Clone)]
@@ -565,7 +680,9 @@ fn build_ce_mesh_sync_index(containers: &[MountedContainer]) -> CeMeshSyncIndex 
             if !e.path.to_ascii_lowercase().ends_with(".uasset") {
                 continue;
             }
-            let Some(hdr) = ce_read_header(&c.archive, &e.path) else { continue; };
+            let Some(hdr) = ce_read_header(&c.archive, &e.path) else {
+                continue;
+            };
             scanned += 1;
             let is_da = hdr.exports_class(da_class);
             let has_comp = hdr.exports_class(comp_class) || hdr.exports_class(comp_base_class);
@@ -580,7 +697,10 @@ fn build_ce_mesh_sync_index(containers: &[MountedContainer]) -> CeMeshSyncIndex 
                     .filter(|p| p.ends_with("-model"))
                     .collect();
                 if !models.is_empty() {
-                    da_to_models.entry(ce_stem(&e.path)).or_default().extend(models);
+                    da_to_models
+                        .entry(ce_stem(&e.path))
+                        .or_default()
+                        .extend(models);
                 }
             }
             if has_comp {
@@ -589,7 +709,13 @@ fn build_ce_mesh_sync_index(containers: &[MountedContainer]) -> CeMeshSyncIndex 
                     .iter()
                     .map(|p| ce_stem(p))
                     .collect();
-                actors.push((ActorRef { container: ci, path: e.path.clone(), }, imported_stems,));
+                actors.push((
+                    ActorRef {
+                        container: ci,
+                        path: e.path.clone(),
+                    },
+                    imported_stems,
+                ));
             }
         }
     }
@@ -721,7 +847,11 @@ fn ce_find_uasset_by_basename(containers: &[MountedContainer], basename: &str) -
             if !p.ends_with(".uasset") {
                 continue;
             }
-            let base = p.rsplit('/').next().unwrap_or(&p).trim_end_matches(".uasset");
+            let base = p
+                .rsplit('/')
+                .next()
+                .unwrap_or(&p)
+                .trim_end_matches(".uasset");
             if base == want {
                 if let Ok(bytes) = c.archive.read(&e.path) {
                     return Some(bytes);
@@ -751,7 +881,9 @@ fn ce_decode_metahuman_table(
 ) -> Option<Vec<(String, std::collections::BTreeMap<String, PropValue>)>> {
     let mut usmap = Usmap::meteorite().ok()?;
     let sbytes = ce_find_uasset_by_basename(containers, struct_basename)?;
-    let shdr = FZenPackageHeader::deserialize(&mut Cursor::new(&sbytes[..]), None, CE_CV, CE_HV, None).ok()?;
+    let shdr =
+        FZenPackageHeader::deserialize(&mut Cursor::new(&sbytes[..]), None, CE_CV, CE_HV, None)
+            .ok()?;
     let sctx = blam_tags::iostore::unversioned::ExportContext::new(&[]);
     let props = blam_tags::iostore::unversioned::read_userdefined_struct_layout(
         ce_export0_bytes(&sbytes, &shdr)?,
@@ -763,7 +895,9 @@ fn ce_decode_metahuman_table(
     .ok()?;
     usmap.register_struct(struct_name, None, props);
     let dbytes = ce_find_uasset_by_basename(containers, table_basename)?;
-    let dhdr = FZenPackageHeader::deserialize(&mut Cursor::new(&dbytes[..]), None, CE_CV, CE_HV, None).ok()?;
+    let dhdr =
+        FZenPackageHeader::deserialize(&mut Cursor::new(&dbytes[..]), None, CE_CV, CE_HV, None)
+            .ok()?;
     blam_tags::iostore::unversioned::read_datatable(
         ce_export0_bytes(&dbytes, &dhdr)?,
         &dhdr.name_map.copy_raw_names(),
@@ -793,7 +927,9 @@ fn ce_soft(sp: &blam_tags::iostore::unversioned::SoftObjectPath) -> Option<(Stri
 }
 
 /// Decode `DT_MetaHumanHeads` → per-row face + facial-hair mesh references.
-fn ce_decode_head_table(containers: &[MountedContainer],) -> Option<Vec<(String, MetaHumanHeadRow)>> {
+fn ce_decode_head_table(
+    containers: &[MountedContainer],
+) -> Option<Vec<(String, MetaHumanHeadRow)>> {
     let rows = ce_decode_metahuman_table(
         containers,
         "S_MetaHumanHeads",
@@ -808,7 +944,11 @@ fn ce_decode_head_table(containers: &[MountedContainer],) -> Option<Vec<(String,
                     row.head = ce_soft(sp);
                 }
                 if let Some(arr) = fields.get("FacialHair").and_then(PropValue::as_array) {
-                    row.hair = arr.iter().filter_map(PropValue::as_soft_object).filter_map(ce_soft).collect();
+                    row.hair = arr
+                        .iter()
+                        .filter_map(PropValue::as_soft_object)
+                        .filter_map(ce_soft)
+                        .collect();
                 }
                 row.type_ = fields
                     .get("Type")
@@ -822,7 +962,9 @@ fn ce_decode_head_table(containers: &[MountedContainer],) -> Option<Vec<(String,
 }
 
 /// Decode `DT_MetaHumanHelmets` → per-row helmet/hat mesh reference.
-fn ce_decode_helmet_table(containers: &[MountedContainer],) -> Option<Vec<(String, MetaHumanHelmetRow)>> {
+fn ce_decode_helmet_table(
+    containers: &[MountedContainer],
+) -> Option<Vec<(String, MetaHumanHelmetRow)>> {
     let rows = ce_decode_metahuman_table(
         containers,
         "S_MetaHumanHelmets",
@@ -833,7 +975,11 @@ fn ce_decode_helmet_table(containers: &[MountedContainer],) -> Option<Vec<(Strin
         rows.into_iter()
             .map(|(key, fields)| {
                 let mut row = MetaHumanHelmetRow::default();
-                if let Some(m) = fields.get("Mesh").and_then(PropValue::as_soft_object).and_then(ce_soft) {
+                if let Some(m) = fields
+                    .get("Mesh")
+                    .and_then(PropValue::as_soft_object)
+                    .and_then(ce_soft)
+                {
                     row.skeletal = m.1.to_ascii_lowercase().starts_with("sk_");
                     row.mesh = Some(m);
                 }
@@ -857,17 +1003,23 @@ fn ce_metahuman_character_key(containers: &[MountedContainer], model_key: &str) 
         .collect();
     for r in refs {
         let c = containers.get(r.container)?;
-        let Some(hdr) = ce_read_header(&c.archive, &r.path) else { continue; };
-        let is_human = hdr
-            .imported_package_names
-            .iter()
-            .any(|p| { p.rsplit('/').next().unwrap_or(p).eq_ignore_ascii_case(CE_MH_COMPONENT)
+        let Some(hdr) = ce_read_header(&c.archive, &r.path) else {
+            continue;
+        };
+        let is_human = hdr.imported_package_names.iter().any(|p| {
+            p.rsplit('/')
+                .next()
+                .unwrap_or(p)
+                .eq_ignore_ascii_case(CE_MH_COMPONENT)
         });
         if !is_human {
             continue;
         }
         let base = r.path.rsplit('/').next().unwrap_or(&r.path);
-        let base = base.strip_suffix(".uasset").unwrap_or(base).to_ascii_lowercase();
+        let base = base
+            .strip_suffix(".uasset")
+            .unwrap_or(base)
+            .to_ascii_lowercase();
         // `bp_<key>bipedactor` → `<key>`.
         let key = base.strip_prefix("bp_").unwrap_or(&base);
         let key = key.strip_suffix("bipedactor").unwrap_or(key);
@@ -891,10 +1043,16 @@ fn ce_head_node_name(skel: &TagFile) -> String {
         let names: Vec<String> = (0..block.len())
             .filter_map(|i| block.element(i).and_then(|e| e.read_string_id("name")))
             .collect();
-        if let Some(n) = names.iter().find(|n| n.eq_ignore_ascii_case("head_m") || n.eq_ignore_ascii_case("head")) {
+        if let Some(n) = names
+            .iter()
+            .find(|n| n.eq_ignore_ascii_case("head_m") || n.eq_ignore_ascii_case("head"))
+        {
             return n.clone();
         }
-        if let Some(n) = names.iter().find(|n| n.to_ascii_lowercase().contains("head")) {
+        if let Some(n) = names
+            .iter()
+            .find(|n| n.to_ascii_lowercase().contains("head"))
+        {
             return n.clone();
         }
     }
@@ -906,9 +1064,12 @@ fn ce_add_metahuman_head(
     model_key: &str,
     needed: &std::collections::BTreeSet<(String, String)>,
     head_node: &str,
+    high_detail: bool,
     out: &mut CeMeshes,
 ) {
-    let Some(key) = ce_metahuman_character_key(containers, model_key) else { return; };
+    let Some(key) = ce_metahuman_character_key(containers, model_key) else {
+        return;
+    };
     let tables = ce_metahuman_tables(containers);
 
     // The model's permutations for `region` (fall back to every distinct
@@ -943,8 +1104,7 @@ fn ce_add_metahuman_head(
         // or `crewman_female`) — the game's `bIsFemale`/`bUseFemaleHeads`. Checking
         // both survives the non-deterministic actor→key pick when several actors
         // share a model. Default male.
-        let female = key.contains("female")
-            || model_key.to_ascii_lowercase().contains("female");
+        let female = key.contains("female") || model_key.to_ascii_lowercase().contains("female");
         let want_type = if female { "female" } else { "male" };
         tables
             .heads
@@ -961,7 +1121,9 @@ fn ce_add_metahuman_head(
         }
         refs.extend(row.hair.iter());
         for (i, (pkg, asset)) in refs.iter().enumerate() {
-            let Some(mesh) = ce_read_skeletal_mesh(containers, pkg) else { continue; };
+            let Some(mesh) = ce_read_skeletal_mesh(containers, pkg) else {
+                continue;
+            };
             // Each mesh's own `head` bone world position anchors it to the classic
             // head node; the face's (first ref) also marks the hat below.
             let anchor = ce_metahuman_head_anchor(&mesh).unwrap_or([0.0; 3]);
@@ -1005,7 +1167,7 @@ fn ce_add_metahuman_head(
                         ));
                     }
                 }
-            } else if let Some(mesh) = ce_read_static_mesh(containers, pkg) {
+            } else if let Some(mesh) = ce_read_static_mesh(containers, pkg, high_detail) {
                 let mats = ce_read_default_materials(containers, pkg);
                 for perm in &helmet_perms {
                     out.statics.push((
@@ -1031,7 +1193,10 @@ fn ce_metahuman_head_anchor(face: &SkeletalMesh) -> Option<[f32; 3]> {
         .bones
         .iter()
         .position(|b| b.name.eq_ignore_ascii_case("head"))
-        .or_else(|| { face.bones.iter().position(|b| b.name.to_ascii_lowercase().contains("head"))
+        .or_else(|| {
+            face.bones
+                .iter()
+                .position(|b| b.name.to_ascii_lowercase().contains("head"))
         })?;
     let world = blam_tags::jms::ue_bind_world(&face.bones);
     let m = world.get(idx)?;
@@ -1041,22 +1206,46 @@ fn ce_metahuman_head_anchor(face: &SkeletalMesh) -> Option<[f32; 3]> {
 /// Read + decode a `USkeletalMesh` by package path (`None` on any failure).
 fn ce_read_skeletal_mesh(containers: &[MountedContainer], pkg: &str) -> Option<Arc<SkeletalMesh>> {
     let (_, bytes) = ce_read_uasset_by_package(containers, pkg)?;
-    let hdr = FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None).ok()?;
+    let hdr =
+        FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None)
+            .ok()?;
     let names = hdr.name_map.copy_raw_names();
-    SkeletalMesh::from_package(&bytes, &names, hdr.summary.header_size as usize).ok().map(Arc::new)
+    SkeletalMesh::from_package(&bytes, &names, hdr.summary.header_size as usize)
+        .ok()
+        .map(Arc::new)
 }
 
-/// Read + decode a `UStaticMesh` (coarse LOD, sufficient for a hat) by package.
-fn ce_read_static_mesh(containers: &[MountedContainer], pkg: &str) -> Option<Arc<StaticMesh>> {
+/// Read + decode a `UStaticMesh` by package, preferring Nanite bulk data when
+/// `high_detail` is enabled and falling back to the coarse cooked LOD.
+fn ce_read_static_mesh(
+    containers: &[MountedContainer],
+    pkg: &str,
+    high_detail: bool,
+) -> Option<Arc<StaticMesh>> {
     let (_, bytes) = ce_read_uasset_by_package(containers, pkg)?;
-    let hdr = FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None).ok()?;
-    StaticMesh::from_package(&bytes, hdr.summary.header_size as usize).ok().map(Arc::new)
+    let hdr =
+        FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None)
+            .ok()?;
+    let bulk = high_detail
+        .then(|| ce_read_bulk_by_package(containers, pkg))
+        .flatten();
+    StaticMesh::from_package_preferring_nanite(
+        &bytes,
+        hdr.summary.header_size as usize,
+        bulk.as_deref(),
+    )
+    .ok()
+    .map(Arc::new)
 }
 
 /// The default per-slot materials of a mesh package (its `MI_`/`M_` imports).
 fn ce_read_default_materials(containers: &[MountedContainer], pkg: &str) -> Vec<String> {
-    let Some((_, bytes)) = ce_read_uasset_by_package(containers, pkg) else { return Vec::new(); };
-    let Ok(hdr) = FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None) else {
+    let Some((_, bytes)) = ce_read_uasset_by_package(containers, pkg) else {
+        return Vec::new();
+    };
+    let Ok(hdr) =
+        FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None)
+    else {
         return Vec::new();
     };
     ce_default_materials(&hdr)
@@ -1094,8 +1283,12 @@ fn ce_load_meshsync_regions(
     let usmap = Usmap::meteorite().ok()?;
     let mut merged = MeshSyncRegions::default();
     for r in refs {
-        let Some(c) = containers.get(r.container) else { continue; };
-        let Ok(bytes) = c.archive.read(&r.path) else { continue; };
+        let Some(c) = containers.get(r.container) else {
+            continue;
+        };
+        let Ok(bytes) = c.archive.read(&r.path) else {
+            continue;
+        };
         let Ok(hdr) =
             FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None)
         else {
@@ -1110,7 +1303,9 @@ fn ce_load_meshsync_regions(
         };
         let start = hdr.summary.header_size as usize + comp.cooked_serial_offset as usize;
         let end = start + comp.cooked_serial_size as usize;
-        let Some(export) = bytes.get(start..end) else { continue; };
+        let Some(export) = bytes.get(start..end) else {
+            continue;
+        };
         let names = hdr.name_map.copy_raw_names();
         if let Ok(regions) = MeshSyncRegions::from_component_export(export, &names, &usmap) {
             // Only world representation — the first-person pawn's arms/legs
@@ -1137,16 +1332,26 @@ fn ce_merge_regions(dst: &mut MeshSyncRegions, src: MeshSyncRegions) {
         }
     }
     for sr in src.regions {
-        let ri = match dst.regions.iter().position(|r| r.name.eq_ignore_ascii_case(&sr.name)) {
+        let ri = match dst
+            .regions
+            .iter()
+            .position(|r| r.name.eq_ignore_ascii_case(&sr.name))
+        {
             Some(i) => i,
             None => {
-                dst.regions.push(Region { name: sr.name.clone(), permutations: Vec::new(), });
+                dst.regions.push(Region {
+                    name: sr.name.clone(),
+                    permutations: Vec::new(),
+                });
                 dst.regions.len() - 1
             }
         };
         for sp in sr.permutations {
             let perms = &mut dst.regions[ri].permutations;
-            let pi = match perms.iter().position(|p| p.name.eq_ignore_ascii_case(&sp.name)) {
+            let pi = match perms
+                .iter()
+                .position(|p| p.name.eq_ignore_ascii_case(&sp.name))
+            {
                 Some(i) => i,
                 None => {
                     perms.push(Permutation {
@@ -1175,7 +1380,13 @@ struct CeMeshes {
     /// `(region, perm, asset name, mesh, material names)`. Meshes are shared
     /// (`Arc`) because color variants reference the same geometry — loading and
     /// (Nanite-)decoding each package once, not once per variant.
-    skeletal: Vec<(String, String, String, std::sync::Arc<SkeletalMesh>, Vec<String>,)>,
+    skeletal: Vec<(
+        String,
+        String,
+        String,
+        std::sync::Arc<SkeletalMesh>,
+        Vec<String>,
+    )>,
     /// `(region, perm, asset name, mesh, parent bone, material names, xform,
     /// world_anchor)`. `world_anchor = Some(pos)` marks a MetaHuman hat baked
     /// world-aligned at the face rig's head-bone position `pos` (UE cm), vs.
@@ -1195,7 +1406,15 @@ struct CeMeshes {
     /// their `head` bone (`head_anchor`, UE cm) at `node`'s classic position (see
     /// [`UeWorldPart`]). Sourced from `DT_MetaHumanHeads`, not the mesh-sync
     /// `RuntimeRegions`.
-    world: Vec<(String, String, String, std::sync::Arc<SkeletalMesh>, String, Vec<String>, [f32; 3],)>,
+    world: Vec<(
+        String,
+        String,
+        String,
+        std::sync::Arc<SkeletalMesh>,
+        String,
+        Vec<String>,
+        [f32; 3],
+    )>,
 }
 
 impl CeMeshes {
@@ -1234,7 +1453,10 @@ fn ce_default_materials(hdr: &FZenPackageHeader) -> Vec<String> {
 /// override binds by slot name, which equals the default material's name, so we
 /// replace the matching default in place (exact, order-preserving) — no reliance
 /// on decoding the mesh's slot array. Names are prefix-stripped for tool.exe.
-fn ce_effective_materials(default_materials: &[String], overrides: &[(String, String)],) -> Vec<String> {
+fn ce_effective_materials(
+    default_materials: &[String],
+    overrides: &[(String, String)],
+) -> Vec<String> {
     let mut mats = default_materials.to_vec();
     for (slot, over) in overrides {
         if let Some(pos) = mats.iter().position(|m| m.eq_ignore_ascii_case(slot)) {
@@ -1273,11 +1495,18 @@ fn ce_collect_parts_from_regions(
         for mref in regions.skeletal_meshes(region, perm) {
             let entry = sk_cache.entry(mref.package.clone()).or_insert_with(|| {
                 let (_, bytes) = ce_read_uasset_by_package(containers, &mref.package)?;
-                let hdr =
-                    FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None,)
-                        .ok()?;
+                let hdr = FZenPackageHeader::deserialize(
+                    &mut Cursor::new(&bytes[..]),
+                    None,
+                    CE_CV,
+                    CE_HV,
+                    None,
+                )
+                .ok()?;
                 let names = hdr.name_map.copy_raw_names();
-                let mesh = SkeletalMesh::from_package(&bytes, &names, hdr.summary.header_size as usize).ok()?;
+                let mesh =
+                    SkeletalMesh::from_package(&bytes, &names, hdr.summary.header_size as usize)
+                        .ok()?;
                 Some((std::sync::Arc::new(mesh), ce_default_materials(&hdr)))
             });
             if let Some((mesh, default_mats)) = entry {
@@ -1293,9 +1522,14 @@ fn ce_collect_parts_from_regions(
         for mref in regions.static_meshes(region, perm) {
             let entry = sm_cache.entry(mref.package.clone()).or_insert_with(|| {
                 let (_, bytes) = ce_read_uasset_by_package(containers, &mref.package)?;
-                let hdr =
-                    FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None,)
-                        .ok()?;
+                let hdr = FZenPackageHeader::deserialize(
+                    &mut Cursor::new(&bytes[..]),
+                    None,
+                    CE_CV,
+                    CE_HV,
+                    None,
+                )
+                .ok()?;
                 // For extraction (and the preview's high-detail mode) prefer the
                 // full-resolution Nanite geometry from the package's `.ubulk`;
                 // the light preview uses the coarse LOD fallback.
@@ -1350,7 +1584,11 @@ fn ce_read_uasset_by_package(
     let suffix = format!("/{tail}.uasset");
     for c in containers {
         for e in c.archive.entries() {
-            if e.path.to_ascii_lowercase().replace('\\', "/").ends_with(&suffix) {
+            if e.path
+                .to_ascii_lowercase()
+                .replace('\\', "/")
+                .ends_with(&suffix)
+            {
                 if let Ok(bytes) = c.archive.read(&e.path) {
                     return Some((e.path.clone(), bytes));
                 }
@@ -1370,7 +1608,11 @@ fn ce_read_bulk_by_package(containers: &[MountedContainer], package: &str) -> Op
     let suffix = format!("/{tail}.uasset");
     for c in containers {
         for e in c.archive.entries() {
-            if e.path.to_ascii_lowercase().replace('\\', "/").ends_with(&suffix) {
+            if e.path
+                .to_ascii_lowercase()
+                .replace('\\', "/")
+                .ends_with(&suffix)
+            {
                 return c.archive.read_bulk_for(e.chunk_index, 0).ok();
             }
         }
@@ -1389,7 +1631,13 @@ fn ce_load_variant_meshes(
     containers: &[MountedContainer],
     char_root: &str,
     needed: &std::collections::BTreeSet<(String, String)>,
-) -> Vec<(String, String, String, std::sync::Arc<SkeletalMesh>, Vec<String>,)> {
+) -> Vec<(
+    String,
+    String,
+    String,
+    std::sync::Arc<SkeletalMesh>,
+    Vec<String>,
+)> {
     use std::collections::BTreeMap;
     let root_slash = format!("{char_root}/");
     let char_name = char_root.rsplit('/').next().unwrap_or("").to_string();
@@ -1438,9 +1686,15 @@ fn ce_load_variant_meshes(
 
     let mut out = Vec::new();
     for (region, perm) in needed {
-        let Some(stem) = resolve(region, perm) else { continue; };
-        let Some((ci, path)) = sk.get(&stem).cloned() else { continue; };
-        let Ok(bytes) = containers[ci].archive.read(&path) else { continue; };
+        let Some(stem) = resolve(region, perm) else {
+            continue;
+        };
+        let Some((ci, path)) = sk.get(&stem).cloned() else {
+            continue;
+        };
+        let Ok(bytes) = containers[ci].archive.read(&path) else {
+            continue;
+        };
         let Ok(hdr) =
             FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None)
         else {
@@ -1460,7 +1714,13 @@ fn ce_load_variant_meshes(
             })
             .map(|p| p.rsplit('/').next().unwrap_or(p).to_string())
             .collect();
-        out.push((region.clone(), perm.clone(), stem, std::sync::Arc::new(mesh), mats,));
+        out.push((
+            region.clone(),
+            perm.clone(),
+            stem,
+            std::sync::Arc::new(mesh),
+            mats,
+        ));
     }
     out
 }
@@ -1470,8 +1730,15 @@ fn ce_load_variant_meshes(
 fn ce_is_excluded(norm: &str, base: &str) -> bool {
     norm.contains("/skeleton/")
         || [
-            "shield", "shadow", "animdynamics", "destroyed", "_dmg", "damage", "collision",
-            "physics", "imposter",
+            "shield",
+            "shadow",
+            "animdynamics",
+            "destroyed",
+            "_dmg",
+            "damage",
+            "collision",
+            "physics",
+            "imposter",
         ]
         .iter()
         .any(|k| base.contains(k))
@@ -1498,26 +1765,58 @@ mod ce_repro_tests {
     use super::*;
     use std::path::PathBuf;
 
-    /// Runs the EXACT app CE-preview path (real mounted source) and dumps where
-    /// each reconstructed mesh actually bakes — to isolate the wing/helmet
-    /// placement issue from render-side effects. Skips if the CE paks aren't
-    /// present on this machine.
+    fn test_jms_vertex(uv: [f32; 2]) -> blam_tags::jms::JmsVertex {
+        blam_tags::jms::JmsVertex {
+            position: blam_tags::math::RealPoint3d::default(),
+            normal: blam_tags::math::RealVector3d::default(),
+            tangent: None,
+            binormal: None,
+            node_sets: Vec::new(),
+            uvs: vec![blam_tags::math::RealPoint2d { x: uv[0], y: uv[1] }],
+        }
+    }
+
     #[test]
-    fn ce_pelican_real_path() {
-        let paks = PathBuf::from(
-            "/Users/camden/Halo/halo-campaign-evolved_pc/Meteorite/Content/Paks"
-        );
+    fn campaign_evolved_export_copies_chimp_uv_conventions_at_the_part_offset() {
+        let mut target = blam_tags::jms::JmsFile {
+            vertices: vec![
+                test_jms_vertex([0.0, 0.0]),
+                test_jms_vertex([0.0, 0.0]),
+                test_jms_vertex([0.0, 0.0]),
+            ],
+            ..Default::default()
+        };
+        let source = blam_tags::jms::JmsFile {
+            vertices: vec![test_jms_vertex([2.25, -0.5]), test_jms_vertex([3.0, 1.5])],
+            ..Default::default()
+        };
+
+        copy_chimp_jms_uvs(&mut target, 1, &source).unwrap();
+
+        assert_eq!(target.vertices[0].uvs[0].x, 0.0);
+        assert_eq!(target.vertices[1].uvs[0].x, 2.25);
+        assert_eq!(target.vertices[1].uvs[0].y, -0.5);
+        assert_eq!(target.vertices[2].uvs[0].x, 3.0);
+        assert_eq!(target.vertices[2].uvs[0].y, 1.5);
+    }
+
+    /// Runs the exact app CE-preview path against the optional `CE_PAKS`
+    /// installation. `CE_MODEL` selects the tag path fragment and `CE_HD`
+    /// enables Nanite detail. Skips when `CE_PAKS` is not configured.
+    #[test]
+    fn ce_model_real_path() {
+        let Some(paks) = std::env::var_os("CE_PAKS").map(PathBuf::from) else {
+            eprintln!("skip: set CE_PAKS to a Campaign Evolved Paks directory");
+            return;
+        };
         if !paks.exists() {
-            eprintln!("skip: CE paks not found");
+            eprintln!("skip: CE_PAKS does not exist: {}", paks.display());
             return;
         }
         let defs = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("definitions");
-        let loaded = crate::source::load_iostore_container_set(
-            paks,
-            &TagNameIndex::default(),
-            &defs
-        )
-        .expect("mount CE container set");
+        let loaded =
+            crate::source::load_iostore_container_set(paks, &TagNameIndex::default(), &defs)
+                .expect("mount CE container set");
         let source = &loaded.source;
         let hlmt = u32::from_be_bytes(*b"hlmt");
         let entry = loaded
@@ -1526,39 +1825,83 @@ mod ce_repro_tests {
             .chain(loaded.all_entries.iter())
             .find(|e| {
                 e.group_tag == hlmt
-                    && e.display_path.to_ascii_lowercase().contains(&std::env::var("CE_MODEL").unwrap_or_else(|_|"pelican/pelican".into()),)
+                    && e.display_path.to_ascii_lowercase().contains(
+                        &std::env::var("CE_MODEL").unwrap_or_else(|_| "pelican/pelican".into()),
+                    )
             })
-            .expect("pelican.model entry")
+            .expect("Campaign Evolved model entry")
             .clone();
-        eprintln!("[TEST] entry: {} loc={:?}", entry.display_path, std::mem::discriminant(&entry.location));
-        let tag = read_entry(source, &entry).expect("read pelican.model");
-        unsafe { std::env::set_var("CE_DEBUG", "1"); }
-        let data = load_campaign_evolved_preview(&tag, &entry, Some(source), std::env::var("CE_HD").is_ok(),)
-            .expect("recognized as CE model")
-            .expect("CE preview built");
+        eprintln!(
+            "[TEST] entry: {} loc={:?}",
+            entry.display_path,
+            std::mem::discriminant(&entry.location)
+        );
+        let tag = read_entry(source, &entry).expect("read Campaign Evolved model");
+        unsafe {
+            std::env::set_var("CE_DEBUG", "1");
+        }
+        let data = load_campaign_evolved_preview(
+            &tag,
+            &entry,
+            Some(source),
+            std::env::var("CE_HD").is_ok(),
+        )
+        .expect("recognized as CE model")
+        .expect("CE preview built");
         eprintln!(
             "[TEST] preview bounds min{:?} max{:?}  ({} draw tris)",
-            data.preview.bounds_min, data.preview.bounds_max, data.draw_triangles.len()
+            data.preview.bounds_min,
+            data.preview.bounds_max,
+            data.preview.indices.len() / 3
         );
+        if std::env::var("CE_JMS").is_ok() {
+            let skeleton = tag_ref_path(&tag.root(), "skeleton model")
+                .expect("Campaign Evolved model has a skeleton model");
+            let jms = campaign_evolved_render_jms(&tag, &entry, source, &skeleton)
+                .expect("Campaign Evolved Chimp JMS export");
+            assert!(!jms.vertices.is_empty());
+            assert!(!jms.triangles.is_empty());
+            assert!(jms.vertices.iter().all(|vertex| {
+                vertex
+                    .uvs
+                    .iter()
+                    .all(|uv| uv.x.is_finite() && uv.y.is_finite())
+            }));
+            eprintln!(
+                "[TEST] Chimp JMS export: {} vertices, {} triangles",
+                jms.vertices.len(),
+                jms.triangles.len()
+            );
+        }
         // Optional OBJ export of the exact preview geometry (set CE_OBJ).
         if std::env::var("CE_OBJ").is_ok() {
             use std::io::Write;
-            let out = format!(
-                "/private/tmp/claude-501/-Users-camden-Source-Baboon-local/4803b682-de10-4887-907a-9f81ad3d13d0/scratchpad/{}.obj",
-                std::env::var("CE_MODEL").unwrap_or_else(|_| "pelican".into()).replace('/', "_")
-            );
+            let out = std::env::temp_dir().join(format!(
+                "baboon-ce-preview-{}.obj",
+                std::env::var("CE_MODEL")
+                    .unwrap_or_else(|_| "pelican".into())
+                    .replace(['/', '\\'], "_")
+            ));
             let mut f = std::fs::File::create(&out).unwrap();
-            for t in &data.draw_triangles {
-                for pos in &t.positions {
-                    writeln!(f, "v {} {} {}", pos[0], pos[1], pos[2]).unwrap();
-                }
+            for vertex in &data.preview.vertices {
+                let pos = vertex.position;
+                writeln!(f, "v {} {} {}", pos[0], pos[1], pos[2]).unwrap();
             }
-            for i in 0..data.draw_triangles.len() {
-                let b = (i * 3 + 1) as u32;
-                writeln!(f, "f {} {} {}", b, b + 1, b + 2).unwrap();
+            for triangle in data.preview.indices.chunks_exact(3) {
+                writeln!(
+                    f,
+                    "f {} {} {}",
+                    triangle[0] + 1,
+                    triangle[1] + 1,
+                    triangle[2] + 1
+                )
+                .unwrap();
             }
-            eprintln!("[TEST] wrote {} ({} tris)", out, data.draw_triangles.len());
+            eprintln!(
+                "[TEST] wrote {} ({} tris)",
+                out.display(),
+                data.preview.indices.len() / 3
+            );
         }
     }
-
 }

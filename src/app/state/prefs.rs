@@ -345,6 +345,9 @@ pub(in crate::app) struct GuiPrefs {
     pub(in crate::app) confirm_runtime_poke: bool,
     pub(in crate::app) enable_chimp: bool,
     pub(in crate::app) chimp_output_dir: Option<PathBuf>,
+    /// Optional external Unreal mappings used by Chimp instead of the bundled
+    /// Campaign Evolved mappings.
+    pub(in crate::app) chimp_usmap_path: Option<PathBuf>,
     pub(in crate::app) expert_mode: bool,
     pub(in crate::app) dark_mode: bool,
     pub(in crate::app) ui_scale: f32,
@@ -378,6 +381,7 @@ impl Default for GuiPrefs {
             confirm_runtime_poke: true,
             enable_chimp: true,
             chimp_output_dir: None,
+            chimp_usmap_path: None,
             expert_mode: false,
             dark_mode: false,
             ui_scale: DEFAULT_UI_SCALE,

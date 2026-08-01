@@ -9,10 +9,20 @@ use std::collections::BTreeMap;
 use std::io::{Cursor, Write};
 
 use blam_tags::iostore::asset::texture2d::decode_texture2d_preview;
-use blam_tags::iostore::container::writer::{PackageOverride, write_package_mod_container};
+use blam_tags::iostore::container::writer::{
+    PackageOverride, PackageReplacement, overwrite_package_in_place_with,
+    overwrite_packages_in_place_with, write_package_mod_container,
+};
 use blam_tags::iostore::object::archive::ExportContext;
+use blam_tags::iostore::object::edit::{
+    default_value_for_type, editable_schema_slots, property_type_for_slot, set_property_slot,
+    validate_value_for_type,
+};
 use blam_tags::iostore::object::export::{Export, ExportBlock, read_export_in, write_export_in};
+use blam_tags::iostore::object::hand_written as chimp_hw;
+use blam_tags::iostore::object::native::{NativeStruct, PerPlatformValue};
 use blam_tags::iostore::object::tail_models::{TailContext, parse_texture_chain_tail};
+use blam_tags::iostore::object::usmap::PropertyType;
 use blam_tags::iostore::object::value::{PropValue, PropertyBlock};
 use blam_tags::iostore::package::builder::{read_payloads, write_package};
 use blam_tags::iostore::package::ue_types::{FPackageObjectIndex, FPackageObjectIndexType};
@@ -52,6 +62,27 @@ enum ChimpBrowser {
     Archives,
     Packages,
     Files,
+}
+
+impl KitSurface {
+    pub(super) const TABS: [(Self, &'static str, &'static str); 2] = [
+        (Self::Tags, "Tags", "Browse and edit Halo tags"),
+        (
+            Self::Chimp,
+            "Chimp",
+            "Browse and edit Unreal Engine packages",
+        ),
+    ];
+}
+
+impl ChimpBrowser {
+    const TABS: [(Self, &'static str); 5] = [
+        (Self::Folders, "Folders"),
+        (Self::Groups, "Groups"),
+        (Self::Files, "Pak files"),
+        (Self::Archives, "Archives"),
+        (Self::Packages, "Packages"),
+    ];
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -203,6 +234,28 @@ pub(super) struct ChimpState {
     document_tree: Option<egui_tiles::Tree<String>>,
     pub(super) documents: HashMap<String, ChimpDocument>,
     pub(super) loading_packages: HashSet<String>,
+    pending_overwrite: Option<String>,
+    pending_overwrite_skip_future: bool,
+    save_dialog: Option<ChimpSaveDialog>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum ChimpSaveMode {
+    #[default]
+    ExportMod,
+    OverwriteSources,
+}
+
+struct ChimpSaveDialog {
+    mode: ChimpSaveMode,
+    name: String,
+    folder: PathBuf,
+    overwrite_acknowledged: bool,
+}
+
+enum ChimpSaveAction {
+    Export(PathBuf),
+    Overwrite,
 }
 
 pub(super) struct ChimpDocument {
@@ -527,17 +580,18 @@ impl ChimpState {
                         .package_types
                         .get(*index)
                         .and_then(Option::as_deref)
-                        .is_some_and(|kind| kind.to_ascii_lowercase().contains(&query));
+                        .is_some_and(|kind| chimp_contains_query(kind, &query));
                     archive_matches
                         && (query.is_empty()
                             || type_matches
-                            || package.name.to_ascii_lowercase().contains(&query)
+                            || chimp_contains_query(&package.name, &query)
                             || package.providers.iter().any(|provider| {
-                                world.containers()[provider.container]
-                                    .path
-                                    .to_string_lossy()
-                                    .to_ascii_lowercase()
-                                    .contains(&query)
+                                chimp_contains_query(
+                                    &world.containers()[provider.container]
+                                        .path
+                                        .to_string_lossy(),
+                                    &query,
+                                )
                             }))
                 })
                 .map(|(index, _)| index),
@@ -558,13 +612,14 @@ impl ChimpState {
                     };
                     archive_matches
                         && (query.is_empty()
-                            || file.path.to_ascii_lowercase().contains(&query)
+                            || chimp_contains_query(&file.path, &query)
                             || file.providers.iter().any(|provider| {
-                                world.pak_containers()[provider.container]
-                                    .path
-                                    .to_string_lossy()
-                                    .to_ascii_lowercase()
-                                    .contains(&query)
+                                chimp_contains_query(
+                                    &world.pak_containers()[provider.container]
+                                        .path
+                                        .to_string_lossy(),
+                                    &query,
+                                )
                             }))
                 })
                 .map(|(index, _)| index),
@@ -602,6 +657,15 @@ impl ChimpState {
 
 fn chimp_tree_id(kit: KitId) -> egui::Id {
     egui::Id::new(("chimp_document_tree", kit.0))
+}
+
+fn chimp_contains_query(value: &str, query: &str) -> bool {
+    let needle = query.as_bytes();
+    needle.is_empty()
+        || value
+            .as_bytes()
+            .windows(needle.len())
+            .any(|window| window.eq_ignore_ascii_case(needle))
 }
 
 fn chimp_tint_toward(base: Color32, accent: Color32, amount: f32) -> Color32 {
@@ -687,7 +751,7 @@ fn decode_chimp_document(
         world, &provider, &header, &payloads, &names, &resolver, &bulk, &exports,
     );
     let (mesh_kind, mesh_preview, mesh_preview_state) =
-        decode_chimp_mesh_preview(&bytes, &header, &exports);
+        decode_chimp_mesh_preview(world, &provider, &bytes, &header, &exports);
     let initial_view = if !texture_previews.is_empty() {
         ChimpDocumentView::Texture
     } else if mesh_kind.is_some() {
@@ -731,6 +795,8 @@ fn chimp_material_names(header: &FZenPackageHeader) -> Vec<String> {
 }
 
 fn decode_chimp_mesh_preview(
+    world: &World,
+    provider: &PackageProvider,
     bytes: &[u8],
     header: &FZenPackageHeader,
     exports: &[ChimpExport],
@@ -760,7 +826,15 @@ fn decode_chimp_mesh_preview(
                     .map(chimp_skeletal_mesh_preview)
             }
             ChimpMeshKind::Static => {
-                StaticMesh::from_package(bytes, header_size).map(chimp_static_mesh_preview)
+                let bulk = world
+                    .archives()
+                    .get(provider.container)
+                    .and_then(|archive| {
+                        let chunk = archive.chunk_index_for(&provider.entry_path).ok()?;
+                        archive.read_bulk_for(chunk, 0).ok()
+                    });
+                StaticMesh::from_package_preferring_nanite(bytes, header_size, bulk.as_deref())
+                    .map(chimp_static_mesh_preview)
             }
         }
         .map_err(|error| format!("Could not decode mesh geometry: {error:#}"))?;
@@ -980,7 +1054,18 @@ fn chimp_package_type(world: &World, header: &FZenPackageHeader) -> Option<Strin
 }
 
 fn index_chimp_package_types(world: &World) -> ChimpTypeIndex {
-    const HEADER_PREFIX: usize = 1024 * 1024;
+    // Most Zen package headers fit in one 64 KiB IoStore compression block.
+    // Only retry with the former 1 MiB window (and finally the whole package)
+    // for the uncommon large header. This avoids decompressing sixteen blocks
+    // for every package while preserving the existing fallback behavior.
+    const HEADER_PREFIXES: [usize; 2] = [64 * 1024, 1024 * 1024];
+    index_chimp_package_types_with_prefixes(world, &HEADER_PREFIXES)
+}
+
+fn index_chimp_package_types_with_prefixes(
+    world: &World,
+    header_prefixes: &[usize],
+) -> ChimpTypeIndex {
     let mut package_types = Vec::with_capacity(world.packages().len());
     let mut type_counts = BTreeMap::new();
     let mut failures = 0usize;
@@ -988,18 +1073,25 @@ fn index_chimp_package_types(world: &World) -> ChimpTypeIndex {
         let result = (|| {
             let provider = package.active_provider()?;
             let archive = world.archives().get(provider.container)?;
-            let prefix = archive
-                .read_prefix(&provider.entry_path, HEADER_PREFIX)
-                .ok()?;
-            let header = FZenPackageHeader::deserialize(
-                &mut Cursor::new(&prefix),
-                None,
-                CE_TOC_VERSION,
-                CE_HEADER_VERSION,
-                None,
-            )
-            .or_else(|_| {
-                world.read_provider(provider).and_then(|bytes| {
+            let mut header = None;
+            for &max_bytes in header_prefixes {
+                let prefix = archive.read_prefix(&provider.entry_path, max_bytes).ok()?;
+                if let Ok(decoded) = FZenPackageHeader::deserialize(
+                    &mut Cursor::new(&prefix),
+                    None,
+                    CE_TOC_VERSION,
+                    CE_HEADER_VERSION,
+                    None,
+                ) {
+                    header = Some(decoded);
+                    break;
+                }
+                if prefix.len() < max_bytes {
+                    break;
+                }
+            }
+            let header = header.or_else(|| {
+                world.read_provider(provider).ok().and_then(|bytes| {
                     FZenPackageHeader::deserialize(
                         &mut Cursor::new(bytes),
                         None,
@@ -1007,10 +1099,9 @@ fn index_chimp_package_types(world: &World) -> ChimpTypeIndex {
                         CE_HEADER_VERSION,
                         None,
                     )
-                    .map_err(anyhow::Error::from)
+                    .ok()
                 })
-            })
-            .ok()?;
+            })?;
             chimp_package_type(world, &header)
         })();
         if let Some(class) = &result {
@@ -1038,6 +1129,14 @@ fn rebuild_chimp_document(
         let (Some(class), Ok(decoded)) = (export.class.as_deref(), &export.decoded) else {
             continue;
         };
+        if let ExportBlock::Reflected(block) = &decoded.block {
+            validate_chimp_property_block(class, block, world.usmap()).map_err(|error| {
+                format!(
+                    "Could not validate {} export {}: {error}",
+                    document.package, export.object
+                )
+            })?;
+        }
         payloads[index] =
             write_export_in(class, decoded, world.usmap(), Some(&resolver)).map_err(|error| {
                 format!(
@@ -1050,7 +1149,109 @@ fn rebuild_chimp_document(
         .map_err(|error| format!("Could not rebuild {}: {error:#}", document.package))
 }
 
+fn validate_chimp_property_block(
+    class: &str,
+    block: &PropertyBlock,
+    usmap: &Usmap,
+) -> Result<(), String> {
+    for entry in &block.entries {
+        let Some(slot) = entry.slot else {
+            continue;
+        };
+        let ty = property_type_for_slot(class, slot, usmap).map_err(|error| error.to_string())?;
+        validate_value_for_type(&ty, &entry.value)
+            .map_err(|error| format!("{}: {error}", entry.name))?;
+        if let (PropertyType::Struct(nested), PropValue::Struct(value)) = (&ty, &entry.value) {
+            validate_chimp_property_block(nested, value, usmap)?;
+        }
+    }
+    Ok(())
+}
+
+fn load_chimp_usmap(path: Option<&Path>) -> Result<Usmap, String> {
+    let Some(path) = path else {
+        return Usmap::meteorite()
+            .map_err(|error| format!("Could not parse bundled Campaign Evolved USMAP: {error:#}"));
+    };
+    let bytes = fs::read(path)
+        .map_err(|error| format!("Could not read USMAP {}: {error}", path.display()))?;
+    Usmap::parse(&bytes)
+        .map_err(|error| format!("Could not parse USMAP {}: {error:#}", path.display()))
+}
+
 impl Baboon {
+    pub(super) fn apply_chimp_usmap_path(&mut self, path: Option<PathBuf>, ctx: egui::Context) {
+        if let Err(error) = load_chimp_usmap(path.as_deref()) {
+            self.status = error;
+            return;
+        }
+        if self
+            .kits
+            .iter()
+            .any(|kit| kit.chimp.documents.values().any(|document| document.dirty))
+        {
+            self.status =
+                "Build or discard modified Chimp packages before changing the USMAP.".to_owned();
+            return;
+        }
+
+        self.chimp_usmap_path = path;
+        self.chimp_usmap_path_input = self
+            .chimp_usmap_path
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_default();
+        let remount: Vec<usize> = self
+            .kits
+            .iter()
+            .enumerate()
+            .filter_map(|(index, kit)| {
+                matches!(
+                    kit.source.as_ref().map(|source| &source.source),
+                    Some(TagSource::IoStoreContainerSet { .. })
+                )
+                .then_some(index)
+            })
+            .collect();
+        for &index in &remount {
+            self.kits[index].chimp = ChimpState::default();
+            self.begin_chimp_mount(index, ctx.clone());
+        }
+        self.status = match &self.chimp_usmap_path {
+            Some(path) if remount.is_empty() => {
+                format!("Chimp USMAP set to {}", path.display())
+            }
+            Some(path) => format!("Chimp USMAP set to {}; remounting Chimp", path.display()),
+            None if remount.is_empty() => {
+                "Chimp will use the bundled Campaign Evolved USMAP".to_owned()
+            }
+            None => "Using the bundled Campaign Evolved USMAP; remounting Chimp".to_owned(),
+        };
+    }
+
+    pub(super) fn commit_chimp_usmap_path_input(&mut self, ctx: egui::Context) {
+        let trimmed = self.chimp_usmap_path_input.trim();
+        let path = (!trimmed.is_empty()).then(|| PathBuf::from(trimmed));
+        self.apply_chimp_usmap_path(path, ctx);
+    }
+
+    pub(super) fn choose_chimp_usmap_path(&mut self, ctx: egui::Context) {
+        let mut dialog = rfd::FileDialog::new()
+            .set_title("Select Chimp USMAP")
+            .add_filter("Unreal mappings", &["usmap"]);
+        if let Some(directory) = self
+            .chimp_usmap_path
+            .as_ref()
+            .and_then(|path| path.parent())
+            .filter(|path| path.is_dir())
+        {
+            dialog = dialog.set_directory(directory);
+        }
+        if let Some(path) = dialog.pick_file() {
+            self.apply_chimp_usmap_path(Some(path), ctx);
+        }
+    }
+
     pub(super) fn begin_chimp_mount(&mut self, kit_index: usize, ctx: egui::Context) {
         if !self.enable_chimp {
             return;
@@ -1066,11 +1267,12 @@ impl Baboon {
             generation: self.kits[kit_index].generation,
         };
         let root = root.clone();
+        let usmap_path = self.chimp_usmap_path.clone();
         self.kits[kit_index].chimp.mount = ChimpMount::Loading;
         let tx = self.tx.clone();
         thread::spawn(move || {
             let result = (|| {
-                let usmap = Usmap::meteorite().map_err(|error| error.to_string())?;
+                let usmap = load_chimp_usmap(usmap_path.as_deref())?;
                 // Keep startup to container discovery + the lightweight package
                 // index. Generated Blueprint schema recovery is intentionally
                 // lazy/future work; doing the whole corpus here would leave the
@@ -1092,6 +1294,7 @@ impl Baboon {
         &mut self,
         stamp: KitStamp,
         result: Result<Arc<World>, String>,
+        ctx: egui::Context,
     ) -> bool {
         let Some(index) = self.resolve_stamp(stamp) else {
             return true;
@@ -1113,6 +1316,7 @@ impl Baboon {
                     )
                 };
                 self.restore_chimp_recovery(index, &world);
+                self.finish_pending_chimp_session_restore(index, ctx);
             }
             Err(error) => {
                 self.kits[index].chimp.mount = ChimpMount::Failed(error.clone());
@@ -1120,6 +1324,52 @@ impl Baboon {
             }
         }
         false
+    }
+
+    fn finish_pending_chimp_session_restore(&mut self, kit_index: usize, ctx: egui::Context) {
+        let packages = std::mem::take(&mut self.kits[kit_index].pending_restore_chimp_packages);
+        if packages.is_empty() {
+            self.kits[kit_index].pending_restore_active_chimp_package = None;
+            return;
+        }
+        let world = match &self.kits[kit_index].chimp.mount {
+            ChimpMount::Ready(world) => world.clone(),
+            _ => return,
+        };
+        let mut queued = 0usize;
+        let mut missing = 0usize;
+        for package in packages {
+            if world.package(&package).is_none() {
+                missing += 1;
+                continue;
+            }
+            if self.kits[kit_index].documents_contains_chimp(&package) {
+                let kit = self.kits[kit_index].id;
+                self.kits[kit_index].chimp.open_document_pane(kit, &package);
+            } else {
+                self.begin_chimp_open_package(kit_index, package, ctx.clone());
+            }
+            queued += 1;
+        }
+        if self.kits[kit_index].chimp.loading_packages.is_empty()
+            && let Some(active) = self.kits[kit_index]
+                .pending_restore_active_chimp_package
+                .take()
+            && self.kits[kit_index].documents_contains_chimp(&active)
+        {
+            let kit = self.kits[kit_index].id;
+            self.kits[kit_index].chimp.selected_package = Some(active.clone());
+            self.kits[kit_index].chimp.open_document_pane(kit, &active);
+        }
+        if queued > 0 || missing > 0 {
+            self.status = match (queued, missing) {
+                (queued, 0) => format!("Reopening {queued} Chimp package(s)"),
+                (0, missing) => format!("Could not find {missing} saved Chimp package(s)"),
+                (queued, missing) => format!(
+                    "Reopening {queued} Chimp package(s); {missing} saved package(s) are missing"
+                ),
+            };
+        }
     }
 
     pub(super) fn handle_chimp_types_indexed(
@@ -1315,15 +1565,25 @@ impl Baboon {
         let Some(index) = self.resolve_stamp(stamp) else {
             return true;
         };
-        let chimp = &mut self.kits[index].chimp;
-        chimp.loading_packages.remove(&package);
+        self.kits[index].chimp.loading_packages.remove(&package);
         match result {
             Ok(document) => {
-                chimp.documents.insert(package.clone(), document);
+                self.kits[index]
+                    .chimp
+                    .documents
+                    .insert(package.clone(), document);
                 let kit_id = self.kits[index].id;
                 self.kits[index].chimp.open_document_pane(kit_id, &package);
             }
             Err(error) => self.status = error,
+        }
+        if self.kits[index].chimp.loading_packages.is_empty()
+            && let Some(active) = self.kits[index].pending_restore_active_chimp_package.take()
+            && self.kits[index].documents_contains_chimp(&active)
+        {
+            let kit_id = self.kits[index].id;
+            self.kits[index].chimp.selected_package = Some(active.clone());
+            self.kits[index].chimp.open_document_pane(kit_id, &active);
         }
         false
     }
@@ -1416,31 +1676,9 @@ impl Baboon {
 
     fn draw_chimp_browser(&mut self, ui: &mut Ui, ctx: &egui::Context, kit_index: usize) {
         ui.horizontal(|ui| {
-            ui.selectable_value(
-                &mut self.kits[kit_index].chimp.browser,
-                ChimpBrowser::Archives,
-                "Archives",
-            );
-            ui.selectable_value(
-                &mut self.kits[kit_index].chimp.browser,
-                ChimpBrowser::Folders,
-                "Folders",
-            );
-            ui.selectable_value(
-                &mut self.kits[kit_index].chimp.browser,
-                ChimpBrowser::Groups,
-                "Groups",
-            );
-            ui.selectable_value(
-                &mut self.kits[kit_index].chimp.browser,
-                ChimpBrowser::Packages,
-                "Packages",
-            );
-            ui.selectable_value(
-                &mut self.kits[kit_index].chimp.browser,
-                ChimpBrowser::Files,
-                "Pak files",
-            );
+            for (browser, label) in ChimpBrowser::TABS {
+                ui.selectable_value(&mut self.kits[kit_index].chimp.browser, browser, label);
+            }
             if matches!(self.kits[kit_index].chimp.mount, ChimpMount::Loading) {
                 ui.spinner();
             }
@@ -1581,9 +1819,9 @@ impl Baboon {
             ui.add_space(4.0);
         }
 
-        let groups = self.kits[kit_index].chimp.filtered_groups.clone();
+        let groups = &self.kits[kit_index].chimp.filtered_groups;
         let selected = self.kits[kit_index].chimp.selected_package.clone();
-        let searching = !self.kits[kit_index].chimp.filter.trim().is_empty();
+        let mut open_package = None;
         let mut extract_texture = None;
         let mut extract_mesh = None;
         if groups.is_empty() && !self.kits[kit_index].chimp.type_indexing {
@@ -1598,9 +1836,9 @@ impl Baboon {
                 for (kind, indices) in groups {
                     egui::CollapsingHeader::new(format!("{kind}  ·  {}", indices.len()))
                         .id_salt(("chimp_group", self.kits[kit_index].id.0, &kind))
-                        .default_open(searching)
+                        .default_open(false)
                         .show(ui, |ui| {
-                            for index in indices {
+                            for &index in indices {
                                 let package = &world.packages()[index];
                                 let label =
                                     package.name.rsplit('/').next().unwrap_or(&package.name);
@@ -1631,16 +1869,15 @@ impl Baboon {
                                     });
                                 }
                                 if response.clicked() {
-                                    self.begin_chimp_open_package(
-                                        kit_index,
-                                        package.name.clone(),
-                                        ctx.clone(),
-                                    );
+                                    open_package = Some(package.name.clone());
                                 }
                             }
                         });
                 }
             });
+        if let Some(package) = open_package {
+            self.begin_chimp_open_package(kit_index, package, ctx.clone());
+        }
         if let Some(package) = extract_texture {
             self.begin_extract_chimp_texture_tiff(kit_index, &package, ctx.clone());
         }
@@ -2007,7 +2244,8 @@ impl Baboon {
                 ui.heading(&document.package);
                 ui.separator();
                 save_mod = ui
-                    .add_enabled(document.dirty, egui::Button::new("Build Chimp mod"))
+                    .add_enabled(document.dirty, egui::Button::new("Save Chimp changes…"))
+                    .on_hover_text("Save every modified Chimp package in one operation")
                     .clicked();
                 extract_package = ui.button("Extract package…").clicked();
                 extract_json = ui.button("Export JSON…").clicked();
@@ -2015,7 +2253,7 @@ impl Baboon {
             });
         }
         if save_mod {
-            self.build_chimp_mod(kit_index, ui.ctx().clone());
+            self.open_chimp_save_dialog(kit_index);
         }
         if extract_package {
             self.extract_chimp_package(kit_index, &package);
@@ -2130,7 +2368,9 @@ impl Baboon {
                     });
                 });
                 egui::CentralPanel::default()
-                    .show_inside(ui, |ui| draw_chimp_export_editor(ui, document))
+                    .show_inside(ui, |ui| {
+                        draw_chimp_export_editor(ui, document, world.usmap())
+                    })
                     .inner
             }
             ChimpDocumentView::Metadata => {
@@ -2159,26 +2399,216 @@ impl Baboon {
         }
     }
 
-    fn chimp_output_path(&self, kit_index: usize) -> Option<PathBuf> {
+    fn chimp_default_output_folder(&self, kit_index: usize) -> Option<PathBuf> {
         let root = match &self.kits.get(kit_index)?.source.as_ref()?.source {
             TagSource::IoStoreContainerSet { root, .. } => root,
             _ => return None,
         };
-        let directory = self
-            .chimp_output_dir
-            .clone()
-            .unwrap_or_else(|| root.join("~mods").join("Chimp"));
-        Some(directory.join("Chimp_P.utoc"))
+        Some(
+            self.chimp_output_dir
+                .clone()
+                .unwrap_or_else(|| root.clone()),
+        )
     }
 
-    pub(super) fn build_chimp_mod(&mut self, kit_index: usize, ctx: egui::Context) {
+    pub(super) fn open_chimp_save_dialog(&mut self, kit_index: usize) {
+        let dirty = self.kits[kit_index]
+            .chimp
+            .documents
+            .values()
+            .filter(|document| document.dirty)
+            .count();
+        if dirty == 0 {
+            self.status = "Chimp has no modified packages to save".to_owned();
+            return;
+        }
+        let Some(folder) = self.chimp_default_output_folder(kit_index) else {
+            self.status = "Chimp does not have a Paks output folder".to_owned();
+            return;
+        };
+        self.kits[kit_index].chimp.save_dialog = Some(ChimpSaveDialog {
+            mode: ChimpSaveMode::ExportMod,
+            name: "ChimpMod".to_owned(),
+            folder,
+            overwrite_acknowledged: false,
+        });
+    }
+
+    pub(super) fn draw_chimp_save_window(&mut self, ctx: &egui::Context) {
+        let Some(kit_index) = self
+            .kits
+            .iter()
+            .position(|kit| kit.chimp.save_dialog.is_some())
+        else {
+            return;
+        };
+        let dirty_packages: Vec<String> = self.kits[kit_index]
+            .chimp
+            .documents
+            .values()
+            .filter(|document| document.dirty)
+            .map(|document| document.package.clone())
+            .collect();
+        let source_containers: Vec<PathBuf> = match &self.kits[kit_index].chimp.mount {
+            ChimpMount::Ready(world) => {
+                let mut paths: Vec<_> = dirty_packages
+                    .iter()
+                    .filter_map(|package| {
+                        let document = self.kits[kit_index].chimp.documents.get(package)?;
+                        world
+                            .containers()
+                            .get(document.provider.container)
+                            .map(|container| container.path.clone())
+                    })
+                    .collect();
+                paths.sort();
+                paths.dedup();
+                paths
+            }
+            _ => Vec::new(),
+        };
+        let mut close = false;
+        let mut action = None;
+        let dialog = self.kits[kit_index]
+            .chimp
+            .save_dialog
+            .as_mut()
+            .expect("checked above");
+        egui::Window::new("Save Chimp changes")
+            .id(egui::Id::new("chimp_save_changes"))
+            .collapsible(false)
+            .resizable(true)
+            .default_width(620.0)
+            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.label(format!(
+                    "{} modified Unreal package(s) will be saved together.",
+                    dirty_packages.len()
+                ));
+                egui::ScrollArea::vertical()
+                    .max_height(150.0)
+                    .show(ui, |ui| {
+                        for package in &dirty_packages {
+                            ui.label(package);
+                        }
+                    });
+                ui.separator();
+                let mode_before = dialog.mode;
+                ui.radio_value(
+                    &mut dialog.mode,
+                    ChimpSaveMode::ExportMod,
+                    "Export mod (recommended)",
+                );
+                ui.radio_value(
+                    &mut dialog.mode,
+                    ChimpSaveMode::OverwriteSources,
+                    "Overwrite source PAKs",
+                );
+                if dialog.mode != mode_before {
+                    dialog.overwrite_acknowledged = false;
+                }
+                ui.separator();
+
+                let mut can_save;
+                match dialog.mode {
+                    ChimpSaveMode::ExportMod => {
+                        ui.horizontal(|ui| {
+                            ui.label("Mod name");
+                            ui.text_edit_singleline(&mut dialog.name);
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Destination");
+                            ui.label(dialog.folder.display().to_string());
+                            if ui.button("Browse…").clicked()
+                                && let Some(folder) = rfd::FileDialog::new()
+                                    .set_title("Choose Chimp mod folder")
+                                    .set_directory(&dialog.folder)
+                                    .pick_folder()
+                            {
+                                dialog.folder = folder;
+                                dialog.overwrite_acknowledged = false;
+                            }
+                        });
+                        let stem = chimp_mod_stem(&dialog.name);
+                        can_save = !sanitize_mod_name(&dialog.name).is_empty();
+                        if can_save {
+                            ui.label(format!("Output: {stem}.utoc / .ucas / .pak"));
+                        } else {
+                            ui.colored_label(
+                                Color32::from_rgb(210, 120, 80),
+                                "Enter a file-safe mod name.",
+                            );
+                        }
+                        let existing =
+                            chimp_existing_triplet(&dialog.folder.join(format!("{stem}.utoc")));
+                        if !existing.is_empty() {
+                            ui.colored_label(
+                                Color32::from_rgb(210, 120, 80),
+                                format!("This will replace: {}", existing.join(", ")),
+                            );
+                            ui.checkbox(
+                                &mut dialog.overwrite_acknowledged,
+                                "Replace the existing mod container",
+                            );
+                            can_save &= dialog.overwrite_acknowledged;
+                        }
+                    }
+                    ChimpSaveMode::OverwriteSources => {
+                        ui.colored_label(
+                            Color32::from_rgb(190, 72, 56),
+                            "This replaces package indexes in the installed game containers.",
+                        );
+                        for path in &source_containers {
+                            ui.label(path.display().to_string());
+                        }
+                        ui.checkbox(
+                            &mut dialog.overwrite_acknowledged,
+                            "I understand these source containers will be modified",
+                        );
+                        can_save = dialog.overwrite_acknowledged && !source_containers.is_empty();
+                    }
+                }
+                ui.separator();
+                ui.horizontal(|ui| {
+                    if ui.button("Cancel").clicked() {
+                        close = true;
+                    }
+                    let label = match dialog.mode {
+                        ChimpSaveMode::ExportMod => "Export mod",
+                        ChimpSaveMode::OverwriteSources => "Overwrite source PAKs",
+                    };
+                    if ui.add_enabled(can_save, egui::Button::new(label)).clicked() {
+                        action = Some(match dialog.mode {
+                            ChimpSaveMode::ExportMod => ChimpSaveAction::Export(
+                                dialog
+                                    .folder
+                                    .join(format!("{}.utoc", chimp_mod_stem(&dialog.name))),
+                            ),
+                            ChimpSaveMode::OverwriteSources => ChimpSaveAction::Overwrite,
+                        });
+                    }
+                });
+            });
+        if close || action.is_some() {
+            self.kits[kit_index].chimp.save_dialog = None;
+        }
+        match action {
+            Some(ChimpSaveAction::Export(output)) => {
+                self.chimp_output_dir = output.parent().map(Path::to_path_buf);
+                self.export_chimp_mod_to(kit_index, output, ctx.clone());
+            }
+            Some(ChimpSaveAction::Overwrite) => {
+                self.overwrite_all_dirty_chimp_packages(kit_index, ctx.clone());
+            }
+            None => {}
+        }
+    }
+
+    fn export_chimp_mod_to(&mut self, kit_index: usize, output: PathBuf, ctx: egui::Context) {
         let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
             return;
         };
         let world = world.clone();
-        let Some(output) = self.chimp_output_path(kit_index) else {
-            return;
-        };
         let mut rebuilt = Vec::new();
         for document in self.kits[kit_index]
             .chimp
@@ -2237,6 +2667,37 @@ impl Baboon {
             self.status = format!("Could not build {}: {error}", output.display());
             return;
         }
+        let validation = (|| -> Result<(), String> {
+            let archive = blam_tags::iostore::IoStoreArchive::open(&temporary)
+                .map_err(|error| format!("Could not reopen temporary mod: {error}"))?;
+            for (_, provider, bytes, _) in &rebuilt {
+                let source = &world.archives()[provider.container];
+                let source_index = source
+                    .chunk_index_for(&provider.entry_path)
+                    .map_err(|error| error.to_string())?;
+                let chunk_id = source
+                    .chunk_id(source_index)
+                    .map_err(|error| error.to_string())?;
+                let saved_index = archive
+                    .find_chunk(&chunk_id)
+                    .ok_or_else(|| format!("Temporary mod is missing {}", provider.entry_path))?;
+                let saved = archive
+                    .read_chunk(saved_index)
+                    .map_err(|error| error.to_string())?;
+                if saved != *bytes {
+                    return Err(format!(
+                        "Temporary mod did not preserve {} exactly",
+                        provider.entry_path
+                    ));
+                }
+            }
+            Ok(())
+        })();
+        if let Err(error) = validation {
+            remove_chimp_triplet(&temporary);
+            self.status = error;
+            return;
+        }
 
         // The active Chimp World (and possibly Baboon's tag mount) can have the
         // existing output memory-mapped. Finish the replacement container at a
@@ -2280,6 +2741,357 @@ impl Baboon {
             }
         }
         self.begin_chimp_mount(kit_index, ctx);
+    }
+
+    fn overwrite_all_dirty_chimp_packages(&mut self, kit_index: usize, ctx: egui::Context) {
+        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+            return;
+        };
+        let world = world.clone();
+        let mut rebuilt = Vec::new();
+        for document in self.kits[kit_index]
+            .chimp
+            .documents
+            .values()
+            .filter(|document| document.dirty)
+        {
+            match rebuild_chimp_document(&world, document) {
+                Ok((bytes, store)) => rebuilt.push((
+                    document.package.clone(),
+                    document.provider.clone(),
+                    bytes,
+                    store,
+                )),
+                Err(error) => {
+                    self.status = error;
+                    return;
+                }
+            }
+        }
+        if rebuilt.is_empty() {
+            self.status = "Chimp has no modified packages to overwrite".to_owned();
+            return;
+        }
+
+        let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+        for (index, (_, provider, _, _)) in rebuilt.iter().enumerate() {
+            groups.entry(provider.container).or_default().push(index);
+        }
+        let mut originals = BTreeMap::new();
+        for &container in groups.keys() {
+            let path = world.containers()[container].path.clone();
+            match fs::read(&path) {
+                Ok(bytes) => {
+                    originals.insert(container, (path, bytes));
+                }
+                Err(error) => {
+                    self.status =
+                        format!("Could not stage rollback for {}: {error}", path.display());
+                    return;
+                }
+            }
+        }
+
+        let mut failure = None;
+        for (&container, indices) in &groups {
+            let replacements: Vec<_> = indices
+                .iter()
+                .map(|&index| {
+                    let (_, provider, bytes, store) = &rebuilt[index];
+                    PackageReplacement {
+                        uasset_path: &provider.entry_path,
+                        rebuilt_bytes: bytes,
+                        store,
+                    }
+                })
+                .collect();
+            let path = &originals[&container].0;
+            if let Err(error) =
+                overwrite_packages_in_place_with(&world.archives()[container], path, &replacements)
+            {
+                failure = Some(format!("Could not overwrite {}: {error}", path.display()));
+                break;
+            }
+        }
+
+        if let Some(mut error) = failure {
+            let mut rollback_failures = Vec::new();
+            for (path, bytes) in originals.values() {
+                if let Err(rollback_error) = fs::write(path, bytes) {
+                    rollback_failures.push(format!("{}: {rollback_error}", path.display()));
+                }
+            }
+            if !rollback_failures.is_empty() {
+                error.push_str(&format!(
+                    "; rollback also failed for {}",
+                    rollback_failures.join(", ")
+                ));
+            }
+            self.status = error;
+            drop(world);
+            self.begin_chimp_mount(kit_index, ctx);
+            return;
+        }
+
+        let packages: Vec<String> = rebuilt
+            .iter()
+            .map(|(package, _, _, _)| package.clone())
+            .collect();
+        for (package, _, bytes, _) in rebuilt {
+            if let Some(document) = self.kits[kit_index].chimp.documents.get_mut(&package) {
+                if let Ok(payloads) = read_payloads(&document.header, &bytes) {
+                    document.payloads = payloads;
+                }
+                document.original = bytes;
+                document.dirty = false;
+            }
+        }
+        self.clear_chimp_recovery_packages(kit_index, &packages);
+        self.status = format!(
+            "Overwrote {} modified Unreal package(s) across {} source container(s)",
+            packages.len(),
+            groups.len()
+        );
+        drop(world);
+        self.begin_chimp_mount(kit_index, ctx);
+    }
+
+    fn overwrite_chimp_package(&mut self, kit_index: usize, package: &str, ctx: egui::Context) {
+        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+            return;
+        };
+        let world = world.clone();
+        let Some(document) = self.kits[kit_index].chimp.documents.get(package) else {
+            return;
+        };
+        let provider = document.provider.clone();
+        let (bytes, store) = match rebuild_chimp_document(&world, document) {
+            Ok(rebuilt) => rebuilt,
+            Err(error) => {
+                self.status = error;
+                return;
+            }
+        };
+        let archive = &world.archives()[provider.container];
+        let path = world.containers()[provider.container].path.clone();
+        let source_chunk = match archive
+            .chunk_index_for(&provider.entry_path)
+            .and_then(|index| archive.chunk_id(index))
+        {
+            Ok(chunk) => chunk,
+            Err(error) => {
+                self.status = format!("Could not resolve {package} in {}: {error}", path.display());
+                return;
+            }
+        };
+        if let Err(error) =
+            overwrite_package_in_place_with(archive, &path, &provider.entry_path, &bytes, &store)
+        {
+            self.status = format!("Could not overwrite {package}: {error}");
+            return;
+        }
+        let verified = blam_tags::iostore::IoStoreArchive::open(&path)
+            .and_then(|archive| {
+                let index = archive.find_chunk(&source_chunk).ok_or(
+                    blam_tags::iostore::IoStoreError::Package(
+                        "saved package chunk is absent after reopening",
+                    ),
+                )?;
+                archive.read_chunk(index)
+            })
+            .is_ok_and(|saved| saved == bytes);
+        if !verified {
+            self.status = format!(
+                "{package} was written, but validation failed; the package remains marked modified"
+            );
+            return;
+        }
+        self.accept_chimp_package_save(kit_index, package, bytes);
+        self.status = format!("Saved {package} into {}", path.display());
+        drop(world);
+        self.begin_chimp_mount(kit_index, ctx);
+    }
+
+    fn save_chimp_package_to_folder(
+        &mut self,
+        kit_index: usize,
+        package: &str,
+        ctx: egui::Context,
+    ) {
+        let stem = chimp_package_container_stem(package);
+        let Some(chosen) = rfd::FileDialog::new()
+            .set_title("Save Chimp package container")
+            .add_filter("Unreal IoStore container", &["utoc"])
+            .set_file_name(format!("{stem}.utoc"))
+            .save_file()
+        else {
+            return;
+        };
+        let output = chosen.with_extension("utoc");
+        let folder = output.parent().unwrap_or(Path::new(".")).to_path_buf();
+        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+            return;
+        };
+        let world = world.clone();
+        let Some(document) = self.kits[kit_index].chimp.documents.get(package) else {
+            return;
+        };
+        let provider = document.provider.clone();
+        let (bytes, store) = match rebuild_chimp_document(&world, document) {
+            Ok(rebuilt) => rebuilt,
+            Err(error) => {
+                self.status = error;
+                return;
+            }
+        };
+        if let Err(error) = fs::create_dir_all(&folder) {
+            self.status = format!("Could not create {}: {error}", folder.display());
+            return;
+        }
+        let temporary = folder.join(format!("{stem}.building.utoc"));
+        let source_archive = &world.archives()[provider.container];
+        let source_chunk = match source_archive
+            .chunk_index_for(&provider.entry_path)
+            .and_then(|index| source_archive.chunk_id(index))
+        {
+            Ok(chunk) => chunk,
+            Err(error) => {
+                self.status = format!("Could not resolve {package}: {error}");
+                return;
+            }
+        };
+        let override_ = PackageOverride {
+            archive: source_archive,
+            uasset_path: &provider.entry_path,
+            bytes: bytes.clone(),
+            store,
+        };
+        if let Err(error) = write_package_mod_container(&[override_], &temporary) {
+            remove_chimp_triplet(&temporary);
+            self.status = format!("Could not build {}: {error}", output.display());
+            return;
+        }
+        let validated = blam_tags::iostore::IoStoreArchive::open(&temporary)
+            .and_then(|archive| {
+                let index = archive.find_chunk(&source_chunk).ok_or(
+                    blam_tags::iostore::IoStoreError::Package(
+                        "saved package chunk is absent from the new container",
+                    ),
+                )?;
+                archive.read_chunk(index)
+            })
+            .is_ok_and(|saved| saved == bytes);
+        if !validated {
+            remove_chimp_triplet(&temporary);
+            self.status = format!("Could not validate the rebuilt package container for {package}");
+            return;
+        }
+
+        drop(world);
+        self.kits[kit_index].chimp.mount = ChimpMount::Idle;
+        let released = match self.release_export_target_mappings(kit_index, &output) {
+            Ok(released) => released,
+            Err(error) => {
+                remove_chimp_triplet(&temporary);
+                self.status = error;
+                self.begin_chimp_mount(kit_index, ctx);
+                return;
+            }
+        };
+        let replaced = replace_chimp_triplet(&temporary, &output);
+        let reopen_failures = self.restore_released_mappings(kit_index, &released);
+        match replaced {
+            Ok(()) => {
+                self.accept_chimp_package_save(kit_index, package, bytes);
+                self.status = format!("Saved {package} as {}", output.display());
+                if !reopen_failures.is_empty() {
+                    self.status.push_str(&format!(
+                        "; {} tag mount(s) could not be reopened",
+                        reopen_failures.len()
+                    ));
+                }
+            }
+            Err(error) => {
+                self.status = format!("Could not install {}: {error}", output.display());
+            }
+        }
+        self.begin_chimp_mount(kit_index, ctx);
+    }
+
+    fn accept_chimp_package_save(&mut self, kit_index: usize, package: &str, bytes: Vec<u8>) {
+        if let Some(document) = self.kits[kit_index].chimp.documents.get_mut(package) {
+            if let Ok(payloads) = read_payloads(&document.header, &bytes) {
+                document.payloads = payloads;
+            }
+            document.original = bytes;
+            document.dirty = false;
+        }
+        self.clear_chimp_recovery_packages(kit_index, &[package.to_owned()]);
+    }
+
+    pub(super) fn draw_chimp_overwrite_confirm_window(&mut self, ctx: &egui::Context) {
+        let Some(kit_index) = self
+            .kits
+            .iter()
+            .position(|kit| kit.chimp.pending_overwrite.is_some())
+        else {
+            return;
+        };
+        let package = self.kits[kit_index]
+            .chimp
+            .pending_overwrite
+            .clone()
+            .expect("checked above");
+        let source = self.kits[kit_index]
+            .chimp
+            .documents
+            .get(&package)
+            .and_then(|document| match &self.kits[kit_index].chimp.mount {
+                ChimpMount::Ready(world) => world
+                    .containers()
+                    .get(document.provider.container)
+                    .map(|container| container.path.clone()),
+                _ => None,
+            });
+        let mut confirm = false;
+        let mut cancel = false;
+        egui::Window::new("Overwrite Unreal package?")
+            .id(egui::Id::new("chimp_overwrite_confirm"))
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.colored_label(
+                    Color32::from_rgb(190, 72, 56),
+                    "This modifies the selected game container in place.",
+                );
+                ui.label(RichText::new(&package).strong());
+                if let Some(path) = &source {
+                    ui.label(path.display().to_string());
+                }
+                ui.label("Baboon appends the rebuilt chunks and atomically updates the UTOC.");
+                ui.checkbox(
+                    &mut self.kits[kit_index].chimp.pending_overwrite_skip_future,
+                    "Don't ask again (changeable in Settings)",
+                );
+                ui.horizontal(|ui| {
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                    if ui.button("Overwrite package").clicked() {
+                        confirm = true;
+                    }
+                });
+            });
+        if cancel {
+            self.kits[kit_index].chimp.pending_overwrite = None;
+        } else if confirm {
+            if self.kits[kit_index].chimp.pending_overwrite_skip_future {
+                self.confirm_container_overwrite = false;
+            }
+            self.kits[kit_index].chimp.pending_overwrite = None;
+            self.overwrite_chimp_package(kit_index, &package, ctx.clone());
+        }
     }
 
     fn extract_chimp_package(&mut self, kit_index: usize, package: &str) {
@@ -2469,11 +3281,9 @@ fn write_chimp_mesh(
             )
             .map_err(|error| format!("Could not decode {package}: {error:#}"))?;
             match format {
-                ChimpMeshFormat::Jms => {
-                    blam_tags::iostore::actorx::skeletal_mesh_to_jms(&mesh, &materials)
-                        .write(&mut writer, 8213)
-                        .map_err(|error| error.to_string())?
-                }
+                ChimpMeshFormat::Jms => chimp_skeletal_mesh_to_jms(&mesh, &materials)
+                    .write(&mut writer, 8213)
+                    .map_err(|error| error.to_string())?,
                 ChimpMeshFormat::Psk => blam_tags::iostore::actorx::write_skeletal_mesh(
                     &mesh,
                     &materials,
@@ -2503,11 +3313,9 @@ fn write_chimp_mesh(
             )
             .map_err(|error| format!("Could not decode {package}: {error:#}"))?;
             match format {
-                ChimpMeshFormat::Jms => {
-                    blam_tags::iostore::actorx::static_mesh_to_jms(&mesh, &materials)
-                        .write(&mut writer, 8213)
-                        .map_err(|error| error.to_string())?
-                }
+                ChimpMeshFormat::Jms => chimp_static_mesh_to_jms(&mesh, &materials)
+                    .write(&mut writer, 8213)
+                    .map_err(|error| error.to_string())?,
                 ChimpMeshFormat::Psk => blam_tags::iostore::actorx::write_static_mesh(
                     &mesh,
                     &materials,
@@ -2533,6 +3341,24 @@ fn write_chimp_mesh(
         format.label(),
         output.display()
     ))
+}
+
+/// Canonical Unreal skeletal-mesh to JMS conversion shared by Chimp's direct
+/// exporter and Campaign Evolved tag-model extraction.
+pub(in crate::app) fn chimp_skeletal_mesh_to_jms(
+    mesh: &SkeletalMesh,
+    material_names: &[String],
+) -> blam_tags::jms::JmsFile {
+    blam_tags::iostore::actorx::skeletal_mesh_to_jms(mesh, material_names)
+}
+
+/// Canonical Unreal static-mesh to JMS conversion shared by Chimp's direct
+/// exporter and Campaign Evolved tag-model extraction.
+pub(in crate::app) fn chimp_static_mesh_to_jms(
+    mesh: &StaticMesh,
+    material_names: &[String],
+) -> blam_tags::jms::JmsFile {
+    blam_tags::iostore::actorx::static_mesh_to_jms(mesh, material_names)
 }
 
 fn draw_chimp_folder_node(
@@ -2670,6 +3496,55 @@ fn triplet(path: &Path) -> [PathBuf; 3] {
         path.with_extension("ucas"),
         path.with_extension("pak"),
     ]
+}
+
+fn chimp_mod_stem(name: &str) -> String {
+    let sanitized = sanitize_mod_name(name);
+    if sanitized
+        .get(sanitized.len().saturating_sub(2)..)
+        .is_some_and(|suffix| suffix.eq_ignore_ascii_case("_p"))
+    {
+        sanitized
+    } else {
+        format!("{sanitized}_P")
+    }
+}
+
+fn chimp_existing_triplet(path: &Path) -> Vec<String> {
+    triplet(path)
+        .into_iter()
+        .filter(|path| path.exists())
+        .map(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("container file")
+                .to_owned()
+        })
+        .collect()
+}
+
+fn chimp_package_container_stem(package: &str) -> String {
+    let leaf = package
+        .rsplit('/')
+        .find(|segment| !segment.is_empty())
+        .unwrap_or("Chimp");
+    let mut stem = leaf
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if stem.is_empty() {
+        stem.push_str("Chimp");
+    }
+    if !stem.ends_with("_P") {
+        stem.push_str("_P");
+    }
+    stem
 }
 
 fn remove_chimp_triplet(path: &Path) {
@@ -3019,7 +3894,7 @@ fn draw_chimp_json_document(
         });
 }
 
-fn draw_chimp_export_editor(ui: &mut Ui, document: &mut ChimpDocument) -> bool {
+fn draw_chimp_export_editor(ui: &mut Ui, document: &mut ChimpDocument, usmap: &Usmap) -> bool {
     let Some(export) = document.exports.get_mut(document.selected_export) else {
         ui.label("This package has no exports.");
         return false;
@@ -3029,6 +3904,7 @@ fn draw_chimp_export_editor(ui: &mut Ui, document: &mut ChimpDocument) -> bool {
         RichText::new(export.class.as_deref().unwrap_or("Unknown class")).color(subtle_dark()),
     );
     ui.add_space(6.0);
+    let class = export.class.clone().unwrap_or_default();
     match &mut export.decoded {
         Ok(decoded) => match &mut decoded.block {
             ExportBlock::Reflected(block) => {
@@ -3043,7 +3919,14 @@ fn draw_chimp_export_editor(ui: &mut Ui, document: &mut ChimpDocument) -> bool {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        draw_chimp_property_block(ui, block, &mut document.header.name_map, 0)
+                        draw_chimp_property_block(
+                            ui,
+                            block,
+                            &class,
+                            &mut document.header.name_map,
+                            usmap,
+                            0,
+                        )
                     })
                     .inner
             }
@@ -3072,34 +3955,148 @@ fn draw_chimp_export_editor(ui: &mut Ui, document: &mut ChimpDocument) -> bool {
 fn draw_chimp_property_block(
     ui: &mut Ui,
     block: &mut PropertyBlock,
+    class: &str,
     names: &mut blam_tags::iostore::package::name_map::FNameMap,
+    usmap: &Usmap,
     depth: usize,
 ) -> bool {
     let mut changed = false;
+    let existing: std::collections::BTreeSet<u32> = block
+        .entries
+        .iter()
+        .filter_map(|entry| entry.slot.map(|slot| slot.index))
+        .collect();
+    if !class.is_empty()
+        && let Ok(slots) = editable_schema_slots(class, usmap)
+    {
+        let omitted: Vec<_> = slots
+            .into_iter()
+            .filter(|(_, slot, ty)| {
+                !existing.contains(&slot.index) && default_value_for_type(ty, usmap).is_ok()
+            })
+            .collect();
+        if !omitted.is_empty() {
+            ui.menu_button(
+                format!("Add omitted property… ({})", omitted.len()),
+                |ui| {
+                    ui.set_max_height(360.0);
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        for (name, slot, ty) in &omitted {
+                            let label = if slot.array_index == 0 {
+                                name.clone()
+                            } else {
+                                format!("{name}[{}]", slot.array_index)
+                            };
+                            if ui.button(label).on_hover_text(format!("{ty:?}")).clicked()
+                                && let Ok(value) = default_value_for_type(ty, usmap)
+                                && set_property_slot(
+                                    block,
+                                    class,
+                                    name,
+                                    slot.array_index,
+                                    value,
+                                    usmap,
+                                )
+                                .is_ok()
+                            {
+                                changed = true;
+                                ui.close_menu();
+                            }
+                        }
+                    });
+                },
+            );
+            ui.separator();
+        }
+    }
     for (index, entry) in block.entries.iter_mut().enumerate() {
         let id = ui.make_persistent_id((depth, index, entry.name.as_ref()));
-        ui.horizontal(|ui| {
+        let declared = entry
+            .slot
+            .and_then(|slot| property_type_for_slot(class, slot, usmap).ok());
+        let label = match entry.slot.map(|slot| slot.array_index) {
+            Some(array_index) if array_index > 0 => {
+                format!("{}[{array_index}]", entry.name)
+            }
+            _ => entry.name.to_string(),
+        };
+        ui.horizontal_top(|ui| {
             ui.set_min_height(24.0);
-            ui.label(RichText::new(entry.name.as_ref()).strong());
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                changed |= draw_chimp_value(ui, id, &mut entry.value, names, depth);
-            });
+            ui.label(RichText::new(label).strong()).on_hover_text(
+                declared
+                    .as_ref()
+                    .map(|ty| format!("{ty:?}"))
+                    .unwrap_or_else(|| "Native field without a USMAP slot".to_owned()),
+            );
+            changed |= chimp_property_value_cell(ui, |ui| {
+                draw_chimp_value(
+                    ui,
+                    id,
+                    &mut entry.value,
+                    declared.as_ref(),
+                    names,
+                    usmap,
+                    depth,
+                )
+            })
+            .inner;
         });
         ui.separator();
     }
     changed
 }
 
+fn chimp_property_value_cell<R>(
+    ui: &mut Ui,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<R> {
+    // `Ui::with_layout` inherits the parent's full remaining cross-axis size.
+    // In a vertical ScrollArea that made one compact scalar editor consume the
+    // entire viewport and then centered the widget inside it. Start each value
+    // cell at one normal row instead; `allocate_ui_with_layout` still expands
+    // when a nested struct or container genuinely needs additional height.
+    let row_height = ui.spacing().interact_size.y.max(24.0);
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), row_height),
+        egui::Layout::right_to_left(egui::Align::Min),
+        add_contents,
+    )
+}
+
 fn draw_chimp_value(
     ui: &mut Ui,
     id: egui::Id,
     value: &mut PropValue,
+    declared: Option<&PropertyType>,
     names: &mut blam_tags::iostore::package::name_map::FNameMap,
+    usmap: &Usmap,
     depth: usize,
 ) -> bool {
+    if let Some(PropertyType::Optional(inner)) = declared
+        && !matches!(value, PropValue::Unset)
+    {
+        let mut changed = false;
+        ui.horizontal(|ui| {
+            if ui.small_button("Unset").clicked() {
+                *value = PropValue::Unset;
+                changed = true;
+            } else {
+                changed |= draw_chimp_value(
+                    ui,
+                    id.with("optional"),
+                    value,
+                    Some(inner),
+                    names,
+                    usmap,
+                    depth,
+                );
+            }
+        });
+        return changed;
+    }
     match value {
         PropValue::Bool(value) => ui.checkbox(value, "").changed(),
-        PropValue::Int(value) => ui.add(egui::DragValue::new(value)).changed(),
+        PropValue::Int(value) => draw_chimp_integer(ui, value, declared, usmap),
         PropValue::Float(value) => ui.add(egui::DragValue::new(value).speed(0.01)).changed(),
         PropValue::Str(value) => {
             let mut text = value.to_string();
@@ -3107,7 +4104,7 @@ fn draw_chimp_value(
                 .add(egui::TextEdit::singleline(&mut text).id(id))
                 .changed();
             if changed {
-                *value = text.into();
+                value.set_text(text);
             }
             changed
         }
@@ -3121,32 +4118,1599 @@ fn draw_chimp_value(
             }
             changed
         }
+        PropValue::Object(value) => ui
+            .add(egui::DragValue::new(value).prefix("Object "))
+            .on_hover_text("FPackageIndex: negative = import, positive = export, zero = None")
+            .changed(),
+        PropValue::SoftObject(value) => {
+            let mut changed = false;
+            egui::CollapsingHeader::new("Soft object path")
+                .id_salt(id)
+                .show(ui, |ui| {
+                    changed |= draw_chimp_fname(ui, "Package", &mut value.package, names);
+                    changed |= draw_chimp_fname(ui, "Asset", &mut value.asset, names);
+                    let mut sub_path = value.sub_path.to_string();
+                    ui.horizontal(|ui| {
+                        ui.label("Sub-path");
+                        if ui.text_edit_singleline(&mut sub_path).changed() {
+                            value.sub_path.set_text(sub_path);
+                            changed = true;
+                        }
+                    });
+                });
+            changed
+        }
         PropValue::Struct(block) => {
+            let nested_class = match declared {
+                Some(PropertyType::Struct(name)) => name.as_str(),
+                _ => "",
+            };
             egui::CollapsingHeader::new(format!("Struct ({} properties)", block.len()))
                 .id_salt(id)
                 .show(ui, |ui| {
-                    draw_chimp_property_block(ui, block, names, depth + 1)
+                    draw_chimp_property_block(ui, block, nested_class, names, usmap, depth + 1)
                 })
                 .body_returned
                 .unwrap_or(false)
         }
-        PropValue::Array(values) | PropValue::Set(values) => {
-            ui.label(format!("{} values (read-only)", values.len()));
-            false
+        PropValue::Array(values) => draw_chimp_sequence(
+            ui,
+            id,
+            "Array",
+            values,
+            declared.and_then(|ty| match ty {
+                PropertyType::Array(inner) => Some(inner.as_ref()),
+                _ => None,
+            }),
+            names,
+            usmap,
+            depth,
+            true,
+        ),
+        PropValue::Set(values) => draw_chimp_sequence(
+            ui,
+            id,
+            "Set",
+            values,
+            declared.and_then(|ty| match ty {
+                PropertyType::Set(inner) => Some(inner.as_ref()),
+                _ => None,
+            }),
+            names,
+            usmap,
+            depth,
+            false,
+        ),
+        PropValue::Map(values) => draw_chimp_map(ui, id, values, declared, names, usmap, depth),
+        PropValue::WithRemovals { removals, inner } => {
+            let removal_type = match declared {
+                Some(PropertyType::Map(key, _)) | Some(PropertyType::Set(key)) => {
+                    Some(key.as_ref())
+                }
+                _ => None,
+            };
+            let mut changed = false;
+            egui::CollapsingHeader::new("Delta-serialized container")
+                .id_salt(id)
+                .show(ui, |ui| {
+                    let mut replace_whole = removals.is_none();
+                    if ui
+                        .checkbox(&mut replace_whole, "Replace whole container")
+                        .changed()
+                    {
+                        *removals = (!replace_whole).then(Vec::new);
+                        changed = true;
+                    }
+                    if let Some(removals) = removals {
+                        changed |= draw_chimp_sequence(
+                            ui,
+                            id.with("removals"),
+                            "Removed values",
+                            removals,
+                            removal_type,
+                            names,
+                            usmap,
+                            depth + 1,
+                            true,
+                        );
+                    }
+                    changed |= draw_chimp_value(
+                        ui,
+                        id.with("inner"),
+                        inner,
+                        declared,
+                        names,
+                        usmap,
+                        depth + 1,
+                    );
+                });
+            changed
         }
-        PropValue::Map(values) => {
-            ui.label(format!("{} pairs (read-only)", values.len()));
+        PropValue::Native(value) => draw_chimp_native(ui, id, value),
+        PropValue::HandWritten(value) => {
+            draw_chimp_hand_written(ui, id, value, names, usmap, depth)
+        }
+        PropValue::Delegate { object, function } => {
+            let mut changed = false;
+            egui::CollapsingHeader::new("Delegate")
+                .id_salt(id)
+                .show(ui, |ui| {
+                    changed |= ui
+                        .add(egui::DragValue::new(object).prefix("Object "))
+                        .changed();
+                    changed |= draw_chimp_fname(ui, "Function", function, names);
+                });
+            changed
+        }
+        PropValue::MulticastDelegate(values) => {
+            draw_chimp_multicast_delegate(ui, id, values, names)
+        }
+        PropValue::FieldPath { path, owner } => {
+            let mut changed = ui
+                .add(egui::DragValue::new(owner).prefix("Owner "))
+                .changed();
+            egui::CollapsingHeader::new(format!("Field path ({} segments)", path.len()))
+                .id_salt(id)
+                .show(ui, |ui| {
+                    let mut remove = None;
+                    for (index, segment) in path.iter_mut().enumerate() {
+                        ui.horizontal(|ui| {
+                            changed |= draw_chimp_fname(ui, &format!("[{index}]"), segment, names);
+                            if ui.small_button("−").clicked() {
+                                remove = Some(index);
+                            }
+                        });
+                    }
+                    if let Some(index) = remove {
+                        path.remove(index);
+                        changed = true;
+                    }
+                    if ui.small_button("+ segment").clicked() {
+                        path.push(blam_tags::iostore::object::value::FName::none());
+                        changed = true;
+                    }
+                });
+            changed
+        }
+        PropValue::Unset => {
+            if let Some(PropertyType::Optional(inner)) = declared
+                && ui.button("Set value").clicked()
+            {
+                match default_value_for_type(inner, usmap) {
+                    Ok(default) => {
+                        *value = default;
+                        return true;
+                    }
+                    Err(error) => {
+                        ui.colored_label(Color32::from_rgb(210, 120, 80), error.to_string());
+                    }
+                }
+            } else {
+                ui.label("Unset");
+            }
             false
         }
         PropValue::Raw(bytes) => {
-            ui.label(format!("{} unknown bytes (preserved)", bytes.len()));
-            false
-        }
-        other => {
-            ui.label(format!("{other:?}"));
+            ui.colored_label(
+                Color32::from_rgb(190, 150, 70),
+                format!("{} untyped bytes · preserved read-only", bytes.len()),
+            );
             false
         }
     }
+}
+
+fn draw_chimp_fname(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut blam_tags::iostore::object::value::FName,
+    names: &mut blam_tags::iostore::package::name_map::FNameMap,
+) -> bool {
+    let mut text = value.to_string();
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.label(label);
+        if ui.text_edit_singleline(&mut text).changed() {
+            *value = blam_tags::iostore::object::edit::intern_name(names, &text);
+            changed = true;
+        }
+    });
+    changed
+}
+
+fn draw_chimp_fstr(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut blam_tags::iostore::object::value::FStr,
+) -> bool {
+    let mut text = value.to_string();
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.label(label);
+        if ui.text_edit_singleline(&mut text).changed() {
+            value.set_text(text);
+            changed = true;
+        }
+    });
+    changed
+}
+
+fn draw_chimp_integer(
+    ui: &mut Ui,
+    value: &mut i64,
+    declared: Option<&PropertyType>,
+    usmap: &Usmap,
+) -> bool {
+    let ty = match declared {
+        Some(PropertyType::Enum { inner, enum_name }) => {
+            if let Some(definition) = usmap.enums.iter().find(|item| item.name == *enum_name) {
+                let selected = definition
+                    .values
+                    .iter()
+                    .find(|(candidate, _)| *candidate == *value as u64)
+                    .map(|(_, name)| name.as_str())
+                    .unwrap_or("Unknown");
+                let mut changed = false;
+                egui::ComboBox::from_id_salt(ui.next_auto_id())
+                    .selected_text(format!("{selected} ({})", *value as u64))
+                    .show_ui(ui, |ui| {
+                        for (candidate, name) in &definition.values {
+                            if ui
+                                .selectable_label(*value as u64 == *candidate, name)
+                                .clicked()
+                            {
+                                *value = *candidate as i64;
+                                changed = true;
+                            }
+                        }
+                    });
+                return changed;
+            }
+            Some(inner.as_ref())
+        }
+        Some(PropertyType::Byte {
+            enum_name: Some(enum_name),
+        }) => {
+            if let Some(definition) = usmap.enums.iter().find(|item| item.name == *enum_name) {
+                let mut changed = false;
+                egui::ComboBox::from_id_salt(ui.next_auto_id())
+                    .selected_text(
+                        definition
+                            .values
+                            .iter()
+                            .find(|(candidate, _)| *candidate == *value as u64)
+                            .map(|(_, name)| name.clone())
+                            .unwrap_or_else(|| value.to_string()),
+                    )
+                    .show_ui(ui, |ui| {
+                        for (candidate, name) in &definition.values {
+                            if ui
+                                .selectable_label(*value as u64 == *candidate, name)
+                                .clicked()
+                            {
+                                *value = *candidate as i64;
+                                changed = true;
+                            }
+                        }
+                    });
+                return changed;
+            }
+            declared
+        }
+        other => other,
+    };
+    match ty {
+        Some(PropertyType::UInt64) => {
+            let mut unsigned = *value as u64;
+            let changed = ui.add(egui::DragValue::new(&mut unsigned)).changed();
+            if changed {
+                *value = unsigned as i64;
+            }
+            changed
+        }
+        Some(PropertyType::UInt32) => ui
+            .add(egui::DragValue::new(value).range(0..=u32::MAX as i64))
+            .changed(),
+        Some(PropertyType::UInt16) => ui
+            .add(egui::DragValue::new(value).range(0..=u16::MAX as i64))
+            .changed(),
+        Some(PropertyType::Int8) => ui
+            .add(egui::DragValue::new(value).range(i8::MIN as i64..=i8::MAX as i64))
+            .changed(),
+        Some(PropertyType::Int16) => ui
+            .add(egui::DragValue::new(value).range(i16::MIN as i64..=i16::MAX as i64))
+            .changed(),
+        Some(PropertyType::Int) => ui
+            .add(egui::DragValue::new(value).range(i32::MIN as i64..=i32::MAX as i64))
+            .changed(),
+        Some(PropertyType::Byte { .. }) => ui
+            .add(egui::DragValue::new(value).range(0..=u8::MAX as i64))
+            .changed(),
+        _ => ui.add(egui::DragValue::new(value)).changed(),
+    }
+}
+
+#[derive(Clone, Copy)]
+enum ChimpListAction {
+    Remove(usize),
+    Duplicate(usize),
+    MoveUp(usize),
+    MoveDown(usize),
+}
+
+fn draw_chimp_list<T: Clone>(
+    ui: &mut Ui,
+    id: egui::Id,
+    label: &str,
+    values: &mut Vec<T>,
+    default: Option<T>,
+    mut draw: impl FnMut(&mut Ui, usize, &mut T) -> bool,
+) -> bool {
+    let mut changed = false;
+    egui::CollapsingHeader::new(format!("{label} ({})", values.len()))
+        .id_salt(id)
+        .show(ui, |ui| {
+            let mut action = None;
+            for (index, value) in values.iter_mut().enumerate() {
+                ui.push_id(index, |ui| {
+                    ui.horizontal_top(|ui| {
+                        ui.label(format!("[{index}]"));
+                        if ui.small_button("↑").clicked() {
+                            action = Some(ChimpListAction::MoveUp(index));
+                        }
+                        if ui.small_button("↓").clicked() {
+                            action = Some(ChimpListAction::MoveDown(index));
+                        }
+                        if ui.small_button("Duplicate").clicked() {
+                            action = Some(ChimpListAction::Duplicate(index));
+                        }
+                        if ui.small_button("Remove").clicked() {
+                            action = Some(ChimpListAction::Remove(index));
+                        }
+                    });
+                    changed |= draw(ui, index, value);
+                    ui.separator();
+                });
+            }
+            if let Some(default) = default
+                && ui.small_button("+ Add").clicked()
+            {
+                values.push(default);
+                changed = true;
+            }
+            match action {
+                Some(ChimpListAction::Remove(index)) => {
+                    values.remove(index);
+                    changed = true;
+                }
+                Some(ChimpListAction::Duplicate(index)) => {
+                    values.insert(index + 1, values[index].clone());
+                    changed = true;
+                }
+                Some(ChimpListAction::MoveUp(index)) if index > 0 => {
+                    values.swap(index, index - 1);
+                    changed = true;
+                }
+                Some(ChimpListAction::MoveDown(index)) if index + 1 < values.len() => {
+                    values.swap(index, index + 1);
+                    changed = true;
+                }
+                _ => {}
+            }
+        });
+    changed
+}
+
+fn draw_chimp_sequence(
+    ui: &mut Ui,
+    id: egui::Id,
+    label: &str,
+    values: &mut Vec<PropValue>,
+    inner_type: Option<&PropertyType>,
+    names: &mut blam_tags::iostore::package::name_map::FNameMap,
+    usmap: &Usmap,
+    depth: usize,
+    allow_duplicates: bool,
+) -> bool {
+    let default = inner_type.and_then(|ty| default_value_for_type(ty, usmap).ok());
+    let before = values.clone();
+    let mut changed = draw_chimp_list(ui, id, label, values, default, |ui, index, value| {
+        draw_chimp_value(
+            ui,
+            id.with(index),
+            value,
+            inner_type,
+            names,
+            usmap,
+            depth + 1,
+        )
+    });
+    if !allow_duplicates {
+        let mut duplicate = false;
+        for left in 0..values.len() {
+            duplicate |= values[left + 1..]
+                .iter()
+                .any(|right| values[left].semantic_eq(right));
+        }
+        if duplicate {
+            *values = before;
+            changed = false;
+            ui.colored_label(
+                Color32::from_rgb(210, 120, 80),
+                "Sets cannot contain duplicate values.",
+            );
+        }
+    }
+    changed
+}
+
+fn draw_chimp_map(
+    ui: &mut Ui,
+    id: egui::Id,
+    values: &mut Vec<(PropValue, PropValue)>,
+    declared: Option<&PropertyType>,
+    names: &mut blam_tags::iostore::package::name_map::FNameMap,
+    usmap: &Usmap,
+    depth: usize,
+) -> bool {
+    let (key_type, value_type) = match declared {
+        Some(PropertyType::Map(key, value)) => (Some(key.as_ref()), Some(value.as_ref())),
+        _ => (None, None),
+    };
+    let default = key_type
+        .and_then(|key| default_value_for_type(key, usmap).ok())
+        .zip(value_type.and_then(|value| default_value_for_type(value, usmap).ok()));
+    let before = values.clone();
+    let mut changed = draw_chimp_list(ui, id, "Map", values, default, |ui, index, pair| {
+        let mut changed = false;
+        ui.label(RichText::new("Key").strong());
+        changed |= draw_chimp_value(
+            ui,
+            id.with((index, "key")),
+            &mut pair.0,
+            key_type,
+            names,
+            usmap,
+            depth + 1,
+        );
+        ui.label(RichText::new("Value").strong());
+        changed |= draw_chimp_value(
+            ui,
+            id.with((index, "value")),
+            &mut pair.1,
+            value_type,
+            names,
+            usmap,
+            depth + 1,
+        );
+        changed
+    });
+    let mut duplicate = false;
+    for left in 0..values.len() {
+        duplicate |= values[left + 1..]
+            .iter()
+            .any(|right| values[left].0.semantic_eq(&right.0));
+    }
+    if duplicate {
+        *values = before;
+        changed = false;
+        ui.colored_label(
+            Color32::from_rgb(210, 120, 80),
+            "Maps cannot contain duplicate keys.",
+        );
+    }
+    changed
+}
+
+fn draw_chimp_multicast_delegate(
+    ui: &mut Ui,
+    id: egui::Id,
+    values: &mut Vec<(i32, blam_tags::iostore::object::value::FName)>,
+    names: &mut blam_tags::iostore::package::name_map::FNameMap,
+) -> bool {
+    draw_chimp_list(
+        ui,
+        id,
+        "Multicast delegate",
+        values,
+        Some((0, blam_tags::iostore::object::value::FName::none())),
+        |ui, _, (object, function)| {
+            let mut changed = ui
+                .add(egui::DragValue::new(object).prefix("Object "))
+                .changed();
+            changed |= draw_chimp_fname(ui, "Function", function, names);
+            changed
+        },
+    )
+}
+
+fn draw_chimp_f64_values(ui: &mut Ui, values: &mut [f64]) -> bool {
+    let mut changed = false;
+    ui.horizontal_wrapped(|ui| {
+        for (index, value) in values.iter_mut().enumerate() {
+            changed |= ui
+                .add(
+                    egui::DragValue::new(value)
+                        .speed(0.01)
+                        .prefix(format!("{index}: ")),
+                )
+                .changed();
+        }
+    });
+    changed
+}
+
+fn draw_chimp_f32_values(ui: &mut Ui, values: &mut [f32]) -> bool {
+    let mut changed = false;
+    ui.horizontal_wrapped(|ui| {
+        for (index, value) in values.iter_mut().enumerate() {
+            changed |= ui
+                .add(
+                    egui::DragValue::new(value)
+                        .speed(0.01)
+                        .prefix(format!("{index}: ")),
+                )
+                .changed();
+        }
+    });
+    changed
+}
+
+fn draw_chimp_i64_values(ui: &mut Ui, values: &mut [i64]) -> bool {
+    let mut changed = false;
+    ui.horizontal_wrapped(|ui| {
+        for (index, value) in values.iter_mut().enumerate() {
+            changed |= ui
+                .add(egui::DragValue::new(value).prefix(format!("{index}: ")))
+                .changed();
+        }
+    });
+    changed
+}
+
+fn draw_chimp_i32_values(ui: &mut Ui, values: &mut [i32]) -> bool {
+    let mut changed = false;
+    ui.horizontal_wrapped(|ui| {
+        for (index, value) in values.iter_mut().enumerate() {
+            changed |= ui
+                .add(egui::DragValue::new(value).prefix(format!("{index}: ")))
+                .changed();
+        }
+    });
+    changed
+}
+
+fn draw_chimp_native(ui: &mut Ui, id: egui::Id, value: &mut NativeStruct) -> bool {
+    let mut changed = false;
+    egui::CollapsingHeader::new("Native struct")
+        .id_salt(id)
+        .show(ui, |ui| {
+            changed |= match value {
+                NativeStruct::Vec3d(values) => draw_chimp_f64_values(ui, values),
+                NativeStruct::Vec4d(values) => draw_chimp_f64_values(ui, values),
+                NativeStruct::Vec2d(values) => draw_chimp_f64_values(ui, values),
+                NativeStruct::TwoVec3d(values) => draw_chimp_f64_values(ui, values),
+                NativeStruct::Vec3f(values) => draw_chimp_f32_values(ui, values),
+                NativeStruct::Vec2f(values) => draw_chimp_f32_values(ui, values),
+                NativeStruct::Mat4f(values) => draw_chimp_f32_values(ui, values),
+                NativeStruct::LinearColor(values) => draw_chimp_f32_values(ui, values),
+                NativeStruct::Mat4d(values) => draw_chimp_f64_values(ui, values.as_mut()),
+                NativeStruct::Ints(values) => draw_chimp_i64_values(ui, values),
+                NativeStruct::Guid(values) => {
+                    let mut changed = false;
+                    ui.horizontal_wrapped(|ui| {
+                        for (index, value) in values.iter_mut().enumerate() {
+                            changed |= ui
+                                .add(egui::DragValue::new(value).prefix(format!("{index}: ")))
+                                .changed();
+                        }
+                    });
+                    changed
+                }
+                NativeStruct::Color(values) => {
+                    let mut changed = false;
+                    for (label, value) in ["B", "G", "R", "A"].into_iter().zip(values) {
+                        changed |= ui
+                            .add(egui::DragValue::new(value).prefix(format!("{label}: ")))
+                            .changed();
+                    }
+                    changed
+                }
+                NativeStruct::Box3d { min, max, is_valid } => {
+                    ui.label("Minimum");
+                    let mut changed = draw_chimp_f64_values(ui, min);
+                    ui.label("Maximum");
+                    changed |= draw_chimp_f64_values(ui, max);
+                    changed |= ui
+                        .add(egui::DragValue::new(is_valid).prefix("Valid: "))
+                        .changed();
+                    changed
+                }
+                NativeStruct::RichCurveKey {
+                    interp_mode,
+                    tangent_mode,
+                    tangent_weight_mode,
+                    values,
+                } => {
+                    let mut changed = ui
+                        .add(egui::DragValue::new(interp_mode).prefix("Interpolation: "))
+                        .changed();
+                    changed |= ui
+                        .add(egui::DragValue::new(tangent_mode).prefix("Tangent: "))
+                        .changed();
+                    changed |= ui
+                        .add(egui::DragValue::new(tangent_weight_mode).prefix("Weight: "))
+                        .changed();
+                    changed |= draw_chimp_f32_values(ui, values);
+                    changed
+                }
+                NativeStruct::FontCharacter {
+                    start_u,
+                    start_v,
+                    size_u,
+                    size_v,
+                    texture_index,
+                    vertical_offset,
+                } => {
+                    let mut changed = false;
+                    for (label, value) in [
+                        ("Start U", start_u),
+                        ("Start V", start_v),
+                        ("Size U", size_u),
+                        ("Size V", size_v),
+                        ("Vertical offset", vertical_offset),
+                    ] {
+                        changed |= ui
+                            .add(egui::DragValue::new(value).prefix(format!("{label}: ")))
+                            .changed();
+                    }
+                    changed |= ui
+                        .add(egui::DragValue::new(texture_index).prefix("Texture: "))
+                        .changed();
+                    changed
+                }
+                NativeStruct::PackedBits(value) => ui
+                    .add(egui::DragValue::new(value).prefix("Bits: "))
+                    .changed(),
+                NativeStruct::I32(value) => ui.add(egui::DragValue::new(value)).changed(),
+                NativeStruct::I64(value) => ui.add(egui::DragValue::new(value)).changed(),
+                NativeStruct::FrameRange {
+                    lower_kind,
+                    lower,
+                    upper_kind,
+                    upper,
+                } => {
+                    let mut changed = ui
+                        .add(egui::DragValue::new(lower_kind).prefix("Lower kind: "))
+                        .changed();
+                    changed |= ui
+                        .add(egui::DragValue::new(lower).prefix("Lower: "))
+                        .changed();
+                    changed |= ui
+                        .add(egui::DragValue::new(upper_kind).prefix("Upper kind: "))
+                        .changed();
+                    changed |= ui
+                        .add(egui::DragValue::new(upper).prefix("Upper: "))
+                        .changed();
+                    changed
+                }
+                NativeStruct::EvaluationKey(values) => {
+                    let mut changed = false;
+                    for (label, value) in ["Sequence", "Track", "Section"].into_iter().zip(values) {
+                        changed |= ui
+                            .add(egui::DragValue::new(value).prefix(format!("{label}: ")))
+                            .changed();
+                    }
+                    changed
+                }
+                NativeStruct::PerPlatform { cooked, value } => {
+                    let mut changed = ui.checkbox(cooked, "Cooked").changed();
+                    changed |= match value {
+                        PerPlatformValue::Int(value) => {
+                            ui.add(egui::DragValue::new(value)).changed()
+                        }
+                        PerPlatformValue::Float(value) => {
+                            ui.add(egui::DragValue::new(value).speed(0.01)).changed()
+                        }
+                        PerPlatformValue::Bool(value) => ui.checkbox(value, "Value").changed(),
+                        PerPlatformValue::FrameRate(numerator, denominator) => {
+                            let mut inner = ui
+                                .add(egui::DragValue::new(numerator).prefix("Numerator: "))
+                                .changed();
+                            inner |= ui
+                                .add(egui::DragValue::new(denominator).prefix("Denominator: "))
+                                .changed();
+                            inner
+                        }
+                    };
+                    changed
+                }
+                NativeStruct::EmptySerializer => {
+                    ui.label("No serialized fields");
+                    false
+                }
+            };
+        });
+    changed
+}
+
+fn draw_chimp_optional_f32(ui: &mut Ui, label: &str, value: &mut Option<f32>) -> bool {
+    let mut present = value.is_some();
+    let mut changed = ui.checkbox(&mut present, label).changed();
+    if present && value.is_none() {
+        *value = Some(0.0);
+    } else if !present {
+        *value = None;
+    }
+    if let Some(value) = value {
+        changed |= ui.add(egui::DragValue::new(value).speed(0.01)).changed();
+    }
+    changed
+}
+
+fn draw_chimp_optional_i32(ui: &mut Ui, label: &str, value: &mut Option<i32>) -> bool {
+    let mut present = value.is_some();
+    let mut changed = ui.checkbox(&mut present, label).changed();
+    if present && value.is_none() {
+        *value = Some(0);
+    } else if !present {
+        *value = None;
+    }
+    if let Some(value) = value {
+        changed |= ui.add(egui::DragValue::new(value)).changed();
+    }
+    changed
+}
+
+fn draw_chimp_optional_u64(ui: &mut Ui, label: &str, value: &mut Option<u64>) -> bool {
+    let mut present = value.is_some();
+    let mut changed = ui.checkbox(&mut present, label).changed();
+    if present && value.is_none() {
+        *value = Some(0);
+    } else if !present {
+        *value = None;
+    }
+    if let Some(value) = value {
+        changed |= ui.add(egui::DragValue::new(value)).changed();
+    }
+    changed
+}
+
+fn draw_chimp_tree_entry(ui: &mut Ui, value: &mut chimp_hw::TreeEntry) -> bool {
+    let mut changed = ui
+        .add(egui::DragValue::new(&mut value.start).prefix("Start: "))
+        .changed();
+    changed |= ui
+        .add(egui::DragValue::new(&mut value.size).prefix("Size: "))
+        .changed();
+    changed |= ui
+        .add(egui::DragValue::new(&mut value.capacity).prefix("Capacity: "))
+        .changed();
+    changed
+}
+
+fn draw_chimp_tree_node(ui: &mut Ui, value: &mut chimp_hw::TreeNode) -> bool {
+    let mut changed = false;
+    changed |= ui
+        .add(egui::DragValue::new(&mut value.range_lower_kind).prefix("Lower kind: "))
+        .changed();
+    changed |= ui
+        .add(egui::DragValue::new(&mut value.range_lower).prefix("Lower: "))
+        .changed();
+    changed |= ui
+        .add(egui::DragValue::new(&mut value.range_upper_kind).prefix("Upper kind: "))
+        .changed();
+    changed |= ui
+        .add(egui::DragValue::new(&mut value.range_upper).prefix("Upper: "))
+        .changed();
+    for (label, item) in [
+        ("Parent children", &mut value.parent_children_handle),
+        ("Parent index", &mut value.parent_index),
+        ("Children id", &mut value.children_id),
+        ("Data id", &mut value.data_id),
+    ] {
+        changed |= ui
+            .add(egui::DragValue::new(item).prefix(format!("{label}: ")))
+            .changed();
+    }
+    changed
+}
+
+fn draw_chimp_shader_value(
+    ui: &mut Ui,
+    id: egui::Id,
+    value: &mut chimp_hw::ShaderValueType,
+    names: &mut blam_tags::iostore::package::name_map::FNameMap,
+) -> bool {
+    let mut changed = ui
+        .add(egui::DragValue::new(&mut value.kind).prefix("Kind: "))
+        .changed();
+    changed |= ui
+        .checkbox(&mut value.is_dynamic_array, "Dynamic array")
+        .changed();
+    match &mut value.body {
+        chimp_hw::ShaderValueTypeBody::Struct { name, elements } => {
+            changed |= draw_chimp_fname(ui, "Struct", name, names);
+            changed |= draw_chimp_list(
+                ui,
+                id.with("elements"),
+                "Elements",
+                elements,
+                None,
+                |ui, index, (name, value)| {
+                    let mut item_changed = draw_chimp_fname(ui, "Name", name, names);
+                    item_changed |=
+                        draw_chimp_shader_value(ui, id.with(("element", index)), value, names);
+                    item_changed
+                },
+            );
+        }
+        chimp_hw::ShaderValueTypeBody::Dimension { dimension, counts } => {
+            changed |= ui
+                .add(egui::DragValue::new(dimension).prefix("Dimension: "))
+                .changed();
+            changed |= draw_chimp_list(
+                ui,
+                id.with("counts"),
+                "Counts",
+                counts,
+                Some(0),
+                |ui, _, value| ui.add(egui::DragValue::new(value)).changed(),
+            );
+        }
+    }
+    changed
+}
+
+fn draw_chimp_text_argument(
+    ui: &mut Ui,
+    id: egui::Id,
+    value: &mut chimp_hw::TextFormatArgument,
+    names: &mut blam_tags::iostore::package::name_map::FNameMap,
+) -> bool {
+    match value {
+        chimp_hw::TextFormatArgument::Int(value) => ui.add(egui::DragValue::new(value)).changed(),
+        chimp_hw::TextFormatArgument::UInt(value) | chimp_hw::TextFormatArgument::Gender(value) => {
+            ui.add(egui::DragValue::new(value)).changed()
+        }
+        chimp_hw::TextFormatArgument::Float(value) => {
+            ui.add(egui::DragValue::new(value).speed(0.01)).changed()
+        }
+        chimp_hw::TextFormatArgument::Double(value) => {
+            ui.add(egui::DragValue::new(value).speed(0.01)).changed()
+        }
+        chimp_hw::TextFormatArgument::Text(value) => {
+            draw_chimp_text(ui, id.with("text"), value, names)
+        }
+    }
+}
+
+fn draw_chimp_text(
+    ui: &mut Ui,
+    id: egui::Id,
+    value: &mut chimp_hw::TextValue,
+    names: &mut blam_tags::iostore::package::name_map::FNameMap,
+) -> bool {
+    let mut changed = ui
+        .add(egui::DragValue::new(&mut value.flags).prefix("Flags: "))
+        .changed();
+    match &mut value.history {
+        chimp_hw::TextHistory::None { culture_invariant } => {
+            let mut present = culture_invariant.is_some();
+            if ui
+                .checkbox(&mut present, "Culture-invariant string")
+                .changed()
+            {
+                *culture_invariant = present.then(Default::default);
+                changed = true;
+            }
+            if let Some(text) = culture_invariant {
+                changed |= draw_chimp_fstr(ui, "Value", text);
+            }
+        }
+        chimp_hw::TextHistory::Base {
+            namespace,
+            key,
+            source,
+        } => {
+            changed |= draw_chimp_fstr(ui, "Namespace", namespace);
+            changed |= draw_chimp_fstr(ui, "Key", key);
+            changed |= draw_chimp_fstr(ui, "Source", source);
+        }
+        chimp_hw::TextHistory::StringTableEntry { table_id, key } => {
+            changed |= draw_chimp_fname(ui, "Table", table_id, names);
+            changed |= draw_chimp_fstr(ui, "Key", key);
+        }
+        chimp_hw::TextHistory::OrderedFormat {
+            source_fmt,
+            arguments,
+        } => {
+            changed |= draw_chimp_text(ui, id.with("source"), source_fmt, names);
+            changed |= draw_chimp_list(
+                ui,
+                id.with("args"),
+                "Arguments",
+                arguments,
+                None,
+                |ui, index, argument| draw_chimp_text_argument(ui, id.with(index), argument, names),
+            );
+        }
+        chimp_hw::TextHistory::NamedFormat {
+            kind,
+            source_fmt,
+            arguments,
+        } => {
+            changed |= ui
+                .add(egui::DragValue::new(kind).prefix("Kind: "))
+                .changed();
+            changed |= draw_chimp_text(ui, id.with("source"), source_fmt, names);
+            changed |= draw_chimp_list(
+                ui,
+                id.with("args"),
+                "Arguments",
+                arguments,
+                None,
+                |ui, index, (name, argument)| {
+                    let mut item_changed = draw_chimp_fstr(ui, "Name", name);
+                    item_changed |= draw_chimp_text_argument(ui, id.with(index), argument, names);
+                    item_changed
+                },
+            );
+        }
+        chimp_hw::TextHistory::AsNumber {
+            kind,
+            currency_code,
+            source_value,
+            options,
+            target_culture,
+        } => {
+            changed |= ui
+                .add(egui::DragValue::new(kind).prefix("Kind: "))
+                .changed();
+            if let Some(currency) = currency_code {
+                changed |= draw_chimp_fstr(ui, "Currency", currency);
+            }
+            changed |= draw_chimp_text_argument(ui, id.with("value"), source_value, names);
+            if let Some(options) = options {
+                changed |= ui
+                    .checkbox(&mut options.always_sign, "Always sign")
+                    .changed();
+                changed |= ui
+                    .checkbox(&mut options.use_grouping, "Use grouping")
+                    .changed();
+                changed |= ui
+                    .add(egui::DragValue::new(&mut options.rounding_mode).prefix("Rounding: "))
+                    .changed();
+                for (label, field) in [
+                    ("Minimum integral", &mut options.minimum_integral_digits),
+                    ("Maximum integral", &mut options.maximum_integral_digits),
+                    ("Minimum fractional", &mut options.minimum_fractional_digits),
+                    ("Maximum fractional", &mut options.maximum_fractional_digits),
+                ] {
+                    changed |= ui
+                        .add(egui::DragValue::new(field).prefix(format!("{label}: ")))
+                        .changed();
+                }
+            }
+            changed |= draw_chimp_fstr(ui, "Culture", target_culture);
+        }
+        chimp_hw::TextHistory::AsDateTime {
+            kind,
+            source_date_time,
+            date_style,
+            time_style,
+            custom_pattern,
+            time_zone,
+            target_culture,
+        } => {
+            changed |= ui
+                .add(egui::DragValue::new(kind).prefix("Kind: "))
+                .changed();
+            changed |= ui
+                .add(egui::DragValue::new(source_date_time).prefix("Ticks: "))
+                .changed();
+            for (label, value) in [("Date style", date_style), ("Time style", time_style)] {
+                let mut present = value.is_some();
+                if ui.checkbox(&mut present, label).changed() {
+                    *value = present.then_some(0);
+                    changed = true;
+                }
+                if let Some(value) = value {
+                    changed |= ui.add(egui::DragValue::new(value)).changed();
+                }
+            }
+            if let Some(pattern) = custom_pattern {
+                changed |= draw_chimp_fstr(ui, "Pattern", pattern);
+            }
+            changed |= draw_chimp_fstr(ui, "Time zone", time_zone);
+            changed |= draw_chimp_fstr(ui, "Culture", target_culture);
+        }
+        chimp_hw::TextHistory::Transform {
+            source_text,
+            transform_type,
+        } => {
+            changed |= draw_chimp_text(ui, id.with("source"), source_text, names);
+            changed |= ui
+                .add(egui::DragValue::new(transform_type).prefix("Transform: "))
+                .changed();
+        }
+        chimp_hw::TextHistory::TextGenerator {
+            generator_type_id,
+            contents,
+        } => {
+            changed |= draw_chimp_fname(ui, "Generator", generator_type_id, names);
+            ui.label(match contents {
+                Some(bytes) => format!("{} generator bytes · preserved read-only", bytes.len()),
+                None => "No generator payload".to_owned(),
+            });
+        }
+    }
+    changed
+}
+
+fn draw_chimp_sampler(
+    ui: &mut Ui,
+    id: egui::Id,
+    value: &mut chimp_hw::WeightedRandomSampler,
+) -> bool {
+    let mut changed = draw_chimp_list(
+        ui,
+        id.with("prob"),
+        "Probabilities",
+        &mut value.prob,
+        Some(0.0),
+        |ui, _, value| ui.add(egui::DragValue::new(value).speed(0.01)).changed(),
+    );
+    changed |= draw_chimp_list(
+        ui,
+        id.with("alias"),
+        "Aliases",
+        &mut value.alias,
+        Some(0),
+        |ui, _, value| ui.add(egui::DragValue::new(value)).changed(),
+    );
+    changed |= ui
+        .add(egui::DragValue::new(&mut value.total_weight).prefix("Total weight: "))
+        .changed();
+    changed
+}
+
+fn draw_chimp_property_bag_type(
+    ui: &mut Ui,
+    id: egui::Id,
+    value: &mut chimp_hw::PropertyBagPropertyType,
+) -> bool {
+    use chimp_hw::PropertyBagPropertyType as T;
+    let mut changed = false;
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(format!("{value:?}"))
+        .show_ui(ui, |ui| {
+            for candidate in [
+                T::None,
+                T::Bool,
+                T::Byte,
+                T::Int32,
+                T::Int64,
+                T::Float,
+                T::Double,
+                T::Name,
+                T::String,
+                T::Text,
+                T::Enum,
+                T::Struct,
+                T::Object,
+                T::SoftObject,
+                T::Class,
+                T::SoftClass,
+                T::UInt32,
+                T::UInt64,
+            ] {
+                changed |= ui
+                    .selectable_value(value, candidate, format!("{candidate:?}"))
+                    .changed();
+            }
+            if matches!(value, T::Unknown(_)) {
+                ui.label("Unknown type is preserved read-only");
+            }
+        });
+    changed
+}
+
+fn draw_chimp_property_bag_container(
+    ui: &mut Ui,
+    id: egui::Id,
+    value: &mut chimp_hw::PropertyBagContainerType,
+) -> bool {
+    use chimp_hw::PropertyBagContainerType as T;
+    let mut changed = false;
+    egui::ComboBox::from_id_salt(id)
+        .selected_text(format!("{value:?}"))
+        .show_ui(ui, |ui| {
+            for candidate in [T::None, T::Array, T::Set] {
+                changed |= ui
+                    .selectable_value(value, candidate, format!("{candidate:?}"))
+                    .changed();
+            }
+            if matches!(value, T::Unknown(_)) {
+                ui.label("Unknown container is preserved read-only");
+            }
+        });
+    changed
+}
+
+fn draw_chimp_hand_written(
+    ui: &mut Ui,
+    id: egui::Id,
+    value: &mut chimp_hw::HandWritten,
+    names: &mut blam_tags::iostore::package::name_map::FNameMap,
+    usmap: &Usmap,
+    depth: usize,
+) -> bool {
+    let mut changed = false;
+    egui::CollapsingHeader::new("Typed Unreal structure")
+        .id_salt(id)
+        .show(ui, |ui| {
+            changed |= match value {
+                chimp_hw::HandWritten::MaterialLayersTree(value) => {
+                    let mut inner = draw_chimp_list(
+                        ui,
+                        id.with("nodes"),
+                        "Nodes",
+                        &mut value.nodes,
+                        Some([0; 4]),
+                        |ui, _, values| {
+                            let mut changed = false;
+                            for value in values {
+                                changed |= ui.add(egui::DragValue::new(value)).changed();
+                            }
+                            changed
+                        },
+                    );
+                    inner |= draw_chimp_list(
+                        ui,
+                        id.with("payloads"),
+                        "Payloads",
+                        &mut value.payloads,
+                        Some([0; 2]),
+                        |ui, _, values| {
+                            values.iter_mut().fold(false, |changed, value| {
+                                ui.add(egui::DragValue::new(value)).changed() || changed
+                            })
+                        },
+                    );
+                    inner |= ui
+                        .add(egui::DragValue::new(&mut value.root).prefix("Root: "))
+                        .changed();
+                    inner
+                }
+                chimp_hw::HandWritten::MovieSceneInlineValue(value) => {
+                    let mut inner = draw_chimp_fstr(ui, "Type", &mut value.type_name);
+                    if let Some(payload) = &mut value.payload {
+                        let class = value.type_name.to_string();
+                        inner |=
+                            draw_chimp_property_block(ui, payload, &class, names, usmap, depth + 1);
+                    }
+                    inner
+                }
+                chimp_hw::HandWritten::EvaluationTree(value) => {
+                    let mut inner = draw_chimp_tree_node(ui, &mut value.root);
+                    inner |= draw_chimp_list(
+                        ui,
+                        id.with("child_entries"),
+                        "Child entries",
+                        &mut value.child_entries,
+                        Some(chimp_hw::TreeEntry {
+                            start: 0,
+                            size: 0,
+                            capacity: 0,
+                        }),
+                        |ui, _, value| draw_chimp_tree_entry(ui, value),
+                    );
+                    inner |= draw_chimp_list(
+                        ui,
+                        id.with("child_nodes"),
+                        "Child nodes",
+                        &mut value.child_nodes,
+                        None,
+                        |ui, _, value| draw_chimp_tree_node(ui, value),
+                    );
+                    inner |= draw_chimp_list(
+                        ui,
+                        id.with("data_entries"),
+                        "Data entries",
+                        &mut value.data_entries,
+                        Some(chimp_hw::TreeEntry {
+                            start: 0,
+                            size: 0,
+                            capacity: 0,
+                        }),
+                        |ui, _, value| draw_chimp_tree_entry(ui, value),
+                    );
+                    inner |= draw_chimp_list(
+                        ui,
+                        id.with("items"),
+                        "Items",
+                        &mut value.items,
+                        None,
+                        |ui, _, value| match value {
+                            chimp_hw::TreeItem::EntityAndMetaDataIndex { entity, meta_data } => {
+                                ui.add(egui::DragValue::new(entity).prefix("Entity: "))
+                                    .changed()
+                                    | ui.add(egui::DragValue::new(meta_data).prefix("Metadata: "))
+                                        .changed()
+                            }
+                            chimp_hw::TreeItem::SubSequence { sequence_id, flags } => {
+                                ui.add(egui::DragValue::new(sequence_id).prefix("Sequence: "))
+                                    .changed()
+                                    | ui.add(egui::DragValue::new(flags).prefix("Flags: "))
+                                        .changed()
+                            }
+                        },
+                    );
+                    inner
+                }
+                chimp_hw::HandWritten::ShaderValueType(value) => {
+                    draw_chimp_shader_value(ui, id, value, names)
+                }
+                chimp_hw::HandWritten::PerQualityLevel(value) => {
+                    let mut inner = ui.checkbox(&mut value.cooked, "Cooked").changed();
+                    inner |= ui
+                        .add(egui::DragValue::new(&mut value.default_bits).prefix("Default bits: "))
+                        .changed();
+                    inner |= draw_chimp_list(
+                        ui,
+                        id.with("overrides"),
+                        "Overrides",
+                        &mut value.overrides,
+                        Some((0, 0)),
+                        |ui, _, (quality, bits)| {
+                            ui.add(egui::DragValue::new(quality).prefix("Quality: "))
+                                .changed()
+                                | ui.add(egui::DragValue::new(bits).prefix("Bits: "))
+                                    .changed()
+                        },
+                    );
+                    inner
+                }
+                chimp_hw::HandWritten::FontData(value) => {
+                    let mut inner = ui
+                        .add(
+                            egui::DragValue::new(&mut value.font_face_asset).prefix("Face asset: "),
+                        )
+                        .changed();
+                    let mut inline = value.inline_face.is_some();
+                    if ui.checkbox(&mut inline, "Inline face").changed() {
+                        value.inline_face = inline.then(|| chimp_hw::InlineFontFace {
+                            filename: Default::default(),
+                            hinting: 0,
+                            loading_policy: 0,
+                        });
+                        inner = true;
+                    }
+                    if let Some(face) = &mut value.inline_face {
+                        inner |= draw_chimp_fstr(ui, "Filename", &mut face.filename);
+                        inner |= ui
+                            .add(egui::DragValue::new(&mut face.hinting).prefix("Hinting: "))
+                            .changed();
+                        inner |= ui
+                            .add(egui::DragValue::new(&mut face.loading_policy).prefix("Loading: "))
+                            .changed();
+                    }
+                    inner |= ui
+                        .add(egui::DragValue::new(&mut value.sub_face_index).prefix("Sub-face: "))
+                        .changed();
+                    inner
+                }
+                chimp_hw::HandWritten::MaterialOverrideNanite(value) => {
+                    let mut inner = ui.checkbox(&mut value.cooked, "Cooked").changed();
+                    inner |= draw_chimp_optional_i32(
+                        ui,
+                        "Override material",
+                        &mut value.override_material,
+                    );
+                    inner |= draw_chimp_property_block(
+                        ui,
+                        &mut value.properties,
+                        "MaterialOverrideNanite",
+                        names,
+                        usmap,
+                        depth + 1,
+                    );
+                    inner
+                }
+                chimp_hw::HandWritten::TimeWarpVariant(value) => match value {
+                    chimp_hw::TimeWarpVariant::Literal(value) => {
+                        ui.add(egui::DragValue::new(value).speed(0.01)).changed()
+                    }
+                    chimp_hw::TimeWarpVariant::Typed {
+                        kind,
+                        object,
+                        payload,
+                    } => {
+                        let mut inner = ui
+                            .add(egui::DragValue::new(kind).prefix("Kind: "))
+                            .changed();
+                        inner |= draw_chimp_optional_i32(ui, "Object", object);
+                        if let Some(payload) = payload {
+                            inner |=
+                                draw_chimp_property_block(ui, payload, "", names, usmap, depth + 1);
+                        }
+                        inner
+                    }
+                },
+                chimp_hw::HandWritten::LocatorFragment(value) => {
+                    let mut inner =
+                        draw_chimp_fname(ui, "Fragment type", &mut value.fragment_type, names);
+                    if let Some(payload) = &mut value.payload {
+                        let class = value.fragment_type.to_string();
+                        inner |=
+                            draw_chimp_property_block(ui, payload, &class, names, usmap, depth + 1);
+                    }
+                    inner
+                }
+                chimp_hw::HandWritten::Text(value) => draw_chimp_text(ui, id, value, names),
+                chimp_hw::HandWritten::MovieSceneChannel(value) => {
+                    let mut inner = ui
+                        .add(
+                            egui::DragValue::new(&mut value.pre_infinity_extrap)
+                                .prefix("Pre extrapolation: "),
+                        )
+                        .changed();
+                    inner |= ui
+                        .add(
+                            egui::DragValue::new(&mut value.post_infinity_extrap)
+                                .prefix("Post extrapolation: "),
+                        )
+                        .changed();
+                    ui.label(format!("{} time bytes · preserved", value.times.data.len()));
+                    ui.label(format!(
+                        "{} value bytes · preserved",
+                        value.values.data.len()
+                    ));
+                    inner |= ui
+                        .add(
+                            egui::DragValue::new(&mut value.default_value)
+                                .speed(0.01)
+                                .prefix("Default: "),
+                        )
+                        .changed();
+                    inner |= ui
+                        .checkbox(&mut value.has_default_value, "Has default")
+                        .changed();
+                    inner |= ui
+                        .add(
+                            egui::DragValue::new(&mut value.tick_resolution_numerator)
+                                .prefix("Tick numerator: "),
+                        )
+                        .changed();
+                    inner |= ui
+                        .add(
+                            egui::DragValue::new(&mut value.tick_resolution_denominator)
+                                .prefix("Tick denominator: "),
+                        )
+                        .changed();
+                    inner |= ui.checkbox(&mut value.show_curve, "Show curve").changed();
+                    inner
+                }
+                chimp_hw::HandWritten::PcgPoint(value) => {
+                    let mut inner = draw_chimp_f64_values(ui, &mut value.transform);
+                    inner |= draw_chimp_optional_f32(ui, "Density", &mut value.density);
+                    for (label, point) in [
+                        ("Bounds minimum", &mut value.bounds_min),
+                        ("Bounds maximum", &mut value.bounds_max),
+                    ] {
+                        let mut present = point.is_some();
+                        if ui.checkbox(&mut present, label).changed() {
+                            *point = present.then_some([0.0; 3]);
+                            inner = true;
+                        }
+                        if let Some(point) = point {
+                            inner |= draw_chimp_f64_values(ui, point);
+                        }
+                    }
+                    let mut color = value.color.is_some();
+                    if ui.checkbox(&mut color, "Color").changed() {
+                        value.color = color.then_some([0.0; 4]);
+                        inner = true;
+                    }
+                    if let Some(color) = &mut value.color {
+                        inner |= draw_chimp_f64_values(ui, color);
+                    }
+                    inner |= draw_chimp_optional_f32(ui, "Steepness", &mut value.steepness);
+                    inner |= draw_chimp_optional_i32(ui, "Seed", &mut value.seed);
+                    inner |=
+                        draw_chimp_optional_u64(ui, "Metadata entry", &mut value.metadata_entry);
+                    inner
+                }
+                chimp_hw::HandWritten::SkeletalMeshSamplingLod(value) => {
+                    draw_chimp_sampler(ui, id, value)
+                }
+                chimp_hw::HandWritten::SkeletalMeshSamplingRegion(value) => {
+                    let mut inner = draw_chimp_list(
+                        ui,
+                        id.with("triangles"),
+                        "Triangle indices",
+                        &mut value.triangle_indices,
+                        Some(0),
+                        |ui, _, value| ui.add(egui::DragValue::new(value)).changed(),
+                    );
+                    inner |= draw_chimp_list(
+                        ui,
+                        id.with("bones"),
+                        "Bone indices",
+                        &mut value.bone_indices,
+                        Some(0),
+                        |ui, _, value| ui.add(egui::DragValue::new(value)).changed(),
+                    );
+                    inner |= draw_chimp_sampler(ui, id.with("sampler"), &mut value.sampler);
+                    inner |= draw_chimp_list(
+                        ui,
+                        id.with("vertices"),
+                        "Vertices",
+                        &mut value.vertices,
+                        Some(0),
+                        |ui, _, value| ui.add(egui::DragValue::new(value)).changed(),
+                    );
+                    inner
+                }
+                chimp_hw::HandWritten::NiagaraVariable(value) => {
+                    let mut inner = draw_chimp_fname(ui, "Name", &mut value.name, names);
+                    inner |= draw_chimp_property_block(
+                        ui,
+                        &mut value.type_def,
+                        "NiagaraTypeDefinition",
+                        names,
+                        usmap,
+                        depth + 1,
+                    );
+                    match &mut value.payload {
+                        chimp_hw::NiagaraPayload::None => {}
+                        chimp_hw::NiagaraPayload::Offset(value) => {
+                            inner |= ui
+                                .add(egui::DragValue::new(value).prefix("Offset: "))
+                                .changed()
+                        }
+                        chimp_hw::NiagaraPayload::VarData(bytes) => {
+                            ui.label(format!(
+                                "{} variable-data bytes · preserved read-only",
+                                bytes.len()
+                            ));
+                        }
+                    }
+                    inner
+                }
+                chimp_hw::HandWritten::NiagaraGpuParamInfo(value) => {
+                    let mut inner = draw_chimp_fstr(ui, "HLSL symbol", &mut value.hlsl_symbol);
+                    inner |= draw_chimp_fstr(ui, "DI class", &mut value.di_class_name);
+                    inner |= draw_chimp_list(
+                        ui,
+                        id.with("functions"),
+                        "Generated functions",
+                        &mut value.generated_functions,
+                        None,
+                        |ui, index, function| {
+                            let mut item = draw_chimp_fname(
+                                ui,
+                                "Definition",
+                                &mut function.definition_name,
+                                names,
+                            );
+                            item |= draw_chimp_fstr(ui, "Instance", &mut function.instance_name);
+                            item |= draw_chimp_list(
+                                ui,
+                                id.with((index, "specifiers")),
+                                "Specifiers",
+                                &mut function.specifiers,
+                                Some((
+                                    blam_tags::iostore::object::value::FName::none(),
+                                    blam_tags::iostore::object::value::FName::none(),
+                                )),
+                                |ui, _, (name, value)| {
+                                    draw_chimp_fname(ui, "Name", name, names)
+                                        | draw_chimp_fname(ui, "Value", value, names)
+                                },
+                            );
+                            let default_reference = chimp_hw::NiagaraVariableCommonReference {
+                                name: blam_tags::iostore::object::value::FName::none(),
+                                underlying_type: 0,
+                            };
+                            item |= draw_chimp_list(
+                                ui,
+                                id.with((index, "inputs")),
+                                "Variadic inputs",
+                                &mut function.variadic_inputs,
+                                Some(default_reference.clone()),
+                                |ui, _, value| {
+                                    draw_chimp_fname(ui, "Name", &mut value.name, names)
+                                        | ui.add(
+                                            egui::DragValue::new(&mut value.underlying_type)
+                                                .prefix("Type: "),
+                                        )
+                                        .changed()
+                                },
+                            );
+                            item |= draw_chimp_list(
+                                ui,
+                                id.with((index, "outputs")),
+                                "Variadic outputs",
+                                &mut function.variadic_outputs,
+                                Some(default_reference),
+                                |ui, _, value| {
+                                    draw_chimp_fname(ui, "Name", &mut value.name, names)
+                                        | ui.add(
+                                            egui::DragValue::new(&mut value.underlying_type)
+                                                .prefix("Type: "),
+                                        )
+                                        .changed()
+                                },
+                            );
+                            item
+                        },
+                    );
+                    inner
+                }
+                chimp_hw::HandWritten::InstancedPropertyBag(value) => {
+                    let mut inner = ui
+                        .add(egui::DragValue::new(&mut value.serial_size).prefix("Serial size: "))
+                        .changed();
+                    if let Some(descriptors) = &mut value.descriptors {
+                        let default_descriptor = chimp_hw::PropertyBagDesc {
+                            value_type_object: 0,
+                            id: Default::default(),
+                            name: blam_tags::iostore::object::value::FName::none(),
+                            value_type: chimp_hw::PropertyBagPropertyType::None,
+                            container_types: Vec::new(),
+                        };
+                        inner |= draw_chimp_list(
+                            ui,
+                            id.with("descriptors"),
+                            "Descriptors",
+                            descriptors,
+                            Some(default_descriptor),
+                            |ui, index, descriptor| {
+                                let mut item = ui
+                                    .add(
+                                        egui::DragValue::new(&mut descriptor.value_type_object)
+                                            .prefix("Type object: "),
+                                    )
+                                    .changed();
+                                item |= draw_chimp_fname(ui, "Name", &mut descriptor.name, names);
+                                ui.label("ID");
+                                item |= draw_chimp_i32_values(ui, &mut descriptor.id.0);
+                                ui.horizontal(|ui| {
+                                    ui.label("Type");
+                                    item |= draw_chimp_property_bag_type(
+                                        ui,
+                                        id.with((index, "type")),
+                                        &mut descriptor.value_type,
+                                    );
+                                });
+                                item |= draw_chimp_list(
+                                    ui,
+                                    id.with((index, "containers")),
+                                    "Containers",
+                                    &mut descriptor.container_types,
+                                    Some(chimp_hw::PropertyBagContainerType::None),
+                                    |ui, container, value| {
+                                        draw_chimp_property_bag_container(
+                                            ui,
+                                            id.with((index, container)),
+                                            value,
+                                        )
+                                    },
+                                );
+                                item
+                            },
+                        );
+                    }
+                    if let Some(values) = &mut value.values {
+                        inner |= draw_chimp_property_block(ui, values, "", names, usmap, depth + 1);
+                    }
+                    inner
+                }
+            };
+        });
+    changed
 }
 
 fn chimp_class_display_name(class: Option<&str>) -> &str {
@@ -3406,6 +5970,55 @@ fn chimp_value_json(value: &PropValue) -> Value {
 mod tests {
     use super::*;
 
+    #[test]
+    fn chimp_scalar_property_row_does_not_consume_the_scroll_viewport() {
+        let context = egui::Context::default();
+        let mut value = 0_i64;
+        let mut row_height = None;
+        let _ = context.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1_200.0, 800.0),
+                )),
+                ..Default::default()
+            },
+            |context| {
+                egui::CentralPanel::default().show(context, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        let row = ui.horizontal_top(|ui| {
+                            ui.set_min_height(24.0);
+                            ui.label("NumReplicatedProperties");
+                            chimp_property_value_cell(ui, |ui| {
+                                ui.add(egui::DragValue::new(&mut value));
+                            });
+                        });
+                        row_height = Some(row.response.rect.height());
+                    });
+                });
+            },
+        );
+
+        let row_height = row_height.expect("the property row was rendered");
+        assert!(
+            row_height <= 40.0,
+            "a scalar property row expanded to {row_height}px"
+        );
+    }
+
+    #[test]
+    fn chimp_mod_names_are_sanitized_and_priority_suffixed() {
+        assert_eq!(chimp_mod_stem("My Cool Mod"), "My-Cool-Mod_P");
+        assert_eq!(chimp_mod_stem("Already_p"), "Already_p");
+        assert_eq!(chimp_mod_stem("../../unsafe"), "unsafe_P");
+    }
+
+    #[test]
+    fn chimp_mod_stem_rejects_an_empty_name_at_the_dialog_boundary() {
+        assert!(sanitize_mod_name(" ! ").is_empty());
+        assert_eq!(chimp_mod_stem(" ! "), "_P");
+    }
+
     fn preview_normal_alignment(preview: &ModelPreviewData) -> (f32, f32) {
         // Unreal's source winding is left-handed, so the sign relative to this
         // right-handed cross product is expected to be negative. Magnitude is
@@ -3413,8 +6026,17 @@ mod tests {
         let mut signed = 0.0;
         let mut absolute = 0.0;
         let mut count = 0usize;
-        for triangle in &preview.draw_triangles {
-            let [a, b, c] = triangle.positions;
+        for triangle in preview.preview.indices.chunks_exact(3) {
+            let Some(a) = preview.preview.vertices.get(triangle[0] as usize) else {
+                continue;
+            };
+            let Some(b) = preview.preview.vertices.get(triangle[1] as usize) else {
+                continue;
+            };
+            let Some(c) = preview.preview.vertices.get(triangle[2] as usize) else {
+                continue;
+            };
+            let [a, b, c] = [a.position, b.position, c.position];
             let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
             let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
             let face = [
@@ -3427,7 +6049,11 @@ mod tests {
                 continue;
             }
             let face = [face[0] / length, face[1] / length, face[2] / length];
-            for normal in triangle.normals {
+            for normal in [
+                preview.preview.vertices[triangle[0] as usize].normal,
+                preview.preview.vertices[triangle[1] as usize].normal,
+                preview.preview.vertices[triangle[2] as usize].normal,
+            ] {
                 let dot = face[0] * normal[0] + face[1] * normal[1] + face[2] * normal[2];
                 signed += dot;
                 absolute += dot.abs();
@@ -3451,6 +6077,67 @@ mod tests {
             !state.filter_is_current(""),
             "the initial empty query must populate the browser once"
         );
+    }
+
+    #[test]
+    fn chimp_browser_tabs_follow_the_asset_browsing_order() {
+        assert_eq!(
+            ChimpBrowser::TABS,
+            [
+                (ChimpBrowser::Folders, "Folders"),
+                (ChimpBrowser::Groups, "Groups"),
+                (ChimpBrowser::Files, "Pak files"),
+                (ChimpBrowser::Archives, "Archives"),
+                (ChimpBrowser::Packages, "Packages"),
+            ]
+        );
+    }
+
+    #[test]
+    fn campaign_evolved_surface_tabs_put_tags_before_chimp() {
+        assert_eq!(KitSurface::TABS[0].0, KitSurface::Tags);
+        assert_eq!(KitSurface::TABS[0].1, "Tags");
+        assert_eq!(KitSurface::TABS[1].0, KitSurface::Chimp);
+        assert_eq!(KitSurface::TABS[1].1, "Chimp");
+    }
+
+    #[test]
+    fn chimp_search_matching_is_case_insensitive_without_allocating_per_package() {
+        assert!(chimp_contains_query("SM_SpiritDropShip_Body", "spirit"));
+        assert!(chimp_contains_query("Texture2D", "texture2d"));
+        assert!(!chimp_contains_query("StaticMesh", "skeletal"));
+    }
+
+    #[test]
+    fn bundled_chimp_usmap_loads_and_invalid_custom_file_is_rejected() {
+        assert!(load_chimp_usmap(None).is_ok());
+        let path =
+            std::env::temp_dir().join(format!("baboon-invalid-{}.usmap", uuid::Uuid::new_v4()));
+        std::fs::write(&path, b"not a usmap").unwrap();
+        let error = load_chimp_usmap(Some(&path)).err().expect("invalid USMAP");
+        assert!(error.contains("Could not parse USMAP"));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires a Campaign Evolved install plus CE_PAKS and CE_USMAP"]
+    fn real_custom_usmap_mounts_and_decodes_a_package() {
+        let root = std::env::var_os("CE_PAKS").expect("set CE_PAKS");
+        let path = PathBuf::from(std::env::var_os("CE_USMAP").expect("set CE_USMAP"));
+        let world = World::open(root, load_chimp_usmap(Some(&path)).unwrap()).unwrap();
+        let package = world
+            .packages()
+            .iter()
+            .find(|package| {
+                package
+                    .name
+                    .to_ascii_lowercase()
+                    .contains("sm_spiritdropship_body")
+            })
+            .unwrap_or_else(|| panic!("SM_SpiritDropShip_Body was not found"));
+        let document = load_chimp_document(&world, &package.name).unwrap();
+        assert!(!document.exports.is_empty());
+        assert_eq!(document.mesh_kind, Some(ChimpMeshKind::Static));
     }
 
     #[test]
@@ -3712,6 +6399,18 @@ mod tests {
 
     #[test]
     #[ignore = "requires a Campaign Evolved install; set CE_PAKS"]
+    fn real_fast_type_index_matches_legacy_window() {
+        let root = std::env::var_os("CE_PAKS").expect("set CE_PAKS");
+        let world = World::open(root, Usmap::meteorite().unwrap()).unwrap();
+        let fast = index_chimp_package_types_with_prefixes(&world, &[64 * 1024, 1024 * 1024]);
+        let legacy = index_chimp_package_types_with_prefixes(&world, &[1024 * 1024]);
+        assert_eq!(fast.package_types, legacy.package_types);
+        assert_eq!(fast.type_counts, legacy.type_counts);
+        assert_eq!(fast.failures, legacy.failures);
+    }
+
+    #[test]
+    #[ignore = "requires a Campaign Evolved install; set CE_PAKS"]
     fn real_file_types_filter_and_texture_preview() {
         let root = std::env::var_os("CE_PAKS").expect("set CE_PAKS");
         let world = World::open(root, Usmap::meteorite().unwrap()).unwrap();
@@ -3846,7 +6545,7 @@ mod tests {
             let preview = document.mesh_preview.as_ref().unwrap().as_ref().unwrap();
             assert!(!preview.preview.vertices.is_empty());
             assert!(!preview.preview.indices.is_empty());
-            assert!(!preview.draw_triangles.is_empty());
+            assert!(!preview.preview.batches.is_empty());
             let (signed_alignment, absolute_alignment) = preview_normal_alignment(preview);
             eprintln!(
                 "{package}: winding-signed normal alignment {signed_alignment:.3}, magnitude {absolute_alignment:.3}"
@@ -3919,11 +6618,8 @@ mod tests {
             document.header.summary.header_size as usize,
         )
         .expect("static mesh has Nanite resources");
-        let nanite = blam_tags::iostore::nanite::decode_nanite(
-            &document.original,
-            &bulk,
-            &resources,
-        );
+        let nanite =
+            blam_tags::iostore::nanite::decode_nanite(&document.original, &bulk, &resources);
         let mut miswound_triangles = 0usize;
         let mut duplicate_index_triangles = 0usize;
         let mut zero_area_triangles = 0usize;
@@ -3957,6 +6653,13 @@ mod tests {
             }
         }
         let converted = StaticMesh::from_nanite(&nanite);
+        let preview = document
+            .mesh_preview
+            .as_ref()
+            .and_then(|preview| preview.as_ref().ok())
+            .expect("Nanite static mesh has a Chimp preview");
+        assert_eq!(preview.preview.vertices.len(), converted.vertices.len());
+        assert_eq!(preview.preview.indices.len(), converted.indices.len());
         let mut converted_miswound_triangles = 0usize;
         let mut severe_uv_stretch_triangles = 0usize;
         let mut maximum_uv_per_cm = 0.0f32;
@@ -4027,9 +6730,9 @@ mod tests {
         let mut position_ids = std::collections::HashMap::<[u32; 3], u32>::new();
         let mut canonical_vertices = Vec::with_capacity(converted.vertices.len());
         for vertex in &converted.vertices {
-            let key = vertex.position.map(|value| {
-                if value == 0.0 { 0 } else { value.to_bits() }
-            });
+            let key = vertex
+                .position
+                .map(|value| if value == 0.0 { 0 } else { value.to_bits() });
             let next = position_ids.len() as u32;
             canonical_vertices.push(*position_ids.entry(key).or_insert(next));
         }
@@ -4181,8 +6884,14 @@ mod tests {
             nanite.unresolved_vertices,
         );
         assert_eq!(nanite.unresolved_vertices, 0);
-        assert_eq!(nanite.triangles.len(), resources.num_input_triangles as usize);
-        assert!(miswound_triangles > 0, "fixture should exercise the regression");
+        assert_eq!(
+            nanite.triangles.len(),
+            resources.num_input_triangles as usize
+        );
+        assert!(
+            miswound_triangles > 0,
+            "fixture should exercise the regression"
+        );
         assert_eq!(converted_miswound_triangles, 0);
         assert_eq!(
             severe_uv_stretch_triangles, 0,
@@ -4223,11 +6932,9 @@ mod tests {
             .windows(8)
             .position(|window| window == b"FACE3200")
             .expect("PSKX contains its 32-bit face chunk");
-        let face_count = i32::from_le_bytes(
-            bytes[face_chunk + 28..face_chunk + 32]
-                .try_into()
-                .unwrap(),
-        ) as usize;
+        let face_count =
+            i32::from_le_bytes(bytes[face_chunk + 28..face_chunk + 32].try_into().unwrap())
+                as usize;
         assert_eq!(face_count, expected_faces);
         std::fs::remove_file(output).unwrap();
     }

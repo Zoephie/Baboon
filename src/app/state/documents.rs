@@ -187,6 +187,8 @@ pub(in crate::app) struct LastSessionKit {
     pub(in crate::app) browser_mode: Option<BrowserMode>,
     pub(in crate::app) browser_sort: Option<BrowserSort>,
     pub(in crate::app) tags: Vec<LastSessionTag>,
+    pub(in crate::app) chimp_packages: Vec<String>,
+    pub(in crate::app) active_chimp_package: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -206,10 +208,18 @@ pub(in crate::app) struct RestoreKit {
     pub(in crate::app) browser_mode: Option<BrowserMode>,
     pub(in crate::app) browser_sort: Option<BrowserSort>,
     pub(in crate::app) tags: Vec<LastSessionTag>,
+    pub(in crate::app) chimp_packages: Vec<String>,
+    pub(in crate::app) active_chimp_package: Option<String>,
 }
 
 pub(in crate::app) struct LastOpenedWindowEntry {
     pub(in crate::app) tag: LastSessionTag,
+    pub(in crate::app) checked: bool,
+    pub(in crate::app) available: bool,
+}
+
+pub(in crate::app) struct LastOpenedChimpEntry {
+    pub(in crate::app) package: String,
     pub(in crate::app) checked: bool,
     pub(in crate::app) available: bool,
 }
@@ -228,6 +238,8 @@ pub(in crate::app) struct LastOpenedWindowsKit {
     pub(in crate::app) browser_mode: Option<BrowserMode>,
     pub(in crate::app) browser_sort: Option<BrowserSort>,
     pub(in crate::app) entries: Vec<LastOpenedWindowEntry>,
+    pub(in crate::app) chimp_entries: Vec<LastOpenedChimpEntry>,
+    pub(in crate::app) active_chimp_package: Option<String>,
 }
 
 /// Launch-time restore prompt backed by `last_session.json`. OK reloads each
@@ -274,7 +286,16 @@ impl LastOpenedWindowsKit {
                 }
             })
             .collect::<Vec<_>>();
-        if entries.is_empty() && !saved.has_project {
+        let chimp_entries = saved
+            .chimp_packages
+            .into_iter()
+            .map(|package| LastOpenedChimpEntry {
+                package,
+                checked: source_available,
+                available: source_available,
+            })
+            .collect::<Vec<_>>();
+        if entries.is_empty() && chimp_entries.is_empty() && !saved.has_project {
             return None;
         }
         Some(Self {
@@ -288,6 +309,8 @@ impl LastOpenedWindowsKit {
             browser_mode: saved.browser_mode,
             browser_sort: saved.browser_sort,
             entries,
+            chimp_entries,
+            active_chimp_package: saved.active_chimp_package,
         })
     }
 
@@ -296,6 +319,14 @@ impl LastOpenedWindowsKit {
             .iter()
             .filter(|entry| entry.available && entry.checked)
             .map(|entry| entry.tag.clone())
+            .collect()
+    }
+
+    pub(in crate::app) fn checked_chimp_packages(&self) -> Vec<String> {
+        self.chimp_entries
+            .iter()
+            .filter(|entry| entry.available && entry.checked)
+            .map(|entry| entry.package.clone())
             .collect()
     }
 }
@@ -326,27 +357,37 @@ impl LastOpenedWindowsPrompt {
             .iter()
             .filter_map(|kit| {
                 let tags = kit.checked_tags();
-                (!tags.is_empty() || kit.has_project).then(|| RestoreKit {
-                    source_kind: kit.source_kind,
-                    source_path: kit.source_path.clone(),
-                    profile_id: kit.profile_id.clone(),
-                    project_path: kit.project_path.clone(),
-                    has_project: kit.has_project,
-                    browser_mode: kit.browser_mode,
-                    browser_sort: kit.browser_sort,
-                    tags,
+                let chimp_packages = kit.checked_chimp_packages();
+                let active_chimp_package = kit
+                    .active_chimp_package
+                    .clone()
+                    .filter(|active| chimp_packages.contains(active));
+                (!tags.is_empty() || !chimp_packages.is_empty() || kit.has_project).then(|| {
+                    RestoreKit {
+                        source_kind: kit.source_kind,
+                        source_path: kit.source_path.clone(),
+                        profile_id: kit.profile_id.clone(),
+                        project_path: kit.project_path.clone(),
+                        has_project: kit.has_project,
+                        browser_mode: kit.browser_mode,
+                        browser_sort: kit.browser_sort,
+                        tags,
+                        chimp_packages,
+                        active_chimp_package,
+                    }
                 })
             })
             .collect()
     }
 
     pub(in crate::app) fn has_checked_tags(&self) -> bool {
-        self.kits
-            .iter()
-            .any(|kit| !kit.checked_tags().is_empty() || kit.has_project)
+        self.kits.iter().any(|kit| {
+            !kit.checked_tags().is_empty()
+                || !kit.checked_chimp_packages().is_empty()
+                || kit.has_project
+        })
     }
 }
-
 
 /// Import-a-tag-file dialog for a Campaign Evolved container source. Owns the
 /// parsed imported `TagFile` (moved out on confirm) and the schema-comparison

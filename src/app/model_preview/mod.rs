@@ -1,9 +1,11 @@
-//! Model loading, variant selection, and software-rendered preview presentation.
+//! Model loading, variant selection, and depth-tested preview presentation.
 //! It owns model-preview data preparation and rendering; tag mutation and general editor presentation belong elsewhere.
 
 use super::*;
 use blam_tags::math::{RealPoint3d, RealQuaternion, RealVector3d};
 use blam_tags::render_model::{Marker, Node, RenderMesh};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 pub(in crate::app) mod loading;
 mod renderer;
@@ -32,6 +34,7 @@ pub(crate) struct RenderModelPreviewRegion {
     pub permutations: Vec<String>,
 }
 
+#[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct RenderModelPreviewVertex {
     pub position: [f32; 3],
@@ -52,6 +55,23 @@ pub(crate) struct RenderModelPreviewMarker {
     pub name: String,
     pub position: [f32; 3],
     pub axes: [[f32; 3]; 3],
+}
+
+static NEXT_MODEL_GEOMETRY_ID: AtomicU64 = AtomicU64::new(1);
+
+fn model_preview_data(
+    source_key: String,
+    render_model_path: String,
+    preview: RenderModelPreview,
+    variants: Vec<ModelVariantPreview>,
+) -> ModelPreviewData {
+    ModelPreviewData {
+        source_key,
+        render_model_path,
+        preview: Arc::new(preview),
+        geometry_id: NEXT_MODEL_GEOMETRY_ID.fetch_add(1, Ordering::Relaxed),
+        variants,
+    }
 }
 
 pub(super) fn draw_model_preview_panel(
@@ -126,9 +146,9 @@ pub(super) fn draw_model_preview_panel(
                         }
                     });
                 ui.checkbox(&mut state.show_backfaces, "Backfaces");
-                // Campaign Evolved: static pieces are Nanite; offer the full
-                // high-resolution decode (off by default — it can be millions
-                // of triangles). Only meaningful for CE `.model`s.
+                // Campaign Evolved: static pieces are Nanite. Full detail is
+                // the faithful default; users can opt into the coarse fallback
+                // for unusually heavy models. Only meaningful for CE `.model`s.
                 let is_campaign_evolved = tag.header.group_tag.to_be_bytes() == *b"hlmt"
                     && tag
                         .root()
@@ -138,8 +158,8 @@ pub(super) fn draw_model_preview_panel(
                 if is_campaign_evolved {
                     ui.checkbox(&mut state.high_detail, "High detail")
                         .on_hover_text(
-                            "Decode full-resolution Nanite geometry instead of the coarse \
-                             fallback (slow; a full model can be millions of triangles)",
+                            "Decode full-resolution Nanite geometry instead of Unreal's coarse \
+                             fallback. Disable this for a faster, lower-detail preview.",
                         );
                 }
                 ui.label(RichText::new("Viewport").color(subtle_dark()));
@@ -260,15 +280,7 @@ pub(in crate::app) fn standalone_mesh_preview(
     source_key: String,
     preview: RenderModelPreview,
 ) -> ModelPreviewData {
-    let max_edge = preview_edge_limit(preview.bounds_min, preview.bounds_max);
-    let draw_triangles = build_model_source_triangles(&preview, max_edge);
-    ModelPreviewData {
-        render_model_path: source_key.clone(),
-        source_key,
-        preview,
-        draw_triangles,
-        variants: Vec::new(),
-    }
+    model_preview_data(source_key.clone(), source_key, preview, Vec::new())
 }
 
 /// Draw a standalone mesh with the same camera, shading, wireframe and
@@ -346,5 +358,10 @@ mod tests {
             model_preview_size_from_percent(400.0),
             MAX_MODEL_PREVIEW_SIZE
         );
+    }
+
+    #[test]
+    fn campaign_evolved_preview_defaults_to_full_detail() {
+        assert!(ModelPreviewState::default().high_detail);
     }
 }

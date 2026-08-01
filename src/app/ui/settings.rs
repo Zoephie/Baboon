@@ -35,14 +35,15 @@ impl Baboon {
                 });
                 ui.separator();
                 ui.add_space(8.0);
-                ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui|
-                    match self.settings_tab {
+                ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| match self.settings_tab {
                         SettingsTab::Startup => self.draw_settings_startup_tab(ui),
                         SettingsTab::Browser => self.draw_settings_browser_tab(ui),
                         SettingsTab::EditingKits => self.draw_settings_editing_kits_tab(ui),
                         SettingsTab::Appearance => self.draw_settings_appearance_tab(ui),
                         SettingsTab::Tools => self.draw_settings_tools_tab(ui),
-                });
+                    });
             });
         if !open {
             self.pending_ui_scale = self.ui_scale;
@@ -434,7 +435,9 @@ impl Baboon {
                     ui.horizontal(|ui| {
                         ui.add_sized(
                             Vec2::new(220.0, 20.0),
-                            egui::Label::new(RichText::new(&profile.name).color(text_dark()).strong(),),
+                            egui::Label::new(
+                                RichText::new(&profile.name).color(text_dark()).strong(),
+                            ),
                         );
                         ui.label(
                             RichText::new(game_display_name(&profile.game)).color(subtle_dark()),
@@ -467,8 +470,7 @@ impl Baboon {
                             ui.label(RichText::new(error).color(material_delete_text()).small());
                         }
                     }
-                    if let Some(error) =
-                        self.editing_kit_validation.custom_icon_error(&profile.id)
+                    if let Some(error) = self.editing_kit_validation.custom_icon_error(&profile.id)
                     {
                         ui.label(
                             RichText::new(error)
@@ -638,10 +640,7 @@ impl Baboon {
         }
     }
 
-    fn commit_custom_editing_kit_draft(
-        &mut self,
-        draft: &mut CustomEditingKitDraft
-    ) -> bool {
+    fn commit_custom_editing_kit_draft(&mut self, draft: &mut CustomEditingKitDraft) -> bool {
         let name = draft.name.trim().to_owned();
         if name.is_empty() {
             draft.error = Some("Enter a project name".to_owned());
@@ -726,14 +725,10 @@ impl Baboon {
         let prefs = self.current_prefs();
         if let Err(error) = save_gui_prefs(&prefs, &self.terminal_open_games, true) {
             self.custom_editing_kit_profiles = previous_profiles;
-            if previous.as_ref().and_then(|profile| profile.icon.as_ref())
-                != profile.icon.as_ref()
+            if previous.as_ref().and_then(|profile| profile.icon.as_ref()) != profile.icon.as_ref()
                 && let Some(icon) = &profile.icon
             {
-                let _ = remove_unreferenced_custom_icon(
-                    icon,
-                    &self.custom_editing_kit_profiles
-                );
+                let _ = remove_unreferenced_custom_icon(icon, &self.custom_editing_kit_profiles);
             }
             draft.error = Some(error);
             return false;
@@ -748,7 +743,11 @@ impl Baboon {
             let source_changed =
                 previous.game != profile.game || !same_recent_path(&previous.root, &profile.root);
             for kit in &mut self.kits {
-                if kit.profile.as_ref().is_some_and(|identity| identity.id == id) {
+                if kit
+                    .profile
+                    .as_ref()
+                    .is_some_and(|identity| identity.id == id)
+                {
                     if source_changed {
                         kit.profile = None;
                     } else if let Some(identity) = &mut kit.profile {
@@ -912,6 +911,42 @@ impl Baboon {
                 self.blender_path = None;
                 self.blender_path_input.clear();
                 self.status = "Blender path cleared".to_owned();
+            }
+        });
+
+        ui.add_space(10.0);
+        ui.separator();
+        ui.label(
+            RichText::new("Chimp — Unreal mappings")
+                .color(text_dark())
+                .strong(),
+        );
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(
+                "USMAP files describe cooked Unreal classes and properties so Chimp can name and decode package data. Leave this blank to use Baboon's bundled Campaign Evolved mappings.",
+            )
+            .color(subtle_dark())
+            .small(),
+        );
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Path").color(subtle_dark()));
+            let path_response = ui.add(
+                egui::TextEdit::singleline(&mut self.chimp_usmap_path_input)
+                    .desired_width(360.0)
+                    .hint_text("Bundled Campaign Evolved USMAP"),
+            );
+            if path_response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                self.commit_chimp_usmap_path_input(ui.ctx().clone());
+            }
+            if ui.button("Browse...").clicked() {
+                self.choose_chimp_usmap_path(ui.ctx().clone());
+            }
+        });
+        ui.add_space(8.0);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if self.chimp_usmap_path.is_some() && ui.button("Use bundled").clicked() {
+                self.apply_chimp_usmap_path(None, ui.ctx().clone());
             }
         });
     }

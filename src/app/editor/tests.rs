@@ -72,9 +72,13 @@ mod tests {
         let mut utocs: Vec<PathBuf> = std::fs::read_dir(&root)
             .expect("read paks dir")
             .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| { p.extension().is_some_and(|x| x.eq_ignore_ascii_case("utoc"))
+            .filter(|p| {
+                p.extension()
+                    .is_some_and(|x| x.eq_ignore_ascii_case("utoc"))
             })
-            .filter(|p| { !p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("global.utoc"))
+            .filter(|p| {
+                !p.file_name()
+                    .is_some_and(|n| n.eq_ignore_ascii_case("global.utoc"))
             })
             .collect();
         utocs.sort();
@@ -82,7 +86,9 @@ mod tests {
         let mut containers = Vec::new();
         let mut packages = ContainerPackageIndex::default();
         for utoc in utocs {
-            let Ok(archive) = IoStoreArchive::open(&utoc) else { continue; };
+            let Ok(archive) = IoStoreArchive::open(&utoc) else {
+                continue;
+            };
             let idx = containers.len();
             for e in archive.entries() {
                 if let Some(pkg) = container_package_name(&e.path) {
@@ -110,8 +116,11 @@ mod tests {
         assert!(!binding.is_empty(), "no media resolved");
 
         let shown = binding.language_to_show(None);
-        let media: Vec<CeSoundMedia> =
-            binding.media_for_language(&shown).into_iter().cloned().collect();
+        let media: Vec<CeSoundMedia> = binding
+            .media_for_language(&shown)
+            .into_iter()
+            .cloned()
+            .collect();
         assert!(!media.is_empty());
 
         let dir = std::env::temp_dir().join(format!("baboon_ce_extract_{}", std::process::id()));
@@ -144,8 +153,9 @@ mod tests {
             assert_eq!(&bytes[0..4], b"RIFF", "{} is not a RIFF", path.display());
             assert_eq!(&bytes[8..12], b"WAVE", "{} is not a WAVE", path.display());
             // Real audio, not a buffer of zeroes.
-            let loud = bytes[44..].chunks_exact(2).any(|s|
-                i16::from_le_bytes([s[0], s[1]]).unsigned_abs() > 64);
+            let loud = bytes[44..]
+                .chunks_exact(2)
+                .any(|s| i16::from_le_bytes([s[0], s[1]]).unsigned_abs() > 64);
             assert!(loud, "{} decoded to silence", path.display());
             println!("wrote {} ({} bytes)", path.display(), bytes.len());
         }
@@ -1338,9 +1348,7 @@ mod tests {
     /// 180/π, applied to every angle field in every game.
     #[test]
     fn angle_fields_are_edited_in_degrees_and_stored_in_radians() {
-        use crate::app::foundation::{
-            foundation_bounds_values, format_foundation_scalar_value,
-        };
+        use crate::app::foundation::{format_foundation_scalar_value, foundation_bounds_values};
         let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
         let root = tag.root();
         let names = TagNameIndex::default();
@@ -1397,7 +1405,9 @@ mod tests {
         let field = tag.root().field("angle").unwrap();
         let names = TagNameIndex::default();
 
-        for typed in ["0.01", "0.15", "20", "45", "70", "360", "1440", "-90", "8.59437"] {
+        for typed in [
+            "0.01", "0.15", "20", "45", "70", "360", "1440", "-90", "8.59437",
+        ] {
             let TagFieldData::Angle(stored) = parse_gui_field_value(&field, typed).unwrap() else {
                 panic!("expected an angle");
             };
@@ -1406,8 +1416,7 @@ mod tests {
 
             // And again, from what was shown — the fixed point that matters when a
             // field is opened, committed, reopened and committed again.
-            let TagFieldData::Angle(second) = parse_gui_field_value(&field, &shown).unwrap()
-            else {
+            let TagFieldData::Angle(second) = parse_gui_field_value(&field, &shown).unwrap() else {
                 panic!("expected an angle");
             };
             assert_eq!(
@@ -1424,9 +1433,7 @@ mod tests {
     /// on.
     #[test]
     fn plain_reals_are_left_alone() {
-        use crate::app::foundation::{
-            foundation_bounds_values, format_foundation_scalar_value,
-        };
+        use crate::app::foundation::{format_foundation_scalar_value, foundation_bounds_values};
         let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
         let root = tag.root();
         let names = TagNameIndex::default();
