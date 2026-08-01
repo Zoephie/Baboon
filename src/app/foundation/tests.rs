@@ -599,4 +599,93 @@ mod tests {
             assert_eq!(edit.resolve_open("some/block", true), None);
         });
     }
+
+    /// The reported complaint, at the layer that causes it: a value the editor
+    /// considers uneditable is *painted text* — there is no cursor to place in
+    /// it, nothing to drag a selection across, and nothing to copy. A value in
+    /// an editable context is a text box, which is what makes retyping a tag
+    /// build's numbers somewhere else possible at all.
+    ///
+    /// Driven through real pointer input rather than by asking which branch was
+    /// taken: what matters is whether clicking the cell puts a caret in it.
+    #[test]
+    fn only_an_editable_value_row_can_be_clicked_into() {
+        assert!(
+            click_across_value_row(true),
+            "an editable value row must take a caret, or its text cannot be selected or copied"
+        );
+        assert!(
+            !click_across_value_row(false),
+            "a read-only row is painted text — nothing there can take focus"
+        );
+    }
+
+    /// Render one `real_vector_3d` row (the `Point 0 / x y z` shape from the
+    /// report) and click along it until something takes keyboard focus.
+    /// Returns whether anything ever did.
+    fn click_across_value_row(editable: bool) -> bool {
+        let ctx = egui::Context::default();
+        let mut tag =
+            TagFile::new(crate::app::test_definition_path("halo4_mcc/camera_track.json")).unwrap();
+        crate::app::add_block_element(&mut tag, "control points").unwrap();
+        let mut focused = false;
+
+        with_test_edit_context(|edit| {
+            edit.editable = editable;
+            // Sweep the row rather than trusting a hand-computed cell position:
+            // the widths are layout details, and a click that lands on the label
+            // by accident would report "not editable" for the wrong reason.
+            for step in 0..90 {
+                let pointer = egui::Pos2::new(step as f32 * 10.0, 12.0);
+                let click = |pressed| egui::Event::PointerButton {
+                    pos: pointer,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: Default::default(),
+                };
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(900.0, 200.0),
+                    )),
+                    events: vec![
+                        egui::Event::PointerMoved(pointer),
+                        click(true),
+                        click(false),
+                    ],
+                    ..Default::default()
+                };
+                let _ = ctx.run(input, |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let field = tag
+                            .root()
+                            .field_path("control points[0]/position")
+                            .expect("the control point's position field");
+                        let value = field.value().expect("position has a value");
+                        let meta = field_display_meta(field.name());
+                        draw_foundation_value_row(
+                            ui,
+                            field,
+                            &meta,
+                            field.type_name(),
+                            &value,
+                            &TagNameIndex::default(),
+                            0,
+                            "control points[0]/position",
+                            edit,
+                            None,
+                            None,
+                            300.0,
+                        );
+                    });
+                });
+                if ctx.memory(|memory| memory.focused()).is_some() {
+                    focused = true;
+                    break;
+                }
+            }
+        });
+
+        focused
+    }
 }

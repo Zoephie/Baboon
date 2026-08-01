@@ -279,14 +279,21 @@ mod tests {
     }
 
     #[test]
-    fn tag_extract_menu_is_limited_to_model_and_animation_groups() {
-        assert!(supports_tag_extract_menu(u32::from_be_bytes(*b"hlmt")));
-        assert!(supports_tag_extract_menu(u32::from_be_bytes(*b"mode")));
-        assert!(supports_tag_extract_menu(u32::from_be_bytes(*b"mod2")));
-        assert!(supports_tag_extract_menu(u32::from_be_bytes(*b"coll")));
-        assert!(supports_tag_extract_menu(u32::from_be_bytes(*b"phmo")));
-        assert!(supports_tag_extract_menu(u32::from_be_bytes(*b"jmad")));
-        assert!(supports_tag_extract_menu(u32::from_be_bytes(*b"antr")));
+    fn tag_extract_menu_covers_every_group_with_an_asset_extractor() {
+        for group in [b"hlmt", b"mode", b"mod2", b"coll", b"phmo", b"jmad", b"antr"] {
+            assert!(supports_tag_extract_menu(u32::from_be_bytes(*group)));
+        }
+        // Per-asset extraction moved into this menu, so the button has to enable
+        // for these groups too — otherwise the items are unreachable.
+        for group in [b"bitm", b"mats", b"hlsl"] {
+            assert!(
+                supports_tag_extract_menu(u32::from_be_bytes(*group)),
+                "{} should enable the Extract menu",
+                String::from_utf8_lossy(group)
+            );
+        }
+        // A scenario's script items sit inline, not in this menu, and a plain
+        // weapon has no extractor at all — both must leave it disabled.
         assert!(!supports_tag_extract_menu(u32::from_be_bytes(*b"scnr")));
         assert!(!supports_tag_extract_menu(u32::from_be_bytes(*b"weap")));
     }

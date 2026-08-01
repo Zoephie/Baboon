@@ -922,10 +922,12 @@ impl Baboon {
         ui.add_space(6.0);
         if !element.is_empty() {
             // `Unresolved` stands in for "gone", the only way an element leaves.
+            // `Unchanged` is a whole-tag verdict and never labels an element,
+            // so it reads as a plain change here rather than inventing a marker.
             let (marker, heading) = match kind {
                 ModExportChange::New => ("+", added_text()),
                 ModExportChange::Unresolved => ("-", removed_text()),
-                ModExportChange::Modified => ("~", modified_text()),
+                ModExportChange::Modified | ModExportChange::Unchanged => ("~", modified_text()),
             };
             // The container above already names the block, so this only has to
             // say which element of it, and what happened to it.
@@ -1016,7 +1018,7 @@ impl Baboon {
             match kind {
                 ModExportChange::New => pane(ui, available, false, "added"),
                 ModExportChange::Unresolved => pane(ui, available, true, "removed"),
-                ModExportChange::Modified => {
+                ModExportChange::Modified | ModExportChange::Unchanged => {
                     ui.horizontal_top(|ui| {
                         pane(ui, half, true, "before");
                         // Not a separator: in a horizontal layout it stretches
@@ -1056,6 +1058,11 @@ impl Baboon {
             .rows
             .iter()
             .filter(|row| row.kind == ModExportChange::Unresolved)
+            .count();
+        let unchanged_count = dialog
+            .rows
+            .iter()
+            .filter(|row| row.kind == ModExportChange::Unchanged)
             .count();
         let stem = dialog.stem();
         let existing = dialog.existing_files();
@@ -1147,6 +1154,19 @@ impl Baboon {
                         ))
                         .color(text_dark()),
                     );
+                    if unchanged_count > 0 {
+                        // Named rather than silently dropped: these are tags the
+                        // workspace still has stashed, and a user who remembers
+                        // touching one deserves to see that it came to nothing.
+                        ui.label(
+                            RichText::new(format!("· {unchanged_count} unchanged"))
+                                .color(subtle_dark()),
+                        )
+                        .on_hover_text(
+                            "Byte-identical to the game's own copy, so there is nothing \
+                             to export. They stay stashed.",
+                        );
+                    }
                     if unresolved_count > 0 {
                         ui.label(
                             RichText::new(format!("· {unresolved_count} excluded"))
@@ -1238,6 +1258,10 @@ impl Baboon {
                                     ModExportChange::Modified => ("~", modified_text()),
                                     ModExportChange::Unresolved => {
                                         ("!", egui::Color32::from_rgb(210, 120, 90))
+                                    }
+                                    // Nothing to write, so nothing to mark.
+                                    ModExportChange::Unchanged => {
+                                        ("=", egui::Color32::from_gray(130))
                                     }
                                 };
                                 // A marker as well as a colour: this is a

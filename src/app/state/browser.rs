@@ -24,6 +24,11 @@ pub(in crate::app) enum BrowserAction {
     ExtractMaterialShaderSourceFolder(Vec<String>),
     ExtractHlslIncludeSource(String),
     ExtractHlslIncludeFolder(Vec<String>),
+    /// Write a scenario's `source files` block out as a folder of `.hsc` files.
+    ExtractScenarioScripts(String),
+    /// Replace a scenario's `source files` block from a folder of `.hsc` files.
+    /// Leaves the document modified rather than saving it.
+    ImportScenarioScripts(String),
     FindReferences(String),
     ExploreReferences(String),
     RenameTag(String),

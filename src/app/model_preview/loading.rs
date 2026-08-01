@@ -8,7 +8,9 @@ use blam_tags::iostore::container_header::EIoContainerHeaderVersion;
 use blam_tags::iostore::skeletal_mesh::SkeletalMesh;
 use blam_tags::iostore::static_mesh::StaticMesh;
 use blam_tags::iostore::ue_types::{EIoStoreTocVersion, FPackageObjectIndex};
-use blam_tags::iostore::unversioned::{MeshRef, MeshSyncRegions, Permutation, PropValue, Region};
+use blam_tags::iostore::unversioned::{
+    MeshRef, MeshSyncRegions, Permutation, PropValue, PropertyBlock, Region,
+};
 use blam_tags::iostore::usmap::Usmap;
 use blam_tags::iostore::zen::FZenPackageHeader;
 use blam_tags::jms::{UeMeshPart, UeStaticPart, UeWorldPart};
@@ -878,7 +880,7 @@ fn ce_decode_metahuman_table(
     struct_basename: &str,
     struct_name: &str,
     table_basename: &str,
-) -> Option<Vec<(String, std::collections::BTreeMap<String, PropValue>)>> {
+) -> Option<Vec<(String, PropertyBlock)>> {
     let mut usmap = Usmap::meteorite().ok()?;
     let sbytes = ce_find_uasset_by_basename(containers, struct_basename)?;
     let shdr =
@@ -906,24 +908,11 @@ fn ce_decode_metahuman_table(
         dhdr.export_map.first()?.object_flags,
     )
     .ok()
-    .map(|rows| {
-        rows.into_iter()
-            .map(|(name, block)| {
-                (
-                    name,
-                    block
-                        .iter()
-                        .map(|(name, value)| (name.to_owned(), value.clone()))
-                        .collect(),
-                )
-            })
-            .collect()
-    })
 }
 
 /// A non-empty soft-object path as `(package, asset)`.
 fn ce_soft(sp: &blam_tags::iostore::unversioned::SoftObjectPath) -> Option<(String, String)> {
-    (!sp.is_empty()).then(|| (sp.package.to_string(), sp.asset.to_string()))
+    (!sp.is_empty()).then(|| (sp.package.as_str().to_string(), sp.asset.as_str().to_string()))
 }
 
 /// Decode `DT_MetaHumanHeads` → per-row face + facial-hair mesh references.

@@ -1080,6 +1080,27 @@ pub(in crate::app) fn draw_entry(
                             action = Some(BrowserAction::ExtractImportInfo(entry.key.clone()));
                             ui.close_menu();
                         }
+                        if is_bitmap_group(entry.group_tag)
+                            && context_menu_button(ui, "Extract bitmap images...").clicked()
+                        {
+                            action = Some(BrowserAction::ExtractBitmap(entry.key.clone()));
+                            ui.close_menu();
+                        }
+                        if is_material_shader_group(entry.group_tag)
+                            && context_menu_button(ui, "Extract source shaders...").clicked()
+                        {
+                            action = Some(BrowserAction::ExtractMaterialShaderSources(
+                                entry.key.clone(),
+                            ));
+                            ui.close_menu();
+                        }
+                        if is_hlsl_include_group(entry.group_tag)
+                            && context_menu_button(ui, "Extract HLSL include...").clicked()
+                        {
+                            action =
+                                Some(BrowserAction::ExtractHlslIncludeSource(entry.key.clone()));
+                            ui.close_menu();
+                        }
                     });
                     let icon_rect = egui::Rect::from_center_size(
                         egui::pos2(
@@ -1093,42 +1114,35 @@ pub(in crate::app) fn draw_entry(
             });
         });
 
-        context_menu_separator(ui);
-        let has_extra_extract = is_embedded_tag_entry(entry)
-            || is_bitmap_group(entry.group_tag)
-            || is_material_shader_group(entry.group_tag)
-            || is_hlsl_include_group(entry.group_tag);
-        if has_extra_extract {
-            ui.menu_button("More extraction tools", |ui| {
-                ui.set_min_width(280.0);
-                if is_embedded_tag_entry(entry)
-                    && context_menu_button(ui, "Extract raw tag...").clicked()
-                {
-                    action = Some(BrowserAction::ExtractRaw(entry.key.clone()));
+        // Whole-tag operations, inline: the raw payload, and the scenario's
+        // script source. Per-asset extraction lives in the Extract submenu
+        // above instead.
+        // Campaign Evolved only for the script pair: the scenario keeps its
+        // original `.hsc` source, and replacing it is only meaningful where that
+        // round-trip is known to hold.
+        let scenario_scripts =
+            is_scenario_group(entry.group_tag) && browser_game_is_campaign_evolved(ui);
+        if is_embedded_tag_entry(entry) || scenario_scripts {
+            context_menu_separator(ui);
+            if is_embedded_tag_entry(entry)
+                && context_menu_button(ui, "Extract raw tag...").clicked()
+            {
+                action = Some(BrowserAction::ExtractRaw(entry.key.clone()));
+                ui.close_menu();
+            }
+            if scenario_scripts {
+                if context_menu_button(ui, "Extract scripts...").clicked() {
+                    action = Some(BrowserAction::ExtractScenarioScripts(entry.key.clone()));
                     ui.close_menu();
                 }
-                if is_bitmap_group(entry.group_tag)
-                    && context_menu_button(ui, "Extract bitmap images...").clicked()
-                {
-                    action = Some(BrowserAction::ExtractBitmap(entry.key.clone()));
+                if context_menu_button(ui, "Import scripts...").clicked() {
+                    action = Some(BrowserAction::ImportScenarioScripts(entry.key.clone()));
                     ui.close_menu();
                 }
-                if is_material_shader_group(entry.group_tag)
-                    && context_menu_button(ui, "Extract source shaders...").clicked()
-                {
-                    action = Some(BrowserAction::ExtractMaterialShaderSources(
-                        entry.key.clone(),
-                    ));
-                    ui.close_menu();
-                }
-                if is_hlsl_include_group(entry.group_tag)
-                    && context_menu_button(ui, "Extract HLSL include...").clicked()
-                {
-                    action = Some(BrowserAction::ExtractHlslIncludeSource(entry.key.clone()));
-                    ui.close_menu();
-                }
-            });
+            }
         }
+
+        context_menu_separator(ui);
         if context_menu_button(ui, "Open with File Explorer").clicked() {
             action = Some(BrowserAction::OpenInExplorer(entry.key.clone()));
             ui.close_menu();
@@ -1363,6 +1377,9 @@ pub(in crate::app) fn supports_tag_extract_menu(group_tag: u32) -> bool {
     supports_tag_geometry_extraction(group_tag)
         || supports_animation_extraction(group_tag)
         || supports_tag_import_info_extraction(group_tag)
+        || is_bitmap_group(group_tag)
+        || is_material_shader_group(group_tag)
+        || is_hlsl_include_group(group_tag)
 }
 
 fn supports_tag_geometry_extraction(group_tag: u32) -> bool {

@@ -150,7 +150,12 @@ pub(in crate::app) fn format_reference_path(
     }
 }
 
-pub(in crate::app) fn draw_tag_metadata(ui: &mut Ui, tag: &TagFile, names: &TagNameIndex) {
+pub(in crate::app) fn draw_tag_metadata(
+    ui: &mut Ui,
+    tag: &TagFile,
+    entry: &TagEntry,
+    names: &TagNameIndex,
+) {
     ui.horizontal(|ui| {
         ui.label(RichText::new("Header group:").color(subtle_dark()));
         ui.monospace(RichText::new(group_label(names, tag.group().tag)).color(text_dark()));
@@ -165,5 +170,21 @@ pub(in crate::app) fn draw_tag_metadata(ui: &mut Ui, tag: &TagFile, names: &TagN
             })
             .color(text_dark()),
         );
+        // The fields below are live either way; this says what happens to what
+        // is typed into them, at the one moment the user is looking at where
+        // this tag came from.
+        if let Some(reason) = unsaveable_reason(entry, tag) {
+            ui.label(
+                RichText::new("Cannot be saved")
+                    .color(READ_ONLY_BADGE_COLOR)
+                    .strong(),
+            )
+            .on_hover_text(reason);
+        }
     });
 }
+
+/// Amber, for the header note on a tag whose edits have nowhere to be written.
+/// Warning-coloured rather than error-coloured: nothing is wrong, and the tag
+/// is fully editable — the edits just do not outlive the session.
+pub(in crate::app) const READ_ONLY_BADGE_COLOR: Color32 = Color32::from_rgb(210, 145, 60);

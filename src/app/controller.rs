@@ -167,6 +167,25 @@ fn explorer_select_args(path: &Path) -> [std::ffi::OsString; 2] {
     ]
 }
 
+/// What a stashed overlay is, for the export review.
+///
+/// Pure so the rule can be tested without a mounted game, which is what
+/// reproducing the report needed: a tag stashed as modified whose bytes turn
+/// out to equal the game's own copy.
+pub(in crate::app) fn classify_overlay(
+    resolvable: bool,
+    kind: CampaignProjectTagKind,
+    matches_shipped: bool,
+) -> ModExportChange {
+    match (resolvable, kind) {
+        (false, _) => ModExportChange::Unresolved,
+        (true, CampaignProjectTagKind::New) => ModExportChange::New,
+        (true, CampaignProjectTagKind::Existing) if matches_shipped => ModExportChange::Unchanged,
+        (true, CampaignProjectTagKind::Existing) => ModExportChange::Modified,
+    }
+}
+
+
 impl Baboon {
     /// Resolve (and cache) the Wwise media a Campaign Evolved `sound` tag binds
     /// to. Returns `None` for every other game and source kind.
@@ -2358,14 +2377,7 @@ impl Baboon {
     /// inside its own source, so resolving it against the active kit silently
     /// finds nothing and the caller skips the tag.
     pub(super) fn entry_for_key_in(&self, kit: usize, key: &str) -> Option<&TagEntry> {
-        let kit = self.kits.get(kit)?;
-        let source = kit.source.as_ref()?;
-        source
-            .entries
-            .iter()
-            .chain(source.all_entries.iter())
-            .chain(kit.active_favorite_entries.iter())
-            .find(|entry| entry.key == key)
+        self.kits.get(kit)?.entry_for_key(key)
     }
 
     pub(super) fn close_tab(&mut self, key: &str) {
@@ -2461,6 +2473,14 @@ impl Baboon {
             .filter_map(|key| {
                 let doc = self.kits[self.active].parsed_tags.get(&key)?;
                 if !doc.dirty.is_set() {
+                    return None;
+                }
+                // Edits to a tag that has no writer (a monolithic build, a
+                // big-endian tag) are session-scratch by construction. Listing
+                // them here would offer a Save that always fails, and — for
+                // CloseApp, which re-checks for dirty work after the prompt —
+                // a close that never terminates.
+                if !document_edits_are_saveable(&self.kits[self.active], &key, doc) {
                     return None;
                 }
                 Some(DirtyTagEntry {
@@ -2880,6 +2900,10 @@ impl Baboon {
             BrowserAction::ExtractHlslIncludeFolder(keys) => {
                 self.begin_extract_hlsl_include_folder(keys, ctx)
             }
+            BrowserAction::ExtractScenarioScripts(key) => {
+                self.begin_extract_scenario_scripts(key, ctx)
+            }
+            BrowserAction::ImportScenarioScripts(key) => self.import_scenario_scripts(&key),
             BrowserAction::RenameTag(key) => self.open_rename_tag(&key),
             BrowserAction::FindReferences(key) => self.show_references_for(&key),
             BrowserAction::ExploreReferences(key) => self.open_content_explorer(&key),
@@ -3373,6 +3397,101 @@ impl Baboon {
 
     /// Starts potentially expensive source or export work off the UI thread.
     /// The worker owns cloned inputs and reports status without mutating UI state.
+    pub(super) fn begin_extract_scenario_scripts(&mut self, key: String, ctx: egui::Context) {
+        if !self.active_game_is_campaign_evolved() {
+            self.status = "Script extraction is only available for Campaign Evolved".to_owned();
+            return;
+        }
+        let Some((source, entry)) = self.export_context(&key) else {
+            return;
+        };
+        let Some(output) = rfd::FileDialog::new()
+            .set_title("Extract Scripts")
+            .pick_folder()
+        else {
+            return;
+        };
+        self.status = format!("Extracting scripts from {}", entry.display_path);
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let result =
+                extract_scenario_scripts(&source, &entry, &output).map_err(|e| e.to_string());
+            let _ = tx.send(WorkerMessage::ExportFinished(result));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Replace a scenario's `source files` block from a folder of `.hsc` files.
+    ///
+    /// Runs on the UI thread because it edits the loaded document: the tag is
+    /// left **modified, not saved**, so the change goes through the same review
+    /// and save path as any other edit. If the tag is not open yet it is read
+    /// first — synchronously, since the result has to be mutated in the same
+    /// step rather than handed to a worker.
+    pub(super) fn import_scenario_scripts(&mut self, key: &str) {
+        if !self.active_game_is_campaign_evolved() {
+            self.status = "Script import is only available for Campaign Evolved".to_owned();
+            return;
+        }
+        let Some(entry) = self.entry_for_key(key).cloned() else {
+            self.status = "Tag is no longer in the browser".to_owned();
+            return;
+        };
+        if !is_scenario_group(entry.group_tag) {
+            self.status = "Script import is only available for scenario tags".to_owned();
+            return;
+        }
+        let Some(folder) = rfd::FileDialog::new()
+            .set_title("Import Scripts")
+            .pick_folder()
+        else {
+            return;
+        };
+
+        if !self.kits[self.active].parsed_tags.contains_key(key) {
+            let Some(source) = self.source().map(|source| source.source.clone()) else {
+                self.status = "No tag source is loaded".to_owned();
+                return;
+            };
+            self.status = format!("Loading {}", entry.display_path);
+            match read_entry(&source, &entry) {
+                Ok(tag) => {
+                    self.kits[self.active]
+                        .parsed_tags
+                        .insert(key.to_owned(), TagDocument::clean(tag));
+                }
+                Err(error) => {
+                    self.status = format!("Could not load {}: {error:#}", entry.display_path);
+                    return;
+                }
+            }
+        }
+
+        let Some(document) = self.kits[self.active].parsed_tags.get_mut(key) else {
+            self.status = "Load the tag before importing scripts".to_owned();
+            return;
+        };
+        match replace_scenario_scripts(&mut document.tag, &folder) {
+            Ok(message) => {
+                document.dirty.touch();
+                self.kits[self.active].open_tag_pane(key);
+                self.kits[self.active].selected_key = Some(key.to_owned());
+                self.status = format!("{message} (unsaved)");
+            }
+            // A failed read leaves the block untouched — `replace_scenario_scripts`
+            // reads the whole folder before it clears anything.
+            Err(error) => self.status = format!("Could not import scripts: {error:#}"),
+        }
+    }
+
+    pub(super) fn active_game_is_campaign_evolved(&self) -> bool {
+        self.source()
+            .and_then(|source| source.game.as_deref())
+            .is_some_and(|game| game == "haloce_evolved")
+    }
+
+    /// Starts potentially expensive source or export work off the UI thread.
+    /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(super) fn begin_extract_hlsl_include_source(&mut self, key: String, ctx: egui::Context) {
         let Some((source, entry)) = self.export_context(&key) else {
             return;
@@ -3472,8 +3591,8 @@ impl Baboon {
         let Some(doc) = self.kits[self.active].parsed_tags.get(key) else {
             return Err("Load the selected tag before saving".to_owned());
         };
-        if doc.tag.classic_engine().is_none() && doc.tag.endian != Endian::Le {
-            return Err("Only little-endian MCC tags can be saved".to_owned());
+        if let Some(reason) = unsaveable_reason(&entry, &doc.tag) {
+            return Err(reason.to_owned());
         }
         let TagEntryLocation::LooseFile(path) = &entry.location else {
             // Container tags are writable, just not through the loose-file
@@ -3809,21 +3928,33 @@ impl Baboon {
                 let resolvable = self
                     .campaign_entry_for_identity(exporting, &overlay.identity)
                     .is_some();
-                let kind = match (resolvable, overlay.kind) {
-                    (false, _) => ModExportChange::Unresolved,
-                    (true, CampaignProjectTagKind::New) => ModExportChange::New,
-                    (true, CampaignProjectTagKind::Existing) => ModExportChange::Modified,
-                };
+                let kind = classify_overlay(
+                    resolvable,
+                    overlay.kind,
+                    // Only asked where the answer can matter, so a review does
+                    // not read shipped payloads it has no use for.
+                    resolvable
+                        && overlay.kind == CampaignProjectTagKind::Existing
+                        && self.overlay_matches_shipped(exporting, overlay),
+                );
                 let overridden_by = self.mod_serving_tag(exporting, &overlay.identity);
                 ModExportRow {
                     identity: overlay.identity.clone(),
                     display_path: overlay.logical_path.clone(),
                     group_tag: overlay.group_tag,
                     kind,
-                    include: kind != ModExportChange::Unresolved,
+                    include: !matches!(
+                        kind,
+                        ModExportChange::Unresolved | ModExportChange::Unchanged
+                    ),
                     bytes: overlay.bytes.len(),
-                    reason: (kind == ModExportChange::Unresolved)
-                        .then(|| "not in this source".to_owned()),
+                    reason: match kind {
+                        ModExportChange::Unresolved => Some("not in this source".to_owned()),
+                        ModExportChange::Unchanged => {
+                            Some("identical to the game's copy".to_owned())
+                        }
+                        _ => None,
+                    },
                     overridden_by,
                 }
             })
@@ -3849,6 +3980,28 @@ impl Baboon {
             diffs: HashMap::new(),
             controls_height: 0.0,
         });
+    }
+
+    /// Whether a stashed overlay is byte-for-byte what the game already ships.
+    ///
+    /// Answered on bytes rather than by diffing parsed tags: a diff can come
+    /// back empty for two tags that are not identical (a field the differ does
+    /// not reach), and "nothing to export" has to mean *nothing*, not "nothing
+    /// I looked at".
+    ///
+    /// A tag only a mod provides has no shipped counterpart, so it is never
+    /// unchanged -- there is nothing for it to be identical to.
+    fn overlay_matches_shipped(&self, kit: usize, overlay: &CampaignProjectOverlay) -> bool {
+        let Some(entry) = self.campaign_entry_for_identity(kit, &overlay.identity) else {
+            return false;
+        };
+        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
+            return false;
+        };
+        matches!(
+            crate::source::read_shipped_entry_bytes(&source.source, &entry),
+            Ok(Some(bytes)) if bytes == *overlay.bytes
+        )
     }
 
     /// Compute the field differences for one reviewed tag, against the tag as
@@ -3983,6 +4136,7 @@ impl Baboon {
                     ModExportChange::New => "new",
                     ModExportChange::Modified => "modified",
                     ModExportChange::Unresolved => "unresolved",
+                    ModExportChange::Unchanged => "unchanged",
                 },
                 "bytes": row.bytes,
                 "error": diff.error,
@@ -4275,15 +4429,15 @@ impl Baboon {
             .collect();
         let new_refs: Vec<blam_tags::iostore::writer::NewPackage> = new_pkgs
             .iter()
-            .map(
-                |(template, bytes, package)| blam_tags::iostore::writer::NewPackage {
-                    template_uasset: template.as_slice(),
-                    tag_bytes: bytes.as_slice(),
-                    new_package_path: package.as_str(),
-                    redirect_from: None,
-                    asset_reference: None,
-                },
-            )
+            .map(|(template, bytes, package)| blam_tags::iostore::writer::NewPackage {
+                template_uasset: template.as_slice(),
+                tag_bytes: bytes.as_slice(),
+                new_package_path: package.as_str(),
+                redirect_from: None,
+                // A new tag's wrapper is built from the template with the
+                // donor's own bindings stripped; nothing here chooses one.
+                asset_reference: None,
+            },)
             .collect();
         let written =
             blam_tags::iostore::writer::write_mod_container_ex(&override_refs, &new_refs, &output);
@@ -4366,8 +4520,8 @@ impl Baboon {
             self.status = "Load the selected tag before saving".to_owned();
             return;
         };
-        if doc.tag.classic_engine().is_none() && doc.tag.endian != Endian::Le {
-            self.status = "Only little-endian MCC tags can be saved".to_owned();
+        if let Some(reason) = unsaveable_reason(&entry, &doc.tag) {
+            self.status = reason.to_owned();
             return;
         }
 

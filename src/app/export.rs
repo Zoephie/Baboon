@@ -7,12 +7,14 @@ pub(super) mod bitmap;
 pub(super) mod geometry;
 pub(super) mod import_info;
 pub(super) mod json;
+pub(super) mod scripts;
 pub(super) mod shader_source;
 
 pub(super) use bitmap::*;
 pub(super) use geometry::*;
 pub(super) use import_info::*;
 pub(super) use json::*;
+pub(super) use scripts::*;
 pub(super) use shader_source::*;
 
 pub(super) fn extract_raw_tag(

@@ -462,9 +462,22 @@ impl Baboon {
 
 fn kit_has_dirty_documents(kit: &Kit) -> bool {
     kit.parsed_tags
-        .values()
-        .any(|document| document.dirty.is_set())
+        .iter()
+        .any(|(key, document)| {
+            document.dirty.is_set() && document_edits_are_saveable(kit, key, document)
+        })
         || kit.chimp.documents.values().any(|document| document.dirty)
+}
+
+/// Whether this kit's edits to `key` could be written back at all.
+///
+/// A monolithic build (and any other tag with no writer) is editable but never
+/// saveable, so its dirty flag is not unsaved *work*: counting it as such would
+/// raise a save prompt on every close whose only honest answer is Discard.
+pub(super) fn document_edits_are_saveable(kit: &Kit, key: &str, document: &TagDocument) -> bool {
+    // An entry the kit can no longer find is not one this can rule out.
+    kit.entry_for_key(key)
+        .is_none_or(|entry| is_saveable_tag(entry, &document.tag))
 }
 
 /// Label for a kit in the kit strip: the game's display name where one was
@@ -496,8 +509,75 @@ fn active_after_removal(active: usize, removed: usize, new_len: usize) -> usize 
 
 #[cfg(test)]
 mod tests {
-    use super::{Kit, KitId, active_after_removal};
+    use super::{Kit, KitId, TagDocument, active_after_removal, kit_has_dirty_documents};
+    use crate::app::test_definition_path;
+    use crate::source::{LoadedSourceData, TagEntry, TagEntryLocation, TagSource, build_tree};
+    use blam_tags::TagFile;
     use std::collections::HashMap;
+    use std::path::PathBuf;
+
+    fn kit_holding(location: TagEntryLocation, endian: blam_tags::Endian) -> Kit {
+        let mut tag = TagFile::new(test_definition_path("halo4_mcc/camera_track.json")).unwrap();
+        tag.endian = endian;
+        let entry = TagEntry {
+            key: "tag".to_owned(),
+            display_path: "test/example.camera_track".to_owned(),
+            group_tag: tag.header.group_tag,
+            group_name: Some("camera_track".to_owned()),
+            location,
+        };
+        let entries = vec![entry];
+        let mut kit = Kit::empty(KitId(0), Default::default());
+        kit.source = Some(LoadedSourceData {
+            label: "test".to_owned(),
+            // Irrelevant to the question asked: what decides an edit's fate is
+            // the entry's location, not how the browser was opened.
+            source: TagSource::SingleFile {
+                path: PathBuf::from("example.camera_track"),
+            },
+            names: Default::default(),
+            game: None,
+            tree: build_tree(&entries),
+            group_tree: build_tree(&entries),
+            entries,
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+        });
+        kit.parsed_tags
+            .insert("tag".to_owned(), TagDocument::modified(tag));
+        kit
+    }
+
+    /// Edits to a tag with nowhere to be written are not unsaved *work*, and
+    /// must not raise the close prompt.
+    ///
+    /// The prompt's only outcomes are Save and Discard. Save on a monolithic
+    /// build fails by construction, and `CloseApp` re-checks for dirty
+    /// documents after the prompt closes — so counting these would put a quit
+    /// behind a dialog whose Save button can never clear it.
+    #[test]
+    fn a_dirty_tag_that_can_never_be_saved_is_not_unsaved_work() {
+        let monolithic = kit_holding(
+            TagEntryLocation::Monolithic {
+                name: "test\\example".to_owned(),
+                group_tag: u32::from_be_bytes(*b"trak"),
+            },
+            blam_tags::Endian::Be,
+        );
+        assert!(
+            !kit_has_dirty_documents(&monolithic),
+            "a monolithic build's edits are session-scratch, not unsaved work"
+        );
+
+        // The same document from somewhere it can be written back to still
+        // stops a close, which is the whole point of the flag.
+        let loose = kit_holding(
+            TagEntryLocation::LooseFile(PathBuf::from("example.camera_track")),
+            blam_tags::Endian::Le,
+        );
+        assert!(kit_has_dirty_documents(&loose));
+    }
 
     /// A folder move rewrites tag keys underneath the open tabs. The tree is
     /// what has to be rewritten: `open_tabs` is re-derived from it every frame,
@@ -567,6 +647,19 @@ pub(super) fn tag_tree_id(id: KitId) -> egui::Id {
 }
 
 impl Kit {
+    /// This kit's browser entry for `key`, wherever it is listed: the visible
+    /// entries, the full set a filtered browser hides, or a favorite pulled in
+    /// from elsewhere.
+    pub(super) fn entry_for_key(&self, key: &str) -> Option<&TagEntry> {
+        let source = self.source.as_ref()?;
+        source
+            .entries
+            .iter()
+            .chain(source.all_entries.iter())
+            .chain(self.active_favorite_entries.iter())
+            .find(|entry| entry.key == key)
+    }
+
     /// Tag keys currently laid out, in tab order. Derived from the tree, which
     /// owns the layout; callers treat `open_tabs` as a read-only view.
     pub(super) fn tabs_from_tree(&self) -> Vec<String> {
