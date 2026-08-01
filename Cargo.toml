@@ -1,6 +1,6 @@
 # Standalone repo: its own workspace root so it doesn't get absorbed into a
-# parent workspace. The blam-tags engine is a pinned Git dependency
-# (camden-smallwood/blam-tags), not a submodule.
+# parent workspace. The blam-tags engine is temporarily pinned to the
+# codex/chimp-backend revision on Zoephie/blam-tags, not a submodule.
 [workspace]
 members = ["."]
 default-members = ["."]
