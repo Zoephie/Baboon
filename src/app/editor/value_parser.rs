@@ -3,21 +3,62 @@
 
 use super::*;
 
-pub(in crate::app) fn is_editable_tag(entry: &TagEntry, tag: &TagFile) -> bool {
-    // Loose tags are edited in place; container (Campaign Evolved) tags are
-    // edited in memory and written out as an override on Save/Save As/Rename.
-    // A brand-new container tag (New Tag / Import of a new path) has no backing
-    // `.ubulk` at all — the in-memory document IS the tag — so it is the most
-    // editable of the three, not the least. Leaving it out made every new CE
-    // tag render read-only: no field could be typed into and no block element
-    // added, until the user exported it as a mod and remounted it as a real
-    // `Container` entry.
-    matches!(
-        entry.location,
+/// Whether this document's fields and block controls are live.
+///
+/// Every parsed tag is editable in memory, whatever it was read out of and
+/// whichever byte order it is in: an edit is a write into the document's own
+/// bytes ([`blam_tags`] encodes each field in the tag's own endian), so there
+/// is nothing about a big-endian tag out of a monolithic build that makes
+/// typing into it incoherent. Whether those edits can be written back
+/// afterwards is a separate question, answered by [`unsaveable_reason`] and
+/// enforced by the save paths.
+///
+/// Editability used to be gated on saveability, which made a monolithic tag
+/// build viewable and nothing else — its values could not even be selected and
+/// copied, because a read-only row is painted text rather than a text box.
+pub(in crate::app) fn is_editable_tag(entry: &TagEntry, _tag: &TagFile) -> bool {
+    // Matched rather than defaulted so a new location has to state its answer.
+    match entry.location {
+        // Loose tags are edited in place; container (Campaign Evolved) tags are
+        // edited in memory and written out as an override on Save/Save
+        // As/Rename. A brand-new container tag (New Tag / Import of a new path)
+        // has no backing `.ubulk` at all — the in-memory document IS the tag.
         TagEntryLocation::LooseFile(_)
-            | TagEntryLocation::Container { .. }
-            | TagEntryLocation::NewContainer { .. }
-    ) && (tag.classic_engine().is_some() || tag.endian == Endian::Le)
+        | TagEntryLocation::Container { .. }
+        | TagEntryLocation::NewContainer { .. } => true,
+        // A monolithic build has no writer, so its edits live and die with the
+        // session — which is the point: you edit to read values back out, to
+        // copy them, and to try a number against the rest of the tag.
+        TagEntryLocation::Monolithic { .. } => true,
+    }
+}
+
+/// Why this document's edits can never be written back, or `None` when they
+/// can. The single source of truth behind every save path's refusal, the
+/// read-only badge on the tag header, and the close prompt's decision not to
+/// treat these edits as unsaved work.
+pub(in crate::app) fn unsaveable_reason(entry: &TagEntry, tag: &TagFile) -> Option<&'static str> {
+    if matches!(entry.location, TagEntryLocation::Monolithic { .. }) {
+        return Some(
+            "Tags in a monolithic build are read-only — edits stay in this session and are \
+             lost when the tag is closed",
+        );
+    }
+    // The MCC tag writer emits a little-endian header, so a big-endian tag
+    // (Xbox 360 / legacy debug build) has no round-trip. Classic tags carry
+    // their own writer and are fine either way.
+    if tag.classic_engine().is_none() && tag.endian != Endian::Le {
+        return Some(
+            "Only little-endian MCC tags can be saved — edits to this big-endian tag stay in \
+             this session",
+        );
+    }
+    None
+}
+
+/// Whether edits to this document can be written back anywhere.
+pub(in crate::app) fn is_saveable_tag(entry: &TagEntry, tag: &TagFile) -> bool {
+    unsaveable_reason(entry, tag).is_none()
 }
 
 pub(in crate::app) fn append_field_path(prefix: &str, field_name: &str) -> String {

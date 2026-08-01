@@ -2355,14 +2355,7 @@ impl Baboon {
     /// inside its own source, so resolving it against the active kit silently
     /// finds nothing and the caller skips the tag.
     pub(super) fn entry_for_key_in(&self, kit: usize, key: &str) -> Option<&TagEntry> {
-        let kit = self.kits.get(kit)?;
-        let source = kit.source.as_ref()?;
-        source
-            .entries
-            .iter()
-            .chain(source.all_entries.iter())
-            .chain(kit.active_favorite_entries.iter())
-            .find(|entry| entry.key == key)
+        self.kits.get(kit)?.entry_for_key(key)
     }
 
     pub(super) fn close_tab(&mut self, key: &str) {
@@ -2461,6 +2454,14 @@ impl Baboon {
             .filter_map(|key| {
                 let doc = self.kits[self.active].parsed_tags.get(&key)?;
                 if !doc.dirty.is_set() {
+                    return None;
+                }
+                // Edits to a tag that has no writer (a monolithic build, a
+                // big-endian tag) are session-scratch by construction. Listing
+                // them here would offer a Save that always fails, and — for
+                // CloseApp, which re-checks for dirty work after the prompt —
+                // a close that never terminates.
+                if !document_edits_are_saveable(&self.kits[self.active], &key, doc) {
                     return None;
                 }
                 Some(DirtyTagEntry {
@@ -3550,8 +3551,8 @@ impl Baboon {
         let Some(doc) = self.kits[self.active].parsed_tags.get(key) else {
             return Err("Load the selected tag before saving".to_owned());
         };
-        if doc.tag.classic_engine().is_none() && doc.tag.endian != Endian::Le {
-            return Err("Only little-endian MCC tags can be saved".to_owned());
+        if let Some(reason) = unsaveable_reason(&entry, &doc.tag) {
+            return Err(reason.to_owned());
         }
         let TagEntryLocation::LooseFile(path) = &entry.location else {
             // Container tags are writable, just not through the loose-file
@@ -4464,8 +4465,8 @@ impl Baboon {
             self.status = "Load the selected tag before saving".to_owned();
             return;
         };
-        if doc.tag.classic_engine().is_none() && doc.tag.endian != Endian::Le {
-            self.status = "Only little-endian MCC tags can be saved".to_owned();
+        if let Some(reason) = unsaveable_reason(&entry, &doc.tag) {
+            self.status = reason.to_owned();
             return;
         }
 

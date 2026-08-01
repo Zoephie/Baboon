@@ -1879,4 +1879,266 @@ mod tag_diff_tests {
             Some(1)
         );
     }
+
+    fn camera_track_entry(location: TagEntryLocation) -> TagEntry {
+        TagEntry {
+            key: "cache:trak:test\\example".into(),
+            display_path: "test/example.camera_track".into(),
+            group_tag: u32::from_be_bytes(*b"trak"),
+            group_name: Some("camera_track".into()),
+            location,
+        }
+    }
+
+    /// A tag carrying the wire marker a Xbox 360 / monolithic build parses as.
+    /// Only the file-level marker — the one the save gate reads — is flipped;
+    /// the block data underneath is still whatever the schema built, which is
+    /// why the byte-order behaviour is checked against a real build instead.
+    fn camera_track_with_wire_endian(endian: Endian) -> TagFile {
+        let mut tag = TagFile::new(test_definition_path("halo4_mcc/camera_track.json")).unwrap();
+        tag.endian = endian;
+        tag
+    }
+
+    /// A monolithic build's tags are fully editable and never saveable, and the
+    /// two answers come from different questions.
+    ///
+    /// They used to come from one: editability was gated on saveability, so a
+    /// tag build rendered as painted text — its values could not be typed into,
+    /// and (the actual complaint) could not be selected and copied either.
+    #[test]
+    fn a_monolithic_tag_is_editable_but_never_saveable() {
+        let tag = camera_track_with_wire_endian(Endian::Be);
+        let monolithic = camera_track_entry(TagEntryLocation::Monolithic {
+            name: "test\\example".into(),
+            group_tag: tag.header.group_tag,
+        });
+
+        assert!(
+            is_editable_tag(&monolithic, &tag),
+            "a monolithic build's fields and block controls must be live"
+        );
+        assert!(!is_saveable_tag(&monolithic, &tag));
+        assert!(
+            unsaveable_reason(&monolithic, &tag)
+                .is_some_and(|reason| reason.contains("monolithic")),
+            "the refusal has to name the build, not the byte order"
+        );
+
+        // The same tag out of a loose folder is refused for the other reason —
+        // the MCC writer emits a little-endian header, so there is no
+        // round-trip for these bytes wherever they came from.
+        let loose_be = camera_track_entry(TagEntryLocation::LooseFile("example.camera_track".into()));
+        assert!(is_editable_tag(&loose_be, &tag));
+        assert!(
+            unsaveable_reason(&loose_be, &tag)
+                .is_some_and(|reason| reason.contains("big-endian"))
+        );
+
+        // And the gate can still say yes: an ordinary little-endian loose tag
+        // saves exactly as it did before.
+        let le = camera_track_with_wire_endian(Endian::Le);
+        assert!(is_saveable_tag(&loose_be, &le));
+    }
+
+    /// A little-endian tag holds an edit little-endian — the anchor for the
+    /// big-endian claim below, and the reason that claim needs real data:
+    /// element bytes are stored in the source wire order, so an edit's byte
+    /// order is a property of the tag it was read from, not of the editor.
+    #[test]
+    fn an_edit_is_stored_in_the_tags_own_byte_order() {
+        let mut tag = TagFile::new(test_definition_path("halo4_mcc/camera_track.json")).unwrap();
+        add_block_element(&mut tag, "control points").unwrap();
+        apply_field_edit(&mut tag, "control points[0]/position", "1.5, 2.5, 3.5").unwrap();
+
+        let bytes = tag.write_to_bytes().unwrap();
+        let mut wanted = Vec::new();
+        for value in [1.5f32, 2.5, 3.5] {
+            wanted.extend_from_slice(&value.to_le_bytes());
+        }
+        assert!(
+            bytes.windows(wanted.len()).any(|window| window == wanted),
+            "a little-endian tag must hold the edit little-endian"
+        );
+    }
+
+    /// Skip-if-absent, and the only place the big-endian edit path can actually
+    /// be exercised: a tag's element bytes carry the byte order they were read
+    /// in, and nothing here can manufacture those — flipping `TagFile::endian`
+    /// on a tag built from a schema changes the file's wire marker and not one
+    /// byte of its block data, so a synthetic "big-endian" tag would agree with
+    /// a broken encoder.
+    ///
+    /// Sweeps the whole build (or `BABOON_MONOLITHIC_TAGS` tags of it) and
+    /// reports a ledger: every tag counted before anything is filtered, and
+    /// every skip named, so a run that reached almost nothing cannot read as a
+    /// clean pass.
+    ///
+    /// Run against a real Halo 4 development build:
+    ///   BABOON_MONOLITHIC="/path/to/tag_cache/blob_index.dat" \
+    ///     cargo test a_monolithic_tag_edit -- --ignored --nocapture
+    #[test]
+    #[ignore = "requires a monolithic tag build; set BABOON_MONOLITHIC"]
+    fn a_monolithic_tag_edit_is_stored_big_endian() {
+        let Ok(blob_index) = std::env::var("BABOON_MONOLITHIC") else {
+            eprintln!("skip: BABOON_MONOLITHIC not set");
+            return;
+        };
+        let blob_index = std::path::PathBuf::from(blob_index);
+        if !blob_index.exists() {
+            eprintln!("skip: no monolithic build at {}", blob_index.display());
+            return;
+        }
+        let limit = std::env::var("BABOON_MONOLITHIC_TAGS")
+            .ok()
+            .and_then(|count| count.parse::<usize>().ok())
+            .unwrap_or(usize::MAX);
+        let names = TagNameIndex::load_from_definitions(&locate_definitions_root());
+        let loaded = crate::source::load_monolithic_blob_index(blob_index, &names)
+            .expect("open the monolithic build");
+
+        let total = loaded.entries.len().min(limit);
+        let (mut unreadable, mut no_real_field, mut edited) = (0usize, 0usize, 0usize);
+        let mut read_panics = Vec::new();
+        let mut failures = Vec::new();
+        // Reading a tag can panic inside the engine's geometry decoder on this
+        // build. That is not what this test is about, so it is caught, counted,
+        // and named rather than allowed to end the sweep at the first one.
+        let previous_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        // Distinctive enough that finding its 4 bytes in a tag is not a
+        // coincidence, and asymmetric under byte-swap.
+        let value = 1234.5677f32;
+        let big = value.to_be_bytes();
+        let little = value.to_le_bytes();
+
+        for entry in loaded.entries.iter().take(limit) {
+            let read = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                crate::source::read_entry(&loaded.source, entry)
+            }));
+            let mut tag = match read {
+                Ok(Ok(tag)) => tag,
+                // Counted and named, not silently passed over: a build Baboon
+                // cannot parse is a different result from one it edits cleanly.
+                Ok(Err(_)) => {
+                    unreadable += 1;
+                    continue;
+                }
+                Err(_) => {
+                    read_panics.push(entry.display_path.clone());
+                    continue;
+                }
+            };
+            assert_eq!(tag.endian, Endian::Be, "a monolithic build is big-endian");
+            assert!(
+                is_editable_tag(entry, &tag),
+                "every tag in the build must be editable"
+            );
+            assert!(
+                !is_saveable_tag(entry, &tag),
+                "and none of them saveable: {}",
+                entry.display_path
+            );
+            let Some(path) = first_real_field_path(tag.root(), 0, "") else {
+                no_real_field += 1;
+                continue;
+            };
+
+            if let Err(error) = apply_field_edit(&mut tag, &path, &value.to_string()) {
+                failures.push(format!("{} / {path}: edit failed: {error}", entry.display_path));
+                continue;
+            }
+            let read_back = tag.root().field_path(&path).and_then(|field| field.value());
+            if !matches!(read_back, Some(TagFieldData::Real(back)) if (back - value).abs() < 0.001) {
+                failures.push(format!(
+                    "{} / {path}: read back as {read_back:?}, not the value typed",
+                    entry.display_path
+                ));
+                continue;
+            }
+
+            let bytes = tag.write_to_bytes().unwrap();
+            if !bytes.windows(4).any(|window| window == big) {
+                failures.push(format!(
+                    "{} / {path}: the edit did not land big-endian",
+                    entry.display_path
+                ));
+                continue;
+            }
+            if bytes.windows(4).any(|window| window == little) {
+                failures.push(format!(
+                    "{} / {path}: the value also appears little-endian",
+                    entry.display_path
+                ));
+                continue;
+            }
+            edited += 1;
+        }
+
+        std::panic::set_hook(previous_hook);
+        eprintln!(
+            "{total} tag(s) in the build: {edited} edited big-endian, {no_real_field} with no \
+             real field to type into, {unreadable} unreadable, {} panicked on read, {} failed",
+            read_panics.len(),
+            failures.len()
+        );
+        // Caught so one bad tag cannot end the sweep, but still a failure: the
+        // whole build read clean once `half_to_f32` stopped overflowing on
+        // subnormal halves, and a tag that panics on read is a tag whose tab
+        // sits on "Loading…" forever.
+        assert!(
+            read_panics.is_empty(),
+            "{} tag(s) panicked while being read: {}",
+            read_panics.len(),
+            read_panics
+                .iter()
+                .take(10)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        assert!(
+            failures.is_empty(),
+            "{} failure(s):\n{}",
+            failures.len(),
+            failures
+                .iter()
+                .take(20)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+        assert!(edited > 0, "no tag in the build had a real field to edit");
+    }
+
+    /// Path of the first plain `real` field in `tag_struct`, searching nested
+    /// structs and the first element of each block.
+    fn first_real_field_path(
+        tag_struct: TagStruct<'_>,
+        depth: usize,
+        prefix: &str,
+    ) -> Option<String> {
+        if depth > 3 {
+            return None;
+        }
+        for field in tag_struct.fields() {
+            let path = append_field_path(prefix, field.name());
+            if matches!(field.value(), Some(TagFieldData::Real(_))) {
+                return Some(path);
+            }
+            if let Some(nested) = field.as_struct() {
+                if let Some(found) = first_real_field_path(nested, depth + 1, &path) {
+                    return Some(found);
+                }
+            } else if let Some(block) = field.as_block() {
+                if let Some(element) = block.element(0) {
+                    let element_path = format!("{path}[0]");
+                    if let Some(found) = first_real_field_path(element, depth + 1, &element_path) {
+                        return Some(found);
+                    }
+                }
+            }
+        }
+        None
+    }
 }

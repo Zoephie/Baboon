@@ -14,7 +14,7 @@ pub(in crate::app) fn draw_bitmap_tag(
     expert_mode: bool,
     edit: &mut FieldEditContext<'_>,
 ) {
-    draw_tag_metadata(ui, tag, names);
+    draw_tag_metadata(ui, tag, entry, names);
     ui.add_space(6.0);
     ui.horizontal(|ui| {
         let can_reimport = bitmap_reimport_data_path(entry, edit.tags_root).is_some();
