@@ -550,13 +550,46 @@ impl ModExportDialog {
     /// files plus its project sidecar, and only the container was ever guarded.
     pub(in crate::app) fn existing_files(&self) -> Vec<String> {
         let stem = self.stem();
+        let destination = self.destination();
         ["utoc", "ucas", "pak", "baboon"]
             .into_iter()
             .map(|extension| format!("{stem}.{extension}"))
-            .filter(|name| self.folder.join(name).exists())
+            .filter(|name| destination.join(name).exists())
             .collect()
     }
+
+    /// The directory the mod's own files land in: `<folder>/~mods/<name>/`.
+    ///
+    /// Every mod gets its own folder under a shared `~mods`, so a `Paks`
+    /// directory does not accumulate loose triplets from every mod ever
+    /// exported, and replacing one mod means replacing the contents of one
+    /// folder. `~mods` is the name the engine's loader already expects mods to
+    /// be grouped under, so a mod exported into the game's own `Paks` is still
+    /// picked up where it lands, with nothing to copy.
+    ///
+    /// A folder that is already `~mods` is used as-is rather than nested inside
+    /// a second one, so browsing to the mods directory does the obvious thing.
+    pub(in crate::app) fn destination(&self) -> PathBuf {
+        let name = sanitize_mod_name(&self.name);
+        let name = if name.is_empty() {
+            "mod".to_owned()
+        } else {
+            name
+        };
+        let already_in_mods = self
+            .folder
+            .file_name()
+            .is_some_and(|folder| folder.eq_ignore_ascii_case(MODS_DIR));
+        if already_in_mods {
+            self.folder.join(name)
+        } else {
+            self.folder.join(MODS_DIR).join(name)
+        }
+    }
 }
+
+/// The directory mods are grouped under, inside whichever folder is chosen.
+pub(in crate::app) const MODS_DIR: &str = "~mods";
 
 /// What Export Mod just wrote, so the app can say what to do with it.
 ///
@@ -716,4 +749,65 @@ pub(in crate::app) struct TagDiffResults {
     pub(in crate::app) diffs: Vec<TagFieldDiff>,
     /// True when the diff hit the cap and more differences exist.
     pub(in crate::app) truncated: bool,
+}
+
+#[cfg(test)]
+mod mod_export_tests {
+    use super::*;
+
+    fn dialog(name: &str, folder: &str) -> ModExportDialog {
+        ModExportDialog {
+            kit: KitId(1),
+            review_only: false,
+            snapshot: CampaignProjectSnapshot {
+                game: "haloce_evolved".to_owned(),
+                source_path: PathBuf::new(),
+                selected_identity: None,
+                tabs: Vec::new(),
+                overlays: HashMap::new(),
+            },
+            rows: Vec::new(),
+            name: name.to_owned(),
+            folder: PathBuf::from(folder),
+            overwrite_acknowledged: false,
+            expanded: HashSet::new(),
+            diffs: HashMap::new(),
+            controls_height: 0.0,
+        }
+    }
+
+    #[test]
+    fn a_mod_gets_a_folder_of_its_own_under_mods() {
+        let dialog = dialog("Cool Mod", "D:/Game/Paks");
+        // The folder is the sanitized name; `_P` belongs to the files, because
+        // it is what gives the container priority rather than part of the name.
+        assert_eq!(
+            dialog.destination(),
+            PathBuf::from("D:/Game/Paks/~mods/Cool-Mod")
+        );
+        assert_eq!(dialog.stem(), "Cool-Mod_P");
+    }
+
+    #[test]
+    fn browsing_into_the_mods_folder_does_not_nest_another() {
+        assert_eq!(
+            dialog("coolmod", "D:/Game/Paks/~mods").destination(),
+            PathBuf::from("D:/Game/Paks/~mods/coolmod")
+        );
+        assert_eq!(
+            dialog("coolmod", "D:/Game/Paks/~MODS").destination(),
+            PathBuf::from("D:/Game/Paks/~MODS/coolmod")
+        );
+    }
+
+    #[test]
+    fn a_name_that_sanitizes_to_nothing_still_has_somewhere_to_go() {
+        // The export button is disabled for an empty name, but the destination
+        // is shown while it is being typed and must not resolve to the folder
+        // itself — that would offer to write the triplet loose into `~mods`.
+        assert_eq!(
+            dialog("///", "D:/Game/Paks").destination(),
+            PathBuf::from("D:/Game/Paks/~mods/mod")
+        );
+    }
 }

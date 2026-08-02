@@ -157,6 +157,9 @@ pub(super) fn register_created_tag_in_source(source: &mut LoadedSourceData, entr
 }
 
 /// Prompt for an override `.utoc` output path, defaulting to `default_name`.
+///
+/// The chosen path names the mod; where it goes is decided by
+/// [`mod_output_path`], so every mod Baboon writes is laid out the same way.
 fn pick_override_utoc(default_name: &str) -> Option<PathBuf> {
     let mut output = rfd::FileDialog::new()
         .set_title("Export Override Container")
@@ -166,7 +169,51 @@ fn pick_override_utoc(default_name: &str) -> Option<PathBuf> {
     if output.extension().is_none() {
         output.set_extension("utoc");
     }
-    Some(ensure_priority_suffix(output))
+    Some(mod_output_path(ensure_priority_suffix(output)))
+}
+
+/// Move a mod's output into a folder of its own under `~mods`.
+///
+/// A mod is a triplet plus a sidecar, and a `Paks` directory that collects them
+/// loose becomes impossible to tell apart from the game's own containers.
+/// Grouping each mod under `~mods/<name>/` keeps them separable and replaceable,
+/// and `~mods` is where the loader already expects mods to be, so a mod written
+/// into the game's own `Paks` still mounts from where it lands.
+///
+/// The folder is named after the mod without the `_P` priority suffix, which is
+/// a property of the container rather than part of what the user called it. A
+/// path already inside a `~mods` folder is left where it is.
+fn mod_output_path(output: PathBuf) -> PathBuf {
+    let Some(file_name) = output.file_name().map(|name| name.to_os_string()) else {
+        return output;
+    };
+    let Some(parent) = output.parent() else {
+        return output;
+    };
+    if parent
+        .components()
+        .any(|part| part.as_os_str().eq_ignore_ascii_case(MODS_DIR))
+    {
+        return output;
+    }
+    let stem = output
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("mod");
+    let folder = stem
+        .strip_suffix("_P")
+        .or_else(|| stem.strip_suffix("_p"))
+        .unwrap_or(stem);
+    parent.join(MODS_DIR).join(folder).join(file_name)
+}
+
+/// Create the folder a mod is about to be written into.
+fn ensure_mod_output_dir(output: &Path) -> Result<(), String> {
+    let Some(directory) = output.parent() else {
+        return Ok(());
+    };
+    fs::create_dir_all(directory)
+        .map_err(|error| format!("Could not create {}: {error}", directory.display()))
 }
 
 /// Force the `_P` suffix onto a mod's file name.
@@ -3735,6 +3782,7 @@ impl Baboon {
                 let Some(output) = pick_override_utoc(&format!("{stem}_P.utoc")) else {
                     return Ok(None);
                 };
+                ensure_mod_output_dir(&output)?;
                 blam_tags::iostore::writer::write_tag_override(
                     &archive, &rel_path, &tag_bytes, &output,
                 )
@@ -3756,6 +3804,7 @@ impl Baboon {
                 let Some(output) = pick_override_utoc(&format!("{leaf}-{group}_P.utoc")) else {
                     return Ok(None);
                 };
+                ensure_mod_output_dir(&output)?;
                 blam_tags::iostore::writer::write_new_tag_container(
                     &template,
                     &tag_bytes,
@@ -3926,6 +3975,10 @@ impl Baboon {
         let Some(output) = pick_override_utoc(&format!("{leaf}_P.utoc")) else {
             return;
         };
+        if let Err(error) = ensure_mod_output_dir(&output) {
+            self.status = error;
+            return;
+        }
         match blam_tags::iostore::writer::write_new_tag_container(
             &template, &bytes, package, None, &output,
         ) {
@@ -4027,7 +4080,12 @@ impl Baboon {
             review_only,
             snapshot,
             rows,
-            name: "mymod".to_owned(),
+            // Whatever this session last exported, so a second export replaces
+            // that mod instead of quietly making a new one beside it.
+            name: self
+                .last_mod_export_name
+                .clone()
+                .unwrap_or_else(|| "mymod".to_owned()),
             folder,
             overwrite_acknowledged: false,
             expanded: HashSet::new(),
@@ -4393,6 +4451,15 @@ impl Baboon {
         output: PathBuf,
     ) {
         let exporting = self.active;
+        // The mod's own folder under `~mods` is created here rather than by the
+        // writer, which is handed a finished path and should not be inventing
+        // directories under it.
+        if let Some(directory) = output.parent()
+            && let Err(error) = fs::create_dir_all(directory)
+        {
+            self.status = format!("Could not create {}: {error}", directory.display());
+            return;
+        }
         let Some(source) = self.source() else {
             self.status = "No source loaded".to_owned();
             return;
@@ -4518,9 +4585,12 @@ impl Baboon {
                 // project, checkpointed here so it carries what the export did.
                 let _ = self.checkpoint_campaign_project(exporting, 0.0);
                 let directory = output.parent().map(Path::to_path_buf).unwrap_or_default();
+                // Anywhere inside the game's own Paks tree, not just its root:
+                // a mod written to `Paks/~mods/<name>/` is already where the
+                // game will find it, so there is nothing to copy there either.
                 let in_place = self
                     .source()
-                    .map(|source| source.source.root_path() == directory)
+                    .map(|source| directory.starts_with(source.source.root_path()))
                     .unwrap_or(false);
                 self.status = if !reopen_failures.is_empty() {
                     // The mod was written; what failed is picking it back up.
@@ -9856,5 +9926,42 @@ mod dependency_tests {
         assert_eq!(affected_keys.len(), 2);
         assert!(affected_keys.contains(&new_shader.key));
         assert!(affected_keys.contains(&outside_model.key));
+    }
+}
+
+#[cfg(test)]
+mod mod_output_tests {
+    use super::*;
+
+    #[test]
+    fn a_mod_is_written_into_a_folder_of_its_own_under_mods() {
+        // The name the user chose becomes the folder; `_P` is a property of the
+        // container, not part of what they called it.
+        assert_eq!(
+            mod_output_path(PathBuf::from("D:/Game/Paks/coolmod_P.utoc")),
+            PathBuf::from("D:/Game/Paks/~mods/coolmod/coolmod_P.utoc")
+        );
+        assert_eq!(
+            mod_output_path(PathBuf::from("D:/Game/Paks/coolmod_p.utoc")),
+            PathBuf::from("D:/Game/Paks/~mods/coolmod/coolmod_p.utoc")
+        );
+        // A name with no suffix keeps its whole stem as the folder.
+        assert_eq!(
+            mod_output_path(PathBuf::from("D:/Game/Paks/plain.utoc")),
+            PathBuf::from("D:/Game/Paks/~mods/plain/plain.utoc")
+        );
+    }
+
+    #[test]
+    fn a_path_already_under_mods_is_left_alone() {
+        // Browsing into the mods folder, or into a mod's own folder, must not
+        // bury the output another level down each time.
+        for path in [
+            "D:/Game/Paks/~mods/coolmod_P.utoc",
+            "D:/Game/Paks/~mods/coolmod/coolmod_P.utoc",
+            "D:/Game/Paks/~MODS/coolmod/coolmod_P.utoc",
+        ] {
+            assert_eq!(mod_output_path(PathBuf::from(path)), PathBuf::from(path));
+        }
     }
 }

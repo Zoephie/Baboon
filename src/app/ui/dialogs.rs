@@ -1065,13 +1065,14 @@ impl Baboon {
             .filter(|row| row.kind == ModExportChange::Unchanged)
             .count();
         let stem = dialog.stem();
+        let destination = dialog.destination();
         let existing = dialog.existing_files();
         let in_game_folder = self
             .kits
             .iter()
             .find(|k| k.id == kit)
             .and_then(|k| k.source.as_ref())
-            .map(|source| source.source.root_path() == dialog.folder)
+            .map(|source| destination.starts_with(source.source.root_path()))
             .unwrap_or(false);
         let included = dialog.included().count();
         let name_ok = !dialog.name.trim().is_empty();
@@ -1370,11 +1371,26 @@ impl Baboon {
                         browse = true;
                     }
                 });
+                // The files go into a folder of their own under `~mods`, so show
+                // where they actually land rather than the folder that was
+                // picked — otherwise "Folder" names somewhere the mod is not.
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Writes to").color(text_dark()));
+                    ui.label(
+                        RichText::new(destination.display().to_string())
+                            .color(subtle_dark())
+                            .monospace()
+                            .small(),
+                    );
+                });
                 if in_game_folder {
                     ui.label(
-                        RichText::new("This is the game's own Paks folder — nothing to copy afterwards.")
-                            .color(subtle_dark())
-                            .small(),
+                        RichText::new(
+                            "This is under the game's own Paks folder — nothing to copy \
+                             afterwards.",
+                        )
+                        .color(subtle_dark())
+                        .small(),
                     );
                 }
                 if !existing.is_empty() {
@@ -1536,7 +1552,13 @@ impl Baboon {
                 .included()
                 .map(|row| row.identity.clone())
                 .collect();
-            let output = dialog.folder.join(format!("{}.utoc", dialog.stem()));
+            let output = dialog
+                .destination()
+                .join(format!("{}.utoc", dialog.stem()));
+            // Kept for the next export in this session, so replacing a mod's
+            // files does not mean typing its name again.
+            let remembered = dialog.name.clone();
+            self.last_mod_export_name = Some(remembered);
             let snapshot = dialog.snapshot.clone();
             // The workspace may have been closed while this was open.
             if self.focus_navigation_kit(kit) {
@@ -1559,6 +1581,11 @@ impl Baboon {
         };
         let stem = exported.stem.clone();
         let directory = exported.directory.clone();
+        // The mod's own folder under `~mods`, which is what has to be copied.
+        let mod_folder = directory
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| stem.clone());
         let count = exported.count;
         let skipped = exported.skipped;
         let mut open = true;
@@ -1587,18 +1614,24 @@ impl Baboon {
                     );
                 }
                 ui.add_space(10.0);
-                ui.label(RichText::new("Copy all three files into the game:").color(text_dark()));
+                // The mod is a folder now, so the instruction is to copy the
+                // folder — moving the three files loose still works, but it
+                // puts them back among the game's own containers.
+                ui.label(
+                    RichText::new("Copy this folder, with all three files in it, into the game:")
+                        .color(text_dark()),
+                );
                 ui.add_space(4.0);
                 for extension in ["utoc", "ucas", "pak"] {
                     ui.label(
-                        RichText::new(format!("    {stem}.{extension}"))
+                        RichText::new(format!("    {mod_folder}/{stem}.{extension}"))
                             .color(text_dark())
                             .monospace(),
                     );
                 }
                 ui.add_space(6.0);
                 ui.label(
-                    RichText::new("    Meteorite/Content/Paks/")
+                    RichText::new(format!("    Meteorite/Content/Paks/{MODS_DIR}/"))
                         .color(text_dark())
                         .monospace(),
                 );

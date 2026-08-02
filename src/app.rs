@@ -236,6 +236,11 @@ pub struct Baboon {
     delete_confirm: Option<DeleteConfirm>,
     /// Result of the last container write, shown until dismissed.
     operation_notice: Option<OperationNotice>,
+    /// What the last mod exported in this session was called, so exporting
+    /// again offers the same name and replaces that mod's files rather than
+    /// making the user retype it. Deliberately not persisted: it describes what
+    /// this session has been working on, not a preference.
+    last_mod_export_name: Option<String>,
     /// Kit ids with an in-place delete worker currently running.
     container_delete_running: HashSet<KitId>,
     /// Every Campaign Evolved tag this installation created by duplicating
@@ -487,6 +492,7 @@ impl Baboon {
             container_duplicate_running: HashSet::new(),
             delete_confirm: None,
             operation_notice: None,
+            last_mod_export_name: None,
             container_delete_running: HashSet::new(),
             created_tags: CreatedTagLedger::load(),
             clear_stash_confirm: None,
