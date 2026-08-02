@@ -11,8 +11,10 @@ Open a single tag, an entire editing-kit `tags/` folder, a monolithic tag cache,
 or a Halo: Campaign Evolved install — **several at once**, each in its own
 workspace, side by side. Browse and search the tag tree (by name *or* field
 value); edit fields, blocks, shaders, and functions inline with full undo/redo;
-preview bitmaps and 3D models; trace references and diff tags; and extract
-geometry, textures, and animations — all from one application.
+preview bitmaps and 3D models; trace references and diff tags; duplicate and
+delete tags; and extract geometry, textures, and animations — all from one
+application. For Halo: Campaign Evolved there is a second workspace, **Chimp**,
+for editing the game's Unreal packages directly.
 
 > Baboon is the GUI front end for the `blam-tags` project. The library does the
 > binary tag parsing; Baboon is the interactive editor built on top of it.
@@ -105,8 +107,63 @@ silently skipped.
   subsequent launches skip the scan entirely.
 - **Context actions** — per-tag and per-folder right-click actions for JSON dump,
   raw extraction, bitmap/geometry/animation extraction, *Rename / Move* (with
-  automatic reference fix-up across every referencing tag), and *Open in File
-  Explorer*.
+  automatic reference fix-up across every referencing tag), *Duplicate*,
+  *Delete*, and *Open in File Explorer*.
+
+### Duplicating & deleting tags
+
+Right-click any tag in the browser to **Duplicate** it. The dialog edits the leaf
+name only — the parent folder, tag group and extension are fixed — and validates
+the name against Windows' rules and the tags already in the source before
+anything is written. The copy opens in a tab and is revealed in the tree beside
+the tag it came from.
+
+- **Loose kits** — the copy is written next to the original as a new file. If the
+  source tag has unsaved edits, the copy takes the edited bytes and the original
+  keeps its own; a name that already exists is refused rather than overwritten.
+- **Campaign Evolved** — the copy is written **into the game's own pak**, in
+  place: the new package is appended to the container's `.ucas` and the `.utoc`
+  is rewritten to address it, with a new package identity and export hash. This
+  changes shipped game files, so it always confirms first, naming the exact pack
+  (mod or shipped) and its `.utoc` path.
+
+**Delete** removes a tag again. A loose tag is *moved*, not erased — it goes to
+`%APPDATA%\Baboon\deleted-tags\<game>\<timestamp>\…` so it can be recovered by
+hand. A Campaign Evolved tag is retired from its container: its chunk slots are
+emptied and its package-store entry removed, without moving any other chunk.
+
+Deleting a Campaign Evolved tag is deliberately limited to **copies Baboon
+itself created**. Once a copy is in a pak it is indistinguishable from a tag the
+game shipped, so eligibility comes from Baboon's own records — a duplicate
+ledger in `%APPDATA%\Baboon`, and the immutable backup written beside a container
+before it is first modified — never from the container. Anything the game
+shipped has Delete greyed out, and the library re-checks the same evidence before
+touching a byte. The confirmation lists every tag that references the one being
+deleted, or says plainly when no reference index is available.
+
+Every in-place container write takes an immutable `.utoc` backup plus a manifest
+beside the pak first, and reports the result — including the backup path — in a
+dialog that stays until dismissed. A failed write restores the container and
+changes nothing.
+
+### Chimp — the Campaign Evolved package workspace
+
+Campaign Evolved's tags are cooked into UE5 packages, and some of what the game
+loads is not a tag at all. **Chimp** is a second workspace inside a loaded
+Campaign Evolved kit for working on those packages directly, rather than forcing
+Unreal concepts through the tag model. Switch to it from the workspace surface
+toggle; it shares the kit's Paks root but keeps its own package index, documents
+and editor state.
+
+- Browse every cooked package in the mounted containers, by folder tree, by
+  filter, or by type.
+- Edit reflected properties against the game's schema (`.usmap`), with typed
+  values, containers, and structs resolved to their real names.
+- Preview textures, static meshes and skeletal meshes.
+- Save edited packages back into the container in place, or bundle them into a
+  mod container.
+- Edits are checkpointed to a recovery folder, so a crash or a restart does not
+  lose work in progress.
 
 ### Search, navigation & cross-referencing
 
@@ -342,6 +399,17 @@ package your changes as a separate, reversible mod:
   new UE package with its own identity, `.uasset`, and container-header entry).
 - **Rename** (right-click) — the same as Save As, plus a package **redirect** so
   existing tags that reference the old name resolve to the renamed one.
+- **Duplicate / Delete** (right-click) — add a copy to, or retire one from, the
+  container itself rather than an overlay. See *Duplicating & deleting tags*.
+
+Any in-place write to a container **drops that pak's perfect-hash lookup table**.
+The table maps a chunk id to a *slot* in the chunk-id array, so both the chunk
+count and every chunk's position are part of it — adding an entry changes the
+modulo base for every chunk in the container, and there is no way to regenerate
+the table. Dropping it makes the runtime index chunk ids directly instead, which
+is exactly how the overlay containers Baboon exports are already laid out. The
+cost is a slightly slower mount for that one pak; the alternative is a container
+whose lookups silently stop resolving.
 
 Export Mod produces a `<name>-WinGDK_P` IoStore **triplet** — `.utoc`, `.ucas`,
 and a small `.pak` stub — plus a same-stem `.baboon` project file containing
@@ -441,7 +509,12 @@ placement to the compositor when coordinates are unavailable.
 - **Engine** — the [`blam-tags`](https://github.com/camden-smallwood/blam-tags) crate, pulled as a pinned Cargo git dependency,
   provides all binary tag parsing/serialisation, bitmap decoding, geometry
   export (JMS/ASS), render-method handling, sound-tag audio decoding (all games,
-  via its `audio` feature), and the monolithic cache reader.
+  via its `audio` feature), the monolithic cache reader, and — via its `iostore`
+  feature — UE5 container reading, Zen-package (de)serialisation, and the
+  in-place container edits behind Campaign Evolved duplicate/delete and Chimp.
+  It is currently pinned to the `codex/chimp-backend` branch of the
+  [`Zoephie/blam-tags`](https://github.com/Zoephie/blam-tags) fork, which carries
+  those container-writing changes ahead of upstream.
 - **Concurrency** — all file I/O (loading, scanning, indexing, export) runs on
   worker threads that communicate with the UI via an `mpsc` channel and request
   repaints; the UI thread never blocks on disk.

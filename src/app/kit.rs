@@ -113,6 +113,12 @@ pub(super) struct Kit {
     /// fresh data. Per kit, so reloading one kit cannot invalidate another's.
     pub(super) generation: u64,
     pub(super) field_index: FieldValueIndex,
+    /// Browser keys this workspace may delete, and the generation they were
+    /// resolved at. Recomputed only when the generation moves: answering it
+    /// walks every entry and stats each container's backups, which is far too
+    /// much to repeat for every frame the browser draws.
+    pub(super) deletable_keys: std::sync::Arc<HashSet<String>>,
+    pub(super) deletable_keys_generation: Option<u64>,
     pub(super) keywords: KeywordStore,
     pub(super) active_favorite_entries: Vec<TagEntry>,
     /// True while a background full-scan of this loose-folder source is running.
@@ -188,6 +194,8 @@ impl Kit {
             modified_signature: Vec::new(),
             generation: 0,
             field_index: FieldValueIndex::default(),
+            deletable_keys: std::sync::Arc::new(HashSet::new()),
+            deletable_keys_generation: None,
             keywords: KeywordStore::default(),
             active_favorite_entries: Vec::new(),
             scanning_entries: false,

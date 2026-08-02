@@ -129,6 +129,7 @@ use runtime_poke::*;
 mod chimp;
 use chimp::*;
 mod controller;
+use controller::{CreatedTagLedger, CreatedTagRecord};
 mod ui;
 
 #[cfg(test)]
@@ -227,6 +228,20 @@ pub struct Baboon {
     import_discard_confirm: Option<PendingImport>,
     /// Pending in-place overwrite confirmation (the tag key) for a container tag.
     overwrite_confirm: Option<OverwriteConfirm>,
+    /// Mandatory confirmation for an in-place Campaign Evolved duplicate.
+    container_duplicate_confirm: Option<ContainerDuplicateConfirm>,
+    /// Kit ids with an in-place duplicate worker currently running.
+    container_duplicate_running: HashSet<KitId>,
+    /// Mandatory confirmation for deleting a tag.
+    delete_confirm: Option<DeleteConfirm>,
+    /// Result of the last container write, shown until dismissed.
+    operation_notice: Option<OperationNotice>,
+    /// Kit ids with an in-place delete worker currently running.
+    container_delete_running: HashSet<KitId>,
+    /// Every Campaign Evolved tag this installation created by duplicating
+    /// another. Deletion is limited to what is recorded here, because a copy is
+    /// otherwise indistinguishable from a tag the game shipped.
+    created_tags: CreatedTagLedger,
     /// Pending confirmation for the Campaign Evolved "clear modifications"
     /// toolbar action, which is irreversible.
     clear_stash_confirm: Option<ClearStashConfirm>,
@@ -468,6 +483,12 @@ impl Baboon {
             import_tag_dialog: None,
             import_discard_confirm: None,
             overwrite_confirm: None,
+            container_duplicate_confirm: None,
+            container_duplicate_running: HashSet::new(),
+            delete_confirm: None,
+            operation_notice: None,
+            container_delete_running: HashSet::new(),
+            created_tags: CreatedTagLedger::load(),
             clear_stash_confirm: None,
             chimp_discard_prompt: None,
             exported_mod: None,

@@ -1327,6 +1327,9 @@ impl Baboon {
         self.draw_chimp_discard_window(ctx);
         self.draw_chimp_save_window(ctx);
         self.draw_clear_stash_confirm_window(ctx);
+        self.draw_container_duplicate_confirm_window(ctx);
+        self.draw_delete_confirm_window(ctx);
+        self.draw_operation_notice_window(ctx);
         self.draw_mod_export_window(ctx);
         self.draw_exported_mod_window(ctx);
         self.draw_poke_window(ctx);

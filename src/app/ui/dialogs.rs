@@ -1826,6 +1826,277 @@ impl Baboon {
         }
     }
 
+    pub(super) fn draw_container_duplicate_confirm_window(&mut self, ctx: &egui::Context) {
+        let Some((kit, key, destination_leaf)) = self
+            .container_duplicate_confirm
+            .as_ref()
+            .map(|confirm| (confirm.kit, confirm.key.clone(), confirm.destination_leaf.clone()))
+        else {
+            return;
+        };
+        let mut open = true;
+        let mut duplicate = false;
+        let mut cancel = false;
+        let (source_display, destination_display, target_label, target_kind, target_utoc) = self
+            .resolve_kit(kit)
+            .and_then(|index| {
+                let entry = self.entry_for_key_in(index, &key)?;
+                let (stem, extension) = entry
+                    .display_path
+                    .rsplit_once('.')
+                    .map(|(stem, extension)| (stem, extension))
+                    .unwrap_or((&entry.display_path, ""));
+                let parent = stem.rsplit_once('/').map(|(parent, _)| parent).unwrap_or("");
+                let destination_display = if extension.is_empty() {
+                    destination_leaf.clone()
+                } else {
+                    format!("{destination_leaf}.{extension}")
+                };
+                let destination_display = if parent.is_empty() {
+                    destination_display
+                } else {
+                    format!("{parent}/{destination_display}")
+                };
+                let (label, is_mod) = self.container_label_for_tag(index, &key)?;
+                let utoc = match &entry.location {
+                    TagEntryLocation::Container { container, .. } => self.kits[index]
+                        .source
+                        .as_ref()
+                        .and_then(|source| match &source.source {
+                            TagSource::IoStoreContainerSet { containers, .. } => {
+                                containers.get(*container)
+                            }
+                            _ => None,
+                        })
+                        .map(|container| container.utoc_path.display().to_string())?,
+                    _ => return None,
+                };
+                Some((
+                    entry.display_path.clone(),
+                    destination_display,
+                    label,
+                    if is_mod { "mounted mod" } else { "shipped pak" },
+                    utoc,
+                ))
+            })
+            .unwrap_or_else(|| {
+                (
+                    key.clone(),
+                    destination_leaf.clone(),
+                    "unknown container".to_owned(),
+                    "container",
+                    "unknown UTOC".to_owned(),
+                )
+            });
+        egui::Window::new("Duplicate in Campaign Evolved container?")
+            .id(egui::Id::new("container_duplicate_confirm"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(560.0)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "Duplicate {source_display} as {destination_display}"
+                    ))
+                    .color(text_dark()),
+                );
+                ui.add_space(7.0);
+                ui.label(
+                    RichText::new(format!(
+                        "Exact target: {target_kind} {target_label} ({target_utoc})"
+                    ))
+                    .color(text_dark())
+                    .monospace(),
+                );
+                ui.add_space(7.0);
+                ui.label(
+                    RichText::new(
+                        "This changes the target UTOC and UCAS. The sibling PAK will not be \
+                         changed. An immutable UTOC backup and manifest are created immediately \
+                         before the duplicate.",
+                    )
+                    .color(subtle_dark()),
+                );
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Duplicate").clicked() {
+                        duplicate = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+        if duplicate {
+            self.container_duplicate_confirm = None;
+            self.start_container_duplicate(kit, key, destination_leaf, ctx.clone());
+        } else if cancel || !open {
+            self.container_duplicate_confirm = None;
+        }
+    }
+
+    pub(super) fn draw_operation_notice_window(&mut self, ctx: &egui::Context) {
+        let Some(notice) = self.operation_notice.as_ref() else {
+            return;
+        };
+        let title = notice.title.clone();
+        let mut message = notice.message.clone();
+        let failed = notice.failed;
+        let mut open = true;
+        let mut dismiss = false;
+        egui::Window::new(title)
+            .id(egui::Id::new("operation_notice"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(620.0)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                if failed {
+                    ui.label(
+                        RichText::new("The container was left as it was; nothing was changed.")
+                            .color(text_dark()),
+                    );
+                    ui.add_space(7.0);
+                }
+                // A read-only multiline edit rather than a label: the message
+                // carries paths and a writer error, and it is only useful if it
+                // can be selected and copied.
+                egui::ScrollArea::vertical()
+                    .max_height(220.0)
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut message)
+                                .desired_width(f32::INFINITY)
+                                .font(egui::TextStyle::Monospace)
+                                .interactive(true),
+                        );
+                    });
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Copy").clicked() {
+                        ui.output_mut(|out| out.copied_text = message.clone());
+                    }
+                    if ui.button("OK").clicked() {
+                        dismiss = true;
+                    }
+                });
+            });
+        if dismiss || !open {
+            self.operation_notice = None;
+        }
+    }
+
+    pub(super) fn draw_delete_confirm_window(&mut self, ctx: &egui::Context) {
+        let Some(confirm) = self.delete_confirm.as_ref() else {
+            return;
+        };
+        let display_path = confirm.display_path.clone();
+        let has_unsaved_edits = confirm.has_unsaved_edits;
+        let referrers = confirm.referrers.clone();
+        let referrers_unavailable = confirm.referrers_unavailable;
+        let container_target = match &confirm.kind {
+            DeleteKind::Container { target_label } => Some(target_label.clone()),
+            DeleteKind::Loose => None,
+        };
+        let title = match container_target {
+            Some(_) => "Delete from Campaign Evolved container?",
+            None => "Delete tag?",
+        };
+        let mut open = true;
+        let mut delete = false;
+        let mut cancel = false;
+        egui::Window::new(title)
+            .id(egui::Id::new("delete_tag_confirm"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(560.0)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(RichText::new(format!("Delete {display_path}")).color(text_dark()));
+                ui.add_space(7.0);
+                match &container_target {
+                    Some(target_label) => {
+                        ui.label(
+                            RichText::new(format!("Exact target: {target_label}"))
+                                .color(text_dark())
+                                .monospace(),
+                        );
+                        ui.add_space(7.0);
+                        ui.label(
+                            RichText::new(
+                                "This changes the target UTOC. The retired bytes stay in the \
+                                 UCAS as dead space, and the sibling PAK will not be changed. An \
+                                 immutable UTOC backup and manifest are created immediately \
+                                 before the delete.",
+                            )
+                            .color(subtle_dark()),
+                        );
+                    }
+                    None => {
+                        ui.label(
+                            RichText::new(
+                                "The file is moved into Baboon's deleted-tags folder, not erased, \
+                                 so it can be recovered by hand.",
+                            )
+                            .color(subtle_dark()),
+                        );
+                    }
+                }
+                if has_unsaved_edits {
+                    ui.add_space(7.0);
+                    ui.label(
+                        RichText::new("This tag has unsaved edits. They will be discarded.")
+                            .color(text_dark()),
+                    );
+                }
+                ui.add_space(7.0);
+                if referrers_unavailable {
+                    ui.label(
+                        RichText::new(
+                            "Reference check unavailable — build the reference index to see what \
+                             points at this tag.",
+                        )
+                        .color(subtle_dark()),
+                    );
+                } else if referrers.is_empty() {
+                    ui.label(RichText::new("Nothing references this tag.").color(subtle_dark()));
+                } else {
+                    ui.label(
+                        RichText::new(format!(
+                            "{} tag(s) reference this one and will be left pointing at nothing:",
+                            referrers.len()
+                        ))
+                        .color(text_dark()),
+                    );
+                    egui::ScrollArea::vertical()
+                        .max_height(120.0)
+                        .show(ui, |ui| {
+                            for referrer in referrers.iter().take(100) {
+                                ui.label(RichText::new(referrer).color(subtle_dark()).monospace());
+                            }
+                        });
+                }
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Delete").clicked() {
+                        delete = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+        if delete {
+            self.begin_delete_tag(ctx.clone());
+        } else if cancel || !open {
+            self.delete_confirm = None;
+        }
+    }
+
     pub(super) fn draw_rename_tag_window(&mut self, ctx: &egui::Context) {
         if self.rename_tag.is_none() {
             return;
@@ -1835,10 +2106,13 @@ impl Baboon {
         let mut cancel = false;
         {
             let state = self.rename_tag.as_mut().expect("checked above");
-            let title = match (state.is_new_container, state.redirect) {
-                (true, true) => "Rename / Move New Tag",
-                (true, false) => "Copy New Tag",
-                (false, false) if state.is_container => "Save Tag As (New Copy)",
+            let title = match state.operation {
+                TagNameOperation::Duplicate => "Duplicate Tag",
+                TagNameOperation::Rename if state.is_new_container => "Rename / Move New Tag",
+                TagNameOperation::SaveAsOverlay if state.is_new_container => "Copy New Tag",
+                TagNameOperation::SaveAsOverlay if state.is_container => {
+                    "Save Tag As (New Copy)"
+                }
                 _ => "Rename Tag",
             };
             egui::Window::new(title)
@@ -1853,28 +2127,74 @@ impl Baboon {
                             .monospace(),
                     );
                     ui.add_space(6.0);
-                    ui.label(
-                        RichText::new(if state.is_new_container {
-                            "New path (folders allowed; extension is fixed)"
-                        } else {
-                            "New name (extension is fixed)"
-                        })
-                        .color(subtle_dark())
-                        .small(),
-                    );
-                    ui.horizontal(|ui| {
-                        ui.add(
-                            egui::TextEdit::singleline(&mut state.new_path_input)
-                                .desired_width(430.0)
-                                .font(egui::TextStyle::Monospace),
-                        );
+                    if state.operation == TagNameOperation::Duplicate {
                         ui.label(
-                            RichText::new(format!(".{}", state.extension)).color(subtle_dark()),
+                            RichText::new("Destination leaf (parent and extension are fixed)")
+                                .color(subtle_dark())
+                                .small(),
                         );
-                    });
+                        ui.horizontal(|ui| {
+                            let parent = if state.fixed_parent.is_empty() {
+                                "(root)/".to_owned()
+                            } else {
+                                format!("{}/", state.fixed_parent)
+                            };
+                            ui.label(RichText::new(parent).color(subtle_dark()).monospace());
+                            let response = ui.add(
+                                egui::TextEdit::singleline(&mut state.new_path_input)
+                                    .id(egui::Id::new("duplicate_tag_name"))
+                                    .desired_width(330.0)
+                                    .font(egui::TextStyle::Monospace),
+                            );
+                            if state.focus_input {
+                                response.request_focus();
+                                if let Some(mut text_state) =
+                                    egui::TextEdit::load_state(ctx, response.id)
+                                {
+                                    text_state.cursor.set_char_range(Some(
+                                        egui::text::CCursorRange::two(
+                                            egui::text::CCursor::new(0),
+                                            egui::text::CCursor::new(
+                                                state.new_path_input.chars().count(),
+                                            ),
+                                        ),
+                                    ));
+                                    text_state.store(ctx, response.id);
+                                }
+                                state.focus_input = false;
+                            }
+                            ui.label(
+                                RichText::new(format!(".{}", state.extension))
+                                    .color(subtle_dark()),
+                            );
+                        });
+                    } else {
+                        ui.label(
+                            RichText::new(if state.is_new_container {
+                                "New path (folders allowed; extension is fixed)"
+                            } else {
+                                "New name (extension is fixed)"
+                            })
+                            .color(subtle_dark())
+                            .small(),
+                        );
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut state.new_path_input)
+                                    .desired_width(430.0)
+                                    .font(egui::TextStyle::Monospace),
+                            );
+                            ui.label(
+                                RichText::new(format!(".{}", state.extension))
+                                    .color(subtle_dark()),
+                            );
+                        });
+                    }
                     // A new tag edits its whole path, so it keeps no parent from
                     // the old one — what is typed IS the destination.
-                    let preview_parent = if state.is_new_container {
+                    let preview_parent = if state.operation == TagNameOperation::Duplicate {
+                        state.fixed_parent.as_str()
+                    } else if state.is_new_container {
                         ""
                     } else {
                         state
@@ -1900,9 +2220,28 @@ impl Baboon {
                             .small(),
                     );
                     ui.add_space(8.0);
-                    if state.is_new_container {
+                    if state.operation == TagNameOperation::Duplicate {
                         ui.label(
-                            RichText::new(if state.redirect {
+                            RichText::new(
+                                "Creates an independent clean duplicate; existing references are \
+                                 unchanged.",
+                            )
+                            .color(text_dark()),
+                        );
+                        ui.label(
+                            RichText::new(if state.is_container {
+                                "The exact current Campaign Evolved container will be backed up \
+                                 and updated in place after a separate confirmation."
+                            } else {
+                                "Current unsaved edits are copied when the source is dirty; clean \
+                                 sources are copied byte-for-byte."
+                            })
+                            .color(subtle_dark())
+                            .small(),
+                        );
+                    } else if state.is_new_container {
+                        ui.label(
+                            RichText::new(if state.operation == TagNameOperation::Rename {
                                 "This tag has not been saved yet, so it simply moves to the new \
                                  path — nothing is written."
                             } else {
@@ -1911,7 +2250,7 @@ impl Baboon {
                             .color(text_dark()),
                         );
                         ui.label(
-                            RichText::new(if state.redirect {
+                            RichText::new(if state.operation == TagNameOperation::Rename {
                                 "It is written when you Save it or Export Mod."
                             } else {
                                 "Both tags are written only when you Save them or Export Mod."
@@ -1920,7 +2259,7 @@ impl Baboon {
                             .small(),
                         );
                     } else if state.is_container {
-                        if state.redirect {
+                        if state.operation == TagNameOperation::Rename {
                             ui.label(
                                 RichText::new(
                                     "Existing references will be redirected to the new tag via the \
@@ -1979,16 +2318,26 @@ impl Baboon {
                         if ui
                             .add_enabled(
                                 !state.new_path_input.trim().is_empty(),
-                                egui::Button::new("Apply"),
+                                egui::Button::new(if state.operation == TagNameOperation::Duplicate {
+                                    "Duplicate"
+                                } else {
+                                    "Apply"
+                                }),
                             )
-                            .on_hover_text(if state.is_new_container && state.redirect {
-                                "Move this unsaved tag to the new path (nothing is written yet)"
-                            } else if state.is_new_container {
-                                "Copy this unsaved tag to the new path (nothing is written yet)"
-                            } else if state.is_container {
-                                "Write a higher-priority overlay container (base game unchanged)"
-                            } else {
-                                "Move the file on disk and rewrite all references"
+                            .on_hover_text(match state.operation {
+                                TagNameOperation::Duplicate => {
+                                    "Create an independent duplicate without rewriting references"
+                                }
+                                TagNameOperation::Rename if state.is_new_container => {
+                                    "Move this unsaved tag to the new path (nothing is written yet)"
+                                }
+                                TagNameOperation::SaveAsOverlay if state.is_new_container => {
+                                    "Copy this unsaved tag to the new path (nothing is written yet)"
+                                }
+                                TagNameOperation::SaveAsOverlay if state.is_container => {
+                                    "Write a higher-priority overlay container (base game unchanged)"
+                                }
+                                _ => "Move the file on disk and rewrite all references",
                             })
                             .clicked()
                         {

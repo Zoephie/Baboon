@@ -3,6 +3,45 @@
 
 use super::*;
 
+/// Completed in-place Campaign Evolved duplicate, ready for UI-thread source
+/// and document registration.
+pub(in crate::app) struct ContainerDuplicateResult {
+    pub(in crate::app) source_key: String,
+    pub(in crate::app) target_container: usize,
+    /// The `.utoc` the duplicate was actually written into. Checked against the
+    /// live source before the result is applied, so a workspace that reloaded
+    /// onto different containers mid-write cannot adopt the wrong provenance.
+    pub(in crate::app) target_utoc: PathBuf,
+    pub(in crate::app) archive: Arc<blam_tags::iostore::IoStoreArchive>,
+    pub(in crate::app) entry: TagEntry,
+    pub(in crate::app) tag: TagFile,
+    pub(in crate::app) package: String,
+    pub(in crate::app) uasset_path: String,
+    pub(in crate::app) ubulk_path: String,
+    pub(in crate::app) target_label: String,
+    pub(in crate::app) is_mod: bool,
+    pub(in crate::app) backup: DuplicateBackupPaths,
+    /// What to write into the duplicate ledger once the UI thread has accepted
+    /// this result. Deletion is only ever offered for a copy recorded there.
+    pub(in crate::app) record: CreatedTagRecord,
+}
+
+/// Completed in-place Campaign Evolved deletion, ready for UI-thread teardown.
+pub(in crate::app) struct ContainerDeleteResult {
+    pub(in crate::app) key: String,
+    pub(in crate::app) target_container: usize,
+    pub(in crate::app) target_utoc: PathBuf,
+    pub(in crate::app) archive: Arc<blam_tags::iostore::IoStoreArchive>,
+    pub(in crate::app) display_path: String,
+    pub(in crate::app) group_tag: u32,
+    pub(in crate::app) package: String,
+    pub(in crate::app) uasset_path: String,
+    pub(in crate::app) ubulk_path: String,
+    pub(in crate::app) target_label: String,
+    pub(in crate::app) is_mod: bool,
+    pub(in crate::app) backup: DuplicateBackupPaths,
+}
+
 /// Results and progress events delivered from background work to the UI thread.
 ///
 /// Kit-scoped variants carry a [`KitStamp`] identifying which kit the job ran
@@ -38,6 +77,14 @@ pub(in crate::app) enum WorkerMessage {
         kit: KitId,
         key: String,
         result: Result<TagFile, String>,
+    },
+    ContainerDuplicateFinished {
+        stamp: KitStamp,
+        result: Result<ContainerDuplicateResult, String>,
+    },
+    ContainerDeleteFinished {
+        stamp: KitStamp,
+        result: Result<ContainerDeleteResult, String>,
     },
     ExportFinished(Result<String, String>),
     PokePreflightFinished {

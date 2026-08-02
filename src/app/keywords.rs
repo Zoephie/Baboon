@@ -60,6 +60,14 @@ impl KeywordStore {
         }
     }
 
+    /// Drop every keyword attached to a tag that no longer exists, so a deleted
+    /// tag stops appearing in keyword browsing and its rows leave the sidecar.
+    pub(super) fn forget_tag(&mut self, tag_key: &str) {
+        if self.by_tag.remove(tag_key).is_some() {
+            self.dirty = true;
+        }
+    }
+
     /// All keywords with how many tags carry each, sorted by name.
     pub(super) fn all_keywords(&self) -> Vec<(String, usize)> {
         let mut counts: BTreeMap<String, usize> = BTreeMap::new();

@@ -536,8 +536,24 @@ fn gui_group_tag_to_extension(group_tag: u32) -> Option<&'static str> {
     })
 }
 
-pub(super) fn natural_key(value: &str) -> String {
+pub fn natural_key(value: &str) -> String {
     value.to_ascii_lowercase().replace('\\', "/")
+}
+
+/// Insert `entry` into a list already ordered by [`natural_key`], returning the
+/// position it landed at.
+///
+/// Every source sorts its entries this way once, at mount, and `build_tree`
+/// stores positional indices — so a folder is drawn in entry-vector order under
+/// `BrowserSort::Natural`. An entry that is pushed rather than inserted lands at
+/// the bottom of its folder instead of beside its neighbours, which reads as
+/// "the new tag never appeared". A list that is not sorted still gets a valid
+/// insertion; it simply has no ordering to preserve.
+pub fn insert_entry_sorted(entries: &mut Vec<TagEntry>, entry: TagEntry) -> usize {
+    let key = natural_key(&entry.display_path);
+    let position = entries.partition_point(|existing| natural_key(&existing.display_path) <= key);
+    entries.insert(position, entry);
+    position
 }
 
 #[cfg(test)]

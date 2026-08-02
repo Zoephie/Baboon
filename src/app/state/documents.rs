@@ -587,6 +587,60 @@ pub(in crate::app) struct OverwriteConfirm {
     pub(in crate::app) key: String,
 }
 
+/// Mandatory confirmation for an in-place Campaign Evolved package duplicate.
+/// The destination is deliberately only a leaf: its parent, group, extension,
+/// and providing container are all captured from the source entry.
+pub(in crate::app) struct ContainerDuplicateConfirm {
+    pub(in crate::app) kit: KitId,
+    pub(in crate::app) key: String,
+    pub(in crate::app) destination_leaf: String,
+}
+
+/// The outcome of a container write, kept on screen until dismissed.
+///
+/// These operations rewrite the game's own pak and take long enough that the
+/// user has looked away, so their result cannot live in the status bar: it is
+/// gone before it can be read, and a failure that scrolls past is a failure that
+/// gets reported as "nothing happened". The message is selectable and copyable
+/// because the useful ones are too long to retype.
+pub(in crate::app) struct OperationNotice {
+    pub(in crate::app) title: String,
+    pub(in crate::app) message: String,
+    pub(in crate::app) failed: bool,
+}
+
+/// Which kind of storage a pending delete will act on. The wording and the
+/// warnings differ completely: one moves a file, the other rewrites a pak.
+pub(in crate::app) enum DeleteKind {
+    Loose,
+    Container {
+        /// The exact pack that will be rewritten, mod or shipped, with its path.
+        target_label: String,
+    },
+}
+
+/// Mandatory confirmation for deleting a tag.
+pub(in crate::app) struct DeleteConfirm {
+    pub(in crate::app) kit: KitId,
+    pub(in crate::app) key: String,
+    pub(in crate::app) display_path: String,
+    pub(in crate::app) kind: DeleteKind,
+    /// Display paths of the tags that point at this one and will be left
+    /// dangling.
+    pub(in crate::app) referrers: Vec<String>,
+    /// True when no reverse-dependency index was available, so the referrer list
+    /// says nothing either way.
+    pub(in crate::app) referrers_unavailable: bool,
+    pub(in crate::app) has_unsaved_edits: bool,
+}
+
+/// Paths of the immutable pre-mutation backup kept beside the target UTOC.
+#[derive(Clone, Debug)]
+pub(in crate::app) struct DuplicateBackupPaths {
+    pub(in crate::app) utoc: PathBuf,
+    pub(in crate::app) manifest: PathBuf,
+}
+
 pub(in crate::app) struct PendingImport {
     /// Workspace this was raised from. The confirm applies against the active
     /// kit, and a modeless dialog outlives the frame that opened it, so the

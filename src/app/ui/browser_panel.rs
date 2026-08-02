@@ -70,6 +70,11 @@ impl Baboon {
                 .as_ref()
                 .and_then(|source| source.game.clone()),
         );
+        self.refresh_deletable_keys(kit_index);
+        set_browser_deletable_keys(
+            ui,
+            std::sync::Arc::clone(&self.kits[kit_index].deletable_keys),
+        );
         let kit = &mut self.kits[kit_index];
         if let Some(source) = kit.source.as_mut() {
             ui.add_space(8.0);

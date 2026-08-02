@@ -415,7 +415,7 @@ checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
 name = "baboon"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "anyhow",
  "atomic-write-file",
@@ -502,7 +502,7 @@ dependencies = [
 [[package]]
 name = "blam-tags"
 version = "0.1.0"
-source = "git+https://github.com/Zoephie/blam-tags?rev=4ef225d6ae90785f158819bf2f1846e9f79f8b15#4ef225d6ae90785f158819bf2f1846e9f79f8b15"
+source = "git+https://github.com/Zoephie/blam-tags?rev=1c65b4109b5c0e3c7837ab73b04a3a47309cfe1b#1c65b4109b5c0e3c7837ab73b04a3a47309cfe1b"
 dependencies = [
  "anyhow",
  "bcdec_rs",

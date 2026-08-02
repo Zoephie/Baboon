@@ -82,6 +82,8 @@ fn context_menu_primary_button(ui: &mut Ui, label: &str, enabled: bool) -> egui:
 fn context_menu_icon(label: &str) -> Option<ButtonIcon> {
     match label {
         "Rename" => Some(ButtonIcon::Rename),
+        "Duplicate" => Some(ButtonIcon::Duplicate),
+        "Delete" => Some(ButtonIcon::Garbage),
         "Move" => Some(ButtonIcon::Move),
         "Open with File Explorer" => Some(ButtonIcon::FileExplorer),
         "Add to Favorites" | "Remove from Favorites" => Some(ButtonIcon::Favourite),
@@ -1047,10 +1049,26 @@ pub(in crate::app) fn draw_entry(
         style_tag_context_menu(ui);
 
         let rename_enabled = supports_rename_menu(entry);
+        let duplicate_enabled = supports_duplicate_menu(entry);
+        let deletable = browser_deletable_keys(ui);
+        let delete_enabled = supports_delete_menu(entry, deletable.as_deref());
         let extract_enabled = supports_tag_extract_menu(entry.group_tag);
         ui.horizontal(|ui| {
             if context_menu_primary_button(ui, "Rename", rename_enabled).clicked() {
                 action = Some(BrowserAction::RenameTag(entry.key.clone()));
+                ui.close_menu();
+            }
+            if context_menu_primary_button(ui, "Duplicate", duplicate_enabled).clicked() {
+                action = Some(BrowserAction::DuplicateTag(entry.key.clone()));
+                ui.close_menu();
+            }
+            if context_menu_primary_button(ui, "Delete", delete_enabled)
+                .on_disabled_hover_text(
+                    "Only loose tags and Campaign Evolved tags duplicated by Baboon can be deleted",
+                )
+                .clicked()
+            {
+                action = Some(BrowserAction::DeleteTag(entry.key.clone()));
                 ui.close_menu();
             }
             if context_menu_primary_button(ui, "Move", rename_enabled).clicked() {
@@ -1250,6 +1268,128 @@ pub(in crate::app) fn supports_rename_menu(entry: &TagEntry) -> bool {
             | TagEntryLocation::Container { .. }
             | TagEntryLocation::NewContainer { .. }
     )
+}
+
+/// Whether the context-menu duplicate has a writable on-disk provider. A
+/// monolithic cache and an unsaved NewContainer have no destination bytes that
+/// this action is allowed to create.
+pub(in crate::app) fn supports_duplicate_menu(entry: &TagEntry) -> bool {
+    matches!(
+        entry.location,
+        TagEntryLocation::LooseFile(_) | TagEntryLocation::Container { .. }
+    )
+}
+
+/// Whether this tag may be deleted.
+///
+/// A loose tag is a file, so it is always offered — the delete moves it into a
+/// recoverable trash folder. A container tag rewrites the game's own pak, so it
+/// is offered only for copies recorded in the duplicate ledger; `deletable` is
+/// that ledger, narrowed to the containers this workspace has mounted.
+pub(in crate::app) fn supports_delete_menu(
+    entry: &TagEntry,
+    deletable: Option<&HashSet<String>>,
+) -> bool {
+    match &entry.location {
+        TagEntryLocation::LooseFile(_) => true,
+        TagEntryLocation::Container { .. } => {
+            deletable.is_some_and(|keys| keys.contains(&entry.key))
+        }
+        TagEntryLocation::NewContainer { .. } | TagEntryLocation::Monolithic { .. } => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(location: TagEntryLocation) -> TagEntry {
+        TagEntry {
+            key: "test".to_owned(),
+            display_path: "objects/example.model".to_owned(),
+            group_tag: 0,
+            group_name: None,
+            location,
+        }
+    }
+
+    #[test]
+    fn duplicate_menu_is_limited_to_writable_on_disk_entries() {
+        assert!(supports_duplicate_menu(&entry(TagEntryLocation::LooseFile(
+            PathBuf::from("objects/example.model")
+        ))));
+        assert!(supports_duplicate_menu(&entry(TagEntryLocation::Container {
+            container: 0,
+            rel_path: "Tags/objects/example-hlmt.ubulk".to_owned(),
+        })));
+        assert!(!supports_duplicate_menu(&entry(TagEntryLocation::Monolithic {
+            name: "objects/example".to_owned(),
+            group_tag: 0,
+        })));
+        assert!(!supports_duplicate_menu(&entry(TagEntryLocation::NewContainer {
+            template_container: 0,
+            template_rel: "Tags/template-hlmt.uasset".to_owned(),
+            package: "/Game/Tags/example-hlmt".to_owned(),
+            group_tag: 0,
+        })));
+    }
+
+    #[test]
+    fn delete_menu_is_offered_for_loose_tags_and_recorded_container_copies_only() {
+        let recorded = HashSet::from(["ublock:pakchunk240-WinGDK:Tags/copy-biped.ubulk".to_owned()]);
+        let copy = TagEntry {
+            key: "ublock:pakchunk240-WinGDK:Tags/copy-biped.ubulk".to_owned(),
+            ..entry(TagEntryLocation::Container {
+                container: 0,
+                rel_path: "Tags/copy-biped.ubulk".to_owned(),
+            })
+        };
+        let shipped = entry(TagEntryLocation::Container {
+            container: 0,
+            rel_path: "Tags/shipped-biped.ubulk".to_owned(),
+        });
+
+        assert!(supports_delete_menu(
+            &entry(TagEntryLocation::LooseFile(PathBuf::from(
+                "objects/example.model"
+            ))),
+            Some(&recorded)
+        ));
+        assert!(supports_delete_menu(&copy, Some(&recorded)));
+        // A tag the game shipped is byte-for-byte as legitimate as a copy, so
+        // the ledger is the only thing that may enable this.
+        assert!(!supports_delete_menu(&shipped, Some(&recorded)));
+        assert!(!supports_delete_menu(&copy, None));
+        assert!(!supports_delete_menu(
+            &entry(TagEntryLocation::Monolithic {
+                name: "objects/example".to_owned(),
+                group_tag: 0,
+            }),
+            Some(&recorded)
+        ));
+        assert!(!supports_delete_menu(
+            &entry(TagEntryLocation::NewContainer {
+                template_container: 0,
+                template_rel: "Tags/template-hlmt.uasset".to_owned(),
+                package: "/Game/Tags/example-hlmt".to_owned(),
+                group_tag: 0,
+            }),
+            Some(&recorded)
+        ));
+    }
+
+    #[test]
+    fn delete_context_button_uses_the_garbage_icon() {
+        assert_eq!(context_menu_icon("Delete"), Some(ButtonIcon::Garbage));
+    }
+
+    #[test]
+    fn duplicate_context_button_uses_duplicate_asset_icon() {
+        assert_eq!(
+            context_menu_icon("Duplicate"),
+            Some(ButtonIcon::Duplicate)
+        );
+    }
 }
 
 pub(in crate::app) fn folder_arrow_icon(ui: &mut Ui, openness: f32, response: &egui::Response) {

@@ -32,12 +32,24 @@ pub(in crate::app) enum BrowserAction {
     FindReferences(String),
     ExploreReferences(String),
     RenameTag(String),
+    DuplicateTag(String),
+    DeleteTag(String),
     MoveTag(String),
     /// Import a tag file into a Campaign Evolved container, at `folder_rel`
     /// (`None` = root).
     ImportTagInFolder { folder_rel: Option<String>, },
     /// Create a new Campaign Evolved tag at `folder_rel` (`None` = root).
     NewTagInFolder { folder_rel: Option<String>, },
+}
+
+/// The name dialog's product-level operation. Storage details such as whether
+/// an entry comes from a container remain separate; workflow decisions must not
+/// be inferred from a pair of booleans that happen to describe the storage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app) enum TagNameOperation {
+    Rename,
+    SaveAsOverlay,
+    Duplicate,
 }
 
 /// The "Rename / Move tag (fix references)" dialog. Shows the referrers that
@@ -54,8 +66,15 @@ pub(in crate::app) struct RenameTagState {
     pub(in crate::app) old_display: String,
     /// File extension (kept fixed; the group can't change on rename).
     pub(in crate::app) extension: String,
+    /// The explicit operation being performed by this dialog.
+    pub(in crate::app) operation: TagNameOperation,
     /// Editable destination: relative path, forward slashes, NO extension.
     pub(in crate::app) new_path_input: String,
+    /// Fixed display parent for Duplicate; Rename and Save As retain their
+    /// existing path presentation rules.
+    pub(in crate::app) fixed_parent: String,
+    /// The first draw of a Duplicate dialog focuses and selects this input.
+    pub(in crate::app) focus_input: bool,
     /// Display paths of tags that reference this one and will be updated.
     pub(in crate::app) referrers: Vec<String>,
     /// True when no reverse-dependency index was available to list referrers.
@@ -63,9 +82,6 @@ pub(in crate::app) struct RenameTagState {
     /// Source is a Campaign Evolved container: apply writes an override
     /// container instead of moving a loose file + rewriting references.
     pub(in crate::app) is_container: bool,
-    /// Container-only: rename (redirect old references to the new tag) vs.
-    /// duplicate (Save As — no redirect). Ignored for loose sources.
-    pub(in crate::app) redirect: bool,
     /// Source is a brand-new (never-saved) Campaign Evolved tag: apply rewrites
     /// the in-memory entry rather than writing any container, so the whole
     /// destination path is editable — this is how a new tag is moved as well as

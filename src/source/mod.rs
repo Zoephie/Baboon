@@ -147,7 +147,7 @@ pub struct MountedContainer {
 /// recovered from the very containers it overrides, so both sides name the same
 /// payload by the same path. A path absent here is a tag that only a mod
 /// provides — there is nothing shipped to compare it against.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct ShippedTagIndex {
     by_path: HashMap<String, usize>,
 }
@@ -164,6 +164,16 @@ impl ShippedTagIndex {
         self.by_path.get(&rel_path.to_ascii_lowercase()).copied()
     }
 
+    /// Forget a payload that is no longer in any pack. The mount's later-pack
+    /// layering is not reconstructed: a path that another pack still provides is
+    /// re-learned on the next mount, and until then it reads as mod-only, which
+    /// is the safe direction — it claims nothing about what the game ships.
+    pub fn remove(&mut self, rel_path: &str) -> bool {
+        self.by_path
+            .remove(&rel_path.to_ascii_lowercase())
+            .is_some()
+    }
+
     pub fn len(&self) -> usize {
         self.by_path.len()
     }
@@ -177,7 +187,7 @@ impl ShippedTagIndex {
 /// the mount resolved it to. Keyed identically to `build_container_set`'s
 /// dedup key, so lookups agree with the browser tree by construction (and
 /// inherit its later-pack-wins layering for free).
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct ContainerTagIndex {
     by_key: HashMap<String, (usize, String)>, // key -> (container index, original-case rel_path)
 }
@@ -206,6 +216,13 @@ impl ContainerTagIndex {
             .get(&container_ref_key(group_tag, reference))
             .map(|(c, p)| (*c, p.as_str()))
     }
+
+    /// Forget a payload that no longer exists. Takes the already-normalized
+    /// dedup key, as [`ContainerTagIndex::insert`] does, so an add and a remove
+    /// address the same row.
+    pub fn remove(&mut self, key: &str) -> bool {
+        self.by_key.remove(key).is_some()
+    }
 }
 
 /// Maps a cooked UE package name (`/Game/...`, lowercased) to the container
@@ -217,7 +234,7 @@ impl ContainerTagIndex {
 /// → `AkAudioEvent` — and those intermediates are ordinary cooked packages with
 /// no tag payload at all. This is the sibling index that makes those hops
 /// resolvable.
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct ContainerPackageIndex {
     by_package: HashMap<String, (usize, String)>,
 }
@@ -245,6 +262,13 @@ impl ContainerPackageIndex {
         self.by_package
             .get(&package.to_ascii_lowercase())
             .map(|(c, p)| (*c, p.as_str()))
+    }
+
+    /// Forget a package that no longer exists in any mounted container.
+    pub fn remove(&mut self, package: &str) -> bool {
+        self.by_package
+            .remove(&package.to_ascii_lowercase())
+            .is_some()
     }
 
     /// Number of indexed packages. Part of the type's surface and asserted on

@@ -35,6 +35,11 @@ use loading::loaded_source_status;
 mod references;
 use anyhow::Context as _;
 use references::*;
+mod created_tags;
+pub(super) use created_tags::{CreatedTagLedger, CreatedTagRecord};
+use created_tags::package_id_for;
+mod delete;
+mod duplicate;
 
 const TERMINAL_VISIBLE_LINE_LIMIT: usize = 20_000;
 const TERMINAL_VISIBLE_LINE_TRIM_TARGET: usize = 18_000;
@@ -117,6 +122,38 @@ fn container_rel_to_package_path(rel: &str) -> Option<String> {
     let no_ext = rel.strip_suffix(".ubulk").unwrap_or(rel);
     let after = no_ext.strip_prefix("Meteorite/Content/").unwrap_or(no_ext);
     Some(format!("/Game/{after}"))
+}
+
+pub(super) fn register_created_tag_in_source(source: &mut LoadedSourceData, entry: TagEntry) {
+    let key = entry.key.clone();
+    source.entries.retain(|existing| existing.key != key);
+    crate::source::insert_entry_sorted(&mut source.entries, entry.clone());
+    let loose_folder = matches!(&source.source, TagSource::LooseFolder { .. });
+    let had_complete_index = !source.all_entries.is_empty();
+    if loose_folder && had_complete_index {
+        source.all_entries.retain(|existing| existing.key != key);
+        crate::source::insert_entry_sorted(&mut source.all_entries, entry.clone());
+    } else if !loose_folder {
+        source.all_entries.clear();
+    }
+    if let TagSource::LooseFolder { root, .. } = &source.source {
+        if let Ok(tree) = crate::source::build_folder_directory_tree(root) {
+            source.tree = tree;
+        }
+        source.group_tree = crate::source::build_group_tree(if had_complete_index {
+            &source.all_entries
+        } else {
+            &source.entries
+        });
+        if had_complete_index
+            && let Some(game) = source.game.as_deref()
+        {
+            let _ = crate::source::save_entry_index(game, root, &source.all_entries);
+        }
+    } else {
+        source.tree = crate::source::build_tree(&source.entries);
+        source.group_tree = crate::source::build_group_tree(&source.entries);
+    }
 }
 
 /// Prompt for an override `.utoc` output path, defaulting to `default_name`.
@@ -447,6 +484,12 @@ impl Baboon {
                 }
                 WorkerMessage::BitmapReimportFinished { kit, key, result } => {
                     self.handle_bitmap_reimport_finished(kit, key, result)
+                }
+                WorkerMessage::ContainerDuplicateFinished { stamp, result } => {
+                    self.handle_container_duplicate_finished(stamp, result)
+                }
+                WorkerMessage::ContainerDeleteFinished { stamp, result } => {
+                    self.handle_container_delete_finished(stamp, result)
                 }
                 WorkerMessage::ExportFinished(result) => self.handle_export_finished(result),
                 WorkerMessage::PokePreflightFinished { kit, key, result } => {
@@ -1702,21 +1745,12 @@ impl Baboon {
     pub(super) fn register_created_tag(&mut self, entry: TagEntry, tag: TagFile) {
         let key = entry.key.clone();
         if let Some(source) = self.source_mut() {
-            source.entries.retain(|existing| existing.key != key);
-            source.entries.push(entry.clone());
-            source.all_entries.retain(|existing| existing.key != key);
-            source.all_entries.push(entry.clone());
-            if let TagSource::LooseFolder { root, .. } = &source.source {
-                if let Ok(tree) = crate::source::build_folder_directory_tree(root) {
-                    source.tree = tree;
-                }
-                source.group_tree = crate::source::build_group_tree(&source.all_entries);
-                if let Some(game) = source.game.as_deref() {
-                    let _ = crate::source::save_entry_index(game, root, &source.all_entries);
-                }
-            }
+            register_created_tag_in_source(source, entry.clone());
         }
         self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
+        // Keyed by entry, so a stale index would answer searches without the
+        // tag that was just created.
+        self.kits[self.active].field_index.invalidate();
         self.kits[self.active]
             .parsed_tags
             .insert(key.clone(), TagDocument::clean(tag));
@@ -2923,6 +2957,8 @@ impl Baboon {
             }
             BrowserAction::ImportScenarioScripts(key) => self.import_scenario_scripts(&key),
             BrowserAction::RenameTag(key) => self.open_rename_tag(&key),
+            BrowserAction::DuplicateTag(key) => self.open_duplicate_tag(&key),
+            BrowserAction::DeleteTag(key) => self.open_delete_tag(&key),
             BrowserAction::FindReferences(key) => self.show_references_for(&key),
             BrowserAction::ExploreReferences(key) => self.open_content_explorer(&key),
             BrowserAction::MoveTag(key) => self.begin_move_tag(&key),
@@ -4652,26 +4688,52 @@ impl Baboon {
     /// Open the rename/move dialog for a tag, pre-listing the tags that
     /// reference it (which will be rewritten on apply).
     pub(super) fn open_rename_tag(&mut self, key: &str) {
-        self.open_rename_or_duplicate(key, true);
+        self.open_name_operation(key, TagNameOperation::Rename);
     }
 
-    /// Open the rename dialog in "duplicate" mode (Save As for a container tag —
-    /// writes a new tag with no redirect). For a tag that has never been saved
-    /// there is nothing to write yet, so the copy is made in memory and both
-    /// tags stay unsaved until Save/Export Mod.
     pub(super) fn open_container_duplicate(&mut self, key: &str) {
-        self.open_rename_or_duplicate(key, false);
+        self.open_name_operation(key, TagNameOperation::SaveAsOverlay);
     }
 
-    fn open_rename_or_duplicate(&mut self, key: &str, redirect: bool) {
+    pub(super) fn open_duplicate_tag(&mut self, key: &str) {
+        self.open_name_operation(key, TagNameOperation::Duplicate);
+    }
+
+    fn open_name_operation(&mut self, key: &str, operation: TagNameOperation) {
         let Some(entry) = self.entry_for_key(key).cloned() else {
             return;
         };
         let is_new_container = matches!(entry.location, TagEntryLocation::NewContainer { .. });
         let is_container =
             is_new_container || matches!(entry.location, TagEntryLocation::Container { .. });
-        if !is_container && !matches!(entry.location, TagEntryLocation::LooseFile(_)) {
-            self.status = "Only loose-folder or container tags can be renamed".to_owned();
+        let supported = match operation {
+            TagNameOperation::Duplicate => {
+                // Two writers on one container's UTOC would race, and each
+                // validates against a handle the other is invalidating.
+                !self.container_duplicate_running.contains(&self.active_kit_id())
+                    && !self.container_delete_running.contains(&self.active_kit_id())
+                    && matches!(
+                        entry.location,
+                        TagEntryLocation::LooseFile(_) | TagEntryLocation::Container { .. }
+                    )
+            }
+            TagNameOperation::Rename | TagNameOperation::SaveAsOverlay => {
+                is_container || matches!(entry.location, TagEntryLocation::LooseFile(_))
+            }
+        };
+        if !supported {
+            self.status = match operation {
+                TagNameOperation::Duplicate => {
+                    "Only loose-file and Campaign Evolved container tags can be duplicated"
+                        .to_owned()
+                }
+                TagNameOperation::Rename => {
+                    "Only loose-folder or container tags can be renamed".to_owned()
+                }
+                TagNameOperation::SaveAsOverlay => {
+                    "Save As is only available for writable tag sources".to_owned()
+                }
+            };
             return;
         }
         let display = entry.display_path.replace('\\', "/");
@@ -4679,12 +4741,23 @@ impl Baboon {
             Some((stem, ext)) => (stem.to_owned(), ext.to_owned()),
             None => (display.clone(), String::new()),
         };
+        let leaf = stem.rsplit(['/', '\\']).next().unwrap_or(&stem).to_owned();
+        let fixed_parent = stem
+            .rsplit_once('/')
+            .map(|(parent, _)| parent.to_owned())
+            .unwrap_or_default();
+        let duplicate_parts = duplicate::duplicate_dialog_parts(&display);
         // A new tag edits its whole path (rename and move are the same in-memory
         // operation for it); everything else edits the leaf name only.
-        let name = if is_new_container {
-            stem.clone()
-        } else {
-            stem.rsplit(['/', '\\']).next().unwrap_or(&stem).to_owned()
+        let name = match operation {
+            TagNameOperation::Duplicate => duplicate_parts.prefill.clone(),
+            TagNameOperation::Rename | TagNameOperation::SaveAsOverlay => {
+                if is_new_container {
+                    stem.clone()
+                } else {
+                    leaf
+                }
+            }
         };
         let (referrers, referrers_unavailable) = match self.references_to_entry(&entry) {
             Some(list) => (
@@ -4699,18 +4772,29 @@ impl Baboon {
             kit: self.active_kit_id(),
             key: entry.key.clone(),
             old_display: display,
-            extension,
+            extension: if operation == TagNameOperation::Duplicate {
+                duplicate_parts.extension
+            } else {
+                extension
+            },
+            operation,
             new_path_input: name,
+            fixed_parent: if operation == TagNameOperation::Duplicate {
+                duplicate_parts.fixed_parent
+            } else {
+                fixed_parent
+            },
+            focus_input: matches!(operation, TagNameOperation::Duplicate),
             referrers,
             referrers_unavailable,
             is_container,
-            redirect,
             is_new_container,
         });
     }
 
-    /// Apply the rename/move: move the file on disk and rewrite every
-    /// referencing tag, in the background (reuses the folder-refactor pipeline).
+    /// Apply the active name operation. Duplicate is routed to its own
+    /// non-destructive copy/confirmation workflow; Rename and SaveAsOverlay
+    /// retain their established paths below.
     pub(super) fn begin_rename_tag(&mut self) {
         // Everything below resolves against the active kit's tags root or
         // container set, so return to the workspace the dialog was opened for.
@@ -4724,20 +4808,26 @@ impl Baboon {
             self.status = "The workspace this rename came from is closed".to_owned();
             return;
         }
-        let Some((key, old_display, new_name_raw, is_container, redirect, is_new_container)) =
+        let Some((key, old_display, new_name_raw, operation, is_container, is_new_container)) =
             self.rename_tag.as_ref().map(|s| {
                 (
                     s.key.clone(),
                     s.old_display.clone(),
                     s.new_path_input.clone(),
+                    s.operation,
                     s.is_container,
-                    s.redirect,
                     s.is_new_container,
                 )
             })
         else {
             return;
         };
+        if duplicate::name_operation_route(operation)
+            == duplicate::NameOperationRoute::InPlaceDuplicateConfirmation
+        {
+            self.begin_duplicate_tag();
+            return;
+        }
         let new_name = new_name_raw.trim().to_owned();
         if new_name.is_empty() {
             self.status = "Enter a new tag name".to_owned();
@@ -4771,7 +4861,11 @@ impl Baboon {
         // open document, so both rename and duplicate are in-memory edits.
         if is_new_container {
             self.rename_tag = None;
-            match self.apply_new_container_rename(&key, &new_rel, !redirect) {
+            match self.apply_new_container_rename(
+                &key,
+                &new_rel,
+                matches!(operation, TagNameOperation::SaveAsOverlay),
+            ) {
                 Ok(message) => self.status = message,
                 Err(error) => self.status = error,
             }
@@ -4782,6 +4876,7 @@ impl Baboon {
         // duplicate does not) instead of moving a loose file.
         if is_container {
             self.rename_tag = None;
+            let redirect = matches!(operation, TagNameOperation::Rename);
             match self.export_container_override(&key, Some((new_rel, redirect))) {
                 Ok(Some(path)) => {
                     let what = if redirect { "renamed tag" } else { "tag copy" };
