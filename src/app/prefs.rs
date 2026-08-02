@@ -793,9 +793,8 @@ fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
         .map(str::trim)
         .filter(|package| chimp_packages.iter().any(|open| open == package))
         .map(str::to_owned);
-    if tags.is_empty() && chimp_packages.is_empty() && !has_project {
-        return None;
-    }
+    // Keep source-only workspaces. The source path is meaningful session state
+    // even when no tag window or project was open in that workspace.
     Some(LastSessionKit {
         source_kind,
         source_path,
@@ -1198,10 +1197,10 @@ mod session_tests {
         assert_eq!(restored.kits[0].game.as_deref(), Some("haloreach_mcc"));
     }
 
-    /// A kit whose tags all failed to parse contributes nothing, and a session
-    /// left with no kits at all is no session.
+    /// A source-only kit remains part of the session even without open tags,
+    /// while a session left with no kits at all is still no session.
     #[test]
-    fn kits_without_usable_tags_are_dropped() {
+    fn source_only_kits_are_retained_for_restore() {
         let value = serde_json::json!({
             "version": 3,
             "kits": [
@@ -1213,11 +1212,35 @@ mod session_tests {
             ],
         });
         let session = parse_last_session(&value).expect("session parses");
-        assert_eq!(session.kits.len(), 1);
-        assert_eq!(session.kits[0].source_path, PathBuf::from("/reach"));
+        assert_eq!(session.kits.len(), 2);
+        assert_eq!(session.kits[0].source_path, PathBuf::from("/h3"));
+        assert_eq!(session.kits[0].tags.len(), 0);
+        assert_eq!(session.kits[1].source_path, PathBuf::from("/reach"));
 
         let empty = serde_json::json!({ "version": 3, "kits": [] });
         assert!(parse_last_session(&empty).is_none());
+    }
+
+    #[test]
+    fn two_source_only_workspaces_keep_their_order_and_identity() {
+        let mut campaign = kit("/campaign-evolved", None);
+        campaign.tags.clear();
+        let mut reach = kit("/reach", None);
+        reach.tags.clear();
+
+        let restored = parse_last_session(&session_value(&LastSessionState {
+            kits: vec![campaign, reach],
+        }))
+        .expect("two source-only workspaces parse");
+
+        assert_eq!(
+            restored
+                .kits
+                .iter()
+                .map(|kit| kit.source_path.clone())
+                .collect::<Vec<_>>(),
+            [PathBuf::from("/campaign-evolved"), PathBuf::from("/reach")]
+        );
     }
 
     #[test]

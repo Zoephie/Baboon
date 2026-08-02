@@ -251,6 +251,7 @@ struct ChimpSaveDialog {
     name: String,
     folder: PathBuf,
     overwrite_acknowledged: bool,
+    pending_close_action: Option<PendingCloseAction>,
 }
 
 enum ChimpSaveAction {
@@ -1441,9 +1442,16 @@ impl Baboon {
             let Ok(bytes) = fs::read(directory.join(filename)) else {
                 continue;
             };
-            let Ok(mut document) = decode_chimp_document(world, provider, bytes) else {
+            let Ok(mut document) = decode_chimp_document(world, provider.clone(), bytes) else {
                 continue;
             };
+            // The recovery file contains the edited view of the package. Keep
+            // the mounted source bytes as the discard baseline so a restored
+            // edit can still be returned to the actual shipped package.
+            let Ok(source_bytes) = world.read_provider(&provider) else {
+                continue;
+            };
+            document.original = source_bytes;
             document.dirty = true;
             self.kits[kit_index]
                 .chimp
@@ -1503,21 +1511,119 @@ impl Baboon {
         }
     }
 
-    fn clear_chimp_recovery_packages(&self, kit_index: usize, packages: &[String]) {
+    fn clear_chimp_recovery_packages(
+        &self,
+        kit_index: usize,
+        packages: &[String],
+    ) -> Result<(), String> {
         let Some((directory, mut manifest)) = self.load_chimp_recovery_manifest(kit_index) else {
-            return;
+            return Ok(());
         };
+        let mut removed_files = Vec::new();
         for package in packages {
             if let Some(filename) = manifest.packages.remove(package) {
-                let _ = fs::remove_file(directory.join(filename));
+                removed_files.push(filename);
             }
         }
         if manifest.packages.is_empty() {
-            let _ = fs::remove_file(directory.join("manifest.json"));
-            let _ = fs::remove_dir(directory);
-        } else if let Ok(bytes) = serde_json::to_vec_pretty(&manifest) {
-            let _ = fs::write(directory.join("manifest.json"), bytes);
+            match fs::remove_file(directory.join("manifest.json")) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(format!(
+                        "Could not remove Chimp recovery manifest {}: {error}",
+                        directory.display()
+                    ));
+                }
+            }
+        } else {
+            let bytes = serde_json::to_vec_pretty(&manifest)
+                .map_err(|error| format!("Could not encode Chimp recovery manifest: {error}"))?;
+            fs::write(directory.join("manifest.json"), bytes).map_err(|error| {
+                format!(
+                    "Could not update Chimp recovery manifest {}: {error}",
+                    directory.display()
+                )
+            })?;
         }
+        // The manifest is the recovery authority. Once it no longer names the
+        // packages, stale payload cleanup cannot make discarded edits return.
+        for filename in removed_files {
+            let _ = fs::remove_file(directory.join(filename));
+        }
+        if manifest.packages.is_empty() {
+            let _ = fs::remove_dir(&directory);
+        }
+        Ok(())
+    }
+
+    pub(super) fn chimp_dirty_packages(&self, kit_index: usize) -> Vec<String> {
+        sorted_unique_dirty_chimp_keys(
+            self.kits[kit_index]
+                .chimp
+                .documents
+                .iter()
+                .map(|(key, document)| (key.as_str(), document.dirty)),
+        )
+    }
+
+    pub(super) fn open_chimp_discard_prompt(
+        &mut self,
+        kit_index: usize,
+        packages: Vec<String>,
+        pending_action: Option<PendingCloseAction>,
+        error: Option<String>,
+    ) {
+        if packages.is_empty() {
+            self.status = "Chimp has no modified packages".to_owned();
+            return;
+        }
+        self.chimp_discard_prompt = Some(ChimpDiscardPrompt {
+            kit: self.kits[kit_index].id,
+            packages,
+            pending_action,
+            error,
+        });
+    }
+
+    fn discard_chimp_packages(
+        &mut self,
+        kit_index: usize,
+        packages: &[String],
+    ) -> Result<usize, String> {
+        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+            return Err(
+                "Chimp is not mounted; the original package data is unavailable".to_owned(),
+            );
+        };
+        let world = world.clone();
+        let mut restored = Vec::new();
+        for package in packages {
+            let Some(document) = self.kits[kit_index].chimp.documents.get(package) else {
+                continue;
+            };
+            if !document.dirty {
+                continue;
+            }
+            let selected_export = document.selected_export;
+            let view = document.view;
+            let mut replacement = load_chimp_document(&world, package)
+                .map_err(|error| format!("Could not restore {package}: {error}"))?;
+            replacement.selected_export =
+                selected_export.min(replacement.exports.len().saturating_sub(1));
+            replacement.view = view;
+            restored.push((package.clone(), replacement));
+        }
+
+        self.clear_chimp_recovery_packages(kit_index, packages)?;
+        let restored_count = restored.len();
+        for (package, document) in restored {
+            self.kits[kit_index]
+                .chimp
+                .documents
+                .insert(package, document);
+        }
+        Ok(restored_count)
     }
 
     fn begin_chimp_open_package(&mut self, kit_index: usize, package: String, ctx: egui::Context) {
@@ -1594,6 +1700,26 @@ impl Baboon {
         ctx: &egui::Context,
         kit_index: usize,
     ) {
+        chimp_workspace_toolbar(ui, |ui| {
+            let packages = self.chimp_dirty_packages(kit_index);
+            let icon = button_icon_image(ui, ButtonIcon::Garbage, text_dark(), 16.0);
+            let response = ui.add_enabled(!packages.is_empty(), egui::Button::image(icon));
+            if response
+                .on_hover_text(
+                    "Discard every modified Chimp package in this workspace and restore the original source data",
+                )
+                .on_disabled_hover_text("This workspace has no modified Chimp packages")
+                .clicked()
+            {
+                self.chimp_discard_prompt = Some(ChimpDiscardPrompt {
+                    kit: self.kits[kit_index].id,
+                    packages,
+                    pending_action: None,
+                    error: None,
+                });
+            }
+        });
+        ui.add_space(4.0);
         let ready = matches!(self.kits[kit_index].chimp.mount, ChimpMount::Ready(_));
         egui::SidePanel::left(egui::Id::new((
             "chimp_package_browser",
@@ -2207,7 +2333,7 @@ impl Baboon {
             self.kits[kit_index].chimp.documents.remove(&package);
         }
         if blocked {
-            self.status = "Build the Chimp mod before closing modified packages.".to_owned();
+            self.status = "Save or discard modified Chimp packages before closing them.".to_owned();
         }
         if let Some(package) = extract_texture {
             self.begin_extract_chimp_texture_tiff(kit_index, &package, ctx.clone());
@@ -2412,6 +2538,26 @@ impl Baboon {
     }
 
     pub(super) fn open_chimp_save_dialog(&mut self, kit_index: usize) {
+        self.open_chimp_save_dialog_with_pending(kit_index, None);
+    }
+
+    pub(super) fn open_chimp_save_dialog_for_close(
+        &mut self,
+        kit_index: usize,
+        action: PendingCloseAction,
+    ) -> bool {
+        self.open_chimp_save_dialog_with_pending(kit_index, Some(action))
+    }
+
+    pub(super) fn has_chimp_save_dialog(&self) -> bool {
+        self.kits.iter().any(|kit| kit.chimp.save_dialog.is_some())
+    }
+
+    fn open_chimp_save_dialog_with_pending(
+        &mut self,
+        kit_index: usize,
+        pending_close_action: Option<PendingCloseAction>,
+    ) -> bool {
         let dirty = self.kits[kit_index]
             .chimp
             .documents
@@ -2420,18 +2566,129 @@ impl Baboon {
             .count();
         if dirty == 0 {
             self.status = "Chimp has no modified packages to save".to_owned();
-            return;
+            return false;
         }
         let Some(folder) = self.chimp_default_output_folder(kit_index) else {
             self.status = "Chimp does not have a Paks output folder".to_owned();
-            return;
+            return false;
         };
         self.kits[kit_index].chimp.save_dialog = Some(ChimpSaveDialog {
             mode: ChimpSaveMode::ExportMod,
             name: "ChimpMod".to_owned(),
             folder,
             overwrite_acknowledged: false,
+            pending_close_action,
         });
+        true
+    }
+
+    pub(super) fn draw_chimp_discard_window(&mut self, ctx: &egui::Context) {
+        let Some(prompt) = self.chimp_discard_prompt.as_ref() else {
+            return;
+        };
+        let kit = prompt.kit;
+        let packages = prompt.packages.clone();
+        let pending_action = prompt.pending_action.clone();
+        let error = prompt.error.clone();
+        let mut open = true;
+        let mut discard = false;
+        let mut save = false;
+        let mut cancel = false;
+
+        egui::Window::new("Discard Chimp changes?")
+            .id(egui::Id::new("chimp_discard_changes"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(true)
+            .default_width(520.0)
+            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
+            .show(ctx, |ui| {
+                ui.label(
+                    RichText::new(if pending_action.is_some() {
+                        "The following modified Chimp packages must be saved or discarded before closing."
+                    } else {
+                        "Every listed Chimp package will return to its original source data."
+                    })
+                    .color(text_dark()),
+                );
+                ui.add_space(6.0);
+                egui::ScrollArea::vertical()
+                    .max_height(180.0)
+                    .show(ui, |ui| {
+                        for package in &packages {
+                            ui.label(RichText::new(package).color(text_dark()).monospace());
+                        }
+                    });
+                if let Some(error) = error.as_deref() {
+                    ui.add_space(6.0);
+                    ui.colored_label(Color32::from_rgb(180, 48, 40), error);
+                }
+                ui.add_space(8.0);
+                ui.label(
+                    RichText::new(
+                        "This removes the unsaved recovery copy. Exported mods and source PAK changes already saved are not affected, and this cannot be undone.",
+                    )
+                    .color(Color32::from_rgb(210, 120, 90)),
+                );
+                ui.add_space(10.0);
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                    if pending_action.is_some()
+                        && ui.button("Save Chimp Changes…").clicked()
+                    {
+                        save = true;
+                    }
+                    if ui.button("Discard Changes").clicked() {
+                        discard = true;
+                    }
+                });
+            });
+
+        if !open || cancel {
+            self.chimp_discard_prompt = None;
+            return;
+        }
+
+        let Some(index) = self.resolve_kit(kit) else {
+            self.chimp_discard_prompt = None;
+            return;
+        };
+
+        if save {
+            let Some(action) = pending_action else {
+                return;
+            };
+            self.chimp_discard_prompt = None;
+            if !self.open_chimp_save_dialog_for_close(index, action.clone()) {
+                self.chimp_discard_prompt = Some(ChimpDiscardPrompt {
+                    kit,
+                    packages,
+                    pending_action: Some(action),
+                    error: Some(self.status.clone()),
+                });
+            }
+        } else if discard {
+            self.chimp_discard_prompt = None;
+            match self.discard_chimp_packages(index, &packages) {
+                Ok(count) => {
+                    self.active = index;
+                    self.status = format!("Discarded {count} modified Chimp package(s)");
+                    if let Some(action) = pending_action {
+                        self.request_close_action(action, ctx);
+                    }
+                }
+                Err(error) => {
+                    self.chimp_discard_prompt = Some(ChimpDiscardPrompt {
+                        kit,
+                        packages,
+                        pending_action,
+                        error: Some(error),
+                    });
+                }
+            }
+        }
     }
 
     pub(super) fn draw_chimp_save_window(&mut self, ctx: &egui::Context) {
@@ -2442,13 +2699,7 @@ impl Baboon {
         else {
             return;
         };
-        let dirty_packages: Vec<String> = self.kits[kit_index]
-            .chimp
-            .documents
-            .values()
-            .filter(|document| document.dirty)
-            .map(|document| document.package.clone())
-            .collect();
+        let dirty_packages = self.chimp_dirty_packages(kit_index);
         let source_containers: Vec<PathBuf> = match &self.kits[kit_index].chimp.mount {
             ChimpMount::Ready(world) => {
                 let mut paths: Vec<_> = dirty_packages
@@ -2589,6 +2840,7 @@ impl Baboon {
                     }
                 });
             });
+        let pending_close_action = dialog.pending_close_action.clone();
         if close || action.is_some() {
             self.kits[kit_index].chimp.save_dialog = None;
         }
@@ -2596,11 +2848,36 @@ impl Baboon {
             Some(ChimpSaveAction::Export(output)) => {
                 self.chimp_output_dir = output.parent().map(Path::to_path_buf);
                 self.export_chimp_mod_to(kit_index, output, ctx.clone());
+                if let Some(action) = pending_close_action {
+                    self.finish_chimp_close_after_save(kit_index, action, ctx);
+                }
             }
             Some(ChimpSaveAction::Overwrite) => {
                 self.overwrite_all_dirty_chimp_packages(kit_index, ctx.clone());
+                if let Some(action) = pending_close_action {
+                    self.finish_chimp_close_after_save(kit_index, action, ctx);
+                }
             }
             None => {}
+        }
+    }
+
+    fn finish_chimp_close_after_save(
+        &mut self,
+        kit_index: usize,
+        action: PendingCloseAction,
+        ctx: &egui::Context,
+    ) {
+        let packages = self.chimp_dirty_packages(kit_index);
+        if packages.is_empty() {
+            self.request_close_action(action, ctx);
+        } else {
+            self.open_chimp_discard_prompt(
+                kit_index,
+                packages,
+                Some(action),
+                Some(self.status.clone()),
+            );
         }
     }
 
@@ -2610,15 +2887,15 @@ impl Baboon {
         };
         let world = world.clone();
         let mut rebuilt = Vec::new();
-        for document in self.kits[kit_index]
+        for (document_key, document) in self.kits[kit_index]
             .chimp
             .documents
-            .values()
-            .filter(|document| document.dirty)
+            .iter()
+            .filter(|(_, document)| document.dirty)
         {
             match rebuild_chimp_document(&world, document) {
                 Ok((bytes, store)) => rebuilt.push((
-                    document.package.clone(),
+                    document_key.clone(),
                     document.provider.clone(),
                     bytes,
                     store,
@@ -2718,12 +2995,19 @@ impl Baboon {
         let reopen_failures = self.restore_released_mappings(kit_index, &released);
         match replaced {
             Ok(()) => {
+                if let Err(error) = self.clear_chimp_recovery_packages(kit_index, &built_packages) {
+                    self.status = format!(
+                        "Built {} but could not clear Chimp recovery: {error}",
+                        output.display()
+                    );
+                    self.begin_chimp_mount(kit_index, ctx);
+                    return;
+                }
                 for (package, _, _, _) in rebuilt {
                     if let Some(document) = self.kits[kit_index].chimp.documents.get_mut(&package) {
                         document.dirty = false;
                     }
                 }
-                self.clear_chimp_recovery_packages(kit_index, &built_packages);
                 self.status = format!(
                     "Built {} modified Unreal package(s) into {}",
                     override_count,
@@ -2749,15 +3033,15 @@ impl Baboon {
         };
         let world = world.clone();
         let mut rebuilt = Vec::new();
-        for document in self.kits[kit_index]
+        for (document_key, document) in self.kits[kit_index]
             .chimp
             .documents
-            .values()
-            .filter(|document| document.dirty)
+            .iter()
+            .filter(|(_, document)| document.dirty)
         {
             match rebuild_chimp_document(&world, document) {
                 Ok((bytes, store)) => rebuilt.push((
-                    document.package.clone(),
+                    document_key.clone(),
                     document.provider.clone(),
                     bytes,
                     store,
@@ -2843,10 +3127,21 @@ impl Baboon {
                     document.payloads = payloads;
                 }
                 document.original = bytes;
+            }
+        }
+        if let Err(error) = self.clear_chimp_recovery_packages(kit_index, &packages) {
+            self.status = format!(
+                "Overwrote the source packages, but could not clear Chimp recovery: {error}"
+            );
+            drop(world);
+            self.begin_chimp_mount(kit_index, ctx);
+            return;
+        }
+        for package in &packages {
+            if let Some(document) = self.kits[kit_index].chimp.documents.get_mut(package) {
                 document.dirty = false;
             }
         }
-        self.clear_chimp_recovery_packages(kit_index, &packages);
         self.status = format!(
             "Overwrote {} modified Unreal package(s) across {} source container(s)",
             packages.len(),
@@ -2906,7 +3201,10 @@ impl Baboon {
             );
             return;
         }
-        self.accept_chimp_package_save(kit_index, package, bytes);
+        if let Err(error) = self.accept_chimp_package_save(kit_index, package, bytes) {
+            self.status = format!("Saved {package}, but could not clear Chimp recovery: {error}");
+            return;
+        }
         self.status = format!("Saved {package} into {}", path.display());
         drop(world);
         self.begin_chimp_mount(kit_index, ctx);
@@ -3002,7 +3300,11 @@ impl Baboon {
         let reopen_failures = self.restore_released_mappings(kit_index, &released);
         match replaced {
             Ok(()) => {
-                self.accept_chimp_package_save(kit_index, package, bytes);
+                if let Err(error) = self.accept_chimp_package_save(kit_index, package, bytes) {
+                    self.status =
+                        format!("Saved {package}, but could not clear Chimp recovery: {error}");
+                    return;
+                }
                 self.status = format!("Saved {package} as {}", output.display());
                 if !reopen_failures.is_empty() {
                     self.status.push_str(&format!(
@@ -3018,15 +3320,23 @@ impl Baboon {
         self.begin_chimp_mount(kit_index, ctx);
     }
 
-    fn accept_chimp_package_save(&mut self, kit_index: usize, package: &str, bytes: Vec<u8>) {
+    fn accept_chimp_package_save(
+        &mut self,
+        kit_index: usize,
+        package: &str,
+        bytes: Vec<u8>,
+    ) -> Result<(), String> {
         if let Some(document) = self.kits[kit_index].chimp.documents.get_mut(package) {
             if let Ok(payloads) = read_payloads(&document.header, &bytes) {
                 document.payloads = payloads;
             }
             document.original = bytes;
+        }
+        self.clear_chimp_recovery_packages(kit_index, &[package.to_owned()])?;
+        if let Some(document) = self.kits[kit_index].chimp.documents.get_mut(package) {
             document.dirty = false;
         }
-        self.clear_chimp_recovery_packages(kit_index, &[package.to_owned()]);
+        Ok(())
     }
 
     pub(super) fn draw_chimp_overwrite_confirm_window(&mut self, ctx: &egui::Context) {
@@ -4061,6 +4371,30 @@ fn chimp_property_value_cell<R>(
         egui::Layout::right_to_left(egui::Align::Min),
         add_contents,
     )
+}
+
+fn chimp_workspace_toolbar<R>(
+    ui: &mut Ui,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<R> {
+    let row_height = ui.spacing().interact_size.y.max(24.0);
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), row_height),
+        egui::Layout::right_to_left(egui::Align::Center),
+        add_contents,
+    )
+}
+
+fn sorted_unique_dirty_chimp_keys<'a>(
+    documents: impl IntoIterator<Item = (&'a str, bool)>,
+) -> Vec<String> {
+    let mut packages = documents
+        .into_iter()
+        .filter_map(|(key, dirty)| dirty.then(|| key.to_owned()))
+        .collect::<Vec<_>>();
+    packages.sort();
+    packages.dedup();
+    packages
 }
 
 fn draw_chimp_value(
@@ -5969,6 +6303,47 @@ fn chimp_value_json(value: &PropValue) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chimp_discard_uses_dirty_document_keys_for_prompts() {
+        assert_eq!(
+            sorted_unique_dirty_chimp_keys([
+                ("/Game/ZetaRequestedKey", true),
+                ("/Game/AlphaRequestedKey", true),
+                ("/Game/CleanRequestedKey", false),
+            ]),
+            ["/Game/AlphaRequestedKey", "/Game/ZetaRequestedKey"]
+        );
+    }
+
+    #[test]
+    fn chimp_workspace_toolbar_does_not_consume_the_editor_viewport() {
+        let context = egui::Context::default();
+        let mut toolbar_height = None;
+        let _ = context.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1_200.0, 800.0),
+                )),
+                ..Default::default()
+            },
+            |context| {
+                egui::CentralPanel::default().show(context, |ui| {
+                    let toolbar = chimp_workspace_toolbar(ui, |ui| {
+                        let _ = ui.button("Discard");
+                    });
+                    toolbar_height = Some(toolbar.response.rect.height());
+                });
+            },
+        );
+
+        let toolbar_height = toolbar_height.expect("the Chimp toolbar was rendered");
+        assert!(
+            toolbar_height <= 40.0,
+            "the Chimp toolbar expanded to {toolbar_height}px"
+        );
+    }
 
     #[test]
     fn chimp_scalar_property_row_does_not_consume_the_scroll_viewport() {

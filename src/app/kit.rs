@@ -230,6 +230,31 @@ impl Kit {
     pub(super) fn is_empty_workspace(&self) -> bool {
         self.source.is_none()
     }
+
+    /// Whether this workspace is available to receive a new source load.
+    ///
+    /// Source loading reserves an empty kit by recording the requested path
+    /// before the worker starts. It is still visually empty while that work
+    /// is in flight, but it must not be reused for a different source.
+    pub(super) fn can_accept_source_load(&self) -> bool {
+        self.source.is_none() && self.requested_path.is_none()
+    }
+
+    /// Clear state staged for a source load that failed before installation.
+    /// The source-less kit can then be reused without carrying the failed
+    /// source's profile, restore windows, project target, or launch request.
+    pub(super) fn release_source_load(&mut self) {
+        if self.source.is_some() {
+            return;
+        }
+        self.requested_path = None;
+        self.profile = None;
+        self.pending_restore_tags.clear();
+        self.pending_restore_chimp_packages.clear();
+        self.pending_restore_active_chimp_package = None;
+        self.pending_launch_tags = None;
+        self.pending_campaign_project = None;
+    }
 }
 
 impl Baboon {
@@ -396,26 +421,38 @@ impl Baboon {
     ///
     /// Opening a source that is already open focuses its kit rather than
     /// loading a second copy of it — the same gesture that switches to an
-    /// already-open tab in an editor. Otherwise the current kit is reused if
-    /// it is still an empty workspace, and a new kit is added if it is not, so
-    /// opening a second game never silently discards the first.
+    /// already-open tab in an editor. Otherwise the current kit is reused only
+    /// when it is an idle empty workspace, and a new kit is added if it is
+    /// loaded or already reserved for another load, so opening a second game
+    /// never silently discards the first.
     ///
     /// Returns `true` when the source was already open and no load is needed.
     pub(super) fn open_kit_for(&mut self, path: &Path) -> bool {
         let path = clean_recent_path(path.to_path_buf());
-        if let Some(index) = self.kits.iter().position(|kit| {
-            kit.requested_path
-                .as_deref()
-                .is_some_and(|open| same_recent_path(open, &path))
-        }) {
+        if let Some(index) = self
+            .kits
+            .iter()
+            .position(|kit| requested_path_matches(kit, &path))
+        {
             self.active = index;
             return true;
         }
-        if !self.kits[self.active].is_empty_workspace() {
+        if !self.kits[self.active].can_accept_source_load() {
             self.add_kit();
         }
         self.kits[self.active].requested_path = Some(path);
         false
+    }
+
+    /// Release a source-load reservation after the worker or synchronous
+    /// preflight fails. The kit may then be reused for a later open request.
+    /// All state staged specifically for that failed load is discarded with
+    /// the reservation so it cannot leak into the next source.
+    pub(super) fn release_source_load(&mut self, kit: KitId) {
+        let Some(index) = self.kit_index(kit) else {
+            return;
+        };
+        self.kits[index].release_source_load();
     }
 
     /// Install a freshly loaded source into the active kit, replacing whatever
@@ -458,6 +495,12 @@ impl Baboon {
             ..Kit::empty(id, self.default_names.clone())
         };
     }
+}
+
+fn requested_path_matches(kit: &Kit, path: &Path) -> bool {
+    kit.requested_path
+        .as_deref()
+        .is_some_and(|open| same_recent_path(open, path))
 }
 
 fn kit_has_dirty_documents(kit: &Kit) -> bool {
@@ -510,10 +553,12 @@ fn active_after_removal(active: usize, removed: usize, new_len: usize) -> usize 
 #[cfg(test)]
 mod tests {
     use super::{Kit, KitId, TagDocument, active_after_removal, kit_has_dirty_documents};
+    use super::EditingKitProfileIdentity;
     use crate::app::test_definition_path;
     use crate::source::{LoadedSourceData, TagEntry, TagEntryLocation, TagSource, build_tree};
     use blam_tags::TagFile;
     use std::collections::HashMap;
+    use std::path::Path;
     use std::path::PathBuf;
 
     fn kit_holding(location: TagEntryLocation, endian: blam_tags::Endian) -> Kit {
@@ -637,6 +682,47 @@ mod tests {
         // Closing the only kit leaves one fresh empty workspace behind it.
         assert_eq!(active_after_removal(0, 0, 1), 0);
         assert_eq!(active_after_removal(5, 0, 1), 0);
+    }
+
+    #[test]
+    fn an_inflight_source_reserves_an_empty_workspace() {
+        let mut kit = Kit::empty(KitId(0), Default::default());
+        assert!(kit.is_empty_workspace());
+        assert!(kit.can_accept_source_load());
+
+        kit.requested_path = Some(PathBuf::from("reach"));
+
+        assert!(kit.is_empty_workspace());
+        assert!(!kit.can_accept_source_load());
+    }
+
+    #[test]
+    fn releasing_a_failed_source_load_makes_the_workspace_reusable() {
+        let mut kit = Kit::empty(KitId(0), Default::default());
+        kit.requested_path = Some(PathBuf::from("reach"));
+        kit.profile = Some(EditingKitProfileIdentity {
+            id: "reach-profile".to_owned(),
+            name: "Reach".to_owned(),
+        });
+        kit.pending_launch_tags = Some(vec![PathBuf::from("objects/example.weapon")]);
+
+        kit.release_source_load();
+
+        assert!(kit.can_accept_source_load());
+        assert!(kit.profile.is_none());
+        assert!(kit.pending_launch_tags.is_none());
+    }
+
+    #[test]
+    fn a_duplicate_pending_source_matches_its_reserved_workspace() {
+        let mut kit = Kit::empty(KitId(0), Default::default());
+        kit.requested_path = Some(PathBuf::from("reach"));
+
+        assert!(super::requested_path_matches(&kit, Path::new("reach")));
+        assert!(!super::requested_path_matches(
+            &kit,
+            Path::new("campaign-evolved")
+        ));
     }
 }
 

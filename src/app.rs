@@ -230,6 +230,9 @@ pub struct Baboon {
     /// Pending confirmation for the Campaign Evolved "clear modifications"
     /// toolbar action, which is irreversible.
     clear_stash_confirm: Option<ClearStashConfirm>,
+    /// Pending workspace-wide Chimp discard, optionally continuing a close
+    /// transaction after the packages have been restored.
+    chimp_discard_prompt: Option<ChimpDiscardPrompt>,
     /// Shown after Export Mod, explaining what to do with the files.
     exported_mod: Option<ExportedMod>,
     /// Review of a pending Export Mod, before anything is written.
@@ -393,7 +396,7 @@ impl Baboon {
             .and_then(LastOpenedWindowsPrompt::from_session);
         let (last_opened_windows, auto_restore_session) = match prefs.session_restore {
             SessionRestore::Always => match last_session {
-                Some(prompt) if prompt.has_checked_tags() => (None, Some(prompt.checked_kits())),
+                Some(prompt) if prompt.has_reopenable_kits() => (None, Some(prompt.checked_kits())),
                 _ => (None, None),
             },
             // Show the prompt.
@@ -466,6 +469,7 @@ impl Baboon {
             import_discard_confirm: None,
             overwrite_confirm: None,
             clear_stash_confirm: None,
+            chimp_discard_prompt: None,
             exported_mod: None,
             mod_export: None,
             poke_dialog: None,

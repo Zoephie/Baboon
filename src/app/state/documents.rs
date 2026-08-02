@@ -89,6 +89,16 @@ pub(in crate::app) struct DirtyTagEntry {
     pub(in crate::app) checked: bool,
 }
 
+/// Confirmation shared by the Chimp toolbar discard action and the close
+/// transaction. `pending_action` is set only when discarding is part of an
+/// app/kit close; a toolbar discard has no continuation.
+pub(in crate::app) struct ChimpDiscardPrompt {
+    pub(in crate::app) kit: KitId,
+    pub(in crate::app) packages: Vec<String>,
+    pub(in crate::app) pending_action: Option<PendingCloseAction>,
+    pub(in crate::app) error: Option<String>,
+}
+
 /// Foundation-style confirmation shown when a close action would discard
 /// edited tags. `allow_app_close_once` is set only after the user confirms an
 /// app exit; the next native close request is then allowed through instead of
@@ -202,7 +212,6 @@ pub(in crate::app) struct RestoreKit {
     pub(in crate::app) source_path: PathBuf,
     pub(in crate::app) profile_id: Option<String>,
     pub(in crate::app) project_path: Option<PathBuf>,
-    pub(in crate::app) has_project: bool,
     /// The browser view this kit was in, or `None` when the session predates
     /// per-kit views — the restored kit then falls back to the saved default.
     pub(in crate::app) browser_mode: Option<BrowserMode>,
@@ -295,9 +304,6 @@ impl LastOpenedWindowsKit {
                 available: source_available,
             })
             .collect::<Vec<_>>();
-        if entries.is_empty() && chimp_entries.is_empty() && !saved.has_project {
-            return None;
-        }
         Some(Self {
             source_kind: saved.source_kind,
             source_path: saved.source_path,
@@ -348,44 +354,36 @@ impl LastOpenedWindowsPrompt {
         })
     }
 
-    /// Every kit that still has something checked, paired with those tags.
-    /// Every kit worth reopening, with the tags checked for it. A kit with no
-    /// checked tags is still restored when it carries a project, since the
-    /// project is the session.
+    /// Every saved workspace, paired with the tags checked for it. A source is
+    /// worth reopening even when it has no checked tags or project state: the
+    /// workspace itself is part of the user's last session.
     pub(in crate::app) fn checked_kits(&self) -> Vec<RestoreKit> {
         self.kits
             .iter()
-            .filter_map(|kit| {
+            .map(|kit| {
                 let tags = kit.checked_tags();
                 let chimp_packages = kit.checked_chimp_packages();
                 let active_chimp_package = kit
                     .active_chimp_package
                     .clone()
                     .filter(|active| chimp_packages.contains(active));
-                (!tags.is_empty() || !chimp_packages.is_empty() || kit.has_project).then(|| {
-                    RestoreKit {
-                        source_kind: kit.source_kind,
-                        source_path: kit.source_path.clone(),
-                        profile_id: kit.profile_id.clone(),
-                        project_path: kit.project_path.clone(),
-                        has_project: kit.has_project,
-                        browser_mode: kit.browser_mode,
-                        browser_sort: kit.browser_sort,
-                        tags,
-                        chimp_packages,
-                        active_chimp_package,
-                    }
-                })
+                RestoreKit {
+                    source_kind: kit.source_kind,
+                    source_path: kit.source_path.clone(),
+                    profile_id: kit.profile_id.clone(),
+                    project_path: kit.project_path.clone(),
+                    browser_mode: kit.browser_mode,
+                    browser_sort: kit.browser_sort,
+                    tags,
+                    chimp_packages,
+                    active_chimp_package,
+                }
             })
             .collect()
     }
 
-    pub(in crate::app) fn has_checked_tags(&self) -> bool {
-        self.kits.iter().any(|kit| {
-            !kit.checked_tags().is_empty()
-                || !kit.checked_chimp_packages().is_empty()
-                || kit.has_project
-        })
+    pub(in crate::app) fn has_reopenable_kits(&self) -> bool {
+        !self.kits.is_empty()
     }
 }
 

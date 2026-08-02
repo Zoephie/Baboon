@@ -22,8 +22,7 @@ impl Baboon {
         let mut loaded = match result {
             Ok(loaded) => loaded,
             Err(error) => {
-                self.kits[self.active].pending_restore_tags.clear();
-                self.kits[self.active].pending_launch_tags = None;
+                self.release_source_load(kit);
                 self.status = error;
                 return false;
             }

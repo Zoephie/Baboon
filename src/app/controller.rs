@@ -570,6 +570,7 @@ impl Baboon {
         let folder_info = match resolve_folder_root(&path, &ek_folder_aliases) {
             Ok(info) => info,
             Err(error) => {
+                self.release_source_load(kit);
                 self.status = error.to_string();
                 return;
             }
@@ -2390,7 +2391,10 @@ impl Baboon {
     }
 
     pub(super) fn request_close_action(&mut self, action: PendingCloseAction, ctx: &egui::Context) {
-        if self.save_changes_prompt.visible {
+        if self.save_changes_prompt.visible
+            || self.chimp_discard_prompt.is_some()
+            || self.has_chimp_save_dialog()
+        {
             return;
         }
         // The save prompt and every save path below it address documents by
@@ -2418,33 +2422,40 @@ impl Baboon {
         // too, and offers stashing as a third, named choice.
         let can_stash = self.current_source_is_campaign_project_capable(self.active);
         let dirty_tags = self.dirty_tags_for_close_action(&action);
-        if dirty_tags.is_empty() {
-            self.execute_close_action(action, ctx);
+        if !dirty_tags.is_empty() {
+            // What discarding would cost, resolved here rather than described in the
+            // abstract: these edits were stashed into the workspace's project within
+            // a second of being typed, so declining to save deletes them from a file
+            // that outlives the session.
+            let stashed = dirty_tags
+                .iter()
+                .filter(|entry| self.tag_has_stashed_overlay(self.active, &entry.tag_id))
+                .count();
+            let stash_file = self.kits[self.active]
+                .campaign_project
+                .as_ref()
+                .map(|project| project.recovery_path.clone());
+            self.save_changes_prompt = SaveChangesPrompt {
+                visible: true,
+                can_stash,
+                dirty_tags,
+                pending_action: action,
+                error: None,
+                allow_app_close_once: self.save_changes_prompt.allow_app_close_once,
+                stash_file,
+                stashed,
+                confirm_discard: false,
+            };
             return;
         }
-        // What discarding would cost, resolved here rather than described in the
-        // abstract: these edits were stashed into the workspace's project within
-        // a second of being typed, so declining to save deletes them from a file
-        // that outlives the session.
-        let stashed = dirty_tags
-            .iter()
-            .filter(|entry| self.tag_has_stashed_overlay(self.active, &entry.tag_id))
-            .count();
-        let stash_file = self.kits[self.active]
-            .campaign_project
-            .as_ref()
-            .map(|project| project.recovery_path.clone());
-        self.save_changes_prompt = SaveChangesPrompt {
-            visible: true,
-            can_stash,
-            dirty_tags,
-            pending_action: action,
-            error: None,
-            allow_app_close_once: self.save_changes_prompt.allow_app_close_once,
-            stash_file,
-            stashed,
-            confirm_discard: false,
-        };
+
+        let chimp_packages = self.dirty_chimp_for_close_action(&action);
+        if !chimp_packages.is_empty() {
+            self.open_chimp_discard_prompt(self.active, chimp_packages, Some(action), None);
+            return;
+        }
+
+        self.execute_close_action(action, ctx);
     }
 
     /// Native app close is a two-step flow in eframe 0.29: when the OS close
@@ -2461,7 +2472,10 @@ impl Baboon {
             return;
         }
         ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-        if self.save_changes_prompt.visible {
+        if self.save_changes_prompt.visible
+            || self.chimp_discard_prompt.is_some()
+            || self.has_chimp_save_dialog()
+        {
             return;
         }
         self.defer_file_action(DeferredFileAction::Close(PendingCloseAction::CloseApp), ctx);
@@ -2490,6 +2504,14 @@ impl Baboon {
                 })
             })
             .collect()
+    }
+
+    fn dirty_chimp_for_close_action(&self, action: &PendingCloseAction) -> Vec<String> {
+        if close_action_includes_chimp(action) {
+            self.chimp_dirty_packages(self.active)
+        } else {
+            Vec::new()
+        }
     }
 
     fn close_action_tag_keys(&self, action: &PendingCloseAction) -> Vec<String> {
@@ -2537,17 +2559,20 @@ impl Baboon {
     fn execute_close_action(&mut self, action: PendingCloseAction, ctx: &egui::Context) {
         match action {
             PendingCloseAction::CloseApp => {
-                // The prompt covers one kit at a time. If another kit still
-                // holds unsaved work, ask about it before exiting rather than
-                // dropping it silently — which is what a single-kit-only
-                // check used to do. "Don't save" clears the flags it listed,
-                // so this converges instead of looping.
+                // `request_close_action` is the close coordinator and only
+                // calls this once every dirty workspace has been resolved. Do
+                // not call it recursively here: a dirty Chimp document used
+                // to be counted by this check but omitted from the tag prompt,
+                // creating an infinite CloseApp -> request_close_action loop.
                 if self.any_kit_dirty() {
-                    self.request_close_action(PendingCloseAction::CloseApp, ctx);
+                    self.status = "Could not close while unsaved workspace data remains".to_owned();
                     return;
                 }
                 if let Some(session) = self.current_session_state() {
-                    let _ = save_last_session(&session);
+                    if let Err(error) = save_last_session(&session) {
+                        self.status = error;
+                        return;
+                    }
                 } else {
                     clear_last_session();
                 }
@@ -2631,11 +2656,10 @@ impl Baboon {
             .selected_package
             .clone()
             .filter(|active| chimp_packages.contains(active));
-        // A kit with no open tags is still worth saving if it carries a
-        // project or open Chimp packages.
-        if tags.is_empty() && chimp_packages.is_empty() && kit.campaign_project.is_none() {
-            return None;
-        }
+        // The source itself is part of the workspace session, even when the
+        // user has no tag, Chimp package, or project open in it. Otherwise a
+        // second loaded editing kit disappears from the next-session prompt
+        // simply because its tags were not selected yet.
         Some(LastSessionKit {
             source_kind,
             source_path,
@@ -2665,7 +2689,6 @@ impl Baboon {
             source_path,
             profile_id,
             project_path,
-            has_project,
             browser_mode,
             browser_sort,
             tags,
@@ -2673,11 +2696,6 @@ impl Baboon {
             active_chimp_package,
         } in kits
         {
-            // A workspace whose only content is its stash still has to be
-            // reopened, so that its recovery file is picked back up.
-            if tags.is_empty() && chimp_packages.is_empty() && !has_project {
-                continue;
-            }
             match source_kind {
                 LastSessionSourceKind::SingleFile => {
                     self.begin_load_single_path(source_path, ctx.clone())
@@ -6460,7 +6478,7 @@ impl Baboon {
                 self.status = format!("Switched to {}", label);
                 return;
             }
-            if !self.kits[self.active].is_empty_workspace() {
+            if !self.kits[self.active].can_accept_source_load() {
                 self.add_kit();
             }
             self.kits[self.active].requested_path = Some(layout.root.clone());
@@ -6891,7 +6909,7 @@ impl Baboon {
                             ),
                             None => "Stashed for Export Mod".to_owned(),
                         };
-                        self.execute_close_action(action, ctx);
+                        self.request_close_action(action, ctx);
                     }
                     Err(error) => {
                         self.save_changes_prompt.error =
@@ -6940,7 +6958,7 @@ impl Baboon {
                 self.save_changes_prompt.dirty_tags.clear();
                 self.save_changes_prompt.error = None;
                 self.save_changes_prompt.confirm_discard = false;
-                self.execute_close_action(action, ctx);
+                self.request_close_action(action, ctx);
             }
             SaveChangesPromptAction::Save(tag_ids) => {
                 let mut saved = Vec::new();
@@ -6996,7 +7014,7 @@ impl Baboon {
                     } else {
                         format!("Saved {} file(s)", saved.len())
                     };
-                    self.execute_close_action(action, ctx);
+                    self.request_close_action(action, ctx);
                 } else {
                     let message = format!("Save failed: {}", errors.join("; "));
                     let pending_action = self.save_changes_prompt.pending_action.clone();
@@ -7049,6 +7067,13 @@ impl Baboon {
             Err(error) => self.status = error,
         }
     }
+}
+
+fn close_action_includes_chimp(action: &PendingCloseAction) -> bool {
+    matches!(
+        action,
+        PendingCloseAction::CloseApp | PendingCloseAction::CloseKit(_)
+    )
 }
 
 fn reset_lazy_folder_browser(
@@ -7398,6 +7423,22 @@ fn render_last_opened_windows_prompt(
 mod tests {
     use super::ensure_priority_suffix;
     use std::path::PathBuf;
+
+    #[test]
+    fn only_workspace_close_actions_wait_for_chimp_documents() {
+        assert!(super::close_action_includes_chimp(
+            &super::PendingCloseAction::CloseApp
+        ));
+        assert!(super::close_action_includes_chimp(
+            &super::PendingCloseAction::CloseKit(super::KitId(1))
+        ));
+        assert!(!super::close_action_includes_chimp(
+            &super::PendingCloseAction::CloseAllTabs
+        ));
+        assert!(!super::close_action_includes_chimp(
+            &super::PendingCloseAction::CloseTab("tag".to_owned())
+        ));
+    }
 
     /// A mod without `_P` mounts at the same priority as the game's own
     /// containers and loses, so it builds correctly and does nothing. Renaming
