@@ -21,7 +21,8 @@
 
 use super::*;
 
-use std::fmt::Write as _;
+use std::fs::File;
+use std::io::{BufWriter, Write as _};
 
 use super::level::{LevelScene, WorldMatrix};
 use super::mesh_weld::weld;
@@ -161,7 +162,11 @@ struct Prototype {
     material: String,
 }
 
-fn write_mesh(usd: &mut String, prototype: &Prototype) {
+/// Errors are deliberately not checked per call. A `BufWriter` that has failed
+/// once keeps failing, so a single flush at the end catches a disk filling up
+/// mid-write; checking eight million individual `write!`s would not learn
+/// anything the flush does not.
+fn write_mesh(usd: &mut impl std::io::Write, prototype: &Prototype) {
     let Prototype {
         prim,
         mesh,
@@ -267,7 +272,12 @@ fn write_mesh(usd: &mut String, prototype: &Prototype) {
     let _ = writeln!(usd, "        }}");
 }
 
-fn write_instance(usd: &mut String, index: usize, prototype: &str, world: &WorldMatrix) {
+fn write_instance(
+    usd: &mut impl std::io::Write,
+    index: usize,
+    prototype: &str,
+    world: &WorldMatrix,
+) {
     let _ = writeln!(usd, "    def Xform \"inst_{index}\" (");
     // The mesh is not copied here: this prim references the one prototype and
     // is marked instanceable, so every placement of a mesh shares its geometry.
@@ -300,50 +310,105 @@ fn write_instance(usd: &mut String, index: usize, prototype: &str, world: &World
     let _ = writeln!(usd, "    }}");
 }
 
-/// Convert a level scene into a USD (`.usda`) document.
-pub(in crate::app) fn scene_to_usd(
+/// Export a level scene to a `.usda` file without ever holding it in memory.
+///
+/// A whole level is 8.5 GiB of text over 745 meshes; building that as a `String`
+/// needs the document, every decoded mesh, and the spare copy a growing buffer
+/// reallocates through, which is more memory than the machines this runs on
+/// have. Streaming caps the cost at one mesh at a time.
+///
+/// The geometry goes to a sidecar file first because a `.usda` names its
+/// materials before the meshes that bind them, and the material list is only
+/// known once every mesh has been loaded. Writing the meshes aside and splicing
+/// them in keeps the document byte-for-byte what the in-memory writer produces,
+/// rather than reordering a file that importers have already been tested
+/// against.
+pub(in crate::app) fn write_scene_usd(
     world: &World,
     scene: &LevelScene,
     detail: MeshDetail,
-) -> (String, LevelExportReport) {
+    path: &Path,
+) -> std::io::Result<LevelExportReport> {
     let mut report = LevelExportReport::default();
     let mut taken = HashSet::new();
     let mut materials: Vec<String> = Vec::new();
-    let mut prototypes: Vec<Option<Prototype>> = Vec::with_capacity(scene.meshes.len());
+    // Only the names survive the loop; each mesh is written and dropped.
+    let mut prototypes: Vec<Option<(String, String)>> = Vec::with_capacity(scene.meshes.len());
 
-    for package in &scene.meshes {
-        let leaf = package.rsplit('/').next().unwrap_or("mesh");
-        let loaded = load_chimp_document(world, package)
-            .and_then(|document| {
-                decode_mesh(world, &document, detail).map(|mesh| (document, mesh))
-            });
-        match loaded {
-            Ok((document, mesh)) => {
-                // The mesh's own material, resolved the same way the material
-                // list written into a single-mesh export is.
-                let material = prim_name(
-                    &chimp_material_names(&document.header)
-                        .into_iter()
-                        .next()
-                        .unwrap_or_else(|| leaf.to_owned()),
-                );
-                if !materials.contains(&material) {
-                    materials.push(material.clone());
+    let geometry_path = path.with_extension("prototypes.tmp");
+    {
+        let mut geometry = BufWriter::new(File::create(&geometry_path)?);
+        for package in &scene.meshes {
+            match load_prototype(world, package, detail, &mut taken) {
+                Some(prototype) => {
+                    if !materials.contains(&prototype.material) {
+                        materials.push(prototype.material.clone());
+                    }
+                    write_mesh(&mut geometry, &prototype);
+                    prototypes.push(Some((prototype.prim, prototype.material)));
                 }
-                prototypes.push(Some(Prototype {
-                    prim: unique_prim_name(leaf, &mut taken),
-                    mesh,
-                    material,
-                }));
-            }
-            Err(_) => {
-                report.unreadable_meshes += 1;
-                prototypes.push(None);
+                None => {
+                    report.unreadable_meshes += 1;
+                    prototypes.push(None);
+                }
             }
         }
+        geometry.flush()?;
     }
 
-    let mut usd = String::new();
+    let mut usd = BufWriter::new(File::create(path)?);
+    write_stage_header(&mut usd);
+    write_materials(&mut usd, &materials);
+    write_prototypes_open(&mut usd);
+    std::io::copy(&mut File::open(&geometry_path)?, &mut usd)?;
+    let _ = writeln!(usd, "    }}");
+    for placement in &scene.placements {
+        let Some(Some((prim, _))) = prototypes.get(placement.mesh) else {
+            report.dropped_placements += 1;
+            continue;
+        };
+        write_instance(&mut usd, report.instances, prim, &placement.world);
+        report.instances += 1;
+    }
+    let _ = writeln!(usd, "}}");
+    // A `BufWriter` that failed once keeps failing, so this is where a disk
+    // filling up two hours into an export is caught.
+    usd.flush()?;
+    drop(usd);
+    let _ = std::fs::remove_file(&geometry_path);
+
+    report.prototypes = prototypes.iter().flatten().count();
+    report.materials = materials.len();
+    Ok(report)
+}
+
+/// One mesh, decoded and named, or `None` if it could not be read.
+fn load_prototype(
+    world: &World,
+    package: &str,
+    detail: MeshDetail,
+    taken: &mut HashSet<String>,
+) -> Option<Prototype> {
+    let leaf = package.rsplit('/').next().unwrap_or("mesh");
+    let (document, mesh) = load_chimp_document(world, package)
+        .and_then(|document| decode_mesh(world, &document, detail).map(|mesh| (document, mesh)))
+        .ok()?;
+    // The mesh's own material, resolved the same way the material list written
+    // into a single-mesh export is.
+    let material = prim_name(
+        &chimp_material_names(&document.header)
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| leaf.to_owned()),
+    );
+    Some(Prototype {
+        prim: unique_prim_name(leaf, taken),
+        mesh,
+        material,
+    })
+}
+
+fn write_stage_header(usd: &mut impl std::io::Write) {
     let _ = writeln!(usd, "#usda 1.0");
     let _ = writeln!(usd, "(");
     let _ = writeln!(usd, "    defaultPrim = \"World\"");
@@ -354,10 +419,12 @@ pub(in crate::app) fn scene_to_usd(
     let _ = writeln!(usd);
     let _ = writeln!(usd, "def Xform \"World\"");
     let _ = writeln!(usd, "{{");
+}
 
+fn write_materials(usd: &mut impl std::io::Write, materials: &[String]) {
     let _ = writeln!(usd, "    def Scope \"Materials\"");
     let _ = writeln!(usd, "    {{");
-    for material in &materials {
+    for material in materials {
         let _ = writeln!(usd, "        def Material \"{material}\"");
         let _ = writeln!(usd, "        {{");
         let _ = writeln!(
@@ -375,15 +442,52 @@ pub(in crate::app) fn scene_to_usd(
         let _ = writeln!(usd, "        }}");
     }
     let _ = writeln!(usd, "    }}");
+}
 
-    // Geometry lives here once. Nothing draws it directly; the placements below
-    // reference it, which is what keeps a quarter of a million copies down to
-    // the size of the meshes themselves.
+/// Geometry lives here once. Nothing draws it directly; the placements
+/// reference it, which is what keeps a quarter of a million copies down to the
+/// size of the meshes themselves.
+fn write_prototypes_open(usd: &mut impl std::io::Write) {
     let _ = writeln!(usd, "    def Scope \"Prototypes\"");
     let _ = writeln!(usd, "    {{");
-    // Referenced, not shown: hiding the sources keeps every mesh from also
-    // being drawn in a heap at the origin.
+    // Referenced, not shown: hiding the sources keeps every mesh from also being
+    // drawn in a heap at the origin.
     let _ = writeln!(usd, "        uniform token visibility = \"invisible\"");
+}
+
+/// Convert a level scene into a USD (`.usda`) document held in memory.
+///
+/// Only safe for a slice of a level — see [`write_scene_usd`] for anything whose
+/// size is not known to be modest.
+pub(in crate::app) fn scene_to_usd(
+    world: &World,
+    scene: &LevelScene,
+    detail: MeshDetail,
+) -> (String, LevelExportReport) {
+    let mut report = LevelExportReport::default();
+    let mut taken = HashSet::new();
+    let mut materials: Vec<String> = Vec::new();
+    let mut prototypes: Vec<Option<Prototype>> = Vec::with_capacity(scene.meshes.len());
+
+    for package in &scene.meshes {
+        match load_prototype(world, package, detail, &mut taken) {
+            Some(prototype) => {
+                if !materials.contains(&prototype.material) {
+                    materials.push(prototype.material.clone());
+                }
+                prototypes.push(Some(prototype));
+            }
+            None => {
+                report.unreadable_meshes += 1;
+                prototypes.push(None);
+            }
+        }
+    }
+
+    let mut usd: Vec<u8> = Vec::new();
+    write_stage_header(&mut usd);
+    write_materials(&mut usd, &materials);
+    write_prototypes_open(&mut usd);
     for prototype in prototypes.iter().flatten() {
         write_mesh(&mut usd, prototype);
     }
@@ -401,7 +505,8 @@ pub(in crate::app) fn scene_to_usd(
 
     report.prototypes = prototypes.iter().flatten().count();
     report.materials = materials.len();
-    (usd, report)
+    // Every byte written above is ASCII, so this cannot fail.
+    (String::from_utf8(usd).expect("the writer emits ASCII"), report)
 }
 
 #[cfg(test)]
@@ -430,10 +535,16 @@ mod tests {
         assert_eq!(unique_prim_name("SM-Rock", &mut taken), "SM_Rock_3");
     }
 
+    /// One placement, as the text the exporter writes for it.
+    fn instance_text(index: usize, prototype: &str, world: &WorldMatrix) -> String {
+        let mut usd: Vec<u8> = Vec::new();
+        write_instance(&mut usd, index, prototype, world);
+        String::from_utf8(usd).expect("the writer emits ASCII")
+    }
+
     #[test]
     fn a_placement_references_the_prototype_rather_than_copying_it() {
-        let mut usd = String::new();
-        write_instance(&mut usd, 7, "SM_Rock", &IDENTITY);
+        let usd = instance_text(7, "SM_Rock", &IDENTITY);
         assert!(usd.contains("def Xform \"inst_7\""));
         assert!(usd.contains("instanceable = true"));
         assert!(usd.contains("references = </World/Prototypes/SM_Rock>"));
@@ -445,9 +556,7 @@ mod tests {
     fn a_placement_is_written_as_unreals_own_matrix() {
         // USD and Unreal agree on layout — row-major, translation last — so a
         // transposed write would be silently wrong rather than rejected.
-        let mut usd = String::new();
-        write_instance(
-            &mut usd,
+        let usd = instance_text(
             0,
             "SM_Rock",
             &compose([100.0, -200.0, 50.0], [0.0; 3], [1.0; 3]),
@@ -463,9 +572,7 @@ mod tests {
         // The reason for USD over a quaternion-and-one-scale format: a
         // reflection is just a matrix, so no placement needs baked geometry and
         // the instancing survives.
-        let mut usd = String::new();
-        write_instance(
-            &mut usd,
+        let usd = instance_text(
             0,
             "SM_Rock",
             &compose([0.0; 3], [0.0; 3], [-1.3, 1.3, 1.3]),
@@ -476,8 +583,7 @@ mod tests {
 
     #[test]
     fn an_identity_placement_writes_the_identity() {
-        let mut usd = String::new();
-        write_instance(&mut usd, 0, "SM_Rock", &IDENTITY);
+        let usd = instance_text(0, "SM_Rock", &IDENTITY);
         assert!(usd.contains("( (1, 0, 0, 0), (0, 1, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1) )"));
     }
 }
@@ -544,6 +650,60 @@ mod real_data_tests {
             report.materials,
             usd.len() / 1024
         );
+    }
+
+    /// The streaming writer and the in-memory one must produce the same file.
+    ///
+    /// Streaming exists so a whole level does not have to fit in memory, and the
+    /// only thing that makes it safe to use for the big exports is that it is
+    /// not a second, differently-behaved exporter. Splicing the geometry in from
+    /// a sidecar is exactly the kind of change that would show up as an off-by-
+    /// one brace or a missing newline, which is why this compares every byte
+    /// rather than a summary.
+    #[test]
+    fn streaming_an_export_writes_the_same_bytes_as_building_it_in_memory() {
+        let Ok(root) = std::env::var("BABOON_PROBE_PAKS") else {
+            eprintln!("skipping: set BABOON_PROBE_PAKS to a Campaign Evolved Paks folder");
+            return;
+        };
+        let usmap = load_chimp_usmap(None).expect("bundled usmap");
+        let world = World::open(std::path::Path::new(&root), usmap).expect("mount the install");
+        let cells: Vec<String> = world
+            .packages()
+            .iter()
+            .filter(|record| record.name.to_lowercase().contains("/c10/_generated_/"))
+            .map(|record| record.name.clone())
+            .collect();
+        if cells.is_empty() {
+            eprintln!("skipping: this install has no C10 cells");
+            return;
+        }
+
+        let mut scene = LevelScene::default();
+        for cell in cells.iter().step_by(211) {
+            if let Ok(document) = load_chimp_document(&world, cell) {
+                read_cell_into(&document, &mut scene);
+            }
+        }
+        let (in_memory, memory_report) = scene_to_usd(&world, &scene, MeshDetail::Fallback);
+
+        let path = std::env::temp_dir().join("baboon-streaming-parity.usda");
+        let stream_report =
+            write_scene_usd(&world, &scene, MeshDetail::Fallback, &path).expect("stream the export");
+        let streamed = std::fs::read_to_string(&path).expect("read back the export");
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(stream_report, memory_report);
+        assert_eq!(
+            streamed.len(),
+            in_memory.len(),
+            "streamed {} bytes against {} in memory",
+            streamed.len(),
+            in_memory.len()
+        );
+        assert!(streamed == in_memory, "the two writers disagree on content");
+        // The sidecar the geometry passed through must not be left behind.
+        assert!(!path.with_extension("prototypes.tmp").exists());
     }
 }
 
@@ -674,7 +834,7 @@ mod census {
             let triangles = mesh.indices.len() / 3;
             // Measured by writing the text, not by estimating a per-number
             // width: the digits a float prints to are the file.
-            let mut usd = String::new();
+            let mut usd: Vec<u8> = Vec::new();
             write_mesh(
                 &mut usd,
                 &Prototype {
@@ -757,6 +917,101 @@ mod census {
 mod sample_export {
     use super::super::level::read_cell_into;
     use super::*;
+
+    /// Write as much of C10 as fits in a triangle budget, to find out how much
+    /// geometry an importer will actually take.
+    ///
+    /// Budgeted on triangles rather than cells because triangles are what an
+    /// importer runs out of memory on, and a cell's cost varies enormously —
+    /// C10's cells range from near-empty to thousands of placements. The budget
+    /// counts *prototype* triangles, the geometry the file contains: instancing
+    /// means a mesh placed a thousand times is still written once, so that is
+    /// what the file weighs and what Blender allocates for it.
+    ///
+    /// `BABOON_SAMPLE_TRIANGLES` sets the budget, `BABOON_SAMPLE_OUT` the file,
+    /// and `BABOON_SAMPLE_NANITE` selects full detail over the fallback.
+    #[test]
+    #[ignore]
+    fn write_triangle_budgeted_usd() {
+        let root = std::env::var("BABOON_PROBE_PAKS").expect("BABOON_PROBE_PAKS");
+        let out = std::env::var("BABOON_SAMPLE_OUT").expect("BABOON_SAMPLE_OUT");
+        let budget: usize = std::env::var("BABOON_SAMPLE_TRIANGLES")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(10_000_000);
+        let detail = if std::env::var("BABOON_SAMPLE_NANITE").is_ok() {
+            MeshDetail::Nanite
+        } else {
+            MeshDetail::Fallback
+        };
+        let usmap = load_chimp_usmap(None).expect("usmap");
+        let world = World::open(std::path::Path::new(&root), usmap).expect("mount");
+        let cells: Vec<String> = world
+            .packages()
+            .iter()
+            .filter(|record| record.name.to_lowercase().contains("/c10/_generated_/"))
+            .map(|record| record.name.clone())
+            .collect();
+
+        // Cells are taken whole: half a cell is not a place, and a mesh dropped
+        // mid-cell would leave its neighbours standing around a hole.
+        let mut scene = LevelScene::default();
+        let mut triangles = 0usize;
+        let mut counted = 0usize;
+        for cell in &cells {
+            let Ok(document) = load_chimp_document(&world, cell) else {
+                continue;
+            };
+            read_cell_into(&document, &mut scene);
+            // `meshes` only ever grows, and in first-seen order, so everything
+            // past the high-water mark is new to this cell.
+            while counted < scene.meshes.len() {
+                triangles += load_chimp_document(&world, &scene.meshes[counted])
+                    .and_then(|mesh_document| decode_mesh(&world, &mesh_document, detail))
+                    .map(|mesh| mesh.indices.len() / 3)
+                    .unwrap_or(0);
+                counted += 1;
+            }
+            if triangles >= budget {
+                break;
+            }
+        }
+
+        let out_path = std::path::PathBuf::from(&out);
+        let report =
+            write_scene_usd(&world, &scene, detail, &out_path).expect("write the sample");
+        let written = std::fs::metadata(&out_path).map(|meta| meta.len()).unwrap_or(0);
+
+        let extent = scene.placements.iter().fold(
+            ([f64::MAX; 3], [f64::MIN; 3]),
+            |(mut min, mut max), placement| {
+                for axis in 0..3 {
+                    min[axis] = min[axis].min(placement.world[12 + axis]);
+                    max[axis] = max[axis].max(placement.world[12 + axis]);
+                }
+                (min, max)
+            },
+        );
+        eprintln!(
+            "wrote {out} ({detail:?})\n\
+             \x20 {} of {} cells: {} prototypes, {} instances, {} materials\n\
+             \x20 {triangles} triangles of geometry, {:.2} MiB of text\n\
+             \x20 spans {:.0} x {:.0} x {:.0} m\n\
+             \x20 {} meshes unreadable, {} placements dropped, skipped reading {:?}",
+            scene.cells,
+            cells.len(),
+            report.prototypes,
+            report.instances,
+            report.materials,
+            written as f64 / (1024.0 * 1024.0),
+            (extent.1[0] - extent.0[0]) / 100.0,
+            (extent.1[1] - extent.0[1]) / 100.0,
+            (extent.1[2] - extent.0[2]) / 100.0,
+            report.unreadable_meshes,
+            report.dropped_placements,
+            scene.skipped,
+        );
+    }
 
     /// Write a slice of C10 to a `.usda` for eyeballing in Blender.
     ///
