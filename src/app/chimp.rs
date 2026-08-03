@@ -9,6 +9,7 @@ use std::collections::BTreeMap;
 
 mod level;
 pub(in crate::app) use level::{LevelScene, read_cell_into};
+mod level_blend;
 mod level_export;
 mod level_segment;
 mod mesh_weld;

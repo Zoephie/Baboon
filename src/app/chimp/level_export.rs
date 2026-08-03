@@ -25,6 +25,9 @@ use std::fs::File;
 use std::io::{BufWriter, Write as _};
 
 use super::level::{LevelScene, WorldMatrix};
+use super::level_blend::{
+    BlendExportReport, BlendMesh, BlendPlacement, BlendWriter, write_build_script,
+};
 use super::level_segment::{PlacedMesh, Segment, SegmentBudget, segment};
 use super::mesh_weld::weld;
 
@@ -458,6 +461,96 @@ pub(in crate::app) fn write_segmented_usd(
     }
 
     write_segment_readme(directory, name, &library_name, &segments, budget, &report)?;
+    Ok(report)
+}
+
+/// Export a level as raw geometry for Blender to assemble into `.blend` files.
+///
+/// Segmented on the same budgets as the USD path and for the same reason: the
+/// master scene has to place the level's objects, and 296,399 of them is past
+/// what Blender takes. One master per region, each linking the per-mesh files
+/// rather than copying them.
+pub(in crate::app) fn write_blend_export(
+    world: &World,
+    scene: &LevelScene,
+    detail: MeshDetail,
+    directory: &Path,
+    name: &str,
+    budget: SegmentBudget,
+) -> std::io::Result<BlendExportReport> {
+    std::fs::create_dir_all(directory)?;
+    let mut report = BlendExportReport::default();
+
+    // Meshes are decoded, written and dropped one at a time; only the triangle
+    // counts the split needs are kept.
+    let mut taken = HashSet::new();
+    let mut written: Vec<Option<u32>> = Vec::with_capacity(scene.meshes.len());
+    let mut mesh_triangles: Vec<usize> = Vec::with_capacity(scene.meshes.len());
+    let data_path = directory.join(format!("{name}.baboonlevel"));
+    let mut writer = BlendWriter::create(&data_path, scene.meshes.len(), scene.placements.len())?;
+    for package in &scene.meshes {
+        match load_prototype(world, package, detail, &mut taken) {
+            Some(prototype) => {
+                writer.write_mesh(BlendMesh {
+                    name: &prototype.prim,
+                    mesh: &prototype.mesh,
+                })?;
+                written.push(Some(report.meshes as u32));
+                mesh_triangles.push(prototype.mesh.indices.len() / 3);
+                report.meshes += 1;
+            }
+            None => {
+                report.unreadable_meshes += 1;
+                written.push(None);
+                mesh_triangles.push(0);
+            }
+        }
+    }
+
+    // A placement whose mesh could not be decoded has nothing to place.
+    let placed: Vec<(usize, PlacedMesh)> = scene
+        .placements
+        .iter()
+        .enumerate()
+        .filter(|(_, placement)| matches!(written.get(placement.mesh), Some(Some(_))))
+        .map(|(index, placement)| {
+            (
+                index,
+                PlacedMesh {
+                    mesh: placement.mesh,
+                    position: [
+                        placement.world[12],
+                        placement.world[13],
+                        placement.world[14],
+                    ],
+                },
+            )
+        })
+        .collect();
+    report.dropped_placements = scene.placements.len() - placed.len();
+    let positions: Vec<PlacedMesh> = placed.iter().map(|(_, placed)| *placed).collect();
+
+    let segments = segment(&positions, &mesh_triangles, budget);
+    report.segments = segments.len();
+    let mut placements = Vec::with_capacity(placed.len());
+    for (number, piece) in segments.iter().enumerate() {
+        for &index in &piece.placements {
+            let (placement_index, _) = placed[index];
+            let placement = &scene.placements[placement_index];
+            let Some(Some(mesh)) = written.get(placement.mesh) else {
+                continue;
+            };
+            placements.push(BlendPlacement {
+                mesh: *mesh,
+                segment: number as u32,
+                world: placement.world,
+            });
+        }
+    }
+    report.placements = placements.len();
+    report.data_bytes = writer.finish(&placements, segments.len())?;
+
+    write_build_script(directory, name, &report)?;
     Ok(report)
 }
 
@@ -1441,6 +1534,70 @@ mod sample_export {
             report.triangles,
             report.library_bytes as f64 / (1024.0 * 1024.0),
             report.segment_bytes as f64 / (1024.0 * 1024.0),
+            report.unreadable_meshes,
+            report.dropped_placements,
+        );
+    }
+
+    /// Write a Blender export of C10 for trying the emitted script against.
+    ///
+    /// Shares `BABOON_SEGMENT_*` with [`write_segmented_sample`], since it is
+    /// the same level split the same way.
+    #[test]
+    #[ignore]
+    fn write_blend_sample() {
+        let root = std::env::var("BABOON_PROBE_PAKS").expect("BABOON_PROBE_PAKS");
+        let directory = std::path::PathBuf::from(
+            std::env::var("BABOON_SEGMENT_DIR").expect("BABOON_SEGMENT_DIR"),
+        );
+        let step: usize = std::env::var("BABOON_SEGMENT_STEP")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(1);
+        let default = SegmentBudget::default();
+        let budget = SegmentBudget {
+            triangles: std::env::var("BABOON_SEGMENT_TRIANGLES")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.triangles),
+            placements: std::env::var("BABOON_SEGMENT_PLACEMENTS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.placements),
+        };
+        let detail = if std::env::var("BABOON_SAMPLE_NANITE").is_ok() {
+            MeshDetail::Nanite
+        } else {
+            MeshDetail::Fallback
+        };
+        let usmap = load_chimp_usmap(None).expect("usmap");
+        let world = World::open(std::path::Path::new(&root), usmap).expect("mount");
+        let cells: Vec<String> = world
+            .packages()
+            .iter()
+            .filter(|record| record.name.to_lowercase().contains("/c10/_generated_/"))
+            .map(|record| record.name.clone())
+            .collect();
+
+        let mut scene = LevelScene::default();
+        for cell in cells.iter().step_by(step) {
+            if let Ok(document) = load_chimp_document(&world, cell) {
+                read_cell_into(&document, &mut scene);
+            }
+        }
+        let report =
+            write_blend_export(&world, &scene, detail, &directory, "c10", budget).expect("write");
+        eprintln!(
+            "wrote {} ({detail:?})\n\
+             \x20 {} cells -> {} meshes, {} placements, {} segments\n\
+             \x20 {:.1} MiB of geometry\n\
+             \x20 {} meshes unreadable, {} placements dropped",
+            directory.display(),
+            scene.cells,
+            report.meshes,
+            report.placements,
+            report.segments,
+            report.data_bytes as f64 / (1024.0 * 1024.0),
             report.unreadable_meshes,
             report.dropped_placements,
         );
