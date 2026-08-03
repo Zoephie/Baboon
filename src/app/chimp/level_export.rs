@@ -25,6 +25,7 @@ use std::fs::File;
 use std::io::{BufWriter, Write as _};
 
 use super::level::{LevelScene, WorldMatrix};
+use super::level_segment::{PlacedMesh, Segment, SegmentBudget, segment};
 use super::mesh_weld::weld;
 
 /// How much of a mesh to export.
@@ -180,14 +181,19 @@ fn write_mesh(usd: &mut impl std::io::Write, prototype: &Prototype) {
     // with it, whatever the placement prim is.
     let _ = writeln!(usd, "        def Xform \"{prim}\"");
     let _ = writeln!(usd, "        {{");
+    write_mesh_body(usd, mesh, &format!("</World/Materials/{material}>"));
+    let _ = writeln!(usd, "        }}");
+}
+
+/// The `def Mesh` block itself, bound to whichever material prim the caller
+/// names — a scene-wide one in a single file, or the prototype's own nested
+/// copy in a shared library.
+fn write_mesh_body(usd: &mut impl std::io::Write, mesh: &StaticMesh, material_path: &str) {
     let _ = writeln!(usd, "            def Mesh \"Mesh\" (");
     let _ = writeln!(usd, "                prepend apiSchemas = [\"MaterialBindingAPI\"]");
     let _ = writeln!(usd, "                )");
     let _ = writeln!(usd, "            {{");
-    let _ = writeln!(
-        usd,
-        "                rel material:binding = </World/Materials/{material}>"
-    );
+    let _ = writeln!(usd, "                rel material:binding = {material_path}");
     let _ = writeln!(usd, "                uniform token subdivisionScheme = \"none\"");
     // Unreal winds its triangles clockwise; USD reads counter-clockwise as
     // front-facing unless told otherwise, which imports every surface
@@ -269,7 +275,6 @@ fn write_mesh(usd: &mut impl std::io::Write, prototype: &Prototype) {
     let _ = writeln!(usd, "                    interpolation = \"vertex\"");
     let _ = writeln!(usd, "                )");
     let _ = writeln!(usd, "            }}");
-    let _ = writeln!(usd, "        }}");
 }
 
 fn write_instance(
@@ -278,14 +283,22 @@ fn write_instance(
     prototype: &str,
     world: &WorldMatrix,
 ) {
+    write_instance_referencing(usd, index, &format!("</World/Prototypes/{prototype}>"), world);
+}
+
+/// A placement whose reference target is written out in full, so it can name a
+/// prototype in this file or one in a shared library file beside it.
+fn write_instance_referencing(
+    usd: &mut impl std::io::Write,
+    index: usize,
+    reference: &str,
+    world: &WorldMatrix,
+) {
     let _ = writeln!(usd, "    def Xform \"inst_{index}\" (");
     // The mesh is not copied here: this prim references the one prototype and
     // is marked instanceable, so every placement of a mesh shares its geometry.
     let _ = writeln!(usd, "        instanceable = true");
-    let _ = writeln!(
-        usd,
-        "        prepend references = </World/Prototypes/{prototype}>"
-    );
+    let _ = writeln!(usd, "        prepend references = {reference}");
     let _ = writeln!(usd, "    )");
     let _ = writeln!(usd, "    {{");
     let _ = write!(usd, "        matrix4d xformOp:transform = ( ");
@@ -308,6 +321,265 @@ fn write_instance(
         "        uniform token[] xformOpOrder = [\"xformOp:transform\"]"
     );
     let _ = writeln!(usd, "    }}");
+}
+
+/// What a segmented export produced.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(in crate::app) struct SegmentedExportReport {
+    pub(in crate::app) segments: usize,
+    /// Segments that broke a budget no further split could fix — a single mesh
+    /// bigger than the whole allowance, or placements sharing one position.
+    pub(in crate::app) over_budget: usize,
+    pub(in crate::app) prototypes: usize,
+    pub(in crate::app) instances: usize,
+    pub(in crate::app) materials: usize,
+    pub(in crate::app) triangles: usize,
+    pub(in crate::app) unreadable_meshes: usize,
+    pub(in crate::app) dropped_placements: usize,
+    pub(in crate::app) library_bytes: u64,
+    pub(in crate::app) segment_bytes: u64,
+}
+
+/// Export a level as one shared prototype library plus a segment per region.
+///
+/// A whole level does not import — 109.7 million triangles across 296,399
+/// placements is past what Blender opens — so the placements are divided
+/// spatially until each piece fits a budget, and each piece becomes its own
+/// file. Geometry is written once into a library the segments reference, so
+/// splitting the level does not multiply its geometry: a rock used across the
+/// map is stored once however many segments place it.
+///
+/// The library is not optional and not a cache. A segment holds only
+/// placements, so a segment without its library beside it imports as nothing at
+/// all — which is why [`write_segment_readme`] says so in the export folder.
+pub(in crate::app) fn write_segmented_usd(
+    world: &World,
+    scene: &LevelScene,
+    detail: MeshDetail,
+    directory: &Path,
+    name: &str,
+    budget: SegmentBudget,
+) -> std::io::Result<SegmentedExportReport> {
+    std::fs::create_dir_all(directory)?;
+    let mut report = SegmentedExportReport::default();
+    let library_name = format!("{name}_prototypes.usda");
+
+    // One pass over the meshes: decode, write, drop, and keep only the triangle
+    // count the split needs. Nothing holds more than a mesh at a time.
+    let mut taken = HashSet::new();
+    let mut prototypes: Vec<Option<String>> = Vec::with_capacity(scene.meshes.len());
+    let mut mesh_triangles: Vec<usize> = Vec::with_capacity(scene.meshes.len());
+    let mut materials = HashSet::new();
+    {
+        let library_path = directory.join(&library_name);
+        let mut library = BufWriter::new(File::create(&library_path)?);
+        write_stage_header(&mut library);
+        write_prototypes_open(&mut library);
+        for package in &scene.meshes {
+            match load_prototype(world, package, detail, &mut taken) {
+                Some(prototype) => {
+                    let triangles = prototype.mesh.indices.len() / 3;
+                    materials.insert(prototype.material.clone());
+                    write_library_prototype(&mut library, &prototype);
+                    prototypes.push(Some(prototype.prim));
+                    mesh_triangles.push(triangles);
+                    report.triangles += triangles;
+                }
+                None => {
+                    report.unreadable_meshes += 1;
+                    prototypes.push(None);
+                    mesh_triangles.push(0);
+                }
+            }
+        }
+        let _ = writeln!(library, "    }}");
+        let _ = writeln!(library, "}}");
+        library.flush()?;
+        drop(library);
+        report.library_bytes = std::fs::metadata(&library_path)?.len();
+    }
+    report.prototypes = prototypes.iter().flatten().count();
+    report.materials = materials.len();
+
+    // A placement whose mesh could not be decoded has nothing to reference, so
+    // it is dropped before the split rather than skewing a segment's budget with
+    // geometry that will not be there.
+    let placed: Vec<(usize, PlacedMesh)> = scene
+        .placements
+        .iter()
+        .enumerate()
+        .filter(|(_, placement)| {
+            matches!(prototypes.get(placement.mesh), Some(Some(_)))
+        })
+        .map(|(index, placement)| {
+            (
+                index,
+                PlacedMesh {
+                    mesh: placement.mesh,
+                    position: [
+                        placement.world[12],
+                        placement.world[13],
+                        placement.world[14],
+                    ],
+                },
+            )
+        })
+        .collect();
+    report.dropped_placements = scene.placements.len() - placed.len();
+    let positions: Vec<PlacedMesh> = placed.iter().map(|(_, placed)| *placed).collect();
+
+    let segments = segment(&positions, &mesh_triangles, budget);
+    report.segments = segments.len();
+    for (number, piece) in segments.iter().enumerate() {
+        if piece.over_budget {
+            report.over_budget += 1;
+        }
+        let path = directory.join(format!("{name}_seg_{number:02}.usda"));
+        let mut usd = BufWriter::new(File::create(&path)?);
+        write_stage_header(&mut usd);
+        for (slot, &index) in piece.placements.iter().enumerate() {
+            let (placement_index, _) = placed[index];
+            let placement = &scene.placements[placement_index];
+            let Some(Some(prim)) = prototypes.get(placement.mesh) else {
+                continue;
+            };
+            write_instance_referencing(
+                &mut usd,
+                slot,
+                &format!("@./{library_name}@</World/Prototypes/{prim}>"),
+                &placement.world,
+            );
+            report.instances += 1;
+        }
+        let _ = writeln!(usd, "}}");
+        usd.flush()?;
+        drop(usd);
+        report.segment_bytes += std::fs::metadata(&path)?.len();
+    }
+
+    write_segment_readme(directory, name, &library_name, &segments, budget, &report)?;
+    Ok(report)
+}
+
+/// One prototype in the shared library, with its material nested inside it.
+///
+/// The material lives *within* the prototype rather than in a scene-wide scope
+/// because a reference only remaps paths inside the subtree it pulls in. A
+/// binding pointing at `/World/Materials/X` would still say that after being
+/// referenced into a segment, where no such prim exists, and every surface would
+/// import unbound. Nesting costs a duplicated stub per prototype and makes the
+/// reference carry everything it needs.
+fn write_library_prototype(usd: &mut impl std::io::Write, prototype: &Prototype) {
+    let Prototype {
+        prim,
+        mesh,
+        material,
+    } = prototype;
+    let _ = writeln!(usd, "        def Xform \"{prim}\"");
+    let _ = writeln!(usd, "        {{");
+    let _ = writeln!(usd, "            def Material \"{material}\"");
+    let _ = writeln!(usd, "            {{");
+    let _ = writeln!(
+        usd,
+        "                token outputs:surface.connect = </World/Prototypes/{prim}/{material}/Surface.outputs:surface>"
+    );
+    let _ = writeln!(usd, "                def Shader \"Surface\"");
+    let _ = writeln!(usd, "                {{");
+    let _ = writeln!(
+        usd,
+        "                    uniform token info:id = \"UsdPreviewSurface\""
+    );
+    let _ = writeln!(usd, "                    token outputs:surface");
+    let _ = writeln!(usd, "                }}");
+    let _ = writeln!(usd, "            }}");
+    write_mesh_body(
+        usd,
+        mesh,
+        &format!("</World/Prototypes/{prim}/{material}>"),
+    );
+    let _ = writeln!(usd, "        }}");
+}
+
+/// Explain the split in the folder it produced, because a directory of segments
+/// and a library is not self-evident and the library is easy to leave behind.
+fn write_segment_readme(
+    directory: &Path,
+    name: &str,
+    library_name: &str,
+    segments: &[Segment],
+    budget: SegmentBudget,
+    report: &SegmentedExportReport,
+) -> std::io::Result<()> {
+    let mut readme = BufWriter::new(File::create(directory.join(format!("{name}_README.txt")))?);
+    let _ = writeln!(readme, "{name} - exported from Baboon as segmented USD");
+    let _ = writeln!(readme);
+    let _ = writeln!(
+        readme,
+        "This level is {} triangles across {} placements, which is more than\n\
+         Blender opens in one file. It has been split into {} segments.",
+        report.triangles, report.instances, report.segments
+    );
+    let _ = writeln!(readme);
+    let _ = writeln!(readme, "WHAT IS HERE");
+    let _ = writeln!(
+        readme,
+        "  {library_name}\n    Every mesh in the level, stored once. This file contains all the\n\
+         \x20   geometry; it places nothing.\n\
+         \x20 {name}_seg_NN.usda\n    One region of the level. Holds only placements, each referencing a\n\
+         \x20   mesh in the library above."
+    );
+    let _ = writeln!(readme);
+    let _ = writeln!(readme, "HOW TO IMPORT");
+    let _ = writeln!(
+        readme,
+        "  Import any {name}_seg_NN.usda. Keep the library file beside the\n\
+         \x20 segments - a segment on its own references geometry that is not there\n\
+         \x20 and imports as nothing. Import as many segments as your machine will\n\
+         \x20 take; they share a coordinate system, so they line up exactly."
+    );
+    let _ = writeln!(readme);
+    let _ = writeln!(readme, "HOW THE SPLIT WAS CHOSEN");
+    let _ = writeln!(
+        readme,
+        "  Segments are regions of the map, not arbitrary slices. The level is\n\
+         \x20 cut in half at the middle of its widest axis, and each half again,\n\
+         \x20 until every piece fits within:\n\
+         \x20     {} triangles across the distinct meshes it uses\n\
+         \x20     {} placements\n\
+         \x20 Both limits matter. Geometry and object count run out separately: a\n\
+         \x20 stand of foliage can place tens of thousands of copies of a handful\n\
+         \x20 of meshes, and a budget counting only triangles would not see it.\n\
+         \x20 Dense areas therefore produce more, smaller segments than open ones.",
+        budget.triangles, budget.placements
+    );
+    if report.over_budget > 0 {
+        let _ = writeln!(readme);
+        let _ = writeln!(
+            readme,
+            "  {} segment(s) exceed the budget and could not be split further -\n\
+             \x20 a single mesh larger than the whole allowance, or placements\n\
+             \x20 stacked at one point. They are listed below and may be slow or\n\
+             \x20 impossible to open.",
+            report.over_budget
+        );
+    }
+    let _ = writeln!(readme);
+    let _ = writeln!(readme, "SEGMENTS");
+    for (number, piece) in segments.iter().enumerate() {
+        let _ = writeln!(
+            readme,
+            "  {name}_seg_{number:02}.usda  {:>12} triangles  {:>8} placements  {:>4} meshes{}",
+            piece.triangles,
+            piece.placements.len(),
+            piece.meshes.len(),
+            if piece.over_budget {
+                "  [OVER BUDGET]"
+            } else {
+                ""
+            }
+        );
+    }
+    readme.flush()
 }
 
 /// Export a level scene to a `.usda` file without ever holding it in memory.
@@ -708,6 +980,97 @@ mod real_data_tests {
 }
 
 #[cfg(test)]
+mod segmented_tests {
+    use super::super::level::read_cell_into;
+    use super::*;
+
+    /// Read a slice of a real level, split it small, and check the pieces are a
+    /// level rather than a pile of files.
+    ///
+    /// Skips unless `BABOON_PROBE_PAKS` points at an install.
+    #[test]
+    fn a_segmented_export_splits_into_referencing_pieces() {
+        let Ok(root) = std::env::var("BABOON_PROBE_PAKS") else {
+            eprintln!("skipping: set BABOON_PROBE_PAKS to a Campaign Evolved Paks folder");
+            return;
+        };
+        let usmap = load_chimp_usmap(None).expect("bundled usmap");
+        let world = World::open(std::path::Path::new(&root), usmap).expect("mount the install");
+        let cells: Vec<String> = world
+            .packages()
+            .iter()
+            .filter(|record| record.name.to_lowercase().contains("/c10/_generated_/"))
+            .map(|record| record.name.clone())
+            .collect();
+        if cells.is_empty() {
+            eprintln!("skipping: this install has no C10 cells");
+            return;
+        }
+
+        let mut scene = LevelScene::default();
+        for cell in cells.iter().step_by(97) {
+            if let Ok(document) = load_chimp_document(&world, cell) {
+                read_cell_into(&document, &mut scene);
+            }
+        }
+        let directory = std::env::temp_dir().join("baboon-segment-test");
+        let _ = std::fs::remove_dir_all(&directory);
+        // Small enough that this really does split, whatever the slice holds.
+        let budget = SegmentBudget {
+            triangles: 400_000,
+            placements: 200,
+        };
+        let report = write_segmented_usd(
+            &world,
+            &scene,
+            MeshDetail::Fallback,
+            &directory,
+            "c10",
+            budget,
+        )
+        .expect("write the segmented export");
+
+        assert!(report.segments > 1, "the budget did not force a split");
+        assert!(report.prototypes > 0);
+        let library = std::fs::read_to_string(directory.join("c10_prototypes.usda")).unwrap();
+        // All the geometry, once, and nothing placed.
+        assert_eq!(library.matches("def Mesh ").count(), report.prototypes);
+        assert!(!library.contains("instanceable = true"));
+        // A material a segment can actually reach: nested inside the prototype,
+        // so the reference carries it.
+        assert!(library.contains("</World/Prototypes/"));
+        assert!(!library.contains("rel material:binding = </World/Materials/"));
+
+        let mut instances = 0;
+        for number in 0..report.segments {
+            let path = directory.join(format!("c10_seg_{number:02}.usda"));
+            let text = std::fs::read_to_string(&path).expect("a segment per count");
+            // Placements only: geometry belongs to the library.
+            assert!(!text.contains("def Mesh "), "segment {number} carries geometry");
+            assert!(text.starts_with("#usda 1.0"));
+            assert!(text.contains("metersPerUnit = 0.01"));
+            let referencing = text.matches("@./c10_prototypes.usda@</World/Prototypes/").count();
+            let placed = text.matches("instanceable = true").count();
+            assert_eq!(referencing, placed, "a placement referenced nothing");
+            instances += placed;
+        }
+        assert_eq!(instances, report.instances);
+        assert_eq!(
+            instances + report.dropped_placements,
+            scene.placements.len(),
+            "placements were lost between the scene and the segments"
+        );
+
+        let readme = std::fs::read_to_string(directory.join("c10_README.txt")).unwrap();
+        assert!(readme.contains("400000 triangles"));
+        assert!(readme.contains("200 placements"));
+        // The one thing a user can get wrong, said plainly.
+        assert!(readme.contains("Keep the library file beside the"));
+        let _ = std::fs::remove_dir_all(&directory);
+    }
+}
+
+#[cfg(test)]
 mod census {
     use super::super::level::read_cell_into;
     use super::*;
@@ -1010,6 +1373,76 @@ mod sample_export {
             report.unreadable_meshes,
             report.dropped_placements,
             scene.skipped,
+        );
+    }
+
+    /// Write a segmented export of C10 for trying in Blender.
+    ///
+    /// `BABOON_SEGMENT_DIR` is the folder, `BABOON_SEGMENT_STEP` reads every Nth
+    /// cell, and `BABOON_SEGMENT_TRIANGLES` / `BABOON_SEGMENT_PLACEMENTS`
+    /// override the budgets so a small area can still be made to split.
+    #[test]
+    #[ignore]
+    fn write_segmented_sample() {
+        let root = std::env::var("BABOON_PROBE_PAKS").expect("BABOON_PROBE_PAKS");
+        let directory = std::path::PathBuf::from(
+            std::env::var("BABOON_SEGMENT_DIR").expect("BABOON_SEGMENT_DIR"),
+        );
+        let step: usize = std::env::var("BABOON_SEGMENT_STEP")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(1);
+        let default = SegmentBudget::default();
+        let budget = SegmentBudget {
+            triangles: std::env::var("BABOON_SEGMENT_TRIANGLES")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.triangles),
+            placements: std::env::var("BABOON_SEGMENT_PLACEMENTS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or(default.placements),
+        };
+        let detail = if std::env::var("BABOON_SAMPLE_NANITE").is_ok() {
+            MeshDetail::Nanite
+        } else {
+            MeshDetail::Fallback
+        };
+        let usmap = load_chimp_usmap(None).expect("usmap");
+        let world = World::open(std::path::Path::new(&root), usmap).expect("mount");
+        let cells: Vec<String> = world
+            .packages()
+            .iter()
+            .filter(|record| record.name.to_lowercase().contains("/c10/_generated_/"))
+            .map(|record| record.name.clone())
+            .collect();
+
+        let mut scene = LevelScene::default();
+        for cell in cells.iter().step_by(step) {
+            if let Ok(document) = load_chimp_document(&world, cell) {
+                read_cell_into(&document, &mut scene);
+            }
+        }
+        let report =
+            write_segmented_usd(&world, &scene, detail, &directory, "c10", budget).expect("write");
+        eprintln!(
+            "wrote {} ({detail:?})\n\
+             \x20 {} cells -> {} segments ({} over budget)\n\
+             \x20 {} prototypes, {} instances, {} materials, {} triangles\n\
+             \x20 library {:.1} MiB, segments {:.1} MiB total\n\
+             \x20 {} meshes unreadable, {} placements dropped",
+            directory.display(),
+            scene.cells,
+            report.segments,
+            report.over_budget,
+            report.prototypes,
+            report.instances,
+            report.materials,
+            report.triangles,
+            report.library_bytes as f64 / (1024.0 * 1024.0),
+            report.segment_bytes as f64 / (1024.0 * 1024.0),
+            report.unreadable_meshes,
+            report.dropped_placements,
         );
     }
 
