@@ -4028,12 +4028,13 @@ impl Baboon {
                 });
                 ctx.request_repaint();
             };
-            // Cells are independent packages and there are thousands of them,
-            // so this is the difference between a quarter of an hour and a
-            // couple of minutes.
+            // Measured over all 2,334 cells of C10: 1.7s on one thread, 0.7s
+            // on four, and 0.8s on sixteen. Past four the threads contend for
+            // more than they win, and the whole walk is a second either way.
             let threads = std::thread::available_parallelism()
                 .map(|count| count.get())
-                .unwrap_or(4);
+                .unwrap_or(4)
+                .min(4);
             let scene = read_cells(&world, &cells, threads, &|done| {
                 report(ChimpLevelPhase::ReadingCells, done, total)
             });
