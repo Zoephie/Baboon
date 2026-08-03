@@ -644,8 +644,14 @@ impl Baboon {
             .names
             .name_for(overlay.group_tag)
             .map(str::to_owned)?;
-        let (template_container, template_rel) =
-            self.find_container_template_in(kit, overlay.group_tag)?;
+        // A stashed tag of a group the game ships none of has no donor to point
+        // back at, and recovering it must not depend on finding one — otherwise
+        // the tag survives the save and vanishes on reopen.
+        let template = super::controller::new_container_template_for(
+            self.find_container_template_in(kit, overlay.group_tag),
+            &group_name,
+        )
+        .ok()?;
         let tag = TagFile::read_from_bytes(&overlay.bytes).ok()?;
         let extension = group_tag_to_extension(overlay.group_tag)
             .unwrap_or(group_name.as_str())
@@ -661,8 +667,7 @@ impl Baboon {
                 group_tag: overlay.group_tag,
                 group_name: Some(group_name),
                 location: TagEntryLocation::NewContainer {
-                    template_container,
-                    template_rel,
+                    template,
                     package,
                     group_tag: overlay.group_tag,
                 },

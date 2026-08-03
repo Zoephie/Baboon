@@ -38,12 +38,12 @@ use serde_json::{Value, json};
 
 use crate::format::{TagNameIndex, format_value, group_label};
 use crate::source::{
-    DependencyRef, EkFolderAlias, EntryIndexRefresh, LoadedSourceData, ReverseDependencyIndex,
-    SUPPORTED_EK_GAMES, TagEntry, TagEntryLocation, TagSource, TagTree, TagTreeNode,
-    load_editing_kit_layout, load_folder, load_folder_node_entries, load_iostore_container,
-    load_iostore_container_set, load_monolithic_blob_index, load_single_file, loose_file_entry,
-    read_entry, resolve_folder_root, scan_folder_subtree_entries,
-    scan_folder_subtree_entries_with_progress, supported_ek_game_id,
+    DependencyRef, EkFolderAlias, EntryIndexRefresh, LoadedSourceData, NewContainerTemplate,
+    ReverseDependencyIndex, SUPPORTED_EK_GAMES, TagEntry, TagEntryLocation, TagSource, TagTree,
+    TagTreeNode, load_editing_kit_layout, load_folder, load_folder_node_entries,
+    load_iostore_container, load_iostore_container_set, load_monolithic_blob_index,
+    load_single_file, loose_file_entry, read_entry, resolve_folder_root,
+    scan_folder_subtree_entries, scan_folder_subtree_entries_with_progress, supported_ek_game_id,
 };
 
 pub(super) const BABOON_GITHUB_URL: &str = "https://github.com/Zoephie/Baboon";
