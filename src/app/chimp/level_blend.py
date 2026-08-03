@@ -126,6 +126,9 @@ def build_mesh(entry):
     mesh = bpy.data.meshes.new(entry["name"])
     vertices = entry["vertices"]
     triangles = entry["triangles"]
+    if vertices == 0 or triangles == 0:
+        return mesh
+    indices = entry["indices"].astype(np.int32)
 
     mesh.vertices.add(vertices)
     mesh.vertices.foreach_set("co", entry["positions"])
@@ -133,28 +136,42 @@ def build_mesh(entry):
     # Every face is a triangle, so the loop layout is known without building
     # per-polygon lists.
     mesh.loops.add(triangles * 3)
+    mesh.loops.foreach_set("vertex_index", indices)
     mesh.polygons.add(triangles)
-    mesh.loops.foreach_set("vertex_index", entry["indices"])
     mesh.polygons.foreach_set("loop_start", np.arange(0, triangles * 3, 3, dtype=np.int32))
-    mesh.polygons.foreach_set("loop_total", np.full(triangles, 3, dtype=np.int32))
+    # Blender 4.1 derives a polygon's loop count from where the next one starts
+    # and makes this read-only; older versions need it set.
+    try:
+        mesh.polygons.foreach_set("loop_total", np.full(triangles, 3, dtype=np.int32))
+    except (AttributeError, RuntimeError):
+        pass
 
+    # `calc_edges` builds the edges the polygons imply. Without it the faces
+    # reference edges that do not exist, and the `validate()` below removes
+    # every one of them - which is how a mesh ends up present, named, and
+    # completely empty.
+    mesh.update(calc_edges=True)
+    if mesh.validate(verbose=False):
+        print(f"    {entry['name']}: geometry was corrected on load")
+
+    # After validate(), which discards layers on a mesh it had to repair.
     uv_layer = mesh.uv_layers.new(name="UVMap")
     # UVs are per vertex in the export and per loop in Blender, so they are
     # expanded through the index buffer.
-    per_loop = entry["uvs"].reshape(-1, 2)[entry["indices"].astype(np.int64)]
+    per_loop = entry["uvs"].reshape(-1, 2)[indices]
     uv_layer.data.foreach_set("uv", per_loop.ravel())
 
-    mesh.update()
-    mesh.validate()
-
     # Custom split normals, so the shading is the one the game had rather than
-    # one recomputed from the faces. Set after validate(), which discards them.
+    # one recomputed from the faces.
     normals = entry["normals"].reshape(-1, 3)
     try:
         mesh.normals_split_custom_set_from_vertices(normals)
-    except AttributeError:
-        # Blender 4.0 and earlier want them per loop.
-        mesh.normals_split_custom_set(normals[entry["indices"].astype(np.int64)])
+    except (AttributeError, RuntimeError):
+        try:
+            # Blender 4.0 and earlier want them per loop.
+            mesh.normals_split_custom_set(normals[indices])
+        except (AttributeError, RuntimeError):
+            print(f"    {entry['name']}: custom normals not supported here")
     return mesh
 
 
@@ -163,8 +180,16 @@ def write_mesh_libraries(export, directory):
     folder = os.path.join(directory, "meshes")
     os.makedirs(folder, exist_ok=True)
     paths = []
+    empty = 0
     for index, entry in enumerate(export.meshes):
         mesh = build_mesh(entry)
+        # Caught here rather than discovered later as an empty master: a mesh
+        # that arrived with faces and has none now means the build went wrong.
+        if entry["triangles"] > 0 and len(mesh.polygons) == 0:
+            empty += 1
+            print(
+                f"    {entry['name']}: {entry['triangles']} triangles in, none built"
+            )
         path = os.path.join(folder, f"{entry['name']}.blend")
         # `libraries.write` saves datablocks to another file without disturbing
         # this session, which is what lets one run produce hundreds of files.
@@ -175,6 +200,11 @@ def write_mesh_libraries(export, directory):
         bpy.data.meshes.remove(mesh)
         if (index + 1) % 25 == 0:
             print(f"  {index + 1}/{len(export.meshes)} meshes written")
+    if empty:
+        raise RuntimeError(
+            f"{empty} of {len(export.meshes)} meshes built with no faces - the "
+            "masters would open with placements and no geometry"
+        )
     return paths
 
 
@@ -186,13 +216,28 @@ def build_master(export, directory, segment, mesh_paths):
     placements = [p for p in export.placements if p[1] == segment]
     used = sorted({mesh for mesh, _, _ in placements})
     linked = {}
+    empty = 0
     for index in used:
         path, name = mesh_paths[index]
         # Link, not append: the geometry stays in its own file and every
         # placement of it here is a reference to that one copy.
         with bpy.data.libraries.load(path, link=True) as (source, target):
-            target.meshes = [n for n in source.meshes if n == name]
-        linked[index] = bpy.data.meshes[name, path] if (name, path) in bpy.data.meshes else bpy.data.meshes[name]
+            # Fall back to whatever the file holds - there is exactly one mesh
+            # per library - so a datablock Blender renamed on write is still
+            # found rather than silently linking nothing.
+            wanted = [n for n in source.meshes if n == name] or list(source.meshes)
+            target.meshes = wanted
+        # After the block, `target.meshes` holds the datablocks themselves,
+        # which is more reliable than looking them up by name and library path.
+        datablock = target.meshes[0] if target.meshes else None
+        if datablock is None:
+            print(f"    could not link {name} from {os.path.basename(path)}")
+            continue
+        if len(datablock.polygons) == 0:
+            empty += 1
+        linked[index] = datablock
+    if empty:
+        print(f"    warning: {empty} linked mesh(es) have no faces")
 
     for number, (mesh_index, _, values) in enumerate(placements):
         mesh = linked.get(mesh_index)
