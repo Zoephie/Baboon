@@ -13,6 +13,24 @@ impl Baboon {
         false
     }
 
+    /// Applies `WorkerMessage::ChimpLevelProgress`.
+    ///
+    /// Dropped when the kit it belongs to has closed: the export outlives the
+    /// workspace that started it, and a level read that is no longer wanted
+    /// should not keep writing over the status of whatever replaced it.
+    pub(super) fn handle_chimp_level_progress(
+        &mut self,
+        kit: KitId,
+        done: usize,
+        total: usize,
+    ) -> bool {
+        if !self.kits.iter().any(|existing| existing.id == kit) {
+            return true;
+        }
+        self.status = format!("Reading level cells… {done}/{total}");
+        false
+    }
+
     /// Applies `WorkerMessage::EntryIndexSaved`, rejecting stale source generations.
     pub(super) fn handle_entry_index_saved(
         &mut self,

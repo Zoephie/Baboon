@@ -23,6 +23,7 @@ it (row-major, translation last) and is transposed below, because Blender takes
 column vectors.
 """
 
+import mmap
 import os
 import struct
 import sys
@@ -73,11 +74,21 @@ def find_export(directory):
 
 
 class Export:
-    """The sidecar, read into memory as flat arrays."""
+    """The sidecar, mapped rather than read.
+
+    A whole level is several gigabytes. `mmap` lets every array below be a view
+    straight into the file, so nothing is copied and the operating system pages
+    in only the mesh being built. Reading it into a `bytes` first would need the
+    entire export resident before a single mesh could be made.
+
+    The mapping is kept alive on the instance because every array here points
+    into it; releasing it would leave them dangling.
+    """
 
     def __init__(self, path):
-        with open(path, "rb") as handle:
-            data = handle.read()
+        self._file = open(path, "rb")  # noqa: SIM115 - outlives this scope
+        self._map = mmap.mmap(self._file.fileno(), 0, access=mmap.ACCESS_READ)
+        data = self._map
         if data[:8] != MAGIC:
             raise RuntimeError(f"{path} is not a Baboon level export")
         version, mesh_count, placement_count, segment_count = struct.unpack_from(
@@ -123,12 +134,14 @@ class Export:
                 }
             )
 
-        self.placements = []
-        for _ in range(placement_count):
-            mesh, segment = struct.unpack_from("<II", data, at)
-            values = struct.unpack_from("<16d", data, at + 8)
-            at += PLACEMENT_SIZE
-            self.placements.append((mesh, segment, values))
+        # A structured view rather than a list of tuples: a quarter of a million
+        # placements as Python objects is hundreds of megabytes and this is none.
+        self.placements = np.frombuffer(
+            data,
+            dtype=np.dtype([("mesh", "<u4"), ("segment", "<u4"), ("matrix", "<f8", 16)]),
+            count=placement_count,
+            offset=at,
+        )
 
 
 def build_mesh(entry):
@@ -259,8 +272,8 @@ def build_master(export, directory, segment, mesh_paths):
     bpy.ops.wm.read_homefile(use_empty=True)
     collection = bpy.context.scene.collection
 
-    placements = [p for p in export.placements if p[1] == segment]
-    used = sorted({mesh for mesh, _, _ in placements})
+    placements = export.placements[export.placements["segment"] == segment]
+    used = sorted(set(placements["mesh"].tolist()))
     linked = {}
     empty = 0
     for index in used:
@@ -285,24 +298,25 @@ def build_master(export, directory, segment, mesh_paths):
     if empty:
         print(f"    warning: {empty} linked mesh(es) have no faces")
 
-    for number, (mesh_index, _, values) in enumerate(placements):
-        mesh = linked.get(mesh_index)
+    for number, record in enumerate(placements):
+        mesh = linked.get(int(record["mesh"]))
         if mesh is None:
             continue
+        values = record["matrix"]
         obj = bpy.data.objects.new(f"inst_{number}", mesh)
         # The export stores Unreal's row-major matrix with the translation last;
         # Blender takes column vectors, so it transposes. Only the translation
         # is rescaled: the basis is a rotation and scale, which are ratios and
         # carry no units, and the mesh it applies to is already in metres.
         rows = [
-            list(values[0:4]),
-            list(values[4:8]),
-            list(values[8:12]),
+            [float(v) for v in values[0:4]],
+            [float(v) for v in values[4:8]],
+            [float(v) for v in values[8:12]],
             [
-                values[12] * UNIT_SCALE,
-                values[13] * UNIT_SCALE,
-                values[14] * UNIT_SCALE,
-                values[15],
+                float(values[12]) * UNIT_SCALE,
+                float(values[13]) * UNIT_SCALE,
+                float(values[14]) * UNIT_SCALE,
+                float(values[15]),
             ],
         ]
         obj.matrix_world = Matrix(rows).transposed()

@@ -86,6 +86,13 @@ pub(in crate::app) enum WorkerMessage {
         stamp: KitStamp,
         result: Result<ContainerDeleteResult, String>,
     },
+    /// Reading a level is minutes of work over thousands of cells, so it
+    /// reports where it has got to rather than going quiet.
+    ChimpLevelProgress {
+        kit: KitId,
+        done: usize,
+        total: usize,
+    },
     ExportFinished(Result<String, String>),
     PokePreflightFinished {
         kit: KitId,

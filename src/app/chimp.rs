@@ -13,7 +13,9 @@ mod level_blend;
 mod level_export;
 mod level_segment;
 mod mesh_weld;
-pub(in crate::app) use level_export::scene_to_usd;
+pub(in crate::app) use level_export::{scene_to_usd, write_blend_export, write_segmented_usd};
+use level_export::MeshDetail;
+use level_segment::SegmentBudget;
 use std::io::{Cursor, Write};
 
 use blam_tags::iostore::asset::texture2d::decode_texture2d_preview;
@@ -159,6 +161,132 @@ enum ChimpTreeClick {
 enum ChimpMeshKind {
     Skeletal,
     Static,
+}
+
+/// How a whole level leaves Baboon.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ChimpLevelFormat {
+    /// One shared prototype library plus a file per region.
+    SegmentedUsd,
+    /// Raw geometry plus a script that builds `.blend` files from it.
+    Blender,
+}
+
+impl ChimpLevelFormat {
+    fn label(self) -> &'static str {
+        match self {
+            Self::SegmentedUsd => "USD (.usda)",
+            Self::Blender => "Blender (.blend)",
+        }
+    }
+
+    fn summary(self) -> &'static str {
+        match self {
+            Self::SegmentedUsd => {
+                "A prototype library holding every mesh once, and a file per region \
+                 that places them. Imports into any DCC that reads USD."
+            }
+            Self::Blender => {
+                "Raw geometry and a script Blender runs to build one .blend per mesh \
+                 and a master that places them as linked duplicates."
+            }
+        }
+    }
+}
+
+/// A level waiting on the answer to "how, and split how far?".
+pub(super) struct ChimpLevelExportPrompt {
+    pub(super) kit: KitId,
+    pub(super) package: String,
+    /// The `_Generated_` cells this level is made of.
+    pub(super) cells: Vec<String>,
+    pub(super) format: ChimpLevelFormat,
+    /// Full Nanite geometry rather than the coarse fallback proxy.
+    pub(super) nanite: bool,
+    pub(super) split: bool,
+    pub(super) triangles: usize,
+    pub(super) placements: usize,
+}
+
+impl ChimpLevelExportPrompt {
+    pub(super) fn format_label(&self) -> &'static str {
+        self.format.label()
+    }
+
+    pub(super) fn format_summary(&self) -> &'static str {
+        self.format.summary()
+    }
+
+    /// What the exported files are named after.
+    pub(super) fn name(&self) -> String {
+        prim_safe_name(self.package.rsplit('/').next().unwrap_or("level"))
+    }
+
+    fn budget(&self) -> SegmentBudget {
+        if self.split {
+            SegmentBudget {
+                triangles: self.triangles.max(1),
+                placements: self.placements.max(1),
+            }
+        } else {
+            // Not "no segmentation" but one segment: the same code path, with a
+            // ceiling nothing reaches, so there is no second way to export.
+            SegmentBudget {
+                triangles: usize::MAX,
+                placements: usize::MAX,
+            }
+        }
+    }
+}
+
+/// A file-name-safe version of a package leaf.
+fn prim_safe_name(raw: &str) -> String {
+    let name: String = raw
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .collect();
+    if name.is_empty() {
+        "level".to_owned()
+    } else {
+        name
+    }
+}
+
+/// Whether a package is shaped like a World Partition persistent level.
+///
+/// A cheap name test rather than a search, because it runs while a context menu
+/// is open and the real answer means scanning every package in the install.
+/// Unreal names a persistent level after the folder that holds it — C10 lives at
+/// `.../C10/C10` — so that is what this looks for, and
+/// [`chimp_level_cells`] decides for certain once the menu is actually used.
+fn chimp_looks_like_level(package: &str) -> bool {
+    let Some((directory, leaf)) = package.rsplit_once('/') else {
+        return false;
+    };
+    let Some((_, folder)) = directory.rsplit_once('/') else {
+        return false;
+    };
+    !leaf.is_empty() && leaf.eq_ignore_ascii_case(folder)
+}
+
+/// The cells a World Partition level is made of, empty if this is not one.
+///
+/// A persistent level sits beside a `_Generated_` folder holding the cells that
+/// place its actors — `C10` is 2,334 of them — so the level package itself
+/// places almost nothing and finding the cells is what makes it exportable.
+fn chimp_level_cells(world: &World, package: &str) -> Vec<String> {
+    let Some((directory, _)) = package.rsplit_once('/') else {
+        return Vec::new();
+    };
+    let prefix = format!("{directory}/_Generated_/").to_lowercase();
+    let mut cells: Vec<String> = world
+        .packages()
+        .iter()
+        .filter(|record| record.name.to_lowercase().starts_with(&prefix))
+        .map(|record| record.name.clone())
+        .collect();
+    cells.sort();
+    cells
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -353,6 +481,7 @@ struct ChimpPaneBehavior<'a> {
     close_all_but: Option<String>,
     extract_texture: Option<String>,
     extract_mesh: Option<(String, ChimpMeshFormat)>,
+    export_level: Option<(String, ChimpLevelFormat)>,
 }
 
 impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_> {
@@ -470,6 +599,10 @@ impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_> {
                         }
                     }
                 });
+            }
+            if chimp_looks_like_level(&package) {
+                ui.separator();
+                chimp_level_export_menu(ui, &package, &mut self.export_level);
             }
         });
         button_response
@@ -1915,6 +2048,7 @@ impl Baboon {
         let selected = self.kits[kit_index].chimp.selected_package.clone();
         let mut extract_texture = None;
         let mut extract_mesh = None;
+        let mut export_level = None;
         egui::ScrollArea::vertical()
             .id_salt(("chimp_packages", self.kits[kit_index].id.0))
             .auto_shrink([false, false])
@@ -1953,7 +2087,8 @@ impl Baboon {
                             .and_then(Option::as_deref),
                         Some("SkeletalMesh" | "StaticMesh")
                     );
-                    if is_texture || is_mesh {
+                    let is_level = chimp_looks_like_level(&package.name);
+                    if is_texture || is_mesh || is_level {
                         response.context_menu(|ui| {
                             if is_texture && ui.button("Extract Texture2D as TIFF…").clicked() {
                                 extract_texture = Some(package.name.clone());
@@ -1961,6 +2096,9 @@ impl Baboon {
                             }
                             if is_mesh {
                                 chimp_mesh_export_menu(ui, &package.name, &mut extract_mesh);
+                            }
+                            if is_level {
+                                chimp_level_export_menu(ui, &package.name, &mut export_level);
                             }
                         });
                     }
@@ -1974,6 +2112,9 @@ impl Baboon {
         }
         if let Some((package, format)) = extract_mesh {
             self.begin_extract_chimp_mesh(kit_index, &package, format, ctx.clone());
+        }
+        if let Some((package, format)) = export_level {
+            self.begin_export_chimp_level(kit_index, &package, format);
         }
     }
 
@@ -2001,6 +2142,7 @@ impl Baboon {
         let mut open_package = None;
         let mut extract_texture = None;
         let mut extract_mesh = None;
+        let mut export_level = None;
         if groups.is_empty() && !self.kits[kit_index].chimp.type_indexing {
             ui.label(RichText::new("No matching Unreal packages.").color(subtle_dark()));
             return;
@@ -2043,6 +2185,13 @@ impl Baboon {
                                                 &mut extract_mesh,
                                             );
                                         }
+                                        if chimp_looks_like_level(&package.name) {
+                                            chimp_level_export_menu(
+                                                ui,
+                                                &package.name,
+                                                &mut export_level,
+                                            );
+                                        }
                                     });
                                 }
                                 if response.clicked() {
@@ -2060,6 +2209,9 @@ impl Baboon {
         }
         if let Some((package, format)) = extract_mesh {
             self.begin_extract_chimp_mesh(kit_index, &package, format, ctx.clone());
+        }
+        if let Some((package, format)) = export_level {
+            self.begin_export_chimp_level(kit_index, &package, format);
         }
     }
 
@@ -2340,6 +2492,7 @@ impl Baboon {
             close_all_but: None,
             extract_texture: None,
             extract_mesh: None,
+            export_level: None,
         };
         tree.ui(&mut behavior, ui);
         let close_requests = std::mem::take(&mut behavior.close_requests);
@@ -2348,6 +2501,7 @@ impl Baboon {
         let close_all_but = behavior.close_all_but.take();
         let extract_texture = behavior.extract_texture.take();
         let extract_mesh = behavior.extract_mesh.take();
+        let export_level = behavior.export_level.take();
         self.kits[kit_index].chimp.document_tree = Some(tree);
         self.kits[kit_index].chimp.sync_open_packages();
         if let Some(package) = focused {
@@ -2391,6 +2545,9 @@ impl Baboon {
         }
         if let Some((package, format)) = extract_mesh {
             self.begin_extract_chimp_mesh(kit_index, &package, format, ctx.clone());
+        }
+        if let Some((package, format)) = export_level {
+            self.begin_export_chimp_level(kit_index, &package, format);
         }
     }
 
@@ -3567,6 +3724,116 @@ impl Baboon {
         });
     }
 
+    /// Offer to export a World Partition level, once it is known to be one.
+    ///
+    /// The prompt comes before the folder dialog rather than after, because how
+    /// a level is split changes what the export *is* — a folder of regions or a
+    /// single file — and that is not a thing to discover afterwards.
+    pub(super) fn begin_export_chimp_level(
+        &mut self,
+        kit_index: usize,
+        package: &str,
+        format: ChimpLevelFormat,
+    ) {
+        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+            return;
+        };
+        let cells = chimp_level_cells(world, package);
+        if cells.is_empty() {
+            self.status = format!("{package} is not a World Partition level");
+            return;
+        }
+        let default = SegmentBudget::default();
+        self.chimp_level_export_prompt = Some(ChimpLevelExportPrompt {
+            kit: self.kits[kit_index].id,
+            package: package.to_owned(),
+            cells,
+            format,
+            // The fallback is a proxy built for hardware that cannot run
+            // Nanite; anyone exporting a level wants the geometry the game has.
+            nanite: true,
+            // A whole level in one USD does not import - measured - but a
+            // Blender master is placements and pointers and opens as one file.
+            split: matches!(format, ChimpLevelFormat::SegmentedUsd),
+            triangles: default.triangles,
+            placements: default.placements,
+        });
+    }
+
+    pub(super) fn start_chimp_level_export(
+        &mut self,
+        prompt: ChimpLevelExportPrompt,
+        ctx: egui::Context,
+    ) {
+        let Some(directory) = rfd::FileDialog::new()
+            .set_title(format!("Export {} as {}", prompt.name(), prompt.format_label()))
+            .pick_folder()
+        else {
+            return;
+        };
+        let Some(kit_index) = self.kits.iter().position(|kit| kit.id == prompt.kit) else {
+            return;
+        };
+        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+            return;
+        };
+        let world = world.clone();
+        let tx = self.tx.clone();
+        let kit = prompt.kit;
+        let name = prompt.name();
+        let budget = prompt.budget();
+        let detail = if prompt.nanite {
+            MeshDetail::Nanite
+        } else {
+            MeshDetail::Fallback
+        };
+        let ChimpLevelExportPrompt { cells, format, .. } = prompt;
+        self.status = format!("Reading {} cells of {name}…", cells.len());
+        thread::spawn(move || {
+            let total = cells.len();
+            let mut scene = LevelScene::default();
+            for (read, cell) in cells.iter().enumerate() {
+                if let Ok(document) = load_chimp_document(&world, cell) {
+                    read_cell_into(&document, &mut scene);
+                }
+                // Reading a level is minutes of work, so it says where it is.
+                if read % 64 == 0 || read + 1 == total {
+                    let _ = tx.send(WorkerMessage::ChimpLevelProgress {
+                        kit,
+                        done: read + 1,
+                        total,
+                    });
+                    ctx.request_repaint();
+                }
+            }
+            let result = match format {
+                ChimpLevelFormat::SegmentedUsd => {
+                    write_segmented_usd(&world, &scene, detail, &directory, &name, budget)
+                        .map_err(|error| error.to_string())
+                        .map(|report| {
+                            format!(
+                                "Exported {name}: {} meshes, {} placements, {} segment(s)",
+                                report.prototypes, report.instances, report.segments
+                            )
+                        })
+                }
+                ChimpLevelFormat::Blender => {
+                    write_blend_export(&world, &scene, detail, &directory, &name, budget)
+                        .map_err(|error| error.to_string())
+                        .map(|report| {
+                            format!(
+                                "Exported {name}: {} meshes, {} placements, {} master(s). \
+                                 Run build_blend.py in Blender to build them.",
+                                report.meshes, report.placements, report.segments
+                            )
+                        })
+                }
+            };
+            let _ = tx.send(WorkerMessage::ExportFinished(result));
+            ctx.request_repaint();
+        });
+    }
+
     fn begin_extract_chimp_mesh(
         &mut self,
         kit_index: usize,
@@ -4029,6 +4296,27 @@ fn chimp_mesh_export_menu(
             ChimpMeshFormat::Pskx,
         ] {
             if ui.button(format.label()).clicked() {
+                *requested = Some((package.to_owned(), format));
+                ui.close_menu();
+            }
+        }
+    });
+}
+
+/// Offered only where it means something: a package with `_Generated_` cells
+/// beside it is a World Partition level, and everything else is one package.
+fn chimp_level_export_menu(
+    ui: &mut Ui,
+    package: &str,
+    requested: &mut Option<(String, ChimpLevelFormat)>,
+) {
+    ui.menu_button("Export level", |ui| {
+        for format in [ChimpLevelFormat::SegmentedUsd, ChimpLevelFormat::Blender] {
+            if ui
+                .button(format.label())
+                .on_hover_text(format.summary())
+                .clicked()
+            {
                 *requested = Some((package.to_owned(), format));
                 ui.close_menu();
             }
@@ -6747,6 +7035,56 @@ mod tests {
             return (0.0, 0.0);
         }
         (signed / count as f32, absolute / count as f32)
+    }
+
+    #[test]
+    fn a_persistent_level_is_recognised_by_its_folder() {
+        // Unreal names a persistent level after the folder holding it, which is
+        // what the menu test keys on before the cells are searched for.
+        assert!(chimp_looks_like_level("/Game/Levels/Halo1/Solo/C10/C10"));
+        assert!(chimp_looks_like_level("/Game/Levels/Halo1/Solo/c10/C10"));
+        // A cell, a mesh, and anything else is one package.
+        assert!(!chimp_looks_like_level(
+            "/Game/Levels/Halo1/Solo/C10/_Generated_/043ATWPYEEJ"
+        ));
+        assert!(!chimp_looks_like_level("/Game/Meshes/Rocks/SM_Rock_A"));
+        assert!(!chimp_looks_like_level("/Game"));
+        assert!(!chimp_looks_like_level(""));
+    }
+
+    #[test]
+    fn an_export_names_its_files_after_the_level() {
+        let prompt = ChimpLevelExportPrompt {
+            kit: KitId(0),
+            package: "/Game/Levels/Halo1/Solo/C10/C10".to_owned(),
+            cells: Vec::new(),
+            format: ChimpLevelFormat::SegmentedUsd,
+            nanite: true,
+            split: true,
+            triangles: 30_000_000,
+            placements: 50_000,
+        };
+        assert_eq!(prompt.name(), "C10");
+        assert_eq!(prompt.budget().triangles, 30_000_000);
+        assert_eq!(prompt.budget().placements, 50_000);
+    }
+
+    #[test]
+    fn not_splitting_is_one_segment_rather_than_another_exporter() {
+        // Turning the split off has to go down the same path, or there are two
+        // ways to write a level and only one of them stays tested.
+        let prompt = ChimpLevelExportPrompt {
+            kit: KitId(0),
+            package: "/Game/Levels/X/Small/Small".to_owned(),
+            cells: Vec::new(),
+            format: ChimpLevelFormat::Blender,
+            nanite: false,
+            split: false,
+            triangles: 30_000_000,
+            placements: 50_000,
+        };
+        assert_eq!(prompt.budget().triangles, usize::MAX);
+        assert_eq!(prompt.budget().placements, usize::MAX);
     }
 
     #[test]
