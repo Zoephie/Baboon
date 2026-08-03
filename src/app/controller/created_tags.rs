@@ -54,13 +54,6 @@ pub(in crate::app) struct CreatedTagRecord {
 }
 
 impl CreatedTagRecord {
-    /// The browser key this record addresses. Built exactly as the mount builds
-    /// it (`src/source/loading.rs`), so a record and a live entry agree by
-    /// construction rather than by coincidence.
-    pub(in crate::app) fn tag_key(&self) -> String {
-        format!("ublock:{}:{}", self.chunk_label, self.ubulk_path)
-    }
-
     fn addresses(&self, utoc_path: &Path, ubulk_path: &str) -> bool {
         Path::new(&self.utoc_path) == utoc_path
             && self.ubulk_path.eq_ignore_ascii_case(ubulk_path)
@@ -142,23 +135,6 @@ impl CreatedTagLedger {
 
     pub(in crate::app) fn is_empty(&self) -> bool {
         self.tags.is_empty()
-    }
-
-    /// Browser keys for the copies that live in `containers`.
-    ///
-    /// Scoped to the containers actually mounted, so a record written for
-    /// another install of the game cannot make an unrelated tag look deletable
-    /// just because its pack label and path happen to match.
-    pub(in crate::app) fn keys_in(&self, containers: &[crate::source::MountedContainer]) -> HashSet<String> {
-        self.tags
-            .iter()
-            .filter(|record| {
-                containers
-                    .iter()
-                    .any(|container| container.utoc_path == Path::new(&record.utoc_path))
-            })
-            .map(CreatedTagRecord::tag_key)
-            .collect()
     }
 }
 
@@ -277,18 +253,6 @@ mod tests {
         assert!(ledger.forget(Path::new(utoc), ubulk));
         assert!(!ledger.forget(Path::new(utoc), ubulk));
         assert!(ledger.is_empty());
-    }
-
-    #[test]
-    fn a_record_names_the_key_the_mount_builds() {
-        let record = record(
-            "C:/Game/Paks/pakchunk240-WinGDK.utoc",
-            "Meteorite/Content/Tags/objects/copy-biped.ubulk",
-        );
-        assert_eq!(
-            record.tag_key(),
-            "ublock:pakchunk240-WinGDK:Meteorite/Content/Tags/objects/copy-biped.ubulk"
-        );
     }
 
     fn write_test_toc(path: &Path, entry_count: u32) {

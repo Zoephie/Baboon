@@ -1970,6 +1970,110 @@ impl Baboon {
         }
     }
 
+    pub(super) fn draw_chimp_mesh_texture_prompt(&mut self, ctx: &egui::Context) {
+        let Some(prompt) = self.chimp_mesh_texture_prompt.as_ref() else {
+            return;
+        };
+        let package = prompt.package.clone();
+        let format_label = prompt.format_label();
+        let mesh_path = prompt.path.display().to_string();
+        let texture_directory = prompt.texture_directory().display().to_string();
+        let subject = prompt.texture_subject();
+        let mut open = true;
+        let mut with_textures: Option<ChimpTextureScope> = None;
+        let mut cancel = false;
+        egui::Window::new("Export textures with this mesh?")
+            .id(egui::Id::new("chimp_mesh_texture_prompt"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(600.0)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(
+                    RichText::new(format!("{package} as {format_label}")).color(text_dark()),
+                );
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(&mesh_path)
+                        .color(subtle_dark())
+                        .monospace()
+                        .small(),
+                );
+                ui.add_space(10.0);
+                ui.label(
+                    RichText::new(
+                        "Baboon can also export the textures this mesh's materials reference, \
+                         as TIFF:",
+                    )
+                    .color(text_dark()),
+                );
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(&texture_directory)
+                        .color(subtle_dark())
+                        .monospace()
+                        .small(),
+                );
+                ui.add_space(6.0);
+                // A material graph is far larger than it looks: exporting one
+                // weapon pulled 49 textures, most of them shared inputs the
+                // whole game uses. Said plainly and up front, because the cost
+                // only becomes obvious once the folder is full.
+                ui.label(
+                    RichText::new(
+                        "Exporting all textures can produce far more than you expect. A \
+                         material graph reaches every shared input it touches — master \
+                         materials, detail maps, lookup tables — so a single weapon can run to \
+                         40–50 files, and decoding them all takes a while.",
+                    )
+                    .color(egui::Color32::from_rgb(210, 120, 90)),
+                );
+                if let Some(subject) = &subject {
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new(format!(
+                            "This model's textures are the ones named after {subject} — usually \
+                             its diffuse, normal, ORM, emissive and decals."
+                        ))
+                        .color(subtle_dark())
+                        .small(),
+                    );
+                }
+                ui.add_space(10.0);
+                ui.horizontal(|ui| {
+                    if let Some(subject) = &subject
+                        && ui
+                            .button("Mesh and this model's textures")
+                            .on_hover_text(format!("Only textures whose name contains {subject}"))
+                            .clicked()
+                    {
+                        with_textures = Some(ChimpTextureScope::Matching);
+                    }
+                    if ui
+                        .button("Mesh and all textures")
+                        .on_hover_text("Every texture the materials reference, shared ones included")
+                        .clicked()
+                    {
+                        with_textures = Some(ChimpTextureScope::All);
+                    }
+                    if ui.button("Mesh only").clicked() {
+                        with_textures = Some(ChimpTextureScope::None);
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+        if let Some(with_textures) = with_textures {
+            if let Some(prompt) = self.chimp_mesh_texture_prompt.take() {
+                self.start_chimp_mesh_export(prompt, with_textures, ctx.clone());
+            }
+        } else if cancel || !open {
+            self.chimp_mesh_texture_prompt = None;
+        }
+    }
+
     pub(super) fn draw_operation_notice_window(&mut self, ctx: &egui::Context) {
         let Some(notice) = self.operation_notice.as_ref() else {
             return;

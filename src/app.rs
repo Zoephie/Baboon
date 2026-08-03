@@ -236,6 +236,8 @@ pub struct Baboon {
     delete_confirm: Option<DeleteConfirm>,
     /// Result of the last container write, shown until dismissed.
     operation_notice: Option<OperationNotice>,
+    /// A Chimp mesh export waiting on the choice to export its textures too.
+    chimp_mesh_texture_prompt: Option<ChimpMeshTexturePrompt>,
     /// What the last mod exported in this session was called, so exporting
     /// again offers the same name and replaces that mod's files rather than
     /// making the user retype it. Deliberately not persisted: it describes what
@@ -492,6 +494,7 @@ impl Baboon {
             container_duplicate_running: HashSet::new(),
             delete_confirm: None,
             operation_notice: None,
+            chimp_mesh_texture_prompt: None,
             last_mod_export_name: None,
             container_delete_running: HashSet::new(),
             created_tags: CreatedTagLedger::load(),

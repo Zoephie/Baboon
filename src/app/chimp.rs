@@ -41,6 +41,38 @@ pub(super) enum KitSurface {
     Chimp,
 }
 
+/// A mesh export waiting on the answer to "textures as well?".
+///
+/// The destination is already chosen at this point, so the choice can be made
+/// against the folder the textures would actually appear in.
+pub(super) struct ChimpMeshTexturePrompt {
+    pub(super) kit: KitId,
+    pub(super) package: String,
+    /// Read through [`ChimpMeshTexturePrompt::format_label`]; the format itself
+    /// is Chimp's own business.
+    format: ChimpMeshFormat,
+    pub(super) path: PathBuf,
+}
+
+impl ChimpMeshTexturePrompt {
+    /// Where the textures would be written.
+    pub(super) fn texture_directory(&self) -> PathBuf {
+        self.path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(CHIMP_TEXTURE_DIR)
+    }
+
+    pub(super) fn format_label(&self) -> &'static str {
+        self.format.label()
+    }
+
+    /// The word "matching textures" would filter on, if one can be derived.
+    pub(super) fn texture_subject(&self) -> Option<String> {
+        chimp_mesh_texture_subject(&self.package)
+    }
+}
+
 pub(super) enum ChimpMount {
     Idle,
     Loading,
@@ -786,12 +818,23 @@ fn decode_chimp_document(
     Ok(document)
 }
 
+/// Whether an imported package is one of the mesh's materials.
+///
+/// Recognised by the `M_`/`MI_` prefix the game's own content uses. A mesh's
+/// import list carries far more than its materials, and this is the same rule
+/// the material list written into an exported mesh already relies on — so the
+/// textures exported alongside a mesh belong to the materials named in it.
+fn is_chimp_material_package(path: &str) -> bool {
+    let leaf = path.rsplit('/').next().unwrap_or(path);
+    leaf.starts_with("MI_") || leaf.starts_with("M_")
+}
+
 fn chimp_material_names(header: &FZenPackageHeader) -> Vec<String> {
     header
         .imported_package_names
         .iter()
+        .filter(|path| is_chimp_material_package(path))
         .map(|path| path.rsplit('/').next().unwrap_or(path).to_owned())
-        .filter(|name| name.starts_with("MI_") || name.starts_with("M_"))
         .collect()
 }
 
@@ -3521,7 +3564,7 @@ impl Baboon {
         kit_index: usize,
         package: &str,
         format: ChimpMeshFormat,
-        ctx: egui::Context,
+        _ctx: egui::Context,
     ) {
         let suggested = format!(
             "{}.{}",
@@ -3536,19 +3579,166 @@ impl Baboon {
         else {
             return;
         };
+        if !matches!(self.kits[kit_index].chimp.mount, ChimpMount::Ready(_)) {
+            return;
+        }
+        // Asked once the destination is known, so the prompt can say exactly
+        // where the textures would land.
+        self.chimp_mesh_texture_prompt = Some(ChimpMeshTexturePrompt {
+            kit: self.kits[kit_index].id,
+            package: package.to_owned(),
+            format,
+            path,
+        });
+    }
+
+    /// Run a mesh export that has been through the texture prompt.
+    pub(super) fn start_chimp_mesh_export(
+        &mut self,
+        prompt: ChimpMeshTexturePrompt,
+        textures: ChimpTextureScope,
+        ctx: egui::Context,
+    ) {
+        let Some(kit_index) = self.kit_index(prompt.kit) else {
+            self.status = "The workspace this export came from is closed".to_owned();
+            return;
+        };
         let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
             return;
         };
         let world = world.clone();
-        let package = package.to_owned();
+        let ChimpMeshTexturePrompt {
+            package,
+            format,
+            path,
+            ..
+        } = prompt;
         let tx = self.tx.clone();
         self.status = format!("Extracting {package} as {}…", format.label());
         thread::spawn(move || {
-            let result = write_chimp_mesh(&world, &package, &path, format);
+            let result = write_chimp_mesh(&world, &package, &path, format, textures);
             let _ = tx.send(WorkerMessage::ExportFinished(result));
             ctx.request_repaint();
         });
     }
+}
+
+/// Where a mesh's textures are written, relative to the mesh itself.
+pub(super) const CHIMP_TEXTURE_DIR: &str = "textures2d";
+
+/// How much of a mesh's texture set to export alongside it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ChimpTextureScope {
+    None,
+    /// Only textures whose name carries the mesh's own subject.
+    Matching,
+    /// Everything the materials reference, shared master inputs included.
+    All,
+}
+
+/// The word a mesh's own textures are expected to carry, taken from its name.
+///
+/// Materials reach a long way — a weapon's material graph pulls in the shared
+/// master inputs, detail maps and lookup tables the whole game uses, so
+/// exporting everything a mesh's materials touch runs to dozens of textures when
+/// the user wanted the handful belonging to this model.
+///
+/// The subject is the first meaningful segment of the mesh's name:
+/// `SM_AssaultRifle_GunBody_M_Default` is about `assaultrifle`, and its own
+/// textures are the ones that say so. A leading segment of two characters or
+/// fewer is an asset-type prefix (`SM_`, `SK_`), not the subject, so it is
+/// skipped.
+pub(super) fn chimp_mesh_texture_subject(package: &str) -> Option<String> {
+    let leaf = package.rsplit('/').next().unwrap_or(package).to_lowercase();
+    let mut segments = leaf.split('_').filter(|segment| !segment.is_empty());
+    let first = segments.next()?;
+    let subject = if first.len() <= 2 {
+        segments.next().unwrap_or(first)
+    } else {
+        first
+    };
+    (!subject.is_empty()).then(|| subject.to_owned())
+}
+
+/// Every Texture2D package reachable from a mesh's materials.
+///
+/// A mesh does not reference textures itself: it references materials, and the
+/// materials reference the textures. Materials are recognised the same way the
+/// material list written into the mesh file recognises them, by the `M_`/`MI_`
+/// prefix the game's own content uses, so the textures exported alongside a mesh
+/// are the ones belonging to the materials named in it.
+///
+/// The result is deduplicated and keeps its discovery order, so a texture shared
+/// by several materials is written once.
+fn chimp_mesh_texture_packages(world: &World, header: &FZenPackageHeader) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut textures = Vec::new();
+    for material in header
+        .imported_package_names
+        .iter()
+        .filter(|path| is_chimp_material_package(path))
+    {
+        let Ok(document) = load_chimp_document(world, material) else {
+            continue;
+        };
+        for candidate in &document.header.imported_package_names {
+            if seen.insert(candidate.clone()) {
+                textures.push(candidate.clone());
+            }
+        }
+    }
+    textures
+}
+
+/// Write every texture a mesh's materials reference into `directory`.
+///
+/// Candidates are whatever the materials import, which includes plenty that are
+/// not textures at all — an import that does not resolve to a decodable
+/// Texture2D is simply not one, and is skipped rather than reported as a
+/// failure. Anything that *is* a texture and still could not be written is
+/// collected, because that is a real loss the caller should hear about.
+fn write_chimp_mesh_textures(
+    world: &World,
+    header: &FZenPackageHeader,
+    directory: &Path,
+    subject: Option<&str>,
+) -> (usize, Vec<String>) {
+    let packages = chimp_mesh_texture_packages(world, header);
+    let mut written = 0usize;
+    let mut failures = Vec::new();
+    let mut created = false;
+    for package in packages {
+        let leaf = package.rsplit('/').next().unwrap_or("texture");
+        // Filtered before loading: decoding a texture only to discard it is the
+        // expensive half of the export.
+        if let Some(subject) = subject
+            && !leaf.to_lowercase().contains(subject)
+        {
+            continue;
+        }
+        let Ok(document) = load_chimp_document(world, &package) else {
+            continue;
+        };
+        if document.texture_previews.is_empty() {
+            continue;
+        }
+        if !created {
+            if let Err(error) = fs::create_dir_all(directory) {
+                failures.push(format!(
+                    "Could not create {}: {error}",
+                    directory.display()
+                ));
+                return (written, failures);
+            }
+            created = true;
+        }
+        let output = directory.join(format!("{leaf}.tif"));
+        match write_chimp_texture_tiff(world, &package, &output) {
+            Ok(_) => written += 1,
+            Err(error) => failures.push(error),
+        }
+    }
+    (written, failures)
 }
 
 fn write_chimp_texture_tiff(world: &World, package: &str, output: &Path) -> Result<String, String> {
@@ -3572,6 +3762,7 @@ fn write_chimp_mesh(
     package: &str,
     output: &Path,
     format: ChimpMeshFormat,
+    textures: ChimpTextureScope,
 ) -> Result<String, String> {
     let document = load_chimp_document(world, package)?;
     let kind = document
@@ -3646,11 +3837,48 @@ fn write_chimp_mesh(
     writer
         .flush()
         .map_err(|error| format!("Could not finish {}: {error}", output.display()))?;
-    Ok(format!(
+    drop(writer);
+    let mut message = format!(
         "Extracted {package} as {} to {}",
         format.label(),
         output.display()
-    ))
+    );
+    if textures != ChimpTextureScope::None {
+        let directory = output
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(CHIMP_TEXTURE_DIR);
+        let subject = match textures {
+            ChimpTextureScope::Matching => chimp_mesh_texture_subject(package),
+            _ => None,
+        };
+        // The mesh is already written, so a texture that fails is reported
+        // beside a successful export rather than turning the whole thing into a
+        // failure the user has to redo.
+        let (written, failures) =
+            write_chimp_mesh_textures(world, &document.header, &directory, subject.as_deref());
+        let scope = match &subject {
+            Some(subject) => format!(" matching \"{subject}\""),
+            None => String::new(),
+        };
+        message.push_str(&match (written, failures.len()) {
+            (0, 0) => format!(
+                ", but no texture{scope} could be read from its materials — nothing was written \
+                 to {}",
+                directory.display()
+            ),
+            (_, 0) => format!(
+                ", with {written} texture(s){scope} in {}",
+                directory.display()
+            ),
+            (_, count) => format!(
+                ", with {written} texture(s){scope} in {} — {count} failed: {}",
+                directory.display(),
+                failures.join("; ")
+            ),
+        });
+    }
+    Ok(message)
 }
 
 /// Canonical Unreal skeletal-mesh to JMS conversion shared by Chimp's direct
@@ -6305,6 +6533,78 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_mesh_import_is_a_material_by_the_prefix_the_game_uses() {
+        assert!(is_chimp_material_package("/Game/Art/Materials/MI_Brute_Body"));
+        assert!(is_chimp_material_package("/Game/Art/Materials/M_Master"));
+        // Everything else a mesh imports - skeletons, physics, engine content,
+        // and the textures themselves - is not a material.
+        assert!(!is_chimp_material_package("/Game/Art/Textures/T_Brute_D"));
+        assert!(!is_chimp_material_package("/Game/Art/SK_Brute"));
+        assert!(!is_chimp_material_package("/Script/Engine"));
+        // The prefix is on the leaf, not anywhere in the path.
+        assert!(!is_chimp_material_package("/Game/M_Things/SK_Brute"));
+    }
+
+    #[test]
+    fn a_mesh_name_names_the_model_its_textures_belong_to() {
+        // The asset-type prefix is not the subject; the segment after it is.
+        assert_eq!(
+            chimp_mesh_texture_subject("/Game/Art/SM_AssaultRifle_GunBody_M_Default").as_deref(),
+            Some("assaultrifle")
+        );
+        assert_eq!(
+            chimp_mesh_texture_subject("/Game/Art/SK_Brute").as_deref(),
+            Some("brute")
+        );
+        // A name that leads with its subject keeps it.
+        assert_eq!(
+            chimp_mesh_texture_subject("/Game/Art/AssaultRifle_Body").as_deref(),
+            Some("assaultrifle")
+        );
+        assert_eq!(
+            chimp_mesh_texture_subject("/Game/Art/Warthog").as_deref(),
+            Some("warthog")
+        );
+        // A prefix and nothing else still has to answer something, or the
+        // filter would match every texture in the game.
+        assert_eq!(
+            chimp_mesh_texture_subject("/Game/Art/SM_").as_deref(),
+            Some("sm")
+        );
+        assert_eq!(chimp_mesh_texture_subject("").as_deref(), None);
+    }
+
+    #[test]
+    fn the_subject_matches_a_models_textures_and_not_the_shared_ones() {
+        let subject = chimp_mesh_texture_subject("/Game/Art/SM_AssaultRifle_GunBody_M_Default")
+            .expect("subject");
+        let matches = |leaf: &str| leaf.to_lowercase().contains(&subject);
+        assert!(matches("T_AssaultRifle_GunBody_D"));
+        assert!(matches("T_assaultrifle_ORM"));
+        assert!(matches("T_AssaultRifle_Decal_01"));
+        // The shared master inputs a material graph drags in are exactly what
+        // this is here to leave out.
+        assert!(!matches("T_MasterNoise_01"));
+        assert!(!matches("T_Default_Normal"));
+        assert!(!matches("T_Brute_D"));
+    }
+
+    #[test]
+    fn textures_land_beside_the_mesh_they_belong_to() {
+        let prompt = ChimpMeshTexturePrompt {
+            kit: KitId(1),
+            package: "/Game/Art/SK_Brute".to_owned(),
+            format: ChimpMeshFormat::Pskx,
+            path: PathBuf::from("C:/exports/brute.pskx"),
+        };
+        assert_eq!(
+            prompt.texture_directory(),
+            PathBuf::from("C:/exports").join(CHIMP_TEXTURE_DIR)
+        );
+        assert_eq!(prompt.format_label(), "ActorX PSKX");
+    }
+
+    #[test]
     fn chimp_discard_uses_dirty_document_keys_for_prompts() {
         assert_eq!(
             sorted_unique_dirty_chimp_keys([
@@ -6947,7 +7247,7 @@ mod tests {
                     uuid::Uuid::new_v4(),
                     format.extension()
                 ));
-                write_chimp_mesh(&world, &package, &output, format).unwrap();
+                write_chimp_mesh(&world, &package, &output, format, ChimpTextureScope::None).unwrap();
                 let bytes = std::fs::read(&output).unwrap();
                 match format {
                     ChimpMeshFormat::Jms => assert!(bytes.starts_with(b";### VERSION ###")),
@@ -7301,7 +7601,14 @@ mod tests {
             "baboon-spiritdropship-{}.pskx",
             uuid::Uuid::new_v4()
         ));
-        write_chimp_mesh(&world, &package.name, &output, ChimpMeshFormat::Pskx).unwrap();
+        write_chimp_mesh(
+            &world,
+            &package.name,
+            &output,
+            ChimpMeshFormat::Pskx,
+            ChimpTextureScope::None,
+        )
+        .unwrap();
         let bytes = std::fs::read(&output).unwrap();
         let face_chunk = bytes
             .windows(8)
