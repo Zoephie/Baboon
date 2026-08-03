@@ -154,6 +154,7 @@ enum ChimpTreeClick {
     Package(String),
     ExtractTexture(String),
     ExtractMesh(String, ChimpMeshFormat),
+    ExportLevel(String, ChimpLevelFormat),
     File(String),
 }
 
@@ -249,6 +250,36 @@ fn prim_safe_name(raw: &str) -> String {
         "level".to_owned()
     } else {
         name
+    }
+}
+
+/// What a package's context menu offers.
+///
+/// One answer, used both to decide whether to attach a menu at all and to decide
+/// what goes in it. The browser draws packages in four places, and when the two
+/// decisions were written out separately at each of them they drifted: the level
+/// entry was added to every menu body, but the guard on two of the sites still
+/// only admitted textures and meshes, so on those the entry sat inside a menu
+/// that was never built. A menu that offers nothing must not open, and anything
+/// it would offer must open it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ChimpPackageActions {
+    texture: bool,
+    mesh: bool,
+    level: bool,
+}
+
+impl ChimpPackageActions {
+    fn of(package: &str, kind: Option<&str>) -> Self {
+        Self {
+            texture: kind == Some("Texture2D"),
+            mesh: matches!(kind, Some("SkeletalMesh" | "StaticMesh")),
+            level: chimp_looks_like_level(package),
+        }
+    }
+
+    fn any(self) -> bool {
+        self.texture || self.mesh || self.level
     }
 }
 
@@ -2073,31 +2104,26 @@ impl Baboon {
                     } else {
                         response
                     };
-                    let is_texture = self.kits[kit_index]
-                        .chimp
-                        .package_types
-                        .get(indices[row])
-                        .and_then(Option::as_deref)
-                        == Some("Texture2D");
-                    let is_mesh = matches!(
+                    let actions = ChimpPackageActions::of(
+                        &package.name,
                         self.kits[kit_index]
                             .chimp
                             .package_types
                             .get(indices[row])
                             .and_then(Option::as_deref),
-                        Some("SkeletalMesh" | "StaticMesh")
                     );
-                    let is_level = chimp_looks_like_level(&package.name);
-                    if is_texture || is_mesh || is_level {
+                    if actions.any() {
                         response.context_menu(|ui| {
-                            if is_texture && ui.button("Extract Texture2D as TIFF…").clicked() {
+                            if actions.texture
+                                && ui.button("Extract Texture2D as TIFF…").clicked()
+                            {
                                 extract_texture = Some(package.name.clone());
                                 ui.close_menu();
                             }
-                            if is_mesh {
+                            if actions.mesh {
                                 chimp_mesh_export_menu(ui, &package.name, &mut extract_mesh);
                             }
-                            if is_level {
+                            if actions.level {
                                 chimp_level_export_menu(ui, &package.name, &mut export_level);
                             }
                         });
@@ -2167,25 +2193,24 @@ impl Baboon {
                                         label,
                                     )
                                     .on_hover_text(&package.name);
-                                if kind == "Texture2D"
-                                    || kind == "SkeletalMesh"
-                                    || kind == "StaticMesh"
-                                {
+                                let actions =
+                                    ChimpPackageActions::of(&package.name, Some(kind.as_str()));
+                                if actions.any() {
                                     response.context_menu(|ui| {
-                                        if kind == "Texture2D"
+                                        if actions.texture
                                             && ui.button("Extract Texture2D as TIFF…").clicked()
                                         {
                                             extract_texture = Some(package.name.clone());
                                             ui.close_menu();
                                         }
-                                        if kind == "SkeletalMesh" || kind == "StaticMesh" {
+                                        if actions.mesh {
                                             chimp_mesh_export_menu(
                                                 ui,
                                                 &package.name,
                                                 &mut extract_mesh,
                                             );
                                         }
-                                        if chimp_looks_like_level(&package.name) {
+                                        if actions.level {
                                             chimp_level_export_menu(
                                                 ui,
                                                 &package.name,
@@ -2363,6 +2388,9 @@ impl Baboon {
             }
             Some(ChimpTreeClick::ExtractTexture(package)) => {
                 self.begin_extract_chimp_texture_tiff(kit_index, &package, ctx.clone());
+            }
+            Some(ChimpTreeClick::ExportLevel(package, format)) => {
+                self.begin_export_chimp_level(kit_index, &package, format);
             }
             Some(ChimpTreeClick::ExtractMesh(package, format)) => {
                 self.begin_extract_chimp_mesh(kit_index, &package, format, ctx.clone());
@@ -4228,18 +4256,14 @@ fn draw_chimp_folder_node(
             response
         };
         let package_type = package_types.get(leaf.package).and_then(Option::as_deref);
-        if matches!(
-            package_type,
-            Some("Texture2D" | "SkeletalMesh" | "StaticMesh")
-        ) {
+        let actions = ChimpPackageActions::of(&package.name, package_type);
+        if actions.any() {
             response.context_menu(|ui| {
-                if package_type == Some("Texture2D")
-                    && ui.button("Extract Texture2D as TIFF…").clicked()
-                {
+                if actions.texture && ui.button("Extract Texture2D as TIFF…").clicked() {
                     clicked = Some(ChimpTreeClick::ExtractTexture(package.name.clone()));
                     ui.close_menu();
                 }
-                if matches!(package_type, Some("SkeletalMesh" | "StaticMesh")) {
+                if actions.mesh {
                     ui.menu_button("Extract mesh", |ui| {
                         for format in [
                             ChimpMeshFormat::Jms,
@@ -4253,6 +4277,13 @@ fn draw_chimp_folder_node(
                             }
                         }
                     });
+                }
+                if actions.level {
+                    let mut requested = None;
+                    chimp_level_export_menu(ui, &package.name, &mut requested);
+                    if let Some((package, format)) = requested {
+                        clicked = Some(ChimpTreeClick::ExportLevel(package, format));
+                    }
                 }
             });
         }
@@ -7035,6 +7066,55 @@ mod tests {
             return (0.0, 0.0);
         }
         (signed / count as f32, absolute / count as f32)
+    }
+
+    #[test]
+    fn a_level_offers_a_menu_wherever_it_is_browsed() {
+        // The bug this exists for: the level entry was added to every menu
+        // body, but two of the four sites still only attached a menu for
+        // textures and meshes - so on those the entry sat inside a menu that
+        // was never built, and right-clicking a level did nothing at all.
+        // A level is a `World`, which is neither.
+        let level = ChimpPackageActions::of("/Game/Levels/Halo1/Solo/C10/C10", Some("World"));
+        assert!(level.level);
+        assert!(level.any(), "a level must open a menu");
+        assert!(!level.texture && !level.mesh);
+    }
+
+    #[test]
+    fn anything_the_menu_would_offer_opens_it() {
+        // The invariant that keeps the guard and the contents from drifting:
+        // `any()` is true exactly when at least one entry would be drawn.
+        for (package, kind) in [
+            ("/Game/Levels/Halo1/Solo/C10/C10", Some("World")),
+            ("/Game/Meshes/SM_Rock", Some("StaticMesh")),
+            ("/Game/Characters/SK_Elite", Some("SkeletalMesh")),
+            ("/Game/Textures/T_Bark", Some("Texture2D")),
+            ("/Game/Levels/Halo1/Solo/C10/_Generated_/043ATWPYEEJ", Some("World")),
+            ("/Game/Blueprints/BP_Door", Some("Blueprint")),
+            ("/Game/Misc/Thing", None),
+        ] {
+            let actions = ChimpPackageActions::of(package, kind);
+            assert_eq!(
+                actions.any(),
+                actions.texture || actions.mesh || actions.level,
+                "{package} would draw entries into a menu that does not open"
+            );
+        }
+    }
+
+    #[test]
+    fn a_package_with_nothing_to_offer_opens_no_menu() {
+        assert!(!ChimpPackageActions::of("/Game/Blueprints/BP_Door", Some("Blueprint")).any());
+        // A cell is a World too, and there are 2,334 of them: offering to
+        // export each one as a level would be noise.
+        assert!(
+            !ChimpPackageActions::of(
+                "/Game/Levels/Halo1/Solo/C10/_Generated_/043ATWPYEEJ",
+                Some("World")
+            )
+            .any()
+        );
     }
 
     #[test]
