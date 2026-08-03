@@ -6,6 +6,9 @@
 
 use super::*;
 use std::collections::BTreeMap;
+
+mod level;
+pub(in crate::app) use level::{LevelScene, read_cell_into};
 use std::io::{Cursor, Write};
 
 use blam_tags::iostore::asset::texture2d::decode_texture2d_preview;
