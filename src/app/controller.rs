@@ -538,8 +538,12 @@ impl Baboon {
                 WorkerMessage::ContainerDeleteFinished { stamp, result } => {
                     self.handle_container_delete_finished(stamp, result)
                 }
-                WorkerMessage::ChimpLevelProgress { kit, done, total } => self
-                    .handle_chimp_level_progress(kit, done, total),
+                WorkerMessage::ChimpLevelProgress {
+                    kit,
+                    phase,
+                    done,
+                    total,
+                } => self.handle_chimp_level_progress(kit, phase, done, total),
                 WorkerMessage::ExportFinished(result) => self.handle_export_finished(result),
                 WorkerMessage::PokePreflightFinished { kit, key, result } => {
                     self.handle_poke_preflight(kit, key, result);

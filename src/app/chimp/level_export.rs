@@ -326,6 +326,16 @@ fn write_instance_referencing(
     let _ = writeln!(usd, "    }}");
 }
 
+/// Which part of a write is running, for callers that show progress.
+///
+/// Named here rather than taking the UI's phase type, so the exporter does not
+/// depend on the thing displaying it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app) enum ExportStage {
+    Meshes,
+    Segments,
+}
+
 /// What a segmented export produced.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(in crate::app) struct SegmentedExportReport {
@@ -362,6 +372,7 @@ pub(in crate::app) fn write_segmented_usd(
     directory: &Path,
     name: &str,
     budget: SegmentBudget,
+    progress: &dyn Fn(ExportStage, usize, usize),
 ) -> std::io::Result<SegmentedExportReport> {
     std::fs::create_dir_all(directory)?;
     let mut report = SegmentedExportReport::default();
@@ -378,7 +389,8 @@ pub(in crate::app) fn write_segmented_usd(
         let mut library = BufWriter::new(File::create(&library_path)?);
         write_stage_header(&mut library);
         write_prototypes_open(&mut library);
-        for package in &scene.meshes {
+        for (index, package) in scene.meshes.iter().enumerate() {
+            progress(ExportStage::Meshes, index, scene.meshes.len());
             match load_prototype(world, package, detail, &mut taken) {
                 Some(prototype) => {
                     let triangles = prototype.mesh.indices.len() / 3;
@@ -434,6 +446,7 @@ pub(in crate::app) fn write_segmented_usd(
     let segments = segment(&positions, &mesh_triangles, budget);
     report.segments = segments.len();
     for (number, piece) in segments.iter().enumerate() {
+        progress(ExportStage::Segments, number, segments.len());
         if piece.over_budget {
             report.over_budget += 1;
         }
@@ -477,6 +490,7 @@ pub(in crate::app) fn write_blend_export(
     directory: &Path,
     name: &str,
     budget: SegmentBudget,
+    progress: &dyn Fn(ExportStage, usize, usize),
 ) -> std::io::Result<BlendExportReport> {
     std::fs::create_dir_all(directory)?;
     let mut report = BlendExportReport::default();
@@ -488,7 +502,8 @@ pub(in crate::app) fn write_blend_export(
     let mut mesh_triangles: Vec<usize> = Vec::with_capacity(scene.meshes.len());
     let data_path = directory.join(format!("{name}.baboonlevel"));
     let mut writer = BlendWriter::create(&data_path, scene.meshes.len(), scene.placements.len())?;
-    for package in &scene.meshes {
+    for (index, package) in scene.meshes.iter().enumerate() {
+        progress(ExportStage::Meshes, index, scene.meshes.len());
         match load_prototype(world, package, detail, &mut taken) {
             Some(prototype) => {
                 writer.write_mesh(BlendMesh {
@@ -982,7 +997,7 @@ mod real_data_tests {
         let mut scene = LevelScene::default();
         // A slice, not the level: this runs in the ordinary test suite.
         for cell in cells.iter().step_by(97) {
-            if let Ok(document) = load_chimp_document(&world, cell) {
+            if let Ok(document) = load_chimp_package(&world, cell) {
                 read_cell_into(&document, &mut scene);
             }
         }
@@ -1046,7 +1061,7 @@ mod real_data_tests {
 
         let mut scene = LevelScene::default();
         for cell in cells.iter().step_by(211) {
-            if let Ok(document) = load_chimp_document(&world, cell) {
+            if let Ok(document) = load_chimp_package(&world, cell) {
                 read_cell_into(&document, &mut scene);
             }
         }
@@ -1102,7 +1117,7 @@ mod segmented_tests {
 
         let mut scene = LevelScene::default();
         for cell in cells.iter().step_by(97) {
-            if let Ok(document) = load_chimp_document(&world, cell) {
+            if let Ok(document) = load_chimp_package(&world, cell) {
                 read_cell_into(&document, &mut scene);
             }
         }
@@ -1120,6 +1135,7 @@ mod segmented_tests {
             &directory,
             "c10",
             budget,
+            &|_, _, _| {},
         )
         .expect("write the segmented export");
 
@@ -1338,7 +1354,7 @@ mod census {
         // be scaled to the level by cell count.
         let mut scene = LevelScene::default();
         for (read, cell) in cells.iter().enumerate() {
-            if let Ok(document) = load_chimp_document(world, cell) {
+            if let Ok(document) = load_chimp_package(world, cell) {
                 read_cell_into(&document, &mut scene);
             }
             let at = read + 1;
@@ -1415,7 +1431,7 @@ mod sample_export {
         let mut triangles = 0usize;
         let mut counted = 0usize;
         for cell in &cells {
-            let Ok(document) = load_chimp_document(&world, cell) else {
+            let Ok(document) = load_chimp_package(&world, cell) else {
                 continue;
             };
             read_cell_into(&document, &mut scene);
@@ -1512,12 +1528,13 @@ mod sample_export {
 
         let mut scene = LevelScene::default();
         for cell in cells.iter().step_by(step) {
-            if let Ok(document) = load_chimp_document(&world, cell) {
+            if let Ok(document) = load_chimp_package(&world, cell) {
                 read_cell_into(&document, &mut scene);
             }
         }
         let report =
-            write_segmented_usd(&world, &scene, detail, &directory, "c10", budget).expect("write");
+            write_segmented_usd(&world, &scene, detail, &directory, "c10", budget, &|_, _, _| {})
+                .expect("write");
         eprintln!(
             "wrote {} ({detail:?})\n\
              \x20 {} cells -> {} segments ({} over budget)\n\
@@ -1579,14 +1596,22 @@ mod sample_export {
             .map(|record| record.name.clone())
             .collect();
 
-        let mut scene = LevelScene::default();
-        for cell in cells.iter().step_by(step) {
-            if let Ok(document) = load_chimp_document(&world, cell) {
-                read_cell_into(&document, &mut scene);
-            }
-        }
+        let selected: Vec<String> = cells.iter().step_by(step).cloned().collect();
+        let threads = std::thread::available_parallelism()
+            .map(|count| count.get())
+            .unwrap_or(4);
+        let started = std::time::Instant::now();
+        let scene = super::super::level::read_cells(&world, &selected, threads, &|_| {});
+        eprintln!(
+            "read {} cells on {threads} threads in {:.1}s",
+            scene.cells,
+            started.elapsed().as_secs_f64()
+        );
+        let started = std::time::Instant::now();
         let report =
-            write_blend_export(&world, &scene, detail, &directory, "c10", budget).expect("write");
+            write_blend_export(&world, &scene, detail, &directory, "c10", budget, &|_, _, _| {})
+                .expect("write");
+        eprintln!("wrote geometry in {:.1}s", started.elapsed().as_secs_f64());
         eprintln!(
             "wrote {} ({detail:?})\n\
              \x20 {} cells -> {} meshes, {} placements, {} segments\n\
@@ -1627,7 +1652,7 @@ mod sample_export {
 
         let mut scene = LevelScene::default();
         for cell in cells.iter().step_by(step) {
-            if let Ok(document) = load_chimp_document(&world, cell) {
+            if let Ok(document) = load_chimp_package(&world, cell) {
                 read_cell_into(&document, &mut scene);
             }
         }

@@ -239,6 +239,7 @@ pub struct Baboon {
     /// A Chimp mesh export waiting on the choice to export its textures too.
     chimp_mesh_texture_prompt: Option<ChimpMeshTexturePrompt>,
     chimp_level_export_prompt: Option<ChimpLevelExportPrompt>,
+    chimp_level_job: Option<ChimpLevelJob>,
     /// What the last mod exported in this session was called, so exporting
     /// again offers the same name and replaces that mod's files rather than
     /// making the user retype it. Deliberately not persisted: it describes what
@@ -497,6 +498,7 @@ impl Baboon {
             operation_notice: None,
             chimp_mesh_texture_prompt: None,
             chimp_level_export_prompt: None,
+            chimp_level_job: None,
             last_mod_export_name: None,
             container_delete_running: HashSet::new(),
             created_tags: CreatedTagLedger::load(),

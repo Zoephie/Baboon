@@ -6,15 +6,16 @@
 
 use super::*;
 use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
 
 mod level;
-pub(in crate::app) use level::{LevelScene, read_cell_into};
+pub(in crate::app) use level::{LevelScene, read_cell_into, read_cells};
 mod level_blend;
 mod level_export;
 mod level_segment;
 mod mesh_weld;
 pub(in crate::app) use level_export::{scene_to_usd, write_blend_export, write_segmented_usd};
-use level_export::MeshDetail;
+use level_export::{ExportStage, MeshDetail};
 use level_segment::SegmentBudget;
 use std::io::{Cursor, Write};
 
@@ -192,6 +193,94 @@ impl ChimpLevelFormat {
                  and a master that places them as linked duplicates."
             }
         }
+    }
+}
+
+/// Which part of a level export is running.
+///
+/// Reported separately because they are not comparable: reading cells is
+/// thousands of small packages, writing meshes is hundreds of large ones, and a
+/// single bar across both would crawl and then leap.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ChimpLevelPhase {
+    ReadingCells,
+    WritingMeshes,
+    WritingSegments,
+}
+
+impl ChimpLevelPhase {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::ReadingCells => "Reading cells",
+            Self::WritingMeshes => "Writing meshes",
+            Self::WritingSegments => "Writing segments",
+        }
+    }
+
+    /// Where this phase sits, for "step 1 of 3".
+    pub(super) fn step(self) -> usize {
+        match self {
+            Self::ReadingCells => 1,
+            Self::WritingMeshes => 2,
+            Self::WritingSegments => 3,
+        }
+    }
+}
+
+/// A level export in flight, and how far along it is.
+pub(super) struct ChimpLevelJob {
+    pub(super) kit: KitId,
+    pub(super) name: String,
+    pub(super) phase: ChimpLevelPhase,
+    pub(super) done: usize,
+    pub(super) total: usize,
+    /// When the current phase began, so the estimate is of the work being done
+    /// rather than an average across phases that cost different amounts.
+    pub(super) phase_started: Instant,
+}
+
+impl ChimpLevelJob {
+    pub(super) fn fraction(&self) -> f32 {
+        if self.total == 0 {
+            return 0.0;
+        }
+        (self.done as f32 / self.total as f32).clamp(0.0, 1.0)
+    }
+
+    /// How much longer this phase looks like taking, or `None` until there is
+    /// enough of it done to say anything honest.
+    pub(super) fn remaining(&self) -> Option<Duration> {
+        if self.done == 0 || self.done >= self.total {
+            return None;
+        }
+        let elapsed = self.phase_started.elapsed().as_secs_f64();
+        // A first few items are not a rate. Guessing from them produces a
+        // number that swings by minutes and teaches the user to ignore it.
+        if elapsed < 1.5 {
+            return None;
+        }
+        let each = elapsed / self.done as f64;
+        Some(Duration::from_secs_f64(
+            each * (self.total - self.done) as f64,
+        ))
+    }
+}
+
+/// "about 4m 20s", or "a few seconds" when there is no point being precise.
+pub(super) fn format_remaining(remaining: Duration) -> String {
+    let seconds = remaining.as_secs();
+    if seconds < 10 {
+        return "a few seconds".to_owned();
+    }
+    if seconds < 60 {
+        return format!("about {seconds}s");
+    }
+    let minutes = seconds / 60;
+    let rest = seconds % 60;
+    if minutes < 10 {
+        format!("about {minutes}m {rest:02}s")
+    } else {
+        format!("about {minutes}m")
     }
 }
 
@@ -898,11 +987,41 @@ pub(super) fn load_chimp_document(world: &World, package: &str) -> Result<ChimpD
     decode_chimp_document(world, provider, bytes)
 }
 
-fn decode_chimp_document(
+/// One package, decoded as far as its exports and no further.
+///
+/// This is all a reader needs, and it is a small fraction of what loading a
+/// *document* costs: [`decode_chimp_document`] goes on to decode previews and
+/// render the editor's text panes, which for a World Partition cell is 329ms of
+/// work against the 1ms the exports themselves take. Reading a level is 2,334
+/// cells, so the difference is a quarter of an hour against seconds.
+pub(super) struct ChimpPackage {
+    pub(super) header: FZenPackageHeader,
+    pub(super) exports: Vec<ChimpExport>,
+}
+
+/// Read and decode a package's exports, skipping everything the editor's
+/// document pane needs and a reader does not.
+pub(super) fn load_chimp_package(world: &World, package: &str) -> Result<ChimpPackage, String> {
+    let record = world
+        .package(package)
+        .ok_or_else(|| format!("{package} is not mounted"))?;
+    let provider = record
+        .active_provider()
+        .cloned()
+        .ok_or_else(|| format!("{package} has no active provider"))?;
+    let bytes = world
+        .read_provider(&provider)
+        .map_err(|error| error.to_string())?;
+    let (header, _, exports) = decode_chimp_exports(world, &provider, &bytes)?;
+    Ok(ChimpPackage { header, exports })
+}
+
+/// The shared front half of loading a package: header, payloads, exports.
+fn decode_chimp_exports(
     world: &World,
-    provider: PackageProvider,
-    bytes: Vec<u8>,
-) -> Result<ChimpDocument, String> {
+    provider: &PackageProvider,
+    bytes: &[u8],
+) -> Result<(FZenPackageHeader, Vec<Vec<u8>>, Vec<ChimpExport>), String> {
     let header = FZenPackageHeader::deserialize(
         &mut Cursor::new(&bytes),
         None,
@@ -911,10 +1030,10 @@ fn decode_chimp_document(
         None,
     )
     .map_err(|error| format!("Could not parse {}: {error:#}", provider.entry_path))?;
-    let payloads = read_payloads(&header, &bytes)
+    let payloads = read_payloads(&header, bytes)
         .map_err(|error| format!("Could not split {}: {error:#}", provider.entry_path))?;
     let names = header.name_map.copy_raw_names();
-    let resolver = world.resolver(&header, &bytes, &names);
+    let resolver = world.resolver(&header, bytes, &names);
     let bulk: Vec<(i64, i64)> = header
         .bulk_data
         .iter()
@@ -951,6 +1070,23 @@ fn decode_chimp_document(
                 decoded,
             }
         })
+        .collect();
+    drop(resolver);
+    Ok((header, payloads, exports))
+}
+
+fn decode_chimp_document(
+    world: &World,
+    provider: PackageProvider,
+    bytes: Vec<u8>,
+) -> Result<ChimpDocument, String> {
+    let (header, payloads, exports) = decode_chimp_exports(world, &provider, &bytes)?;
+    let names = header.name_map.copy_raw_names();
+    let resolver = world.resolver(&header, &bytes, &names);
+    let bulk: Vec<(i64, i64)> = header
+        .bulk_data
+        .iter()
+        .map(|entry| (entry.serial_offset, entry.serial_size))
         .collect();
     let texture_previews = decode_chimp_texture_previews(
         world, &provider, &header, &payloads, &names, &resolver, &bulk, &exports,
@@ -1934,6 +2070,7 @@ impl Baboon {
                 });
             }
         });
+        self.draw_chimp_level_progress(ui, kit_index);
         ui.add_space(4.0);
         let ready = matches!(self.kits[kit_index].chimp.mount, ChimpMount::Ready(_));
         egui::SidePanel::left(egui::Id::new((
@@ -1980,6 +2117,61 @@ impl Baboon {
                     self.draw_chimp_mount_status(ui, kit_index);
                 }
             });
+    }
+
+    /// A bar for the export running in this workspace, if one is.
+    ///
+    /// A level export is minutes of work, and without this the window simply
+    /// sits there — the one thing a user cannot tell from a frozen-looking
+    /// screen is the difference between working and stuck.
+    fn draw_chimp_level_progress(&mut self, ui: &mut Ui, kit_index: usize) {
+        let kit = self.kits[kit_index].id;
+        let Some(job) = self.chimp_level_job.as_ref().filter(|job| job.kit == kit) else {
+            return;
+        };
+        let phase = job.phase;
+        let (done, total) = (job.done, job.total);
+        let fraction = job.fraction();
+        let remaining = job.remaining();
+        let name = job.name.clone();
+
+        ui.add_space(4.0);
+        egui::Frame::none()
+            .fill(row_type())
+            .inner_margin(egui::Margin::symmetric(8.0, 6.0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(format!("Exporting {name}"))
+                            .color(text_dark())
+                            .strong(),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Only ever an estimate, and said as one.
+                        if let Some(remaining) = remaining {
+                            ui.label(
+                                RichText::new(format!("{} left", format_remaining(remaining)))
+                                    .color(subtle_dark())
+                                    .small(),
+                            );
+                        }
+                    });
+                });
+                ui.add_space(3.0);
+                ui.add(
+                    egui::ProgressBar::new(fraction)
+                        .desired_height(10.0)
+                        .text(
+                            RichText::new(format!(
+                                "{} ({}/3) — {done}/{total}",
+                                phase.label(),
+                                phase.step()
+                            ))
+                            .small(),
+                        ),
+                );
+            });
+        ui.add_space(2.0);
     }
 
     fn draw_chimp_mount_status(&mut self, ui: &mut Ui, kit_index: usize) {
@@ -3816,27 +4008,49 @@ impl Baboon {
             MeshDetail::Fallback
         };
         let ChimpLevelExportPrompt { cells, format, .. } = prompt;
-        self.status = format!("Reading {} cells of {name}…", cells.len());
+        self.chimp_level_job = Some(ChimpLevelJob {
+            kit,
+            name: name.clone(),
+            phase: ChimpLevelPhase::ReadingCells,
+            done: 0,
+            total: cells.len(),
+            phase_started: Instant::now(),
+        });
+        self.status = format!("Exporting {name}…");
         thread::spawn(move || {
             let total = cells.len();
-            let mut scene = LevelScene::default();
-            for (read, cell) in cells.iter().enumerate() {
-                if let Ok(document) = load_chimp_document(&world, cell) {
-                    read_cell_into(&document, &mut scene);
-                }
-                // Reading a level is minutes of work, so it says where it is.
-                if read % 64 == 0 || read + 1 == total {
-                    let _ = tx.send(WorkerMessage::ChimpLevelProgress {
-                        kit,
-                        done: read + 1,
-                        total,
-                    });
-                    ctx.request_repaint();
-                }
-            }
+            let report = |phase, done, total| {
+                let _ = tx.send(WorkerMessage::ChimpLevelProgress {
+                    kit,
+                    phase,
+                    done,
+                    total,
+                });
+                ctx.request_repaint();
+            };
+            // Cells are independent packages and there are thousands of them,
+            // so this is the difference between a quarter of an hour and a
+            // couple of minutes.
+            let threads = std::thread::available_parallelism()
+                .map(|count| count.get())
+                .unwrap_or(4);
+            let scene = read_cells(&world, &cells, threads, &|done| {
+                report(ChimpLevelPhase::ReadingCells, done, total)
+            });
+            report(ChimpLevelPhase::ReadingCells, total, total);
+            let stage = |stage, done, total| {
+                report(
+                    match stage {
+                        ExportStage::Meshes => ChimpLevelPhase::WritingMeshes,
+                        ExportStage::Segments => ChimpLevelPhase::WritingSegments,
+                    },
+                    done,
+                    total,
+                )
+            };
             let result = match format {
                 ChimpLevelFormat::SegmentedUsd => {
-                    write_segmented_usd(&world, &scene, detail, &directory, &name, budget)
+                    write_segmented_usd(&world, &scene, detail, &directory, &name, budget, &stage)
                         .map_err(|error| error.to_string())
                         .map(|report| {
                             format!(
@@ -3846,7 +4060,7 @@ impl Baboon {
                         })
                 }
                 ChimpLevelFormat::Blender => {
-                    write_blend_export(&world, &scene, detail, &directory, &name, budget)
+                    write_blend_export(&world, &scene, detail, &directory, &name, budget, &stage)
                         .map_err(|error| error.to_string())
                         .map(|report| {
                             format!(
@@ -7066,6 +7280,57 @@ mod tests {
             return (0.0, 0.0);
         }
         (signed / count as f32, absolute / count as f32)
+    }
+
+    fn job_at(done: usize, total: usize, elapsed: Duration) -> ChimpLevelJob {
+        ChimpLevelJob {
+            kit: KitId(0),
+            name: "C10".to_owned(),
+            phase: ChimpLevelPhase::ReadingCells,
+            done,
+            total,
+            phase_started: Instant::now() - elapsed,
+        }
+    }
+
+    #[test]
+    fn a_progress_estimate_waits_until_it_has_something_to_go_on() {
+        // A rate from the first few items swings by minutes and teaches the
+        // user to ignore the number, so there is no number until then.
+        assert!(job_at(0, 2334, Duration::from_secs(10)).remaining().is_none());
+        assert!(job_at(3, 2334, Duration::from_millis(200)).remaining().is_none());
+        // Finished is not "0s left", it is nothing to say.
+        assert!(job_at(2334, 2334, Duration::from_secs(60)).remaining().is_none());
+    }
+
+    #[test]
+    fn a_progress_estimate_extrapolates_the_rate_so_far() {
+        // Half done after 60s means about 60s left.
+        let remaining = job_at(1_000, 2_000, Duration::from_secs(60))
+            .remaining()
+            .expect("half way through is enough to estimate from");
+        assert!(
+            (55..=65).contains(&remaining.as_secs()),
+            "estimated {}s",
+            remaining.as_secs()
+        );
+    }
+
+    #[test]
+    fn a_fraction_stays_inside_the_bar() {
+        assert_eq!(job_at(0, 0, Duration::from_secs(1)).fraction(), 0.0);
+        assert_eq!(job_at(1_167, 2_334, Duration::from_secs(1)).fraction(), 0.5);
+        // A count past the total would draw outside the bar.
+        assert_eq!(job_at(9_999, 2_334, Duration::from_secs(1)).fraction(), 1.0);
+    }
+
+    #[test]
+    fn time_left_is_said_at_the_precision_it_is_known_to() {
+        assert_eq!(format_remaining(Duration::from_secs(3)), "a few seconds");
+        assert_eq!(format_remaining(Duration::from_secs(42)), "about 42s");
+        assert_eq!(format_remaining(Duration::from_secs(260)), "about 4m 20s");
+        // Past ten minutes the seconds are noise.
+        assert_eq!(format_remaining(Duration::from_secs(1_500)), "about 25m");
     }
 
     #[test]

@@ -18,6 +18,8 @@
 
 use super::*;
 
+use std::sync::atomic::{AtomicUsize, Ordering};
+
 use blam_tags::iostore::asset::level::read_instance_transforms;
 use blam_tags::iostore::object::export::ExportBlock;
 use blam_tags::iostore::object::native::NativeStruct;
@@ -81,6 +83,10 @@ impl LevelSkips {
 pub(in crate::app) struct LevelScene {
     /// Unique mesh packages, in first-seen order.
     pub(in crate::app) meshes: Vec<String>,
+    /// The same names, for lookup. A level places a quarter of a million meshes
+    /// drawn from several hundred, and scanning the list for each one is a
+    /// hundred million string comparisons for an answer a map gives directly.
+    by_mesh: HashMap<String, usize>,
     pub(in crate::app) placements: Vec<MeshPlacement>,
     pub(in crate::app) skipped: LevelSkips,
     /// Cells that were read into this scene.
@@ -89,11 +95,35 @@ pub(in crate::app) struct LevelScene {
 
 impl LevelScene {
     fn mesh_index(&mut self, package: &str) -> usize {
-        if let Some(index) = self.meshes.iter().position(|existing| existing == package) {
-            return index;
+        if let Some(index) = self.by_mesh.get(package) {
+            return *index;
         }
         self.meshes.push(package.to_owned());
-        self.meshes.len() - 1
+        let index = self.meshes.len() - 1;
+        self.by_mesh.insert(package.to_owned(), index);
+        index
+    }
+
+    /// Fold another scene's placements into this one, keeping first-seen mesh
+    /// order.
+    ///
+    /// Cells are read in parallel but absorbed in cell order, so the result is
+    /// the one a single-threaded read would have produced — mesh indices
+    /// included. A scene that depended on which thread finished first would
+    /// export differently every run.
+    pub(in crate::app) fn absorb(&mut self, other: LevelScene) {
+        let remap: Vec<usize> = other
+            .meshes
+            .iter()
+            .map(|package| self.mesh_index(package))
+            .collect();
+        self.placements
+            .extend(other.placements.into_iter().map(|placement| MeshPlacement {
+                mesh: remap[placement.mesh],
+                world: placement.world,
+            }));
+        self.skipped.absorb(other.skipped);
+        self.cells += other.cells;
     }
 
     fn place(&mut self, package: &str, world: WorldMatrix) {
@@ -235,11 +265,11 @@ fn mesh_package(block: &PropertyBlock, slots: &[ImportSlot]) -> Result<String, (
 ///
 /// Appends rather than returns, because a level is the union of thousands of
 /// cells and callers accumulate them.
-pub(in crate::app) fn read_cell_into(document: &ChimpDocument, scene: &mut LevelScene) {
-    let slots = read_import_slots(&document.header).unwrap_or_default();
+pub(in crate::app) fn read_cell_into(cell: &ChimpPackage, scene: &mut LevelScene) {
+    let slots = read_import_slots(&cell.header).unwrap_or_default();
     let mut skips = LevelSkips::default();
 
-    for (index, export) in document.exports.iter().enumerate() {
+    for (index, export) in cell.exports.iter().enumerate() {
         let class = export.class.as_deref().unwrap_or_default();
         let instanced = class == "InstancedStaticMeshComponent";
         if class != "StaticMeshComponent" && !instanced {
@@ -261,7 +291,7 @@ pub(in crate::app) fn read_cell_into(document: &ChimpDocument, scene: &mut Level
                 continue;
             }
         };
-        let component = world_transform(&document.exports, index);
+        let component = world_transform(&cell.exports, index);
         if !instanced {
             scene.place(&package, component);
             continue;
@@ -283,6 +313,71 @@ pub(in crate::app) fn read_cell_into(document: &ChimpDocument, scene: &mut Level
 
     scene.skipped.absorb(skips);
     scene.cells += 1;
+}
+
+/// Read every cell of a level, using the machine rather than one core of it.
+///
+/// Cells are independent — each is a package decoded on its own — and there are
+/// thousands of them, so this is the difference between a quarter of an hour and
+/// a couple of minutes. Reading C10 sequentially takes 13 of the 25 minutes a
+/// full export costs.
+///
+/// The work is split into *contiguous* chunks and absorbed in chunk order, so
+/// the scene is byte-identical to a sequential read. Handing out cells one at a
+/// time would balance better and make mesh order depend on thread scheduling,
+/// which would export a different file every run.
+pub(in crate::app) fn read_cells(
+    world: &World,
+    cells: &[String],
+    threads: usize,
+    progress: &(dyn Fn(usize) + Sync),
+) -> LevelScene {
+    let threads = threads.clamp(1, 64).min(cells.len().max(1));
+    let done = AtomicUsize::new(0);
+    let chunk = cells.len().div_ceil(threads.max(1));
+    let mut parts: Vec<LevelScene> = std::thread::scope(|scope| {
+        let handles: Vec<_> = cells
+            .chunks(chunk.max(1))
+            .map(|slice| {
+                let done = &done;
+                scope.spawn(move || {
+                    let mut scene = LevelScene::default();
+                    for cell in slice {
+                        if let Ok(document) = crate::app::chimp::load_chimp_package(world, cell) {
+                            read_cell_into(&document, &mut scene);
+                        } else {
+                            // Still counted: the caller asked for this many
+                            // cells and a progress bar that stalls on the
+                            // unreadable ones is lying about where it is.
+                            scene.cells += 1;
+                        }
+                        let seen = done.fetch_add(1, Ordering::Relaxed) + 1;
+                        if seen % 32 == 0 {
+                            progress(seen);
+                        }
+                    }
+                    scene
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap_or_default())
+            .collect()
+    });
+    progress(cells.len());
+
+    // Merging into the first part rather than an empty scene keeps the largest
+    // chunk's placements where they are instead of copying them.
+    let mut scene = if parts.is_empty() {
+        LevelScene::default()
+    } else {
+        parts.remove(0)
+    };
+    for part in parts {
+        scene.absorb(part);
+    }
+    scene
 }
 
 #[cfg(test)]
@@ -375,6 +470,183 @@ mod tests {
 }
 
 #[cfg(test)]
+mod scaling_probe {
+    use super::*;
+
+    /// Split one cell's cost into the steps that make it up.
+    ///
+    /// Reading a cell costs 329ms and the bytes arrive in under a millisecond,
+    /// so the time is in decoding — but decoding is a header parse, a class
+    /// lookup per export and a property decode per export, and which of those
+    /// it is decides whether anything can be done about it.
+    #[test]
+    #[ignore]
+    fn probe_cell_decode_breakdown() {
+        use blam_tags::iostore::object::archive::ExportContext;
+        use blam_tags::iostore::object::export::read_export_in;
+        use blam_tags::iostore::package::builder::read_payloads;
+        use blam_tags::iostore::package::zen::FZenPackageHeader;
+        use std::io::Cursor;
+        use std::time::Instant;
+
+        let root = std::env::var("BABOON_PROBE_PAKS").expect("BABOON_PROBE_PAKS");
+        let step: usize = std::env::var("BABOON_SCALE_STEP")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(8);
+        let usmap = crate::app::chimp::load_chimp_usmap(None).expect("usmap");
+        let world = World::open(std::path::Path::new(&root), usmap).expect("mount");
+        let cells: Vec<String> = world
+            .packages()
+            .iter()
+            .filter(|record| record.name.to_lowercase().contains("/c10/_generated_/"))
+            .map(|record| record.name.clone())
+            .step_by(step)
+            .collect();
+
+        let (mut read, mut parse, mut classes, mut decode) = (0.0, 0.0, 0.0, 0.0);
+        let (mut exports_seen, mut per_cell) = (0usize, Vec::new());
+        for cell in &cells {
+            let cell_started = Instant::now();
+            let started = Instant::now();
+            let Ok(bytes) = world.read_package(cell) else {
+                continue;
+            };
+            read += started.elapsed().as_secs_f64();
+
+            let started = Instant::now();
+            let Ok(header) = FZenPackageHeader::deserialize(
+                &mut Cursor::new(&bytes),
+                None,
+                blam_tags::iostore::world::CE_TOC_VERSION,
+                blam_tags::iostore::world::CE_HEADER_VERSION,
+                None,
+            ) else {
+                continue;
+            };
+            let Ok(payloads) = read_payloads(&header, &bytes) else {
+                continue;
+            };
+            let names = header.name_map.copy_raw_names();
+            parse += started.elapsed().as_secs_f64();
+
+            let started = Instant::now();
+            let resolved: Vec<Option<String>> = header
+                .export_map
+                .iter()
+                .map(|entry| world.class_key(&header, entry.class_index))
+                .collect();
+            classes += started.elapsed().as_secs_f64();
+
+            let started = Instant::now();
+            let resolver = world.resolver(&header, &bytes, &names);
+            let bulk: Vec<(i64, i64)> = header
+                .bulk_data
+                .iter()
+                .map(|entry| (entry.serial_offset, entry.serial_size))
+                .collect();
+            let context = ExportContext {
+                bulk_data: &bulk,
+                resolver: Some(&resolver),
+            };
+            for ((entry, payload), class) in
+                header.export_map.iter().zip(&payloads).zip(&resolved)
+            {
+                exports_seen += 1;
+                if let Some(class) = class.as_deref() {
+                    let _ = read_export_in(
+                        payload,
+                        &names,
+                        world.usmap(),
+                        class,
+                        entry.object_flags,
+                        &context,
+                    );
+                }
+            }
+            decode += started.elapsed().as_secs_f64();
+            per_cell.push(cell_started.elapsed().as_secs_f64());
+        }
+
+        per_cell.sort_by(f64::total_cmp);
+        let total: f64 = per_cell.iter().sum();
+        let at = |q: f64| per_cell[((per_cell.len() as f64 - 1.0) * q) as usize];
+        eprintln!(
+            "{} cells, {exports_seen} exports, {total:.1}s\n\
+             \x20 read bytes    {read:6.1}s\n\
+             \x20 parse header  {parse:6.1}s\n\
+             \x20 resolve class {classes:6.1}s\n\
+             \x20 decode props  {decode:6.1}s\n\
+             \x20 per cell: median {:.0}ms  p90 {:.0}ms  p99 {:.0}ms  max {:.0}ms",
+            cells.len(),
+            at(0.5) * 1000.0,
+            at(0.9) * 1000.0,
+            at(0.99) * 1000.0,
+            per_cell.last().copied().unwrap_or(0.0) * 1000.0,
+        );
+    }
+
+    /// Find out what a cell read actually costs, and whether threads help.
+    ///
+    /// Parallelising the walk gained 13% on sixteen threads, which is not what
+    /// independent work does — so this splits the cost into decompressing the
+    /// package and decoding its exports, and times the walk at several thread
+    /// counts, rather than guessing which one is the wall.
+    #[test]
+    #[ignore]
+    fn probe_cell_read_scaling() {
+        let root = std::env::var("BABOON_PROBE_PAKS").expect("BABOON_PROBE_PAKS");
+        let step: usize = std::env::var("BABOON_SCALE_STEP")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(8);
+        let usmap = crate::app::chimp::load_chimp_usmap(None).expect("usmap");
+        let world = World::open(std::path::Path::new(&root), usmap).expect("mount");
+        let cells: Vec<String> = world
+            .packages()
+            .iter()
+            .filter(|record| record.name.to_lowercase().contains("/c10/_generated_/"))
+            .map(|record| record.name.clone())
+            .step_by(step)
+            .collect();
+        eprintln!("{} cells", cells.len());
+
+        let started = std::time::Instant::now();
+        let mut bytes = 0usize;
+        for cell in &cells {
+            if let Ok(data) = world.read_package(cell) {
+                bytes += data.len();
+            }
+        }
+        let read = started.elapsed().as_secs_f64();
+        eprintln!(
+            "  read_package only:      {read:.1}s  ({:.1} MiB, {:.1} MiB/s)",
+            bytes as f64 / (1024.0 * 1024.0),
+            bytes as f64 / (1024.0 * 1024.0) / read
+        );
+
+        let started = std::time::Instant::now();
+        for cell in &cells {
+            let _ = crate::app::chimp::load_chimp_document(&world, cell);
+        }
+        eprintln!(
+            "  load_chimp_document:    {:.1}s",
+            started.elapsed().as_secs_f64()
+        );
+
+        for threads in [1usize, 2, 4, 8, 16] {
+            let started = std::time::Instant::now();
+            let scene = read_cells(&world, &cells, threads, &|_| {});
+            eprintln!(
+                "  read_cells x{threads:<2}          {:.1}s  ({} placements)",
+                started.elapsed().as_secs_f64(),
+                scene.placements.len()
+            );
+        }
+    }
+}
+
+#[cfg(test)]
 mod real_data_tests {
     use super::*;
 
@@ -406,7 +678,7 @@ mod real_data_tests {
 
         let mut scene = LevelScene::default();
         for cell in cells.iter().step_by(11) {
-            if let Ok(document) = crate::app::chimp::load_chimp_document(&world, cell) {
+            if let Ok(document) = crate::app::chimp::load_chimp_package(&world, cell) {
                 read_cell_into(&document, &mut scene);
             }
         }

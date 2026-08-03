@@ -86,10 +86,12 @@ pub(in crate::app) enum WorkerMessage {
         stamp: KitStamp,
         result: Result<ContainerDeleteResult, String>,
     },
-    /// Reading a level is minutes of work over thousands of cells, so it
-    /// reports where it has got to rather than going quiet.
+    /// Exporting a level is minutes of work over thousands of cells and
+    /// hundreds of meshes, so it reports where it has got to rather than going
+    /// quiet for a quarter of an hour.
     ChimpLevelProgress {
         kit: KitId,
+        phase: ChimpLevelPhase,
         done: usize,
         total: usize,
     },
