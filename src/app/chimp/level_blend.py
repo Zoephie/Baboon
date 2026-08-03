@@ -36,6 +36,21 @@ VERSION = 1
 # mesh index, segment index, then a 4x4 of doubles.
 PLACEMENT_SIZE = 4 + 4 + 16 * 8
 
+# Unreal works in centimetres and Blender in metres. Without this the level is
+# built a hundred times too large and lands tens of thousands of units from the
+# origin - past the default viewport clip, so the objects are all present and
+# nothing can be seen. The USD path says the same thing with `metersPerUnit`.
+UNIT_SCALE = 0.01
+# How far the viewport sees. A level is hundreds of metres across and the
+# default is 1000, which cuts most of it away the moment it is framed.
+VIEW_DISTANCE = 10000.0
+# Mesh libraries hold a mesh datablock and no object, which is what makes them
+# linkable - but it also means opening one shows an empty scene, because there
+# is nothing in it to draw. Set this to True to save them as ordinary scenes
+# with the mesh placed at the origin instead: slower, and no longer the shape
+# the masters link against, but each file can then be opened and looked at.
+INSPECTABLE_MESH_FILES = False
+
 
 def script_directory():
     """Where this script lives, whether run from the text editor or the CLI."""
@@ -131,7 +146,9 @@ def build_mesh(entry):
     indices = entry["indices"].astype(np.int32)
 
     mesh.vertices.add(vertices)
-    mesh.vertices.foreach_set("co", entry["positions"])
+    # Centimetres to metres. The placement translations are scaled to match, so
+    # the level keeps its proportions and arrives at a size Blender can show.
+    mesh.vertices.foreach_set("co", entry["positions"] * UNIT_SCALE)
 
     # Every face is a triangle, so the loop layout is known without building
     # per-polygon lists.
@@ -191,10 +208,22 @@ def write_mesh_libraries(export, directory):
                 f"    {entry['name']}: {entry['triangles']} triangles in, none built"
             )
         path = os.path.join(folder, f"{entry['name']}.blend")
-        # `libraries.write` saves datablocks to another file without disturbing
-        # this session, which is what lets one run produce hundreds of files.
-        bpy.data.libraries.write(path, {mesh}, fake_user=True, compress=True)
-        paths.append((path, mesh.name))
+        name = mesh.name
+        if INSPECTABLE_MESH_FILES:
+            # A whole scene with the mesh in it, so the file opens and shows
+            # something. Costs a file save each rather than a datablock write.
+            obj = bpy.data.objects.new(name, mesh)
+            bpy.context.scene.collection.objects.link(obj)
+            set_up_scene_for_a_level()
+            bpy.ops.wm.save_as_mainfile(filepath=path, compress=True)
+            bpy.data.objects.remove(obj)
+        else:
+            # `libraries.write` saves datablocks to another file without
+            # disturbing this session, which is what lets one run produce
+            # hundreds of files. The result holds a mesh and no object, so
+            # opening it shows an empty scene - see the note printed below.
+            bpy.data.libraries.write(path, {mesh}, fake_user=True, compress=True)
+        paths.append((path, name))
         # The session keeps nothing: the geometry is in the file now, and
         # holding every mesh at once is the memory ceiling this avoids.
         bpy.data.meshes.remove(mesh)
@@ -245,13 +274,43 @@ def build_master(export, directory, segment, mesh_paths):
             continue
         obj = bpy.data.objects.new(f"inst_{number}", mesh)
         # The export stores Unreal's row-major matrix with the translation last;
-        # Blender takes column vectors, so it transposes.
-        obj.matrix_world = Matrix([values[0:4], values[4:8], values[8:12], values[12:16]]).transposed()
+        # Blender takes column vectors, so it transposes. Only the translation
+        # is rescaled: the basis is a rotation and scale, which are ratios and
+        # carry no units, and the mesh it applies to is already in metres.
+        rows = [
+            list(values[0:4]),
+            list(values[4:8]),
+            list(values[8:12]),
+            [
+                values[12] * UNIT_SCALE,
+                values[13] * UNIT_SCALE,
+                values[14] * UNIT_SCALE,
+                values[15],
+            ],
+        ]
+        obj.matrix_world = Matrix(rows).transposed()
         collection.objects.link(obj)
 
+    set_up_scene_for_a_level()
     path = os.path.join(directory, f"{export.name}_master_{segment:02d}.blend")
     bpy.ops.wm.save_as_mainfile(filepath=path, compress=True)
     return path, len(placements)
+
+
+def set_up_scene_for_a_level():
+    """Metric units, and a viewport that can see something hundreds of metres
+    across. The default clip of 1000 frames a level and then hides it."""
+    scene = bpy.context.scene
+    scene.unit_settings.system = "METRIC"
+    scene.unit_settings.length_unit = "METERS"
+    for screen in bpy.data.screens:
+        for area in screen.areas:
+            if area.type != "VIEW_3D":
+                continue
+            for space in area.spaces:
+                if space.type == "VIEW_3D":
+                    space.clip_start = 0.1
+                    space.clip_end = VIEW_DISTANCE
 
 
 def main():
@@ -264,6 +323,14 @@ def main():
 
     print("writing mesh libraries...")
     mesh_paths = write_mesh_libraries(export, directory)
+    if not INSPECTABLE_MESH_FILES:
+        print(
+            "  note: a mesh library holds a mesh datablock and no object, which\n"
+            "  is what makes it linkable - opening one shows an empty scene even\n"
+            "  though the geometry is there. To see it, use the Outliner's\n"
+            "  'Blender File' display mode, or set INSPECTABLE_MESH_FILES = True\n"
+            "  at the top of this script and run it again."
+        )
 
     print("building masters...")
     for segment in range(export.segment_count):
