@@ -142,7 +142,7 @@ def build_mesh(entry):
     vertices = entry["vertices"]
     triangles = entry["triangles"]
     if vertices == 0 or triangles == 0:
-        return mesh
+        return mesh, 0
     indices = entry["indices"].astype(np.int32)
 
     mesh.vertices.add(vertices)
@@ -168,8 +168,13 @@ def build_mesh(entry):
     # every one of them - which is how a mesh ends up present, named, and
     # completely empty.
     mesh.update(calc_edges=True)
-    if mesh.validate(verbose=False):
-        print(f"    {entry['name']}: geometry was corrected on load")
+    # `validate` discards degenerate faces - zero-area triangles, and ones with
+    # a repeated corner - which Nanite decoding produces at cluster boundaries.
+    # They draw nothing, so losing them is right, but the triangle count Blender
+    # reports will not match the export and that should not be a mystery.
+    built = len(mesh.polygons)
+    mesh.validate(verbose=False)
+    dropped = built - len(mesh.polygons)
 
     # After validate(), which discards layers on a mesh it had to repair.
     uv_layer = mesh.uv_layers.new(name="UVMap")
@@ -189,7 +194,7 @@ def build_mesh(entry):
             mesh.normals_split_custom_set(normals[indices])
         except (AttributeError, RuntimeError):
             print(f"    {entry['name']}: custom normals not supported here")
-    return mesh
+    return mesh, dropped
 
 
 def write_mesh_libraries(export, directory):
@@ -198,8 +203,12 @@ def write_mesh_libraries(export, directory):
     os.makedirs(folder, exist_ok=True)
     paths = []
     empty = 0
+    degenerate = 0
+    exported = 0
     for index, entry in enumerate(export.meshes):
-        mesh = build_mesh(entry)
+        mesh, dropped = build_mesh(entry)
+        degenerate += dropped
+        exported += entry["triangles"]
         # Caught here rather than discovered later as an empty master: a mesh
         # that arrived with faces and has none now means the build went wrong.
         if entry["triangles"] > 0 and len(mesh.polygons) == 0:
@@ -233,6 +242,14 @@ def write_mesh_libraries(export, directory):
         raise RuntimeError(
             f"{empty} of {len(export.meshes)} meshes built with no faces - the "
             "masters would open with placements and no geometry"
+        )
+    if degenerate:
+        share = degenerate / exported * 100 if exported else 0.0
+        print(
+            f"  {degenerate:,} of {exported:,} triangles ({share:.2f}%) were "
+            "degenerate and were dropped;\n"
+            f"  Blender will report {exported - degenerate:,} triangles, not "
+            f"{exported:,}. They had no area to draw."
         )
     return paths
 
