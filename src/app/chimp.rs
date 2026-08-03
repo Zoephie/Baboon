@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 
 mod level;
 pub(in crate::app) use level::{LevelScene, read_cell_into};
+mod level_export;
+pub(in crate::app) use level_export::scene_to_usd;
 use std::io::{Cursor, Write};
 
 use blam_tags::iostore::asset::texture2d::decode_texture2d_preview;
