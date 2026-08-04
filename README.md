@@ -175,6 +175,10 @@ and editor state.
   additionally keeps the cooked pixel format (BC1–BC7 and the uncompressed
   formats) and the whole mip chain, so it is the bytes the game ships rather
   than a re-encode; TIFF and PNG are one flat RGBA8 image per block.
+- Extracting a static or skeletal mesh offers its textures alongside it — either
+  every texture the materials reference, or just the ones named after the model —
+  and asks the same image-format question, so they land beside the mesh in
+  whichever format you picked rather than always TIFF.
 - Save edited packages back into the container in place, or bundle them into a
   mod container.
 - Edits are checkpointed to a recovery folder, so a crash or a restart does not

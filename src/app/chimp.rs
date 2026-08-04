@@ -62,6 +62,11 @@ pub(super) struct ChimpMeshTexturePrompt {
     /// Read through [`ChimpMeshTexturePrompt::format_label`]; the format itself
     /// is Chimp's own business.
     format: ChimpMeshFormat,
+    /// Which image format the textures would be written as, if any are. Asked
+    /// here rather than in a second window, because it is only one more choice
+    /// about the same export and the answer only matters alongside the two
+    /// buttons that ask for textures at all.
+    pub(super) texture_format: ChimpTextureFormat,
     pub(super) path: PathBuf,
 }
 
@@ -4301,6 +4306,7 @@ impl Baboon {
             kit: self.kits[kit_index].id,
             package: package.to_owned(),
             format,
+            texture_format: ChimpTextureFormat::Dds,
             path,
         });
     }
@@ -4323,13 +4329,15 @@ impl Baboon {
         let ChimpMeshTexturePrompt {
             package,
             format,
+            texture_format,
             path,
             ..
         } = prompt;
         let tx = self.tx.clone();
         self.status = format!("Extracting {package} as {}…", format.label());
         thread::spawn(move || {
-            let result = write_chimp_mesh(&world, &package, &path, format, textures);
+            let result =
+                write_chimp_mesh(&world, &package, &path, format, textures, texture_format);
             let _ = tx.send(WorkerMessage::ExportFinished(result));
             ctx.request_repaint();
         });
@@ -4415,6 +4423,7 @@ fn write_chimp_mesh_textures(
     header: &FZenPackageHeader,
     directory: &Path,
     subject: Option<&str>,
+    format: ChimpTextureFormat,
 ) -> (usize, Vec<String>) {
     let packages = chimp_mesh_texture_packages(world, header);
     let mut written = 0usize;
@@ -4445,8 +4454,8 @@ fn write_chimp_mesh_textures(
             }
             created = true;
         }
-        let output = directory.join(format!("{leaf}.tif"));
-        match write_chimp_texture(world, &package, &output, ChimpTextureFormat::Tiff) {
+        let output = directory.join(format!("{leaf}.{}", format.extension()));
+        match write_chimp_texture(world, &package, &output, format) {
             Ok(_) => written += 1,
             Err(error) => failures.push(error),
         }
@@ -4754,6 +4763,7 @@ fn write_chimp_mesh(
     output: &Path,
     format: ChimpMeshFormat,
     textures: ChimpTextureScope,
+    texture_format: ChimpTextureFormat,
 ) -> Result<String, String> {
     let document = load_chimp_document(world, package)?;
     let kind = document
@@ -4846,8 +4856,13 @@ fn write_chimp_mesh(
         // The mesh is already written, so a texture that fails is reported
         // beside a successful export rather than turning the whole thing into a
         // failure the user has to redo.
-        let (written, failures) =
-            write_chimp_mesh_textures(world, &document.header, &directory, subject.as_deref());
+        let (written, failures) = write_chimp_mesh_textures(
+            world,
+            &document.header,
+            &directory,
+            subject.as_deref(),
+            texture_format,
+        );
         let scope = match &subject {
             Some(subject) => format!(" matching \"{subject}\""),
             None => String::new(),
@@ -7652,6 +7667,7 @@ mod tests {
             kit: KitId(1),
             package: "/Game/Art/SK_Brute".to_owned(),
             format: ChimpMeshFormat::Pskx,
+            texture_format: ChimpTextureFormat::Dds,
             path: PathBuf::from("C:/exports/brute.pskx"),
         };
         assert_eq!(
@@ -8545,6 +8561,58 @@ mod tests {
         }
     }
 
+    /// A mesh's textures follow the format chosen in the prompt, not a fixed
+    /// TIFF, and land beside the mesh in `textures2d`.
+    #[test]
+    #[ignore = "requires a Campaign Evolved install; set CE_PAKS"]
+    fn mesh_textures_use_the_chosen_image_format() {
+        let root = std::env::var_os("CE_PAKS").expect("set CE_PAKS");
+        let world = World::open(root, Usmap::meteorite().unwrap()).unwrap();
+        let index = index_chimp_package_types(&world);
+        let mesh = world
+            .packages()
+            .iter()
+            .zip(&index.package_types)
+            .find(|(package, kind)| {
+                kind.as_deref() == Some("SkeletalMesh")
+                    && !chimp_mesh_texture_packages(
+                        &world,
+                        &load_chimp_document(&world, &package.name).unwrap().header,
+                    )
+                    .is_empty()
+            })
+            .map(|(package, _)| package.name.clone())
+            .expect("a skeletal mesh whose materials reference textures");
+
+        for (format, extension) in [
+            (ChimpTextureFormat::Png, "png"),
+            (ChimpTextureFormat::Dds, "dds"),
+        ] {
+            let directory =
+                std::env::temp_dir().join(format!("baboon-meshtex-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&directory).unwrap();
+            write_chimp_mesh(
+                &world,
+                &mesh,
+                &directory.join("mesh.pskx"),
+                ChimpMeshFormat::Pskx,
+                ChimpTextureScope::All,
+                format,
+            )
+            .unwrap();
+            let textures: Vec<_> = std::fs::read_dir(directory.join(CHIMP_TEXTURE_DIR))
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            assert!(!textures.is_empty(), "{mesh} wrote no textures");
+            assert!(
+                textures.iter().all(|name| name.ends_with(extension)),
+                "expected only .{extension}: {textures:?}"
+            );
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
     /// Scratch helper: export a texture to DDS and report each file's header.
     /// `CE_TEXTURE_PACKAGE` picks it, `CE_TEXTURE_DDS_DIR` says where.
     #[test]
@@ -8698,7 +8766,7 @@ mod tests {
                     uuid::Uuid::new_v4(),
                     format.extension()
                 ));
-                write_chimp_mesh(&world, &package, &output, format, ChimpTextureScope::None).unwrap();
+                write_chimp_mesh(&world, &package, &output, format, ChimpTextureScope::None, ChimpTextureFormat::Dds).unwrap();
                 let bytes = std::fs::read(&output).unwrap();
                 match format {
                     ChimpMeshFormat::Jms => assert!(bytes.starts_with(b";### VERSION ###")),
@@ -9058,6 +9126,7 @@ mod tests {
             &output,
             ChimpMeshFormat::Pskx,
             ChimpTextureScope::None,
+            ChimpTextureFormat::Dds,
         )
         .unwrap();
         let bytes = std::fs::read(&output).unwrap();

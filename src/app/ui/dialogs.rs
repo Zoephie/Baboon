@@ -1979,6 +1979,7 @@ impl Baboon {
         let mesh_path = prompt.path.display().to_string();
         let texture_directory = prompt.texture_directory().display().to_string();
         let subject = prompt.texture_subject();
+        let mut texture_format = prompt.texture_format;
         let mut open = true;
         let mut with_textures: Option<ChimpTextureScope> = None;
         let mut cancel = false;
@@ -2003,8 +2004,7 @@ impl Baboon {
                 ui.add_space(10.0);
                 ui.label(
                     RichText::new(
-                        "Baboon can also export the textures this mesh's materials reference, \
-                         as TIFF:",
+                        "Baboon can also export the textures this mesh's materials reference:",
                     )
                     .color(text_dark()),
                 );
@@ -2040,6 +2040,25 @@ impl Baboon {
                         .small(),
                     );
                 }
+                ui.add_space(12.0);
+                // The same choice the single-texture export asks for, offered
+                // here rather than as a second window: it is one more decision
+                // about the same export, and it only applies to the two buttons
+                // below that ask for textures at all.
+                ui.label(RichText::new("Image format for those textures").color(text_dark()));
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    for choice in ChimpTextureFormat::ALL {
+                        ui.radio_value(&mut texture_format, choice, choice.label())
+                            .on_hover_text(choice.summary());
+                    }
+                });
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new(texture_format.summary())
+                        .color(subtle_dark())
+                        .small(),
+                );
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
                     if let Some(subject) = &subject
@@ -2065,6 +2084,9 @@ impl Baboon {
                     }
                 });
             });
+        if let Some(prompt) = self.chimp_mesh_texture_prompt.as_mut() {
+            prompt.texture_format = texture_format;
+        }
         if let Some(with_textures) = with_textures {
             if let Some(prompt) = self.chimp_mesh_texture_prompt.take() {
                 self.start_chimp_mesh_export(prompt, with_textures, ctx.clone());
