@@ -292,9 +292,18 @@ mod tests {
                 String::from_utf8_lossy(group)
             );
         }
-        // A scenario's script items sit inline, not in this menu, and a plain
-        // weapon has no extractor at all — both must leave it disabled.
-        assert!(!supports_tag_extract_menu(u32::from_be_bytes(*b"scnr")));
+        // Level geometry: a BSP exports one ASS, and a scenario exports one per
+        // BSP it references. The scenario's *script* items still sit inline
+        // rather than in this menu, but its geometry item lives here, so the
+        // menu must enable for both groups.
+        for group in [b"sbsp", b"scnr"] {
+            assert!(
+                supports_tag_extract_menu(u32::from_be_bytes(*group)),
+                "{} should enable the Extract menu",
+                String::from_utf8_lossy(group)
+            );
+        }
+        // A plain weapon has no extractor at all — it must leave it disabled.
         assert!(!supports_tag_extract_menu(u32::from_be_bytes(*b"weap")));
     }
 }
