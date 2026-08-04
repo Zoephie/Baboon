@@ -45,6 +45,72 @@ const TERMINAL_VISIBLE_LINE_LIMIT: usize = 20_000;
 const TERMINAL_VISIBLE_LINE_TRIM_TARGET: usize = 18_000;
 const ENTRY_INDEX_REFRESH_INTERVAL_SECS: f64 = 30.0;
 
+/// Choose the container tag whose `.uasset` a new tag will donate its package
+/// structure from, returning its container index and container path.
+///
+/// A same-group tag is preferred but not required. The game ships no tag at all
+/// for 38 of the 139 defined groups — `cinematic_scene` among them — so
+/// insisting on one made those groups impossible to create rather than merely
+/// awkward. `blam-tags` derives everything group-shaped (the wrapper class, its
+/// CDO, the script imports and the flag pair) from the destination package path,
+/// so a donor of another group contributes only package structure.
+fn pick_container_template<'a>(
+    entries: impl Iterator<Item = &'a TagEntry> + Clone,
+    group_tag: u32,
+) -> Option<(usize, String)> {
+    let uasset_of = |entry: &TagEntry| match &entry.location {
+        TagEntryLocation::Container {
+            container,
+            rel_path,
+        } => rel_path
+            .strip_suffix(".ubulk")
+            .map(|stem| (*container, format!("{stem}.uasset"))),
+        _ => None,
+    };
+    if let Some(found) = entries
+        .clone()
+        .filter(|entry| entry.group_tag == group_tag)
+        .find_map(uasset_of)
+    {
+        return Some(found);
+    }
+    // Only a wrapper that carries no properties of its own can be donated across
+    // groups: a present property is indexed against the donor class's schema and
+    // would name a different property under the destination's. `blam-tags`
+    // rejects a donor that fails that, so the fallback picks from groups whose
+    // wrappers are bare in every shipped tag.
+    entries
+        .filter(|entry| {
+            entry
+                .group_name
+                .as_deref()
+                .is_some_and(|name| BARE_WRAPPER_DONOR_GROUPS.contains(&name))
+        })
+        .find_map(uasset_of)
+}
+
+/// Campaign Evolved groups whose `.uasset` wrapper carries no properties at all,
+/// making it safe to donate as the package structure for a new tag of *any*
+/// group.
+///
+/// Drawn from the 47 bare groups measured in
+/// `docs/campaign-evolved-tag-packages.md` §3, restricted to ones the game
+/// actually ships so the fallback can always find one. A donor whose wrapper
+/// does carry properties is rejected by `blam-tags`, because those properties
+/// are positional against the donor class's schema.
+const BARE_WRAPPER_DONOR_GROUPS: &[&str] = &[
+    "collision_model",
+    "physics_model",
+    "camera_shake",
+    "camera_track",
+    "shader",
+    "style",
+    "rumble",
+    "formation",
+    "camo",
+    "color_table",
+];
+
 /// Map a container `.ubulk` path to the UE package path the runtime hashes.
 /// `Meteorite/Content/Tags/objects/.../foo-biped.ubulk` → `/Game/Tags/objects/.../foo-biped`.
 /// Normalize a user-entered container tag path: lowercase, `\`→`/`, collapse
@@ -1059,7 +1125,15 @@ impl Baboon {
             return;
         }
         let tag = match TagFile::new(&group.schema_path) {
-            Ok(tag) => tag,
+            Ok(mut tag) => {
+                // `TagFile::new` zeroes the whole file-header generation; the
+                // simulation expects Campaign Evolved's.
+                if let Err(error) = apply_editing_kit_mcc_header(&mut tag, CAMPAIGN_EVOLVED_GAME) {
+                    self.new_tag_dialog.error = Some(error);
+                    return;
+                }
+                tag
+            }
             Err(error) => {
                 self.new_tag_dialog.error = Some(format!("Could not create tag: {error}"));
                 return;
@@ -1478,28 +1552,60 @@ impl Baboon {
     /// A specific kit's template. Project recovery names its kit: the container
     /// a stashed new tag is modelled on has to come from the source that tag
     /// belongs to, not from whichever kit happens to be focused.
+    ///
+    /// A same-group tag is preferred but no longer required. The game ships no
+    /// tag at all for 38 of the 139 defined groups — `cinematic_scene` among
+    /// them — so insisting on one made those groups impossible to create rather
+    /// than merely awkward. `blam-tags` derives everything group-shaped (the
+    /// wrapper class, its CDO, the script imports and the flag pair) from the
+    /// destination package path, so a donor of another group contributes only
+    /// package structure.
     pub(super) fn find_container_template_in(
         &self,
         kit: usize,
         group_tag: u32,
     ) -> Option<(usize, String)> {
         let source = self.kits.get(kit)?.source.as_ref()?;
-        source
-            .entries
-            .iter()
-            .chain(source.all_entries.iter())
-            .find_map(|entry| match &entry.location {
-                TagEntryLocation::Container {
-                    container,
-                    rel_path,
-                } if entry.group_tag == group_tag => {
-                    let uasset = rel_path
-                        .strip_suffix(".ubulk")
-                        .map(|s| format!("{s}.uasset"))?;
-                    Some((*container, uasset))
-                }
-                _ => None,
-            })
+        pick_container_template(
+            source.entries.iter().chain(source.all_entries.iter()),
+            group_tag,
+        )
+    }
+
+    /// Read the `.uasset` a new tag donates its package structure from.
+    ///
+    /// The donor recorded on the entry is a *hint*, not a fact: container
+    /// indices are positional, so a remount reorders them and a tag stashed in a
+    /// project outlives the index it was created against. Re-resolving on a miss
+    /// is what keeps such a tag saveable instead of failing with "template
+    /// container is stale".
+    fn read_new_container_template(
+        &self,
+        template_container: usize,
+        template_rel: &str,
+        group_tag: u32,
+    ) -> Result<Vec<u8>, String> {
+        let Some(source) = self.source() else {
+            return Err("No source loaded".to_owned());
+        };
+        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+            return Err("Source is not a container".to_owned());
+        };
+        if let Some(bytes) = containers
+            .get(template_container)
+            .and_then(|mounted| mounted.archive.read(template_rel).ok())
+        {
+            return Ok(bytes);
+        }
+        let (container, rel) = self.find_container_template(group_tag).ok_or_else(|| {
+            "No tag in the mounted paks can donate a package template".to_owned()
+        })?;
+        containers
+            .get(container)
+            .ok_or_else(|| "Template container is stale".to_owned())?
+            .archive
+            .read(&rel)
+            .map_err(|e| format!("Failed to read template .uasset: {e}"))
     }
 
     /// Register an in-memory (unsaved) container tag: insert it into the browser
@@ -3939,7 +4045,7 @@ impl Baboon {
             template_container,
             template_rel,
             package,
-            ..
+            group_tag,
         } = &entry.location
         else {
             self.status = "Not a new container tag".to_owned();
@@ -3956,27 +4062,14 @@ impl Baboon {
                 return;
             }
         };
-        let template = {
-            let Some(source) = self.source() else {
-                self.status = "No source loaded".to_owned();
-                return;
-            };
-            let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
-                self.status = "Source is not a container".to_owned();
-                return;
-            };
-            let Some(mounted) = containers.get(*template_container) else {
-                self.status = "Template container is stale".to_owned();
-                return;
-            };
-            match mounted.archive.read(template_rel) {
-                Ok(b) => b,
-                Err(e) => {
-                    self.status = format!("Failed to read template .uasset: {e}");
+        let template =
+            match self.read_new_container_template(*template_container, template_rel, *group_tag) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    self.status = error;
                     return;
                 }
-            }
-        };
+            };
         let leaf = package.rsplit('/').next().unwrap_or("tag");
         let Some(output) = pick_override_utoc(&format!("{leaf}_P.utoc")) else {
             return;
@@ -4519,13 +4612,20 @@ impl Baboon {
                     template_container,
                     template_rel,
                     package,
-                    ..
+                    group_tag,
                 } => {
-                    let Some(m) = containers.get(*template_container) else {
-                        skipped += 1;
-                        continue;
-                    };
-                    let Ok(template) = m.archive.read(template_rel) else {
+                    // The recorded donor is a hint — container indices shift on a
+                    // remount — so a miss re-resolves rather than dropping the tag
+                    // out of the export.
+                    let donor = containers
+                        .get(*template_container)
+                        .and_then(|m| m.archive.read(template_rel).ok())
+                        .or_else(|| {
+                            let (container, rel) =
+                                self.find_container_template_in(exporting, *group_tag)?;
+                            containers.get(container)?.archive.read(&rel).ok()
+                        });
+                    let Some(template) = donor else {
                         skipped += 1;
                         continue;
                     };
@@ -7268,6 +7368,10 @@ mod save_changes_prompt_tests;
 #[cfg(test)]
 #[path = "tests/mod_overrides.rs"]
 mod mod_override_tests;
+
+#[cfg(test)]
+#[path = "tests/campaign_new_tag.rs"]
+mod campaign_new_tag_tests;
 
 enum SaveChangesPromptAction {
     None,

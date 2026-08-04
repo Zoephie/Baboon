@@ -37,7 +37,18 @@ fn requires_native_layout_template(group_name: &str) -> bool {
 /// the corresponding editing kit. `TagFile::new` deliberately initializes
 /// these fields to zero, which is sufficient for the library's own parser but
 /// is rejected (and can crash) in the native editing-kit tools.
+///
+/// Campaign Evolved rides along despite having no editing kit: it is the same
+/// question — which generation does a freshly created tag claim — and answering
+/// it in two places is how the CE case came to be missing in the first place.
 pub(super) fn apply_editing_kit_mcc_header(tag: &mut TagFile, game: &str) -> Result<(), String> {
+    // Campaign Evolved is not an editing-kit game — its tags are read by the
+    // shipped simulation, not by guerilla — so it carries its own generation and
+    // none of the MCC defaults below apply to it.
+    if game == CAMPAIGN_EVOLVED_GAME {
+        tag.header.build_version = CAMPAIGN_EVOLVED_BUILD_VERSION;
+        return Ok(());
+    }
     let build_number = match game {
         "halo3_mcc" | "halo3odst_mcc" => 1,
         "haloreach_mcc" | "halo4_mcc" | "halo2amp_mcc" => 2,
@@ -49,6 +60,22 @@ pub(super) fn apply_editing_kit_mcc_header(tag: &mut TagFile, game: &str) -> Res
     tag.header.version = u32::MAX;
     Ok(())
 }
+
+/// The definitions-directory name for Campaign Evolved. Defined here rather
+/// than shared because the two other copies (`controller::tools`,
+/// `source::loading`) are equally local and the string is the on-disk folder
+/// name, not a value anything derives.
+pub(super) const CAMPAIGN_EVOLVED_GAME: &str = "haloce_evolved";
+
+/// The `build_version` Campaign Evolved stamps on a tag file.
+///
+/// `TagFile::new` leaves the whole generation at zero, which the library's own
+/// parser accepts. `build_number` and `version` are deliberately left there:
+/// unlike MCC, no value for either has been read off a shipped CE tag, so
+/// picking one would write a guess into every tag the editor creates. Settling
+/// them means reading a shipped `.ubulk` header and comparing — worth doing, and
+/// not something to infer from this one.
+pub(super) const CAMPAIGN_EVOLVED_BUILD_VERSION: i32 = 5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::app) enum ConversionIssueKind {
