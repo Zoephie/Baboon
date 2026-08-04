@@ -2081,6 +2081,66 @@ impl Baboon {
     /// and every piece of that — why it splits, what the numbers mean, that the
     /// shared library has to travel with the segments — is invisible from the
     /// files alone.
+    pub(super) fn draw_chimp_texture_export_prompt(&mut self, ctx: &egui::Context) {
+        let Some(prompt) = self.chimp_texture_export_prompt.as_ref() else {
+            return;
+        };
+        let name = prompt.name().to_owned();
+        let mut format = prompt.format;
+        let mut open = true;
+        let mut go = false;
+        let mut cancel = false;
+
+        egui::Window::new("Extract texture")
+            .id(egui::Id::new("chimp_texture_export_prompt"))
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .default_width(460.0)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .show(ctx, |ui| {
+                ui.label(RichText::new(&name).color(text_dark()));
+                ui.add_space(10.0);
+                for choice in ChimpTextureFormat::ALL {
+                    ui.radio_value(&mut format, choice, choice.label());
+                    ui.indent(choice.label(), |ui| {
+                        ui.label(RichText::new(choice.summary()).color(subtle_dark()).small());
+                    });
+                    ui.add_space(6.0);
+                }
+                ui.add_space(6.0);
+                ui.label(
+                    RichText::new(
+                        "A virtual texture with more than one UDIM block writes one numbered \
+                         file per block beside the name you choose, each at the resolution it \
+                         was authored at.",
+                    )
+                    .color(subtle_dark())
+                    .small(),
+                );
+                ui.add_space(14.0);
+                ui.horizontal(|ui| {
+                    if ui.button("Choose file and export…").clicked() {
+                        go = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+
+        if let Some(prompt) = self.chimp_texture_export_prompt.as_mut() {
+            prompt.format = format;
+        }
+        if go {
+            if let Some(prompt) = self.chimp_texture_export_prompt.take() {
+                self.start_chimp_texture_export(prompt, ctx.clone());
+            }
+        } else if cancel || !open {
+            self.chimp_texture_export_prompt = None;
+        }
+    }
+
     pub(super) fn draw_chimp_level_export_prompt(&mut self, ctx: &egui::Context) {
         let Some(prompt) = self.chimp_level_export_prompt.as_ref() else {
             return;

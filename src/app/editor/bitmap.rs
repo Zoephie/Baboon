@@ -78,19 +78,22 @@ pub(in crate::app) fn draw_bitmap_preview(
         preview.texture_dirty = true;
     }
 
-    draw_bitmap_preview_data(ui, ctx, &entry.key, preview, true);
+    draw_bitmap_preview_data(ui, ctx, &entry.key, preview, true, "Image");
 }
 
 /// Render an already-decoded RGBA preview with the same controls and canvas as
 /// Baboon's bitmap editor. Other asset systems (such as Chimp's Texture2D
 /// packages) use this entry point so channel toggles, zooming, backgrounds and
 /// pixel inspection stay identical rather than drifting into parallel viewers.
+/// `image_label` names the outer selection axis: bitmap tags step through images
+/// in a sequence, while Chimp's virtual textures step through layers.
 pub(in crate::app) fn draw_bitmap_preview_data(
     ui: &mut Ui,
     ctx: &egui::Context,
     texture_key: &str,
     preview: &mut BitmapPreviewState,
     supports_image_selection: bool,
+    image_label: &str,
 ) {
     let Some(decoded) = preview.decoded.as_ref() else {
         return;
@@ -120,7 +123,7 @@ pub(in crate::app) fn draw_bitmap_preview_data(
     ui.horizontal(|ui| {
         // Image (sequence) selector.
         if data.image_count > 1 {
-            ui.label(RichText::new("Image").color(subtle_dark()));
+            ui.label(RichText::new(image_label).color(subtle_dark()));
             if ui
                 .add_enabled(preview.image_index > 0, egui::Button::new("◀"))
                 .clicked()
@@ -147,7 +150,7 @@ pub(in crate::app) fn draw_bitmap_preview_data(
             }
             ui.separator();
         } else {
-            ui.label(RichText::new("Image 0").color(subtle_dark()));
+            ui.label(RichText::new(format!("{image_label} 0")).color(subtle_dark()));
         }
         // Mip-level selector.
         if data.mip_count > 1 {

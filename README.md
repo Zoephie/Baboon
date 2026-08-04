@@ -159,7 +159,22 @@ and editor state.
   filter, or by type.
 - Edit reflected properties against the game's schema (`.usmap`), with typed
   values, containers, and structs resolved to their real names.
-- Preview textures, static meshes and skeletal meshes.
+- Preview textures, static meshes and skeletal meshes. Textures use the same
+  viewer as `bitmap` tags, stepping through every mip level and — on a virtual
+  texture with more than one layer — every layer. Campaign Evolved ships most of
+  its art as UE5 virtual textures; those are reassembled from their tiles,
+  borders removed, with the UDIM blocks laid out side by side. A base mip larger
+  than the display can upload is noted and the largest mip that fits is shown
+  instead; export is unaffected.
+- **Extract Texture2D** — one menu entry that asks which image format first,
+  then where to save. DDS, TIFF and PNG all split a UDIM virtual
+  texture into `name.1001.…`, `name.1002.…`, … following the UDIM convention,
+  ready to import back into Unreal as a UDIM set, and all three give each block
+  the resolution it was authored at — a set that mixes 2048 and 1024 blocks
+  exports each at its own size rather than magnifying the smaller ones. DDS
+  additionally keeps the cooked pixel format (BC1–BC7 and the uncompressed
+  formats) and the whole mip chain, so it is the bytes the game ships rather
+  than a re-encode; TIFF and PNG are one flat RGBA8 image per block.
 - Save edited packages back into the container in place, or bundle them into a
   mod container.
 - Edits are checkpointed to a recovery folder, so a crash or a restart does not
