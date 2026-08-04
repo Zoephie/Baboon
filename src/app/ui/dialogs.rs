@@ -1979,7 +1979,7 @@ impl Baboon {
         let mesh_path = prompt.path.display().to_string();
         let texture_directory = prompt.texture_directory().display().to_string();
         let subject = prompt.texture_subject();
-        let mut texture_format = prompt.texture_format;
+        let mut texture_export = prompt.texture_export;
         let mut open = true;
         let mut with_textures: Option<ChimpTextureScope> = None;
         let mut cancel = false;
@@ -2049,15 +2049,24 @@ impl Baboon {
                 ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     for choice in ChimpTextureFormat::ALL {
-                        ui.radio_value(&mut texture_format, choice, choice.label())
+                        ui.radio_value(&mut texture_export.format, choice, choice.label())
                             .on_hover_text(choice.summary());
                     }
                 });
                 ui.add_space(4.0);
                 ui.label(
-                    RichText::new(texture_format.summary())
+                    RichText::new(texture_export.format.summary())
                         .color(subtle_dark())
                         .small(),
+                );
+                ui.add_space(6.0);
+                ui.checkbox(
+                    &mut texture_export.split_udim,
+                    "Split UDIM blocks into separate files",
+                )
+                .on_hover_text(
+                    "Off writes each UDIM texture as one stitched image instead, for an \
+                     engine with no UDIM support",
                 );
                 ui.add_space(10.0);
                 ui.horizontal(|ui| {
@@ -2085,7 +2094,7 @@ impl Baboon {
                 });
             });
         if let Some(prompt) = self.chimp_mesh_texture_prompt.as_mut() {
-            prompt.texture_format = texture_format;
+            prompt.texture_export = texture_export;
         }
         if let Some(with_textures) = with_textures {
             if let Some(prompt) = self.chimp_mesh_texture_prompt.take() {
@@ -2108,7 +2117,7 @@ impl Baboon {
             return;
         };
         let name = prompt.name().to_owned();
-        let mut format = prompt.format;
+        let mut export = prompt.export;
         let mut open = true;
         let mut go = false;
         let mut cancel = false;
@@ -2124,19 +2133,28 @@ impl Baboon {
                 ui.label(RichText::new(&name).color(text_dark()));
                 ui.add_space(10.0);
                 for choice in ChimpTextureFormat::ALL {
-                    ui.radio_value(&mut format, choice, choice.label());
+                    ui.radio_value(&mut export.format, choice, choice.label());
                     ui.indent(choice.label(), |ui| {
                         ui.label(RichText::new(choice.summary()).color(subtle_dark()).small());
                     });
                     ui.add_space(6.0);
                 }
                 ui.add_space(6.0);
+                ui.separator();
+                ui.add_space(6.0);
+                ui.checkbox(&mut export.split_udim, "Split UDIM blocks into separate files");
+                ui.add_space(4.0);
                 ui.label(
-                    RichText::new(
+                    RichText::new(if export.split_udim {
                         "A virtual texture with more than one UDIM block writes one numbered \
                          file per block beside the name you choose, each at the resolution it \
-                         was authored at.",
-                    )
+                         was authored at."
+                    } else {
+                        "The whole set is written as the single stitched image its tiles were \
+                         reassembled into — for an engine with no UDIM support. Blocks \
+                         authored smaller are magnified to sit on the same grid, so this \
+                         costs some detail that splitting keeps."
+                    })
                     .color(subtle_dark())
                     .small(),
                 );
@@ -2152,7 +2170,7 @@ impl Baboon {
             });
 
         if let Some(prompt) = self.chimp_texture_export_prompt.as_mut() {
-            prompt.format = format;
+            prompt.export = export;
         }
         if go {
             if let Some(prompt) = self.chimp_texture_export_prompt.take() {

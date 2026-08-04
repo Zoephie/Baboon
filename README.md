@@ -174,7 +174,11 @@ and editor state.
   exports each at its own size rather than magnifying the smaller ones. DDS
   additionally keeps the cooked pixel format (BC1–BC7 and the uncompressed
   formats) and the whole mip chain, so it is the bytes the game ships rather
-  than a re-encode; TIFF and PNG are one flat RGBA8 image per block.
+  than a re-encode; TIFF and PNG are one flat RGBA8 image per block. Splitting
+  can be turned off, writing the whole set as the single stitched image its
+  tiles were reassembled into, for an engine with no UDIM support — blocks
+  authored smaller are magnified onto the same grid, so it costs some of the
+  detail splitting keeps.
 - Extracting a static or skeletal mesh offers its textures alongside it — either
   every texture the materials reference, or just the ones named after the model —
   and asks the same image-format question, so they land beside the mesh in

@@ -66,7 +66,7 @@ pub(super) struct ChimpMeshTexturePrompt {
     /// here rather than in a second window, because it is only one more choice
     /// about the same export and the answer only matters alongside the two
     /// buttons that ask for textures at all.
-    pub(super) texture_format: ChimpTextureFormat,
+    pub(super) texture_export: ChimpTextureExport,
     pub(super) path: PathBuf,
 }
 
@@ -223,7 +223,7 @@ impl ChimpTextureFormat {
 pub(super) struct ChimpTextureExportPrompt {
     pub(super) kit: KitId,
     pub(super) package: String,
-    pub(super) format: ChimpTextureFormat,
+    pub(super) export: ChimpTextureExport,
 }
 
 impl ChimpTextureExportPrompt {
@@ -4102,8 +4102,8 @@ impl Baboon {
         self.chimp_texture_export_prompt = Some(ChimpTextureExportPrompt {
             kit: self.kits[kit_index].id,
             package: package.to_owned(),
-            // DDS first: it is the only one that round-trips into Unreal.
-            format: ChimpTextureFormat::Dds,
+            // DDS and split UDIM: the pair that round-trips into Unreal.
+            export: ChimpTextureExport::default(),
         });
     }
 
@@ -4116,8 +4116,9 @@ impl Baboon {
         let ChimpTextureExportPrompt {
             kit,
             package,
-            format,
+            export,
         } = prompt;
+        let format = export.format;
         let leaf = package.rsplit('/').next().unwrap_or("texture").to_owned();
         let (filter, extensions) = format.filter();
         let Some(path) = rfd::FileDialog::new()
@@ -4138,7 +4139,7 @@ impl Baboon {
         let tx = self.tx.clone();
         self.status = format!("Extracting {package}…");
         thread::spawn(move || {
-            let result = write_chimp_texture(&world, &package, &path, format);
+            let result = write_chimp_texture(&world, &package, &path, export);
             let _ = tx.send(WorkerMessage::ExportFinished(result));
             ctx.request_repaint();
         });
@@ -4306,7 +4307,7 @@ impl Baboon {
             kit: self.kits[kit_index].id,
             package: package.to_owned(),
             format,
-            texture_format: ChimpTextureFormat::Dds,
+            texture_export: ChimpTextureExport::default(),
             path,
         });
     }
@@ -4329,7 +4330,7 @@ impl Baboon {
         let ChimpMeshTexturePrompt {
             package,
             format,
-            texture_format,
+            texture_export,
             path,
             ..
         } = prompt;
@@ -4337,7 +4338,7 @@ impl Baboon {
         self.status = format!("Extracting {package} as {}…", format.label());
         thread::spawn(move || {
             let result =
-                write_chimp_mesh(&world, &package, &path, format, textures, texture_format);
+                write_chimp_mesh(&world, &package, &path, format, textures, texture_export);
             let _ = tx.send(WorkerMessage::ExportFinished(result));
             ctx.request_repaint();
         });
@@ -4423,7 +4424,7 @@ fn write_chimp_mesh_textures(
     header: &FZenPackageHeader,
     directory: &Path,
     subject: Option<&str>,
-    format: ChimpTextureFormat,
+    options: ChimpTextureExport,
 ) -> (usize, Vec<String>) {
     let packages = chimp_mesh_texture_packages(world, header);
     let mut written = 0usize;
@@ -4454,8 +4455,8 @@ fn write_chimp_mesh_textures(
             }
             created = true;
         }
-        let output = directory.join(format!("{leaf}.{}", format.extension()));
-        match write_chimp_texture(world, &package, &output, format) {
+        let output = directory.join(format!("{leaf}.{}", options.format.extension()));
+        match write_chimp_texture(world, &package, &output, options) {
             Ok(_) => written += 1,
             Err(error) => failures.push(error),
         }
@@ -4484,8 +4485,27 @@ fn chimp_selected_surfaces<'a>(
         .map_err(|error| format!("{package}: {error}"))
 }
 
+/// How a Texture2D should be written out.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) struct ChimpTextureExport {
+    pub(super) format: ChimpTextureFormat,
+    /// Split a UDIM set into one numbered file per block. Off writes the whole
+    /// set as the single stitched image it was reassembled into, for engines
+    /// that have no UDIM support to import it with.
+    pub(super) split_udim: bool,
+}
+
+impl Default for ChimpTextureExport {
+    fn default() -> Self {
+        Self {
+            format: ChimpTextureFormat::Dds,
+            split_udim: true,
+        }
+    }
+}
+
 /// Write every layer of a Texture2D, splitting a UDIM virtual texture into
-/// 1001-numbered files.
+/// 1001-numbered files unless asked for one stitched image.
 ///
 /// All three formats split the same way and pick the same base level per block,
 /// so a set exported as PNG lines up with the same set exported as DDS. Only
@@ -4495,8 +4515,9 @@ fn write_chimp_texture(
     world: &World,
     package: &str,
     output: &Path,
-    format: ChimpTextureFormat,
+    options: ChimpTextureExport,
 ) -> Result<String, String> {
+    let ChimpTextureExport { format, split_udim } = options;
     let document = load_chimp_document(world, package)?;
     let surfaces = chimp_selected_surfaces(&document, package)?;
     let stem = output
@@ -4505,8 +4526,14 @@ fn write_chimp_texture(
         .unwrap_or_else(|| "texture".to_owned());
     let directory = output.parent().unwrap_or(Path::new("."));
 
-    let blocks_x = surfaces.width_in_blocks.max(1);
-    let blocks_y = surfaces.height_in_blocks.max(1);
+    // Splitting is only a question for a set with more than one block; a plain
+    // texture is one file either way.
+    let split = split_udim && surfaces.is_udim();
+    let (blocks_x, blocks_y) = if split {
+        (surfaces.width_in_blocks.max(1), surfaces.height_in_blocks.max(1))
+    } else {
+        (1, 1)
+    };
     let mut written = Vec::new();
     let mut failures = Vec::new();
 
@@ -4516,6 +4543,15 @@ fn write_chimp_texture(
         } else {
             String::new()
         };
+        if !split {
+            let name = format!("{stem}{layer_suffix}.{}", format.extension());
+            let path = directory.join(&name);
+            match write_stitched_layer(surfaces, layer_index, layer, format, &path) {
+                Ok(()) => written.push(name),
+                Err(error) => failures.push(format!("{name}: {error}")),
+            }
+            continue;
+        }
         // Decoding a base level is expensive - mip 0 of a large virtual texture
         // is tens of megabytes - and blocks sharing a level can share the work.
         let mut decoded_levels: HashMap<usize, Vec<u8>> = HashMap::new();
@@ -4639,23 +4675,79 @@ fn write_flat_block(
         );
     }
 
+    write_flat_image(&cropped, block_width, block_height, format, path)
+}
+
+/// Write a whole layer as one file, keeping every UDIM block in the single
+/// stitched image the tiles were reassembled into.
+///
+/// For DDS this stays lossless — the cooked format and the whole mip chain —
+/// but only while every block carries every level. A mixed-resolution set has
+/// gaps at its finest levels, and filling them means magnifying from the level
+/// below, which cannot be expressed in compressed blocks; that case writes one
+/// RGBA8 level instead so the image is complete rather than holed.
+fn write_stitched_layer(
+    surfaces: &Texture2dSurfaces,
+    layer_index: usize,
+    layer: &blam_tags::iostore::asset::texture2d::TextureLayerSurfaces,
+    format: ChimpTextureFormat,
+    path: &Path,
+) -> Result<(), String> {
+    let has_gaps = layer
+        .mips
+        .iter()
+        .any(|surface| !surface.missing_tiles.is_empty());
+    if matches!(format, ChimpTextureFormat::Dds) && !has_gaps {
+        return write_dds_block(layer, 1, 1, 0, 0, path);
+    }
+
+    let rgba = surfaces
+        .display_rgba8(layer_index, 0)
+        .map_err(|error| format!("{error:#}"))?;
+    let (width, height) = (surfaces.width, surfaces.height);
+    if !matches!(format, ChimpTextureFormat::Dds) {
+        return write_flat_image(&rgba, width, height, format, path);
+    }
+
+    let dxgi = blam_tags::bitmap::dds::ue_dxgi_format("PF_R8G8B8A8")
+        .ok_or_else(|| "RGBA8 has no DDS equivalent".to_owned())?;
+    let mut file = fs::File::create(path)
+        .map_err(|error| format!("Could not create {}: {error}", path.display()))?;
+    blam_tags::bitmap::dds::write_dds_dxgi(
+        &mut file,
+        dxgi,
+        width,
+        height,
+        1,
+        1,
+        None,
+        Some(32),
+        &rgba,
+    )
+    .map_err(|error| format!("Could not encode {}: {error}", path.display()))
+}
+
+fn write_flat_image(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    format: ChimpTextureFormat,
+    path: &Path,
+) -> Result<(), String> {
     let mut file = fs::File::create(path)
         .map_err(|error| format!("Could not create {}: {error}", path.display()))?;
     match format {
-        ChimpTextureFormat::Png => image::RgbaImage::from_raw(block_width, block_height, cropped)
-            .ok_or_else(|| "cropped block does not match its dimensions".to_owned())?
-            .write_to(
-                &mut std::io::BufWriter::new(&mut file),
-                image::ImageFormat::Png,
-            )
+        ChimpTextureFormat::Png => {
+            image::RgbaImage::from_raw(width, height, rgba.to_vec())
+                .ok_or_else(|| "image does not match its dimensions".to_owned())?
+                .write_to(
+                    &mut std::io::BufWriter::new(&mut file),
+                    image::ImageFormat::Png,
+                )
+                .map_err(|error| format!("Could not encode {}: {error}", path.display()))
+        }
+        _ => blam_tags::bitmap::tiff::write_rgba8_tiff(&mut file, width, height, rgba)
             .map_err(|error| format!("Could not encode {}: {error}", path.display())),
-        _ => blam_tags::bitmap::tiff::write_rgba8_tiff(
-            &mut file,
-            block_width,
-            block_height,
-            &cropped,
-        )
-        .map_err(|error| format!("Could not encode {}: {error}", path.display())),
     }
 }
 
@@ -4763,7 +4855,7 @@ fn write_chimp_mesh(
     output: &Path,
     format: ChimpMeshFormat,
     textures: ChimpTextureScope,
-    texture_format: ChimpTextureFormat,
+    texture_export: ChimpTextureExport,
 ) -> Result<String, String> {
     let document = load_chimp_document(world, package)?;
     let kind = document
@@ -4861,7 +4953,7 @@ fn write_chimp_mesh(
             &document.header,
             &directory,
             subject.as_deref(),
-            texture_format,
+            texture_export,
         );
         let scope = match &subject {
             Some(subject) => format!(" matching \"{subject}\""),
@@ -7667,7 +7759,7 @@ mod tests {
             kit: KitId(1),
             package: "/Game/Art/SK_Brute".to_owned(),
             format: ChimpMeshFormat::Pskx,
-            texture_format: ChimpTextureFormat::Dds,
+            texture_export: ChimpTextureExport::default(),
             path: PathBuf::from("C:/exports/brute.pskx"),
         };
         assert_eq!(
@@ -8393,7 +8485,7 @@ mod tests {
             &world,
             &package,
             &directory.join("texture.tif"),
-            ChimpTextureFormat::Tiff,
+            ChimpTextureExport { format: ChimpTextureFormat::Tiff, ..Default::default() },
         )
         .unwrap();
         let written: Vec<_> = std::fs::read_dir(&directory)
@@ -8447,7 +8539,7 @@ mod tests {
             &world,
             &package,
             &directory.join("t.png"),
-            ChimpTextureFormat::Png,
+            ChimpTextureExport { format: ChimpTextureFormat::Png, ..Default::default() },
         )
         .unwrap();
         let side = |name: &str| {
@@ -8498,7 +8590,7 @@ mod tests {
         let directory = std::env::temp_dir().join(format!("baboon-dds-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&directory).unwrap();
         let output = directory.join("texture.dds");
-        write_chimp_texture(&world, &package, &output, ChimpTextureFormat::Dds).unwrap();
+        write_chimp_texture(&world, &package, &output, ChimpTextureExport::default()).unwrap();
 
         let mut written: Vec<String> = std::fs::read_dir(&directory)
             .unwrap()
@@ -8542,7 +8634,7 @@ mod tests {
                 &world,
                 &package,
                 &directory.join(format!("texture.{extension}")),
-                format,
+                ChimpTextureExport { format, ..Default::default() },
             )
             .unwrap();
             let mut flat: Vec<String> = std::fs::read_dir(&directory)
@@ -8559,6 +8651,49 @@ mod tests {
             assert!(first.starts_with(magic), "{extension} magic");
             std::fs::remove_dir_all(&directory).unwrap();
         }
+    }
+
+    /// Turning the split off writes one stitched image covering every UDIM
+    /// block, for an engine that cannot import a numbered set.
+    #[test]
+    #[ignore = "requires a Campaign Evolved install; set CE_PAKS"]
+    fn unsplit_udim_exports_one_stitched_image() {
+        let root = std::env::var_os("CE_PAKS").expect("set CE_PAKS");
+        let world = World::open(root, Usmap::meteorite().unwrap()).unwrap();
+        let package = world
+            .packages()
+            .iter()
+            .map(|package| package.name.clone())
+            .find(|name| name.to_ascii_lowercase().ends_with("t_elite_minor_armor_n"))
+            .expect("elite minor armour normal");
+        let document = load_chimp_document(&world, &package).unwrap();
+        let surfaces = chimp_selected_surfaces(&document, &package).unwrap();
+        assert!(surfaces.is_udim());
+
+        let directory =
+            std::env::temp_dir().join(format!("baboon-stitched-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        write_chimp_texture(
+            &world,
+            &package,
+            &directory.join("t.png"),
+            ChimpTextureExport {
+                format: ChimpTextureFormat::Png,
+                split_udim: false,
+            },
+        )
+        .unwrap();
+        let written: Vec<_> = std::fs::read_dir(&directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(written, vec!["t.png".to_owned()], "one file, not a set");
+
+        let bytes = std::fs::read(directory.join("t.png")).unwrap();
+        let side = |at: usize| u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap());
+        // The whole atlas, at the full reassembled size.
+        assert_eq!((side(16), side(20)), (surfaces.width, surfaces.height));
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     /// A mesh's textures follow the format chosen in the prompt, not a fixed
@@ -8597,7 +8732,7 @@ mod tests {
                 &directory.join("mesh.pskx"),
                 ChimpMeshFormat::Pskx,
                 ChimpTextureScope::All,
-                format,
+                ChimpTextureExport { format, ..Default::default() },
             )
             .unwrap();
             let textures: Vec<_> = std::fs::read_dir(directory.join(CHIMP_TEXTURE_DIR))
@@ -8633,7 +8768,8 @@ mod tests {
             .find(|name| name.to_ascii_lowercase().ends_with(&target))
             .unwrap_or_else(|| panic!("no package ending in {target:?}"));
         let fmt = match std::env::var("CE_TEXTURE_FORMAT").unwrap_or_default().as_str() { "png" => ChimpTextureFormat::Png, "tif" => ChimpTextureFormat::Tiff, _ => ChimpTextureFormat::Dds };
-        println!("{}", write_chimp_texture(&world, &package, &directory.join(format!("t.{}", fmt.extension())), fmt).unwrap());
+        let split = std::env::var("CE_TEXTURE_SPLIT").unwrap_or_default() != "0";
+        println!("{}", write_chimp_texture(&world, &package, &directory.join(format!("t.{}", fmt.extension())), ChimpTextureExport { format: fmt, split_udim: split }).unwrap());
         let mut names: Vec<_> = std::fs::read_dir(&directory)
             .unwrap()
             .map(|entry| entry.unwrap().path())
@@ -8766,7 +8902,7 @@ mod tests {
                     uuid::Uuid::new_v4(),
                     format.extension()
                 ));
-                write_chimp_mesh(&world, &package, &output, format, ChimpTextureScope::None, ChimpTextureFormat::Dds).unwrap();
+                write_chimp_mesh(&world, &package, &output, format, ChimpTextureScope::None, ChimpTextureExport::default()).unwrap();
                 let bytes = std::fs::read(&output).unwrap();
                 match format {
                     ChimpMeshFormat::Jms => assert!(bytes.starts_with(b";### VERSION ###")),
@@ -9126,7 +9262,7 @@ mod tests {
             &output,
             ChimpMeshFormat::Pskx,
             ChimpTextureScope::None,
-            ChimpTextureFormat::Dds,
+            ChimpTextureExport::default(),
         )
         .unwrap();
         let bytes = std::fs::read(&output).unwrap();
