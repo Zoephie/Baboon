@@ -42,16 +42,15 @@ fn requires_native_layout_template(group_name: &str) -> bool {
 /// question — which generation does a freshly created tag claim — and answering
 /// it in two places is how the CE case came to be missing in the first place.
 pub(super) fn apply_editing_kit_mcc_header(tag: &mut TagFile, game: &str) -> Result<(), String> {
-    // Campaign Evolved is not an editing-kit game — its tags are read by the
-    // shipped simulation, not by guerilla — so it carries its own generation and
-    // none of the MCC defaults below apply to it.
-    if game == CAMPAIGN_EVOLVED_GAME {
-        tag.header.build_version = CAMPAIGN_EVOLVED_BUILD_VERSION;
-        return Ok(());
-    }
     let build_number = match game {
         "halo3_mcc" | "halo3odst_mcc" => 1,
-        "haloreach_mcc" | "halo4_mcc" | "halo2amp_mcc" => 2,
+        // Campaign Evolved carries Reach's generation exactly, because its
+        // `.ubulk` blobs *are* Reach-format tags — the UE5 package around them
+        // is a wrapper, and the simulation reads the blob. Measured, not
+        // assumed: all 12,289 shipped tag blobs across all 101 groups read
+        // `1 / 2 / 0xffffffff`, with no per-group variation. The gate is
+        // `the_shipped_tag_header_generation` in blam-tags.
+        "haloreach_mcc" | "halo4_mcc" | "halo2amp_mcc" | "haloce_evolved" => 2,
         _ => return Err(format!("No MCC tag-header defaults are known for {game}")),
     };
     tag.header.build_version = 1;
@@ -67,15 +66,14 @@ pub(super) fn apply_editing_kit_mcc_header(tag: &mut TagFile, game: &str) -> Res
 /// name, not a value anything derives.
 pub(super) const CAMPAIGN_EVOLVED_GAME: &str = "haloce_evolved";
 
-/// The `build_version` Campaign Evolved stamps on a tag file.
+/// The generation every shipped Campaign Evolved tag blob carries:
+/// `(build_version, build_number, version)`.
 ///
-/// `TagFile::new` leaves the whole generation at zero, which the library's own
-/// parser accepts. `build_number` and `version` are deliberately left there:
-/// unlike MCC, no value for either has been read off a shipped CE tag, so
-/// picking one would write a guess into every tag the editor creates. Settling
-/// them means reading a shipped `.ubulk` header and comparing — worth doing, and
-/// not something to infer from this one.
-pub(super) const CAMPAIGN_EVOLVED_BUILD_VERSION: i32 = 5;
+/// Identical to Halo Reach's, which is the point — a CE `.ubulk` is a
+/// Reach-format tag. `TagFile::new` leaves all three at zero, which is the one
+/// value nothing shipped has, so an unstamped tag is one the simulation has
+/// never seen the like of.
+pub(super) const CAMPAIGN_EVOLVED_GENERATION: (i32, i32, u32) = (1, 2, u32::MAX);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::app) enum ConversionIssueKind {

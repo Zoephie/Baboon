@@ -44,37 +44,52 @@ fn group_tag_of(group: &str) -> u32 {
 
 /// `TagFile::new` zeroes the whole file-header generation, and nothing stamped
 /// Campaign Evolved's over it — the CE arm was simply missing from
-/// `apply_editing_kit_mcc_header`, which only knew the five MCC games.
+/// `apply_editing_kit_mcc_header`, which only knew the five MCC games. An
+/// unstamped tag parses in Baboon and is unlike anything the game ships.
+///
+/// The values are measured, not chosen: all 12,289 shipped CE tag blobs read
+/// `1 / 2 / 0xffffffff`, across all 101 groups, with no variation. See
+/// `the_shipped_tag_header_generation` in blam-tags.
 #[test]
-fn a_new_campaign_evolved_tag_carries_the_games_build_version() {
+fn a_new_campaign_evolved_tag_carries_the_shipped_generation() {
     let mut tag = TagFile::new(definition("cinematic_scene")).expect("build from the CE schema");
-    assert_eq!(tag.header.build_version, 0, "TagFile::new starts at zero");
+    assert_eq!(
+        (tag.header.build_version, tag.header.build_number, tag.header.version),
+        (0, 0, 0),
+        "TagFile::new starts at zero, which is what makes the stamp necessary"
+    );
     apply_editing_kit_mcc_header(&mut tag, CAMPAIGN_EVOLVED_GAME).expect("CE is a known game");
-    assert_eq!(tag.header.build_version, CAMPAIGN_EVOLVED_BUILD_VERSION);
+    assert_eq!(
+        (tag.header.build_version, tag.header.build_number, tag.header.version),
+        CAMPAIGN_EVOLVED_GENERATION
+    );
 }
 
-/// Campaign Evolved must not pick up the MCC defaults: `version = u32::MAX` is
-/// what guerilla writes when it has no source revision, and CE is not read by
-/// guerilla at all.
+/// Campaign Evolved's generation is Halo Reach's, because a CE `.ubulk` *is* a
+/// Reach-format tag — the UE5 package around it is only a wrapper. Pinned as an
+/// equality rather than two copies of the same literals, so the two can never be
+/// changed apart by accident.
 #[test]
-fn campaign_evolved_does_not_take_the_mcc_defaults() {
-    let mut ce = TagFile::new(definition("cinematic_scene")).expect("build from the CE schema");
-    apply_editing_kit_mcc_header(&mut ce, CAMPAIGN_EVOLVED_GAME).expect("CE is a known game");
-    assert_ne!(ce.header.version, u32::MAX, "that is guerilla's sentinel");
-    assert_eq!(ce.header.build_number, 0);
+fn campaign_evolved_carries_the_same_generation_as_reach() {
+    let stamp = |game: &str| {
+        let mut tag = TagFile::new(definition("cinematic_scene")).expect("any tag will do");
+        apply_editing_kit_mcc_header(&mut tag, game).unwrap_or_else(|e| panic!("{game}: {e}"));
+        (tag.header.build_version, tag.header.build_number, tag.header.version)
+    };
+    assert_eq!(stamp(CAMPAIGN_EVOLVED_GAME), stamp("haloreach_mcc"));
+    assert_eq!(stamp(CAMPAIGN_EVOLVED_GAME), CAMPAIGN_EVOLVED_GENERATION);
 }
 
-/// Adding the Campaign Evolved arm must not have moved the MCC ones.
+/// Adding Campaign Evolved must not have moved the editing-kit games.
 ///
 /// `apply_editing_kit_mcc_header` is the only function the CE creation path
-/// shares with the five editing-kit games, so it is the only place a CE change
-/// could reach H2EK/H3EK/H3ODSTEK/H4EK/H2AMPEK tags. The generations are pinned
-/// here as well as in `editing_kit_header_defaults_match_profile_generations`
-/// because that test asserts on serialized bytes, and this one is about the
-/// branch: CE takes an early return, and every other game must fall through it
-/// untouched.
+/// shares with them, so it is the only place a CE change could reach
+/// H2EK/H3EK/H3ODSTEK/H4EK/H2AMPEK tags. The generations are pinned here as well
+/// as in `editing_kit_header_defaults_match_profile_generations` because that
+/// test asserts on serialized bytes and this one asserts on the match arms —
+/// CE joined the `build_number = 2` group, and H3/ODST must stay at 1.
 #[test]
-fn the_campaign_evolved_arm_leaves_the_editing_kit_games_alone() {
+fn adding_campaign_evolved_left_the_editing_kit_games_alone() {
     for (game, build_number) in [
         ("halo3_mcc", 1),
         ("halo3odst_mcc", 1),
@@ -88,10 +103,6 @@ fn the_campaign_evolved_arm_leaves_the_editing_kit_games_alone() {
         assert_eq!(tag.header.build_version, 1, "{game} build_version");
         assert_eq!(tag.header.build_number, build_number, "{game} build_number");
         assert_eq!(tag.header.version, u32::MAX, "{game} version");
-        assert_ne!(
-            tag.header.build_version, CAMPAIGN_EVOLVED_BUILD_VERSION,
-            "{game} took Campaign Evolved's stamp"
-        );
     }
 }
 
