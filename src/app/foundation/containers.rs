@@ -613,7 +613,7 @@ fn strip_index_suffix(segment: &str) -> &str {
     segment.split_once('[').map_or(segment, |(name, _)| name)
 }
 
-fn inline_mapping_function_from_struct(
+pub(super) fn inline_mapping_function_from_struct(
     tag_struct: TagStruct<'_>,
     struct_path: &str,
 ) -> Option<(FunctionView, String)> {
@@ -640,6 +640,24 @@ fn inline_mapping_function_from_struct(
         }
         let bytes = field.as_data()?.to_vec();
         if bytes.is_empty() {
+            // A function field with no bytes still gets the function editor,
+            // seeded with what a fresh one would hold. Falling through left a
+            // dead `data [0 bytes]` row that could not author the function it
+            // was standing in for. New elements are seeded at creation now, so
+            // this is for tags an earlier build already wrote that way.
+            //
+            // The seed is the editor's own default rather than what the runtime
+            // would make of these bytes: `ensure_valid` repairs a short blob to
+            // 32 *zeroes*, an identity clamped to 0..0, which is not what
+            // creating one gives you. Matching creation keeps the two paths
+            // showing the same thing. Nothing is written until the user edits.
+            if field.is_function_data()
+                && let Ok(function) = TagFunction::parse(&blam_tags::default_function_definition_bytes(
+                    blam_tags::io::Endian::Le,
+                ))
+            {
+                return Some((FunctionView::from_function(function), data_path));
+            }
             continue;
         }
         if let Some(view) = legacy_mapping_function_view(&bytes) {

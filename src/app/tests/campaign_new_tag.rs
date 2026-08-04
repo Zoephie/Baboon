@@ -1,11 +1,13 @@
 //! Creating a Campaign Evolved tag in a group the game ships no instance of.
 //!
-//! The dialog offers all 139 groups the definitions define, but the game ships a
+//! The dialog offers all 141 groups the definitions define, but the game ships a
 //! tag for only 101 of them. Creation used to require an existing same-group
-//! `.uasset` to donate the UE5 package structure, so the other 38 -- among them
+//! `.uasset` to donate the UE5 package structure, so the other 40 -- among them
 //! `cinematic_scene`, the reported case -- could not be created at all. The
-//! donor is now allowed to come from another group, because everything
-//! group-shaped in the wrapper is derived from the destination package path.
+//! wrapper is now *derived* from the group's own rules when no same-group tag
+//! ships, which covers 36 of those 40. The last four are `object`, `unit`,
+//! `item` and `device`: Halo's abstract base groups, which have no standalone
+//! instances by design and stay refused.
 
 use super::*;
 
@@ -191,39 +193,72 @@ fn a_shipped_group_donates_its_own_wrapper() {
 /// The reported bug. `cinematic_scene` ships no tag, so the same-group scan
 /// finds nothing — and creation used to stop there with "No existing
 /// cinematic_scene tag in the mounted paks to use as a template".
+///
+/// It now derives instead, which is why the scan returning `None` is the
+/// *expected* answer here rather than the failure it used to be. Both halves are
+/// asserted: no donor is found, and the group is still creatable.
 #[test]
-fn a_group_the_game_ships_no_tag_of_still_finds_a_donor() {
+fn a_group_the_game_ships_no_tag_of_is_derived_rather_than_donated() {
     let entries = vec![
         container_entry(0, "objects/characters/elite/elite", "biped"),
         container_entry(1, "objects/vehicles/warthog/warthog", "collision_model"),
     ];
-    let (container, rel) =
-        pick_container_template(entries.iter(), group_tag_of("cinematic_scene"))
-            .expect("a group with no shipped tag must still find a donor");
-    assert_eq!(container, 1, "the donor's own container has to come with it");
+    let donor = pick_container_template(entries.iter(), group_tag_of("cinematic_scene"));
     assert!(
-        rel.ends_with("-collision_model.uasset"),
-        "expected a bare-wrapper donor, got {rel}"
+        donor.is_none(),
+        "no other group may stand in as a donor, got {donor:?}"
+    );
+    assert!(
+        matches!(
+            new_container_template_for(donor, "cinematic_scene"),
+            Ok(NewContainerTemplate::Derived { .. })
+        ),
+        "cinematic_scene has to remain creatable without one"
     );
 }
 
-/// The fallback is restricted to groups whose wrapper carries nothing. A `biped`
-/// wrapper holds an `AssetReference` indexed against `BlamBipedTagDataAsset`'s
-/// schema, so donating it to another group would name a different property —
-/// `blam-tags` rejects that, and picking one here would only move the failure.
+/// The four groups that are neither shipped nor derivable are Halo's abstract
+/// base groups. Refusing them is the point: they have no standalone instances,
+/// and a wrapper donated from some bare group would declare none of the
+/// properties their classes actually carry — the silent failure cloning had.
+///
+/// This is the half that makes the test above mean something. Asserting only
+/// that `cinematic_scene` is allowed would pass just as well if the gate had
+/// been deleted outright.
 #[test]
-fn a_donor_whose_wrapper_carries_properties_is_not_offered() {
+fn an_abstract_base_group_is_refused_by_name() {
+    for group in ["object", "unit", "item", "device"] {
+        let error = new_container_template_for(None, group)
+            .expect_err("an abstract base group has no wrapper to derive");
+        assert!(
+            error.contains(group),
+            "the refusal has to name the group, got {error:?}"
+        );
+    }
+}
+
+/// A `biped` wrapper holds an `AssetReference` indexed against
+/// `BlamBipedTagDataAsset`'s schema, so donating it to another group would name
+/// a different property under the destination's.
+#[test]
+fn a_donor_of_another_group_is_never_offered() {
     let entries = vec![container_entry(0, "objects/characters/elite/elite", "biped")];
     assert!(
         pick_container_template(entries.iter(), group_tag_of("cinematic_scene")).is_none(),
-        "biped is not a safe cross-group donor"
+        "biped is not a cross-group donor"
     );
-    for group in BARE_WRAPPER_DONOR_GROUPS {
-        assert!(
-            definition(group).is_file(),
-            "{group} is offered as a donor but has no CE schema"
-        );
-    }
+    // Nor is a bare one. `collision_model` carries no properties of its own, so
+    // `blam-tags` would accept it as a donor — the reason it is refused is the
+    // destination, not the donor.
+    let bare = vec![container_entry(
+        0,
+        "objects/vehicles/warthog/warthog",
+        "collision_model",
+    )];
+    assert!(
+        pick_container_template(bare.iter(), group_tag_of("cinematic_scene")).is_none(),
+        "a bare donor is still the wrong group"
+    );
 }
 
 /// Only mounted container tags can donate. An in-memory tag created earlier in
@@ -236,14 +271,16 @@ fn an_unsaved_tag_is_not_a_donor() {
         group_tag: group_tag_of("collision_model"),
         group_name: Some("collision_model".into()),
         location: TagEntryLocation::NewContainer {
-            template_container: 0,
-            template_rel: "Tags/other-collision_model.uasset".into(),
+            template: NewContainerTemplate::Donor {
+                container: 0,
+                rel_path: "Tags/other-collision_model.uasset".into(),
+            },
             package: "/Game/Tags/test/probe-collision_model".into(),
             group_tag: group_tag_of("collision_model"),
         },
     }];
     assert!(
-        pick_container_template(entries.iter(), group_tag_of("cinematic_scene")).is_none(),
+        pick_container_template(entries.iter(), group_tag_of("collision_model")).is_none(),
         "an unsaved tag has no .uasset to donate"
     );
 }

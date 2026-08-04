@@ -741,8 +741,10 @@ mod tests {
             group_tag: 0,
             group_name: None,
             location: TagEntryLocation::NewContainer {
-                template_container: 0,
-                template_rel: "Tags/template-biped.uasset".to_owned(),
+                template: NewContainerTemplate::Donor {
+                    container: 0,
+                    rel_path: "Tags/template-biped.uasset".to_owned(),
+                },
                 package: "/Game/Tags/objects/fresh-biped".to_owned(),
                 group_tag: 0,
             },

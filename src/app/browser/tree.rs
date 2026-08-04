@@ -1340,8 +1340,10 @@ mod tests {
             group_tag: 0,
         })));
         assert!(!supports_duplicate_menu(&entry(TagEntryLocation::NewContainer {
-            template_container: 0,
-            template_rel: "Tags/template-hlmt.uasset".to_owned(),
+            template: NewContainerTemplate::Donor {
+                container: 0,
+                rel_path: "Tags/template-hlmt.uasset".to_owned(),
+            },
             package: "/Game/Tags/example-hlmt".to_owned(),
             group_tag: 0,
         })));
@@ -1382,8 +1384,10 @@ mod tests {
         ));
         assert!(!supports_delete_menu(
             &entry(TagEntryLocation::NewContainer {
-                template_container: 0,
-                template_rel: "Tags/template-hlmt.uasset".to_owned(),
+                template: NewContainerTemplate::Donor {
+                    container: 0,
+                    rel_path: "Tags/template-hlmt.uasset".to_owned(),
+                },
                 package: "/Game/Tags/example-hlmt".to_owned(),
                 group_tag: 0,
             }),

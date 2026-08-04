@@ -72,15 +72,34 @@ pub enum TagEntryLocation {
     /// Saves (writes a new `_P` override container) or Exports a Mod. There is
     /// no backing `.ubulk` to read, so the document is authoritative.
     ///
-    /// `template_container`/`template_rel` point at an existing same-group tag's
-    /// `.uasset`, used as the package template by `write_new_tag_container`.
-    /// `package` is the target UE package path `"/Game/Tags/<rel>-<group>"`.
+    /// `template` says where the package wrapper comes from. `package` is the
+    /// target UE package path `"/Game/Tags/<rel>-<group>"`.
     NewContainer {
-        template_container: usize,
-        template_rel: String,
+        template: NewContainerTemplate,
         package: String,
         group_tag: u32,
     },
+}
+
+/// Where a brand-new Campaign Evolved tag's Unreal `.uasset` wrapper comes from.
+///
+/// Cloning a same-group tag was the only option for a long time, which meant a
+/// group the game ships no tag of could not be authored at all — 26 of the 140
+/// defined groups, `cinematic_scene` among them. The wrapper is derivable for
+/// exactly those groups, so the source of it is a choice now rather than a
+/// precondition.
+#[derive(Clone, Debug)]
+pub enum NewContainerTemplate {
+    /// An existing same-group tag's `.uasset` in a mounted container, cloned
+    /// and given the new tag's identity. `container` indexes the owning
+    /// [`TagSource::IoStoreContainerSet`]'s `containers`.
+    Donor { container: usize, rel_path: String },
+    /// No tag of this group ships, so the wrapper is derived from the group's
+    /// own rules by `blam_tags::iostore::asset::tag_package`. Only possible for
+    /// a group whose class adds nothing over `BlamTagDataAssetBase`; the group
+    /// long name is carried because deriving needs it and `group_tag` alone
+    /// cannot produce it.
+    Derived { group: String },
 }
 
 #[derive(Clone)]

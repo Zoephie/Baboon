@@ -48,68 +48,35 @@ const ENTRY_INDEX_REFRESH_INTERVAL_SECS: f64 = 30.0;
 /// Choose the container tag whose `.uasset` a new tag will donate its package
 /// structure from, returning its container index and container path.
 ///
-/// A same-group tag is preferred but not required. The game ships no tag at all
-/// for 38 of the 139 defined groups — `cinematic_scene` among them — so
-/// insisting on one made those groups impossible to create rather than merely
-/// awkward. `blam-tags` derives everything group-shaped (the wrapper class, its
-/// CDO, the script imports and the flag pair) from the destination package path,
-/// so a donor of another group contributes only package structure.
+/// Same-group only. A donor of another group is not an option: its wrapper is
+/// the wrong shape for the destination class, and the two ways that can go
+/// wrong are both silent. A donor carrying properties names *different*
+/// properties under the destination's schema, because they are positional; a
+/// bare donor given to a class that has properties declares none of them.
+///
+/// It does not have to be an option, either. A group the game ships no tag of
+/// is served by [`NewContainerTemplate::Derived`] instead, which builds the
+/// wrapper from the group's own rules. Measured over the mounted paks by
+/// `blam-tags`' `ce_group_census` example: of the 141 defined groups the game
+/// ships 101, and 36 of the remaining 40 derive. The last four are
+/// `object`/`unit`/`item`/`device` — Halo's abstract base groups, which have no
+/// standalone instances by design and are refused rather than fabricated.
 fn pick_container_template<'a>(
-    entries: impl Iterator<Item = &'a TagEntry> + Clone,
+    entries: impl Iterator<Item = &'a TagEntry>,
     group_tag: u32,
 ) -> Option<(usize, String)> {
-    let uasset_of = |entry: &TagEntry| match &entry.location {
-        TagEntryLocation::Container {
-            container,
-            rel_path,
-        } => rel_path
-            .strip_suffix(".ubulk")
-            .map(|stem| (*container, format!("{stem}.uasset"))),
-        _ => None,
-    };
-    if let Some(found) = entries
-        .clone()
-        .filter(|entry| entry.group_tag == group_tag)
-        .find_map(uasset_of)
-    {
-        return Some(found);
-    }
-    // Only a wrapper that carries no properties of its own can be donated across
-    // groups: a present property is indexed against the donor class's schema and
-    // would name a different property under the destination's. `blam-tags`
-    // rejects a donor that fails that, so the fallback picks from groups whose
-    // wrappers are bare in every shipped tag.
     entries
-        .filter(|entry| {
-            entry
-                .group_name
-                .as_deref()
-                .is_some_and(|name| BARE_WRAPPER_DONOR_GROUPS.contains(&name))
+        .filter(|entry| entry.group_tag == group_tag)
+        .find_map(|entry| match &entry.location {
+            TagEntryLocation::Container {
+                container,
+                rel_path,
+            } => rel_path
+                .strip_suffix(".ubulk")
+                .map(|stem| (*container, format!("{stem}.uasset"))),
+            _ => None,
         })
-        .find_map(uasset_of)
 }
-
-/// Campaign Evolved groups whose `.uasset` wrapper carries no properties at all,
-/// making it safe to donate as the package structure for a new tag of *any*
-/// group.
-///
-/// Drawn from the 47 bare groups measured in
-/// `docs/campaign-evolved-tag-packages.md` §3, restricted to ones the game
-/// actually ships so the fallback can always find one. A donor whose wrapper
-/// does carry properties is rejected by `blam-tags`, because those properties
-/// are positional against the donor class's schema.
-const BARE_WRAPPER_DONOR_GROUPS: &[&str] = &[
-    "collision_model",
-    "physics_model",
-    "camera_shake",
-    "camera_track",
-    "shader",
-    "style",
-    "rumble",
-    "formation",
-    "camo",
-    "color_table",
-];
 
 /// Map a container `.ubulk` path to the UE package path the runtime hashes.
 /// `Meteorite/Content/Tags/objects/.../foo-biped.ubulk` → `/Game/Tags/objects/.../foo-biped`.
@@ -165,6 +132,91 @@ fn normalize_container_tag_rel(input: &str) -> String {
         *last = stem;
     }
     segments.join("/")
+}
+
+/// Decide where a new tag's `.uasset` wrapper will come from.
+///
+/// A same-group tag in the mounted paks is the first choice: cloning one is the
+/// path with the most mileage on it, and it is right for every group the game
+/// actually ships. When there is none, the wrapper is derivable — but only for
+/// a group whose class adds nothing over `BlamTagDataAssetBase`, since anything
+/// more names other packages and needs an import map that cannot be derived
+/// from the group alone. A group with neither is refused here rather than
+/// producing a tag that cannot be saved later.
+pub(super) fn new_container_template_for(
+    donor: Option<(usize, String)>,
+    group_name: &str,
+) -> Result<NewContainerTemplate, String> {
+    if let Some((container, rel_path)) = donor {
+        return Ok(NewContainerTemplate::Donor {
+            container,
+            rel_path,
+        });
+    }
+    let usmap = blam_tags::iostore::object::usmap::Usmap::meteorite()
+        .map_err(|error| format!("Could not load the Unreal mappings: {error}"))?;
+    if blam_tags::iostore::asset::tag_package::is_bare_group(group_name, &usmap) {
+        return Ok(NewContainerTemplate::Derived {
+            group: group_name.to_owned(),
+        });
+    }
+    Err(format!(
+        "No existing {group_name} tag in the mounted paks to use as a template, and a \
+         {group_name} wrapper cannot be derived because the group carries Unreal properties \
+         that name other packages"
+    ))
+}
+
+/// The `.uasset` bytes to seed a new tag's package with, cloned or derived.
+///
+/// `reresolve` finds a fresh donor when the recorded one no longer reads. It is
+/// a closure rather than a container index because the two callers scope it to
+/// different kits: Save uses the active one, Export Mod the one being exported.
+pub(super) fn new_container_template_bytes(
+    template: &NewContainerTemplate,
+    containers: &[crate::source::MountedContainer],
+    package: &str,
+    tag_len: u64,
+    reresolve: impl FnOnce() -> Option<(usize, String)>,
+) -> Result<Vec<u8>, String> {
+    match template {
+        NewContainerTemplate::Donor {
+            container,
+            rel_path,
+        } => {
+            // The recorded donor is a hint, not a fact: container indices are
+            // positional, so a remount reorders them and a tag stashed in a
+            // project outlives the index it was created against. Re-resolving
+            // on a miss is what keeps such a tag saveable instead of failing
+            // with "template container is stale".
+            if let Some(bytes) = containers
+                .get(*container)
+                .and_then(|mounted| mounted.archive.read(rel_path).ok())
+            {
+                return Ok(bytes);
+            }
+            let (container, rel_path) =
+                reresolve().ok_or("No tag in the mounted paks can donate a package template")?;
+            containers
+                .get(container)
+                .ok_or("Template container is stale")?
+                .archive
+                .read(&rel_path)
+                .map_err(|error| format!("Failed to read template .uasset: {error}"))
+        }
+        NewContainerTemplate::Derived { group } => {
+            let usmap = blam_tags::iostore::object::usmap::Usmap::meteorite()
+                .map_err(|error| format!("Could not load the Unreal mappings: {error}"))?;
+            // A derived wrapper is a valid template of its own group, so it goes
+            // through the same writer path a cloned one does: that path rewrites
+            // an identity this already has, and finds nothing to strip.
+            blam_tags::iostore::asset::tag_package::build_bare_tag_package(
+                group, package, tag_len, &usmap,
+            )
+            .map(|(bytes, _store)| bytes)
+            .map_err(|error| format!("Could not derive a {group} wrapper: {error}"))
+        }
+    }
 }
 
 /// The UE package path a brand-new tag will be written at, from its normalized
@@ -1151,8 +1203,8 @@ impl Baboon {
 
     /// Register a brand-new in-memory container tag (shared by New Tag and
     /// Import-of-a-new-path). `logical` is the normalized container-relative path
-    /// (no extension). Fails if the path is empty, no same-group template tag
-    /// exists to seed the package, or a new tag already occupies that path.
+    /// (no extension). Fails if the path is empty, the group's wrapper can be
+    /// neither cloned nor derived, or a new tag already occupies that path.
     pub(super) fn add_new_container_tag(
         &mut self,
         logical: &str,
@@ -1164,14 +1216,8 @@ impl Baboon {
         if logical.is_empty() {
             return Err("Enter a tag path (e.g. objects/foo/bar)".to_owned());
         }
-        // A brand-new package needs an existing same-group tag's `.uasset` as its
-        // structural template (see `write_new_tag_container`).
-        let Some((template_container, template_rel)) = self.find_container_template(group_tag)
-        else {
-            return Err(format!(
-                "No existing {group_name} tag in the mounted paks to use as a template"
-            ));
-        };
+        let template =
+            new_container_template_for(self.find_container_template(group_tag), group_name)?;
         let package = new_container_package(logical, group_name);
         let key = new_container_key(&package);
         if self.kits[self.active].parsed_tags.contains_key(&key)
@@ -1190,8 +1236,7 @@ impl Baboon {
             group_tag,
             group_name: Some(group_name.to_owned()),
             location: TagEntryLocation::NewContainer {
-                template_container,
-                template_rel,
+                template,
                 package,
                 group_tag,
             },
@@ -1215,16 +1260,14 @@ impl Baboon {
             return Err("Tag is no longer in the source".to_owned());
         };
         let TagEntryLocation::NewContainer {
-            template_container,
-            template_rel,
+            template,
             group_tag,
             ..
         } = &entry.location
         else {
             return Err("Not a new Campaign Evolved tag".to_owned());
         };
-        let (template_container, template_rel, group_tag) =
-            (*template_container, template_rel.clone(), *group_tag);
+        let (template, group_tag) = (template.clone(), *group_tag);
         if new_rel.is_empty() {
             return Err("Enter a tag path (e.g. objects/foo/bar)".to_owned());
         }
@@ -1288,8 +1331,7 @@ impl Baboon {
                 group_tag: entry.group_tag,
                 group_name: Some(group_name),
                 location: TagEntryLocation::NewContainer {
-                    template_container,
-                    template_rel,
+                    template,
                     package,
                     group_tag,
                 },
@@ -1563,13 +1605,9 @@ impl Baboon {
     /// a stashed new tag is modelled on has to come from the source that tag
     /// belongs to, not from whichever kit happens to be focused.
     ///
-    /// A same-group tag is preferred but no longer required. The game ships no
-    /// tag at all for 38 of the 139 defined groups — `cinematic_scene` among
-    /// them — so insisting on one made those groups impossible to create rather
-    /// than merely awkward. `blam-tags` derives everything group-shaped (the
-    /// wrapper class, its CDO, the script imports and the flag pair) from the
-    /// destination package path, so a donor of another group contributes only
-    /// package structure.
+    /// Returning `None` is an ordinary answer, not a failure: it means the game
+    /// ships no tag of this group, and the caller derives the wrapper instead.
+    /// See [`pick_container_template`] for why no other group can stand in.
     pub(super) fn find_container_template_in(
         &self,
         kit: usize,
@@ -4043,17 +4081,17 @@ impl Baboon {
 
     /// Save a brand-new (in-memory) container tag as a new `_P` override
     /// container. A new tag has no baseline in the paks to overwrite, so this
-    /// writes a standalone override package via `write_new_tag_container`, using
-    /// a same-group tag's `.uasset` as the package template. The base game is
-    /// untouched; the user copies the emitted `.utoc`/`.ucas`/`.pak` into `Paks/`.
+    /// writes a standalone override package via `write_new_tag_container`,
+    /// seeded with a same-group tag's `.uasset` or, for a group the game ships
+    /// none of, one derived from the group. The base game is untouched; the
+    /// user copies the emitted `.utoc`/`.ucas`/`.pak` into `Paks/`.
     fn save_new_container_tag(&mut self, key: &str) {
         let Some(entry) = self.entry_for_key(key).cloned() else {
             self.status = "Tag is no longer in the source".to_owned();
             return;
         };
         let TagEntryLocation::NewContainer {
-            template_container,
-            template_rel,
+            template,
             package,
             group_tag,
         } = &entry.location
@@ -4072,14 +4110,29 @@ impl Baboon {
                 return;
             }
         };
-        let template =
-            match self.read_new_container_template(*template_container, template_rel, *group_tag) {
+        let template = {
+            let Some(source) = self.source() else {
+                self.status = "No source loaded".to_owned();
+                return;
+            };
+            let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+                self.status = "Source is not a container".to_owned();
+                return;
+            };
+            match new_container_template_bytes(
+                template,
+                containers,
+                package,
+                bytes.len() as u64,
+                || self.find_container_template(*group_tag),
+            ) {
                 Ok(bytes) => bytes,
                 Err(error) => {
                     self.status = error;
                     return;
                 }
-            };
+            }
+        };
         let leaf = package.rsplit('/').next().unwrap_or("tag");
         let Some(output) = pick_override_utoc(&format!("{leaf}_P.utoc")) else {
             return;
@@ -4619,23 +4672,20 @@ impl Baboon {
                     ));
                 }
                 TagEntryLocation::NewContainer {
-                    template_container,
-                    template_rel,
+                    template,
                     package,
                     group_tag,
                 } => {
-                    // The recorded donor is a hint — container indices shift on a
-                    // remount — so a miss re-resolves rather than dropping the tag
-                    // out of the export.
-                    let donor = containers
-                        .get(*template_container)
-                        .and_then(|m| m.archive.read(template_rel).ok())
-                        .or_else(|| {
-                            let (container, rel) =
-                                self.find_container_template_in(exporting, *group_tag)?;
-                            containers.get(container)?.archive.read(&rel).ok()
-                        });
-                    let Some(template) = donor else {
+                    // A recorded donor is re-resolved against the kit being
+                    // exported, not the active one: they differ, and the wrong
+                    // kit's containers would drop the tag out of the export.
+                    let Ok(template) = new_container_template_bytes(
+                        template,
+                        containers,
+                        package,
+                        overlay.bytes.len() as u64,
+                        || self.find_container_template_in(exporting, *group_tag),
+                    ) else {
                         skipped += 1;
                         continue;
                     };
@@ -9897,12 +9947,63 @@ mod dependency_tests {
             group_tag,
             group_name: Some(group_name.to_owned()),
             location: TagEntryLocation::NewContainer {
-                template_container: 0,
-                template_rel: "Tags/other-camera_track.uasset".to_owned(),
+                template: NewContainerTemplate::Donor {
+                    container: 0,
+                    rel_path: "Tags/other-camera_track.uasset".to_owned(),
+                },
                 package,
                 group_tag,
             },
         }
+    }
+
+    /// A group the game ships no tag of is authorable when its wrapper can be
+    /// derived, and refused when it cannot.
+    ///
+    /// Both halves matter. Only checking that `cinematic_scene` is allowed
+    /// would pass just as well if the gate had been deleted outright, and the
+    /// refusal is what keeps a tag from being created that could never be
+    /// saved — the group's Unreal class names other packages, and no import map
+    /// for those can be derived from the group alone.
+    #[test]
+    fn a_group_with_no_shipped_tag_is_authorable_only_when_its_wrapper_derives() {
+        // Nothing to clone: the decision falls to whether the group is bare.
+        let derived = new_container_template_for(None, "cinematic_scene")
+            .expect("cinematic_scene ships no tag but its wrapper derives");
+        assert!(matches!(
+            derived,
+            NewContainerTemplate::Derived { ref group } if group == "cinematic_scene"
+        ));
+        for group in ["scenario_hs_source_file", "flock", "point_physics"] {
+            assert!(
+                matches!(
+                    new_container_template_for(None, group),
+                    Ok(NewContainerTemplate::Derived { .. })
+                ),
+                "{group} is bare and should derive"
+            );
+        }
+
+        // `object` and `unit` carry `AssetReference`, so there is nothing to
+        // derive and nothing to clone.
+        for group in ["object", "unit", "item", "device"] {
+            let error = new_container_template_for(None, group)
+                .expect_err("{group} must not be authorable without a donor");
+            assert!(
+                error.contains(group),
+                "the refusal should name the group, got: {error}"
+            );
+        }
+
+        // A donor always wins, bare or not: cloning is the path with the most
+        // mileage on it and is right for every group the game actually ships.
+        let donor =
+            new_container_template_for(Some((3, "Tags/x-biped.uasset".to_owned())), "biped")
+                .expect("a donor is always usable");
+        assert!(matches!(
+            donor,
+            NewContainerTemplate::Donor { container: 3, .. }
+        ));
     }
 
     /// Renaming a new tag must land on exactly the key and package that

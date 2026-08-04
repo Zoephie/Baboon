@@ -1884,8 +1884,10 @@ mod tag_diff_tests {
             group_tag: tag.header.group_tag,
             group_name: Some("camera_track".into()),
             location: TagEntryLocation::NewContainer {
-                template_container: 0,
-                template_rel: "Tags/other-camera_track.uasset".into(),
+                template: NewContainerTemplate::Donor {
+                    container: 0,
+                    rel_path: "Tags/other-camera_track.uasset".into(),
+                },
                 package: "/Game/Tags/test/example-camera_track".into(),
                 group_tag: tag.header.group_tag,
             },
