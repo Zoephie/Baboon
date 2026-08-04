@@ -19,7 +19,7 @@ Both hypotheses in the brief were tested against the bytes. They split:
 | # | Hypothesis | Verdict |
 |---|---|---|
 | 1 | CE's BSP layout is closer to Halo 4's than to Reach's | **Refuted.** CE's BSP is a *strict, order-preserving subset of Reach's*, with zero type mismatches on all 50 shared top-level fields. It is further from H4 than from Reach on every measure taken. |
-| 2 | H4-era BSPs drop the sealed world and put most geometry in instanced blocks | **Confirmed for CE**, though for a reason unrelated to H4. CE's sealed world is vestigial (1 cluster, 0 portals, 51 surfaces) while 3,492 instance placements over 775 definitions carry 206,652 collision surfaces. This was not verified for Halo 4 itself — see [Open questions](#5-open-questions--blockers). |
+| 2 | H4-era BSPs drop the sealed world and put most geometry in instanced blocks | **Confirmed**, for Halo 4 itself and for CE. Six H4 level BSPs run 1–2 clusters and 0–5 portals against 96–471 instanced definitions, where Reach and H2A of comparable size carry 18–86 clusters and 32–148 portals. CE matches H4's structure (1 cluster, 0 portals, 775 definitions). See [Halo 4](#halo-4-verified-separately). |
 
 The more consequential finding is that **neither hypothesis identifies the actual blocker**:
 
@@ -381,11 +381,10 @@ Patch 3 (decide format)  →  Patch 1  →  Patch 2  →  [re-evaluate]  →  Pa
 2. **Is `level_a` representative?** It is one of ~100 CE BSPs. Before generalising, run the
    `per mesh temporary == 0` check across all of them — if even one has render buffers, the model
    in §2 is wrong. This is cheap: the tooling already exists (see below).
-3. **Format decision for patch 3.** Needs a human call; see the three options above.
-4. **Does Halo 4 actually behave as hypothesis 2 claims?** Refuting hypothesis 1 for CE says
-   nothing about H4 itself, and no H4 kit was available on this machine (the index holds only
-   HREK, H3EK, H3ODSTEK). H4 BSP support is a genuinely separate piece of work from CE's, and this
-   report should not be read as covering it.
+3. ~~**Format decision for patch 3.**~~ Settled: ASS, collision-only, validated in Blender.
+4. ~~**Does Halo 4 actually behave as hypothesis 2 claims?**~~ Answered once an H4EK install
+   was available — yes, and H4 needs no extraction work of its own. See
+   [Halo 4](#halo-4--verified-separately).
 5. **Should `Game` gain a fourth variant?** `Game::of()` returning `Halo3` for CE is currently
    harmless — CE genuinely is Reach-shaped. But if CE-specific branching accumulates, the
    three-value enum will become the wrong axis. `Title` already exists for engine-level
@@ -455,15 +454,26 @@ Not committed — no commit was requested.
 `ass.rs` read only `raw_items/collision bsp`, so any BSP that stores its sealed world in
 `large collision bsp` silently lost it. Now both fields are read.
 
-This turned out **not** to be Reach-only, as first assumed — CE is split across the two,
-so the CE work was incomplete without it:
+Which field a BSP uses is **a per-BSP property, not a per-generation one** — the name is
+the clue, `large` being for collision past some size threshold. Two engines split across
+the two fields *within themselves*:
 
 | BSP | `collision bsp` | `large collision bsp` |
 |---|---|---|
 | CE `c10/level_a`, `b30/sb_main` | 1 | 0 |
 | CE `c20/BSP_library_middle_down`, `a30/holdouts` | **0** | **1** |
-| Reach `cex_beaver_creek` | 0 | 1 (46,178 surfaces) |
-| H3 / ODST | 1 | *field does not exist* |
+| Reach `cex_ff_halo`, `cex_hangemhigh_000` | 1 | 0 |
+| Reach `cex_beaver_creek`, `cex_damnation` | **0** | **1** (46,178 surfaces on beaver_creek) |
+| H4 — all six levels surveyed | 1 | 0 |
+| H2A `ca_ascension`/`ca_coagulation`/`ca_lockout` | 1 | 0 |
+| ODST | 1 | 0 |
+| H3 | 1 | *field does not exist* |
+
+> **Correction.** An earlier revision of this doc, and commit `e022218`'s message, said
+> Reach, Halo 4 and H2A "moved the sealed world into `large collision bsp`". That is
+> wrong: H4 and H2A never use it in anything surveyed, and Reach only uses it for some of
+> its BSPs. The conclusion that both fields must be read is unaffected — strengthened, if
+> anything, since no generation can be assumed to use one or the other.
 
 Effect is strictly additive — one OBJECT + one INSTANCE, appended, with the
 `@collision_only` material already present in every prior export so no material indices
@@ -477,6 +487,41 @@ on `cex_beaver_creek`.
 (H3EK was unavailable for the second pass — the user was cleaning that tag tree — so
 ODST, which shares H3's schema and has no `large collision bsp` field, stands in for the
 H3 generation. H3EK was byte-identical in the first pass.)
+
+### Halo 4 — verified separately
+
+An H4EK install became available after the CE work landed, so the generation the original
+hypotheses were built around could finally be measured instead of inferred.
+`environments/solo/m020/00_vista` and five more level BSPs:
+
+| | meshes | pmt | clusters | portals | defs | instances |
+|---|---|---|---|---|---|---|
+| H4 `00_vista` | 222 | **222** | 1 | 0 | 221 | 287 |
+| H4 `01_crater` | 472 | **472** | 1 | 0 | 471 | 535 |
+| H4 `05_wreckage_a` | 97 | **97** | 1 | 0 | 96 | 130 |
+| Reach `cex_beaver_creek` | 470 | 470 | **42** | **67** | 428 | 1060 |
+| Reach `cex_damnation` | 520 | 520 | **86** | **148** | 434 | 806 |
+| H2A `ca_ascension_bsp01` | 858 | 858 | **22** | **54** | 836 | 867 |
+| CE `c10/level_a` | 776 | **0** | 1 | 0 | 775 | 3492 |
+
+Two results:
+
+- **Hypothesis 2 confirmed for H4.** Its sealed world really is vestigial — 1–2 clusters
+  and 0–5 portals, against 18–86 clusters and 32–148 portals on Reach and H2A levels of
+  comparable size. Essentially the whole level is instanced geometry.
+- **H4 needs no work.** `pmt` is fully populated, so it has always had inline render
+  buffers and has always exported correctly. `00_vista` emits 222 objects, 289 instances,
+  252,203 vertices, 234,708 triangles, including its `@CollideOnly` sealed-world object.
+  The collision fallback correctly does not engage.
+
+Worth separating two axes the original hypotheses conflated. CE is **Reach-shaped in
+schema** (a strict ordered subset, §3) but **H4-like in level structure** (1 cluster, no
+portals, everything instanced). Hypothesis 1 asked about layout and is still refuted;
+what it was reaching for was this structural resemblance, which is real.
+
+H4 also carries a `Havok Data` block in `raw_items` that no other generation has — a
+serialized Havok body, empty in `00_vista`. Not needed for geometry extraction, noted
+only because it is the one genuinely H4-only field in that resource.
 
 ### Patch 5 — Baboon UI — done
 
