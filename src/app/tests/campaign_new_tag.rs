@@ -121,6 +121,40 @@ fn a_game_with_no_known_generation_is_still_rejected() {
     }
 }
 
+/// Every way a Campaign Evolved tag comes into existence has to end up with the
+/// same generation, or "correct" depends on which menu item was used.
+///
+/// Three paths reach `add_new_container_tag`: New Tag builds from the schema and
+/// stamps; Copy round-trips an existing CE tag through its own bytes and so
+/// inherits a header that is already right; Import takes a file from disk, whose
+/// header is the *source's* and has to be restamped. This pins the two that go
+/// through a `TagFile` the caller supplies.
+#[test]
+fn an_imported_tag_is_restamped_for_campaign_evolved() {
+    // A tag carrying another kit's generation — Halo 3's, `build_number = 1`.
+    let mut foreign = TagFile::new(definition("cinematic_scene")).expect("any tag will do");
+    apply_editing_kit_mcc_header(&mut foreign, "halo3_mcc").expect("H3 is a known game");
+    assert_ne!(
+        (foreign.header.build_version, foreign.header.build_number, foreign.header.version),
+        CAMPAIGN_EVOLVED_GENERATION,
+        "the fixture has to start wrong for this to prove anything"
+    );
+
+    apply_editing_kit_mcc_header(&mut foreign, CAMPAIGN_EVOLVED_GAME).expect("CE is a known game");
+    assert_eq!(
+        (foreign.header.build_version, foreign.header.build_number, foreign.header.version),
+        CAMPAIGN_EVOLVED_GENERATION
+    );
+
+    // And a zeroed header — what an older Baboon wrote — restamps too.
+    let mut zeroed = TagFile::new(definition("cinematic_scene")).expect("any tag will do");
+    apply_editing_kit_mcc_header(&mut zeroed, CAMPAIGN_EVOLVED_GAME).expect("CE is a known game");
+    assert_eq!(
+        (zeroed.header.build_version, zeroed.header.build_number, zeroed.header.version),
+        CAMPAIGN_EVOLVED_GENERATION
+    );
+}
+
 /// Every group the dialog offers must have a schema on disk, or the group list
 /// and the creation path disagree about what is creatable.
 #[test]

@@ -1432,10 +1432,20 @@ impl Baboon {
         let group_tag = dialog.group_tag;
         let group_name = dialog.group_name.clone();
         let extension = dialog.extension.clone();
-        let Some(tag) = dialog.tag.take() else {
+        let Some(mut tag) = dialog.tag.take() else {
             dialog.error = Some("No tag to import".to_owned());
             return;
         };
+        // The generation belongs to the destination, not to the file that was
+        // picked. Import only ever targets a Campaign Evolved container, and the
+        // schema gate above compares layout rather than the file header — so a
+        // tag authored for another kit, or by a Baboon old enough to leave the
+        // header zeroed, would otherwise land in the paks claiming a generation
+        // the simulation never ships.
+        if let Err(error) = apply_editing_kit_mcc_header(&mut tag, CAMPAIGN_EVOLVED_GAME) {
+            dialog.error = Some(error);
+            return;
+        }
 
         // Does a base-game tag already exist at this path+group?
         let existing = self.source().and_then(|s| match &s.source {
