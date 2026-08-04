@@ -45,6 +45,39 @@ const TERMINAL_VISIBLE_LINE_LIMIT: usize = 20_000;
 const TERMINAL_VISIBLE_LINE_TRIM_TARGET: usize = 18_000;
 const ENTRY_INDEX_REFRESH_INTERVAL_SECS: f64 = 30.0;
 
+/// Choose the container tag whose `.uasset` a new tag will donate its package
+/// structure from, returning its container index and container path.
+///
+/// Same-group only. A donor of another group is not an option: its wrapper is
+/// the wrong shape for the destination class, and the two ways that can go
+/// wrong are both silent. A donor carrying properties names *different*
+/// properties under the destination's schema, because they are positional; a
+/// bare donor given to a class that has properties declares none of them.
+///
+/// It does not have to be an option, either. A group the game ships no tag of
+/// is served by [`NewContainerTemplate::Derived`] instead, which builds the
+/// wrapper from the group's own rules. Measured over the mounted paks by
+/// `blam-tags`' `ce_group_census` example: of the 141 defined groups the game
+/// ships 101, and 36 of the remaining 40 derive. The last four are
+/// `object`/`unit`/`item`/`device` — Halo's abstract base groups, which have no
+/// standalone instances by design and are refused rather than fabricated.
+fn pick_container_template<'a>(
+    entries: impl Iterator<Item = &'a TagEntry>,
+    group_tag: u32,
+) -> Option<(usize, String)> {
+    entries
+        .filter(|entry| entry.group_tag == group_tag)
+        .find_map(|entry| match &entry.location {
+            TagEntryLocation::Container {
+                container,
+                rel_path,
+            } => rel_path
+                .strip_suffix(".ubulk")
+                .map(|stem| (*container, format!("{stem}.uasset"))),
+            _ => None,
+        })
+}
+
 /// Map a container `.ubulk` path to the UE package path the runtime hashes.
 /// `Meteorite/Content/Tags/objects/.../foo-biped.ubulk` → `/Game/Tags/objects/.../foo-biped`.
 /// Normalize a user-entered container tag path: lowercase, `\`→`/`, collapse
@@ -135,23 +168,40 @@ pub(super) fn new_container_template_for(
 }
 
 /// The `.uasset` bytes to seed a new tag's package with, cloned or derived.
+///
+/// `reresolve` finds a fresh donor when the recorded one no longer reads. It is
+/// a closure rather than a container index because the two callers scope it to
+/// different kits: Save uses the active one, Export Mod the one being exported.
 pub(super) fn new_container_template_bytes(
     template: &NewContainerTemplate,
     containers: &[crate::source::MountedContainer],
     package: &str,
     tag_len: u64,
+    reresolve: impl FnOnce() -> Option<(usize, String)>,
 ) -> Result<Vec<u8>, String> {
     match template {
         NewContainerTemplate::Donor {
             container,
             rel_path,
         } => {
-            let mounted = containers
+            // The recorded donor is a hint, not a fact: container indices are
+            // positional, so a remount reorders them and a tag stashed in a
+            // project outlives the index it was created against. Re-resolving
+            // on a miss is what keeps such a tag saveable instead of failing
+            // with "template container is stale".
+            if let Some(bytes) = containers
                 .get(*container)
-                .ok_or("Template container is stale")?;
-            mounted
+                .and_then(|mounted| mounted.archive.read(rel_path).ok())
+            {
+                return Ok(bytes);
+            }
+            let (container, rel_path) =
+                reresolve().ok_or("No tag in the mounted paks can donate a package template")?;
+            containers
+                .get(container)
+                .ok_or("Template container is stale")?
                 .archive
-                .read(rel_path)
+                .read(&rel_path)
                 .map_err(|error| format!("Failed to read template .uasset: {error}"))
         }
         NewContainerTemplate::Derived { group } => {
@@ -606,6 +656,12 @@ impl Baboon {
                 WorkerMessage::ContainerDeleteFinished { stamp, result } => {
                     self.handle_container_delete_finished(stamp, result)
                 }
+                WorkerMessage::ChimpLevelProgress {
+                    kit,
+                    phase,
+                    done,
+                    total,
+                } => self.handle_chimp_level_progress(kit, phase, done, total),
                 WorkerMessage::ExportFinished(result) => self.handle_export_finished(result),
                 WorkerMessage::PokePreflightFinished { kit, key, result } => {
                     self.handle_poke_preflight(kit, key, result);
@@ -1121,7 +1177,15 @@ impl Baboon {
             return;
         }
         let tag = match TagFile::new(&group.schema_path) {
-            Ok(tag) => tag,
+            Ok(mut tag) => {
+                // `TagFile::new` zeroes the whole file-header generation; the
+                // simulation expects Campaign Evolved's.
+                if let Err(error) = apply_editing_kit_mcc_header(&mut tag, CAMPAIGN_EVOLVED_GAME) {
+                    self.new_tag_dialog.error = Some(error);
+                    return;
+                }
+                tag
+            }
             Err(error) => {
                 self.new_tag_dialog.error = Some(format!("Could not create tag: {error}"));
                 return;
@@ -1410,10 +1474,20 @@ impl Baboon {
         let group_tag = dialog.group_tag;
         let group_name = dialog.group_name.clone();
         let extension = dialog.extension.clone();
-        let Some(tag) = dialog.tag.take() else {
+        let Some(mut tag) = dialog.tag.take() else {
             dialog.error = Some("No tag to import".to_owned());
             return;
         };
+        // The generation belongs to the destination, not to the file that was
+        // picked. Import only ever targets a Campaign Evolved container, and the
+        // schema gate above compares layout rather than the file header — so a
+        // tag authored for another kit, or by a Baboon old enough to leave the
+        // header zeroed, would otherwise land in the paks claiming a generation
+        // the simulation never ships.
+        if let Err(error) = apply_editing_kit_mcc_header(&mut tag, CAMPAIGN_EVOLVED_GAME) {
+            dialog.error = Some(error);
+            return;
+        }
 
         // Does a base-game tag already exist at this path+group?
         let existing = self.source().and_then(|s| match &s.source {
@@ -1530,28 +1604,56 @@ impl Baboon {
     /// A specific kit's template. Project recovery names its kit: the container
     /// a stashed new tag is modelled on has to come from the source that tag
     /// belongs to, not from whichever kit happens to be focused.
+    ///
+    /// Returning `None` is an ordinary answer, not a failure: it means the game
+    /// ships no tag of this group, and the caller derives the wrapper instead.
+    /// See [`pick_container_template`] for why no other group can stand in.
     pub(super) fn find_container_template_in(
         &self,
         kit: usize,
         group_tag: u32,
     ) -> Option<(usize, String)> {
         let source = self.kits.get(kit)?.source.as_ref()?;
-        source
-            .entries
-            .iter()
-            .chain(source.all_entries.iter())
-            .find_map(|entry| match &entry.location {
-                TagEntryLocation::Container {
-                    container,
-                    rel_path,
-                } if entry.group_tag == group_tag => {
-                    let uasset = rel_path
-                        .strip_suffix(".ubulk")
-                        .map(|s| format!("{s}.uasset"))?;
-                    Some((*container, uasset))
-                }
-                _ => None,
-            })
+        pick_container_template(
+            source.entries.iter().chain(source.all_entries.iter()),
+            group_tag,
+        )
+    }
+
+    /// Read the `.uasset` a new tag donates its package structure from.
+    ///
+    /// The donor recorded on the entry is a *hint*, not a fact: container
+    /// indices are positional, so a remount reorders them and a tag stashed in a
+    /// project outlives the index it was created against. Re-resolving on a miss
+    /// is what keeps such a tag saveable instead of failing with "template
+    /// container is stale".
+    fn read_new_container_template(
+        &self,
+        template_container: usize,
+        template_rel: &str,
+        group_tag: u32,
+    ) -> Result<Vec<u8>, String> {
+        let Some(source) = self.source() else {
+            return Err("No source loaded".to_owned());
+        };
+        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+            return Err("Source is not a container".to_owned());
+        };
+        if let Some(bytes) = containers
+            .get(template_container)
+            .and_then(|mounted| mounted.archive.read(template_rel).ok())
+        {
+            return Ok(bytes);
+        }
+        let (container, rel) = self.find_container_template(group_tag).ok_or_else(|| {
+            "No tag in the mounted paks can donate a package template".to_owned()
+        })?;
+        containers
+            .get(container)
+            .ok_or_else(|| "Template container is stale".to_owned())?
+            .archive
+            .read(&rel)
+            .map_err(|e| format!("Failed to read template .uasset: {e}"))
     }
 
     /// Register an in-memory (unsaved) container tag: insert it into the browser
@@ -3989,7 +4091,9 @@ impl Baboon {
             return;
         };
         let TagEntryLocation::NewContainer {
-            template, package, ..
+            template,
+            package,
+            group_tag,
         } = &entry.location
         else {
             self.status = "Not a new container tag".to_owned();
@@ -4015,7 +4119,13 @@ impl Baboon {
                 self.status = "Source is not a container".to_owned();
                 return;
             };
-            match new_container_template_bytes(template, containers, package, bytes.len() as u64) {
+            match new_container_template_bytes(
+                template,
+                containers,
+                package,
+                bytes.len() as u64,
+                || self.find_container_template(*group_tag),
+            ) {
                 Ok(bytes) => bytes,
                 Err(error) => {
                     self.status = error;
@@ -4562,13 +4672,19 @@ impl Baboon {
                     ));
                 }
                 TagEntryLocation::NewContainer {
-                    template, package, ..
+                    template,
+                    package,
+                    group_tag,
                 } => {
+                    // A recorded donor is re-resolved against the kit being
+                    // exported, not the active one: they differ, and the wrong
+                    // kit's containers would drop the tag out of the export.
                     let Ok(template) = new_container_template_bytes(
                         template,
                         containers,
                         package,
                         overlay.bytes.len() as u64,
+                        || self.find_container_template_in(exporting, *group_tag),
                     ) else {
                         skipped += 1;
                         continue;
@@ -7312,6 +7428,10 @@ mod save_changes_prompt_tests;
 #[cfg(test)]
 #[path = "tests/mod_overrides.rs"]
 mod mod_override_tests;
+
+#[cfg(test)]
+#[path = "tests/campaign_new_tag.rs"]
+mod campaign_new_tag_tests;
 
 enum SaveChangesPromptAction {
     None,

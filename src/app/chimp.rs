@@ -6,9 +6,20 @@
 
 use super::*;
 use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
+
+mod level;
+pub(in crate::app) use level::{LevelScene, read_cell_into, read_cells};
+mod level_blend;
+mod level_export;
+mod level_segment;
+mod mesh_weld;
+pub(in crate::app) use level_export::{scene_to_usd, write_blend_export, write_segmented_usd};
+use level_export::{ExportStage, MeshDetail};
+use level_segment::SegmentBudget;
 use std::io::{Cursor, Write};
 
-use blam_tags::iostore::asset::texture2d::decode_texture2d_preview;
+use blam_tags::iostore::asset::texture2d::{Texture2dSurfaces, decode_texture2d_surfaces};
 use blam_tags::iostore::container::writer::{
     PackageOverride, PackageReplacement, overwrite_package_in_place_with,
     overwrite_packages_in_place_with, write_package_mod_container,
@@ -51,6 +62,11 @@ pub(super) struct ChimpMeshTexturePrompt {
     /// Read through [`ChimpMeshTexturePrompt::format_label`]; the format itself
     /// is Chimp's own business.
     format: ChimpMeshFormat,
+    /// Which image format the textures would be written as, if any are. Asked
+    /// here rather than in a second window, because it is only one more choice
+    /// about the same export and the answer only matters alongside the two
+    /// buttons that ask for textures at all.
+    pub(super) texture_export: ChimpTextureExport,
     pub(super) path: PathBuf,
 }
 
@@ -140,10 +156,95 @@ enum ChimpDocumentView {
     Metadata,
 }
 
+/// How a Texture2D extraction should be written.
+///
+/// All three split a UDIM set into 1001-numbered files and give each block its
+/// authored resolution. DDS additionally keeps the cooked pixel format and the
+/// whole mip chain; TIFF and PNG are one flat RGBA8 image per block.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ChimpTextureFormat {
+    Dds,
+    Tiff,
+    Png,
+}
+
+impl ChimpTextureFormat {
+    pub(super) const ALL: [Self; 3] = [Self::Dds, Self::Tiff, Self::Png];
+
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::Dds => "DDS",
+            Self::Tiff => "TIFF",
+            Self::Png => "PNG",
+        }
+    }
+
+    /// What choosing this format actually gets you, in the prompt.
+    pub(super) fn summary(self) -> &'static str {
+        match self {
+            Self::Dds => {
+                "The bytes the game ships: the cooked pixel format (BC1-BC7 and the \
+                 uncompressed formats) with the whole mip chain, not a re-encode. \
+                 The only choice that round-trips back into Unreal unchanged."
+            }
+            Self::Tiff => {
+                "One flat RGBA8 image, uncompressed. Larger than PNG, and what most \
+                 texture and compositing tools prefer to be handed."
+            }
+            Self::Png => {
+                "One flat RGBA8 image, losslessly compressed. The smallest of the \
+                 three and the one anything will open."
+            }
+        }
+    }
+
+    fn extension(self) -> &'static str {
+        match self {
+            Self::Dds => "dds",
+            Self::Tiff => "tif",
+            Self::Png => "png",
+        }
+    }
+
+    fn filter(self) -> (&'static str, &'static [&'static str]) {
+        match self {
+            Self::Dds => ("DDS image", &["dds"]),
+            Self::Tiff => ("TIFF image", &["tif", "tiff"]),
+            Self::Png => ("PNG image", &["png"]),
+        }
+    }
+}
+
+/// A texture export waiting on the answer to "which image format?".
+///
+/// The format is asked before the save dialog rather than after, because it
+/// decides what the export *is* — one file or a numbered UDIM set, compressed
+/// mips or a flat image — and the file picker's name and filter follow from it.
+pub(super) struct ChimpTextureExportPrompt {
+    pub(super) kit: KitId,
+    pub(super) package: String,
+    pub(super) export: ChimpTextureExport,
+}
+
+impl ChimpTextureExportPrompt {
+    pub(super) fn name(&self) -> &str {
+        self.package.rsplit('/').next().unwrap_or(&self.package)
+    }
+}
+
+/// One entry; the format is chosen in the prompt it opens.
+fn chimp_texture_export_menu(ui: &mut egui::Ui, package: &str, out: &mut Option<String>) {
+    if ui.button("Extract Texture2D…").clicked() {
+        *out = Some(package.to_owned());
+        ui.close_menu();
+    }
+}
+
 enum ChimpTreeClick {
     Package(String),
     ExtractTexture(String),
     ExtractMesh(String, ChimpMeshFormat),
+    ExportLevel(String, ChimpLevelFormat),
     File(String),
 }
 
@@ -151,6 +252,250 @@ enum ChimpTreeClick {
 enum ChimpMeshKind {
     Skeletal,
     Static,
+}
+
+/// How a whole level leaves Baboon.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ChimpLevelFormat {
+    /// One shared prototype library plus a file per region.
+    SegmentedUsd,
+    /// Raw geometry plus a script that builds `.blend` files from it.
+    Blender,
+}
+
+impl ChimpLevelFormat {
+    fn label(self) -> &'static str {
+        match self {
+            Self::SegmentedUsd => "USD (.usda)",
+            Self::Blender => "Blender (.blend)",
+        }
+    }
+
+    fn summary(self) -> &'static str {
+        match self {
+            Self::SegmentedUsd => {
+                "A prototype library holding every mesh once, and a file per region \
+                 that places them. Imports into any DCC that reads USD."
+            }
+            Self::Blender => {
+                "Raw geometry and a script Blender runs to build one .blend per mesh \
+                 and a master that places them as linked duplicates."
+            }
+        }
+    }
+}
+
+/// Which part of a level export is running.
+///
+/// Reported separately because they are not comparable: reading cells is
+/// thousands of small packages, writing meshes is hundreds of large ones, and a
+/// single bar across both would crawl and then leap.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ChimpLevelPhase {
+    ReadingCells,
+    WritingMeshes,
+    WritingSegments,
+}
+
+impl ChimpLevelPhase {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::ReadingCells => "Reading cells",
+            Self::WritingMeshes => "Writing meshes",
+            Self::WritingSegments => "Writing segments",
+        }
+    }
+
+    /// Where this phase sits, for "step 1 of 3".
+    pub(super) fn step(self) -> usize {
+        match self {
+            Self::ReadingCells => 1,
+            Self::WritingMeshes => 2,
+            Self::WritingSegments => 3,
+        }
+    }
+}
+
+/// A level export in flight, and how far along it is.
+pub(super) struct ChimpLevelJob {
+    pub(super) kit: KitId,
+    pub(super) name: String,
+    pub(super) phase: ChimpLevelPhase,
+    pub(super) done: usize,
+    pub(super) total: usize,
+    /// When the current phase began, so the estimate is of the work being done
+    /// rather than an average across phases that cost different amounts.
+    pub(super) phase_started: Instant,
+}
+
+impl ChimpLevelJob {
+    pub(super) fn fraction(&self) -> f32 {
+        if self.total == 0 {
+            return 0.0;
+        }
+        (self.done as f32 / self.total as f32).clamp(0.0, 1.0)
+    }
+
+    /// How much longer this phase looks like taking, or `None` until there is
+    /// enough of it done to say anything honest.
+    pub(super) fn remaining(&self) -> Option<Duration> {
+        if self.done == 0 || self.done >= self.total {
+            return None;
+        }
+        let elapsed = self.phase_started.elapsed().as_secs_f64();
+        // A first few items are not a rate. Guessing from them produces a
+        // number that swings by minutes and teaches the user to ignore it.
+        if elapsed < 1.5 {
+            return None;
+        }
+        let each = elapsed / self.done as f64;
+        Some(Duration::from_secs_f64(
+            each * (self.total - self.done) as f64,
+        ))
+    }
+}
+
+/// "about 4m 20s", or "a few seconds" when there is no point being precise.
+pub(super) fn format_remaining(remaining: Duration) -> String {
+    let seconds = remaining.as_secs();
+    if seconds < 10 {
+        return "a few seconds".to_owned();
+    }
+    if seconds < 60 {
+        return format!("about {seconds}s");
+    }
+    let minutes = seconds / 60;
+    let rest = seconds % 60;
+    if minutes < 10 {
+        format!("about {minutes}m {rest:02}s")
+    } else {
+        format!("about {minutes}m")
+    }
+}
+
+/// A level waiting on the answer to "how, and split how far?".
+pub(super) struct ChimpLevelExportPrompt {
+    pub(super) kit: KitId,
+    pub(super) package: String,
+    /// The `_Generated_` cells this level is made of.
+    pub(super) cells: Vec<String>,
+    pub(super) format: ChimpLevelFormat,
+    /// Full Nanite geometry rather than the coarse fallback proxy.
+    pub(super) nanite: bool,
+    pub(super) split: bool,
+    pub(super) triangles: usize,
+    pub(super) placements: usize,
+}
+
+impl ChimpLevelExportPrompt {
+    pub(super) fn format_label(&self) -> &'static str {
+        self.format.label()
+    }
+
+    pub(super) fn format_summary(&self) -> &'static str {
+        self.format.summary()
+    }
+
+    /// What the exported files are named after.
+    pub(super) fn name(&self) -> String {
+        prim_safe_name(self.package.rsplit('/').next().unwrap_or("level"))
+    }
+
+    fn budget(&self) -> SegmentBudget {
+        if self.split {
+            SegmentBudget {
+                triangles: self.triangles.max(1),
+                placements: self.placements.max(1),
+            }
+        } else {
+            // Not "no segmentation" but one segment: the same code path, with a
+            // ceiling nothing reaches, so there is no second way to export.
+            SegmentBudget {
+                triangles: usize::MAX,
+                placements: usize::MAX,
+            }
+        }
+    }
+}
+
+/// A file-name-safe version of a package leaf.
+fn prim_safe_name(raw: &str) -> String {
+    let name: String = raw
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .collect();
+    if name.is_empty() {
+        "level".to_owned()
+    } else {
+        name
+    }
+}
+
+/// What a package's context menu offers.
+///
+/// One answer, used both to decide whether to attach a menu at all and to decide
+/// what goes in it. The browser draws packages in four places, and when the two
+/// decisions were written out separately at each of them they drifted: the level
+/// entry was added to every menu body, but the guard on two of the sites still
+/// only admitted textures and meshes, so on those the entry sat inside a menu
+/// that was never built. A menu that offers nothing must not open, and anything
+/// it would offer must open it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ChimpPackageActions {
+    texture: bool,
+    mesh: bool,
+    level: bool,
+}
+
+impl ChimpPackageActions {
+    fn of(package: &str, kind: Option<&str>) -> Self {
+        Self {
+            texture: kind == Some("Texture2D"),
+            mesh: matches!(kind, Some("SkeletalMesh" | "StaticMesh")),
+            level: chimp_looks_like_level(package),
+        }
+    }
+
+    fn any(self) -> bool {
+        self.texture || self.mesh || self.level
+    }
+}
+
+/// Whether a package is shaped like a World Partition persistent level.
+///
+/// A cheap name test rather than a search, because it runs while a context menu
+/// is open and the real answer means scanning every package in the install.
+/// Unreal names a persistent level after the folder that holds it — C10 lives at
+/// `.../C10/C10` — so that is what this looks for, and
+/// [`chimp_level_cells`] decides for certain once the menu is actually used.
+fn chimp_looks_like_level(package: &str) -> bool {
+    let Some((directory, leaf)) = package.rsplit_once('/') else {
+        return false;
+    };
+    let Some((_, folder)) = directory.rsplit_once('/') else {
+        return false;
+    };
+    !leaf.is_empty() && leaf.eq_ignore_ascii_case(folder)
+}
+
+/// The cells a World Partition level is made of, empty if this is not one.
+///
+/// A persistent level sits beside a `_Generated_` folder holding the cells that
+/// place its actors — `C10` is 2,334 of them — so the level package itself
+/// places almost nothing and finding the cells is what makes it exportable.
+fn chimp_level_cells(world: &World, package: &str) -> Vec<String> {
+    let Some((directory, _)) = package.rsplit_once('/') else {
+        return Vec::new();
+    };
+    let prefix = format!("{directory}/_Generated_/").to_lowercase();
+    let mut cells: Vec<String> = world
+        .packages()
+        .iter()
+        .filter(|record| record.name.to_lowercase().starts_with(&prefix))
+        .map(|record| record.name.clone())
+        .collect();
+    cells.sort();
+    cells
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -322,6 +667,9 @@ pub(super) struct ChimpTypeIndex {
 struct ChimpTexturePreview {
     export_index: usize,
     preview: BitmapPreviewState,
+    /// Every layer and mip the package stores, kept in its cooked pixel format.
+    /// The viewer expands one of these at a time; export writes them untouched.
+    surfaces: Result<Texture2dSurfaces, String>,
 }
 
 #[derive(Default, Deserialize, Serialize)]
@@ -345,6 +693,7 @@ struct ChimpPaneBehavior<'a> {
     close_all_but: Option<String>,
     extract_texture: Option<String>,
     extract_mesh: Option<(String, ChimpMeshFormat)>,
+    export_level: Option<(String, ChimpLevelFormat)>,
 }
 
 impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_> {
@@ -443,10 +792,7 @@ impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_> {
             }
             if has_texture {
                 ui.separator();
-                if ui.button("Extract Texture2D as TIFF…").clicked() {
-                    self.extract_texture = Some(package.clone());
-                    ui.close_menu();
-                }
+                chimp_texture_export_menu(ui, &package, &mut self.extract_texture);
             }
             if has_mesh {
                 ui.separator();
@@ -462,6 +808,10 @@ impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_> {
                         }
                     }
                 });
+            }
+            if chimp_looks_like_level(&package) {
+                ui.separator();
+                chimp_level_export_menu(ui, &package, &mut self.export_level);
             }
         });
         button_response
@@ -726,11 +1076,41 @@ pub(super) fn load_chimp_document(world: &World, package: &str) -> Result<ChimpD
     decode_chimp_document(world, provider, bytes)
 }
 
-fn decode_chimp_document(
+/// One package, decoded as far as its exports and no further.
+///
+/// This is all a reader needs, and it is a small fraction of what loading a
+/// *document* costs: [`decode_chimp_document`] goes on to decode previews and
+/// render the editor's text panes, which for a World Partition cell is 329ms of
+/// work against the 1ms the exports themselves take. Reading a level is 2,334
+/// cells, so the difference is a quarter of an hour against seconds.
+pub(super) struct ChimpPackage {
+    pub(super) header: FZenPackageHeader,
+    pub(super) exports: Vec<ChimpExport>,
+}
+
+/// Read and decode a package's exports, skipping everything the editor's
+/// document pane needs and a reader does not.
+pub(super) fn load_chimp_package(world: &World, package: &str) -> Result<ChimpPackage, String> {
+    let record = world
+        .package(package)
+        .ok_or_else(|| format!("{package} is not mounted"))?;
+    let provider = record
+        .active_provider()
+        .cloned()
+        .ok_or_else(|| format!("{package} has no active provider"))?;
+    let bytes = world
+        .read_provider(&provider)
+        .map_err(|error| error.to_string())?;
+    let (header, _, exports) = decode_chimp_exports(world, &provider, &bytes)?;
+    Ok(ChimpPackage { header, exports })
+}
+
+/// The shared front half of loading a package: header, payloads, exports.
+fn decode_chimp_exports(
     world: &World,
-    provider: PackageProvider,
-    bytes: Vec<u8>,
-) -> Result<ChimpDocument, String> {
+    provider: &PackageProvider,
+    bytes: &[u8],
+) -> Result<(FZenPackageHeader, Vec<Vec<u8>>, Vec<ChimpExport>), String> {
     let header = FZenPackageHeader::deserialize(
         &mut Cursor::new(&bytes),
         None,
@@ -739,10 +1119,10 @@ fn decode_chimp_document(
         None,
     )
     .map_err(|error| format!("Could not parse {}: {error:#}", provider.entry_path))?;
-    let payloads = read_payloads(&header, &bytes)
+    let payloads = read_payloads(&header, bytes)
         .map_err(|error| format!("Could not split {}: {error:#}", provider.entry_path))?;
     let names = header.name_map.copy_raw_names();
-    let resolver = world.resolver(&header, &bytes, &names);
+    let resolver = world.resolver(&header, bytes, &names);
     let bulk: Vec<(i64, i64)> = header
         .bulk_data
         .iter()
@@ -779,6 +1159,23 @@ fn decode_chimp_document(
                 decoded,
             }
         })
+        .collect();
+    drop(resolver);
+    Ok((header, payloads, exports))
+}
+
+fn decode_chimp_document(
+    world: &World,
+    provider: PackageProvider,
+    bytes: Vec<u8>,
+) -> Result<ChimpDocument, String> {
+    let (header, payloads, exports) = decode_chimp_exports(world, &provider, &bytes)?;
+    let names = header.name_map.copy_raw_names();
+    let resolver = world.resolver(&header, &bytes, &names);
+    let bulk: Vec<(i64, i64)> = header
+        .bulk_data
+        .iter()
+        .map(|entry| (entry.serial_offset, entry.serial_size))
         .collect();
     let texture_previews = decode_chimp_texture_previews(
         world, &provider, &header, &payloads, &names, &resolver, &bulk, &exports,
@@ -1019,7 +1416,7 @@ fn decode_chimp_texture_previews(
                 let texture = parse_texture_chain_tail(&export.tail, names, context, true)
                     .map_err(|error| error.to_string())?;
                 let package_chunk = package_chunk.as_ref().map_err(|error| error.to_string())?;
-                decode_texture2d_preview(&texture, |bulk_index| {
+                decode_texture2d_surfaces(&texture, |bulk_index| {
                     let entry = header
                         .bulk_data
                         .get(bulk_index.max(0) as usize)
@@ -1041,21 +1438,105 @@ fn decode_chimp_texture_previews(
                 .map_err(|error| error.to_string())
             })();
             let mut preview = BitmapPreviewState::default();
-            preview.decoded = Some(decoded.map(|decoded| BitmapPreviewData {
-                width: decoded.width,
-                height: decoded.height,
-                image_count: 1,
-                mip_count: 1,
-                format_name: decoded.pixel_format,
-                type_name: format!("Texture2D • mip {}", decoded.mip_level),
-                rgba: decoded.rgba8,
-            }));
+            // Start on the largest mip that a GPU texture can actually hold.
+            // Mip 0 of a virtual texture is routinely wider than the driver's
+            // limit, and an oversized upload renders as noise rather than
+            // failing, so choosing here is the difference between a preview and
+            // an apparently corrupt one.
+            if let Ok(surfaces) = &decoded {
+                preview.mip_index = first_displayable_mip(surfaces, 0);
+            }
+            preview.decoded = Some(
+                decoded
+                    .as_ref()
+                    .map_err(Clone::clone)
+                    .and_then(|surfaces| {
+                        chimp_texture_mip_data(surfaces, preview.image_index, preview.mip_index)
+                    }),
+            );
             ChimpTexturePreview {
                 export_index,
                 preview,
+                surfaces: decoded,
             }
         })
         .collect()
+}
+
+/// Largest mip index that is safe to upload as a GPU texture.
+///
+/// Cooked virtual textures reach 14336 px on their base mip, well past the
+/// 8192-16384 limit typical hardware reports. Uploading past that limit does not
+/// error — the texture is simply never defined, and the viewer shows garbage —
+/// so the base mip is skipped rather than shown wrong. `max_side` of 0 means the
+/// limit is not known yet, in which case a conservative cap is applied.
+fn first_displayable_mip(surfaces: &Texture2dSurfaces, max_side: usize) -> usize {
+    let limit = if max_side == 0 { 8192 } else { max_side } as u32;
+    surfaces
+        .layers
+        .first()
+        .and_then(|layer| {
+            layer
+                .mips
+                .iter()
+                .position(|mip| mip.width <= limit && mip.height <= limit)
+        })
+        .unwrap_or(0)
+}
+
+/// Expand one layer/mip of a decoded texture into the shared bitmap viewer's
+/// model. Layer and mip counts come from the surfaces, so the viewer's existing
+/// steppers work without Chimp growing a second viewer.
+fn chimp_texture_mip_data(
+    surfaces: &Texture2dSurfaces,
+    layer_index: usize,
+    mip_index: usize,
+) -> Result<BitmapPreviewData, String> {
+    let layer_count = surfaces.layers.len().max(1);
+    let layer_index = layer_index.min(layer_count - 1);
+    let layer = surfaces
+        .layers
+        .get(layer_index)
+        .ok_or_else(|| "texture has no layers".to_owned())?;
+    let mip_count = layer.mips.len().max(1);
+    let mip_index = mip_index.min(mip_count - 1);
+    let surface = layer
+        .mips
+        .get(mip_index)
+        .ok_or_else(|| format!("texture layer has no mip {mip_index}"))?;
+    // Not `to_rgba8`: a mixed-resolution UDIM set has no tiles at this level for
+    // its lower-resolution blocks, and those regions must come from the coarser
+    // level rather than show as holes.
+    let rgba = surfaces
+        .display_rgba8(layer_index, mip_index)
+        .map_err(|error| format!("{error:#}"))?;
+
+    let mut type_name = String::from("Texture2D");
+    if surfaces.is_virtual {
+        type_name.push_str(" • virtual");
+    }
+    if surfaces.is_udim() {
+        type_name.push_str(&format!(
+            " • {}x{} UDIM",
+            surfaces.width_in_blocks, surfaces.height_in_blocks
+        ));
+    }
+    if layer_count > 1 {
+        type_name.push_str(&format!(" • layer {layer_index}"));
+    }
+    if !surface.missing_tiles.is_empty() {
+        // Say so rather than let a magnified region read as a decode fault.
+        type_name.push_str(" • some blocks magnified (authored lower-resolution)");
+    }
+    Ok(BitmapPreviewData {
+        width: surface.width,
+        height: surface.height,
+        image_count: layer_count,
+        mip_count,
+        format_name: surface.pixel_format.clone(),
+        type_name,
+        rgba,
+    })
 }
 
 fn chimp_package_type(world: &World, header: &FZenPackageHeader) -> Option<String> {
@@ -1762,6 +2243,7 @@ impl Baboon {
                 });
             }
         });
+        self.draw_chimp_level_progress(ui, kit_index);
         ui.add_space(4.0);
         let ready = matches!(self.kits[kit_index].chimp.mount, ChimpMount::Ready(_));
         egui::SidePanel::left(egui::Id::new((
@@ -1808,6 +2290,61 @@ impl Baboon {
                     self.draw_chimp_mount_status(ui, kit_index);
                 }
             });
+    }
+
+    /// A bar for the export running in this workspace, if one is.
+    ///
+    /// A level export is minutes of work, and without this the window simply
+    /// sits there — the one thing a user cannot tell from a frozen-looking
+    /// screen is the difference between working and stuck.
+    fn draw_chimp_level_progress(&mut self, ui: &mut Ui, kit_index: usize) {
+        let kit = self.kits[kit_index].id;
+        let Some(job) = self.chimp_level_job.as_ref().filter(|job| job.kit == kit) else {
+            return;
+        };
+        let phase = job.phase;
+        let (done, total) = (job.done, job.total);
+        let fraction = job.fraction();
+        let remaining = job.remaining();
+        let name = job.name.clone();
+
+        ui.add_space(4.0);
+        egui::Frame::none()
+            .fill(row_type())
+            .inner_margin(egui::Margin::symmetric(8.0, 6.0))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(format!("Exporting {name}"))
+                            .color(text_dark())
+                            .strong(),
+                    );
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Only ever an estimate, and said as one.
+                        if let Some(remaining) = remaining {
+                            ui.label(
+                                RichText::new(format!("{} left", format_remaining(remaining)))
+                                    .color(subtle_dark())
+                                    .small(),
+                            );
+                        }
+                    });
+                });
+                ui.add_space(3.0);
+                ui.add(
+                    egui::ProgressBar::new(fraction)
+                        .desired_height(10.0)
+                        .text(
+                            RichText::new(format!(
+                                "{} ({}/3) — {done}/{total}",
+                                phase.label(),
+                                phase.step()
+                            ))
+                            .small(),
+                        ),
+                );
+            });
+        ui.add_space(2.0);
     }
 
     fn draw_chimp_mount_status(&mut self, ui: &mut Ui, kit_index: usize) {
@@ -1907,6 +2444,7 @@ impl Baboon {
         let selected = self.kits[kit_index].chimp.selected_package.clone();
         let mut extract_texture = None;
         let mut extract_mesh = None;
+        let mut export_level = None;
         egui::ScrollArea::vertical()
             .id_salt(("chimp_packages", self.kits[kit_index].id.0))
             .auto_shrink([false, false])
@@ -1931,28 +2469,28 @@ impl Baboon {
                     } else {
                         response
                     };
-                    let is_texture = self.kits[kit_index]
-                        .chimp
-                        .package_types
-                        .get(indices[row])
-                        .and_then(Option::as_deref)
-                        == Some("Texture2D");
-                    let is_mesh = matches!(
+                    let actions = ChimpPackageActions::of(
+                        &package.name,
                         self.kits[kit_index]
                             .chimp
                             .package_types
                             .get(indices[row])
                             .and_then(Option::as_deref),
-                        Some("SkeletalMesh" | "StaticMesh")
                     );
-                    if is_texture || is_mesh {
+                    if actions.any() {
                         response.context_menu(|ui| {
-                            if is_texture && ui.button("Extract Texture2D as TIFF…").clicked() {
-                                extract_texture = Some(package.name.clone());
-                                ui.close_menu();
+                            if actions.texture {
+                                chimp_texture_export_menu(
+                                    ui,
+                                    &package.name,
+                                    &mut extract_texture,
+                                );
                             }
-                            if is_mesh {
+                            if actions.mesh {
                                 chimp_mesh_export_menu(ui, &package.name, &mut extract_mesh);
+                            }
+                            if actions.level {
+                                chimp_level_export_menu(ui, &package.name, &mut export_level);
                             }
                         });
                     }
@@ -1962,10 +2500,13 @@ impl Baboon {
                 }
             });
         if let Some(package) = extract_texture {
-            self.begin_extract_chimp_texture_tiff(kit_index, &package, ctx.clone());
+            self.begin_extract_chimp_texture(kit_index, &package);
         }
         if let Some((package, format)) = extract_mesh {
             self.begin_extract_chimp_mesh(kit_index, &package, format, ctx.clone());
+        }
+        if let Some((package, format)) = export_level {
+            self.begin_export_chimp_level(kit_index, &package, format);
         }
     }
 
@@ -1993,6 +2534,7 @@ impl Baboon {
         let mut open_package = None;
         let mut extract_texture = None;
         let mut extract_mesh = None;
+        let mut export_level = None;
         if groups.is_empty() && !self.kits[kit_index].chimp.type_indexing {
             ui.label(RichText::new("No matching Unreal packages.").color(subtle_dark()));
             return;
@@ -2017,22 +2559,29 @@ impl Baboon {
                                         label,
                                     )
                                     .on_hover_text(&package.name);
-                                if kind == "Texture2D"
-                                    || kind == "SkeletalMesh"
-                                    || kind == "StaticMesh"
-                                {
+                                let actions =
+                                    ChimpPackageActions::of(&package.name, Some(kind.as_str()));
+                                if actions.any() {
                                     response.context_menu(|ui| {
-                                        if kind == "Texture2D"
-                                            && ui.button("Extract Texture2D as TIFF…").clicked()
-                                        {
-                                            extract_texture = Some(package.name.clone());
-                                            ui.close_menu();
+                                        if actions.texture {
+                                            chimp_texture_export_menu(
+                                                ui,
+                                                &package.name,
+                                                &mut extract_texture,
+                                            );
                                         }
-                                        if kind == "SkeletalMesh" || kind == "StaticMesh" {
+                                        if actions.mesh {
                                             chimp_mesh_export_menu(
                                                 ui,
                                                 &package.name,
                                                 &mut extract_mesh,
+                                            );
+                                        }
+                                        if actions.level {
+                                            chimp_level_export_menu(
+                                                ui,
+                                                &package.name,
+                                                &mut export_level,
                                             );
                                         }
                                     });
@@ -2048,10 +2597,13 @@ impl Baboon {
             self.begin_chimp_open_package(kit_index, package, ctx.clone());
         }
         if let Some(package) = extract_texture {
-            self.begin_extract_chimp_texture_tiff(kit_index, &package, ctx.clone());
+            self.begin_extract_chimp_texture(kit_index, &package);
         }
         if let Some((package, format)) = extract_mesh {
             self.begin_extract_chimp_mesh(kit_index, &package, format, ctx.clone());
+        }
+        if let Some((package, format)) = export_level {
+            self.begin_export_chimp_level(kit_index, &package, format);
         }
     }
 
@@ -2202,7 +2754,10 @@ impl Baboon {
                 self.begin_chimp_open_package(kit_index, package, ctx.clone());
             }
             Some(ChimpTreeClick::ExtractTexture(package)) => {
-                self.begin_extract_chimp_texture_tiff(kit_index, &package, ctx.clone());
+                self.begin_extract_chimp_texture(kit_index, &package);
+            }
+            Some(ChimpTreeClick::ExportLevel(package, format)) => {
+                self.begin_export_chimp_level(kit_index, &package, format);
             }
             Some(ChimpTreeClick::ExtractMesh(package, format)) => {
                 self.begin_extract_chimp_mesh(kit_index, &package, format, ctx.clone());
@@ -2332,6 +2887,7 @@ impl Baboon {
             close_all_but: None,
             extract_texture: None,
             extract_mesh: None,
+            export_level: None,
         };
         tree.ui(&mut behavior, ui);
         let close_requests = std::mem::take(&mut behavior.close_requests);
@@ -2340,6 +2896,7 @@ impl Baboon {
         let close_all_but = behavior.close_all_but.take();
         let extract_texture = behavior.extract_texture.take();
         let extract_mesh = behavior.extract_mesh.take();
+        let export_level = behavior.export_level.take();
         self.kits[kit_index].chimp.document_tree = Some(tree);
         self.kits[kit_index].chimp.sync_open_packages();
         if let Some(package) = focused {
@@ -2379,10 +2936,13 @@ impl Baboon {
             self.status = "Save or discard modified Chimp packages before closing them.".to_owned();
         }
         if let Some(package) = extract_texture {
-            self.begin_extract_chimp_texture_tiff(kit_index, &package, ctx.clone());
+            self.begin_extract_chimp_texture(kit_index, &package);
         }
         if let Some((package, format)) = extract_mesh {
             self.begin_extract_chimp_mesh(kit_index, &package, format, ctx.clone());
+        }
+        if let Some((package, format)) = export_level {
+            self.begin_export_chimp_level(kit_index, &package, format);
         }
     }
 
@@ -3530,30 +4090,189 @@ impl Baboon {
         }
     }
 
-    fn begin_extract_chimp_texture_tiff(
+    /// Ask which image format to extract a Texture2D as.
+    ///
+    /// The save dialog comes after the answer, because the format decides both
+    /// what the export is — a numbered UDIM set or a single file, a mip chain or
+    /// one flat image — and what the picker should be named and filtered for.
+    fn begin_extract_chimp_texture(&mut self, kit_index: usize, package: &str) {
+        if !matches!(self.kits[kit_index].chimp.mount, ChimpMount::Ready(_)) {
+            return;
+        }
+        self.chimp_texture_export_prompt = Some(ChimpTextureExportPrompt {
+            kit: self.kits[kit_index].id,
+            package: package.to_owned(),
+            // DDS and split UDIM: the pair that round-trips into Unreal.
+            export: ChimpTextureExport::default(),
+        });
+    }
+
+    /// Pick a destination and run the extraction the prompt described.
+    pub(super) fn start_chimp_texture_export(
         &mut self,
-        kit_index: usize,
-        package: &str,
+        prompt: ChimpTextureExportPrompt,
         ctx: egui::Context,
     ) {
-        let suggested = format!("{}.tif", package.rsplit('/').next().unwrap_or("texture"));
+        let ChimpTextureExportPrompt {
+            kit,
+            package,
+            export,
+        } = prompt;
+        let format = export.format;
+        let leaf = package.rsplit('/').next().unwrap_or("texture").to_owned();
+        let (filter, extensions) = format.filter();
         let Some(path) = rfd::FileDialog::new()
-            .set_title("Extract Texture2D as TIFF")
-            .add_filter("TIFF image", &["tif", "tiff"])
-            .set_file_name(&suggested)
+            .set_title(format!("Extract Texture2D as {}", format.label()))
+            .add_filter(filter, extensions)
+            .set_file_name(format!("{leaf}.{}", format.extension()))
             .save_file()
         else {
+            return;
+        };
+        let Some(kit_index) = self.kits.iter().position(|entry| entry.id == kit) else {
             return;
         };
         let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
             return;
         };
         let world = world.clone();
-        let package = package.to_owned();
         let tx = self.tx.clone();
         self.status = format!("Extracting {package}…");
         thread::spawn(move || {
-            let result = write_chimp_texture_tiff(&world, &package, &path);
+            let result = write_chimp_texture(&world, &package, &path, export);
+            let _ = tx.send(WorkerMessage::ExportFinished(result));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Offer to export a World Partition level, once it is known to be one.
+    ///
+    /// The prompt comes before the folder dialog rather than after, because how
+    /// a level is split changes what the export *is* — a folder of regions or a
+    /// single file — and that is not a thing to discover afterwards.
+    pub(super) fn begin_export_chimp_level(
+        &mut self,
+        kit_index: usize,
+        package: &str,
+        format: ChimpLevelFormat,
+    ) {
+        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+            return;
+        };
+        let cells = chimp_level_cells(world, package);
+        if cells.is_empty() {
+            self.status = format!("{package} is not a World Partition level");
+            return;
+        }
+        let default = SegmentBudget::default();
+        self.chimp_level_export_prompt = Some(ChimpLevelExportPrompt {
+            kit: self.kits[kit_index].id,
+            package: package.to_owned(),
+            cells,
+            format,
+            // The fallback is a proxy built for hardware that cannot run
+            // Nanite; anyone exporting a level wants the geometry the game has.
+            nanite: true,
+            // A whole level in one USD does not import - measured - but a
+            // Blender master is placements and pointers and opens as one file.
+            split: matches!(format, ChimpLevelFormat::SegmentedUsd),
+            triangles: default.triangles,
+            placements: default.placements,
+        });
+    }
+
+    pub(super) fn start_chimp_level_export(
+        &mut self,
+        prompt: ChimpLevelExportPrompt,
+        ctx: egui::Context,
+    ) {
+        let Some(directory) = rfd::FileDialog::new()
+            .set_title(format!("Export {} as {}", prompt.name(), prompt.format_label()))
+            .pick_folder()
+        else {
+            return;
+        };
+        let Some(kit_index) = self.kits.iter().position(|kit| kit.id == prompt.kit) else {
+            return;
+        };
+        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+            return;
+        };
+        let world = world.clone();
+        let tx = self.tx.clone();
+        let kit = prompt.kit;
+        let name = prompt.name();
+        let budget = prompt.budget();
+        let detail = if prompt.nanite {
+            MeshDetail::Nanite
+        } else {
+            MeshDetail::Fallback
+        };
+        let ChimpLevelExportPrompt { cells, format, .. } = prompt;
+        self.chimp_level_job = Some(ChimpLevelJob {
+            kit,
+            name: name.clone(),
+            phase: ChimpLevelPhase::ReadingCells,
+            done: 0,
+            total: cells.len(),
+            phase_started: Instant::now(),
+        });
+        self.status = format!("Exporting {name}…");
+        thread::spawn(move || {
+            let total = cells.len();
+            let report = |phase, done, total| {
+                let _ = tx.send(WorkerMessage::ChimpLevelProgress {
+                    kit,
+                    phase,
+                    done,
+                    total,
+                });
+                ctx.request_repaint();
+            };
+            // Measured over all 2,334 cells of C10: 1.7s on one thread, 0.7s
+            // on four, and 0.8s on sixteen. Past four the threads contend for
+            // more than they win, and the whole walk is a second either way.
+            let threads = std::thread::available_parallelism()
+                .map(|count| count.get())
+                .unwrap_or(4)
+                .min(4);
+            let scene = read_cells(&world, &cells, threads, &|done| {
+                report(ChimpLevelPhase::ReadingCells, done, total)
+            });
+            report(ChimpLevelPhase::ReadingCells, total, total);
+            let stage = |stage, done, total| {
+                report(
+                    match stage {
+                        ExportStage::Meshes => ChimpLevelPhase::WritingMeshes,
+                        ExportStage::Segments => ChimpLevelPhase::WritingSegments,
+                    },
+                    done,
+                    total,
+                )
+            };
+            let result = match format {
+                ChimpLevelFormat::SegmentedUsd => {
+                    write_segmented_usd(&world, &scene, detail, &directory, &name, budget, &stage)
+                        .map_err(|error| error.to_string())
+                        .map(|report| {
+                            format!(
+                                "Exported {name}: {} meshes, {} placements, {} segment(s)",
+                                report.prototypes, report.instances, report.segments
+                            )
+                        })
+                }
+                ChimpLevelFormat::Blender => {
+                    write_blend_export(&world, &scene, detail, &directory, &name, budget, &stage)
+                        .map_err(|error| error.to_string())
+                        .map(|report| {
+                            format!(
+                                "Exported {name}: {} meshes, {} placements, {} master(s). \
+                                 Run build_blend.py in Blender to build them.",
+                                report.meshes, report.placements, report.segments
+                            )
+                        })
+                }
+            };
             let _ = tx.send(WorkerMessage::ExportFinished(result));
             ctx.request_repaint();
         });
@@ -3588,6 +4307,7 @@ impl Baboon {
             kit: self.kits[kit_index].id,
             package: package.to_owned(),
             format,
+            texture_export: ChimpTextureExport::default(),
             path,
         });
     }
@@ -3610,13 +4330,15 @@ impl Baboon {
         let ChimpMeshTexturePrompt {
             package,
             format,
+            texture_export,
             path,
             ..
         } = prompt;
         let tx = self.tx.clone();
         self.status = format!("Extracting {package} as {}…", format.label());
         thread::spawn(move || {
-            let result = write_chimp_mesh(&world, &package, &path, format, textures);
+            let result =
+                write_chimp_mesh(&world, &package, &path, format, textures, texture_export);
             let _ = tx.send(WorkerMessage::ExportFinished(result));
             ctx.request_repaint();
         });
@@ -3702,6 +4424,7 @@ fn write_chimp_mesh_textures(
     header: &FZenPackageHeader,
     directory: &Path,
     subject: Option<&str>,
+    options: ChimpTextureExport,
 ) -> (usize, Vec<String>) {
     let packages = chimp_mesh_texture_packages(world, header);
     let mut written = 0usize;
@@ -3732,8 +4455,8 @@ fn write_chimp_mesh_textures(
             }
             created = true;
         }
-        let output = directory.join(format!("{leaf}.tif"));
-        match write_chimp_texture_tiff(world, &package, &output) {
+        let output = directory.join(format!("{leaf}.{}", options.format.extension()));
+        match write_chimp_texture(world, &package, &output, options) {
             Ok(_) => written += 1,
             Err(error) => failures.push(error),
         }
@@ -3741,20 +4464,389 @@ fn write_chimp_mesh_textures(
     (written, failures)
 }
 
-fn write_chimp_texture_tiff(world: &World, package: &str, output: &Path) -> Result<String, String> {
-    let document = load_chimp_document(world, package)?;
-    let data = document
+/// The texture surfaces of the export the user has selected.
+///
+/// Export used to take whichever Texture2D export happened to decode first,
+/// which is the wrong one whenever a package holds more than one and the combo
+/// box is pointing at another.
+fn chimp_selected_surfaces<'a>(
+    document: &'a ChimpDocument,
+    package: &str,
+) -> Result<&'a Texture2dSurfaces, String> {
+    let selected = document
         .texture_previews
         .iter()
-        .find_map(|texture| texture.preview.decoded.as_ref()?.as_ref().ok())
-        .ok_or_else(|| format!("{package} has no decodable Texture2D image"))?;
-    let mut file = fs::File::create(output)
-        .map_err(|error| format!("Could not create {}: {error}", output.display()))?;
-    // Export the decoder's straight RGBA buffer. Viewer channel masks,
-    // backgrounds and colour presentation are deliberately not applied.
-    blam_tags::bitmap::tiff::write_rgba8_tiff(&mut file, data.width, data.height, &data.rgba)
-        .map_err(|error| format!("Could not encode {}: {error}", output.display()))?;
-    Ok(format!("Extracted {package} to {}", output.display()))
+        .find(|texture| texture.export_index == document.selected_export)
+        .or_else(|| document.texture_previews.first())
+        .ok_or_else(|| format!("{package} has no Texture2D export"))?;
+    selected
+        .surfaces
+        .as_ref()
+        .map_err(|error| format!("{package}: {error}"))
+}
+
+/// How a Texture2D should be written out.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) struct ChimpTextureExport {
+    pub(super) format: ChimpTextureFormat,
+    /// Split a UDIM set into one numbered file per block. Off writes the whole
+    /// set as the single stitched image it was reassembled into, for engines
+    /// that have no UDIM support to import it with.
+    pub(super) split_udim: bool,
+}
+
+impl Default for ChimpTextureExport {
+    fn default() -> Self {
+        Self {
+            format: ChimpTextureFormat::Dds,
+            split_udim: true,
+        }
+    }
+}
+
+/// Write every layer of a Texture2D, splitting a UDIM virtual texture into
+/// 1001-numbered files unless asked for one stitched image.
+///
+/// All three formats split the same way and pick the same base level per block,
+/// so a set exported as PNG lines up with the same set exported as DDS. Only
+/// what each file carries differs: DDS keeps the cooked pixel format and the
+/// whole mip chain, while TIFF and PNG are one flat RGBA8 image.
+fn write_chimp_texture(
+    world: &World,
+    package: &str,
+    output: &Path,
+    options: ChimpTextureExport,
+) -> Result<String, String> {
+    let ChimpTextureExport { format, split_udim } = options;
+    let document = load_chimp_document(world, package)?;
+    let surfaces = chimp_selected_surfaces(&document, package)?;
+    let stem = output
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "texture".to_owned());
+    let directory = output.parent().unwrap_or(Path::new("."));
+
+    // Splitting is only a question for a set with more than one block; a plain
+    // texture is one file either way.
+    let split = split_udim && surfaces.is_udim();
+    let (blocks_x, blocks_y) = if split {
+        (surfaces.width_in_blocks.max(1), surfaces.height_in_blocks.max(1))
+    } else {
+        (1, 1)
+    };
+    let mut written = Vec::new();
+    let mut failures = Vec::new();
+
+    for (layer_index, layer) in surfaces.layers.iter().enumerate() {
+        let layer_suffix = if surfaces.layers.len() > 1 {
+            format!(".layer{layer_index}")
+        } else {
+            String::new()
+        };
+        if !split {
+            let name = format!("{stem}{layer_suffix}.{}", format.extension());
+            let path = directory.join(&name);
+            match write_stitched_layer(surfaces, layer_index, layer, format, &path) {
+                Ok(()) => written.push(name),
+                Err(error) => failures.push(format!("{name}: {error}")),
+            }
+            continue;
+        }
+        // Decoding a base level is expensive - mip 0 of a large virtual texture
+        // is tens of megabytes - and blocks sharing a level can share the work.
+        let mut decoded_levels: HashMap<usize, Vec<u8>> = HashMap::new();
+        for block_y in 0..blocks_y {
+            for block_x in 0..blocks_x {
+                let name = if blocks_x * blocks_y > 1 {
+                    // `1001 + row * 10 + column`, with row counted down from the
+                    // top of the reassembled image. Unreal derives a block's
+                    // coordinates straight from the number - `BlockX` is
+                    // `(udim - 1001) % 10` and `BlockY` is `(udim - 1001) / 10`
+                    // - and lays `BlockY` downward in a texture whose V axis
+                    // already points down, so block row 0 is the top row. The
+                    // upward-counting v of a DCC's UDIM grid is that same
+                    // mapping seen through the opposite V convention, not a
+                    // second one to correct for: flipping here is what makes a
+                    // multi-row set import with its rows swapped.
+                    let udim = 1001 + block_y * 10 + block_x;
+                    format!("{stem}{layer_suffix}.{udim}.{}", format.extension())
+                } else {
+                    format!("{stem}{layer_suffix}.{}", format.extension())
+                };
+                let path = directory.join(&name);
+                let result = match format {
+                    ChimpTextureFormat::Dds => {
+                        write_dds_block(layer, blocks_x, blocks_y, block_x, block_y, &path)
+                    }
+                    ChimpTextureFormat::Tiff | ChimpTextureFormat::Png => write_flat_block(
+                        layer,
+                        blocks_x,
+                        blocks_y,
+                        block_x,
+                        block_y,
+                        format,
+                        &mut decoded_levels,
+                        &path,
+                    ),
+                };
+                match result {
+                    Ok(()) => written.push(name),
+                    Err(error) => failures.push(format!("{name}: {error}")),
+                }
+            }
+        }
+    }
+
+    if written.is_empty() {
+        return Err(format!(
+            "Could not export {package}: {}",
+            failures.join("; ")
+        ));
+    }
+    let mut message = format!(
+        "Extracted {package} to {} ({} file{})",
+        directory.display(),
+        written.len(),
+        if written.len() == 1 { "" } else { "s" }
+    );
+    if !failures.is_empty() {
+        message.push_str(&format!("; skipped {}", failures.join("; ")));
+    }
+    Ok(message)
+}
+
+/// The finest level that holds every tile of this UDIM block and still divides
+/// evenly into the block grid.
+///
+/// A mixed-resolution UDIM set starts some blocks lower down the chain, so this
+/// is the level at which the block is at its authored resolution.
+fn block_base_level(
+    layer: &blam_tags::iostore::asset::texture2d::TextureLayerSurfaces,
+    blocks_x: u32,
+    blocks_y: u32,
+    block_x: u32,
+    block_y: u32,
+) -> Option<usize> {
+    layer.mips.iter().position(|surface| {
+        surface.data.is_ok()
+            && surface.covers_block(blocks_x, blocks_y, block_x, block_y)
+            && surface.width % blocks_x == 0
+            && surface.height % blocks_y == 0
+    })
+}
+
+/// Write one UDIM block of one layer as a single flat RGBA8 image.
+#[allow(clippy::too_many_arguments)]
+fn write_flat_block(
+    layer: &blam_tags::iostore::asset::texture2d::TextureLayerSurfaces,
+    blocks_x: u32,
+    blocks_y: u32,
+    block_x: u32,
+    block_y: u32,
+    format: ChimpTextureFormat,
+    decoded_levels: &mut HashMap<usize, Vec<u8>>,
+    path: &Path,
+) -> Result<(), String> {
+    let level = block_base_level(layer, blocks_x, blocks_y, block_x, block_y)
+        .ok_or_else(|| "no mip covers this block".to_owned())?;
+    let surface = &layer.mips[level];
+    let rgba = match decoded_levels.entry(level) {
+        std::collections::hash_map::Entry::Occupied(entry) => entry.into_mut(),
+        std::collections::hash_map::Entry::Vacant(entry) => {
+            entry.insert(surface.to_rgba8().map_err(|error| format!("{error:#}"))?)
+        }
+    };
+
+    let block_width = surface.width / blocks_x;
+    let block_height = surface.height / blocks_y;
+    if block_width == 0 || block_height == 0 {
+        return Err("block has no pixels at this mip".to_owned());
+    }
+    let origin_x = (block_x * block_width) as usize;
+    let origin_y = (block_y * block_height) as usize;
+    let stride = surface.width as usize * 4;
+    let mut cropped = Vec::with_capacity(block_width as usize * block_height as usize * 4);
+    for row in 0..block_height as usize {
+        let start = (origin_y + row) * stride + origin_x * 4;
+        let end = start + block_width as usize * 4;
+        cropped.extend_from_slice(
+            rgba.get(start..end)
+                .ok_or_else(|| "mip is shorter than its dimensions".to_owned())?,
+        );
+    }
+
+    write_flat_image(&cropped, block_width, block_height, format, path)
+}
+
+/// Write a whole layer as one file, keeping every UDIM block in the single
+/// stitched image the tiles were reassembled into.
+///
+/// For DDS this stays lossless — the cooked format and the whole mip chain —
+/// but only while every block carries every level. A mixed-resolution set has
+/// gaps at its finest levels, and filling them means magnifying from the level
+/// below, which cannot be expressed in compressed blocks; that case writes one
+/// RGBA8 level instead so the image is complete rather than holed.
+fn write_stitched_layer(
+    surfaces: &Texture2dSurfaces,
+    layer_index: usize,
+    layer: &blam_tags::iostore::asset::texture2d::TextureLayerSurfaces,
+    format: ChimpTextureFormat,
+    path: &Path,
+) -> Result<(), String> {
+    let has_gaps = layer
+        .mips
+        .iter()
+        .any(|surface| !surface.missing_tiles.is_empty());
+    if matches!(format, ChimpTextureFormat::Dds) && !has_gaps {
+        return write_dds_block(layer, 1, 1, 0, 0, path);
+    }
+
+    let rgba = surfaces
+        .display_rgba8(layer_index, 0)
+        .map_err(|error| format!("{error:#}"))?;
+    let (width, height) = (surfaces.width, surfaces.height);
+    if !matches!(format, ChimpTextureFormat::Dds) {
+        return write_flat_image(&rgba, width, height, format, path);
+    }
+
+    let dxgi = blam_tags::bitmap::dds::ue_dxgi_format("PF_R8G8B8A8")
+        .ok_or_else(|| "RGBA8 has no DDS equivalent".to_owned())?;
+    let mut file = fs::File::create(path)
+        .map_err(|error| format!("Could not create {}: {error}", path.display()))?;
+    blam_tags::bitmap::dds::write_dds_dxgi(
+        &mut file,
+        dxgi,
+        width,
+        height,
+        1,
+        1,
+        None,
+        Some(32),
+        &rgba,
+    )
+    .map_err(|error| format!("Could not encode {}: {error}", path.display()))
+}
+
+fn write_flat_image(
+    rgba: &[u8],
+    width: u32,
+    height: u32,
+    format: ChimpTextureFormat,
+    path: &Path,
+) -> Result<(), String> {
+    let mut file = fs::File::create(path)
+        .map_err(|error| format!("Could not create {}: {error}", path.display()))?;
+    match format {
+        ChimpTextureFormat::Png => {
+            image::RgbaImage::from_raw(width, height, rgba.to_vec())
+                .ok_or_else(|| "image does not match its dimensions".to_owned())?
+                .write_to(
+                    &mut std::io::BufWriter::new(&mut file),
+                    image::ImageFormat::Png,
+                )
+                .map_err(|error| format!("Could not encode {}: {error}", path.display()))
+        }
+        _ => blam_tags::bitmap::tiff::write_rgba8_tiff(&mut file, width, height, rgba)
+            .map_err(|error| format!("Could not encode {}: {error}", path.display())),
+    }
+}
+
+/// Write one UDIM block of one layer as a DDS with its whole mip chain.
+///
+/// Mips whose block dimensions no longer divide by the UDIM grid are dropped
+/// rather than approximated: below that size the cooked data no longer holds one
+/// block per region, so cropping would invent pixels.
+fn write_dds_block(
+    layer: &blam_tags::iostore::asset::texture2d::TextureLayerSurfaces,
+    blocks_x: u32,
+    blocks_y: u32,
+    block_x: u32,
+    block_y: u32,
+    path: &Path,
+) -> Result<(), String> {
+    let mut format_name: Option<String> = None;
+    let mut dimensions: Option<(u32, u32)> = None;
+    let mut payload = Vec::new();
+    let mut levels = 0u32;
+
+    for surface in &layer.mips {
+        let Ok(data) = &surface.data else {
+            // A leading mip that cannot be read is skipped so the rest still
+            // export, but a gap part-way down would leave the chain claiming
+            // levels it does not contain.
+            if levels > 0 {
+                break;
+            }
+            continue;
+        };
+        // A UDIM set can author its blocks at different resolutions, so a
+        // half-size block has no tiles at the finest levels. Start that block's
+        // chain where its data actually begins: the file then carries the
+        // resolution it was drawn at, rather than a magnified guess.
+        if !surface.covers_block(blocks_x, blocks_y, block_x, block_y) {
+            if levels > 0 {
+                break;
+            }
+            continue;
+        }
+        // Every mip in one file must share a format; a fallback mip that came
+        // out RGBA8 cannot sit in a BC7 chain.
+        if format_name.get_or_insert_with(|| surface.pixel_format.clone()) != &surface.pixel_format {
+            break;
+        }
+        let (unit_x, unit_y, unit_bytes) =
+            blam_tags::iostore::asset::texture2d::ue_format_info(&surface.pixel_format)
+                .ok_or_else(|| format!("{} has no DDS block size", surface.pixel_format))?;
+        let surface_bw = surface.width.div_ceil(unit_x);
+        let surface_bh = surface.height.div_ceil(unit_y);
+        if surface_bw % blocks_x != 0 || surface_bh % blocks_y != 0 {
+            break;
+        }
+        let block_bw = surface_bw / blocks_x;
+        let block_bh = surface_bh / blocks_y;
+        if block_bw == 0 || block_bh == 0 {
+            break;
+        }
+        let stride = unit_bytes as usize;
+        let origin_bx = (block_x * block_bw) as usize;
+        let origin_by = (block_y * block_bh) as usize;
+        for row in 0..block_bh as usize {
+            let start = ((origin_by + row) * surface_bw as usize + origin_bx) * stride;
+            let end = start + block_bw as usize * stride;
+            let row_bytes = data
+                .get(start..end)
+                .ok_or_else(|| "mip is shorter than its dimensions".to_owned())?;
+            payload.extend_from_slice(row_bytes);
+        }
+        if dimensions.is_none() {
+            dimensions = Some((block_bw * unit_x, block_bh * unit_y));
+        }
+        levels += 1;
+    }
+
+    let format_name = format_name.ok_or_else(|| "no mip decoded".to_owned())?;
+    let (width, height) = dimensions.ok_or_else(|| "no mip decoded".to_owned())?;
+    let dxgi = blam_tags::bitmap::dds::ue_dxgi_format(&format_name)
+        .ok_or_else(|| format!("{format_name} has no DDS equivalent"))?;
+    let (unit_x, unit_y, unit_bytes) =
+        blam_tags::iostore::asset::texture2d::ue_format_info(&format_name)
+            .ok_or_else(|| format!("{format_name} has no DDS block size"))?;
+    let compressed = unit_x > 1 || unit_y > 1;
+
+    let mut file = fs::File::create(path)
+        .map_err(|error| format!("Could not create {}: {error}", path.display()))?;
+    blam_tags::bitmap::dds::write_dds_dxgi(
+        &mut file,
+        dxgi,
+        width,
+        height,
+        levels,
+        1,
+        compressed.then_some((unit_x, unit_y, unit_bytes)),
+        (!compressed).then_some(unit_bytes * 8),
+        &payload,
+    )
+    .map_err(|error| format!("Could not encode {}: {error}", path.display()))
 }
 
 fn write_chimp_mesh(
@@ -3763,6 +4855,7 @@ fn write_chimp_mesh(
     output: &Path,
     format: ChimpMeshFormat,
     textures: ChimpTextureScope,
+    texture_export: ChimpTextureExport,
 ) -> Result<String, String> {
     let document = load_chimp_document(world, package)?;
     let kind = document
@@ -3855,8 +4948,13 @@ fn write_chimp_mesh(
         // The mesh is already written, so a texture that fails is reported
         // beside a successful export rather than turning the whole thing into a
         // failure the user has to redo.
-        let (written, failures) =
-            write_chimp_mesh_textures(world, &document.header, &directory, subject.as_deref());
+        let (written, failures) = write_chimp_mesh_textures(
+            world,
+            &document.header,
+            &directory,
+            subject.as_deref(),
+            texture_export,
+        );
         let scope = match &subject {
             Some(subject) => format!(" matching \"{subject}\""),
             None => String::new(),
@@ -3953,18 +5051,17 @@ fn draw_chimp_folder_node(
             response
         };
         let package_type = package_types.get(leaf.package).and_then(Option::as_deref);
-        if matches!(
-            package_type,
-            Some("Texture2D" | "SkeletalMesh" | "StaticMesh")
-        ) {
+        let actions = ChimpPackageActions::of(&package.name, package_type);
+        if actions.any() {
             response.context_menu(|ui| {
-                if package_type == Some("Texture2D")
-                    && ui.button("Extract Texture2D as TIFF…").clicked()
-                {
-                    clicked = Some(ChimpTreeClick::ExtractTexture(package.name.clone()));
-                    ui.close_menu();
+                if actions.texture {
+                    let mut request = None;
+                    chimp_texture_export_menu(ui, &package.name, &mut request);
+                    if let Some(name) = request {
+                        clicked = Some(ChimpTreeClick::ExtractTexture(name));
+                    }
                 }
-                if matches!(package_type, Some("SkeletalMesh" | "StaticMesh")) {
+                if actions.mesh {
                     ui.menu_button("Extract mesh", |ui| {
                         for format in [
                             ChimpMeshFormat::Jms,
@@ -3978,6 +5075,13 @@ fn draw_chimp_folder_node(
                             }
                         }
                     });
+                }
+                if actions.level {
+                    let mut requested = None;
+                    chimp_level_export_menu(ui, &package.name, &mut requested);
+                    if let Some((package, format)) = requested {
+                        clicked = Some(ChimpTreeClick::ExportLevel(package, format));
+                    }
                 }
             });
         }
@@ -4021,6 +5125,27 @@ fn chimp_mesh_export_menu(
             ChimpMeshFormat::Pskx,
         ] {
             if ui.button(format.label()).clicked() {
+                *requested = Some((package.to_owned(), format));
+                ui.close_menu();
+            }
+        }
+    });
+}
+
+/// Offered only where it means something: a package with `_Generated_` cells
+/// beside it is a World Partition level, and everything else is one package.
+fn chimp_level_export_menu(
+    ui: &mut Ui,
+    package: &str,
+    requested: &mut Option<(String, ChimpLevelFormat)>,
+) {
+    ui.menu_button("Export level", |ui| {
+        for format in [ChimpLevelFormat::SegmentedUsd, ChimpLevelFormat::Blender] {
+            if ui
+                .button(format.label())
+                .on_hover_text(format.summary())
+                .clicked()
+            {
                 *requested = Some((package.to_owned(), format));
                 ui.close_menu();
             }
@@ -4194,7 +5319,46 @@ fn draw_chimp_texture_preview(ui: &mut Ui, document: &mut ChimpDocument) {
         document.package, preview.export_index
     );
     let ctx = ui.ctx().clone();
-    draw_bitmap_preview_data(ui, &ctx, &texture_key, &mut preview.preview, false);
+
+    // The shared viewer clears `decoded` when the layer or mip stepper moves;
+    // refill it from the surfaces already in hand rather than re-reading the
+    // package. This mirrors `draw_bitmap_preview` for classic bitmap tags.
+    if preview.preview.decoded.is_none() {
+        preview.preview.decoded = Some(match &preview.surfaces {
+            Ok(surfaces) => chimp_texture_mip_data(
+                surfaces,
+                preview.preview.image_index,
+                preview.preview.mip_index,
+            ),
+            Err(error) => Err(error.clone()),
+        });
+        preview.preview.texture_dirty = true;
+    }
+
+    if let Ok(surfaces) = &preview.surfaces {
+        let max_side = ctx.input(|input| input.max_texture_side);
+        let smallest = first_displayable_mip(surfaces, max_side);
+        if preview.preview.mip_index < smallest {
+            // Only reachable if the driver reports a smaller limit than the
+            // conservative one used at decode time.
+            preview.preview.mip_index = smallest;
+            preview.preview.decoded = None;
+        }
+        if let Some(layer) = surfaces.layers.first()
+            && smallest > 0
+            && let Some(base) = layer.mips.first()
+        {
+            ui.label(
+                RichText::new(format!(
+                    "Mip 0 is {}x{}, larger than this display can upload ({max_side} px); showing mip {smallest} and smaller. Export writes every mip at full size.",
+                    base.width, base.height
+                ))
+                .color(subtle_dark()),
+            );
+        }
+    }
+
+    draw_bitmap_preview_data(ui, &ctx, &texture_key, &mut preview.preview, true, "Layer");
 }
 
 #[derive(Clone, Copy)]
@@ -6595,6 +7759,7 @@ mod tests {
             kit: KitId(1),
             package: "/Game/Art/SK_Brute".to_owned(),
             format: ChimpMeshFormat::Pskx,
+            texture_export: ChimpTextureExport::default(),
             path: PathBuf::from("C:/exports/brute.pskx"),
         };
         assert_eq!(
@@ -6739,6 +7904,156 @@ mod tests {
             return (0.0, 0.0);
         }
         (signed / count as f32, absolute / count as f32)
+    }
+
+    fn job_at(done: usize, total: usize, elapsed: Duration) -> ChimpLevelJob {
+        ChimpLevelJob {
+            kit: KitId(0),
+            name: "C10".to_owned(),
+            phase: ChimpLevelPhase::ReadingCells,
+            done,
+            total,
+            phase_started: Instant::now() - elapsed,
+        }
+    }
+
+    #[test]
+    fn a_progress_estimate_waits_until_it_has_something_to_go_on() {
+        // A rate from the first few items swings by minutes and teaches the
+        // user to ignore the number, so there is no number until then.
+        assert!(job_at(0, 2334, Duration::from_secs(10)).remaining().is_none());
+        assert!(job_at(3, 2334, Duration::from_millis(200)).remaining().is_none());
+        // Finished is not "0s left", it is nothing to say.
+        assert!(job_at(2334, 2334, Duration::from_secs(60)).remaining().is_none());
+    }
+
+    #[test]
+    fn a_progress_estimate_extrapolates_the_rate_so_far() {
+        // Half done after 60s means about 60s left.
+        let remaining = job_at(1_000, 2_000, Duration::from_secs(60))
+            .remaining()
+            .expect("half way through is enough to estimate from");
+        assert!(
+            (55..=65).contains(&remaining.as_secs()),
+            "estimated {}s",
+            remaining.as_secs()
+        );
+    }
+
+    #[test]
+    fn a_fraction_stays_inside_the_bar() {
+        assert_eq!(job_at(0, 0, Duration::from_secs(1)).fraction(), 0.0);
+        assert_eq!(job_at(1_167, 2_334, Duration::from_secs(1)).fraction(), 0.5);
+        // A count past the total would draw outside the bar.
+        assert_eq!(job_at(9_999, 2_334, Duration::from_secs(1)).fraction(), 1.0);
+    }
+
+    #[test]
+    fn time_left_is_said_at_the_precision_it_is_known_to() {
+        assert_eq!(format_remaining(Duration::from_secs(3)), "a few seconds");
+        assert_eq!(format_remaining(Duration::from_secs(42)), "about 42s");
+        assert_eq!(format_remaining(Duration::from_secs(260)), "about 4m 20s");
+        // Past ten minutes the seconds are noise.
+        assert_eq!(format_remaining(Duration::from_secs(1_500)), "about 25m");
+    }
+
+    #[test]
+    fn a_level_offers_a_menu_wherever_it_is_browsed() {
+        // The bug this exists for: the level entry was added to every menu
+        // body, but two of the four sites still only attached a menu for
+        // textures and meshes - so on those the entry sat inside a menu that
+        // was never built, and right-clicking a level did nothing at all.
+        // A level is a `World`, which is neither.
+        let level = ChimpPackageActions::of("/Game/Levels/Halo1/Solo/C10/C10", Some("World"));
+        assert!(level.level);
+        assert!(level.any(), "a level must open a menu");
+        assert!(!level.texture && !level.mesh);
+    }
+
+    #[test]
+    fn anything_the_menu_would_offer_opens_it() {
+        // The invariant that keeps the guard and the contents from drifting:
+        // `any()` is true exactly when at least one entry would be drawn.
+        for (package, kind) in [
+            ("/Game/Levels/Halo1/Solo/C10/C10", Some("World")),
+            ("/Game/Meshes/SM_Rock", Some("StaticMesh")),
+            ("/Game/Characters/SK_Elite", Some("SkeletalMesh")),
+            ("/Game/Textures/T_Bark", Some("Texture2D")),
+            ("/Game/Levels/Halo1/Solo/C10/_Generated_/043ATWPYEEJ", Some("World")),
+            ("/Game/Blueprints/BP_Door", Some("Blueprint")),
+            ("/Game/Misc/Thing", None),
+        ] {
+            let actions = ChimpPackageActions::of(package, kind);
+            assert_eq!(
+                actions.any(),
+                actions.texture || actions.mesh || actions.level,
+                "{package} would draw entries into a menu that does not open"
+            );
+        }
+    }
+
+    #[test]
+    fn a_package_with_nothing_to_offer_opens_no_menu() {
+        assert!(!ChimpPackageActions::of("/Game/Blueprints/BP_Door", Some("Blueprint")).any());
+        // A cell is a World too, and there are 2,334 of them: offering to
+        // export each one as a level would be noise.
+        assert!(
+            !ChimpPackageActions::of(
+                "/Game/Levels/Halo1/Solo/C10/_Generated_/043ATWPYEEJ",
+                Some("World")
+            )
+            .any()
+        );
+    }
+
+    #[test]
+    fn a_persistent_level_is_recognised_by_its_folder() {
+        // Unreal names a persistent level after the folder holding it, which is
+        // what the menu test keys on before the cells are searched for.
+        assert!(chimp_looks_like_level("/Game/Levels/Halo1/Solo/C10/C10"));
+        assert!(chimp_looks_like_level("/Game/Levels/Halo1/Solo/c10/C10"));
+        // A cell, a mesh, and anything else is one package.
+        assert!(!chimp_looks_like_level(
+            "/Game/Levels/Halo1/Solo/C10/_Generated_/043ATWPYEEJ"
+        ));
+        assert!(!chimp_looks_like_level("/Game/Meshes/Rocks/SM_Rock_A"));
+        assert!(!chimp_looks_like_level("/Game"));
+        assert!(!chimp_looks_like_level(""));
+    }
+
+    #[test]
+    fn an_export_names_its_files_after_the_level() {
+        let prompt = ChimpLevelExportPrompt {
+            kit: KitId(0),
+            package: "/Game/Levels/Halo1/Solo/C10/C10".to_owned(),
+            cells: Vec::new(),
+            format: ChimpLevelFormat::SegmentedUsd,
+            nanite: true,
+            split: true,
+            triangles: 30_000_000,
+            placements: 50_000,
+        };
+        assert_eq!(prompt.name(), "C10");
+        assert_eq!(prompt.budget().triangles, 30_000_000);
+        assert_eq!(prompt.budget().placements, 50_000);
+    }
+
+    #[test]
+    fn not_splitting_is_one_segment_rather_than_another_exporter() {
+        // Turning the split off has to go down the same path, or there are two
+        // ways to write a level and only one of them stays tested.
+        let prompt = ChimpLevelExportPrompt {
+            kit: KitId(0),
+            package: "/Game/Levels/X/Small/Small".to_owned(),
+            cells: Vec::new(),
+            format: ChimpLevelFormat::Blender,
+            nanite: false,
+            split: false,
+            triangles: 30_000_000,
+            placements: 50_000,
+        };
+        assert_eq!(prompt.budget().triangles, usize::MAX);
+        assert_eq!(prompt.budget().placements, usize::MAX);
     }
 
     #[test]
@@ -7161,15 +8476,355 @@ mod tests {
                 "target virtual texture should contain decoded colour data"
             );
         }
-        let output =
-            std::env::temp_dir().join(format!("baboon-chimp-texture-{}.tif", uuid::Uuid::new_v4()));
-        write_chimp_texture_tiff(&world, &package, &output).unwrap();
-        let bytes = std::fs::read(&output).unwrap();
-        assert!(
-            bytes.starts_with(b"II*") || bytes.starts_with(b"MM\0*"),
-            "Texture2D extraction should produce a TIFF file"
+        // A UDIM set writes one numbered file per block rather than the single
+        // path chosen, so check the directory rather than that exact name.
+        let directory =
+            std::env::temp_dir().join(format!("baboon-chimp-texture-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        write_chimp_texture(
+            &world,
+            &package,
+            &directory.join("texture.tif"),
+            ChimpTextureExport { format: ChimpTextureFormat::Tiff, ..Default::default() },
+        )
+        .unwrap();
+        let written: Vec<_> = std::fs::read_dir(&directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        assert!(!written.is_empty(), "Texture2D extraction wrote nothing");
+        for path in &written {
+            let bytes = std::fs::read(path).unwrap();
+            assert!(
+                bytes.starts_with(b"II*") || bytes.starts_with(b"MM\0*"),
+                "{} should be a TIFF file",
+                path.display()
+            );
+        }
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// A multi-row UDIM set numbers its rows downward from the top of the
+    /// reassembled image, because that is the block coordinate Unreal recovers
+    /// from the number. Flipping is the mistake, so pin the direction against a
+    /// set whose rows are told apart by their authored resolution.
+    #[test]
+    #[ignore = "requires a Campaign Evolved install; set CE_PAKS"]
+    fn udim_rows_are_numbered_downward_from_the_top() {
+        let root = std::env::var_os("CE_PAKS").expect("set CE_PAKS");
+        let world = World::open(root, Usmap::meteorite().unwrap()).unwrap();
+        let package = world
+            .packages()
+            .iter()
+            .map(|package| package.name.clone())
+            .find(|name| name.to_ascii_lowercase().ends_with("t_elite_minor_armor_n"))
+            .expect("elite minor armour normal");
+        let document = load_chimp_document(&world, &package).unwrap();
+        let surfaces = chimp_selected_surfaces(&document, &package).unwrap();
+        assert_eq!((surfaces.width_in_blocks, surfaces.height_in_blocks), (3, 2));
+
+        // In the middle column this set is full size on the top row and half
+        // size on the bottom, so the pair (1002, 1012) fixes the direction.
+        let layer = &surfaces.layers[0];
+        let top_middle = block_base_level(layer, 3, 2, 1, 0).unwrap();
+        let bottom_middle = block_base_level(layer, 3, 2, 1, 1).unwrap();
+        assert_ne!(
+            top_middle, bottom_middle,
+            "this fixture only pins the direction if the two rows differ"
         );
-        std::fs::remove_file(output).unwrap();
+
+        let directory = std::env::temp_dir().join(format!("baboon-udim-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        write_chimp_texture(
+            &world,
+            &package,
+            &directory.join("t.png"),
+            ChimpTextureExport { format: ChimpTextureFormat::Png, ..Default::default() },
+        )
+        .unwrap();
+        let side = |name: &str| {
+            let bytes = std::fs::read(directory.join(name)).unwrap();
+            u32::from_be_bytes(bytes[16..20].try_into().unwrap())
+        };
+        // Top row is 100x, the row below it 101x.
+        assert_eq!(
+            side("t.1002.png"),
+            layer.mips[top_middle].width / 3,
+            "1002 should be the top-middle block"
+        );
+        assert_eq!(
+            side("t.1012.png"),
+            layer.mips[bottom_middle].width / 3,
+            "1012 should be the block below 1002"
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// Exports a real UDIM virtual texture and checks the DDS files it produces.
+    ///
+    /// This is the end-to-end check for the whole texture path: the VT tiles are
+    /// reassembled while still compressed, split back into UDIM blocks, and
+    /// written with their full mip chain.
+    #[test]
+    #[ignore = "requires a Campaign Evolved install; set CE_PAKS"]
+    fn real_udim_virtual_texture_extracts_to_numbered_dds_files() {
+        let root = std::env::var_os("CE_PAKS").expect("set CE_PAKS");
+        let world = World::open(root, Usmap::meteorite().unwrap()).unwrap();
+        let target = std::env::var("CE_TEXTURE_PACKAGE")
+            .unwrap_or_else(|_| "T_MI_FloodTank_Default_D".to_owned())
+            .to_ascii_lowercase();
+        let package = world
+            .packages()
+            .iter()
+            .map(|package| package.name.clone())
+            .find(|name| name.to_ascii_lowercase().ends_with(&target))
+            .unwrap_or_else(|| panic!("no Texture2D package ending in {target:?}"));
+
+        let document = load_chimp_document(&world, &package).unwrap();
+        let surfaces = chimp_selected_surfaces(&document, &package).unwrap();
+        assert!(surfaces.is_virtual, "{package} should be a virtual texture");
+        assert!(surfaces.is_udim(), "{package} should be a UDIM set");
+        // Tiles were cropped in block space, so the surface is still compressed.
+        assert_eq!(surfaces.layers[0].mips[0].pixel_format, "PF_DXT1");
+
+        let directory = std::env::temp_dir().join(format!("baboon-dds-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let output = directory.join("texture.dds");
+        write_chimp_texture(&world, &package, &output, ChimpTextureExport::default()).unwrap();
+
+        let mut written: Vec<String> = std::fs::read_dir(&directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        written.sort();
+        assert_eq!(
+            written.len(),
+            (surfaces.width_in_blocks * surfaces.height_in_blocks) as usize,
+            "one DDS per UDIM block: {written:?}"
+        );
+        assert!(written.contains(&"texture.1001.dds".to_owned()), "{written:?}");
+
+        let bytes = std::fs::read(directory.join("texture.1001.dds")).unwrap();
+        assert_eq!(&bytes[0..4], b"DDS ");
+        let read_u32 = |at: usize| u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+        let (height, width) = (read_u32(12), read_u32(16));
+        let mip_count = read_u32(28);
+        // One block of a 7x1 grid over 7168x1024 is a square 1024 page.
+        assert_eq!(
+            (width, height),
+            (
+                surfaces.width / surfaces.width_in_blocks,
+                surfaces.height / surfaces.height_in_blocks
+            )
+        );
+        assert!(mip_count > 1, "expected a mip chain, found {mip_count}");
+        // fourcc "DX10" at the pixel-format block, then the DXGI format.
+        assert_eq!(&bytes[84..88], b"DX10");
+        assert_eq!(read_u32(128), 71, "PF_DXT1 should write DXGI BC1_UNORM");
+        std::fs::remove_dir_all(&directory).unwrap();
+
+        // PNG and TIFF split identically, at the same per-block resolution, so a
+        // set exported one way lines up with the same set exported another.
+        for (format, extension, magic) in [
+            (ChimpTextureFormat::Png, "png", &b"\x89PNG"[..]),
+            (ChimpTextureFormat::Tiff, "tif", &b"II*"[..]),
+        ] {
+            std::fs::create_dir_all(&directory).unwrap();
+            write_chimp_texture(
+                &world,
+                &package,
+                &directory.join(format!("texture.{extension}")),
+                ChimpTextureExport { format, ..Default::default() },
+            )
+            .unwrap();
+            let mut flat: Vec<String> = std::fs::read_dir(&directory)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            flat.sort();
+            assert_eq!(flat.len(), written.len(), "{extension}: {flat:?}");
+            assert!(
+                flat.contains(&format!("texture.1001.{extension}")),
+                "{flat:?}"
+            );
+            let first = std::fs::read(directory.join(format!("texture.1001.{extension}"))).unwrap();
+            assert!(first.starts_with(magic), "{extension} magic");
+            std::fs::remove_dir_all(&directory).unwrap();
+        }
+    }
+
+    /// Turning the split off writes one stitched image covering every UDIM
+    /// block, for an engine that cannot import a numbered set.
+    #[test]
+    #[ignore = "requires a Campaign Evolved install; set CE_PAKS"]
+    fn unsplit_udim_exports_one_stitched_image() {
+        let root = std::env::var_os("CE_PAKS").expect("set CE_PAKS");
+        let world = World::open(root, Usmap::meteorite().unwrap()).unwrap();
+        let package = world
+            .packages()
+            .iter()
+            .map(|package| package.name.clone())
+            .find(|name| name.to_ascii_lowercase().ends_with("t_elite_minor_armor_n"))
+            .expect("elite minor armour normal");
+        let document = load_chimp_document(&world, &package).unwrap();
+        let surfaces = chimp_selected_surfaces(&document, &package).unwrap();
+        assert!(surfaces.is_udim());
+
+        let directory =
+            std::env::temp_dir().join(format!("baboon-stitched-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        write_chimp_texture(
+            &world,
+            &package,
+            &directory.join("t.png"),
+            ChimpTextureExport {
+                format: ChimpTextureFormat::Png,
+                split_udim: false,
+            },
+        )
+        .unwrap();
+        let written: Vec<_> = std::fs::read_dir(&directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(written, vec!["t.png".to_owned()], "one file, not a set");
+
+        let bytes = std::fs::read(directory.join("t.png")).unwrap();
+        let side = |at: usize| u32::from_be_bytes(bytes[at..at + 4].try_into().unwrap());
+        // The whole atlas, at the full reassembled size.
+        assert_eq!((side(16), side(20)), (surfaces.width, surfaces.height));
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    /// A mesh's textures follow the format chosen in the prompt, not a fixed
+    /// TIFF, and land beside the mesh in `textures2d`.
+    #[test]
+    #[ignore = "requires a Campaign Evolved install; set CE_PAKS"]
+    fn mesh_textures_use_the_chosen_image_format() {
+        let root = std::env::var_os("CE_PAKS").expect("set CE_PAKS");
+        let world = World::open(root, Usmap::meteorite().unwrap()).unwrap();
+        let index = index_chimp_package_types(&world);
+        let mesh = world
+            .packages()
+            .iter()
+            .zip(&index.package_types)
+            .find(|(package, kind)| {
+                kind.as_deref() == Some("SkeletalMesh")
+                    && !chimp_mesh_texture_packages(
+                        &world,
+                        &load_chimp_document(&world, &package.name).unwrap().header,
+                    )
+                    .is_empty()
+            })
+            .map(|(package, _)| package.name.clone())
+            .expect("a skeletal mesh whose materials reference textures");
+
+        for (format, extension) in [
+            (ChimpTextureFormat::Png, "png"),
+            (ChimpTextureFormat::Dds, "dds"),
+        ] {
+            let directory =
+                std::env::temp_dir().join(format!("baboon-meshtex-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&directory).unwrap();
+            write_chimp_mesh(
+                &world,
+                &mesh,
+                &directory.join("mesh.pskx"),
+                ChimpMeshFormat::Pskx,
+                ChimpTextureScope::All,
+                ChimpTextureExport { format, ..Default::default() },
+            )
+            .unwrap();
+            let textures: Vec<_> = std::fs::read_dir(directory.join(CHIMP_TEXTURE_DIR))
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+                .collect();
+            assert!(!textures.is_empty(), "{mesh} wrote no textures");
+            assert!(
+                textures.iter().all(|name| name.ends_with(extension)),
+                "expected only .{extension}: {textures:?}"
+            );
+            std::fs::remove_dir_all(directory).unwrap();
+        }
+    }
+
+    /// Scratch helper: export a texture to DDS and report each file's header.
+    /// `CE_TEXTURE_PACKAGE` picks it, `CE_TEXTURE_DDS_DIR` says where.
+    #[test]
+    #[ignore = "manual check; set CE_PAKS and CE_TEXTURE_DDS_DIR"]
+    fn real_texture_to_dds_report() {
+        let root = std::env::var_os("CE_PAKS").expect("set CE_PAKS");
+        let directory =
+            std::path::PathBuf::from(std::env::var("CE_TEXTURE_DDS_DIR").expect("set dir"));
+        std::fs::create_dir_all(&directory).unwrap();
+        let world = World::open(root, Usmap::meteorite().unwrap()).unwrap();
+        let target = std::env::var("CE_TEXTURE_PACKAGE")
+            .unwrap_or_else(|_| "T_Elite_Minor_Armor_N".to_owned())
+            .to_ascii_lowercase();
+        let package = world
+            .packages()
+            .iter()
+            .map(|package| package.name.clone())
+            .find(|name| name.to_ascii_lowercase().ends_with(&target))
+            .unwrap_or_else(|| panic!("no package ending in {target:?}"));
+        let fmt = match std::env::var("CE_TEXTURE_FORMAT").unwrap_or_default().as_str() { "png" => ChimpTextureFormat::Png, "tif" => ChimpTextureFormat::Tiff, _ => ChimpTextureFormat::Dds };
+        let split = std::env::var("CE_TEXTURE_SPLIT").unwrap_or_default() != "0";
+        println!("{}", write_chimp_texture(&world, &package, &directory.join(format!("t.{}", fmt.extension())), ChimpTextureExport { format: fmt, split_udim: split }).unwrap());
+        let mut names: Vec<_> = std::fs::read_dir(&directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect();
+        names.sort();
+        for path in names {
+            let bytes = std::fs::read(&path).unwrap();
+            let at = |offset: usize| {
+                u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
+            };
+            println!(
+                "  {}: {}x{} mips={} dxgi={} bytes={}",
+                path.file_name().unwrap().to_string_lossy(),
+                at(16),
+                at(12),
+                at(28),
+                at(128),
+                bytes.len()
+            );
+        }
+    }
+
+    /// Scratch helper: dump a decoded mip to PNG so it can be eyeballed.
+    /// `CE_TEXTURE_PACKAGE` picks the texture, `CE_TEXTURE_MIP` the level and
+    /// `CE_TEXTURE_PNG` the output path.
+    #[test]
+    #[ignore = "manual visual check; set CE_PAKS and CE_TEXTURE_PNG"]
+    fn real_texture_mip_to_png() {
+        let root = std::env::var_os("CE_PAKS").expect("set CE_PAKS");
+        let out = std::env::var("CE_TEXTURE_PNG").expect("set CE_TEXTURE_PNG");
+        let level: usize = std::env::var("CE_TEXTURE_MIP")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0);
+        let world = World::open(root, Usmap::meteorite().unwrap()).unwrap();
+        let target = std::env::var("CE_TEXTURE_PACKAGE")
+            .unwrap_or_else(|_| "T_MI_FloodTank_Default_D".to_owned())
+            .to_ascii_lowercase();
+        let package = world
+            .packages()
+            .iter()
+            .map(|package| package.name.clone())
+            .find(|name| name.to_ascii_lowercase().ends_with(&target))
+            .unwrap_or_else(|| panic!("no package ending in {target:?}"));
+        let document = load_chimp_document(&world, &package).unwrap();
+        let surfaces = chimp_selected_surfaces(&document, &package).unwrap();
+        let data = chimp_texture_mip_data(surfaces, 0, level).unwrap();
+        println!(
+            "{package}: {}x{} {} ({})",
+            data.width, data.height, data.format_name, data.type_name
+        );
+        image::RgbaImage::from_raw(data.width, data.height, data.rgba)
+            .unwrap()
+            .save(&out)
+            .unwrap();
     }
 
     #[test]
@@ -7247,7 +8902,7 @@ mod tests {
                     uuid::Uuid::new_v4(),
                     format.extension()
                 ));
-                write_chimp_mesh(&world, &package, &output, format, ChimpTextureScope::None).unwrap();
+                write_chimp_mesh(&world, &package, &output, format, ChimpTextureScope::None, ChimpTextureExport::default()).unwrap();
                 let bytes = std::fs::read(&output).unwrap();
                 match format {
                     ChimpMeshFormat::Jms => assert!(bytes.starts_with(b";### VERSION ###")),
@@ -7607,6 +9262,7 @@ mod tests {
             &output,
             ChimpMeshFormat::Pskx,
             ChimpTextureScope::None,
+            ChimpTextureExport::default(),
         )
         .unwrap();
         let bytes = std::fs::read(&output).unwrap();

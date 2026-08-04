@@ -1330,6 +1330,8 @@ impl Baboon {
         self.draw_container_duplicate_confirm_window(ctx);
         self.draw_delete_confirm_window(ctx);
         self.draw_chimp_mesh_texture_prompt(ctx);
+        self.draw_chimp_texture_export_prompt(ctx);
+        self.draw_chimp_level_export_prompt(ctx);
         self.draw_operation_notice_window(ctx);
         self.draw_mod_export_window(ctx);
         self.draw_exported_mod_window(ctx);

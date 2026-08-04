@@ -3,13 +3,49 @@
 
 use super::*;
 
+use std::time::Instant;
+
 impl Baboon {
     /// Applies `WorkerMessage::ExportFinished` to the application status.
     pub(super) fn handle_export_finished(&mut self, result: Result<String, String>) -> bool {
+        self.chimp_level_job = None;
         self.status = match result {
             Ok(message) => message,
             Err(error) => error,
         };
+        false
+    }
+
+    /// Applies `WorkerMessage::ChimpLevelProgress`.
+    ///
+    /// Dropped when the kit it belongs to has closed: the export outlives the
+    /// workspace that started it, and a level read that is no longer wanted
+    /// should not keep writing over the status of whatever replaced it.
+    pub(super) fn handle_chimp_level_progress(
+        &mut self,
+        kit: KitId,
+        phase: ChimpLevelPhase,
+        done: usize,
+        total: usize,
+    ) -> bool {
+        if !self.kits.iter().any(|existing| existing.id == kit) {
+            self.chimp_level_job = None;
+            return true;
+        }
+        let Some(job) = self.chimp_level_job.as_mut() else {
+            return false;
+        };
+        if job.kit != kit {
+            return false;
+        }
+        // A new phase restarts the clock: an estimate carried over from reading
+        // cells would describe work that is already finished.
+        if job.phase != phase {
+            job.phase = phase;
+            job.phase_started = Instant::now();
+        }
+        job.done = done;
+        job.total = total;
         false
     }
 

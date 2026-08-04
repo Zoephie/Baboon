@@ -389,3 +389,99 @@ pub(in crate::app) fn extract_scenario_geometry(
     }
     Ok(message)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// End-to-end against a real Campaign Evolved install: mount the pak set,
+    /// find a structure BSP and the scenario that references it, and run both
+    /// export paths the browser's Extract menu now offers.
+    ///
+    /// CE is a Blam/Unreal hybrid — the Blam tag owns collision, Unreal owns
+    /// rendered geometry — so a CE BSP legitimately exports collision only.
+    /// What this guards is that it exports *something substantial*: before the
+    /// collision fallback in blam-tags, `c10/level_a` produced a single
+    /// 198-vertex object out of 775 instanced definitions.
+    ///
+    /// Ignored by default — it needs the shipped game.
+    ///
+    /// Run with:
+    ///   CE_ROOT="D:/SteamLibrary/steamapps/common/Halo Campaign Evolved" \
+    ///     cargo test ce_structure_bsp -- --ignored --nocapture
+    #[test]
+    #[ignore = "requires a Campaign Evolved install; set CE_ROOT"]
+    fn ce_structure_bsp_and_scenario_export_geometry() {
+        let Ok(root) = std::env::var("CE_ROOT") else {
+            eprintln!("skipping: set CE_ROOT to the Campaign Evolved install root");
+            return;
+        };
+        let root = PathBuf::from(root);
+        let paks = crate::source::find_paks_dir(&root)
+            .unwrap_or_else(|| panic!("no Paks dir under {}", root.display()));
+
+        let definitions = crate::app::locate_definitions_root();
+        let names = crate::format::TagNameIndex::load_game(&definitions, "haloce_evolved")
+            .expect("load haloce_evolved tag-name index");
+        let loaded = crate::source::load_iostore_container_set(paks, &names, &definitions)
+            .expect("mount CE container set");
+
+        let find = |suffix: &str, group: &[u8; 4]| {
+            let want = u32::from_be_bytes(*group);
+            loaded
+                .all_entries
+                .iter()
+                .chain(loaded.entries.iter())
+                .find(|e| {
+                    e.group_tag == want
+                        && e.display_path.replace('\\', "/").to_ascii_lowercase().contains(suffix)
+                })
+                .cloned()
+        };
+
+        let out = std::env::temp_dir().join("baboon_ce_geometry_test");
+        let _ = std::fs::remove_dir_all(&out);
+        std::fs::create_dir_all(&out).expect("create out dir");
+
+        // Single BSP → one ASS.
+        let bsp = find("c10/_generated_/level_a", b"sbsp")
+            .or_else(|| find("level_a", b"sbsp"))
+            .expect("no c10 level_a scenario_structure_bsp mounted");
+        let msg = extract_geometry_for_entry(&loaded.source, &bsp, &out).expect("export BSP");
+        println!("{msg}");
+        let ass = out.join(format!("{}.ASS", tag_file_stem(&bsp)));
+        let len = std::fs::metadata(&ass).expect("BSP ASS written").len();
+        assert!(
+            len > 1_000_000,
+            "{} is only {len} bytes — the collision fallback did not run (needs a \
+             blam-tags with the collision-only BSP support)",
+            ass.display()
+        );
+
+        // Scenario → one file per referenced BSP.
+        let scnr = find("c10", b"scnr").expect("no c10 scenario mounted");
+        let msg = extract_scenario_geometry(&loaded.source, &scnr, &out).expect("export scenario");
+        println!("{msg}");
+        let structure = out.join(tag_file_stem(&scnr)).join("structure");
+        let emitted: Vec<_> = std::fs::read_dir(&structure)
+            .unwrap_or_else(|e| panic!("read {}: {e}", structure.display()))
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .is_some_and(|x| x.eq_ignore_ascii_case("ass"))
+            })
+            .collect();
+        assert!(
+            emitted.len() > 1,
+            "scenario emitted {} file(s) into {} — expected one per structure_bsp",
+            emitted.len(),
+            structure.display()
+        );
+        for e in &emitted {
+            let len = e.metadata().map(|m| m.len()).unwrap_or(0);
+            println!("  {} — {len} bytes", e.path().display());
+            assert!(len > 0, "{} is empty", e.path().display());
+        }
+    }
+}

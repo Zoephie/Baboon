@@ -37,10 +37,20 @@ fn requires_native_layout_template(group_name: &str) -> bool {
 /// the corresponding editing kit. `TagFile::new` deliberately initializes
 /// these fields to zero, which is sufficient for the library's own parser but
 /// is rejected (and can crash) in the native editing-kit tools.
+///
+/// Campaign Evolved rides along despite having no editing kit: it is the same
+/// question — which generation does a freshly created tag claim — and answering
+/// it in two places is how the CE case came to be missing in the first place.
 pub(super) fn apply_editing_kit_mcc_header(tag: &mut TagFile, game: &str) -> Result<(), String> {
     let build_number = match game {
         "halo3_mcc" | "halo3odst_mcc" => 1,
-        "haloreach_mcc" | "halo4_mcc" | "halo2amp_mcc" => 2,
+        // Campaign Evolved carries Reach's generation exactly, because its
+        // `.ubulk` blobs *are* Reach-format tags — the UE5 package around them
+        // is a wrapper, and the simulation reads the blob. Measured, not
+        // assumed: all 12,289 shipped tag blobs across all 101 groups read
+        // `1 / 2 / 0xffffffff`, with no per-group variation. The gate is
+        // `the_shipped_tag_header_generation` in blam-tags.
+        "haloreach_mcc" | "halo4_mcc" | "halo2amp_mcc" | "haloce_evolved" => 2,
         _ => return Err(format!("No MCC tag-header defaults are known for {game}")),
     };
     tag.header.build_version = 1;
@@ -49,6 +59,21 @@ pub(super) fn apply_editing_kit_mcc_header(tag: &mut TagFile, game: &str) -> Res
     tag.header.version = u32::MAX;
     Ok(())
 }
+
+/// The definitions-directory name for Campaign Evolved. Defined here rather
+/// than shared because the two other copies (`controller::tools`,
+/// `source::loading`) are equally local and the string is the on-disk folder
+/// name, not a value anything derives.
+pub(super) const CAMPAIGN_EVOLVED_GAME: &str = "haloce_evolved";
+
+/// The generation every shipped Campaign Evolved tag blob carries:
+/// `(build_version, build_number, version)`.
+///
+/// Identical to Halo Reach's, which is the point — a CE `.ubulk` is a
+/// Reach-format tag. `TagFile::new` leaves all three at zero, which is the one
+/// value nothing shipped has, so an unstamped tag is one the simulation has
+/// never seen the like of.
+pub(super) const CAMPAIGN_EVOLVED_GENERATION: (i32, i32, u32) = (1, 2, u32::MAX);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::app) enum ConversionIssueKind {

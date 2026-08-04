@@ -1086,6 +1086,19 @@ pub(in crate::app) fn draw_entry(
                             action = Some(BrowserAction::ExtractGeometry(entry.key.clone()));
                             ui.close_menu();
                         }
+                        if supports_bsp_geometry_extraction(entry.group_tag)
+                            && context_menu_button(ui, "Extract BSP geometry").clicked()
+                        {
+                            action = Some(BrowserAction::ExtractGeometry(entry.key.clone()));
+                            ui.close_menu();
+                        }
+                        if supports_scenario_geometry_extraction(entry.group_tag)
+                            && context_menu_button(ui, "Extract level geometry (one file per BSP)")
+                                .clicked()
+                        {
+                            action = Some(BrowserAction::ExtractGeometry(entry.key.clone()));
+                            ui.close_menu();
+                        }
                         if supports_animation_extraction(entry.group_tag)
                             && context_menu_button(ui, "Extract animations").clicked()
                         {
@@ -1519,6 +1532,8 @@ pub(in crate::app) fn supports_animation_extraction(group_tag: u32) -> bool {
 
 pub(in crate::app) fn supports_tag_extract_menu(group_tag: u32) -> bool {
     supports_tag_geometry_extraction(group_tag)
+        || supports_bsp_geometry_extraction(group_tag)
+        || supports_scenario_geometry_extraction(group_tag)
         || supports_animation_extraction(group_tag)
         || supports_tag_import_info_extraction(group_tag)
         || is_bitmap_group(group_tag)
@@ -1531,6 +1546,19 @@ fn supports_tag_geometry_extraction(group_tag: u32) -> bool {
         group_tag.to_be_bytes().as_slice(),
         b"hlmt" | b"mode" | b"phmo" | b"coll" | b"mod2"
     )
+}
+
+/// A single structure BSP exports to one ASS. Kept apart from
+/// [`supports_tag_geometry_extraction`] because the menu wording differs
+/// — a BSP is level geometry, not a model — and because the two land in
+/// different arms of `extract_geometry_for_entry`.
+fn supports_bsp_geometry_extraction(group_tag: u32) -> bool {
+    group_tag.to_be_bytes().as_slice() == b"sbsp"
+}
+
+/// A scenario exports every BSP it references, one file each.
+fn supports_scenario_geometry_extraction(group_tag: u32) -> bool {
+    group_tag.to_be_bytes().as_slice() == b"scnr"
 }
 
 fn supports_tag_import_info_extraction(group_tag: u32) -> bool {
