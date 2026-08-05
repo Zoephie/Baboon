@@ -2,11 +2,11 @@
 # parent workspace. The blam-tags engine is pinned to a revision, not a
 # submodule.
 #
-# The pin is camden-smallwood/blam-tags, which is where the engine lives. It
-# briefly pointed at Zoephie/blam-tags `codex/chimp-backend` for one PR and was
-# never moved back; this restores it. The pinned revision is that chimp-backend
-# tip (`fe888dd`) plus the engine commits this branch needs, so nothing upstream
-# is dropped by the move.
+# The engine lives at camden-smallwood/blam-tags and the pin belongs there. It
+# points at Zoephie/blam-tags `bump-normal-decode` only while
+# camden-smallwood/blam-tags#3 (signed DXN bump maps) is open — that branch is
+# camden's `master` plus the one fix, so nothing upstream is dropped. Move the
+# pin back to the camden URL at the merge commit once the PR lands.
 [workspace]
 members = ["."]
 default-members = ["."]
@@ -25,7 +25,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 atomic-write-file = "0.3"
-blam-tags = { git = "https://github.com/camden-smallwood/blam-tags", rev = "bd18820e5e67ff83a853487641937af0bace6032", features = ["audio", "iostore"] }
+blam-tags = { git = "https://github.com/Zoephie/blam-tags", rev = "2f89fbb5d4f098bb2872ff8b0d7244fe21f46521", features = ["audio", "iostore"] }
 directories = "6"
 display-info = "0.5"
 eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }

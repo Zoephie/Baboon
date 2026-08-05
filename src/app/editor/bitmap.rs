@@ -478,6 +478,10 @@ pub(in crate::app) fn build_bitmap_preview(
     })
 }
 
+#[cfg(test)]
+#[path = "../tests/bitmap_bump_preview.rs"]
+mod bump_preview_tests;
+
 pub(in crate::app) fn filtered_bitmap_rgba(
     data: &BitmapPreviewData,
     preview: &BitmapPreviewState,
