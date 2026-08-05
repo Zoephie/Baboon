@@ -3565,6 +3565,12 @@ fn draw_conversion_report(ui: &mut Ui, report: &TagConversionReport, salt: &str)
                 ui.label(report.transferred_resources.to_string());
                 ui.end_row();
             }
+            // The one row that is a to-do list rather than a statistic.
+            if report.dropped_references > 0 {
+                ui.label("References to reconnect by hand");
+                ui.label(report.dropped_references.to_string());
+                ui.end_row();
+            }
         });
 
     if report.issues.is_empty() {

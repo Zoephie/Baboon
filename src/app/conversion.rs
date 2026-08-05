@@ -172,6 +172,13 @@ pub(in crate::app) struct TagConversionReport {
     /// comparing an animation graph's before and after wants to see that its
     /// payload went with it.
     pub(in crate::app) transferred_resources: usize,
+    /// References left empty because the target game has no such tag class.
+    ///
+    /// Counted apart from `unsupported_source` because it is a different kind
+    /// of fact: not a field the conversion failed to carry, but one the
+    /// destination has no home for by design. It is also the count a user acts
+    /// on — each one is something to reconnect by hand.
+    pub(in crate::app) dropped_references: usize,
     pub(in crate::app) issues: Vec<ConversionIssue>,
 }
 
@@ -1460,7 +1467,7 @@ fn validate_reference_fidelity(
 ) -> Result<(), String> {
     let mut source_values = Vec::new();
     collect_reference_values(source.root(), "", &mut source_values);
-    let mut expected = HashSet::<(u32, String)>::new();
+    let mut expected = HashSet::<(u32, String, String)>::new();
     for reference in source_values {
         if let Some(reason) = mapping_catalog.reference_drop_reason(
             group_name,
@@ -1489,17 +1496,36 @@ fn validate_reference_fidelity(
                         format_group_tag(reference.group_tag)
                     )
                 })?;
-        let target_group = target_groups
+        let Some(target_group) = target_groups
             .by_name
             .get(&source_group_name.to_ascii_lowercase())
             .copied()
-            .ok_or_else(|| {
-                format!(
-                    "Cannot preserve reference {}: target has no {source_group_name} group",
-                    reference.tag_path
-                )
-            })?;
-        expected.insert((target_group, reference.tag_path));
+        else {
+            // The target game has no such tag class at all. No correct
+            // implementation could preserve this reference, so refusing the
+            // whole tag over it says nothing about the conversion's quality —
+            // it just makes the tag unconvertible.
+            //
+            // Halo Reach's `model` points at a `render_model`; Campaign Evolved
+            // replaced Halo's render geometry with Unreal skeletal meshes and
+            // defines no such group. Every Reach model refuses on that, and
+            // will keep refusing however good the field matching gets.
+            //
+            // So report it, precisely enough to act on: the field to fill in
+            // and the tag path that used to be there.
+            report.issues.push(ConversionIssue {
+                kind: ConversionIssueKind::Warning,
+                path: reference.field_path,
+                message: format!(
+                    "{target_game} has no {source_group_name} group, so this reference to {} \
+                     was left empty — reconnect it by hand if the target needs one",
+                    reference.tag_path,
+                ),
+            });
+            report.dropped_references += 1;
+            continue;
+        };
+        expected.insert((target_group, reference.tag_path, reference.field_path));
     }
 
     let mut actual_values = Vec::new();
@@ -1508,20 +1534,49 @@ fn validate_reference_fidelity(
         .into_iter()
         .map(|value| (value.group_tag, value.tag_path))
         .collect::<HashSet<_>>();
-    let missing = expected
-        .into_iter()
-        .filter_map(|(group, path)| {
-            (!actual.contains(&(group, path.clone())))
-                .then(|| format!("{}:{path}", format_group_tag(group)))
-        })
-        .collect::<Vec<_>>();
-    if missing.is_empty() {
+
+    // A reference that did not arrive is one of two very different things, and
+    // this check is only worth having if it can tell them apart.
+    //
+    // If the conversion already reported a problem at that field, the target
+    // simply has no home for it -- Campaign Evolved's biped declares no
+    // fireteam name, Reach's does. That is a fact about the games, and the
+    // author reconnects what they need.
+    //
+    // If nothing was reported, the field matched and the value vanished
+    // anyway. That is a bug in field matching, and it is what this check
+    // exists to catch, so it stays fatal.
+    let mut unexplained = Vec::new();
+    for (group, tag_path, field_path) in expected {
+        if actual.contains(&(group, tag_path.clone())) {
+            continue;
+        }
+        let explained = report.issues.iter().any(|issue| {
+            blam_tags::TagFieldPath::parse(&clean_field_key(&issue.path))
+                .is_ancestor_of(&blam_tags::TagFieldPath::parse(&clean_field_key(&field_path)))
+        });
+        if explained {
+            report.dropped_references += 1;
+            report.issues.push(ConversionIssue {
+                kind: ConversionIssueKind::Warning,
+                path: field_path,
+                message: format!(
+                    "Reference to {}:{tag_path} was left empty — reconnect it by hand if the                      target needs one",
+                    format_group_tag(group),
+                ),
+            });
+            continue;
+        }
+        unexplained.push(format!("{}:{tag_path} (at {field_path})", format_group_tag(group)));
+    }
+
+    if unexplained.is_empty() {
         Ok(())
     } else {
         Err(format!(
-            "Conversion would lose {} non-empty tag reference(s): {}",
-            missing.len(),
-            missing.join(", ")
+            "Conversion would lose {} tag reference(s) the target does have a field for,              which means field matching went wrong rather than the games differing: {}",
+            unexplained.len(),
+            unexplained.join(", ")
         ))
     }
 }
@@ -5179,17 +5234,41 @@ mod tests {
         drop(material_field);
         drop(root);
 
-        let error = analyze_conversion(
+        let draft = analyze_conversion(
             &source,
             "halo4_mcc",
             "halo3_mcc",
             &definitions,
             Some(&tags_root),
         )
-        .err()
-        .expect("reference loss should reject conversion");
-        assert!(error.contains("Cannot preserve reference"), "{error}");
-        assert!(error.contains("materials\\particles\\energy"));
+        .expect("a down-port reports what it cannot carry rather than refusing");
+
+        // Halo 3 has no `material` group at all, so no implementation could
+        // preserve this reference. What matters is that it is named precisely,
+        // so the author can rebuild that part with the older render-method
+        // system — which is exactly what `docs/tag-conversion-mappings.md`
+        // promises a down-port report will do.
+        assert!(draft.report.dropped_references > 0);
+        assert!(
+            draft
+                .report
+                .issues
+                .iter()
+                .any(|issue| issue.message.contains("materials\\particles\\energy")),
+            "the report has to name the material that needs recreating: {:?}",
+            draft.report.issues.iter().map(|i| &i.message).collect::<Vec<_>>(),
+        );
+
+        // The other half of that promise: nothing was forced into an unrelated
+        // older field to make the reference appear to survive.
+        let mut carried = Vec::new();
+        collect_reference_values(draft.tag.root(), "", &mut carried);
+        assert!(
+            !carried
+                .iter()
+                .any(|value| value.tag_path.contains("particles\\energy")),
+            "the material must not be re-pointed at some unrelated Halo 3 field",
+        );
 
         fs::remove_dir_all(tags_root).unwrap();
     }

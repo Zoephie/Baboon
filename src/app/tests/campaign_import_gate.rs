@@ -374,3 +374,128 @@ fn collect_graphs(directory: &std::path::Path, out: &mut Vec<std::path::PathBuf>
         }
     }
 }
+
+/// A Halo Reach `model` converts, even though Campaign Evolved has no
+/// `render_model` group to point its render reference at.
+///
+/// Campaign Evolved replaced Halo's render geometry with Unreal skeletal
+/// meshes, so it defines no `render_model` at all. Every Reach model referred to
+/// one and refused on it — and would have kept refusing however good the field
+/// matching got, because no implementation can preserve a reference to a class
+/// the destination does not have.
+///
+/// It is reported rather than silently dropped: each one is a reference the
+/// author has to reconnect.
+#[test]
+fn a_reach_model_converts_despite_campaign_evolved_having_no_render_model() {
+    let source_path = std::path::Path::new(
+        "D:/SteamLibrary/steamapps/common/HREK/tags/objects/characters/spartans/spartans.model",
+    );
+    if !source_path.is_file() {
+        eprintln!("skipping: HREK is not installed at the expected path");
+        return;
+    }
+    let source = TagFile::read(source_path).expect("read the spartans model");
+    let draft = analyze_conversion(
+        &source,
+        "haloreach_mcc",
+        CAMPAIGN_EVOLVED_GAME,
+        &locate_definitions_root(),
+        None,
+    )
+    .unwrap_or_else(|error| panic!("a Reach model must convert: {error}"));
+
+    assert!(
+        draft.report.dropped_references > 0,
+        "the render_model reference has nowhere to go and must be counted",
+    );
+    let named = draft
+        .report
+        .issues
+        .iter()
+        .any(|issue| issue.message.contains("render_model"));
+    assert!(named, "the report has to name what needs reconnecting");
+
+    let bytes = draft.tag.write_to_bytes().expect("serialize it");
+    TagFile::read_from_bytes(&bytes).expect("read it back");
+}
+
+/// Every tag in HREK's `objects` tree, converted. Broad rather than deep: it
+/// covers the object groups a user actually imports and the references between
+/// them, which is where "the target has no such group" bites.
+///
+/// `#[ignore]`d — tens of thousands of files. Prints a per-group tally so a
+/// failure says which class is unhappy, not just how many.
+#[test]
+#[ignore]
+fn the_hrek_objects_tree_converts() {
+    let root = std::path::Path::new("D:/SteamLibrary/steamapps/common/HREK/tags/objects");
+    if !root.is_dir() {
+        eprintln!("skipping: HREK is not installed at the expected path");
+        return;
+    }
+    let definitions = locate_definitions_root();
+    let ce_groups: std::collections::HashSet<String> = load_new_tag_groups(CAMPAIGN_EVOLVED_GAME)
+        .expect("Campaign Evolved definitions")
+        .into_iter()
+        .map(|group| group.name)
+        .collect();
+
+    let mut files = Vec::new();
+    collect_all(root, &mut files);
+    files.sort();
+
+    let mut converted = 0usize;
+    let mut skipped_group = 0usize;
+    let mut failures: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    for path in &files {
+        let Ok(source) = TagFile::read(path) else { continue };
+        let extension = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or_default()
+            .to_owned();
+        // Campaign Evolved simply has no counterpart for some Reach classes;
+        // that is a fact about the games, not a conversion failure.
+        if !ce_groups.contains(&extension) {
+            skipped_group += 1;
+            continue;
+        }
+        match analyze_conversion(
+            &source,
+            "haloreach_mcc",
+            CAMPAIGN_EVOLVED_GAME,
+            &definitions,
+            None,
+        ) {
+            Ok(_) => converted += 1,
+            Err(error) => failures.entry(extension).or_default().push(format!(
+                "{}: {error}",
+                path.file_name().and_then(|n| n.to_str()).unwrap_or_default(),
+            )),
+        }
+    }
+    eprintln!(
+        "converted {converted}, skipped {skipped_group} (group absent from Campaign Evolved), \
+         failed {}",
+        failures.values().map(Vec::len).sum::<usize>(),
+    );
+    for (group, cases) in &failures {
+        eprintln!("  {group}: {} failure(s), e.g. {}", cases.len(), cases[0]);
+    }
+    assert!(failures.is_empty(), "{} group(s) failed to convert", failures.len());
+}
+
+fn collect_all(directory: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_all(&path, out);
+        } else if path.extension().is_some() {
+            out.push(path);
+        }
+    }
+}
