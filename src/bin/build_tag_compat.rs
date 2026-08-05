@@ -11,13 +11,20 @@ fn main() {
         .collect();
     let mut suggest: Option<Option<String>> = None;
 
-    let mut args = std::env::args().skip(1);
-    while let Some(flag) = args.next() {
+    // Hand-rolled rather than clap: this is a build helper with six flags and
+    // no dependency budget worth spending on it.
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let mut index = 0;
+    while index < argv.len() {
+        let flag = argv[index].clone();
+        index += 1;
         let mut value = || {
-            args.next().unwrap_or_else(|| {
+            let Some(value) = argv.get(index).cloned().filter(|v| !v.starts_with("--")) else {
                 eprintln!("{flag} needs a value");
                 std::process::exit(2);
-            })
+            };
+            index += 1;
+            value
         };
         match flag.as_str() {
             "--definitions" => definitions = PathBuf::from(value()),
@@ -31,9 +38,15 @@ fn main() {
                     .map(|(a, b)| (a.trim().to_owned(), b.trim().to_owned()))
                     .collect();
             }
-            // Optional group filter, so a reviewer working one group at a time
-            // is not handed the whole corpus.
-            "--suggest-drops" => suggest = Some(std::env::args().nth(2).filter(|a| !a.starts_with("--"))),
+            // The group name is optional, so a reviewer working one group at a
+            // time is not handed the whole corpus.
+            "--suggest-drops" => {
+                let group = argv.get(index).cloned().filter(|v| !v.starts_with("--"));
+                if group.is_some() {
+                    index += 1;
+                }
+                suggest = Some(group);
+            }
             "--help" | "-h" => {
                 eprintln!(
                     "usage: build_tag_compat [--definitions DIR] [--mappings FILE] \

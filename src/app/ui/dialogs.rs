@@ -80,14 +80,12 @@ impl Baboon {
                             .selected_text(&dialog.target_game)
                             .width(220.0)
                             .show_ui(ui, |ui| {
-                                for game in CONVERSION_GAMES {
-                                    if *game != dialog.source_game {
-                                        ui.selectable_value(
-                                            &mut dialog.target_game,
-                                            (*game).to_owned(),
-                                            *game,
-                                        );
-                                    }
+                                for game in conversion_targets_for(&dialog.source_game) {
+                                    ui.selectable_value(
+                                        &mut dialog.target_game,
+                                        game.to_owned(),
+                                        game,
+                                    );
                                 }
                             });
                     });
@@ -282,14 +280,12 @@ impl Baboon {
                             egui::ComboBox::from_id_salt("folder_conversion_target")
                                 .selected_text(&dialog.target_game)
                                 .show_ui(ui, |ui| {
-                                    for game in CONVERSION_GAMES {
-                                        if *game != dialog.source_game {
-                                            ui.selectable_value(
-                                                &mut dialog.target_game,
-                                                (*game).to_owned(),
-                                                *game,
-                                            );
-                                        }
+                                    for game in conversion_targets_for(&dialog.source_game) {
+                                        ui.selectable_value(
+                                            &mut dialog.target_game,
+                                            game.to_owned(),
+                                            game,
+                                        );
                                     }
                                 });
                         });

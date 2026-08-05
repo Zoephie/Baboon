@@ -1223,7 +1223,7 @@ impl Baboon {
         }
         let tag = match TagFile::new(&group.schema_path) {
             Ok(mut tag) => {
-                if CONVERSION_GAMES.contains(&self.new_tag_dialog.game.as_str())
+                if CONVERSION_PROFILES.contains(&self.new_tag_dialog.game.as_str())
                     && let Err(error) =
                         apply_editing_kit_mcc_header(&mut tag, &self.new_tag_dialog.game)
                 {

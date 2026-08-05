@@ -9,6 +9,8 @@ use std::cell::RefCell;
 
 mod companions;
 use companions::*;
+mod resources;
+use resources::*;
 
 pub(super) const CONVERSION_GAMES: &[&str] = &[
     "halo3_mcc",
@@ -34,6 +36,57 @@ pub(super) const CONVERSION_PROFILES: &[&str] = &[
     "halo2amp_mcc",
     CAMPAIGN_EVOLVED_GAME,
 ];
+
+/// The profile Campaign Evolved's schemas descend from, and the only one it
+/// converts with.
+pub(super) const CAMPAIGN_EVOLVED_PARENT: &str = "haloreach_mcc";
+
+/// Whether the converter will attempt this ordered pair.
+///
+/// The five MCC profiles convert to each other in any direction: their mutual
+/// surface is the reviewed common base the catalog covers. Campaign Evolved
+/// pairs only with Halo Reach, both ways — a Campaign Evolved tag *is* a
+/// Reach-format tag at a different schema revision, and no other profile has
+/// that relationship. Refusing the rest by name beats converting a Halo 3 tag
+/// into Campaign Evolved through a Reach-shaped hole nobody reviewed.
+pub(super) fn conversion_pair_supported(source_game: &str, target_game: &str) -> bool {
+    if source_game == target_game {
+        return false;
+    }
+    let mcc = |game: &str| CONVERSION_GAMES.contains(&game);
+    match (source_game, target_game) {
+        (CAMPAIGN_EVOLVED_GAME, other) | (other, CAMPAIGN_EVOLVED_GAME) => {
+            other == CAMPAIGN_EVOLVED_PARENT
+        }
+        (source, target) => mcc(source) && mcc(target),
+    }
+}
+
+/// The profiles a conversion from `source_game` may target, in menu order.
+pub(super) fn conversion_targets_for(source_game: &str) -> Vec<&'static str> {
+    CONVERSION_PROFILES
+        .iter()
+        .copied()
+        .filter(|target| conversion_pair_supported(source_game, target))
+        .collect()
+}
+
+/// Why a pair is refused, in a sentence that says what to do instead.
+fn unsupported_pair_message(source_game: &str, target_game: &str) -> String {
+    if source_game == target_game {
+        return "Choose a different target game profile".to_owned();
+    }
+    if source_game == CAMPAIGN_EVOLVED_GAME || target_game == CAMPAIGN_EVOLVED_GAME {
+        let other =
+            if source_game == CAMPAIGN_EVOLVED_GAME { target_game } else { source_game };
+        return format!(
+            "Campaign Evolved converts only to and from {CAMPAIGN_EVOLVED_PARENT}, because its \
+             schemas descend from Reach's and no other profile's do. Convert to \
+             {CAMPAIGN_EVOLVED_PARENT} first, then to {other}."
+        );
+    }
+    "The selected source or target profile is not supported by this converter".to_owned()
+}
 
 const CONVERSION_MAPPING_CATALOG: &str = include_str!("../../mappings/conversion_mappings.json");
 
@@ -114,6 +167,11 @@ pub(in crate::app) struct TagConversionReport {
     pub(in crate::app) defaulted_target: usize,
     pub(in crate::app) unsupported_source: usize,
     pub(in crate::app) truncated: usize,
+    /// Pageable resources carried across whole. Worth counting separately from
+    /// ordinary fields: one of these can be the bulk of the tag, and a reader
+    /// comparing an animation graph's before and after wants to see that its
+    /// payload went with it.
+    pub(in crate::app) transferred_resources: usize,
     pub(in crate::app) issues: Vec<ConversionIssue>,
 }
 
@@ -293,6 +351,15 @@ struct ConversionContext<'a> {
     companion_tags: Vec<CompanionTagDraft>,
     fatal_error: Option<String>,
     root_matches: usize,
+    /// Paths of non-null pageable resources the conversion could not carry.
+    ///
+    /// A resource holds the bulk of what some tags are — an animation graph's
+    /// entire compressed payload is one — so leaving one behind silently would
+    /// produce a tag that looks converted and plays nothing. The safety check
+    /// reads this rather than asking whether the source had any resources at
+    /// all, which is what it used to do and what made every animation graph
+    /// unconvertible.
+    resources_left_behind: Vec<String>,
 }
 
 #[derive(serde::Deserialize)]
@@ -313,6 +380,17 @@ struct ConversionMappingCatalog {
     unusable_schemas: Vec<UnusableSchemaRule>,
     #[serde(default)]
     reference_drops: Vec<ReferenceDropRule>,
+    /// Source fields the target profile does not define at all, reviewed and
+    /// accepted as dropped.
+    ///
+    /// `reference_drops` answers the same question for tag references only.
+    /// This covers everything else, and exists because the fail-closed groups
+    /// cannot otherwise distinguish "the destination has no such field, and we
+    /// have checked that is fine" from "something went wrong". Without it every
+    /// Halo Reach animation graph refuses on the two node-flag bytes Campaign
+    /// Evolved does not carry.
+    #[serde(default)]
+    accepted_field_drops: Vec<ReferenceDropRule>,
     #[serde(default)]
     field_aliases: Vec<FieldAliasRule>,
     #[serde(default)]
@@ -486,6 +564,20 @@ impl ConversionMappingCatalog {
                 ));
             }
         }
+        for (index, rule) in catalog.accepted_field_drops.iter().enumerate() {
+            validate_game_scopes(
+                "accepted_field_drops",
+                index,
+                &rule.group,
+                &rule.source_games,
+                &rule.target_games,
+            )?;
+            if clean_field_key(&rule.source_path).is_empty() || rule.reason.trim().is_empty() {
+                return Err(format!(
+                    "conversion_mappings.json accepted_field_drops[{index}] has an empty path or reason"
+                ));
+            }
+        }
         for (index, rule) in catalog.option_aliases.iter().enumerate() {
             validate_mapping_rule_scope(
                 "option_aliases",
@@ -626,6 +718,31 @@ impl ConversionMappingCatalog {
             .then_some(rule.reason.as_str())
         })
     }
+
+    /// Why a source field with no target counterpart is an accepted loss.
+    ///
+    /// Checks both sections: a reference and an ordinary field are the same
+    /// question to a caller asking "was this drop reviewed?", and splitting the
+    /// lookup would let a rule filed in the wrong one silently stop working.
+    fn accepted_drop_reason<'a>(
+        &'a self,
+        group: &str,
+        source_game: &str,
+        target_game: &str,
+        source_path: &str,
+    ) -> Option<&'a str> {
+        let matches = |rule: &'a ReferenceDropRule| {
+            (rule.group.eq_ignore_ascii_case(group)
+                && game_scope_matches(&rule.source_games, source_game)
+                && game_scope_matches(&rule.target_games, target_game)
+                && clean_field_key(&rule.source_path) == clean_field_key(source_path))
+            .then_some(rule.reason.as_str())
+        };
+        self.accepted_field_drops
+            .iter()
+            .find_map(matches)
+            .or_else(|| self.reference_drops.iter().find_map(matches))
+    }
 }
 
 fn validate_game_scopes(
@@ -641,7 +758,7 @@ fn validate_game_scopes(
         ));
     }
     for game in source_games.iter().chain(target_games) {
-        if !CONVERSION_GAMES.contains(&game.as_str()) {
+        if !CONVERSION_PROFILES.contains(&game.as_str()) {
             return Err(format!(
                 "conversion_mappings.json {section}[{index}] uses unsupported game {game}"
             ));
@@ -668,7 +785,7 @@ fn validate_mapping_rule_scope(
         ));
     }
     for game in source_games.iter().chain(target_games) {
-        if !CONVERSION_GAMES.contains(&game.as_str()) {
+        if !CONVERSION_PROFILES.contains(&game.as_str()) {
             return Err(format!(
                 "conversion_mappings.json {section}[{index}] uses unsupported game {game}"
             ));
@@ -842,13 +959,8 @@ fn analyze_conversion_with_templates(
     if source.classic_engine().is_some() || source.endian != Endian::Le {
         return Err("Only little-endian MCC tags can be converted".to_owned());
     }
-    if !CONVERSION_GAMES.contains(&source_game) || !CONVERSION_GAMES.contains(&target_game) {
-        return Err(
-            "The selected source or target profile is not supported by this converter".to_owned(),
-        );
-    }
-    if source_game == target_game {
-        return Err("Choose a different target game profile".to_owned());
+    if !conversion_pair_supported(source_game, target_game) {
+        return Err(unsupported_pair_message(source_game, target_game));
     }
 
     let source_groups = GameTagIndex::load(definitions_root, source_game)?;
@@ -883,7 +995,7 @@ fn analyze_conversion_with_templates(
     let target_field_aliases = SchemaFieldAliases::load(&schema_path)?;
     let mapping_catalog = ConversionMappingCatalog::load()?;
     let native_target = native_templates
-        .map(|templates| find_native_target_template(templates, target_group_tag))
+        .map(|templates| find_native_target_template(templates, target_group_tag, target_game))
         .transpose()?
         .flatten();
     for game in [source_game, target_game] {
@@ -939,6 +1051,7 @@ fn analyze_conversion_with_templates(
         companion_tags: Vec::new(),
         fatal_error: None,
         root_matches: 0,
+        resources_left_behind: Vec::new(),
     };
     if let Some(template_path) = target_template.as_ref() {
         context.report.issues.push(ConversionIssue {
@@ -1033,12 +1146,28 @@ fn validate_critical_runtime_safety(
     source: &TagFile,
     context: &ConversionContext<'_>,
 ) -> Result<(), String> {
-    if struct_contains_non_null_resource(source.root()) {
+    // Not "does the source have resources?" but "did any resource fail to
+    // cross?". The old question refused every animation graph, because an
+    // animation graph's payload *is* a pageable resource — it is why a loose
+    // HREK jmad runs to a hundred megabytes and more.
+    if !context.resources_left_behind.is_empty() {
         return Err(format!(
-            "{} contains non-null pageable runtime resources that cannot yet be translated safely from {} to {}",
-            context.group_name, context.source_game, context.target_game
+            "{} carries {} pageable resource(s) that could not be translated from {} to {} ({}); \
+             the tag was not written",
+            context.group_name,
+            context.resources_left_behind.len(),
+            context.source_game,
+            context.target_game,
+            context
+                .resources_left_behind
+                .iter()
+                .take(3)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", "),
         ));
     }
+    let _ = source;
     const FAIL_CLOSED_GROUPS: &[&str] = &[
         "model_animation_graph",
         "damage_effect",
@@ -1055,7 +1184,7 @@ fn validate_critical_runtime_safety(
         .filter(|issue| {
             context
                 .mapping_catalog
-                .reference_drop_reason(
+                .accepted_drop_reason(
                     context.group_name,
                     context.source_game,
                     context.target_game,
@@ -1156,9 +1285,30 @@ fn convert_to_struct_path(
     convert_to_struct_path(source, nested, &remainder, context)
 }
 
+/// Whether a candidate on disk is an acceptable native layout template for
+/// `target_game`.
+///
+/// The rule everywhere else is "not one of our own conversion drafts", and a
+/// draft is recognized by `version == -1` where an editing-kit tag carries a
+/// real one. That rule *inverts* for Campaign Evolved, whose shipped generation
+/// is exactly `1 / 2 / 0xffffffff` — all 12,289 of its tag blobs read it. Left
+/// unqualified the check rejects the entire game, and silently: the converter
+/// would simply fall back to a generated layout every time with nothing saying
+/// why.
+fn accepts_native_template(tag: &TagFile, target_game: &str) -> bool {
+    if target_game == CAMPAIGN_EVOLVED_GAME {
+        let (build_version, build_number, version) = CAMPAIGN_EVOLVED_GENERATION;
+        return tag.header.build_version == build_version
+            && tag.header.build_number == build_number
+            && tag.header.version == version;
+    }
+    tag.header.version != u32::MAX
+}
+
 fn find_native_target_template(
     templates: &NativeTemplateIndex,
     target_group_tag: u32,
+    target_game: &str,
 ) -> Result<Option<(TagFile, PathBuf)>, String> {
     {
         let cached = templates.cached.borrow();
@@ -1179,12 +1329,12 @@ fn find_native_target_template(
         let Ok(mut tag) = TagFile::read(path) else {
             continue;
         };
-        // Converted drafts use -1. Prefer an editing-kit-authored tag so its
-        // embedded layout contains expansions for custom schema fields.
+        // Prefer a game-authored tag so its embedded layout carries the
+        // expansions a dumped JSON schema need not describe.
         if tag.group().tag == target_group_tag
             && tag.classic_engine().is_none()
             && tag.endian == Endian::Le
-            && tag.header.version != u32::MAX
+            && accepts_native_template(&tag, target_game)
             && reset_tag_to_defaults(&mut tag).is_ok()
         {
             let bytes = tag.write_to_bytes().map_err(|error| {
@@ -1218,7 +1368,7 @@ fn create_companion_tag(
         .ok_or_else(|| format!("{} has no {group_name} tag group", context.target_game))?;
     let native_target = context
         .native_templates
-        .map(|templates| find_native_target_template(templates, group_tag))
+        .map(|templates| find_native_target_template(templates, group_tag, context.target_game))
         .transpose()?
         .flatten();
     let schema = context
@@ -2529,16 +2679,7 @@ fn convert_field(
             }
         }
         TagFieldType::PageableResource => {
-            if source
-                .as_resource()
-                .is_some_and(|resource| !matches!(resource.kind(), TagResourceKind::Null))
-            {
-                record_unsupported(
-                    context,
-                    path.to_owned(),
-                    "Non-null pageable resources are engine-specific".to_owned(),
-                );
-            }
+            transfer_resource(source, &mut target, path, context);
         }
         TagFieldType::ApiInterop => {
             if field_has_meaningful_value(source) {
@@ -3169,7 +3310,7 @@ impl Baboon {
         else {
             return false;
         };
-        CONVERSION_GAMES.contains(&game)
+        !conversion_targets_for(game).is_empty()
             && document.tag.classic_engine().is_none()
             && document.tag.endian == Endian::Le
     }
@@ -3188,12 +3329,11 @@ impl Baboon {
         let Some(source_game) = source.game.clone() else {
             return;
         };
-        let target_game = CONVERSION_GAMES
-            .iter()
-            .copied()
-            .find(|game| *game != source_game)
-            .unwrap_or("halo3odst_mcc")
-            .to_owned();
+        let Some(target_game) = conversion_targets_for(&source_game).first().map(|game| (*game).to_owned())
+        else {
+            self.status = format!("Nothing converts from {source_game}");
+            return;
+        };
         let source_label = self
             .entry_for_key(&key)
             .map(|entry| entry.display_path.clone())
@@ -3449,17 +3589,11 @@ impl Baboon {
             self.status = "Folder conversion requires a detected editing-kit profile".to_owned();
             return;
         };
-        if !CONVERSION_GAMES.contains(&source_game.as_str()) {
-            self.status =
-                "Folder conversion currently supports MCC Halo 3-family profiles only".to_owned();
+        let Some(target_game) = conversion_targets_for(&source_game).first().map(|game| (*game).to_owned())
+        else {
+            self.status = format!("Nothing converts from {source_game}");
             return;
-        }
-        let target_game = CONVERSION_GAMES
-            .iter()
-            .copied()
-            .find(|game| *game != source_game)
-            .unwrap_or("halo3odst_mcc")
-            .to_owned();
+        };
         self.folder_conversion_dialog = Some(FolderConversionDialog {
             source_rel_path: rel_path,
             source_label: label,
@@ -5325,6 +5459,239 @@ mod tests {
         assert!(draft.native_layout_template.is_some());
         let bytes = draft.tag.write_to_bytes().unwrap();
         TagFile::read_from_bytes(&bytes).unwrap();
+    }
+
+    /// Campaign Evolved pairs only with Halo Reach, and says so rather than
+    /// quietly offering a conversion nobody reviewed.
+    #[test]
+    fn campaign_evolved_converts_only_with_reach() {
+        assert!(conversion_pair_supported("haloreach_mcc", CAMPAIGN_EVOLVED_GAME));
+        assert!(conversion_pair_supported(CAMPAIGN_EVOLVED_GAME, "haloreach_mcc"));
+        for other in ["halo3_mcc", "halo3odst_mcc", "halo4_mcc", "halo2amp_mcc"] {
+            assert!(
+                !conversion_pair_supported(other, CAMPAIGN_EVOLVED_GAME),
+                "{other} must not convert straight into Campaign Evolved",
+            );
+            assert!(!conversion_pair_supported(CAMPAIGN_EVOLVED_GAME, other));
+        }
+        assert!(!conversion_pair_supported(CAMPAIGN_EVOLVED_GAME, CAMPAIGN_EVOLVED_GAME));
+
+        // The refusal has to say what to do instead, or it is a dead end.
+        let message = unsupported_pair_message("halo3_mcc", CAMPAIGN_EVOLVED_GAME);
+        assert!(message.contains("haloreach_mcc"), "{message}");
+
+        // The five MCC profiles are untouched.
+        assert!(conversion_pair_supported("halo3_mcc", "haloreach_mcc"));
+        assert!(conversion_pair_supported("halo4_mcc", "halo2amp_mcc"));
+    }
+
+    /// A Halo Reach animation graph converts into Campaign Evolved.
+    ///
+    /// This is the whole point of the exercise, and it used to fail twice over:
+    /// Campaign Evolved was not a conversion target at all, and the safety
+    /// check refused any tag carrying a pageable resource — which every
+    /// animation graph does, because its payload *is* one.
+    ///
+    /// Built from the schemas rather than from a kit, so it runs on CI. That
+    /// means null resources; the engine's `resource_copy_tests` cover a
+    /// populated one crossing byte-for-byte, and the fixture test below covers
+    /// a real file when HREK is installed.
+    #[test]
+    fn a_reach_animation_graph_converts_into_campaign_evolved() {
+        let definitions = locate_definitions_root();
+        let source = TagFile::new(
+            definitions.join("haloreach_mcc/model_animation_graph.json"),
+        )
+        .expect("build a Reach animation graph from its schema");
+
+        let draft = analyze_conversion(
+            &source,
+            "haloreach_mcc",
+            CAMPAIGN_EVOLVED_GAME,
+            &definitions,
+            None,
+        )
+        .expect("a Reach animation graph must convert into Campaign Evolved");
+
+        // The target's layout won, not the source's — that is the safety
+        // argument, and the four structs that changed size are where it shows.
+        let root = draft.tag.root();
+        let pool = root
+            .field_path("definitions/animations")
+            .and_then(|field| field.as_block())
+            .expect("the converted graph declares an animation pool")
+            .definition()
+            .struct_definition();
+        let shared = pool
+            .fields()
+            .find(|field| field.name() == "shared animation data")
+            .and_then(|field| field.as_block())
+            .expect("each pool entry holds shared animation data")
+            .struct_definition();
+        assert_eq!(shared.name(), "shared_model_animation_block");
+        assert_eq!(
+            shared.size(),
+            200,
+            "Campaign Evolved's 200-byte element, not Reach's 212-byte one",
+        );
+
+        // The stamp belongs to the destination.
+        assert_eq!(
+            (
+                draft.tag.header.build_version,
+                draft.tag.header.build_number,
+                draft.tag.header.version,
+            ),
+            CAMPAIGN_EVOLVED_GENERATION,
+        );
+
+        // And it round-trips.
+        let bytes = draft.tag.write_to_bytes().expect("serialize the converted graph");
+        TagFile::read_from_bytes(&bytes).expect("read the converted graph back");
+    }
+
+    /// The reviewed drops are what let the graph through, so an unreviewed loss
+    /// must still stop it. Removing one from the catalog has to bring the
+    /// refusal back — otherwise the fail-closed rule has quietly stopped
+    /// guarding anything.
+    #[test]
+    fn an_uncatalogued_animation_graph_loss_still_refuses() {
+        let catalog = ConversionMappingCatalog::load().unwrap();
+        for field in ["node joint flags", "additional flags", "facial wrinkle events"] {
+            assert!(
+                catalog
+                    .accepted_drop_reason(
+                        "model_animation_graph",
+                        "haloreach_mcc",
+                        CAMPAIGN_EVOLVED_GAME,
+                        field,
+                    )
+                    .is_some(),
+                "{field} must be a reviewed drop, or every Reach graph refuses",
+            );
+        }
+        // A field nobody reviewed is not accepted just because it is in the
+        // same group.
+        assert!(
+            catalog
+                .accepted_drop_reason(
+                    "model_animation_graph",
+                    "haloreach_mcc",
+                    CAMPAIGN_EVOLVED_GAME,
+                    "some field nobody reviewed",
+                )
+                .is_none(),
+        );
+    }
+
+    /// Every reviewed drop has to name a field the schemas actually declare. A
+    /// rule written for a name that has since moved reads as coverage and
+    /// silently provides none.
+    #[test]
+    fn every_accepted_drop_names_a_real_field() {
+        let catalog = ConversionMappingCatalog::load().unwrap();
+        let definitions = locate_definitions_root();
+        for rule in &catalog.accepted_field_drops {
+            // Only the *source* side. A dropped field exists there and, by
+            // definition, not on the target — that is what makes it a drop.
+            for game in &rule.source_games {
+                let path = definitions.join(game).join(format!("{}.json", rule.group));
+                if !path.is_file() {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).unwrap();
+                assert!(
+                    text.contains(rule.source_path.as_str()),
+                    "{game}/{} declares no field named `{}`",
+                    rule.group,
+                    rule.source_path,
+                );
+            }
+            for game in &rule.target_games {
+                let path = definitions.join(game).join(format!("{}.json", rule.group));
+                if !path.is_file() {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).unwrap();
+                assert!(
+                    !text.contains(rule.source_path.as_str()),
+                    "{game}/{} does declare `{}`, so it is not a drop and the rule                      is hiding a real conversion failure",
+                    rule.group,
+                    rule.source_path,
+                );
+            }
+        }
+    }
+
+    /// A real Halo Reach animation graph, off disk, with its animation payload
+    /// in it. Self-skips without HREK, so a green run here proves less than it
+    /// looks — check for the skip line.
+    ///
+    /// The schema-built test above cannot cover this: `TagFile::new` produces
+    /// null resources, and the entire question is whether a *populated* one
+    /// crosses.
+    #[test]
+    fn a_real_hrek_animation_graph_carries_its_payload_into_campaign_evolved() {
+        let source_path = Path::new(
+            "D:/SteamLibrary/steamapps/common/HREK/tags/cinematics/052lb_reflection/objects/052lb_reflection_030/elevator_1.model_animation_graph",
+        );
+        if !source_path.is_file() {
+            eprintln!("skipping: HREK is not installed at the expected path");
+            return;
+        }
+        let definitions = locate_definitions_root();
+        let source = TagFile::read(source_path).expect("read the HREK animation graph");
+
+        let resources_in = count_non_null_resources(source.root());
+        assert!(
+            resources_in > 0,
+            "this fixture must actually carry a payload, or the assertions below \
+             are 0 == 0 and prove nothing",
+        );
+        let draft = analyze_conversion(
+            &source,
+            "haloreach_mcc",
+            CAMPAIGN_EVOLVED_GAME,
+            &definitions,
+            None,
+        )
+        .unwrap_or_else(|error| panic!("a real Reach animation graph must convert: {error}"));
+
+        assert_eq!(
+            draft.report.transferred_resources, resources_in,
+            "every pageable resource the source carried has to arrive; the payload \
+             is most of what an animation graph is",
+        );
+        let bytes = draft.tag.write_to_bytes().expect("serialize the converted graph");
+        let reopened = TagFile::read_from_bytes(&bytes).expect("read it back");
+        assert_eq!(
+            count_non_null_resources(reopened.root()),
+            resources_in,
+            "the resources survived the write",
+        );
+    }
+
+    #[cfg(test)]
+    fn count_non_null_resources(structure: TagStruct<'_>) -> usize {
+        structure
+            .fields()
+            .map(|field| {
+                let here = field
+                    .as_resource()
+                    .is_some_and(|resource| !matches!(resource.kind(), TagResourceKind::Null))
+                    as usize;
+                let nested = field.as_struct().map(count_non_null_resources).unwrap_or(0)
+                    + field
+                        .as_block()
+                        .map(|block| block.iter().map(count_non_null_resources).sum())
+                        .unwrap_or(0)
+                    + field
+                        .as_array()
+                        .map(|array| array.iter().map(count_non_null_resources).sum())
+                        .unwrap_or(0);
+                here + nested
+            })
+            .sum()
     }
 
     #[test]
