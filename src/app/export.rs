@@ -4,6 +4,7 @@
 use super::*;
 
 pub(super) mod bitmap;
+pub(super) mod container_dump;
 pub(super) mod geometry;
 pub(super) mod import_info;
 pub(super) mod json;
@@ -11,6 +12,7 @@ pub(super) mod scripts;
 pub(super) mod shader_source;
 
 pub(super) use bitmap::*;
+pub(super) use container_dump::*;
 pub(super) use geometry::*;
 pub(super) use import_info::*;
 pub(super) use json::*;

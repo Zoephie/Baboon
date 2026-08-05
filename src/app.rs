@@ -236,6 +236,10 @@ pub struct Baboon {
     container_duplicate_running: HashSet<KitId>,
     /// Mandatory confirmation for deleting a tag.
     delete_confirm: Option<DeleteConfirm>,
+    /// Mandatory confirmation for a bulk extraction of every shipped tag.
+    container_dump_confirm: Option<ContainerDumpConfirm>,
+    /// The one bulk container extraction allowed to run at a time.
+    container_dump_job: Option<ContainerDumpJob>,
     /// Result of the last container write, shown until dismissed.
     operation_notice: Option<OperationNotice>,
     /// A Chimp mesh export waiting on the choice to export its textures too.
@@ -500,6 +504,8 @@ impl Baboon {
             container_duplicate_confirm: None,
             container_duplicate_running: HashSet::new(),
             delete_confirm: None,
+            container_dump_confirm: None,
+            container_dump_job: None,
             operation_notice: None,
             chimp_mesh_texture_prompt: None,
             chimp_texture_export_prompt: None,

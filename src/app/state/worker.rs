@@ -95,6 +95,19 @@ pub(in crate::app) enum WorkerMessage {
         done: usize,
         total: usize,
     },
+    /// Bulk extraction of a container set's shipped tags is tens of thousands
+    /// of reads and writes, so it says where it has got to. Stamped rather than
+    /// carrying a bare kit id: the job outlives a source reload, and progress
+    /// for containers that are no longer mounted should be dropped, not drawn.
+    ContainerDumpProgress {
+        stamp: KitStamp,
+        done: usize,
+        total: usize,
+    },
+    ContainerDumpFinished {
+        stamp: KitStamp,
+        result: Result<ContainerDumpReport, String>,
+    },
     ExportFinished(Result<String, String>),
     PokePreflightFinished {
         kit: KitId,
@@ -292,4 +305,47 @@ pub(in crate::app) struct ReferenceIndexProgressState {
     pub(in crate::app) label: String,
     pub(in crate::app) processed: usize,
     pub(in crate::app) total: usize,
+}
+
+/// A bulk container extraction in flight, and how far along it is.
+///
+/// Only one runs at a time across the whole application: it saturates the disk,
+/// and two of them would each report half a bar while taking twice as long.
+pub(in crate::app) struct ContainerDumpJob {
+    pub(in crate::app) kit: KitId,
+    pub(in crate::app) output: PathBuf,
+    pub(in crate::app) done: usize,
+    pub(in crate::app) total: usize,
+    pub(in crate::app) started: std::time::Instant,
+    /// Set from the UI thread by the Cancel button; the workers check it between
+    /// tags, so a run stops within one tag rather than at the next file boundary
+    /// of a job that has minutes left.
+    pub(in crate::app) cancel: Arc<AtomicBool>,
+}
+
+impl ContainerDumpJob {
+    pub(in crate::app) fn fraction(&self) -> f32 {
+        if self.total == 0 {
+            return 0.0;
+        }
+        (self.done as f32 / self.total as f32).clamp(0.0, 1.0)
+    }
+
+    /// How much longer this looks like taking, or `None` until there is enough
+    /// of it done to say anything honest.
+    pub(in crate::app) fn remaining(&self) -> Option<std::time::Duration> {
+        if self.done == 0 || self.done >= self.total {
+            return None;
+        }
+        let elapsed = self.started.elapsed().as_secs_f64();
+        // A first few tags are not a rate. Guessing from them produces a number
+        // that swings by minutes and teaches the user to ignore it.
+        if elapsed < 1.5 {
+            return None;
+        }
+        let each = elapsed / self.done as f64;
+        Some(std::time::Duration::from_secs_f64(
+            each * (self.total - self.done) as f64,
+        ))
+    }
 }

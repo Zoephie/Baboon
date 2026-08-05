@@ -687,6 +687,18 @@ pub(in crate::app) struct ContainerDuplicateConfirm {
     pub(in crate::app) destination_leaf: String,
 }
 
+/// Mandatory confirmation for extracting every shipped tag in a container set.
+///
+/// Not destructive, but expensive enough to be worth a deliberate answer: it is
+/// tens of thousands of decompressed reads and file writes, and the user has to
+/// know that before it starts rather than three minutes into a frozen-looking
+/// window. Carries its workspace like the other modeless confirms.
+pub(in crate::app) struct ContainerDumpConfirm {
+    pub(in crate::app) kit: KitId,
+    pub(in crate::app) output: PathBuf,
+    pub(in crate::app) total: usize,
+}
+
 /// The outcome of a container write, kept on screen until dismissed.
 ///
 /// These operations rewrite the game's own pak and take long enough that the

@@ -424,6 +424,16 @@ package your changes as a separate, reversible mod:
   existing tags that reference the old name resolve to the renamed one.
 - **Duplicate / Delete** (right-click) — add a copy to, or retire one from, the
   container itself rather than an overlay. See *Duplicating & deleting tags*.
+- **Extract All Tags to Folder…** (File menu, **Expert mode** only) — write every
+  tag the mounted containers ship into a folder on disk, laid out like an editing
+  kit (`levels/…`, `objects/…`, `shaders/…`, with friendly group extensions), so
+  the tag set can be diffed, grepped, handed to other tools, or reopened with
+  **Load Folder**. The `.ubulk` payloads are already byte-complete tags, so they
+  are copied out untouched — no parse, no re-serialize. This extracts what the
+  game **ships**: a mod mounted over a tag is ignored, and tags that only a mod
+  provides are counted as skipped. It is tens of thousands of decompressed reads
+  and file writes, so it confirms first, reports progress in the status bar, and
+  can be cancelled from there; Baboon stays usable while it runs.
 
 Any in-place write to a container **drops that pak's perfect-hash lookup table**.
 The table maps a chunk id to a *slot* in the chunk-id array, so both the chunk

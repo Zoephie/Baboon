@@ -11,15 +11,28 @@ use super::*;
 
 const PAKS: &str = "/Users/camden/Halo/halo-campaign-evolved_pc/Meteorite/Content/Paks";
 
-fn mount() -> Option<crate::source::LoadedSourceData> {
-    if !std::path::Path::new(PAKS).exists() {
-        eprintln!("skipping: Campaign Evolved not present");
+/// The install these fixtures run against, or `None` when there isn't one.
+///
+/// `BABOON_CE_PAKS` overrides the default so the fixtures are runnable wherever
+/// the game happens to be installed. Without it a machine with a perfectly good
+/// install still skips every test here, and a skip reads exactly like a pass.
+fn paks() -> Option<std::path::PathBuf> {
+    let path = std::env::var_os("BABOON_CE_PAKS")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(PAKS));
+    if !path.exists() {
+        eprintln!("skipping: Campaign Evolved not present at {}", path.display());
         return None;
     }
+    Some(path)
+}
+
+fn mount() -> Option<crate::source::LoadedSourceData> {
+    let paks = paks()?;
     let defs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
     let names = crate::format::TagNameIndex::load_from_definitions(&defs);
     Some(
-        crate::source::load_iostore_container_set(std::path::PathBuf::from(PAKS), &names, &defs)
+        crate::source::load_iostore_container_set(paks, &names, &defs)
             .expect("mount container set"),
     )
 }
@@ -152,6 +165,117 @@ fn a_modded_tag_still_resolves_to_the_shipped_copy() {
     assert!(checked > 0, "at least one tag is served from a mod");
 }
 
+/// Bulk extraction writes the *shipped* payload to a mirror of the browser
+/// tree.
+///
+/// Run over a slice of the install rather than all of it: the layout, the
+/// choice of payload, and the skip accounting are what can be wrong, and none of
+/// them need forty thousand tags to show it.
+#[test]
+fn extracting_container_tags_mirrors_the_tree_with_shipped_bytes() {
+    let Some(loaded) = mount() else { return };
+    let sample = loaded
+        .entries
+        .iter()
+        .filter(|entry| matches!(entry.location, TagEntryLocation::Container { .. }))
+        // Deliberately small. What can be wrong here is the layout, the choice
+        // of payload, and the skip accounting, and none of them need volume to
+        // show it — while a fixture that writes hundreds of files makes the
+        // whole suite's disk busy, and the index tests share one SQLite file.
+        .take(24)
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(!sample.is_empty(), "the mount enumerated container tags");
+
+    let output = std::env::temp_dir().join(format!("baboon-dump-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&output);
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let report = crate::app::export::container_dump::dump_shipped_container_tags(
+        &loaded.source,
+        &sample,
+        &output,
+        &cancel,
+        &|_, _| {},
+    )
+    .expect("extract sample");
+
+    assert_eq!(
+        report.written + report.skipped + report.failed,
+        sample.len(),
+        "every sampled tag is accounted for"
+    );
+    assert!(report.written > 0, "the sample produced files");
+    assert!(!report.cancelled);
+    // Failures are named rather than swallowed. Not asserted to be zero: a run
+    // over the whole install turns up a handful of payloads the Oodle decoder
+    // rejects, and the contract is that those are reported and the rest are
+    // still written — not that the game decompresses perfectly.
+    assert_eq!(
+        report.failures.len(),
+        report.failed.min(20),
+        "every failure up to the report cap is named"
+    );
+
+    for entry in &sample {
+        let path = output.join(&entry.display_path);
+        let shipped = match crate::source::read_shipped_entry_bytes(&loaded.source, entry) {
+            Ok(shipped) => shipped,
+            // Unreadable here means unreadable for the extraction too, and it is
+            // already counted in `failed`.
+            Err(_) => continue,
+        };
+        let Some(shipped) = shipped else {
+            // Mod-only: counted as skipped, and nothing written for it.
+            assert!(!path.exists(), "{} is mod-only", entry.display_path);
+            continue;
+        };
+        // `display_path` is the browser's own path, so joining it onto the
+        // output root is the whole layout claim.
+        let written = std::fs::read(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        assert_eq!(
+            written,
+            shipped,
+            "{} was extracted verbatim from the shipped pack",
+            entry.display_path
+        );
+    }
+    let _ = std::fs::remove_dir_all(&output);
+}
+
+/// Cancelling stops the run and still reports what it managed, rather than
+/// failing outright — a partial extraction has files on disk worth naming.
+#[test]
+fn a_cancelled_extraction_reports_what_it_wrote() {
+    let Some(loaded) = mount() else { return };
+    let sample = loaded
+        .entries
+        .iter()
+        .filter(|entry| matches!(entry.location, TagEntryLocation::Container { .. }))
+        .take(24)
+        .cloned()
+        .collect::<Vec<_>>();
+    assert!(!sample.is_empty());
+    let output =
+        std::env::temp_dir().join(format!("baboon-dump-cancel-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&output);
+    // Already cancelled: every worker breaks on its first check, so nothing is
+    // read and the run is still a reported outcome rather than an error.
+    let cancel = std::sync::atomic::AtomicBool::new(true);
+    let report = crate::app::export::container_dump::dump_shipped_container_tags(
+        &loaded.source,
+        &sample,
+        &output,
+        &cancel,
+        &|_, _| {},
+    )
+    .expect("a cancelled run is not a failure");
+    assert!(report.cancelled);
+    assert_eq!(report.written, 0);
+    assert_eq!(report.failed, 0);
+    let _ = std::fs::remove_dir_all(&output);
+}
+
 /// Exporting a mod over an installed copy of itself: the whole sequence the
 /// export performs, on a copy of a real mod container so nothing in the install
 /// is touched.
@@ -161,13 +285,10 @@ fn a_modded_tag_still_resolves_to_the_shipped_copy() {
 /// afterwards, since the browser reads through it.
 #[test]
 fn a_mounted_container_can_be_released_replaced_and_remounted() {
-    if !std::path::Path::new(PAKS).exists() {
-        eprintln!("skipping: Campaign Evolved not present");
-        return;
-    }
+    let Some(paks) = paks() else { return };
     // A real mod container, copied out of the install. Any non-pakchunk container
     // will do; without one there is nothing index-less to exercise.
-    let Some(donor) = std::fs::read_dir(PAKS)
+    let Some(donor) = std::fs::read_dir(&paks)
         .expect("read Paks")
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
         .find(|path| {
@@ -198,7 +319,7 @@ fn a_mounted_container_can_be_released_replaced_and_remounted() {
     // no directory index, so only the containers it overrides can name its chunks.
     let mut loaded = crate::source::load_iostore_container(
         target.clone(),
-        Some(std::path::PathBuf::from(PAKS)),
+        Some(paks.clone()),
         &names,
         &defs,
     )

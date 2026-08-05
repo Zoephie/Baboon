@@ -11,6 +11,9 @@ pub(in crate::app) enum DeferredFileAction {
     SaveProject,
     SaveProjectAs,
     ExportMod,
+    /// Write every tag the mounted containers ship to a folder. Deferred like
+    /// the other actions that open a native dialog straight from the menu.
+    ExtractAllContainerTags,
     PokeCurrentTag,
     Close(PendingCloseAction),
 }

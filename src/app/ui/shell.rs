@@ -210,6 +210,30 @@ impl Baboon {
                                 ui.close_menu();
                                 self.review_changes();
                             }
+                            // Expert-gated because it is the one action here
+                            // that writes tens of thousands of files: useful
+                            // for getting the tag set out to diff or grep, and
+                            // not something to trip over while editing.
+                            if self.expert_mode
+                                && ui
+                                    .add_enabled(
+                                        self.container_dump_job.is_none(),
+                                        egui::Button::new("Extract All Tags to Folder\u{2026}"),
+                                    )
+                                    .on_hover_text(
+                                        "Expert feature: write every tag these containers ship to a folder laid out like an editing kit. Tens of thousands of files \u{2014} this takes a while",
+                                    )
+                                    .on_disabled_hover_text(
+                                        "An extraction is already running",
+                                    )
+                                    .clicked()
+                            {
+                                ui.close_menu();
+                                self.defer_file_action(
+                                    DeferredFileAction::ExtractAllContainerTags,
+                                    ctx,
+                                );
+                            }
                         }
                         if self.expert_mode {
                             if ui
@@ -741,6 +765,36 @@ impl Baboon {
                     } else {
                         ui.label(&self.status);
                     }
+                    // Additive rather than part of the chain above: the
+                    // extraction outlives whatever the user does next, and its
+                    // bar is the only place a cancel is reachable from.
+                    if let Some(job) = &self.container_dump_job {
+                        let (fraction, done, total) = (job.fraction(), job.done, job.total);
+                        let remaining = job.remaining();
+                        ui.separator();
+                        ui.label(RichText::new("Extracting tags").strong())
+                            // Where it is writing. The folder was chosen minutes
+                            // ago in a native dialog and is nowhere else on
+                            // screen once the confirm has closed.
+                            .on_hover_text(format!("Writing to {}", job.output.display()));
+                        draw_index_progress_bar(
+                            ui,
+                            220.0,
+                            Some(fraction),
+                            &format!("{done} / {total} tags"),
+                        );
+                        if let Some(remaining) = remaining {
+                            ui.label(
+                                RichText::new(format!("{} left", format_remaining(remaining)))
+                                    .color(subtle_dark())
+                                    .small(),
+                            );
+                        }
+                        if ui.small_button("Cancel").clicked() {
+                            job.cancel.store(true, Ordering::Relaxed);
+                        }
+                        ctx.request_repaint();
+                    }
                     if let Some(progress) = &self.folder_refactor {
                         ui.separator();
                         ui.label(RichText::new(&progress.label).strong());
@@ -1255,6 +1309,9 @@ impl Baboon {
                 self.save_campaign_project_file_as(kit, now);
             }
             Some(DeferredFileAction::ExportMod) => self.export_mod(),
+            Some(DeferredFileAction::ExtractAllContainerTags) => {
+                self.begin_extract_all_container_tags(ctx.clone())
+            }
             Some(DeferredFileAction::PokeCurrentTag) => self.begin_poke_current_tag(ctx.clone()),
             Some(DeferredFileAction::Close(action)) => self.request_close_action(action, ctx),
             None => {}
@@ -1333,6 +1390,7 @@ impl Baboon {
         self.draw_chimp_save_window(ctx);
         self.draw_clear_stash_confirm_window(ctx);
         self.draw_container_duplicate_confirm_window(ctx);
+        self.draw_container_dump_confirm_window(ctx);
         self.draw_delete_confirm_window(ctx);
         self.draw_chimp_mesh_texture_prompt(ctx);
         self.draw_chimp_texture_export_prompt(ctx);

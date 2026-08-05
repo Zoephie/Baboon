@@ -1007,8 +1007,12 @@ pub(in crate::app) fn format_byte_count(bytes: usize) -> String {
         format!("{bytes} B")
     } else if bytes < 1024 * 1024 {
         format!("{:.1} KiB", bytes as f32 / 1024.0)
-    } else {
+    } else if bytes < 1024 * 1024 * 1024 {
         format!("{:.1} MiB", bytes as f32 / (1024.0 * 1024.0))
+    } else {
+        // A bulk container extraction is measured in gigabytes, and "8734.2 MiB"
+        // is a number the reader has to divide themselves.
+        format!("{:.1} GiB", bytes as f32 / (1024.0 * 1024.0 * 1024.0))
     }
 }
 

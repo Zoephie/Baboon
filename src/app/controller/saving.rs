@@ -49,6 +49,105 @@ impl Baboon {
         false
     }
 
+    /// Applies `WorkerMessage::ContainerDumpProgress`.
+    pub(super) fn handle_container_dump_progress(
+        &mut self,
+        stamp: KitStamp,
+        done: usize,
+        total: usize,
+    ) -> bool {
+        if self.resolve_stamp(stamp).is_none() {
+            return true;
+        }
+        let Some(job) = self
+            .container_dump_job
+            .as_mut()
+            .filter(|job| job.kit == stamp.kit)
+        else {
+            return false;
+        };
+        job.done = done;
+        job.total = total;
+        false
+    }
+
+    /// Applies `WorkerMessage::ContainerDumpFinished`.
+    ///
+    /// The result goes to a notice rather than the status line: an extraction
+    /// runs for minutes, the user has looked away, and a tally that expires on a
+    /// timer is a tally nobody reads. The job is cleared either way — including
+    /// for a workspace that closed mid-run, which would otherwise leave a
+    /// progress bar on screen with nothing behind it.
+    pub(super) fn handle_container_dump_finished(
+        &mut self,
+        stamp: KitStamp,
+        result: Result<ContainerDumpReport, String>,
+    ) -> bool {
+        if self
+            .container_dump_job
+            .as_ref()
+            .is_some_and(|job| job.kit == stamp.kit)
+        {
+            self.container_dump_job = None;
+        }
+        // Deliberately not gated on `resolve_stamp`: the files were written
+        // whatever became of the workspace, and silently dropping the outcome of
+        // an operation that just took ten minutes is worse than a late notice.
+        match result {
+            Ok(report) => {
+                let mut message = format!(
+                    "Wrote {} tag(s), {}.",
+                    report.written,
+                    format_byte_count(report.bytes as usize)
+                );
+                if report.skipped > 0 {
+                    message.push_str(&format!(
+                        "\n{} tag(s) skipped: only a mod provides them, so the game ships no copy \
+                         to extract.",
+                        report.skipped
+                    ));
+                }
+                if report.failed > 0 {
+                    message.push_str(&format!("\n{} tag(s) failed:", report.failed));
+                    for failure in &report.failures {
+                        message.push_str(&format!("\n  {failure}"));
+                    }
+                    if report.failed > report.failures.len() {
+                        message.push_str(&format!(
+                            "\n  ...and {} more",
+                            report.failed - report.failures.len()
+                        ));
+                    }
+                }
+                self.status = if report.cancelled {
+                    format!("Extraction cancelled after {} tag(s)", report.written)
+                } else {
+                    format!("Extracted {} tag(s)", report.written)
+                };
+                self.operation_notice = Some(OperationNotice {
+                    title: if report.cancelled {
+                        "Extraction cancelled".to_owned()
+                    } else {
+                        "Extraction finished".to_owned()
+                    },
+                    message,
+                    // A cancelled run did what was asked of it. Only the tags
+                    // that could not be written are a failure.
+                    failed: report.failed > 0,
+                });
+            }
+            Err(error) => {
+                self.status = format!("Extraction failed: {error}");
+                self.operation_notice = Some(OperationNotice {
+                    title: "Extraction failed".to_owned(),
+                    message: error,
+                    failed: true,
+                });
+            }
+        }
+        false
+    }
+
     /// Applies `WorkerMessage::EntryIndexSaved`, rejecting stale source generations.
     pub(super) fn handle_entry_index_saved(
         &mut self,

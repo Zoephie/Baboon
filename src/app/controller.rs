@@ -773,6 +773,12 @@ impl Baboon {
                     done,
                     total,
                 } => self.handle_chimp_level_progress(kit, phase, done, total),
+                WorkerMessage::ContainerDumpProgress { stamp, done, total } => {
+                    self.handle_container_dump_progress(stamp, done, total)
+                }
+                WorkerMessage::ContainerDumpFinished { stamp, result } => {
+                    self.handle_container_dump_finished(stamp, result)
+                }
                 WorkerMessage::ExportFinished(result) => self.handle_export_finished(result),
                 WorkerMessage::PokePreflightFinished { kit, key, result } => {
                     self.handle_poke_preflight(kit, key, result);
@@ -3685,6 +3691,128 @@ impl Baboon {
             let result =
                 extract_bitmap_entries(&source, &entries, &output).map_err(|e| e.to_string());
             let _ = tx.send(WorkerMessage::ExportFinished(result));
+            ctx.request_repaint();
+        });
+    }
+
+    /// Asks where to put every shipped tag in the mounted containers, then
+    /// raises the confirmation that says what that costs.
+    ///
+    /// Expert-only, and re-checked here rather than trusting the menu: this is
+    /// the one action in the application that writes tens of thousands of files
+    /// in one go, and it should not be reachable by a stale request.
+    pub(super) fn begin_extract_all_container_tags(&mut self, _ctx: egui::Context) {
+        if !self.expert_mode {
+            self.status = "Extracting all tags requires Expert mode".to_owned();
+            return;
+        }
+        if self.container_dump_job.is_some() {
+            self.status = "An extraction is already running".to_owned();
+            return;
+        }
+        let Some(source_data) = self.source() else {
+            return;
+        };
+        let TagSource::IoStoreContainerSet { root, .. } = &source_data.source else {
+            self.status = "Extracting all tags needs a Campaign Evolved container".to_owned();
+            return;
+        };
+        let root = root.clone();
+        // A container mount enumerates every tag up front, so this is the whole
+        // set — there is no background scan to wait on first.
+        let total = source_data
+            .entries
+            .iter()
+            .filter(|entry| matches!(entry.location, TagEntryLocation::Container { .. }))
+            .count();
+        if total == 0 {
+            self.status = "This workspace has no container tags to extract".to_owned();
+            return;
+        }
+        let Some(output) = rfd::FileDialog::new()
+            .set_title("Extract All Tags")
+            .pick_folder()
+        else {
+            return;
+        };
+        // Tens of thousands of files landing in the game's own Paks folder would
+        // be found by the next mount and are a nuisance to unpick by hand.
+        if output.starts_with(&root) {
+            self.status = format!(
+                "Choose a folder outside {} — extracting into the game's own Paks folder would \
+                 leave tens of thousands of files beside its containers",
+                root.display()
+            );
+            return;
+        }
+        self.container_dump_confirm = Some(ContainerDumpConfirm {
+            kit: self.active_kit_id(),
+            output,
+            total,
+        });
+    }
+
+    /// Runs the confirmed extraction on a worker thread.
+    pub(super) fn start_container_dump(
+        &mut self,
+        kit: KitId,
+        output: PathBuf,
+        ctx: egui::Context,
+    ) {
+        if self.container_dump_job.is_some() {
+            self.status = "An extraction is already running".to_owned();
+            return;
+        }
+        let Some(index) = self.kit_index(kit) else {
+            return;
+        };
+        let Some(source_data) = self.kits[index].source.as_ref() else {
+            return;
+        };
+        // Cloning the source is cheap: the mounted archives are behind `Arc`, so
+        // this shares them rather than re-mapping the containers.
+        let source = source_data.source.clone();
+        let entries: Vec<TagEntry> = source_data
+            .entries
+            .iter()
+            .filter(|entry| matches!(entry.location, TagEntryLocation::Container { .. }))
+            .cloned()
+            .collect();
+        let total = entries.len();
+        if total == 0 {
+            self.status = "This workspace has no container tags to extract".to_owned();
+            return;
+        }
+        let stamp = KitStamp {
+            kit,
+            generation: self.kits[index].generation,
+        };
+        let cancel = Arc::new(AtomicBool::new(false));
+        self.container_dump_job = Some(ContainerDumpJob {
+            kit,
+            output: output.clone(),
+            done: 0,
+            total,
+            started: std::time::Instant::now(),
+            cancel: cancel.clone(),
+        });
+        self.status = format!("Extracting {total} tag(s) to {}", output.display());
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let progress_tx = tx.clone();
+            let progress_ctx = ctx.clone();
+            let progress = move |done: usize, total: usize| {
+                let _ = progress_tx.send(WorkerMessage::ContainerDumpProgress { stamp, done, total });
+                progress_ctx.request_repaint();
+            };
+            // This reads memory-mapped `.ucas` partitions across several
+            // threads; a panic in there must end the job, not the application.
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                dump_shipped_container_tags(&source, &entries, &output, &cancel, &progress)
+                    .map_err(|error| error.to_string())
+            }))
+            .unwrap_or_else(|_| Err("Tag extraction worker crashed".to_owned()));
+            let _ = tx.send(WorkerMessage::ContainerDumpFinished { stamp, result });
             ctx.request_repaint();
         });
     }
