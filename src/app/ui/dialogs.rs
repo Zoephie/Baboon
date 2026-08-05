@@ -3052,6 +3052,9 @@ impl Baboon {
         let mut do_import = false;
         let mut do_cancel = false;
         let mut do_analyze = false;
+        // Set to the source profile when the user asks what this conversion
+        // will cost; opens the compatibility sheet pre-aimed at the answer.
+        let mut show_compat: Option<String> = None;
         egui::Window::new("Import Tag")
             .id(egui::Id::new("import_tag_dialog"))
             .collapsible(false)
@@ -3158,6 +3161,16 @@ impl Baboon {
                                 .clicked()
                             {
                                 do_analyze = true;
+                            }
+                            if ui
+                                .link("What transfers?")
+                                .on_hover_text(
+                                    "Open the compatibility sheet for this group, in this \
+                                     direction",
+                                )
+                                .clicked()
+                            {
+                                show_compat = Some(source_game.clone());
                             }
                         });
                         if let Some(draft) = draft.as_ref() {
@@ -3271,6 +3284,17 @@ impl Baboon {
 
         if !open {
             do_cancel = true;
+        }
+        if let Some(source_game) = show_compat {
+            let group = self
+                .import_tag_dialog
+                .as_ref()
+                .map(|dialog| dialog.group_name.clone())
+                .unwrap_or_default();
+            self.tag_compat.ensure_loaded(&locate_help_docs_root());
+            self.tag_compat.focus(&source_game, CAMPAIGN_EVOLVED_GAME, &group);
+            self.help_panel_tab = HelpPanelTab::TagCompat;
+            self.about_open = true;
         }
         if do_cancel {
             self.import_tag_dialog = None;

@@ -79,18 +79,6 @@ impl CompatVerdict {
         }
     }
 
-    /// A one-line explanation for a reader who has not memorized the legend.
-    pub fn describe(self) -> &'static str {
-        match self {
-            Self::HardBlocked => "cannot be converted",
-            Self::SourceOnly => "dropped — the target has no such field",
-            Self::OptionLoss => "some options have no counterpart",
-            Self::TypeChangedSafe => "same bytes, different type name",
-            Self::RenamedProvable => "renamed, and the rename is recorded",
-            Self::TargetOnly => "left at its default — the source has no such field",
-            Self::Identical => "transfers unchanged",
-        }
-    }
 }
 
 impl fmt::Display for CompatVerdict {

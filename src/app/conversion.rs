@@ -1228,22 +1228,6 @@ fn validate_critical_runtime_safety(
     Ok(())
 }
 
-fn struct_contains_non_null_resource(structure: TagStruct<'_>) -> bool {
-    structure.fields().any(|field| {
-        field
-            .as_resource()
-            .is_some_and(|resource| !matches!(resource.kind(), TagResourceKind::Null))
-            || field
-                .as_struct()
-                .is_some_and(struct_contains_non_null_resource)
-            || field
-                .as_block()
-                .is_some_and(|block| block.iter().any(struct_contains_non_null_resource))
-            || field
-                .as_array()
-                .is_some_and(|array| array.iter().any(struct_contains_non_null_resource))
-    })
-}
 
 fn struct_at_path<'a>(mut structure: TagStruct<'a>, path: &str) -> Option<TagStruct<'a>> {
     for component in path.split('/').filter(|component| !component.is_empty()) {

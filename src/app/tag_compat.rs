@@ -68,6 +68,29 @@ impl CompatVerdict {
         matches!(self, Self::HardBlocked | Self::SourceOnly | Self::OptionLoss)
     }
 
+    /// Every verdict, so callers can derive a set rather than restate one.
+    const ALL: [Self; 7] = [
+        Self::HardBlocked,
+        Self::SourceOnly,
+        Self::OptionLoss,
+        Self::TypeChangedSafe,
+        Self::RenamedProvable,
+        Self::TargetOnly,
+        Self::Identical,
+    ];
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::HardBlocked => "hard_blocked",
+            Self::SourceOnly => "source_only",
+            Self::OptionLoss => "option_loss",
+            Self::TypeChangedSafe => "type_changed_safe",
+            Self::RenamedProvable => "renamed_provable",
+            Self::TargetOnly => "target_only",
+            Self::Identical => "identical",
+        }
+    }
+
     pub(in crate::app) fn color(self) -> Color32 {
         match self {
             Self::HardBlocked => material_delete_text(),
@@ -76,6 +99,21 @@ impl CompatVerdict {
             _ => subtle_dark(),
         }
     }
+}
+
+/// The `IN (...)` list of loss verdicts, built from [`CompatVerdict::is_loss`]
+/// rather than written out.
+///
+/// Two queries filter on it, and a third would be easy to add. Spelling the set
+/// into SQL by hand is how one of them ends up disagreeing with the checkbox
+/// that claims to control it.
+fn loss_verdict_sql() -> String {
+    CompatVerdict::ALL
+        .iter()
+        .filter(|verdict| verdict.is_loss())
+        .map(|verdict| format!("'{}'", verdict.as_str()))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 /// An ordered profile pair the database covers.
@@ -355,16 +393,16 @@ fn query_groups(
     losses_only: bool,
     search: &str,
 ) -> Result<Vec<CompatGroupRow>, String> {
-    let mut statement = connection
-        .prepare(
-            "SELECT group_name,verdict,size_diff_structs,source_only_fields,target_only_fields,blocked_reason
-             FROM groups
-             WHERE pair_id=?1
-               AND (?2=0 OR verdict IN ('hard_blocked','source_only','option_loss'))
-               AND (?3='' OR group_name LIKE '%'||?3||'%')
-             ORDER BY group_name",
-        )
-        .map_err(|error| error.to_string())?;
+    let sql = format!(
+        "SELECT group_name,verdict,size_diff_structs,source_only_fields,target_only_fields,blocked_reason
+         FROM groups
+         WHERE pair_id=?1
+           AND (?2=0 OR verdict IN ({}))
+           AND (?3='' OR group_name LIKE '%'||?3||'%')
+         ORDER BY group_name",
+        loss_verdict_sql(),
+    );
+    let mut statement = connection.prepare(&sql).map_err(|error| error.to_string())?;
     let rows = statement
         .query_map(params![pair, losses_only as i64, search.trim()], |row| {
             Ok(CompatGroupRow {
@@ -387,19 +425,19 @@ fn query_fields(
     group: &str,
     losses_only: bool,
 ) -> Result<Vec<CompatFieldRow>, String> {
-    let mut statement = connection
-        .prepare(
-            "SELECT f.struct_key,COALESCE(s.first_path,f.struct_key),
-                    f.source_name,f.source_type,f.target_name,f.target_type,
-                    f.verdict,f.rule,f.detail
-             FROM fields f
-             LEFT JOIN structs s
-               ON s.pair_id=f.pair_id AND s.group_name=f.group_name AND s.struct_key=f.struct_key
-             WHERE f.pair_id=?1 AND f.group_name=?2
-               AND (?3=0 OR f.verdict IN ('hard_blocked','source_only','option_loss'))
-             ORDER BY s.first_path,f.ordinal",
-        )
-        .map_err(|error| error.to_string())?;
+    let sql = format!(
+        "SELECT f.struct_key,COALESCE(s.first_path,f.struct_key),
+                f.source_name,f.source_type,f.target_name,f.target_type,
+                f.verdict,f.rule,f.detail
+         FROM fields f
+         LEFT JOIN structs s
+           ON s.pair_id=f.pair_id AND s.group_name=f.group_name AND s.struct_key=f.struct_key
+         WHERE f.pair_id=?1 AND f.group_name=?2
+           AND (?3=0 OR f.verdict IN ({}))
+         ORDER BY s.first_path,f.ordinal",
+        loss_verdict_sql(),
+    );
+    let mut statement = connection.prepare(&sql).map_err(|error| error.to_string())?;
     let rows = statement
         .query_map(params![pair, group, losses_only as i64], |row| {
             Ok(CompatFieldRow {
