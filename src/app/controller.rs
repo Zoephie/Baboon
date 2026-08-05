@@ -4800,12 +4800,16 @@ impl Baboon {
             self.status = "Export Mod is only for Campaign Evolved containers".to_owned();
             return;
         };
+        // Tag bytes ride along as the `Arc` the overlay already holds rather
+        // than as a copy. The writer only borrows slices from these, and a
+        // batch of animation graphs is measured in gigabytes -- copying each
+        // one to hand it over is a second full set nobody reads.
         let mut overrides: Vec<(
             std::sync::Arc<blam_tags::iostore::IoStoreArchive>,
             String,
-            Vec<u8>,
+            std::sync::Arc<Vec<u8>>,
         )> = Vec::new();
-        let mut new_pkgs: Vec<(Vec<u8>, Vec<u8>, String)> = Vec::new();
+        let mut new_pkgs: Vec<(Vec<u8>, std::sync::Arc<Vec<u8>>, String)> = Vec::new();
         let mut skipped = 0usize;
         for overlay in snapshot.overlays.values() {
             if !included.contains(&overlay.identity) {
@@ -4830,11 +4834,7 @@ impl Baboon {
                         skipped += 1;
                         continue;
                     };
-                    overrides.push((
-                        m.archive.clone(),
-                        rel_path.clone(),
-                        overlay.bytes.as_ref().clone(),
-                    ));
+                    overrides.push((m.archive.clone(), rel_path.clone(), overlay.bytes.clone()));
                 }
                 TagEntryLocation::NewContainer {
                     template,
@@ -4854,7 +4854,7 @@ impl Baboon {
                         skipped += 1;
                         continue;
                     };
-                    new_pkgs.push((template, overlay.bytes.as_ref().clone(), package.clone()));
+                    new_pkgs.push((template, overlay.bytes.clone(), package.clone()));
                 }
                 _ => skipped += 1,
             }
