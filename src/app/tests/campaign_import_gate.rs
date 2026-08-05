@@ -269,3 +269,108 @@ fn a_campaign_evolved_only_group_is_claimed_by_nothing_else() {
         "skull_globals exists only in Campaign Evolved",
     );
 }
+
+/// A large, real, heavily-authored character graph — the one that found two
+/// bugs the small fixture could not.
+///
+/// `elevator_1` passes without exercising either: its skeleton nodes carry no
+/// flags and it has no IK chain events, so the fields that failed to convert
+/// never had a non-default value to report. Size is not the point; authored
+/// content is. This one has 2,136 flagged nodes and IK chains using the -1
+/// sentinel.
+///
+/// 167 MB, so it is `#[ignore]`d — run it with `-- --ignored` before trusting a
+/// change to the animation-graph conversion.
+#[test]
+#[ignore]
+fn the_spartans_animation_graph_converts_whole() {
+    let source_path = std::path::Path::new(
+        "D:/SteamLibrary/steamapps/common/HREK/tags/objects/characters/spartans/spartans.model_animation_graph",
+    );
+    if !source_path.is_file() {
+        eprintln!("skipping: HREK is not installed at the expected path");
+        return;
+    }
+    let source = TagFile::read(source_path).expect("read the spartans graph");
+    let draft = analyze_conversion(
+        &source,
+        "haloreach_mcc",
+        CAMPAIGN_EVOLVED_GAME,
+        &locate_definitions_root(),
+        None,
+    )
+    .unwrap_or_else(|error| panic!("the spartans graph must convert: {error}"));
+
+    assert!(
+        draft.report.transferred_resources > 0,
+        "the animation payload has to come with it",
+    );
+    let bytes = draft.tag.write_to_bytes().expect("serialize it");
+    TagFile::read_from_bytes(&bytes).expect("read it back");
+}
+
+/// Every animation graph HREK ships, converted. The only way to know the
+/// reviewed drop list is complete rather than complete-for-the-files-we-tried.
+///
+/// ~3 GB and 2,603 files, so it is `#[ignore]`d and prints a summary instead of
+/// asserting file by file.
+#[test]
+#[ignore]
+fn the_whole_hrek_animation_corpus_converts() {
+    let root = std::path::Path::new("D:/SteamLibrary/steamapps/common/HREK/tags");
+    if !root.is_dir() {
+        eprintln!("skipping: HREK is not installed at the expected path");
+        return;
+    }
+    let definitions = locate_definitions_root();
+    let mut graphs = Vec::new();
+    collect_graphs(root, &mut graphs);
+    graphs.sort();
+    assert!(!graphs.is_empty(), "HREK should ship animation graphs");
+
+    let mut converted = 0usize;
+    let mut failures: Vec<String> = Vec::new();
+    for path in &graphs {
+        let Ok(source) = TagFile::read(path) else {
+            failures.push(format!("{}: unreadable", path.display()));
+            continue;
+        };
+        match analyze_conversion(
+            &source,
+            "haloreach_mcc",
+            CAMPAIGN_EVOLVED_GAME,
+            &definitions,
+            None,
+        ) {
+            Ok(_) => converted += 1,
+            Err(error) => failures.push(format!("{}: {error}", path.display())),
+        }
+    }
+    eprintln!("converted {converted}/{} animation graphs", graphs.len());
+    for failure in failures.iter().take(20) {
+        eprintln!("  {failure}");
+    }
+    assert!(
+        failures.is_empty(),
+        "{} of {} graphs did not convert",
+        failures.len(),
+        graphs.len(),
+    );
+}
+
+fn collect_graphs(directory: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_graphs(&path, out);
+        } else if path
+            .extension()
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("model_animation_graph"))
+        {
+            out.push(path);
+        }
+    }
+}

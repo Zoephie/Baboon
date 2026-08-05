@@ -731,12 +731,26 @@ impl ConversionMappingCatalog {
         target_game: &str,
         source_path: &str,
     ) -> Option<&'a str> {
+        // A rule covers its own path *and* everything beneath it. When the
+        // target has no `facial wrinkle events` block at all, it has none of
+        // the fields inside one either, and the converter reports those
+        // children individually — 85 of HREK's cinematic head graphs refused on
+        // `.../facial wrinkle events[0]/wrinkle name` while the rule named the
+        // block. Matching by ancestry is what a dropped container means.
+        //
+        // `is_ancestor_of` compares segment by segment and ignores element
+        // indices, so this cannot match a differently-named sibling and one
+        // rule covers every element of a repeated block.
         let matches = |rule: &'a ReferenceDropRule| {
-            (rule.group.eq_ignore_ascii_case(group)
-                && game_scope_matches(&rule.source_games, source_game)
-                && game_scope_matches(&rule.target_games, target_game)
-                && clean_field_key(&rule.source_path) == clean_field_key(source_path))
-            .then_some(rule.reason.as_str())
+            if !rule.group.eq_ignore_ascii_case(group)
+                || !game_scope_matches(&rule.source_games, source_game)
+                || !game_scope_matches(&rule.target_games, target_game)
+            {
+                return None;
+            }
+            let covered = blam_tags::TagFieldPath::parse(&clean_field_key(&rule.source_path));
+            let reported = blam_tags::TagFieldPath::parse(&clean_field_key(source_path));
+            covered.is_ancestor_of(&reported).then_some(rule.reason.as_str())
         };
         self.accepted_field_drops
             .iter()
@@ -3014,6 +3028,64 @@ fn normalize_option_name(name: &str) -> String {
         .to_ascii_lowercase()
 }
 
+/// Byte width of an integer field type, or `None` if it is not one.
+fn integer_width(field_type: TagFieldType) -> Option<u32> {
+    Some(match field_type {
+        TagFieldType::CharInteger | TagFieldType::ByteInteger => 1,
+        TagFieldType::ShortInteger | TagFieldType::WordInteger => 2,
+        TagFieldType::LongInteger | TagFieldType::DwordInteger => 4,
+        TagFieldType::Int64Integer | TagFieldType::QwordInteger => 8,
+        _ => return None,
+    })
+}
+
+fn is_signed_integer(field_type: TagFieldType) -> bool {
+    matches!(
+        field_type,
+        TagFieldType::CharInteger
+            | TagFieldType::ShortInteger
+            | TagFieldType::LongInteger
+            | TagFieldType::Int64Integer
+    )
+}
+
+/// Reinterpret `value` between two same-width integer types of different
+/// signedness, leaving every other pair alone.
+///
+/// The two declare the same bytes; only how an editor prints them differs. A
+/// signed -1 and an unsigned 255 in a one-byte field are the same 0xFF, and the
+/// engine reads the byte. Passing the mathematical value through a range check
+/// instead would reject the most common sentinel in the format.
+///
+/// Widening and narrowing are deliberately untouched: those really can lose a
+/// value, and the range check is what catches it.
+fn reinterpret_same_width_integer(
+    source_type: TagFieldType,
+    target_type: TagFieldType,
+    value: i128,
+) -> i128 {
+    let (Some(source_width), Some(target_width)) =
+        (integer_width(source_type), integer_width(target_type))
+    else {
+        return value;
+    };
+    if source_width != target_width || is_signed_integer(source_type) == is_signed_integer(target_type)
+    {
+        return value;
+    }
+    let bits = source_width * 8;
+    let mask = if bits >= 128 { u128::MAX } else { (1u128 << bits) - 1 };
+    let stored = value as u128 & mask;
+    if is_signed_integer(target_type) {
+        // Unsigned to signed: sign-extend from the top bit of the stored width.
+        let shift = 128 - bits;
+        ((stored << shift) as i128) >> shift
+    } else {
+        // Signed to unsigned: the masked bits are already the value.
+        stored as i128
+    }
+}
+
 fn convert_integer(
     source: TagField<'_>,
     mut target: TagFieldMut<'_>,
@@ -3024,6 +3096,13 @@ fn convert_integer(
         return;
     };
     let target_type = target.as_ref().field_type();
+    // Two integers of the same width under different signedness are the same
+    // bytes, so carry the bits rather than the mathematical value. Halo Reach
+    // declares an animation graph's IK `chain index` as `char_integer` and
+    // Campaign Evolved as `byte_integer`; both write 0xFF for "none", but a
+    // range check sees -1 arriving at a u8 and calls it a loss. It reported
+    // 2,124 of them on one character graph, none of them real.
+    let value = reinterpret_same_width_integer(source.field_type(), target_type, value);
     let Some(converted) = integer_field_value(target_type, value) else {
         record_unsupported(
             context,
@@ -5541,7 +5620,12 @@ mod tests {
     #[test]
     fn an_uncatalogued_animation_graph_loss_still_refuses() {
         let catalog = ConversionMappingCatalog::load().unwrap();
-        for field in ["node joint flags", "additional flags", "facial wrinkle events"] {
+        // The paths the converter actually reports, indices and all.
+        for field in [
+            "definitions/skeleton nodes[0]/node joint flags",
+            "definitions/skeleton nodes[7]/additional flags",
+            "definitions/animations[0]/shared animation data[0]/facial wrinkle events[0]/region",
+        ] {
             assert!(
                 catalog
                     .accepted_drop_reason(
@@ -5562,49 +5646,160 @@ mod tests {
                     "model_animation_graph",
                     "haloreach_mcc",
                     CAMPAIGN_EVOLVED_GAME,
-                    "some field nobody reviewed",
+                    "definitions/some field nobody reviewed",
                 )
                 .is_none(),
         );
     }
 
-    /// Every reviewed drop has to name a field the schemas actually declare. A
-    /// rule written for a name that has since moved reads as coverage and
-    /// silently provides none.
+    /// A rule that drops a container drops what is inside it.
+    ///
+    /// Campaign Evolved has no `facial wrinkle events` block, so it has none of
+    /// the fields within one either — but the converter reports those children
+    /// individually, one per element. 85 of HREK's cinematic head graphs
+    /// refused on `.../facial wrinkle events[0]/wrinkle name` while the rule
+    /// named the block itself.
     #[test]
-    fn every_accepted_drop_names_a_real_field() {
+    fn a_dropped_container_covers_the_fields_inside_it() {
+        let catalog = ConversionMappingCatalog::load().unwrap();
+        let reason = |path: &str| {
+            catalog.accepted_drop_reason(
+                "model_animation_graph",
+                "haloreach_mcc",
+                CAMPAIGN_EVOLVED_GAME,
+                path,
+            )
+        };
+
+        // The block itself, and the children the converter actually reports.
+        for path in [
+            "definitions/animations[0]/shared animation data[0]/facial wrinkle events",
+            "definitions/animations[0]/shared animation data[0]/facial wrinkle events[0]/wrinkle name",
+            "definitions/animations[12]/shared animation data[0]/facial wrinkle events[3]/region",
+        ] {
+            assert!(reason(path).is_some(), "`{path}` should be covered");
+        }
+
+        // Ancestry, not string prefix: a differently-named sibling is not
+        // covered just because it starts the same way.
+        assert!(reason("definitions/animations[0]/shared animation data[0]/facial wrinkle eventsX").is_none());
+        // And an unrelated field in the same struct is still a real loss.
+        assert!(reason("definitions/animations[0]/shared animation data[0]/some other field").is_none());
+    }
+
+    /// A signedness rename carries the bits, not the arithmetic.
+    ///
+    /// `-1` is the format's "no index" sentinel and appears everywhere. Halo
+    /// Reach declares an animation graph's IK `chain index` signed and Campaign
+    /// Evolved declares it unsigned; both store 0xFF. Range-checking the
+    /// mathematical value instead reported 2,124 losses on one character graph,
+    /// none of them real.
+    #[test]
+    fn a_signedness_rename_carries_the_bits() {
+        use TagFieldType as T;
+        // One byte, signed to unsigned and back.
+        assert_eq!(reinterpret_same_width_integer(T::CharInteger, T::ByteInteger, -1), 255);
+        assert_eq!(reinterpret_same_width_integer(T::ByteInteger, T::CharInteger, 255), -1);
+        assert_eq!(reinterpret_same_width_integer(T::CharInteger, T::ByteInteger, 7), 7);
+        // Wider pairs behave the same way.
+        assert_eq!(reinterpret_same_width_integer(T::ShortInteger, T::WordInteger, -1), 65535);
+        assert_eq!(reinterpret_same_width_integer(T::LongInteger, T::DwordInteger, -1), 4294967295);
+        assert_eq!(reinterpret_same_width_integer(T::DwordInteger, T::LongInteger, 4294967295), -1);
+
+        // Same signedness is left alone.
+        assert_eq!(reinterpret_same_width_integer(T::CharInteger, T::CharInteger, -1), -1);
+        // And so is a real width change, where the range check is the point.
+        assert_eq!(reinterpret_same_width_integer(T::LongInteger, T::ByteInteger, -1), -1);
+        assert_eq!(reinterpret_same_width_integer(T::CharInteger, T::LongInteger, -1), -1);
+    }
+
+    /// Every reviewed drop has to resolve to a real field, by the same path the
+    /// converter will report it under.
+    ///
+    /// This is the test the first attempt needed and did not have. The rules
+    /// were written with bare field names — `additional flags` — while the
+    /// converter reports `definitions/skeleton nodes[0]/additional flags`, so
+    /// nothing matched and every animation graph with a non-default node flag
+    /// refused. A real 167 MB Halo Reach graph found that; a schema walk finds
+    /// it in milliseconds, on CI, without a kit.
+    ///
+    /// Element indices are stripped before comparison, which is what lets one
+    /// rule cover a field inside a block of 2,136 elements.
+    #[test]
+    fn every_accepted_drop_resolves_along_the_path_the_converter_reports() {
         let catalog = ConversionMappingCatalog::load().unwrap();
         let definitions = locate_definitions_root();
+        assert!(
+            !catalog.accepted_field_drops.is_empty(),
+            "the animation graph rules should be here",
+        );
+
         for rule in &catalog.accepted_field_drops {
-            // Only the *source* side. A dropped field exists there and, by
-            // definition, not on the target — that is what makes it a drop.
             for game in &rule.source_games {
                 let path = definitions.join(game).join(format!("{}.json", rule.group));
                 if !path.is_file() {
                     continue;
                 }
-                let text = std::fs::read_to_string(&path).unwrap();
+                let tag = TagFile::new(&path)
+                    .unwrap_or_else(|error| panic!("build {game}/{}: {error}", rule.group));
                 assert!(
-                    text.contains(rule.source_path.as_str()),
-                    "{game}/{} declares no field named `{}`",
+                    schema_path_resolves(tag.definitions().root_struct(), &rule.source_path),
+                    "{game}/{}: `{}` does not resolve; the converter would report a                      different path and this rule would never fire",
                     rule.group,
                     rule.source_path,
                 );
             }
+            // And it must genuinely be absent on the far side, or the rule is
+            // hiding a conversion failure rather than recording a known loss.
             for game in &rule.target_games {
                 let path = definitions.join(game).join(format!("{}.json", rule.group));
                 if !path.is_file() {
                     continue;
                 }
-                let text = std::fs::read_to_string(&path).unwrap();
+                let tag = TagFile::new(&path).unwrap();
                 assert!(
-                    !text.contains(rule.source_path.as_str()),
-                    "{game}/{} does declare `{}`, so it is not a drop and the rule                      is hiding a real conversion failure",
+                    !schema_path_resolves(tag.definitions().root_struct(), &rule.source_path),
+                    "{game}/{} does declare `{}`, so it is not a drop",
                     rule.group,
                     rule.source_path,
                 );
             }
         }
+    }
+
+    /// Walk a `/`-separated field path through a schema, descending containers.
+    #[cfg(test)]
+    fn schema_path_resolves(root: blam_tags::TagStructDefinition<'_>, path: &str) -> bool {
+        let mut current = root;
+        let segments: Vec<String> = blam_tags::TagFieldPath::parse(path)
+            .strip_node_indices()
+            .to_string()
+            .split('/')
+            .filter(|segment| !segment.is_empty())
+            .map(str::to_owned)
+            .collect();
+        let Some((last, parents)) = segments.split_last() else {
+            return false;
+        };
+        for segment in parents {
+            let Some(next) = current.fields().find_map(|field| {
+                (clean_field_key(field.name()) == clean_field_key(segment))
+                    .then(|| {
+                        field
+                            .as_struct()
+                            .or_else(|| field.as_block().map(|b| b.struct_definition()))
+                            .or_else(|| field.as_array().map(|a| a.struct_definition()))
+                            .or_else(|| field.as_resource().map(|r| r.struct_definition()))
+                    })
+                    .flatten()
+            }) else {
+                return false;
+            };
+            current = next;
+        }
+        current
+            .fields()
+            .any(|field| clean_field_key(field.name()) == clean_field_key(last))
     }
 
     /// A real Halo Reach animation graph, off disk, with its animation payload

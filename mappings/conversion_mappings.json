@@ -295,7 +295,7 @@
       "target_games": [
         "haloce_evolved"
       ],
-      "source_path": "node joint flags",
+      "source_path": "definitions/skeleton nodes/node joint flags",
       "reason": "Reach stores per-node joint limits (constrained, global rotation, and the spring/ball variants) that Campaign Evolved's skeleton node block does not declare; the simulation derives joint behaviour from the skeleton instead. Reviewed: no Campaign Evolved field carries this, and the animation plays from the codec data, not from these flags."
     },
     {
@@ -306,7 +306,7 @@
       "target_games": [
         "haloce_evolved"
       ],
-      "source_path": "additional flags",
+      "source_path": "definitions/skeleton nodes/additional flags",
       "reason": "Reach's per-node info flags (base node, no-collision) have no Campaign Evolved counterpart; the two bytes are why animation_graph_node_block is 44 bytes in Reach and 40 in Campaign Evolved. Reviewed: node identity comes from the skeleton the graph is bound to."
     },
     {
@@ -317,7 +317,7 @@
       "target_games": [
         "haloce_evolved"
       ],
-      "source_path": "facial wrinkle events",
+      "source_path": "definitions/animations/shared animation data/facial wrinkle events",
       "reason": "Reach drives facial wrinkle maps from per-animation events. Campaign Evolved ships no wrinkle system and declares no such block. Reviewed: there is nothing on the target side to receive this, and its absence does not affect skeletal playback."
     },
     {
@@ -328,7 +328,7 @@
       "target_games": [
         "haloreach_mcc"
       ],
-      "source_path": "authored frame rate",
+      "source_path": "definitions/animations/shared animation data/authored frame rate",
       "reason": "Campaign Evolved records the frame rate an animation was authored at so it can resample; Reach assumes 30Hz throughout and declares no such field. Reviewed: the codec data is already sampled, so the annotation is descriptive rather than load-bearing."
     },
     {
@@ -339,7 +339,7 @@
       "target_games": [
         "haloreach_mcc"
       ],
-      "source_path": "ik weight source function",
+      "source_path": "definitions/ik sets/ik points/ik weight source function",
       "reason": "Campaign Evolved added a per-IK-point object function driving that point's weight, which is why animation_ik_set_item is 8 bytes there and 4 in Reach. Reviewed: Reach has no per-point weight source, so the value has nowhere to go; IK still resolves from the chain."
     },
     {
@@ -350,7 +350,7 @@
       "target_games": [
         "haloreach_mcc"
       ],
-      "source_path": "secondary weight source",
+      "source_path": "definitions/NEW blend screens/secondary weight source",
       "reason": "Campaign Evolved compounds two blend-screen weight sources where Reach has one. The primary maps onto Reach's `weight source`; the secondary has no counterpart. Reviewed: dropping it leaves the primary behaviour intact, which is what Reach would have expressed anyway."
     },
     {
@@ -361,7 +361,7 @@
       "target_games": [
         "haloreach_mcc"
       ],
-      "source_path": "secondary weight source object function",
+      "source_path": "definitions/NEW blend screens/secondary weight source object function",
       "reason": "The object function paired with the secondary weight source above, and dropped for the same reason."
     }
   ],
