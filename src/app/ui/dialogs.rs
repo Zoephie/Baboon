@@ -3166,44 +3166,99 @@ impl Baboon {
                     }
                 }
 
-                match &dialog.comparison {
-                    Some(cmp) => match cmp.severity {
-                        blam_tags::LayoutSeverity::Match => {
-                            ui.label(
-                                RichText::new(format!("✔ Schema matches {}", dialog.group_name))
-                                    .color(disclosure_triangle_green())
-                                    .small(),
-                            );
-                        }
-                        blam_tags::LayoutSeverity::Drift => {
-                            ui.label(
-                                RichText::new(
-                                    "⚠ Schema differs in field metadata only (wire layout \
-                                     matches). Safe to import.",
-                                )
-                                .color(Color32::from_rgb(242, 196, 48))
-                                .small(),
-                            );
-                            ui.checkbox(&mut dialog.import_anyway, "Import anyway");
-                        }
-                        blam_tags::LayoutSeverity::Incompatible => {
-                            ui.label(
-                                RichText::new(
-                                    "✖ Schema is incompatible (group, version, or size differs) — \
-                                     this tag does not match the base game.",
-                                )
+                let group_name = dialog.group_name.clone();
+                match &mut dialog.mode {
+                    ImportMode::Convert { source_game, .. } => {
+                        ui.label(
+                            RichText::new(format!("✖ This is a {source_game} tag"))
                                 .color(material_delete_text())
+                                .small(),
+                        );
+                        ui.label(
+                            RichText::new(
+                                "Its root struct matches Campaign Evolved's, but nested structs \
+                                 do not. Copying the bytes would land a tag the game reads at \
+                                 the wrong offsets, so it has to be converted first.",
+                            )
+                            .color(subtle_dark())
+                            .small(),
+                        );
+                    }
+                    ImportMode::Native {
+                        comparison,
+                        import_anyway,
+                    } => match comparison {
+                        Some(cmp) => match cmp.severity {
+                            blam_tags::LayoutSeverity::Match => {
+                                ui.label(
+                                    RichText::new(format!("✔ Schema matches {group_name}"))
+                                        .color(disclosure_triangle_green())
+                                        .small(),
+                                );
+                            }
+                            blam_tags::LayoutSeverity::Drift => {
+                                ui.label(
+                                    RichText::new(
+                                        "⚠ Schema differs in field metadata only (wire layout \
+                                         matches), and no other game claims this tag. Safe to \
+                                         import.",
+                                    )
+                                    .color(Color32::from_rgb(242, 196, 48))
+                                    .small(),
+                                );
+                                ui.checkbox(import_anyway, "Import anyway");
+                            }
+                            blam_tags::LayoutSeverity::Incompatible => {
+                                ui.label(
+                                    RichText::new(
+                                        "✖ Schema is incompatible (group, version, or size \
+                                         differs) — this tag does not match the base game.",
+                                    )
+                                    .color(material_delete_text())
+                                    .small(),
+                                );
+                            }
+                        },
+                        None => {
+                            ui.label(
+                                RichText::new(
+                                    "No shipped definition for this group — not validated.",
+                                )
+                                .color(subtle_dark())
                                 .small(),
                             );
                         }
                     },
-                    None => {
-                        ui.label(
-                            RichText::new("No shipped definition for this group — not validated.")
-                                .color(subtle_dark())
-                                .small(),
-                        );
-                    }
+                }
+
+                if dialog.profile_verdicts.len() > 1 {
+                    egui::CollapsingHeader::new("Compared against each game")
+                        .id_salt("import_profile_verdicts")
+                        .show(ui, |ui| {
+                            for (game, fit) in &dialog.profile_verdicts {
+                                let (mark, color) = match fit {
+                                    ProfileFit::Identical => {
+                                        ("✔ identical", disclosure_triangle_green())
+                                    }
+                                    ProfileFit::Diverges(_) => {
+                                        ("⚠ differs", Color32::from_rgb(242, 196, 48))
+                                    }
+                                    ProfileFit::WrongGroup => {
+                                        ("✖ different group", material_delete_text())
+                                    }
+                                };
+                                ui.label(
+                                    RichText::new(format!("{game}  {mark}")).color(color).small(),
+                                );
+                                if let ProfileFit::Diverges(where_) = fit {
+                                    ui.label(
+                                        RichText::new(format!("      {where_}"))
+                                            .color(subtle_dark())
+                                            .small(),
+                                    );
+                                }
+                            }
+                        });
                 }
 
                 if let Some(error) = &dialog.error {
@@ -3216,10 +3271,14 @@ impl Baboon {
                     if ui.button("Cancel").clicked() {
                         do_cancel = true;
                     }
-                    let blocked = matches!(
-                        dialog.comparison.as_ref().map(|cmp| cmp.severity),
-                        Some(blam_tags::LayoutSeverity::Incompatible)
-                    ) || dialog.name.trim().is_empty();
+                    let blocked = match &dialog.mode {
+                        // Nothing to confirm until a conversion exists.
+                        ImportMode::Convert { draft, .. } => draft.is_none(),
+                        ImportMode::Native { comparison, .. } => matches!(
+                            comparison.as_ref().map(|cmp| cmp.severity),
+                            Some(blam_tags::LayoutSeverity::Incompatible)
+                        ),
+                    } || dialog.name.trim().is_empty();
                     if ui
                         .add_enabled(!blocked, egui::Button::new("Import"))
                         .clicked()

@@ -18,6 +18,23 @@ pub(super) const CONVERSION_GAMES: &[&str] = &[
     "halo2amp_mcc",
 ];
 
+/// Every profile a tag may be recognized as, or converted to or from.
+///
+/// Campaign Evolved is here and deliberately not in [`CONVERSION_GAMES`].
+/// That list is the reviewed *common base*, and the catalog's coverage
+/// denominator is the intersection of its members: the five share 125 groups,
+/// but adding Campaign Evolved drops the intersection to 68. Folding it in
+/// would not add a profile — it would delete 57 reviewed groups from
+/// `conversion_mappings.json`.
+pub(super) const CONVERSION_PROFILES: &[&str] = &[
+    "halo3_mcc",
+    "halo3odst_mcc",
+    "haloreach_mcc",
+    "halo4_mcc",
+    "halo2amp_mcc",
+    CAMPAIGN_EVOLVED_GAME,
+];
+
 const CONVERSION_MAPPING_CATALOG: &str = include_str!("../../mappings/conversion_mappings.json");
 
 /// These groups contain layout features which `TagFile::new` cannot currently

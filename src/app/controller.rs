@@ -134,6 +134,117 @@ fn normalize_container_tag_rel(input: &str) -> String {
     segments.join("/")
 }
 
+/// Compare an imported tag's embedded layout against one profile's shipped JSON
+/// definition for its group. `None` if that profile ships no schema for the
+/// group, or the schema cannot be built.
+pub(super) fn compare_import_against_profile(
+    game: &str,
+    group_tag: u32,
+    imported: &TagFile,
+) -> Option<blam_tags::LayoutComparison> {
+    let group = load_new_tag_groups(game)
+        .ok()?
+        .into_iter()
+        .find(|g| g.group_tag == group_tag)?;
+    let expected = TagFile::new(&group.schema_path).ok()?;
+    Some(blam_tags::compare_root_layout(&expected, imported))
+}
+
+/// How an imported tag's own layout fits one profile's definition of its group.
+///
+/// Uses the recursive comparison rather than `compare_root_layout`, because the
+/// root is exactly where the interesting cases agree: a Halo Reach
+/// `model_animation_graph` and a Campaign Evolved one declare identical root
+/// structs and diverge four structs down.
+pub(super) fn profile_fit(game: &str, group_tag: u32, imported: &TagFile) -> Option<ProfileFit> {
+    let group = load_new_tag_groups(game)
+        .ok()?
+        .into_iter()
+        .find(|g| g.group_tag == group_tag)?;
+    let expected = TagFile::new(&group.schema_path).ok()?;
+    if expected.header.group_tag != imported.header.group_tag {
+        return Some(ProfileFit::WrongGroup);
+    }
+    Some(
+        match blam_tags::struct_trees_are_wire_identical(
+            expected.definitions().root_struct(),
+            imported.definitions().root_struct(),
+        ) {
+            Ok(_) => ProfileFit::Identical,
+            Err(mismatch) => ProfileFit::Diverges(mismatch.to_string()),
+        },
+    )
+}
+
+/// Work out how a picked file has to be landed in `target_game`, by comparing it
+/// against every profile that defines its group.
+///
+/// Import only ever targets a Campaign Evolved container, so the question is not
+/// "which game is this?" in the abstract — it is "can these bytes be copied, or
+/// do they have to be converted first?". A file whose layout is wire-identical
+/// to the destination's is copied. A file wire-identical to some *other*
+/// profile is that game's tag, whatever its extension claims, and its bytes
+/// cannot be copied.
+///
+/// Root-level comparison cannot make this call. Reach and Campaign Evolved
+/// declare the `model_animation_graph` root field-for-field identically, so
+/// `compare_root_layout` reports a clean match for a Reach animation graph —
+/// no warning, no override, straight into the paks with
+/// `shared_model_animation_block` 12 bytes too long. Closing that is why this
+/// walks the whole struct graph.
+///
+/// The returned verdict list is evidence, not a decision. It seeds the mode and
+/// stays on the dialog so the user can see why, and correct an unusual file.
+pub(super) fn classify_import_source_for(
+    target_game: &str,
+    group_tag: u32,
+    imported: &TagFile,
+) -> (Vec<(String, ProfileFit)>, ImportMode) {
+    let mut verdicts = CONVERSION_PROFILES
+        .iter()
+        .filter_map(|profile| {
+            profile_fit(profile, group_tag, imported).map(|fit| ((*profile).to_owned(), fit))
+        })
+        .collect::<Vec<_>>();
+    verdicts.sort_by(|a, b| a.0.cmp(&b.0));
+
+    let native = || ImportMode::Native {
+        comparison: compare_import_against_profile(target_game, group_tag, imported),
+        import_anyway: false,
+    };
+
+    // The destination fitting settles it: the bytes are already the right
+    // shape, and no other profile's opinion can change that.
+    if verdicts
+        .iter()
+        .any(|(game, fit)| game == target_game && fit.is_identical())
+    {
+        return (verdicts, native());
+    }
+
+    // Otherwise a profile that *does* fit names the game this tag was authored
+    // for. Prefer Reach when several do, since it is the profile Campaign
+    // Evolved's own schemas descend from.
+    let foreign = verdicts
+        .iter()
+        .filter(|(game, fit)| fit.is_identical() && game != target_game)
+        .map(|(game, _)| game.clone())
+        .min_by_key(|game| (game != "haloreach_mcc", game.clone()));
+
+    match foreign {
+        Some(source_game) => (
+            verdicts,
+            ImportMode::Convert {
+                source_game,
+                draft: None,
+            },
+        ),
+        // Nothing claims it. This is the dev-era layout drift the gate was
+        // originally calibrated for, so keep the override available.
+        None => (verdicts, native()),
+    }
+}
+
 /// Decide where a new tag's `.uasset` wrapper will come from.
 ///
 /// A same-group tag in the mounted paks is the first choice: cloning one is the
@@ -1382,7 +1493,7 @@ impl Baboon {
         let extension = group_tag_to_extension(group_tag)
             .unwrap_or(group_name.as_str())
             .to_owned();
-        let comparison = self.compare_import_against_json(group_tag, &tag);
+        let (profile_verdicts, mode) = self.classify_import_source(group_tag, &tag);
         let name = picked
             .file_stem()
             .and_then(|s| s.to_str())
@@ -1397,29 +1508,24 @@ impl Baboon {
             group_name,
             extension,
             tag: Some(tag),
-            comparison,
-            import_anyway: false,
+            mode,
+            profile_verdicts,
             error: None,
         });
     }
 
-    /// Compare an imported tag's embedded layout against our shipped JSON
-    /// definition for its group. `None` if we ship no schema for the group.
-    fn compare_import_against_json(
+    /// Work out how a picked file has to be landed, against the active source's
+    /// game as the destination.
+    fn classify_import_source(
         &self,
         group_tag: u32,
         imported: &TagFile,
-    ) -> Option<blam_tags::LayoutComparison> {
-        let game = self
+    ) -> (Vec<(String, ProfileFit)>, ImportMode) {
+        let target_game = self
             .source()
             .and_then(|s| s.game.clone())
-            .unwrap_or_else(|| "haloce_evolved".to_owned());
-        let group = load_new_tag_groups(&game)
-            .ok()?
-            .into_iter()
-            .find(|g| g.group_tag == group_tag)?;
-        let expected = TagFile::new(&group.schema_path).ok()?;
-        Some(blam_tags::compare_root_layout(&expected, imported))
+            .unwrap_or_else(|| CAMPAIGN_EVOLVED_GAME.to_owned());
+        classify_import_source_for(&target_game, group_tag, imported)
     }
 
     /// Apply the pending import: validate the schema gate, resolve the target
@@ -1440,24 +1546,46 @@ impl Baboon {
         let Some(dialog) = self.import_tag_dialog.as_mut() else {
             return;
         };
-        // Schema gate (policy calibrated by the CE drift sweep): a group /
-        // version / root-size mismatch is a hard block; benign field-metadata
-        // drift only warns and needs the "Import anyway" override.
-        if let Some(cmp) = &dialog.comparison {
-            if !cmp.group_match || !cmp.version_match || !cmp.root_size_match {
-                dialog.error = Some(
-                    "Schema is incompatible (group, version, or size differs) — this tag \
-                     doesn't match the base game's definition."
-                        .to_owned(),
-                );
-                return;
+        // Schema gate. A file authored for another game has to be converted;
+        // one that merely drifted from our Campaign Evolved definition can be
+        // waved through. Splitting those two is the whole point of `ImportMode`
+        // — the old gate saw only "not a match" and offered the same override
+        // for both, which let a Halo Reach tag through on a tick box.
+        match &dialog.mode {
+            ImportMode::Convert { source_game, draft } => {
+                if draft.is_none() {
+                    dialog.error = Some(format!(
+                        "This is a {source_game} tag, not a Campaign Evolved one. Its root \
+                         struct happens to agree, but nested structs do not, so copying its \
+                         bytes would land a tag the game reads at the wrong offsets. \
+                         Converting {source_game} tags into Campaign Evolved is not wired up \
+                         yet."
+                    ));
+                    return;
+                }
             }
-            if cmp.severity != blam_tags::LayoutSeverity::Match && !dialog.import_anyway {
-                dialog.error = Some(
-                    "Schema differs in field metadata. Tick \"Import anyway\" to proceed."
-                        .to_owned(),
-                );
-                return;
+            ImportMode::Native {
+                comparison,
+                import_anyway,
+            } => {
+                if let Some(cmp) = comparison {
+                    if !cmp.group_match || !cmp.version_match || !cmp.root_size_match {
+                        dialog.error = Some(
+                            "Schema is incompatible (group, version, or size differs) — this \
+                             tag doesn't match the base game's definition."
+                                .to_owned(),
+                        );
+                        return;
+                    }
+                    if cmp.severity != blam_tags::LayoutSeverity::Match && !*import_anyway {
+                        dialog.error = Some(
+                            "Schema differs in field metadata. Tick \"Import anyway\" to \
+                             proceed."
+                                .to_owned(),
+                        );
+                        return;
+                    }
+                }
             }
         }
         let folder = normalize_container_tag_rel(&dialog.folder_rel);
@@ -7432,6 +7560,10 @@ mod mod_override_tests;
 #[cfg(test)]
 #[path = "tests/campaign_new_tag.rs"]
 mod campaign_new_tag_tests;
+
+#[cfg(test)]
+#[path = "tests/campaign_import_gate.rs"]
+mod campaign_import_gate_tests;
 
 enum SaveChangesPromptAction {
     None,
