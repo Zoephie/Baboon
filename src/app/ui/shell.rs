@@ -572,6 +572,11 @@ impl Baboon {
                             self.about_open = true;
                             ui.close_menu();
                         }
+                        if ui.button("Tag Compatibility...").clicked() {
+                            self.help_panel_tab = HelpPanelTab::TagCompat;
+                            self.about_open = true;
+                            ui.close_menu();
+                        }
                         if ui.button("Map Names...").clicked() {
                             self.help_panel_tab = HelpPanelTab::MapNames;
                             self.about_open = true;

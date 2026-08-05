@@ -34,6 +34,11 @@ impl Baboon {
                     );
                     ui.selectable_value(
                         &mut self.help_panel_tab,
+                        HelpPanelTab::TagCompat,
+                        "Tag Compatibility",
+                    );
+                    ui.selectable_value(
+                        &mut self.help_panel_tab,
                         HelpPanelTab::MapNames,
                         "Map Names",
                     );
@@ -51,6 +56,7 @@ impl Baboon {
                             &mut self.tutorials_category,
                         ),
                     HelpPanelTab::ScriptDoc => self.draw_script_doc_tab(ui),
+                    HelpPanelTab::TagCompat => self.draw_tag_compat_tab(ui),
                     HelpPanelTab::MapNames => draw_map_names_tab(ui, &mut self.map_names_game_tab),
                 }
             });
@@ -220,6 +226,207 @@ impl Baboon {
         if let Some(key) = clicked {
             self.script_docs.select(key);
         }
+    }
+
+    /// What a tag loses crossing between two games, read out of the generated
+    /// compatibility database.
+    fn draw_tag_compat_tab(&mut self, ui: &mut Ui) {
+        self.tag_compat.ensure_loaded(&locate_help_docs_root());
+        match draw_tag_compat_body(ui, &mut self.tag_compat) {
+            Some(TagCompatRequest::ExportSheet) => self.export_tag_compat_sheet(),
+            None => {}
+        }
+    }
+
+    fn export_tag_compat_sheet(&mut self) {
+        let pair = self.tag_compat.pairs.get(self.tag_compat.pair);
+        let stem = pair
+            .map(|pair| format!("{}-to-{}", pair.source_game, pair.target_game))
+            .unwrap_or_else(|| "tag-compat".to_owned());
+        let group = self.tag_compat.selected_group.clone().unwrap_or_default();
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Export compatibility sheet")
+            .add_filter("Comma-separated values", &["csv"])
+            .set_file_name(format!("{stem}-{group}.csv"))
+            .save_file()
+        else {
+            return;
+        };
+        self.status = match std::fs::write(&path, self.tag_compat.visible_csv()) {
+            Ok(()) => format!("Wrote {}", path.display()),
+            Err(error) => format!("Could not write {}: {error}", path.display()),
+        };
+    }
+}
+
+/// What the compatibility tab wants done. The tab itself only collects the
+/// request — picking a path and writing the file is the controller's job, per
+/// this module's contract.
+enum TagCompatRequest {
+    ExportSheet,
+}
+
+/// The tab body. Free-standing and doing no I/O, so a test can lay it out
+/// without a whole `Baboon`.
+fn draw_tag_compat_body(ui: &mut Ui, state: &mut TagCompatUiState) -> Option<TagCompatRequest> {
+    if let Some(error) = state.error() {
+        doc_load_error(ui, &format!("Tag compatibility data failed to load: {error}"));
+        return None;
+    }
+    if state.pairs.is_empty() {
+        doc_load_error(
+            ui,
+            "The tag compatibility database covers no profile pairs. Rebuild it with              `cargo run --bin build_tag_compat`.",
+        );
+        return None;
+    }
+
+    let mut request = None;
+    ui.horizontal(|ui| {
+        let current = state.pairs[state.pair].label();
+        egui::ComboBox::from_id_salt("tag_compat_pair")
+            .selected_text(current)
+            .show_ui(ui, |ui| {
+                for (index, pair) in state.pairs.iter().enumerate() {
+                    ui.selectable_value(&mut state.pair, index, pair.label());
+                }
+            });
+        ui.separator();
+        ui.checkbox(&mut state.losses_only, "Only what is lost")
+            .on_hover_text(
+                "Hide every field that transfers unchanged. There are tens of thousands                  of those, and they are not what you came to find out.",
+            );
+        ui.separator();
+        ui.add(
+            egui::TextEdit::singleline(&mut state.search)
+                .hint_text("Filter groups")
+                .desired_width(180.0),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui
+                .add_enabled(!state.fields.is_empty(), egui::Button::new("Export sheet..."))
+                .on_hover_text("Write the rows shown here to a CSV file")
+                .clicked()
+            {
+                request = Some(TagCompatRequest::ExportSheet);
+            }
+        });
+    });
+    ui.add_space(6.0);
+
+    state.refresh();
+
+    let mut clicked: Option<String> = None;
+    egui::SidePanel::left("tag_compat_groups")
+        .resizable(true)
+        .default_width(300.0)
+        .show_inside(ui, |ui| {
+            ui.label(
+                RichText::new(format!("{} group(s)", state.groups.len()))
+                    .color(subtle_dark())
+                    .small(),
+            );
+            egui::ScrollArea::vertical()
+                .id_salt("tag_compat_group_list")
+                .show(ui, |ui| {
+                    for row in &state.groups {
+                        let selected = state.selected_group.as_deref() == Some(&row.group);
+                        let response = ui.selectable_label(
+                            selected,
+                            RichText::new(format!("{}  ·  {}", row.group, row.verdict.label()))
+                                .color(row.verdict.color()),
+                        );
+                        let response = match &row.blocked_reason {
+                            Some(reason) => response.on_hover_text(reason),
+                            None => response.on_hover_text(format!(
+                                "{}
+{} struct(s) change size · {} field(s) dropped ·                                  {} left at default",
+                                row.verdict.explain(),
+                                row.size_diff_structs,
+                                row.source_only_fields,
+                                row.target_only_fields,
+                            )),
+                        };
+                        if response.clicked() {
+                            clicked = Some(row.group.clone());
+                        }
+                    }
+                });
+        });
+
+    egui::CentralPanel::default().show_inside(ui, |ui| {
+        let Some(group) = state.selected_group.clone() else {
+            ui.label(
+                RichText::new("Select a tag group to see what happens to each of its fields.")
+                    .color(subtle_dark()),
+            );
+            return;
+        };
+        if state.fields.is_empty() {
+            ui.label(
+                RichText::new(format!(
+                    "Nothing to report for {group} — every field transfers unchanged."
+                ))
+                .color(subtle_dark()),
+            );
+            return;
+        }
+        egui::ScrollArea::both()
+            .id_salt("tag_compat_fields")
+            .show(ui, |ui| {
+                egui::Grid::new("tag_compat_field_grid")
+                    .num_columns(4)
+                    .striped(true)
+                    .show(ui, |ui| {
+                        for header in ["Where", "Source", "Target", "What happens"] {
+                            ui.label(RichText::new(header).color(subtle_dark()).small());
+                        }
+                        ui.end_row();
+                        for row in &state.fields {
+                            ui.label(RichText::new(&row.first_path).small())
+                                .on_hover_text(&row.struct_key);
+                            ui.label(field_cell(&row.source_name, &row.source_type));
+                            ui.label(field_cell(&row.target_name, &row.target_type));
+                            let mut text = row.verdict.label().to_owned();
+                            if !row.detail.is_empty() {
+                                text.push_str("  ·  ");
+                                text.push_str(&row.detail);
+                            }
+                            ui.label(RichText::new(text).color(row.verdict.color()).small())
+                                .on_hover_text(format!(
+                                    "{}
+matched by: {}",
+                                    row.verdict.explain(),
+                                    row.rule,
+                                ));
+                            ui.end_row();
+                        }
+                    });
+            });
+    });
+
+    if let Some(group) = clicked {
+        state.select_group(group);
+    }
+    request
+}
+
+/// Lay out the compatibility tab against a state, for tests. A native GL window
+/// is not something a test can click through, and an egui panel that panics on
+/// an empty selection or a grid whose column count disagrees with its cells
+/// shows up nowhere until something actually lays it out.
+#[cfg(test)]
+pub(in crate::app) fn draw_tag_compat_body_for_tests(ui: &mut Ui, state: &mut TagCompatUiState) {
+    let _ = draw_tag_compat_body(ui, state);
+}
+
+/// One side of a field row: its name, with the type underneath when the two
+/// sides disagree about it.
+fn field_cell(name: &Option<String>, type_name: &Option<String>) -> RichText {
+    match (name, type_name) {
+        (Some(name), Some(type_name)) => RichText::new(format!("{name}\n{type_name}")).small(),
+        (Some(name), None) => RichText::new(name.clone()).small(),
+        _ => RichText::new("—").color(subtle_dark()).small(),
     }
 }
 

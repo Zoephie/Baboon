@@ -8,7 +8,7 @@ mod browser_panel;
 mod dialogs;
 mod find;
 mod first_run;
-mod help;
+pub(super) mod help;
 mod search_windows;
 mod recents;
 mod settings;

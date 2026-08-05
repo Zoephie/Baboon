@@ -27,7 +27,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 atomic-write-file = "0.3"
-blam-tags = { git = "https://github.com/Zoephie/blam-tags", rev = "813d7c1", features = ["audio", "iostore"] }
+blam-tags = { git = "https://github.com/Zoephie/blam-tags", rev = "5af9e40", features = ["audio", "iostore"] }
 directories = "6"
 display-info = "0.5"
 eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }

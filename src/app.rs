@@ -93,6 +93,8 @@ mod tutorials;
 use tutorials::*;
 mod script_docs;
 use script_docs::*;
+mod tag_compat;
+use tag_compat::*;
 mod prefs;
 use prefs::*;
 mod browser;
@@ -276,6 +278,7 @@ pub struct Baboon {
     tutorials_game: String,
     tutorials_category: TutorialCategory,
     script_docs: ScriptDocsUiState,
+    tag_compat: TagCompatUiState,
     map_names_game_tab: MapNamesGameTab,
     tool_commands: ToolCommandsUiState,
     tool_commands_window_pos: Option<egui::Pos2>,
@@ -520,6 +523,7 @@ impl Baboon {
             tutorials_game: "haloce_evolved".to_owned(),
             tutorials_category: TutorialCategory::ThreeD,
             script_docs: ScriptDocsUiState::default(),
+            tag_compat: TagCompatUiState::default(),
             map_names_game_tab: MapNamesGameTab::HaloCe,
             tool_commands: ToolCommandsUiState::default(),
             tool_commands_window_pos: prefs.tool_commands_window_pos,

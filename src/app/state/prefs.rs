@@ -40,6 +40,7 @@ pub(in crate::app) enum HelpPanelTab {
     Doc,
     Tutorials,
     ScriptDoc,
+    TagCompat,
     MapNames,
 }
 
