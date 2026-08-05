@@ -114,58 +114,7 @@ impl Baboon {
                             .color(text_dark())
                             .strong(),
                         );
-                        egui::Grid::new("tag_conversion_summary")
-                            .num_columns(2)
-                            .spacing([20.0, 3.0])
-                            .show(ui, |ui| {
-                                ui.label("Copied exactly");
-                                ui.label(report.copied_exact.to_string());
-                                ui.end_row();
-                                ui.label("Converted semantically");
-                                ui.label(report.converted_semantic.to_string());
-                                ui.end_row();
-                                ui.label("Mapped through schema/catalog aliases");
-                                ui.label(report.mapped_aliases.to_string());
-                                ui.end_row();
-                                ui.label("Target fields left at defaults");
-                                ui.label(report.defaulted_target.to_string());
-                                ui.end_row();
-                                ui.label("Unsupported source values");
-                                ui.label(report.unsupported_source.to_string());
-                                ui.end_row();
-                                ui.label("Truncated elements");
-                                ui.label(report.truncated.to_string());
-                                ui.end_row();
-                            });
-
-                        if !report.issues.is_empty() {
-                            ui.add_space(6.0);
-                            ui.label(
-                                RichText::new("Conversion details")
-                                    .color(subtle_dark())
-                                    .small(),
-                            );
-                            egui::ScrollArea::vertical()
-                                .id_salt("tag_conversion_issues")
-                                .max_height(230.0)
-                                .show(ui, |ui| {
-                                    for issue in &report.issues {
-                                        let kind = match issue.kind {
-                                            ConversionIssueKind::Unsupported => "Unsupported",
-                                            ConversionIssueKind::Truncated => "Truncated",
-                                            ConversionIssueKind::Warning => "Warning",
-                                        };
-                                        ui.label(
-                                            RichText::new(format!(
-                                                "{kind}: {} — {}",
-                                                issue.path, issue.message
-                                            ))
-                                            .color(subtle_dark())
-                                            .small(),
-                                        );
-                                    }
-                                });
-                        }
+                        draw_conversion_report(ui, report, "tag_conversion");
                     }
 
                     if let Some(error) = dialog.error.as_ref() {
@@ -3102,6 +3051,7 @@ impl Baboon {
         let mut open = true;
         let mut do_import = false;
         let mut do_cancel = false;
+        let mut do_analyze = false;
         egui::Window::new("Import Tag")
             .id(egui::Id::new("import_tag_dialog"))
             .collapsible(false)
@@ -3163,22 +3113,57 @@ impl Baboon {
                 }
 
                 let group_name = dialog.group_name.clone();
+                let identical_profiles: Vec<String> = dialog
+                    .profile_verdicts
+                    .iter()
+                    .filter(|(_, fit)| fit.is_identical())
+                    .map(|(game, _)| game.clone())
+                    .collect();
                 match &mut dialog.mode {
-                    ImportMode::Convert { source_game, .. } => {
+                    ImportMode::Convert { source_game, draft } => {
                         ui.label(
-                            RichText::new(format!("✖ This is a {source_game} tag"))
-                                .color(material_delete_text())
+                            RichText::new(format!("⟳ This is a {source_game} tag"))
+                                .color(Color32::from_rgb(242, 196, 48))
                                 .small(),
                         );
                         ui.label(
                             RichText::new(
                                 "Its root struct matches Campaign Evolved's, but nested structs \
                                  do not. Copying the bytes would land a tag the game reads at \
-                                 the wrong offsets, so it has to be converted first.",
+                                 the wrong offsets, so it is converted instead.",
                             )
                             .color(subtle_dark())
                             .small(),
                         );
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            ui.label(RichText::new("Source profile").color(subtle_dark()));
+                            egui::ComboBox::from_id_salt("import_source_profile")
+                                .selected_text(source_game.as_str())
+                                .show_ui(ui, |ui| {
+                                    for game in &identical_profiles {
+                                        if ui
+                                            .selectable_label(game == source_game, game)
+                                            .clicked()
+                                        {
+                                            source_game.clone_from(game);
+                                            // The draft belongs to the profile
+                                            // it was made from.
+                                            *draft = None;
+                                        }
+                                    }
+                                });
+                            if ui
+                                .button(if draft.is_some() { "Re-analyze" } else { "Analyze conversion" })
+                                .clicked()
+                            {
+                                do_analyze = true;
+                            }
+                        });
+                        if let Some(draft) = draft.as_ref() {
+                            ui.add_space(6.0);
+                            draw_conversion_report(ui, &draft.report, "import_conversion");
+                        }
                     }
                     ImportMode::Native {
                         comparison,
@@ -3289,6 +3274,8 @@ impl Baboon {
         }
         if do_cancel {
             self.import_tag_dialog = None;
+        } else if do_analyze {
+            self.analyze_import_conversion();
         } else if do_import {
             self.confirm_import_tag();
         }
@@ -3522,4 +3509,60 @@ mod mod_export_tests {
         assert_eq!(dialog("thing_P").stem(), "thing_P");
         assert_eq!(dialog("thing_p").stem(), "thing_p");
     }
+}
+
+/// The conversion summary and issue list.
+///
+/// Shared by the "Save Tag for Another Game" window and the import dialog: both
+/// answer the same question — what will this conversion cost — and two copies
+/// would drift.
+fn draw_conversion_report(ui: &mut Ui, report: &TagConversionReport, salt: &str) {
+    egui::Grid::new(format!("{salt}_summary"))
+        .num_columns(2)
+        .spacing([20.0, 3.0])
+        .show(ui, |ui| {
+            for (label, value) in [
+                ("Copied exactly", report.copied_exact),
+                ("Converted semantically", report.converted_semantic),
+                ("Mapped through schema/catalog aliases", report.mapped_aliases),
+                ("Target fields left at defaults", report.defaulted_target),
+                ("Unsupported source values", report.unsupported_source),
+                ("Truncated elements", report.truncated),
+            ] {
+                ui.label(label);
+                ui.label(value.to_string());
+                ui.end_row();
+            }
+            // Only worth a row when there are any. A resource can be most of
+            // what a tag is -- an animation graph's whole payload is one -- so
+            // when one crossed, say so.
+            if report.transferred_resources > 0 {
+                ui.label("Pageable resources carried across");
+                ui.label(report.transferred_resources.to_string());
+                ui.end_row();
+            }
+        });
+
+    if report.issues.is_empty() {
+        return;
+    }
+    ui.add_space(6.0);
+    ui.label(RichText::new("Conversion details").color(subtle_dark()).small());
+    egui::ScrollArea::vertical()
+        .id_salt(format!("{salt}_issues"))
+        .max_height(230.0)
+        .show(ui, |ui| {
+            for issue in &report.issues {
+                let kind = match issue.kind {
+                    ConversionIssueKind::Unsupported => "Unsupported",
+                    ConversionIssueKind::Truncated => "Truncated",
+                    ConversionIssueKind::Warning => "Warning",
+                };
+                ui.label(
+                    RichText::new(format!("{kind}: {} — {}", issue.path, issue.message))
+                        .color(subtle_dark())
+                        .small(),
+                );
+            }
+        });
 }

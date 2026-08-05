@@ -1514,6 +1514,39 @@ impl Baboon {
         });
     }
 
+    /// Convert the picked file for the dialog's chosen source profile and hold
+    /// the draft. Nothing is registered until the user confirms, so this is
+    /// safe to re-run as they change the profile.
+    pub(super) fn analyze_import_conversion(&mut self) {
+        let Some(dialog) = self.import_tag_dialog.as_mut() else {
+            return;
+        };
+        let ImportMode::Convert { source_game, draft } = &mut dialog.mode else {
+            return;
+        };
+        let Some(source) = dialog.tag.as_ref() else {
+            dialog.error = Some("No tag to convert".to_owned());
+            return;
+        };
+        let source_game = source_game.clone();
+        match analyze_conversion(
+            source,
+            &source_game,
+            CAMPAIGN_EVOLVED_GAME,
+            &locate_definitions_root(),
+            None,
+        ) {
+            Ok(analyzed) => {
+                *draft = Some(analyzed);
+                dialog.error = None;
+            }
+            Err(error) => {
+                *draft = None;
+                dialog.error = Some(error);
+            }
+        }
+    }
+
     /// Work out how a picked file has to be landed, against the active source's
     /// game as the destination.
     fn classify_import_source(
@@ -1555,11 +1588,8 @@ impl Baboon {
             ImportMode::Convert { source_game, draft } => {
                 if draft.is_none() {
                     dialog.error = Some(format!(
-                        "This is a {source_game} tag, not a Campaign Evolved one. Its root \
-                         struct happens to agree, but nested structs do not, so copying its \
-                         bytes would land a tag the game reads at the wrong offsets. \
-                         Converting {source_game} tags into Campaign Evolved is not wired up \
-                         yet."
+                        "This is a {source_game} tag. Analyze the conversion first — its bytes \
+                         cannot be copied as they are."
                     ));
                     return;
                 }
@@ -1602,7 +1632,14 @@ impl Baboon {
         let group_tag = dialog.group_tag;
         let group_name = dialog.group_name.clone();
         let extension = dialog.extension.clone();
-        let Some(mut tag) = dialog.tag.take() else {
+        // In Convert mode the converted draft is what lands, not the file that
+        // was picked — the picked bytes are the wrong shape, which is the whole
+        // reason the mode exists.
+        let converted = match &mut dialog.mode {
+            ImportMode::Convert { draft, .. } => draft.take().map(|draft| draft.tag),
+            ImportMode::Native { .. } => None,
+        };
+        let Some(mut tag) = converted.or_else(|| dialog.tag.take()) else {
             dialog.error = Some("No tag to import".to_owned());
             return;
         };

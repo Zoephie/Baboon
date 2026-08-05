@@ -202,6 +202,56 @@ fn a_group_both_games_agree_on_imports_natively() {
     );
 }
 
+/// The import path end to end on a real HREK file: classified as needing
+/// conversion, converted, and the converted tag is what would land.
+///
+/// Self-skips without HREK, so watch for the skip line before trusting a green
+/// run here.
+#[test]
+fn a_real_hrek_animation_graph_imports_as_a_conversion() {
+    let source_path = std::path::Path::new(
+        "D:/SteamLibrary/steamapps/common/HREK/tags/cinematics/052lb_reflection/objects/052lb_reflection_030/elevator_1.model_animation_graph",
+    );
+    if !source_path.is_file() {
+        eprintln!("skipping: HREK is not installed at the expected path");
+        return;
+    }
+    let bytes = std::fs::read(source_path).expect("read the HREK graph");
+    let imported = TagFile::read_from_bytes(&bytes).expect("parse it");
+    let group_tag = imported.header.group_tag;
+
+    // 1. The gate recognizes it as another game's tag rather than waving it
+    //    through on a root-struct match.
+    let (verdicts, mode) = classify_import_source_for(CAMPAIGN_EVOLVED_GAME, group_tag, &imported);
+    let ImportMode::Convert { source_game, .. } = mode else {
+        panic!("a real Reach animation graph must not import as native bytes: {verdicts:?}");
+    };
+    assert_eq!(source_game, "haloreach_mcc");
+
+    // 2. It converts, and the converted tag is a Campaign Evolved one.
+    let draft = analyze_conversion(
+        &imported,
+        &source_game,
+        CAMPAIGN_EVOLVED_GAME,
+        &locate_definitions_root(),
+        None,
+    )
+    .unwrap_or_else(|error| panic!("the import path must be able to convert it: {error}"));
+
+    assert!(
+        draft.report.transferred_resources > 0,
+        "the animation payload has to come with it",
+    );
+    assert_eq!(draft.target_group_name, "model_animation_graph");
+
+    // 3. And what lands parses, at the destination's generation.
+    let mut landed = draft.tag;
+    apply_editing_kit_mcc_header(&mut landed, CAMPAIGN_EVOLVED_GAME).expect("stamp it");
+    let written = landed.write_to_bytes().expect("serialize what would land");
+    let reopened = TagFile::read_from_bytes(&written).expect("the paks would be able to read it");
+    assert_eq!(reopened.header.group_tag, group_tag);
+}
+
 /// A group only Campaign Evolved defines cannot be claimed by any other
 /// profile, so the verdict list names exactly one game.
 #[test]
