@@ -21,7 +21,10 @@ fn paks() -> Option<std::path::PathBuf> {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from(PAKS));
     if !path.exists() {
-        eprintln!("skipping: Campaign Evolved not present at {}", path.display());
+        eprintln!(
+            "skipping: Campaign Evolved not present at {}",
+            path.display()
+        );
         return None;
     }
     Some(path)
@@ -231,11 +234,10 @@ fn extracting_container_tags_mirrors_the_tree_with_shipped_bytes() {
         };
         // `display_path` is the browser's own path, so joining it onto the
         // output root is the whole layout claim.
-        let written = std::fs::read(&path)
-            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        let written =
+            std::fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
         assert_eq!(
-            written,
-            shipped,
+            written, shipped,
             "{} was extracted verbatim from the shipped pack",
             entry.display_path
         );
@@ -256,8 +258,7 @@ fn a_cancelled_extraction_reports_what_it_wrote() {
         .cloned()
         .collect::<Vec<_>>();
     assert!(!sample.is_empty());
-    let output =
-        std::env::temp_dir().join(format!("baboon-dump-cancel-{}", std::process::id()));
+    let output = std::env::temp_dir().join(format!("baboon-dump-cancel-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&output);
     // Already cancelled: every worker breaks on its first check, so nothing is
     // read and the run is still a reported outcome rather than an error.
@@ -317,20 +318,20 @@ fn a_mounted_container_can_be_released_replaced_and_remounted() {
     let names = crate::format::TagNameIndex::load_from_definitions(&defs);
     // Mounted against the real Paks, as the app does: an override container ships
     // no directory index, so only the containers it overrides can name its chunks.
-    let mut loaded = crate::source::load_iostore_container(
-        target.clone(),
-        Some(paks.clone()),
-        &names,
-        &defs,
-    )
-    .expect("mount the copied mod");
+    let mut loaded =
+        crate::source::load_iostore_container(target.clone(), Some(paks.clone()), &names, &defs)
+            .expect("mount the copied mod");
 
     assert_eq!(
         crate::source::mounted_containers_at(&loaded.source, &target),
         vec![0],
         "the export target is recognised as a mounted container"
     );
-    let entry = loaded.entries.first().cloned().expect("the mod carries a tag");
+    let entry = loaded
+        .entries
+        .first()
+        .cloned()
+        .expect("the mod carries a tag");
     crate::source::read_entry(&loaded.source, &entry).expect("read while mapped");
 
     let root = match &loaded.source {
@@ -362,7 +363,9 @@ fn a_mounted_container_can_be_released_replaced_and_remounted() {
     id[..8].copy_from_slice(&0x0bad_f00d_dead_beefu64.to_le_bytes());
     id[11] = blam_tags::iostore::CHUNK_TYPE_BULK_DATA;
     writer.add_chunk(blam_tags::iostore::FIoChunkId(id), vec![7u8; 2048]);
-    writer.write(&target).expect("replace the mounted container");
+    writer
+        .write(&target)
+        .expect("replace the mounted container");
 
     let containers_snapshot = match &loaded.source {
         TagSource::IoStoreContainerSet { containers, .. } => containers.clone(),
@@ -373,6 +376,165 @@ fn a_mounted_container_can_be_released_replaced_and_remounted() {
     assert!(
         reopened.is_partition_mapped(),
         "the remounted container is readable again"
+    );
+
+    let _ = std::fs::remove_dir_all(&scratch);
+}
+
+/// Every tag the install mounts must be able to name the `.uasset` wrapper it
+/// belongs to.
+///
+/// The Marine biped could not: swapping `.ubulk` for `.uasset` on the indexed
+/// payload path produced `objects/characters/Marine/marine-biped.uasset`, and
+/// the container spells that folder `marine`. A directory index is matched byte
+/// for byte, so the copy failed with "path not found in container" against a
+/// path nothing had ever held. This is that failure, asked of every tag at once
+/// rather than of the one that happened to be reported.
+#[test]
+fn every_container_tag_can_name_its_wrapper() {
+    let Some(loaded) = mount() else { return };
+    let TagSource::IoStoreContainerSet {
+        containers,
+        packages,
+        ..
+    } = &loaded.source
+    else {
+        panic!("not a container set");
+    };
+    let mut unresolved = Vec::new();
+    let mut assembled_would_have_failed = 0usize;
+    for entry in &loaded.entries {
+        let TagEntryLocation::Container {
+            container,
+            rel_path,
+        } = &entry.location
+        else {
+            continue;
+        };
+        match resolve_source_uasset(containers, packages, *container, rel_path) {
+            Ok(resolved) => {
+                if resolved.how != "same container" {
+                    assembled_would_have_failed += 1;
+                }
+            }
+            Err(_) if unresolved.len() < 20 => {
+                unresolved.push(format!("{} ({rel_path})", entry.display_path))
+            }
+            Err(_) => {}
+        }
+    }
+    eprintln!(
+        "{assembled_would_have_failed} of {} tags need more than an extension swap to find their \
+         wrapper",
+        loaded.entries.len()
+    );
+    assert!(
+        unresolved.is_empty(),
+        "{} tag(s) have no resolvable wrapper, e.g. {}",
+        unresolved.len(),
+        unresolved.join(", ")
+    );
+}
+
+/// A mod exported under a name nothing was mounted under is folded into the
+/// mount that is already there, rather than needing a reload — which rebuilds
+/// the workspace and costs every open tab and the Mod Stash with it.
+#[test]
+fn a_freshly_written_mod_can_be_mounted_without_reloading() {
+    let Some(paks) = paks() else { return };
+    let Some(mut loaded) = mount() else { return };
+    let before = loaded.entries.len();
+    let containers_before = match &loaded.source {
+        TagSource::IoStoreContainerSet { containers, .. } => containers.len(),
+        _ => panic!("not a container set"),
+    };
+    let Some(donor) = std::fs::read_dir(&paks)
+        .expect("read Paks")
+        .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+        .find(|path| {
+            path.extension().is_some_and(|ext| ext == "utoc")
+                && !path
+                    .file_stem()
+                    .is_some_and(|stem| stem.to_string_lossy().starts_with("pakchunk"))
+                && path.file_name().is_some_and(|name| name != "global.utoc")
+        })
+    else {
+        eprintln!("skipping: no mod container in this Paks folder to copy");
+        return;
+    };
+    // Inside the real Paks tree, because an index-less container's chunks are
+    // named from the containers it overrides and those are found from the root.
+    let scratch = paks.join(format!(".baboon-mount-test-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&scratch);
+    std::fs::create_dir_all(&scratch).expect("scratch dir");
+    let target = scratch.join("freshly_written_P.utoc");
+    for extension in ["utoc", "ucas", "pak"] {
+        let from = donor.with_extension(extension);
+        if from.exists() {
+            std::fs::copy(&from, target.with_extension(extension)).expect("copy container");
+        }
+    }
+
+    // What every open tab, parsed document and undo stack is filed under.
+    let keys_before: Vec<String> = loaded
+        .entries
+        .iter()
+        .map(|entry| entry.key.clone())
+        .collect();
+
+    let contributed = crate::source::mount_additional_container(&mut loaded, &target)
+        .expect("mount the freshly written mod");
+
+    // Mounting a mod over a tag changes where it is read from, never what it
+    // is. Anything else orphans the tabs of the tags that were just exported.
+    for key in &keys_before {
+        assert!(
+            loaded.entries.iter().any(|entry| entry.key == *key),
+            "{key} lost its identity when the mod was mounted over it"
+        );
+    }
+
+    let TagSource::IoStoreContainerSet { containers, .. } = &loaded.source else {
+        panic!("not a container set");
+    };
+    assert_eq!(
+        containers.len(),
+        containers_before + 1,
+        "the new container joined the set"
+    );
+    let mounted = containers.last().expect("the new container");
+    assert!(
+        mounted.is_mod,
+        "a container outside the game's own packs is a mod"
+    );
+    assert_eq!(mounted.utoc_path, target);
+    if contributed > 0 {
+        // Its tags are reachable through the mount, in sorted position, and
+        // readable — which is the whole point of not needing the reload.
+        assert!(loaded.entries.len() >= before);
+        let entry = loaded
+            .entries
+            .iter()
+            .find(|entry| matches!(
+                &entry.location,
+                TagEntryLocation::Container { container, .. } if *container == containers.len() - 1
+            ))
+            .cloned()
+            .expect("the new container's tags are in the entry list");
+        crate::source::read_entry(&loaded.source, &entry).expect("read through the new mount");
+        assert!(
+            loaded
+                .entries
+                .windows(2)
+                .all(|pair| crate::source::natural_key(&pair[0].display_path)
+                    <= crate::source::natural_key(&pair[1].display_path)),
+            "entries stay in the order the browser draws"
+        );
+    }
+    // Mounting the same file twice is a no-op rather than a second container.
+    assert_eq!(
+        crate::source::mount_additional_container(&mut loaded, &target).expect("idempotent"),
+        0
     );
 
     let _ = std::fs::remove_dir_all(&scratch);

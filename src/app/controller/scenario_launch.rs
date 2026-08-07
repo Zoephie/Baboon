@@ -100,6 +100,18 @@ pub(super) fn scenario_launch_context(
     })
 }
 
+/// Whether this game's Sapien can be handed a scenario to open.
+///
+/// Two kits are out, for different reasons. Halo Combat Evolved's Sapien is the
+/// original tool and takes no scenario on its command line at all — there is no
+/// terminal route into it, so opening a scenario "in Sapien" is not a thing
+/// that kit can do rather than a thing that happens to be unconfigured. Campaign
+/// Evolved ships no Sapien whatsoever. Everywhere else the argument works, and
+/// only a missing `sapien.exe` can stop a launch.
+///
+/// This is also what decides whether the button is *shown*: an editing kit that
+/// can never do this should not offer a control for it, greyed out or
+/// otherwise.
 pub(super) fn sapien_supports_scenario_argument(game: &str) -> bool {
     matches!(
         game,
@@ -381,8 +393,14 @@ mod tests {
         );
     }
 
+    /// The same answer decides whether the scenario's Sapien button is drawn at
+    /// all, so this covers every game Baboon ships definitions for rather than
+    /// only the ones that support it — a game added without a decision here
+    /// would silently get no button.
     #[test]
     fn sapien_scenario_arguments_exclude_halo_ce() {
+        // Combat Evolved's Sapien takes no scenario argument, and Campaign
+        // Evolved has no Sapien. Both mean "no button", not "greyed out".
         assert!(!sapien_supports_scenario_argument("haloce_mcc"));
         assert!(!sapien_supports_scenario_argument("haloce_evolved"));
         for game in [
@@ -395,6 +413,30 @@ mod tests {
         ] {
             assert!(sapien_supports_scenario_argument(game), "{game}");
         }
+    }
+
+    /// Every game with definitions is either offered the button or explicitly
+    /// not, so adding a game cannot leave this unanswered by accident.
+    #[test]
+    fn every_shipped_game_has_a_decision_about_the_sapien_button() {
+        let definitions = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
+        let games: Vec<String> = std::fs::read_dir(&definitions)
+            .expect("the definitions submodule is required to build")
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.path().is_dir())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| !name.starts_with('.'))
+            .collect();
+        assert!(!games.is_empty(), "definitions/ has per-game folders");
+        let without_sapien: Vec<&String> = games
+            .iter()
+            .filter(|game| !sapien_supports_scenario_argument(game))
+            .collect();
+        assert_eq!(
+            without_sapien.len(),
+            2,
+            "exactly two shipped games have no scenario-capable Sapien, got {without_sapien:?}"
+        );
     }
 
     #[test]

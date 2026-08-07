@@ -420,15 +420,22 @@ impl Baboon {
             return;
         }
         let key = entry.key.clone();
+        // Halo Combat Evolved's Sapien cannot be handed a scenario, and
+        // Campaign Evolved has no Sapien at all. Neither is a button worth
+        // greying out — a control that can never work reads as something the
+        // user has misconfigured.
+        let offers_sapien = self.kit_offers_scenario_sapien(kit_index);
         ui.horizontal(|ui| {
             ui.label(RichText::new("Open scenario in:").color(subtle_dark()));
-            let sapien_ready = self.can_launch_scenario_in_sapien(kit_index, entry);
-            if launcher_button(ui, self.sapien_icon.as_ref(), "S", sapien_ready)
-                .on_hover_text("Save if needed, then launch this scenario in Sapien")
-                .clicked()
-            {
-                self.active = kit_index;
-                self.launch_scenario_in_sapien(&key);
+            if offers_sapien {
+                let sapien_ready = self.can_launch_scenario_in_sapien(kit_index, entry);
+                if launcher_button(ui, self.sapien_icon.as_ref(), "S", sapien_ready)
+                    .on_hover_text("Save if needed, then launch this scenario in Sapien")
+                    .clicked()
+                {
+                    self.active = kit_index;
+                    self.launch_scenario_in_sapien(&key);
+                }
             }
             let tag_test_ready = self.can_launch_scenario_in_tag_test(kit_index, entry);
             if launcher_button(ui, self.tag_test_icon.as_ref(), "T", tag_test_ready)
@@ -604,6 +611,10 @@ impl eframe::App for Baboon {
         self.window_state.observe(ctx);
         self.draw_root_ui(ctx, frame);
         self.run_deferred_file_action(ctx);
+        // A container write whose workspace closed while it was in flight left
+        // a mapping released and an Unreal package mount idle. Nothing else
+        // would ever put those back.
+        self.sweep_container_write_leases(ctx);
         self.maybe_autosave_campaign_projects(ctx);
     }
 

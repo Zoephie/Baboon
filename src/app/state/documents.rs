@@ -495,7 +495,7 @@ impl ModExportDialog {
     /// mounted — that is what makes a re-export of an installed mod impossible
     /// while it is open.
     pub(in crate::app) fn output_utoc(&self) -> PathBuf {
-        self.folder.join(format!("{}.utoc", self.stem()))
+        self.destination().join(format!("{}.utoc", self.stem()))
     }
 }
 
@@ -591,8 +591,18 @@ impl ModExportDialog {
     /// so it is part of the name rather than something the user can leave off.
     /// The game folds case before comparing, so a name already ending `_p` is
     /// left as it is.
+    ///
+    /// A name that sanitizes to nothing still gets a stem: the field is shown
+    /// live beside the file names it produces, and a half-typed name that
+    /// previewed as a bare `_P.utoc` read like a bug. Export stays disabled
+    /// until the name is real.
     pub(in crate::app) fn stem(&self) -> String {
         let name = sanitize_mod_name(&self.name);
+        let name = if name.is_empty() {
+            "mod".to_owned()
+        } else {
+            name
+        };
         if name.len() >= 2 && name[name.len() - 2..].eq_ignore_ascii_case("_p") {
             name
         } else {
@@ -609,45 +619,35 @@ impl ModExportDialog {
     pub(in crate::app) fn existing_files(&self) -> Vec<String> {
         let stem = self.stem();
         let destination = self.destination();
-        ["utoc", "ucas", "pak", "baboon"]
+        MOD_FILE_EXTENSIONS
             .into_iter()
             .map(|extension| format!("{stem}.{extension}"))
             .filter(|name| destination.join(name).exists())
             .collect()
     }
 
-    /// The directory the mod's own files land in: `<folder>/~mods/<name>/`.
+    /// The directory the mod's files land in: the folder that was chosen, and
+    /// nothing appended to it.
     ///
-    /// Every mod gets its own folder under a shared `~mods`, so a `Paks`
-    /// directory does not accumulate loose triplets from every mod ever
-    /// exported, and replacing one mod means replacing the contents of one
-    /// folder. `~mods` is the name the engine's loader already expects mods to
-    /// be grouped under, so a mod exported into the game's own `Paks` is still
-    /// picked up where it lands, with nothing to copy.
-    ///
-    /// A folder that is already `~mods` is used as-is rather than nested inside
-    /// a second one, so browsing to the mods directory does the obvious thing.
+    /// The mod name names the *files*, never a directory. Deriving a folder
+    /// from it too meant picking `Paks/~mods` and typing `mymod` wrote to
+    /// `Paks/~mods/mymod/`, which is a level of nesting nobody asked for and
+    /// which the engine's loader does not require — `~mods` is scanned
+    /// recursively, so a triplet sitting directly in it is found either way.
+    /// The default folder is already `Paks/~mods` (see `open_mod_review`), so
+    /// the obvious export lands in the obvious place with no guessing here.
     pub(in crate::app) fn destination(&self) -> PathBuf {
-        let name = sanitize_mod_name(&self.name);
-        let name = if name.is_empty() {
-            "mod".to_owned()
-        } else {
-            name
-        };
-        let already_in_mods = self
-            .folder
-            .file_name()
-            .is_some_and(|folder| folder.eq_ignore_ascii_case(MODS_DIR));
-        if already_in_mods {
-            self.folder.join(name)
-        } else {
-            self.folder.join(MODS_DIR).join(name)
-        }
+        self.folder.clone()
     }
 }
 
-/// The directory mods are grouped under, inside whichever folder is chosen.
+/// The directory mods are grouped under, and the export's default destination
+/// inside the game's own `Paks`.
 pub(in crate::app) const MODS_DIR: &str = "~mods";
+
+/// Everything one exported mod is made of, in the order the dialog lists them.
+/// The three the engine loads, plus the project sidecar that travels with them.
+pub(in crate::app) const MOD_FILE_EXTENSIONS: [&str; 4] = ["utoc", "ucas", "pak", "baboon"];
 
 /// What Export Mod just wrote, so the app can say what to do with it.
 ///
@@ -835,6 +835,7 @@ mod mod_export_tests {
                 selected_identity: None,
                 tabs: Vec::new(),
                 overlays: HashMap::new(),
+                history: Default::default(),
             },
             rows: Vec::new(),
             name: name.to_owned(),
@@ -847,37 +848,43 @@ mod mod_export_tests {
     }
 
     #[test]
-    fn a_mod_gets_a_folder_of_its_own_under_mods() {
-        let dialog = dialog("Cool Mod", "D:/Game/Paks");
-        // The folder is the sanitized name; `_P` belongs to the files, because
-        // it is what gives the container priority rather than part of the name.
-        assert_eq!(
-            dialog.destination(),
-            PathBuf::from("D:/Game/Paks/~mods/Cool-Mod")
-        );
+    fn the_mod_name_names_the_files_and_not_a_folder() {
+        let dialog = dialog("Cool Mod", "D:/Game/Paks/~mods");
+        // `_P` belongs to the files, because it is what gives the container
+        // priority rather than part of the name the user typed.
+        assert_eq!(dialog.destination(), PathBuf::from("D:/Game/Paks/~mods"));
         assert_eq!(dialog.stem(), "Cool-Mod_P");
-    }
-
-    #[test]
-    fn browsing_into_the_mods_folder_does_not_nest_another() {
         assert_eq!(
-            dialog("coolmod", "D:/Game/Paks/~mods").destination(),
-            PathBuf::from("D:/Game/Paks/~mods/coolmod")
-        );
-        assert_eq!(
-            dialog("coolmod", "D:/Game/Paks/~MODS").destination(),
-            PathBuf::from("D:/Game/Paks/~MODS/coolmod")
+            dialog.output_utoc(),
+            PathBuf::from("D:/Game/Paks/~mods/Cool-Mod_P.utoc")
         );
     }
 
     #[test]
-    fn a_name_that_sanitizes_to_nothing_still_has_somewhere_to_go() {
-        // The export button is disabled for an empty name, but the destination
-        // is shown while it is being typed and must not resolve to the folder
-        // itself — that would offer to write the triplet loose into `~mods`.
-        assert_eq!(
-            dialog("///", "D:/Game/Paks").destination(),
-            PathBuf::from("D:/Game/Paks/~mods/mod")
-        );
+    fn a_chosen_folder_is_the_folder_written_to() {
+        // Every shape of picked folder, including one that is not `~mods` at
+        // all: what was picked is where the files go. Anything else made
+        // "Browse..." mean "browse to the parent of where I want this".
+        for folder in [
+            "D:/Game/Paks",
+            "D:/Game/Paks/~mods",
+            "D:/Game/Paks/~MODS",
+            "D:/Somewhere/Else",
+        ] {
+            let dialog = dialog("coolmod", folder);
+            assert_eq!(dialog.destination(), PathBuf::from(folder));
+            assert_eq!(
+                dialog.output_utoc(),
+                PathBuf::from(folder).join("coolmod_P.utoc")
+            );
+        }
+    }
+
+    #[test]
+    fn a_name_that_sanitizes_to_nothing_still_names_a_file() {
+        // The export button is disabled for an empty name, but the file names
+        // are shown while it is being typed and a bare `_P.utoc` reads like a
+        // bug rather than like an unfinished name.
+        assert_eq!(dialog("///", "D:/Game/Paks").stem(), "mod_P");
     }
 }

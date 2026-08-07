@@ -35,11 +35,14 @@ use loading::loaded_source_status;
 mod references;
 use anyhow::Context as _;
 use references::*;
+mod container_write;
+pub(in crate::app) use container_write::*;
 mod created_tags;
-pub(super) use created_tags::{CreatedTagLedger, CreatedTagRecord};
 use created_tags::package_id_for;
+pub(super) use created_tags::{CreatedTagLedger, CreatedTagRecord};
 mod delete;
 mod duplicate;
+use duplicate::resolve_source_uasset;
 
 const TERMINAL_VISIBLE_LINE_LIMIT: usize = 20_000;
 const TERMINAL_VISIBLE_LINE_TRIM_TARGET: usize = 18_000;
@@ -347,10 +350,36 @@ fn new_container_key(package: &str) -> String {
     format!("newtag:{package}")
 }
 
+/// A container-relative payload path as a `/Game/…` package path.
+///
+/// The content root is stripped case-insensitively and the remainder is left
+/// exactly as the container spells it. Matching `Meteorite/Content/` literally
+/// meant a container that wrote `meteorite/content/` produced a package path
+/// with the cook's directory layout still embedded in it, which resolves to
+/// nothing — the same class of bug as reassembling a `.uasset` path from a
+/// `.ubulk` one. Lowercasing the remainder would be the other failure: the
+/// package path is what the destination's directory-index entry is built from,
+/// and that index is case-sensitive.
 fn container_rel_to_package_path(rel: &str) -> Option<String> {
-    let no_ext = rel.strip_suffix(".ubulk").unwrap_or(rel);
-    let after = no_ext.strip_prefix("Meteorite/Content/").unwrap_or(no_ext);
+    let no_ext = rel
+        .strip_suffix(".ubulk")
+        .or_else(|| rel.strip_suffix(".uasset"))
+        .unwrap_or(rel);
+    let after = strip_content_root(no_ext);
     Some(format!("/Game/{after}"))
+}
+
+/// Strip a container's content root (`Meteorite/Content/`, or a bare
+/// `Content/`) however it is capitalised, leaving the rest untouched.
+pub(super) fn strip_content_root(rel: &str) -> &str {
+    for prefix in ["Meteorite/Content/", "Content/"] {
+        if let Some(candidate) = rel.get(..prefix.len())
+            && candidate.eq_ignore_ascii_case(prefix)
+        {
+            return &rel[prefix.len()..];
+        }
+    }
+    rel
 }
 
 pub(super) fn register_created_tag_in_source(source: &mut LoadedSourceData, entry: TagEntry) {
@@ -374,9 +403,7 @@ pub(super) fn register_created_tag_in_source(source: &mut LoadedSourceData, entr
         } else {
             &source.entries
         });
-        if had_complete_index
-            && let Some(game) = source.game.as_deref()
-        {
+        if had_complete_index && let Some(game) = source.game.as_deref() {
             let _ = crate::source::save_entry_index(game, root, &source.all_entries);
         }
     } else {
@@ -434,6 +461,54 @@ fn mod_output_path(output: PathBuf) -> PathBuf {
         .or_else(|| stem.strip_suffix("_p"))
         .unwrap_or(stem);
     parent.join(MODS_DIR).join(folder).join(file_name)
+}
+
+/// What Save does with an edited Campaign Evolved container tag.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ContainerSaveRoute {
+    /// Show what shipping the change looks like. The edit is already carried in
+    /// the workspace's stash, so nothing is lost by not writing.
+    ExportReview,
+    /// Overwrite the tag inside the game's own pak, after confirming.
+    ConfirmOverwriteInPlace,
+    /// The same overwrite, for a user who has turned the confirmation off.
+    OverwriteInPlace,
+}
+
+/// Route Save for a container tag.
+///
+/// Writing back into the game's own paks edits the installed game, which is not
+/// how a change should be shipped and is not something a user should reach by
+/// pressing Save. It is an expert-mode route; everyone else is sent to the
+/// export, which is the supported one.
+pub(super) fn container_save_route(expert_mode: bool, confirm: bool) -> ContainerSaveRoute {
+    match (expert_mode, confirm) {
+        (false, _) => ContainerSaveRoute::ExportReview,
+        (true, true) => ContainerSaveRoute::ConfirmOverwriteInPlace,
+        (true, false) => ContainerSaveRoute::OverwriteInPlace,
+    }
+}
+
+/// The folder Export Mod offers by default: the game's own `~mods`, inside the
+/// `Paks` directory the source was mounted from.
+///
+/// `~mods` is where the engine's loader already looks — `FPakPlatformFile`
+/// walks the pak folder recursively — so a mod written there is installed
+/// where it lands, with nothing to copy afterwards.
+pub(super) fn default_mod_export_folder(paks_root: &Path) -> PathBuf {
+    paks_root.join(MODS_DIR)
+}
+
+/// Create the directory a mod's files are about to be written into.
+///
+/// This is what creates the game's `~mods` on a first export: the default
+/// destination is inside it, and nothing else in the app makes it.
+fn ensure_export_directory(output: &Path) -> Result<(), String> {
+    let Some(directory) = output.parent() else {
+        return Ok(());
+    };
+    fs::create_dir_all(directory)
+        .map_err(|error| format!("Could not create {}: {error}", directory.display()))
 }
 
 /// Create the folder a mod is about to be written into.
@@ -497,7 +572,6 @@ pub(in crate::app) fn classify_overlay(
         (true, CampaignProjectTagKind::Existing) => ModExportChange::Modified,
     }
 }
-
 
 impl Baboon {
     /// Resolve (and cache) the Wwise media a Campaign Evolved `sound` tag binds
@@ -761,9 +835,11 @@ impl Baboon {
                 WorkerMessage::BitmapReimportFinished { kit, key, result } => {
                     self.handle_bitmap_reimport_finished(kit, key, result)
                 }
-                WorkerMessage::ContainerDuplicateFinished { stamp, result } => {
-                    self.handle_container_duplicate_finished(stamp, result)
-                }
+                WorkerMessage::ContainerDuplicateFinished {
+                    stamp,
+                    lease,
+                    result,
+                } => self.handle_container_duplicate_finished(stamp, lease, result, ctx),
                 WorkerMessage::ContainerDeleteFinished { stamp, result } => {
                     self.handle_container_delete_finished(stamp, result)
                 }
@@ -1816,9 +1892,9 @@ impl Baboon {
         {
             return Ok(bytes);
         }
-        let (container, rel) = self.find_container_template(group_tag).ok_or_else(|| {
-            "No tag in the mounted paks can donate a package template".to_owned()
-        })?;
+        let (container, rel) = self
+            .find_container_template(group_tag)
+            .ok_or_else(|| "No tag in the mounted paks can donate a package template".to_owned())?;
         containers
             .get(container)
             .ok_or_else(|| "Template container is stale".to_owned())?
@@ -3753,12 +3829,7 @@ impl Baboon {
     }
 
     /// Runs the confirmed extraction on a worker thread.
-    pub(super) fn start_container_dump(
-        &mut self,
-        kit: KitId,
-        output: PathBuf,
-        ctx: egui::Context,
-    ) {
+    pub(super) fn start_container_dump(&mut self, kit: KitId, output: PathBuf, ctx: egui::Context) {
         if self.container_dump_job.is_some() {
             self.status = "An extraction is already running".to_owned();
             return;
@@ -3802,7 +3873,8 @@ impl Baboon {
             let progress_tx = tx.clone();
             let progress_ctx = ctx.clone();
             let progress = move |done: usize, total: usize| {
-                let _ = progress_tx.send(WorkerMessage::ContainerDumpProgress { stamp, done, total });
+                let _ =
+                    progress_tx.send(WorkerMessage::ContainerDumpProgress { stamp, done, total });
                 progress_ctx.request_repaint();
             };
             // This reads memory-mapped `.ucas` partitions across several
@@ -4119,16 +4191,24 @@ impl Baboon {
             return;
         }
         // For a container tag, "Save" overwrites the tag inside the game's pak
-        // in place (destructive). Confirm first unless the user opted out (loose
-        // builds never prompt).
+        // in place, which is destructive and is not how anyone should be
+        // shipping a change — so it is an expert-mode route now. Everyone else
+        // gets the export, which is the supported one.
         if self.current_source_is_container() {
-            if self.confirm_container_overwrite {
-                self.overwrite_confirm = Some(OverwriteConfirm {
-                    kit: self.active_kit_id(),
-                    key,
-                });
-            } else {
-                self.overwrite_current_tag_in_place(&key);
+            match container_save_route(self.expert_mode, self.confirm_container_overwrite) {
+                ContainerSaveRoute::ExportReview => {
+                    self.status = "Your change is kept in this workspace — export it as a mod to \
+                                   put it in the game"
+                        .to_owned();
+                    self.export_mod();
+                }
+                ContainerSaveRoute::ConfirmOverwriteInPlace => {
+                    self.overwrite_confirm = Some(OverwriteConfirm {
+                        kit: self.active_kit_id(),
+                        key,
+                    });
+                }
+                ContainerSaveRoute::OverwriteInPlace => self.overwrite_current_tag_in_place(&key),
             }
             return;
         }
@@ -4467,17 +4547,59 @@ impl Baboon {
         self.open_mod_review(true);
     }
 
-    fn open_mod_review(&mut self, review_only: bool) {
-        let exporting = self.active;
+    /// Re-derive an open review's rows from the workspace as it stands now.
+    ///
+    /// A duplicate that lands while the review is open adds a tag to the stash
+    /// the review is describing, and a list that quietly does not include it is
+    /// worse than no list — the point of the window is that what is reviewed
+    /// and what is written cannot disagree.
+    pub(in crate::app) fn refresh_open_mod_review(&mut self, kit: usize) {
+        let Some(open) = self.mod_export.as_ref() else {
+            return;
+        };
+        if self.resolve_kit(open.kit) != Some(kit) {
+            return;
+        }
+        let Some((snapshot, rows)) = self.capture_mod_export_rows(kit) else {
+            return;
+        };
+        let Some(dialog) = self.mod_export.as_mut() else {
+            return;
+        };
+        // Whatever the user had already unticked stays unticked.
+        let excluded: HashSet<String> = dialog
+            .rows
+            .iter()
+            .filter(|row| !row.include)
+            .map(|row| row.identity.clone())
+            .collect();
+        dialog.snapshot = snapshot;
+        dialog.rows = rows
+            .into_iter()
+            .map(|mut row| {
+                if excluded.contains(&row.identity) {
+                    row.include = false;
+                }
+                row
+            })
+            .collect();
+        dialog.diffs.clear();
+    }
+
+    /// Capture the stash and describe every tag in it, for the review window.
+    fn capture_mod_export_rows(
+        &mut self,
+        exporting: usize,
+    ) -> Option<(CampaignProjectSnapshot, Vec<ModExportRow>)> {
         let snapshot = match self.capture_campaign_project(exporting, 0.0) {
             Ok(Some(snapshot)) => snapshot,
             Ok(None) => {
                 self.status = "Export Mod is only for Campaign Evolved containers".to_owned();
-                return;
+                return None;
             }
             Err(error) => {
                 self.status = format!("Could not checkpoint project for export: {error}");
-                return;
+                return None;
             }
         };
         let mut rows: Vec<ModExportRow> = snapshot
@@ -4522,14 +4644,30 @@ impl Baboon {
             })
             .collect();
         rows.sort_by(|a, b| a.display_path.cmp(&b.display_path));
+        Some((snapshot, rows))
+    }
 
+    fn open_mod_review(&mut self, review_only: bool) {
+        let exporting = self.active;
+        let Some((snapshot, rows)) = self.capture_mod_export_rows(exporting) else {
+            return;
+        };
         // The container source's root is already the game's `Paks` directory,
-        // so a mod exported straight there needs no copying at all.
+        // so a mod exported into its `~mods` needs no copying at all. The
+        // folder is created here as well as at write time: it is what the
+        // "Browse..." picker opens into and what the preview claims, and
+        // neither can name a directory that does not exist yet. A failure is
+        // ignored — the write path reports it properly, with the error.
         let folder = self.kits[exporting]
             .source
             .as_ref()
-            .map(|source| source.source.root_path().to_path_buf())
+            .map(|source| default_mod_export_folder(source.source.root_path()))
             .unwrap_or_default();
+        // Not for a review: looking at what is stashed should not leave a
+        // directory behind in the game's install.
+        if !review_only && !folder.as_os_str().is_empty() {
+            let _ = fs::create_dir_all(&folder);
+        }
         self.mod_export = Some(ModExportDialog {
             kit: self.active_kit_id(),
             review_only,
@@ -4805,6 +4943,10 @@ impl Baboon {
     /// the archive — better a named refusal than a write that fails at the OS with
     /// `ERROR_USER_MAPPED_FILE` and nothing to connect it to the mod being
     /// installed.
+    /// Superseded by [`Baboon::unmap_leased_containers`], which does the same
+    /// thing across every open workspace and inside a lease that guarantees the
+    /// restore. Kept only as the mechanism the container tests drive directly.
+    #[cfg(test)]
     pub(super) fn release_export_target_mappings(
         &mut self,
         kit: usize,
@@ -4852,6 +4994,7 @@ impl Baboon {
     /// index, and `reopen_container_archive` is what rebuilds its file list from
     /// the containers it overrides. Falls back to remapping the archive that is
     /// already there, which at least leaves the mount readable.
+    #[cfg(test)]
     pub(super) fn restore_released_mappings(
         &mut self,
         kit: usize,
@@ -4904,15 +5047,11 @@ impl Baboon {
         snapshot: &CampaignProjectSnapshot,
         included: &HashSet<String>,
         output: PathBuf,
+        ctx: &egui::Context,
     ) {
         let exporting = self.active;
-        // The mod's own folder under `~mods` is created here rather than by the
-        // writer, which is handed a finished path and should not be inventing
-        // directories under it.
-        if let Some(directory) = output.parent()
-            && let Err(error) = fs::create_dir_all(directory)
-        {
-            self.status = format!("Could not create {}: {error}", directory.display());
+        if let Err(error) = ensure_export_directory(&output) {
+            self.status = error;
             return;
         }
         let Some(source) = self.source() else {
@@ -4922,6 +5061,7 @@ impl Baboon {
         let TagSource::IoStoreContainerSet {
             containers,
             shipped,
+            packages,
             ..
         } = &source.source
         else {
@@ -4948,6 +5088,39 @@ impl Baboon {
                 continue;
             };
             match &entry.location {
+                // A copy Baboon made lives in a container like any other tag,
+                // but the game ships no package for it — so an override chunk
+                // would patch a package that exists only inside whichever mod
+                // it was copied into, and the exported mod would be broken
+                // anywhere else. It goes out as a new package, seeded with its
+                // own wrapper.
+                TagEntryLocation::Container {
+                    container,
+                    rel_path,
+                } if overlay.kind == CampaignProjectTagKind::New => {
+                    let Some(package) = overlay.package.clone() else {
+                        skipped += 1;
+                        continue;
+                    };
+                    let Ok(resolved) =
+                        resolve_source_uasset(containers, packages, *container, rel_path)
+                    else {
+                        skipped += 1;
+                        continue;
+                    };
+                    let Ok(template) =
+                        containers
+                            .get(resolved.container)
+                            .ok_or(())
+                            .and_then(|mounted| {
+                                mounted.archive.read(&resolved.rel_path).map_err(|_| ())
+                            })
+                    else {
+                        skipped += 1;
+                        continue;
+                    };
+                    new_pkgs.push((template, overlay.bytes.clone(), package));
+                }
                 TagEntryLocation::Container {
                     container,
                     rel_path,
@@ -4992,40 +5165,95 @@ impl Baboon {
             self.status = "Nothing selected to export".to_owned();
             return;
         }
-        // The writer truncates the three files it writes, and a container this
-        // workspace has mounted has its `.ucas` mapped — which Windows will not
-        // let anyone truncate. Releasing has to happen after the bases above are
-        // collected (they are other containers) and before the writer runs.
-        let released = match self.release_export_target_mappings(exporting, &output) {
-            Ok(released) => released,
-            Err(error) => {
-                self.status = error;
-                return;
-            }
-        };
+        // Taken before anything is built, so a second export to the same files
+        // is refused rather than interleaved, and so the Unreal package
+        // workspace — which holds its own mapping of every `.ucas` and an open
+        // handle on every `.pak` under `Paks` — lets go before the swap.
+        let mut lease =
+            match self.acquire_container_write_lease(&output, ContainerWriteMode::Replace) {
+                Ok(lease) => lease,
+                Err(failure) => {
+                    self.status = failure.to_string();
+                    return;
+                }
+            };
+        // Built at a staging path first, with every container still mapped.
+        // The writer reads each override's base container *while* it writes,
+        // and for a tag only a mod carries that base is the container being
+        // replaced — so "unmap, then write" cannot work here. Write, unmap,
+        // then swap.
+        let staging = staging_utoc_for(&output);
+        if let Some(directory) = staging.parent()
+            && let Err(error) = fs::create_dir_all(directory)
+        {
+            self.status =
+                ContainerWriteFailure::at(LeasePhase::Write, directory, error).to_string();
+            self.release_container_write_lease(lease, ContainerWriteOutcome::Unchanged, ctx);
+            return;
+        }
         let override_refs: Vec<(&blam_tags::iostore::IoStoreArchive, &str, &[u8])> = overrides
             .iter()
             .map(|(a, p, b)| (a.as_ref(), p.as_str(), b.as_slice()))
             .collect();
         let new_refs: Vec<blam_tags::iostore::writer::NewPackage> = new_pkgs
             .iter()
-            .map(|(template, bytes, package)| blam_tags::iostore::writer::NewPackage {
-                template_uasset: template.as_slice(),
-                tag_bytes: bytes.as_slice(),
-                new_package_path: package.as_str(),
-                redirect_from: None,
-                // A new tag's wrapper is built from the template with the
-                // donor's own bindings stripped; nothing here chooses one.
-                asset_reference: None,
-            },)
+            .map(
+                |(template, bytes, package)| blam_tags::iostore::writer::NewPackage {
+                    template_uasset: template.as_slice(),
+                    tag_bytes: bytes.as_slice(),
+                    new_package_path: package.as_str(),
+                    redirect_from: None,
+                    // A new tag's wrapper is built from the template with the
+                    // donor's own bindings stripped; nothing here chooses one.
+                    asset_reference: None,
+                },
+            )
             .collect();
-        let written =
-            blam_tags::iostore::writer::write_mod_container_ex(&override_refs, &new_refs, &output);
-        // Before anything reads through the mount again, and whether or not the
-        // write worked: a released partition refuses every payload read.
+        let built =
+            blam_tags::iostore::writer::write_mod_container_ex(&override_refs, &new_refs, &staging);
+        // Every borrow of a mounted archive has to be gone before the unmap:
+        // one surviving clone is the difference between replacing the mod and
+        // being told the workspace is reading it.
         drop(override_refs);
+        drop(new_refs);
         drop(overrides);
-        let reopen_failures = self.restore_released_mappings(exporting, &released);
+        if let Err(error) = built {
+            // Nothing of the original was touched — the whole point of building
+            // at a staging path — so say so rather than leaving the user
+            // wondering what state their installed mod is in.
+            discard_staging(&staging);
+            self.release_container_write_lease(lease, ContainerWriteOutcome::Unchanged, ctx);
+            self.status = format!(
+                "Export Mod failed: {}. Nothing was replaced",
+                ContainerWriteFailure::at(LeasePhase::Write, &staging, error)
+            );
+            return;
+        }
+        if let Err(failure) = self.unmap_leased_containers(&mut lease) {
+            discard_staging(&staging);
+            self.release_container_write_lease(lease, ContainerWriteOutcome::Unchanged, ctx);
+            self.status = failure.to_string();
+            return;
+        }
+        // Each existing file is moved aside before any of the new ones land, so
+        // a failure part-way through puts back what was there rather than
+        // leaving a container built from two mods.
+        // `swap_container_triplet` puts back whatever it moved aside, and says
+        // so in the phase it reports: `Swap` when the original was restored,
+        // `Rollback` when restoring it is what failed.
+        let written = swap_container_triplet(&staging, &output);
+        discard_staging(&staging);
+        let replaced_a_mount = lease.unmapped_any();
+        let report = self.release_container_write_lease(
+            lease,
+            if written.is_ok() {
+                ContainerWriteOutcome::Committed
+            } else {
+                ContainerWriteOutcome::Unchanged
+            },
+            ctx,
+        );
+        let reopen_failures = report.reopen_failures;
         match written {
             Ok(()) => {
                 let stem = output
@@ -5036,17 +5264,19 @@ impl Baboon {
                 let sidecar = output.with_extension("baboon");
                 // A sidecar written next to an exported mod may be replacing an
                 // older one, and nothing here knows what is in it.
-                if let Err(error) = save_campaign_project(&sidecar, snapshot, None) {
-                    self.status =
-                        format!("Exported {count} tag(s), but the .baboon sidecar failed: {error}");
+                if let Err(error) = save_campaign_project(&sidecar, snapshot, None, ProjectScope::ModSidecar) {
+                    self.status = format!(
+                        "Exported {count} tag(s), but the .baboon sidecar failed: {}",
+                        ContainerWriteFailure::at(LeasePhase::Commit, &sidecar, error)
+                    );
                 }
                 // The sidecar travels with the mod; the workspace keeps its own
                 // project, checkpointed here so it carries what the export did.
                 let _ = self.checkpoint_campaign_project(exporting, 0.0);
                 let directory = output.parent().map(Path::to_path_buf).unwrap_or_default();
                 // Anywhere inside the game's own Paks tree, not just its root:
-                // a mod written to `Paks/~mods/<name>/` is already where the
-                // game will find it, so there is nothing to copy there either.
+                // a mod written to `Paks/~mods/` is already where the game will
+                // find it, so there is nothing to copy there either.
                 let in_place = self
                     .source()
                     .map(|source| directory.starts_with(source.source.root_path()))
@@ -5054,11 +5284,14 @@ impl Baboon {
                 self.status = if !reopen_failures.is_empty() {
                     // The mod was written; what failed is picking it back up.
                     format!(
-                        "Exported {count} tag(s) as {stem}, but remounting failed ({}) — reload \
-                         the source",
-                        reopen_failures.join("; ")
+                        "Exported {count} tag(s) as {stem}, but {} — reload the source",
+                        ContainerWriteFailure::at(
+                            LeasePhase::Remount,
+                            &output,
+                            reopen_failures.join("; ")
+                        )
                     )
-                } else if released.is_empty() {
+                } else if !replaced_a_mount {
                     format!("Exported {count} tag(s) as {stem}")
                 } else {
                     // The container it replaced is mounted, so the browser is now
@@ -5069,6 +5302,31 @@ impl Baboon {
                          the source if its tag list changed"
                     )
                 };
+                // A mod replacing one that was already mounted came back
+                // through the lease's reopen. One written under a name nothing
+                // was mounted under is not in the set at all, and until now the
+                // only way to see it was a reload — which rebuilds the
+                // workspace and costs every open tab and the stash with it.
+                if in_place && !replaced_a_mount {
+                    let mounted = self.kits[exporting]
+                        .source
+                        .as_mut()
+                        .map(|source| crate::source::mount_additional_container(source, &output));
+                    match mounted {
+                        Some(Ok(count)) if count > 0 => {
+                            self.kits[exporting].generation =
+                                self.kits[exporting].generation.wrapping_add(1);
+                            self.kits[exporting].field_index.invalidate();
+                            self.status
+                                .push_str(&format!(" — mounted, {count} tag(s) now served by it"));
+                        }
+                        Some(Err(error)) => self.status.push_str(&format!(
+                            " — but {}; reload the source to see it",
+                            ContainerWriteFailure::at(LeasePhase::Remount, &output, error)
+                        )),
+                        _ => {}
+                    }
+                }
                 // Written straight into the game's own folder: there is nothing
                 // to copy, so the instructions would only be noise.
                 if !in_place {
@@ -5239,8 +5497,12 @@ impl Baboon {
             TagNameOperation::Duplicate => {
                 // Two writers on one container's UTOC would race, and each
                 // validates against a handle the other is invalidating.
-                !self.container_duplicate_running.contains(&self.active_kit_id())
-                    && !self.container_delete_running.contains(&self.active_kit_id())
+                !self
+                    .container_duplicate_running
+                    .contains(&self.active_kit_id())
+                    && !self
+                        .container_delete_running
+                        .contains(&self.active_kit_id())
                     && matches!(
                         entry.location,
                         TagEntryLocation::LooseFile(_) | TagEntryLocation::Container { .. }
@@ -6613,7 +6875,12 @@ impl Baboon {
 
     /// Apply a snapshot returned by the journal: re-parse the bytes into the
     /// document and invalidate derived caches.
-    fn restore_snapshot(&mut self, key: &str, restored: Option<(Vec<u8>, String)>, verb: &str) {
+    fn restore_snapshot(
+        &mut self,
+        key: &str,
+        restored: Option<(Arc<Vec<u8>>, String)>,
+        verb: &str,
+    ) {
         // Classic (Halo CE / Halo 2) snapshots are serialized in classic format,
         // which `read_from_bytes` can't parse — re-parse with the JSON layout.
         let group_tag = self.kits[self.active]
@@ -6740,6 +7007,23 @@ impl Baboon {
 
     pub(super) fn launch_tag_test(&mut self) {
         self.launch_kit_tool_clearing_startup("tag_test", self.tag_test_executable(), "init.txt");
+    }
+
+    /// Whether this workspace's editing kit has a Sapien that can open a
+    /// scenario at all — the question of whether to *offer* the button, as
+    /// opposed to whether it can be pressed right now.
+    ///
+    /// Answered from the kit's game alone, deliberately. Whether a particular
+    /// scenario resolves to a launchable path, and whether `sapien.exe` is
+    /// where it should be, are reasons to grey the button out; a kit whose
+    /// Sapien has no way to be given a scenario is a reason for there to be no
+    /// button.
+    pub(super) fn kit_offers_scenario_sapien(&self, kit: usize) -> bool {
+        self.kits
+            .get(kit)
+            .and_then(|kit| kit.source.as_ref())
+            .and_then(|source| source.game.as_deref())
+            .is_some_and(sapien_supports_scenario_argument)
     }
 
     pub(super) fn can_launch_scenario_in_sapien(&self, kit: usize, entry: &TagEntry) -> bool {
@@ -10481,5 +10765,105 @@ mod mod_output_tests {
         ] {
             assert_eq!(mod_output_path(PathBuf::from(path)), PathBuf::from(path));
         }
+    }
+
+    #[test]
+    fn saving_a_container_tag_never_touches_the_game_without_expert_mode() {
+        // The confirmation preference is irrelevant outside expert mode: there
+        // is nothing destructive left for it to guard. A user who once ticked
+        // "don't ask again" must not silently get the in-place write back.
+        for confirm in [true, false] {
+            assert_eq!(
+                container_save_route(false, confirm),
+                ContainerSaveRoute::ExportReview,
+                "confirm = {confirm}"
+            );
+        }
+    }
+
+    #[test]
+    fn expert_mode_keeps_both_in_place_routes() {
+        assert_eq!(
+            container_save_route(true, true),
+            ContainerSaveRoute::ConfirmOverwriteInPlace
+        );
+        assert_eq!(
+            container_save_route(true, false),
+            ContainerSaveRoute::OverwriteInPlace
+        );
+    }
+
+    #[test]
+    fn export_mod_defaults_into_the_games_own_mods_folder() {
+        assert_eq!(
+            default_mod_export_folder(Path::new("D:/Game/Meteorite/Content/Paks")),
+            PathBuf::from("D:/Game/Meteorite/Content/Paks/~mods")
+        );
+    }
+
+    #[test]
+    fn the_default_export_creates_mods_when_it_is_missing() {
+        // The one behaviour that must survive the destination change: a first
+        // export into a `Paks` folder that has never had a mod in it makes
+        // `~mods` rather than failing.
+        let paks = std::env::temp_dir().join(format!(
+            "baboon-export-dir-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&paks).expect("a Paks folder to export into");
+        let mods = default_mod_export_folder(&paks);
+        assert!(!mods.exists(), "the fixture starts without a ~mods folder");
+
+        ensure_export_directory(&mods.join("mymod_P.utoc")).expect("created");
+
+        assert!(mods.is_dir(), "~mods was created for the export");
+        // And the files land directly in it — no folder named after the mod.
+        assert_eq!(mods.join("mymod_P.utoc").parent(), Some(mods.as_path()));
+        let _ = fs::remove_dir_all(&paks);
+    }
+
+    #[test]
+    fn a_copy_baboon_authored_exports_as_a_new_package() {
+        // A duplicate mounts as an ordinary container tag, so without the
+        // ledger's word for it the export would build a field override against
+        // a package that exists only inside the mod it was copied into.
+        let entry = TagEntry {
+            key: "ublock:mymod_P:Tags/objects/copy-biped.ubulk".to_owned(),
+            display_path: "objects/copy.biped".to_owned(),
+            group_tag: parse_group_tag("bipd").unwrap(),
+            group_name: Some("biped".to_owned()),
+            location: TagEntryLocation::Container {
+                container: 0,
+                rel_path: "Tags/objects/copy-biped.ubulk".to_owned(),
+            },
+        };
+        let package = "/Game/Tags/objects/copy-biped".to_owned();
+
+        let (_, _, authored_kind, authored_package) =
+            crate::app::campaign_entry_project_parts_with(&entry, Some(package.clone()))
+                .expect("a container entry has project parts");
+        assert_eq!(authored_kind, CampaignProjectTagKind::New);
+        assert_eq!(authored_package.as_deref(), Some(package.as_str()));
+        // `New` never reaches the "identical to the game's copy" branch: there
+        // is no shipped copy for it to be identical to.
+        assert_eq!(
+            classify_overlay(true, authored_kind, true),
+            ModExportChange::New
+        );
+
+        // The same entry with nothing in the ledger is still what it looks
+        // like: an edit to a tag the game ships.
+        let (_, _, shipped_kind, shipped_package) =
+            crate::app::campaign_entry_project_parts_with(&entry, None).expect("project parts");
+        assert_eq!(shipped_kind, CampaignProjectTagKind::Existing);
+        assert_eq!(shipped_package, None);
+        assert_eq!(
+            classify_overlay(true, shipped_kind, false),
+            ModExportChange::Modified
+        );
     }
 }

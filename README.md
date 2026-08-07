@@ -83,6 +83,13 @@ Tag files are identified by probing their 64-byte header for the `BLAM`
 (big-endian) / `MALB` (little-endian) magic, so non-tag files in the tree are
 silently skipped.
 
+A loose kit keeps a cached index of its tags in `%APPDATA%\Baboon`, and every
+open reconciles that cache against disk in the background — a size/mtime check
+per file, re-reading only the headers of files that actually changed. Both that
+reconciliation and the from-scratch scan fan their per-file work out across every
+core, which is roughly a 3× saving on the reconciliation for a full MCC kit
+(H3EK's ~58,000 files: 4.7s → 1.7s here).
+
 ### Tag browser
 
 - **Folder view** — the on-disk directory hierarchy, with a **per-group icon**
@@ -121,11 +128,22 @@ the tag it came from.
 - **Loose kits** — the copy is written next to the original as a new file. If the
   source tag has unsaved edits, the copy takes the edited bytes and the original
   keeps its own; a name that already exists is refused rather than overwritten.
-- **Campaign Evolved** — the copy is written **into the game's own pak**, in
-  place: the new package is appended to the container's `.ucas` and the `.utoc`
-  is rewritten to address it, with a new package identity and export hash. This
-  changes shipped game files, so it always confirms first, naming the exact pack
-  (mod or shipped) and its `.utoc` path.
+- **Campaign Evolved** — the copy is written **into the container that serves the
+  tag**, in place: the new package is appended to that container's `.ucas` and
+  the `.utoc` is rewritten to address it, with a new package identity and export
+  hash. This changes files the game loads, so it always confirms first, naming
+  the exact pack (mod or shipped) and its `.utoc` path. The copy appears in the
+  tree immediately, is searchable and openable without a reload, and is carried
+  into the next exported mod as **new content** — a package of its own, not a
+  field-level edit to the tag it came from.
+
+  The `.uasset` wrapper a copy is built from is resolved from what the mount
+  recorded at index time — the package index first, then the container's own
+  directory entries, matched without case if need be — never by assembling a
+  path from the name shown in the browser. A container's directory index is
+  matched byte for byte, and a mod that ships no index has its paths *recovered*,
+  so the two halves of a package do not always agree on case. Every duplicate
+  logs the paths it actually used, and a failure reports them.
 
 **Delete** removes a tag again. A loose tag is *moved*, not erased — it goes to
 `%APPDATA%\Baboon\deleted-tags\<game>\<timestamp>\…` so it can be recovered by
@@ -402,22 +420,25 @@ All extraction runs on background threads and reports progress to the status bar
 ### Halo: Campaign Evolved mods
 
 Campaign Evolved's tags live inside UE5 IoStore paks. Baboon edits them **in
-memory** and offers two ways to commit changes — overwrite the game directly, or
-package your changes as a separate, reversible mod:
+memory**, and exporting a mod is the way changes are committed:
 
-- **Save** (Ctrl+S) — **overwrites the tag inside the game's own pak, in place.**
-  The edited chunk is appended to the container's `.ucas` and its `.utoc` is
-  rewritten to point at it (preserving the container's perfect-hash seeds), with
-  the paired `.uasset`'s bulk-data size patched when an edit changes the tag's
-  byte length. This modifies the shipped game files, so Baboon **always confirms
-  first** — the dialog offers *Export Mod* as the non-destructive alternative, and
-  has a *Don't ask again* option (also under **Settings → Startup → Saving**).
-  There is no undo without a backup of the paks. *(Loose-folder MCC tags save
-  normally and never prompt.)*
+- **Save** (Ctrl+S) — your change is already kept in the workspace's stash, so
+  Save opens the **Export Mod** review rather than writing anything into the
+  game. The installed paks are never touched. *(Loose-folder MCC tags save
+  normally.)*
 - **Export Mod…** (File menu) — bundle **every modified tag in the active
   project**, including checkpointed tags whose tabs were closed, into one
   portable, higher-priority **overlay container** without touching the base game.
   Mods are fully reversible (delete the overlay to uninstall).
+- **Overwriting the game's own paks** is available in **Expert mode** only. With
+  it on, Save writes the tag back into its container in place: the edited chunk
+  is appended to the `.ucas` and the `.utoc` is rewritten to point at it
+  (preserving the container's perfect-hash seeds), with the paired `.uasset`'s
+  bulk-data size patched when an edit changes the tag's byte length. This
+  modifies the shipped game files, so Baboon **confirms first** — with a *Don't
+  ask again* option under **Settings → Startup → Saving** — and there is no undo
+  without a backup of the paks. Chimp's *Overwrite source PAKs* mode is gated the
+  same way.
 - **Save As** — *duplicate* the tag under a new name into an overlay container (a
   new UE package with its own identity, `.uasset`, and container-header entry).
 - **Rename** (right-click) — the same as Save As, plus a package **redirect** so
@@ -444,13 +465,28 @@ is exactly how the overlay containers Baboon exports are already laid out. The
 cost is a slightly slower mount for that one pak; the alternative is a container
 whose lookups silently stop resolving.
 
-Export Mod produces a `<name>-WinGDK_P` IoStore **triplet** — `.utoc`, `.ucas`,
-and a small `.pak` stub — plus a same-stem `.baboon` project file containing
-the open-tab layout and recoverable copies of every modified/new tag. Use
+Export Mod writes into the folder you pick, and **only** that folder — the mod
+name names the files, never a directory. It defaults to the game's own
+`Meteorite/Content/Paks/~mods`, created for you if it does not exist, so the
+ordinary export installs itself where it lands with nothing to copy. The review
+window lists the exact four files it is about to write before you commit to it.
+
+The mod is built at a staging path with every container still mapped, and only
+swapped over the files already there once it is complete — so a failed export
+leaves the installed mod exactly as it was. Replacing a mod this workspace has
+mounted works too: Baboon releases its own mappings and the Unreal package
+workspace's open handles first, then remounts and reindexes afterwards, keeping
+your open tabs and edits. If something else still holds the container open, the
+refusal names the file, the step it failed at, and what it can identify as still
+holding it rather than asking you to try again.
+
+Export Mod produces a `<name>_P` IoStore **triplet** — `.utoc`, `.ucas`, and a
+small `.pak` stub — plus a same-stem `.baboon` project file containing the
+open-tab layout and recoverable copies of every modified/new tag. Use
 **File → Open Baboon Project…** to continue editing that project on this or
 another machine. Save As / Rename produce the IoStore triplet without a project
-sidecar. Drop **all three runtime files**
-files into the game's `Meteorite/Content/Paks/` folder alongside the base paks.
+sidecar. If you exported somewhere other than the game's own `~mods`, drop **all
+three runtime files** into `Meteorite/Content/Paks/~mods/` (or `Paks/` itself).
 The `.pak` is required: UE's loader discovers containers by scanning that folder
 for `.pak` files and derives the matching `.utoc`/`.ucas` from each — an overlay
 with no `.pak` is never mounted. The `_P` suffix then gives the overlay patch
@@ -458,9 +494,20 @@ priority so UE serves your chunks on top of the base (last-mounted-wins).
 
 While a Campaign Evolved source is open, Baboon checkpoints the active project
 to `%APPDATA%\Baboon\campaign_evolved_recovery.baboon` after a short idle
-period. Clean tabs reload from the game containers; modified and newly-created
-tags are stored in the project database. The normal Ask / Always / Never session
+period. A project stores the **session**, not just the files: which tags were
+open and in what order, which was selected, the edited bytes of every modified
+or newly-created tag, and each open tag's **undo/redo history** — so reopening a
+workspace picks up where you left off, including the steps behind an edit. Clean
+tabs reload from the game containers. The normal Ask / Always / Never session
 setting controls whether this recovery project is reopened on the next launch.
+
+History is capped well below what is kept in memory — the most recent 16 steps
+per stack, within a 64 MiB budget shared across the whole workspace, oldest
+dropped first — because one step is a whole serialized tag and Campaign Evolved
+ships a 105 MiB animation graph. It is written to your own recovery and project
+files only, **never** to the `.baboon` beside an exported mod: that file is
+downloaded by whoever installs the mod, and your editing trail is neither their
+business nor their bandwidth.
 
 Tag identity (`FPackageId` / export hashes), UE5 Zen-package `.uasset`
 (de)serialization, and override-container writing are all implemented natively in
@@ -491,8 +538,12 @@ per game:
 Launchers are disabled until the relevant executable is found in the kit.
 
 When a loose `.scenario` tag is open, its editor header also provides Sapien and
-tag_test buttons. For supported kits, Baboon saves pending edits and passes the
-absolute scenario file directly to Sapien; Halo CE is excluded. The tag_test
+tag_test buttons. Baboon saves pending edits and passes the absolute scenario
+file directly to Sapien. **Halo: Combat Evolved has no Sapien button at all** —
+that kit's Sapien takes no scenario on its command line, so there is no way to
+open one in it, and a control that can never work is not offered greyed out.
+Campaign Evolved has no Sapien to launch either. Combat Evolved keeps its
+tag_test button; every other kit keeps both. The tag_test
 launcher updates the kit's `init.txt` while preserving unrelated commands. The
 quick-access launchers remain generic, and quick-access tag_test removes stale
 active scenario-launch commands from `init.txt`.
@@ -553,7 +604,15 @@ placement to the compositor when coordinates are unavailable.
   repaints; the UI thread never blocks on disk.
 - **Caching & performance** — lazy folder-tree expansion, a memoised search-match
   tree keyed on a source generation counter, an LRU parsed-tag cache, and a
-  persisted per-game entry index on disk.
+  persisted per-game entry index on disk whose reconciliation and full scan both
+  run across every core.
+- **Container writes** — every write to a mounted IoStore container goes through
+  a lease that takes the container out of service, drops the mappings and handles
+  Baboon holds on it (its own, and the Unreal package workspace's, across every
+  open workspace), performs the write, then remounts and reindexes. Truncating
+  writes build at a staging path and swap; appending writes keep their mappings,
+  because the engine's in-place writer reads through them. Failures name the
+  file, the phase, and whatever can be identified as still holding the container.
 - **Platform** — primarily Windows (release builds run as a windowed app with no
   console; the app icon is embedded as a Win32 resource via `build.rs`).
   *Open in File Explorer* and the bundled tool launchers are Windows-specific;

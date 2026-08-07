@@ -7,6 +7,7 @@
 use super::*;
 use rusqlite::{Connection, params};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeMap;
 
 pub(super) const CAMPAIGN_PROJECT_VERSION: i64 = 1;
 pub(super) const CAMPAIGN_PROJECT_AUTOSAVE_SECS: f64 = 0.75;
@@ -63,6 +64,95 @@ pub(super) struct CampaignProjectOverlay {
     pub(super) digest: [u8; 32],
 }
 
+/// One tag's undo and redo stacks as the session holds them, oldest first.
+#[derive(Clone, Debug, Default)]
+pub(super) struct TagHistory {
+    pub(super) undo: Vec<HistoryStep>,
+    pub(super) redo: Vec<HistoryStep>,
+    /// The owning journal's change counter when this was captured, so a save
+    /// can tell "nothing has happened since" without looking at the snapshots.
+    pub(super) revision: u64,
+}
+
+/// One undoable step: what it was called, and the tag bytes it restores.
+#[derive(Clone, Debug)]
+pub(super) struct HistoryStep {
+    pub(super) label: String,
+    pub(super) bytes: Arc<Vec<u8>>,
+}
+
+/// How many steps of one stack a restored session gets back.
+///
+/// Far below the in-memory limit of 64 on purpose. A step is a whole serialized
+/// tag, the recovery file is rewritten as you edit, and the value of persisted
+/// history falls off a cliff after the last handful of actions — nobody
+/// reopens a workspace to undo their sixtieth-from-last change.
+pub(super) const HISTORY_STEP_LIMIT: usize = 16;
+
+/// The total bytes of history one workspace may write to its recovery file.
+///
+/// Campaign Evolved ships a 105 MiB animation graph; two of those in a stack
+/// would be a quarter-gigabyte written repeatedly while the user edits. The
+/// newest steps are kept and the oldest dropped, so what survives is the part
+/// anyone would actually reach for.
+pub(super) const HISTORY_BYTE_BUDGET: usize = 64 * 1024 * 1024;
+
+/// Trim captured history to what may be written, newest first.
+///
+/// Applied across the whole workspace rather than per tag: the budget exists to
+/// bound the recovery file, and a per-tag budget multiplies by however many tags
+/// happen to be open. Steps are dropped oldest-first, and a stack keeps its
+/// order.
+pub(super) fn trim_history_for_disk(
+    history: &mut BTreeMap<String, TagHistory>,
+    step_limit: usize,
+    byte_budget: usize,
+) {
+    for entry in history.values_mut() {
+        for stack in [&mut entry.undo, &mut entry.redo] {
+            if stack.len() > step_limit {
+                stack.drain(..stack.len() - step_limit);
+            }
+        }
+    }
+    // Newest-first across every stack, so what is dropped is the least likely
+    // to be wanted. `(identity, stack, index)` keeps this deterministic when two
+    // steps are equally old.
+    let mut steps: Vec<(String, bool, usize, usize)> = Vec::new();
+    for (identity, entry) in history.iter() {
+        for (index, step) in entry.undo.iter().enumerate() {
+            steps.push((identity.clone(), false, index, step.bytes.len()));
+        }
+        for (index, step) in entry.redo.iter().enumerate() {
+            steps.push((identity.clone(), true, index, step.bytes.len()));
+        }
+    }
+    // Oldest first: lowest index within a stack, then by identity for stability.
+    steps.sort_by(|a, b| a.2.cmp(&b.2).then(a.0.cmp(&b.0)).then(a.1.cmp(&b.1)));
+    let mut total: usize = steps.iter().map(|(_, _, _, len)| *len).sum();
+    let mut drop_counts: HashMap<(String, bool), usize> = HashMap::new();
+    for (identity, is_redo, _, len) in steps {
+        if total <= byte_budget {
+            break;
+        }
+        total -= len;
+        *drop_counts.entry((identity, is_redo)).or_default() += 1;
+    }
+    for ((identity, is_redo), count) in drop_counts {
+        let Some(entry) = history.get_mut(&identity) else {
+            continue;
+        };
+        let stack = if is_redo {
+            &mut entry.redo
+        } else {
+            &mut entry.undo
+        };
+        let count = count.min(stack.len());
+        stack.drain(..count);
+    }
+    history.retain(|_, entry| !entry.undo.is_empty() || !entry.redo.is_empty());
+}
+
 pub(super) fn overlay_digest(bytes: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(bytes);
@@ -76,16 +166,49 @@ pub(super) struct CampaignProjectSnapshot {
     pub(super) selected_identity: Option<String>,
     pub(super) tabs: Vec<CampaignProjectTab>,
     pub(super) overlays: HashMap<String, CampaignProjectOverlay>,
+    /// Each open tag's undo/redo stacks, so reopening the workspace reopens the
+    /// session rather than just the files. Written to this workspace's own
+    /// recovery project and to a project the user names, never to the sidecar
+    /// beside an exported mod — that one travels to whoever installs the mod,
+    /// and an author's step-by-step editing trail is neither their business nor
+    /// something they should have to download.
+    pub(super) history: BTreeMap<String, TagHistory>,
 }
 
 impl CampaignProjectSnapshot {
     /// Each overlay's digest, by identity — what the overlays table holds once
     /// this snapshot has been written.
-    pub(super) fn digests(&self) -> HashMap<String, [u8; 32]> {
-        self.overlays
-            .iter()
-            .map(|(identity, overlay)| (identity.clone(), overlay.digest))
-            .collect()
+    pub(super) fn digests(&self) -> SavedProjectState {
+        SavedProjectState {
+            overlays: self
+                .overlays
+                .iter()
+                .map(|(identity, overlay)| (identity.clone(), overlay.digest))
+                .collect(),
+            history: self.history_digest(),
+        }
+    }
+
+    /// One digest over the whole session history.
+    ///
+    /// The history table is replaced wholesale on every write — an undo stack
+    /// shifts by one on every edit, so nearly every row's position changes and
+    /// there is nothing to reconcile row by row. That makes *skipping* the
+    /// write when nothing changed the only thing standing between this feature
+    /// and rewriting tens of megabytes twice a second while someone drags a
+    /// slider.
+    pub(super) fn history_digest(&self) -> [u8; 32] {
+        let mut hasher = Sha256::new();
+        for (identity, entry) in &self.history {
+            hasher.update(identity.as_bytes());
+            // The journal's own change counter, not a hash of the snapshots:
+            // hashing them would only move the per-tick cost from the disk to
+            // the CPU, which is not a saving.
+            hasher.update(entry.revision.to_le_bytes());
+            hasher.update((entry.undo.len() as u64).to_le_bytes());
+            hasher.update((entry.redo.len() as u64).to_le_bytes());
+        }
+        hasher.finalize().into()
     }
 
     pub(super) fn fingerprint(&self) -> Vec<u8> {
@@ -105,8 +228,38 @@ impl CampaignProjectSnapshot {
             hasher.update(overlay.identity.as_bytes());
             hasher.update(overlay.digest);
         }
+        // Undo history moves with the edits that produced it almost always, but
+        // not quite: a redo stack cleared by a fresh edit, or an undo that lands
+        // back on bytes already stashed, changes the session without changing
+        // any overlay. Folding it in is what stops those going unwritten.
+        hasher.update(self.history_digest());
         hasher.finalize().to_vec()
     }
+}
+
+/// What a written project left on disk, so the next write can skip what has
+/// not changed.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub(super) struct SavedProjectState {
+    /// Each overlay's digest, by identity — rows whose bytes match are left
+    /// alone rather than rewritten.
+    pub(super) overlays: HashMap<String, [u8; 32]>,
+    /// One digest over the whole history table, which is replaced wholesale or
+    /// not at all.
+    pub(super) history: [u8; 32],
+}
+
+/// Which kind of `.baboon` is being written.
+///
+/// The two are the same format and deliberately not the same content: a session
+/// project is this workspace's own state, while a sidecar is published beside a
+/// mod for other people.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ProjectScope {
+    /// This workspace's recovery file, or a project the user saved.
+    Session,
+    /// The `.baboon` written next to an exported mod's containers.
+    ModSidecar,
 }
 
 pub(super) struct ActiveCampaignProject {
@@ -134,10 +287,10 @@ pub(super) struct ActiveCampaignProject {
     /// `None` when that is unknown — a fresh workspace, or a project imported
     /// from a file the recovery has never seen — and the next write then
     /// replaces every row rather than merging into whatever was there.
-    pub(super) saved_digests: Option<HashMap<String, [u8; 32]>>,
+    pub(super) saved_digests: Option<SavedProjectState>,
     /// What an in-flight write will leave on disk, promoted to `saved_digests`
     /// once it reports success.
-    pub(super) pending_digests: Option<HashMap<String, [u8; 32]>>,
+    pub(super) pending_digests: Option<SavedProjectState>,
     pub(super) last_saved_fingerprint: Vec<u8>,
     pub(super) next_autosave_at: f64,
     pub(super) revision: u64,
@@ -276,7 +429,10 @@ pub(super) fn campaign_recovery_path(source_root: Option<&Path>) -> PathBuf {
     let mut hasher = Sha256::new();
     hasher.update(root.to_string_lossy().as_bytes());
     let digest = hasher.finalize();
-    let tag = digest[..6].iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let tag = digest[..6]
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<String>();
     crate::storage::data_path(&format!("{CAMPAIGN_RECOVERY_STEM}-{tag}.baboon"))
 }
 
@@ -302,7 +458,8 @@ pub(super) fn is_campaign_recovery_file(path: &Path) -> bool {
 pub(super) fn save_campaign_project(
     path: &Path,
     snapshot: &CampaignProjectSnapshot,
-    on_disk: Option<&HashMap<String, [u8; 32]>>,
+    on_disk: Option<&SavedProjectState>,
+    scope: ProjectScope,
 ) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
@@ -337,6 +494,14 @@ pub(super) fn save_campaign_project(
                  kind TEXT NOT NULL,
                  package TEXT,
                  bytes BLOB NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS history (
+                 identity TEXT NOT NULL,
+                 stack TEXT NOT NULL,
+                 position INTEGER NOT NULL,
+                 label TEXT NOT NULL,
+                 bytes BLOB NOT NULL,
+                 PRIMARY KEY (identity, stack, position)
              );",
         )
         .map_err(|error| format!("Could not initialize project database: {error}"))?;
@@ -351,10 +516,13 @@ pub(super) fn save_campaign_project(
     // rewrite only the ones whose bytes differ.
     match on_disk {
         Some(on_disk) => {
-            for identity in on_disk.keys() {
+            for identity in on_disk.overlays.keys() {
                 if !snapshot.overlays.contains_key(identity) {
                     transaction
-                        .execute("DELETE FROM overlays WHERE identity = ?1", params![identity],)
+                        .execute(
+                            "DELETE FROM overlays WHERE identity = ?1",
+                            params![identity],
+                        )
                         .map_err(|error| {
                             format!("Could not drop project tag {identity}: {error}")
                         })?;
@@ -399,7 +567,9 @@ pub(super) fn save_campaign_project(
             .map_err(|error| format!("Could not write project tab {}: {error}", tab.label))?;
     }
     for overlay in snapshot.overlays.values() {
-        if on_disk.is_some_and(|on_disk| on_disk.get(&overlay.identity) == Some(&overlay.digest)) {
+        if on_disk
+            .is_some_and(|on_disk| on_disk.overlays.get(&overlay.identity) == Some(&overlay.digest))
+        {
             continue;
         }
         transaction
@@ -422,6 +592,43 @@ pub(super) fn save_campaign_project(
                     overlay.logical_path
                 )
             })?;
+    }
+    // History is replaced wholesale rather than reconciled. Undo stacks shift
+    // by one on every edit — a step pushed at the top, the oldest dropped — so
+    // almost every row's position changes and there is nothing to spare.
+    // Keeping it small is what makes that affordable, which is what the budget
+    // above is for.
+    // Skipped entirely when nothing has changed, which is what keeps an active
+    // edit session from rewriting the whole table twice a second.
+    let history_unchanged =
+        on_disk.is_some_and(|on_disk| on_disk.history == snapshot.history_digest());
+    if !history_unchanged {
+        transaction
+            .execute("DELETE FROM history", [])
+            .map_err(|error| format!("Could not reset project history: {error}"))?;
+    }
+    if scope == ProjectScope::Session && !history_unchanged {
+        for (identity, entry) in &snapshot.history {
+            for (stack, steps) in [("undo", &entry.undo), ("redo", &entry.redo)] {
+                for (position, step) in steps.iter().enumerate() {
+                    transaction
+                        .execute(
+                            "INSERT INTO history (identity, stack, position, label, bytes)
+                             VALUES (?1, ?2, ?3, ?4, ?5)",
+                            params![
+                                identity,
+                                stack,
+                                position as i64,
+                                step.label,
+                                step.bytes.as_slice(),
+                            ],
+                        )
+                        .map_err(|error| {
+                            format!("Could not write project history for {identity}: {error}")
+                        })?;
+                }
+            }
+        }
     }
     transaction
         .commit()
@@ -521,12 +728,48 @@ pub(super) fn load_campaign_project(path: &Path) -> Result<CampaignProjectSnapsh
         })
         .collect::<Result<HashMap<_, _>, String>>()?;
 
+    // A project written before history existed simply has no table. That is a
+    // session with nothing to undo, not a project that fails to open.
+    let mut history: BTreeMap<String, TagHistory> = BTreeMap::new();
+    if let Ok(mut statement) = connection
+        .prepare("SELECT identity, stack, label, bytes FROM history ORDER BY identity, stack, position")
+    {
+        let rows = statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, Vec<u8>>(3)?,
+                ))
+            })
+            .map_err(|error| format!("Could not query project history: {error}"))?;
+        for row in rows {
+            let (identity, stack, label, bytes) =
+                row.map_err(|error| format!("Could not decode project history: {error}"))?;
+            let step = HistoryStep {
+                label,
+                bytes: Arc::new(bytes),
+            };
+            let entry = history.entry(identity).or_default();
+            match stack.as_str() {
+                "undo" => entry.undo.push(step),
+                "redo" => entry.redo.push(step),
+                // A stack name this build does not know is skipped rather than
+                // guessed at: restoring a step onto the wrong stack would undo
+                // in the wrong direction.
+                _ => {}
+            }
+        }
+    }
+
     Ok(CampaignProjectSnapshot {
         game,
         source_path: PathBuf::from(source_path),
         selected_identity,
         tabs,
         overlays,
+        history,
     })
 }
 
@@ -543,21 +786,135 @@ fn logical_path_from_display(display_path: &str) -> String {
 pub(super) fn campaign_entry_project_parts(
     entry: &TagEntry,
 ) -> Option<(String, String, CampaignProjectTagKind, Option<String>)> {
+    campaign_entry_project_parts_with(entry, None)
+}
+
+/// Identity, logical path, kind and package for one Campaign Evolved entry.
+///
+/// `authored_package` is the canonical `/Game/…` path of a copy **Baboon
+/// itself** put into a container, taken from the duplicate ledger. Without it
+/// a duplicate is indistinguishable from a tag the game shipped — it mounts as
+/// an ordinary `TagEntryLocation::Container` and nothing in the container
+/// records who wrote it — so it filed as `Existing` and an export built a
+/// field override against a package that only exists inside the mod it was
+/// copied into. With it, the copy is what it actually is: new content, with
+/// its own package identity, that an export writes whole.
+pub(super) fn campaign_entry_project_parts_with(
+    entry: &TagEntry,
+    authored_package: Option<String>,
+) -> Option<(String, String, CampaignProjectTagKind, Option<String>)> {
     let logical_path = logical_path_from_display(&entry.display_path);
-    let kind = match &entry.location {
-        TagEntryLocation::Container { .. } => CampaignProjectTagKind::Existing,
-        TagEntryLocation::NewContainer { .. } => CampaignProjectTagKind::New,
+    let (kind, package) = match (&entry.location, authored_package) {
+        (TagEntryLocation::Container { .. }, Some(package)) => {
+            (CampaignProjectTagKind::New, Some(package))
+        }
+        (TagEntryLocation::Container { .. }, None) => (CampaignProjectTagKind::Existing, None),
+        (TagEntryLocation::NewContainer { package, .. }, _) => {
+            (CampaignProjectTagKind::New, Some(package.clone()))
+        }
         _ => return None,
-    };
-    let package = match &entry.location {
-        TagEntryLocation::NewContainer { package, .. } => Some(package.clone()),
-        _ => None,
     };
     let identity = format!("{:08x}:{logical_path}", entry.group_tag);
     Some((identity, logical_path, kind, package))
 }
 
 impl Baboon {
+    /// The canonical package path of a container entry Baboon authored, or
+    /// `None` for one the game ships.
+    ///
+    /// Answered from the duplicate ledger, which is the only persistent record
+    /// that a copy was made and is already what gates deletion. Resolved by the
+    /// container's `.utoc` path and the payload's own path, so a copy stays
+    /// recognisable across remounts that reorder the container list.
+    pub(super) fn authored_package_for_entry(
+        &self,
+        kit: usize,
+        entry: &TagEntry,
+    ) -> Option<String> {
+        let TagEntryLocation::Container {
+            container,
+            rel_path,
+        } = &entry.location
+        else {
+            return None;
+        };
+        let source = self.kits.get(kit)?.source.as_ref()?;
+        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+            return None;
+        };
+        let utoc = &containers.get(*container)?.utoc_path;
+        self.created_tags
+            .find(utoc, rel_path)
+            .map(|record| record.package_path.clone())
+    }
+
+    /// Give a freshly restored document the undo history the project kept for
+    /// it, if any is still waiting.
+    ///
+    /// Called wherever a document appears during a restore — the synchronous
+    /// path for a stashed edit, and the worker result for a tab that had to be
+    /// read back off disk. Taking the history rather than copying it means a
+    /// document reopened later in the same session does not get a second, stale
+    /// copy of it.
+    pub(super) fn apply_pending_history(&mut self, kit: usize, key: &str) {
+        let Some(history) = self.kits[kit].pending_history.remove(key) else {
+            return;
+        };
+        let Some(document) = self.kits[kit].parsed_tags.get_mut(key) else {
+            return;
+        };
+        let steps = |steps: Vec<HistoryStep>| {
+            steps
+                .into_iter()
+                .map(|step| crate::app::Snapshot {
+                    bytes: step.bytes,
+                    label: step.label,
+                })
+                .collect::<Vec<_>>()
+        };
+        document
+            .journal
+            .restore(steps(history.undo), steps(history.redo));
+    }
+
+    /// Stash a tag Baboon just wrote into a container as new content.
+    ///
+    /// A duplicate is registered as a *clean* document — the copy really is on
+    /// disk, so flagging it dirty would claim an unsaved change that does not
+    /// exist — and only dirty documents are captured. Without this the copy is
+    /// invisible to Export Mod until it is edited, and a mod exported under a
+    /// different name would silently leave it behind.
+    pub(super) fn stash_authored_tag(
+        &mut self,
+        kit: usize,
+        entry: &TagEntry,
+        package: String,
+        bytes: Vec<u8>,
+        now: f64,
+    ) {
+        let Some((identity, logical_path, kind, package)) =
+            campaign_entry_project_parts_with(entry, Some(package))
+        else {
+            return;
+        };
+        self.ensure_campaign_project(kit, now);
+        let Some(project) = self.kits[kit].campaign_project.as_mut() else {
+            return;
+        };
+        project.overlays.insert(
+            identity.clone(),
+            CampaignProjectOverlay {
+                identity,
+                group_tag: entry.group_tag,
+                logical_path,
+                kind,
+                package,
+                digest: overlay_digest(&bytes),
+                bytes: Arc::new(bytes),
+            },
+        );
+    }
+
     pub(super) fn current_source_is_campaign_project_capable(&self, kit: usize) -> bool {
         self.kits[kit]
             .source
@@ -565,7 +922,11 @@ impl Baboon {
             .is_some_and(|source| matches!(source.source, TagSource::IoStoreContainerSet { .. }))
     }
 
-    pub(super) fn campaign_entry_for_identity(&self, kit: usize, identity: &str,) -> Option<TagEntry> {
+    pub(super) fn campaign_entry_for_identity(
+        &self,
+        kit: usize,
+        identity: &str,
+    ) -> Option<TagEntry> {
         let source = self.kits[kit].source.as_ref()?;
         source
             .entries
@@ -783,7 +1144,12 @@ impl Baboon {
             let Some(entry) = self.entry_for_key_in(kit, key) else {
                 continue;
             };
-            let Some((identity, logical_path, kind, package)) = campaign_entry_project_parts(entry)
+            let authored = self.authored_package_for_entry(kit, entry);
+            let Some(entry) = self.entry_for_key_in(kit, key) else {
+                continue;
+            };
+            let Some((identity, logical_path, kind, package)) =
+                campaign_entry_project_parts_with(entry, authored)
             else {
                 continue;
             };
@@ -818,7 +1184,12 @@ impl Baboon {
             let Some(entry) = self.entry_for_key_in(kit, key) else {
                 continue;
             };
-            let Some((identity, logical_path, kind, package)) = campaign_entry_project_parts(entry)
+            let authored = self.authored_package_for_entry(kit, entry);
+            let Some(entry) = self.entry_for_key_in(kit, key) else {
+                continue;
+            };
+            let Some((identity, logical_path, kind, package)) =
+                campaign_entry_project_parts_with(entry, authored)
             else {
                 continue;
             };
@@ -837,6 +1208,37 @@ impl Baboon {
                 .and_then(campaign_entry_project_parts)
                 .map(|(identity, _, _, _)| identity)
         });
+        // Every open document's undo trail, not just the edited ones: a tag
+        // whose edits were undone back to the original is still a tag whose
+        // history the user may want on the other side of a restart.
+        let mut history: BTreeMap<String, TagHistory> = BTreeMap::new();
+        for (key, document) in &self.kits[kit].parsed_tags {
+            let (undo, redo) = document.journal.stacks();
+            if undo.is_empty() && redo.is_empty() {
+                continue;
+            }
+            let Some(entry) = self.entry_for_key_in(kit, key) else {
+                continue;
+            };
+            let Some((identity, ..)) = campaign_entry_project_parts(entry) else {
+                continue;
+            };
+            let step = |snapshot: &crate::app::Snapshot| HistoryStep {
+                label: snapshot.label.clone(),
+                // Shared with the journal rather than copied — this runs twice
+                // a second.
+                bytes: snapshot.bytes.clone(),
+            };
+            history.insert(
+                identity,
+                TagHistory {
+                    undo: undo.iter().map(step).collect(),
+                    redo: redo.iter().map(step).collect(),
+                    revision: document.journal.revision(),
+                },
+            );
+        }
+        trim_history_for_disk(&mut history, HISTORY_STEP_LIMIT, HISTORY_BYTE_BUDGET);
         if let Some(project) = self.kits[kit].campaign_project.as_mut() {
             project.overlays.clone_from(&overlays);
             project.captured_revisions = now_captured;
@@ -847,6 +1249,7 @@ impl Baboon {
             selected_identity,
             tabs,
             overlays,
+            history,
         }))
     }
 
@@ -993,7 +1396,11 @@ impl Baboon {
         };
     }
 
-    pub(super) fn checkpoint_campaign_project(&mut self, kit: usize, now: f64,) -> Result<bool, String> {
+    pub(super) fn checkpoint_campaign_project(
+        &mut self,
+        kit: usize,
+        now: f64,
+    ) -> Result<bool, String> {
         let Some(snapshot) = self.capture_campaign_project(kit, now)? else {
             return Ok(false);
         };
@@ -1016,7 +1423,12 @@ impl Baboon {
             .lock()
             .map_err(|_| "Campaign project writer lock was poisoned".to_owned())?;
         let on_disk = project.saved_digests.clone();
-        save_campaign_project(&project.recovery_path, &snapshot, on_disk.as_ref())?;
+        save_campaign_project(
+            &project.recovery_path,
+            &snapshot,
+            on_disk.as_ref(),
+            ProjectScope::Session,
+        )?;
         project.saved_digests = Some(snapshot.digests());
         project.last_saved_fingerprint = fingerprint;
         project.next_autosave_at = now + CAMPAIGN_PROJECT_AUTOSAVE_SECS;
@@ -1098,7 +1510,7 @@ impl Baboon {
                             if latest_write_revision.load(Ordering::SeqCst) != revision {
                                 Ok(())
                             } else {
-                                save_campaign_project(&path, &snapshot, on_disk.as_ref())
+                                save_campaign_project(&path, &snapshot, on_disk.as_ref(), ProjectScope::Session)
                             }
                         });
                     let _ = tx.send(WorkerMessage::CampaignProjectSaved {
@@ -1182,8 +1594,10 @@ impl Baboon {
         if is_campaign_recovery_file(&path) {
             return;
         }
-        self.kits[kit].pending_campaign_project =
-            Some(PendingCampaignProject { path, snapshot: None });
+        self.kits[kit].pending_campaign_project = Some(PendingCampaignProject {
+            path,
+            snapshot: None,
+        });
     }
 
     /// Write this workspace's project to its associated `.baboon`, asking for a
@@ -1260,7 +1674,7 @@ impl Baboon {
         };
         // Nothing here knows what is in a file the user named, and it may be an
         // older project entirely, so it is replaced rather than merged into.
-        if let Err(error) = save_campaign_project(&path, &snapshot, None) {
+        if let Err(error) = save_campaign_project(&path, &snapshot, None, ProjectScope::Session) {
             self.status = error;
             return;
         }
@@ -1271,7 +1685,10 @@ impl Baboon {
         // The recovery file stays the live copy, so it is brought level with what
         // was just written out.
         if let Err(error) = self.checkpoint_campaign_project(kit, now) {
-            self.status = format!("Saved {}, but the recovery file failed: {error}", path.display());
+            self.status = format!(
+                "Saved {}, but the recovery file failed: {error}",
+                path.display()
+            );
             return;
         }
         self.status = format!("Saved {count} modified tag(s) to {}", path.display());
@@ -1369,6 +1786,19 @@ impl Baboon {
             identity_to_key.insert(tab.identity.clone(), entry.key);
         }
 
+        // Staged by document key before any tag is opened, so it is already
+        // waiting whichever way the document arrives — restored from a stashed
+        // edit below, or read back off disk by a worker some frames later.
+        self.kits[kit].pending_history = snapshot
+            .history
+            .iter()
+            .filter_map(|(identity, history)| {
+                identity_to_key
+                    .get(identity)
+                    .map(|key| (key.clone(), history.clone()))
+            })
+            .collect();
+
         // Rebuild the kit's tag layout from the project, rather than the flat
         // tab list the rack used: the tiles tree owns which tags are open.
         let kit_id = self.kits[kit].id;
@@ -1388,6 +1818,7 @@ impl Baboon {
                     // writing every stashed tag out again.
                     restored_revisions.insert(key.clone(), document.dirty.revision());
                     self.kits[kit].parsed_tags.insert(key.clone(), document);
+                    self.apply_pending_history(kit, &key);
                 } else {
                     missing += 1;
                     continue;
@@ -1506,6 +1937,126 @@ mod tests {
         }
     }
 
+    fn history_of(sizes: &[usize]) -> TagHistory {
+        TagHistory {
+            undo: sizes
+                .iter()
+                .enumerate()
+                .map(|(index, size)| HistoryStep {
+                    label: format!("edit {index}"),
+                    bytes: Arc::new(vec![0; *size]),
+                })
+                .collect(),
+            redo: Vec::new(),
+            revision: 1,
+        }
+    }
+
+    #[test]
+    fn history_is_trimmed_to_the_newest_steps() {
+        let mut history = BTreeMap::from([("a".to_owned(), history_of(&[1; 20]))]);
+
+        trim_history_for_disk(&mut history, 16, 1024);
+
+        let kept: Vec<&str> = history["a"]
+            .undo
+            .iter()
+            .map(|step| step.label.as_str())
+            .collect();
+        assert_eq!(kept.len(), 16);
+        assert_eq!(
+            kept.first().copied(),
+            Some("edit 4"),
+            "the oldest four steps are the ones dropped"
+        );
+        assert_eq!(kept.last().copied(), Some("edit 19"));
+    }
+
+    #[test]
+    fn the_byte_budget_is_shared_across_every_open_tag() {
+        // The budget bounds the recovery file, so it cannot be per tag — ten
+        // tags each holding "only" their own allowance is ten times the file.
+        let mut history = BTreeMap::from([
+            ("a".to_owned(), history_of(&[400, 400, 400])),
+            ("b".to_owned(), history_of(&[400, 400, 400])),
+        ]);
+
+        trim_history_for_disk(&mut history, 16, 1000);
+
+        let total: usize = history
+            .values()
+            .flat_map(|entry| entry.undo.iter().chain(entry.redo.iter()))
+            .map(|step| step.bytes.len())
+            .sum();
+        assert!(total <= 1000, "kept {total} bytes against a 1000 budget");
+        // What survives is the newest of each tag, not one tag's whole stack.
+        for identity in ["a", "b"] {
+            assert_eq!(
+                history[identity].undo.last().map(|step| step.label.as_str()),
+                Some("edit 2"),
+                "{identity} kept its most recent step"
+            );
+        }
+    }
+
+    /// The history table is replaced wholesale, so a save that cannot tell it
+    /// is unchanged rewrites every step. During a drag that is tens of
+    /// megabytes twice a second.
+    #[test]
+    fn an_unchanged_history_is_not_rewritten() {
+        let path = temp_project("history-skip");
+        let mut snapshot = snapshot_of(vec![overlay("a", b"one")]);
+        snapshot.history = BTreeMap::from([(
+            "a".to_owned(),
+            TagHistory {
+                undo: vec![HistoryStep {
+                    label: "Edit color".to_owned(),
+                    bytes: Arc::new(vec![1, 2, 3]),
+                }],
+                redo: Vec::new(),
+                revision: 7,
+            },
+        )]);
+        save_campaign_project(&path, &snapshot, None, ProjectScope::Session).unwrap();
+        let saved = snapshot.digests();
+
+        // Reach into the file and mark the row, so a rewrite is detectable.
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute("UPDATE history SET label = 'sentinel'", [])
+            .unwrap();
+        drop(connection);
+
+        // The tag was edited again, but the journal did not move — the same
+        // undo steps, the same revision.
+        let mut later = snapshot_of(vec![overlay("a", b"two")]);
+        later.history = snapshot.history.clone();
+        save_campaign_project(&path, &later, Some(&saved), ProjectScope::Session).unwrap();
+
+        let loaded = load_campaign_project(&path).unwrap();
+        assert_eq!(
+            loaded.history["a"].undo[0].label, "sentinel",
+            "an unchanged history was rewritten"
+        );
+        assert_eq!(*loaded.overlays["a"].bytes, b"two".to_vec());
+
+        // A journal that did move is written again.
+        let mut moved = later.clone();
+        moved.history.get_mut("a").unwrap().revision = 8;
+        save_campaign_project(&path, &moved, Some(&later.digests()), ProjectScope::Session).unwrap();
+        let loaded = load_campaign_project(&path).unwrap();
+        assert_eq!(loaded.history["a"].undo[0].label, "Edit color");
+
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn a_tag_trimmed_to_nothing_leaves_no_row_behind() {
+        let mut history = BTreeMap::from([("a".to_owned(), TagHistory::default())]);
+        trim_history_for_disk(&mut history, 16, 1000);
+        assert!(history.is_empty());
+    }
+
     fn snapshot_of(overlays: Vec<CampaignProjectOverlay>) -> CampaignProjectSnapshot {
         CampaignProjectSnapshot {
             game: "haloce_evolved".to_owned(),
@@ -1516,6 +2067,7 @@ mod tests {
                 .into_iter()
                 .map(|overlay| (overlay.identity.clone(), overlay))
                 .collect(),
+            history: BTreeMap::new(),
         }
     }
 
@@ -1533,7 +2085,7 @@ mod tests {
                 .as_nanos()
         ));
         let first = snapshot_of(vec![overlay("a", b"one"), overlay("b", b"two")]);
-        save_campaign_project(&path, &first, None).unwrap();
+        save_campaign_project(&path, &first, None, ProjectScope::Session).unwrap();
 
         // "a" is unchanged, "b" is gone, "c" is new. The claim that "a" is
         // already on disk is honoured by digest, so passing different bytes
@@ -1541,7 +2093,7 @@ mod tests {
         let mut stale = overlay("a", b"REWRITTEN");
         stale.digest = overlay_digest(b"one");
         let second = snapshot_of(vec![stale, overlay("c", b"three")]);
-        save_campaign_project(&path, &second, Some(&first.digests())).unwrap();
+        save_campaign_project(&path, &second, Some(&first.digests()), ProjectScope::Session).unwrap();
 
         let loaded = load_campaign_project(&path).unwrap();
         let mut identities: Vec<&String> = loaded.overlays.keys().collect();
@@ -1617,7 +2169,13 @@ mod tests {
     fn an_imported_project_replaces_a_stale_recovery_file() {
         let recovery = temp_project("stale-recovery");
         // What an earlier session of this workspace left behind.
-        save_campaign_project(&recovery, &snapshot_of(vec![overlay("old", b"x")]), None).unwrap();
+        save_campaign_project(
+            &recovery,
+            &snapshot_of(vec![overlay("old", b"x")]),
+            None,
+            ProjectScope::Session,
+        )
+        .unwrap();
 
         let imported = snapshot_of(vec![overlay("new", b"y")]);
         let project = ActiveCampaignProject::imported(
@@ -1636,7 +2194,13 @@ mod tests {
             "the recovery file does not hold these bytes yet, so a write is due"
         );
         // Exactly what `checkpoint_campaign_project` then does with them.
-        save_campaign_project(&recovery, &imported, project.saved_digests.as_ref()).unwrap();
+        save_campaign_project(
+            &recovery,
+            &imported,
+            project.saved_digests.as_ref(),
+            ProjectScope::Session,
+        )
+        .unwrap();
         assert_eq!(
             identities_in(&recovery),
             vec!["new"],
@@ -1709,8 +2273,22 @@ mod tests {
                 floating: false,
             }],
             overlays: HashMap::from([(overlay.identity.clone(), overlay.clone())]),
+            history: BTreeMap::from([(
+                overlay.identity.clone(),
+                TagHistory {
+                    undo: vec![HistoryStep {
+                        label: "Edit color".to_owned(),
+                        bytes: Arc::new(vec![7, 7, 7]),
+                    }],
+                    redo: vec![HistoryStep {
+                        label: "Block edit".to_owned(),
+                        bytes: Arc::new(vec![9]),
+                    }],
+                    revision: 3,
+                },
+            )]),
         };
-        save_campaign_project(&path, &snapshot, None).unwrap();
+        save_campaign_project(&path, &snapshot, None, ProjectScope::Session).unwrap();
         let loaded = load_campaign_project(&path).unwrap();
         assert_eq!(loaded.tabs.len(), 1);
         assert_eq!(loaded.tabs[0].identity, overlay.identity);
@@ -1718,6 +2296,29 @@ mod tests {
             loaded.overlays[&loaded.tabs[0].identity].bytes,
             overlay.bytes
         );
+        // The session, not just the files: which tags were open, what was
+        // edited, and the steps that got there.
+        let restored = &loaded.history[&overlay.identity];
+        assert_eq!(restored.undo.len(), 1);
+        assert_eq!(restored.undo[0].label, "Edit color");
+        assert_eq!(*restored.undo[0].bytes, vec![7, 7, 7]);
+        assert_eq!(restored.redo.len(), 1);
+        assert_eq!(restored.redo[0].label, "Block edit");
+        assert_eq!(*restored.redo[0].bytes, vec![9]);
+
+        // The same snapshot written as a mod's sidecar carries the tags and
+        // nothing about how they were arrived at: that file is downloaded by
+        // whoever installs the mod.
+        let sidecar = path.with_extension("sidecar.baboon");
+        save_campaign_project(&sidecar, &snapshot, None, ProjectScope::ModSidecar).unwrap();
+        let published = load_campaign_project(&sidecar).unwrap();
+        assert!(
+            published.history.is_empty(),
+            "an exported mod must not ship the author's undo history"
+        );
+        assert_eq!(published.overlays.len(), snapshot.overlays.len());
+        let _ = fs::remove_file(&sidecar);
+
         let connection = Connection::open(&path).unwrap();
         connection
             .execute("UPDATE project SET version = 99 WHERE id = 1", [])
@@ -1783,8 +2384,12 @@ mod tests {
             collisions.is_empty(),
             "{} identity collision(s):\n{}",
             collisions.len(),
-            collisions.iter().take(10).cloned().collect::<Vec<_>>().join("\n")
+            collisions
+                .iter()
+                .take(10)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("\n")
         );
     }
 }
-

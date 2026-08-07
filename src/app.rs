@@ -131,7 +131,7 @@ use runtime_poke::*;
 mod chimp;
 use chimp::*;
 mod controller;
-use controller::{CreatedTagLedger, CreatedTagRecord};
+use controller::{ContainerLeaseId, ContainerWriteLease, CreatedTagLedger, CreatedTagRecord};
 mod ui;
 
 #[cfg(test)]
@@ -234,6 +234,17 @@ pub struct Baboon {
     container_duplicate_confirm: Option<ContainerDuplicateConfirm>,
     /// Kit ids with an in-place duplicate worker currently running.
     container_duplicate_running: HashSet<KitId>,
+    /// Container writes currently in flight, by lease id. A lease outlives the
+    /// UI-thread call that took it exactly when the write runs on a worker, and
+    /// the terminal `WorkerMessage` carries the id back so the completion
+    /// handler can find it. Keyed rather than stacked: two workspaces may be
+    /// writing to two different containers at the same time.
+    container_write_leases: HashMap<ContainerLeaseId, ContainerWriteLease>,
+    next_container_lease: u64,
+    /// Workspaces whose Unreal package mount a finished container write idled
+    /// and must start again. Queued rather than remounted in place because the
+    /// release runs from paths that have no `egui::Context` to spawn with.
+    pending_chimp_remounts: Vec<KitId>,
     /// Mandatory confirmation for deleting a tag.
     delete_confirm: Option<DeleteConfirm>,
     /// Mandatory confirmation for a bulk extraction of every shipped tag.
@@ -503,6 +514,9 @@ impl Baboon {
             overwrite_confirm: None,
             container_duplicate_confirm: None,
             container_duplicate_running: HashSet::new(),
+            container_write_leases: HashMap::new(),
+            next_container_lease: 0,
+            pending_chimp_remounts: Vec::new(),
             delete_confirm: None,
             container_dump_confirm: None,
             container_dump_job: None,

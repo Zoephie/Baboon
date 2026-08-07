@@ -80,6 +80,11 @@ pub(in crate::app) enum WorkerMessage {
     },
     ContainerDuplicateFinished {
         stamp: KitStamp,
+        /// The container write this job holds. Round-tripped through the worker
+        /// so the completion handler can find the lease again on the UI thread
+        /// and put back everything it took, on the failure path as well as the
+        /// success one.
+        lease: ContainerLeaseId,
         result: Result<ContainerDuplicateResult, String>,
     },
     ContainerDeleteFinished {

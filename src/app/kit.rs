@@ -155,6 +155,11 @@ pub(super) struct Kit {
     /// finishes loading. Held per kit rather than in one shared slot so
     /// several kits can restore concurrently and finish in any order.
     pub(super) pending_restore_tags: Vec<LastSessionTag>,
+    /// Undo/redo stacks a restored project brought back, by document key, held
+    /// until the document they belong to exists. A restored tab is loaded
+    /// asynchronously, so the history almost always arrives before the tag it
+    /// applies to.
+    pub(super) pending_history: HashMap<String, TagHistory>,
     /// Chimp packages staged by session restore until the Unreal container
     /// world has mounted. Kept separate from tag restoration so Tags remains
     /// the initial surface.
@@ -208,6 +213,7 @@ impl Kit {
             surface: KitSurface::Tags,
             chimp: ChimpState::default(),
             pending_restore_tags: Vec::new(),
+            pending_history: HashMap::new(),
             pending_restore_chimp_packages: Vec::new(),
             pending_restore_active_chimp_package: None,
             pending_launch_tags: None,

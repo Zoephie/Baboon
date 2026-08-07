@@ -34,8 +34,12 @@ struct ContainerDuplicateWorkerInput {
     root: PathBuf,
     containers: Vec<crate::source::MountedContainer>,
     target_container: usize,
+    /// The paired `.uasset`, read on the UI thread through the path the mount
+    /// recorded rather than one reassembled from the payload's name.
+    wrapper_bytes: Vec<u8>,
+    /// What the resolution actually settled on, carried so a failure names it.
+    diagnostics: DuplicateDiagnostics,
     source_key: String,
-    source_rel_path: String,
     group_tag: u32,
     group_name: String,
     body_bytes: Vec<u8>,
@@ -145,7 +149,10 @@ fn duplicate_display_path(source_display: &str, leaf: &str) -> String {
         Some((stem, extension)) => (stem, extension),
         None => (source_display, ""),
     };
-    let parent = stem.rsplit_once('/').map(|(parent, _)| parent).unwrap_or("");
+    let parent = stem
+        .rsplit_once('/')
+        .map(|(parent, _)| parent)
+        .unwrap_or("");
     let file = if extension.is_empty() {
         leaf.to_owned()
     } else {
@@ -216,6 +223,188 @@ fn exact_container_provider(entry: &TagEntry) -> Result<(usize, String), String>
     }
 }
 
+/// The `.uasset` wrapper a container tag's `.ubulk` payload belongs to, as the
+/// mount recorded it.
+#[derive(Clone, Debug)]
+pub(super) struct ResolvedUasset {
+    /// Which mounted container actually carries the wrapper.
+    pub(super) container: usize,
+    /// The path in its **original case**. The IoStore directory index is
+    /// case-sensitive, so this string is only ever one taken from a real entry
+    /// — never one this code assembled.
+    pub(super) rel_path: String,
+    /// How it was found, for the diagnostic.
+    pub(super) how: &'static str,
+}
+
+/// Find the `.uasset` wrapper paired with a `.ubulk` payload.
+///
+/// Swapping the extension on the payload path and reading that is right almost
+/// always and wrong in exactly the cases that matter. A container's directory
+/// index is matched byte-for-byte, and the two entries do not have to agree on
+/// case: a mod ships no directory index at all, so its paths are *recovered* —
+/// from a base container's index when the chunk id is known there, and
+/// otherwise from the Zen header's own package name, which carries whatever
+/// casing the cook wrote. `objects/characters/Marine/marine-biped.ubulk` and
+/// `objects/characters/marine/marine-biped.uasset` are the same package to
+/// Unreal (chunk ids hash the lowercased name) and two different keys to the
+/// container index — so the swapped string resolves to nothing, in every
+/// container, and the copy fails with "path not found".
+///
+/// So ask the indexes that recorded the real paths first, and only fall back to
+/// assembling one. Nothing assembled is ever handed to a read: each step
+/// returns a string taken from an entry that exists.
+pub(super) fn resolve_source_uasset(
+    containers: &[crate::source::MountedContainer],
+    packages: &crate::source::ContainerPackageIndex,
+    target: usize,
+    ubulk_rel_path: &str,
+) -> Result<ResolvedUasset, String> {
+    resolve_source_uasset_in(&MountedPaths(containers), packages, target, ubulk_rel_path)
+}
+
+/// The directory-index questions [`resolve_source_uasset`] asks of the mount.
+///
+/// A seam, so the resolution order can be tested against containers whose
+/// `.uasset` and `.ubulk` entries deliberately disagree on case — which is the
+/// whole bug, and which no container Baboon can synthesise reproduces, since
+/// the only writer available emits no directory index at all.
+pub(super) trait ContainerPaths {
+    fn count(&self) -> usize;
+    /// Whether `path` is in this container's directory index, matched exactly.
+    fn contains(&self, container: usize, path: &str) -> bool;
+    /// The container's own spelling of `path`, matched without case.
+    fn find_ignoring_case(&self, container: usize, path: &str) -> Option<String>;
+}
+
+struct MountedPaths<'a>(&'a [crate::source::MountedContainer]);
+
+impl ContainerPaths for MountedPaths<'_> {
+    fn count(&self) -> usize {
+        self.0.len()
+    }
+
+    fn contains(&self, container: usize, path: &str) -> bool {
+        self.0
+            .get(container)
+            .is_some_and(|mounted| mounted.archive.contains(path))
+    }
+
+    fn find_ignoring_case(&self, container: usize, path: &str) -> Option<String> {
+        self.0
+            .get(container)?
+            .archive
+            .entries()
+            .iter()
+            .find(|entry| entry.path.eq_ignore_ascii_case(path))
+            .map(|entry| entry.path.clone())
+    }
+}
+
+pub(super) fn resolve_source_uasset_in(
+    containers: &dyn ContainerPaths,
+    packages: &crate::source::ContainerPackageIndex,
+    target: usize,
+    ubulk_rel_path: &str,
+) -> Result<ResolvedUasset, String> {
+    let assembled = ubulk_rel_path
+        .strip_suffix(".ubulk")
+        .map(|stem| format!("{stem}.uasset"))
+        .ok_or("Source container path is not a .ubulk")?;
+
+    // 1. What indexing recorded. `ContainerPackageIndex` is keyed by the
+    //    lowercased `/game/...` package name and stores the original-case
+    //    container path, which is exactly the provenance this needs.
+    if let Some(package) = crate::source::container_package_name(&assembled)
+        && let Some((container, rel_path)) = packages.lookup(&package)
+        && containers.contains(container, rel_path)
+    {
+        return Ok(ResolvedUasset {
+            container,
+            rel_path: rel_path.to_owned(),
+            how: "package index",
+        });
+    }
+
+    // 2. The exact swapped path in the container that provides the payload.
+    if containers.contains(target, &assembled) {
+        return Ok(ResolvedUasset {
+            container: target,
+            rel_path: assembled,
+            how: "same container",
+        });
+    }
+
+    // 3. and 4. The same path spelt differently, in the providing container
+    //    first and then in the layers beneath it — an older mod that shipped a
+    //    payload without its wrapper leaves the base game's copy as the only
+    //    one there is.
+    let search =
+        std::iter::once(target).chain(lower_priority_container_indices(target, containers.count()));
+    for index in search {
+        if let Some(rel_path) = containers.find_ignoring_case(index, &assembled) {
+            return Ok(ResolvedUasset {
+                container: index,
+                rel_path,
+                how: if index == target {
+                    "same container, different case"
+                } else {
+                    "lower-priority container"
+                },
+            });
+        }
+    }
+    Err(format!(
+        "No .uasset wrapper for {ubulk_rel_path} in any mounted container (looked for \
+         {assembled}, in any case)"
+    ))
+}
+
+/// Everything a duplicate resolved before it wrote anything, so a failure
+/// report names what was actually used rather than what was displayed.
+#[derive(Clone, Debug)]
+pub(super) struct DuplicateDiagnostics {
+    pub(super) display_path: String,
+    pub(super) source_container: usize,
+    pub(super) source_container_label: String,
+    pub(super) source_utoc: PathBuf,
+    pub(super) source_ubulk: String,
+    pub(super) source_uasset: String,
+    pub(super) source_uasset_container: String,
+    pub(super) source_uasset_how: &'static str,
+    pub(super) source_package: String,
+    pub(super) package_basename: String,
+    pub(super) destination_package: String,
+    pub(super) destination_uasset: String,
+    pub(super) destination_ubulk: String,
+}
+
+impl std::fmt::Display for DuplicateDiagnostics {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "duplicate: shown as {shown}\n  source container: #{index} {label} ({utoc})\n  \
+             payload: {ubulk}\n  wrapper: {uasset} (in {wrapper_container}, via \
+             {how})\n  package: {package} (basename {basename})\n  destination package: \
+             {destination}\n  destination wrapper: {destination_uasset}\n  destination payload: \
+             {destination_ubulk}",
+            shown = self.display_path,
+            index = self.source_container,
+            label = self.source_container_label,
+            utoc = self.source_utoc.display(),
+            ubulk = self.source_ubulk,
+            uasset = self.source_uasset,
+            wrapper_container = self.source_uasset_container,
+            how = self.source_uasset_how,
+            package = self.source_package,
+            basename = self.package_basename,
+            destination = self.destination_package,
+            destination_uasset = self.destination_uasset,
+            destination_ubulk = self.destination_ubulk,
+        )
+    }
+}
+
 fn container_duplicate_paths(
     source_rel_path: &str,
     source_display: &str,
@@ -255,10 +444,7 @@ fn container_rel_to_package_path_for_duplicate(rel: &str) -> Result<String, Stri
         .strip_suffix(".uasset")
         .or_else(|| rel.strip_suffix(".ubulk"))
         .ok_or("Container asset path has no supported extension")?;
-    let after_content = strip_prefix_case_insensitive(no_extension, "Meteorite/Content/")
-        .or_else(|| strip_prefix_case_insensitive(no_extension, "Content/"))
-        .unwrap_or(no_extension);
-    Ok(format!("/Game/{after_content}"))
+    Ok(format!("/Game/{}", super::strip_content_root(no_extension)))
 }
 
 fn strip_prefix_case_insensitive<'a>(value: &'a str, prefix: &str) -> Option<&'a str> {
@@ -324,13 +510,11 @@ fn loose_duplicate_entry(
     new_leaf: &str,
 ) -> Result<TagEntry, String> {
     match source {
-        TagSource::LooseFolder { root, .. } => crate::source::loose_file_entry(
-            root,
-            destination,
-            source_names,
-        )
-        .map_err(|error| format!("Could not register duplicate: {error:#}"))?
-        .ok_or_else(|| "The copied file is not a recognized tag".to_owned()),
+        TagSource::LooseFolder { root, .. } => {
+            crate::source::loose_file_entry(root, destination, source_names)
+                .map_err(|error| format!("Could not register duplicate: {error:#}"))?
+                .ok_or_else(|| "The copied file is not a recognized tag".to_owned())
+        }
         TagSource::SingleFile { .. } => Ok(TagEntry {
             key: format!("file:{}", destination.display()),
             display_path: duplicate_display_path(&source_entry.display_path, new_leaf),
@@ -474,36 +658,26 @@ fn lower_priority_container_indices(target: usize, count: usize) -> impl Iterato
     (0..target.min(count)).rev()
 }
 
-/// Read the effective wrapper without changing the provider of the tag body:
-/// the exact target archive wins, then lower-priority mounted layers nearest
-/// the provider are considered for older mods that omitted their paired asset.
+/// Read the effective wrapper without changing the provider of the tag body.
+///
+/// The path comes from [`resolve_source_uasset`], which asks the mount's own
+/// indexes rather than assembling one — so the read is against a path that
+/// exists, in the case the container spells it.
 fn read_effective_wrapper(
-    _root: &Path,
     containers: &[crate::source::MountedContainer],
-    target: usize,
-    source_rel_path: &str,
+    resolved: &ResolvedUasset,
 ) -> Result<Vec<u8>, String> {
-    let wrapper_path = source_rel_path
-        .strip_suffix(".ubulk")
-        .map(|stem| format!("{stem}.uasset"))
-        .ok_or("Source container path is not a .ubulk")?;
-    let target_archive = containers
-        .get(target)
-        .ok_or("Container provenance is stale")?
+    containers
+        .get(resolved.container)
+        .ok_or_else(|| "Container provenance is stale".to_owned())?
         .archive
-        .clone();
-    match target_archive.read(&wrapper_path) {
-        Ok(bytes) => return Ok(bytes),
-        Err(_) => {}
-    }
-    for index in lower_priority_container_indices(target, containers.len()) {
-        if let Ok(bytes) = containers[index].archive.read(&wrapper_path) {
-            return Ok(bytes);
-        }
-    }
-    Err(format!(
-        "Could not read the effective paired asset for {source_rel_path}"
-    ))
+        .read(&resolved.rel_path)
+        .map_err(|error| {
+            format!(
+                "Could not read the paired asset {} : {error}",
+                resolved.rel_path
+            )
+        })
 }
 
 fn write_create_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -528,9 +702,7 @@ fn write_create_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
 }
 
 fn backup_sibling_path(utoc: &Path, suffix: &str) -> Result<PathBuf, String> {
-    let parent = utoc
-        .parent()
-        .ok_or("Target UTOC has no parent directory")?;
+    let parent = utoc.parent().ok_or("Target UTOC has no parent directory")?;
     let filename = utoc
         .file_name()
         .ok_or("Target UTOC has no filename")?
@@ -582,7 +754,12 @@ pub(super) fn create_duplicate_backup(utoc: &Path) -> Result<DuplicateBackupPath
         .map_err(|error| format!("Could not read original UTOC {}: {error}", utoc.display()))?;
     let ucas = utoc.with_extension("ucas");
     let original_ucas_length = fs::metadata(&ucas)
-        .map_err(|error| format!("Could not inspect original UCAS {}: {error}", ucas.display()))?
+        .map_err(|error| {
+            format!(
+                "Could not inspect original UCAS {}: {error}",
+                ucas.display()
+            )
+        })?
         .len();
     let original_utoc_filename = utoc
         .file_name()
@@ -674,17 +851,14 @@ impl Baboon {
             .source()
             .map(source_entries_display_paths)
             .unwrap_or_default();
-        let new_leaf = match validate_duplicate_leaf_name(
-            &raw_name,
-            &destination_display,
-            &existing,
-        ) {
-            Ok(name) => name,
-            Err(error) => {
-                self.status = error;
-                return;
-            }
-        };
+        let new_leaf =
+            match validate_duplicate_leaf_name(&raw_name, &destination_display, &existing) {
+                Ok(name) => name,
+                Err(error) => {
+                    self.status = error;
+                    return;
+                }
+            };
         match entry.location {
             TagEntryLocation::LooseFile(_) => {
                 self.rename_tag = None;
@@ -740,19 +914,15 @@ impl Baboon {
                 return Err(error);
             }
         };
-        let duplicate_entry = match loose_duplicate_entry(
-            &source_kind,
-            entry,
-            &source_names,
-            &destination,
-            new_leaf,
-        ) {
-            Ok(entry) => entry,
-            Err(error) => {
-                reset_readonly_and_remove(&destination);
-                return Err(error);
-            }
-        };
+        let duplicate_entry =
+            match loose_duplicate_entry(&source_kind, entry, &source_names, &destination, new_leaf)
+            {
+                Ok(entry) => entry,
+                Err(error) => {
+                    reset_readonly_and_remove(&destination);
+                    return Err(error);
+                }
+            };
         let duplicate_key = duplicate_entry.key.clone();
         self.register_created_tag(duplicate_entry, parsed);
         // Expand and scroll to the copy so it is visible beside the tag it came
@@ -783,8 +953,8 @@ impl Baboon {
             return;
         }
         if self.container_duplicate_running.contains(&kit) {
-            self.status = "A Campaign Evolved duplicate is already running for this workspace"
-                .to_owned();
+            self.status =
+                "A Campaign Evolved duplicate is already running for this workspace".to_owned();
             return;
         }
         let Some(entry) = self.entry_for_key(&key).cloned() else {
@@ -819,13 +989,30 @@ impl Baboon {
             self.status = error;
             return;
         }
-        let (root, containers, target_label, is_mod, entry_count_before, body_bytes) = {
+        // Everything the write needs is read here, on the UI thread, against
+        // the mount as it stands. Resolving the wrapper before the worker
+        // starts is what lets a failure be reported with the paths that were
+        // actually used rather than the ones that were displayed.
+        let (
+            root,
+            containers,
+            target_utoc,
+            target_label,
+            is_mod,
+            entry_count_before,
+            body_bytes,
+            wrapper_bytes,
+            diagnostics,
+        ) = {
             let Some(source) = self.source() else {
                 self.status = "No source is loaded".to_owned();
                 return;
             };
             let TagSource::IoStoreContainerSet {
-                root, containers, ..
+                root,
+                containers,
+                packages,
+                ..
             } = &source.source
             else {
                 self.status = "Source is not a Campaign Evolved container source".to_owned();
@@ -834,6 +1021,25 @@ impl Baboon {
             let Some(target) = containers.get(target_container) else {
                 self.status = "Container provenance is stale".to_owned();
                 return;
+            };
+            let resolved = match resolve_source_uasset(
+                containers,
+                packages,
+                target_container,
+                &source_rel_path,
+            ) {
+                Ok(resolved) => resolved,
+                Err(error) => {
+                    self.status = error;
+                    return;
+                }
+            };
+            let wrapper = match read_effective_wrapper(containers, &resolved) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    self.status = error;
+                    return;
+                }
             };
             let is_dirty = self.kits[self.active]
                 .parsed_tags
@@ -863,15 +1069,59 @@ impl Baboon {
                     return;
                 }
             };
+            let diagnostics = DuplicateDiagnostics {
+                display_path: entry.display_path.clone(),
+                source_container: target_container,
+                source_container_label: target.chunk_label.clone(),
+                source_utoc: target.utoc_path.clone(),
+                source_ubulk: source_rel_path.clone(),
+                source_uasset: resolved.rel_path.clone(),
+                source_uasset_container: containers
+                    .get(resolved.container)
+                    .map(|mounted| mounted.chunk_label.clone())
+                    .unwrap_or_else(|| "unknown".to_owned()),
+                source_uasset_how: resolved.how,
+                source_package: crate::source::container_package_name(&resolved.rel_path)
+                    .unwrap_or_else(|| "unknown".to_owned()),
+                package_basename: resolved
+                    .rel_path
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or(&resolved.rel_path)
+                    .to_owned(),
+                destination_package: paths.package.clone(),
+                destination_uasset: paths.uasset.clone(),
+                destination_ubulk: paths.ubulk.clone(),
+            };
             (
                 root.clone(),
                 containers.clone(),
+                target.utoc_path.clone(),
                 target.chunk_label.clone(),
                 target.is_mod,
                 target.archive.chunk_count(),
                 body,
+                wrapper,
+                diagnostics,
             )
         };
+        eprintln!("{diagnostics}");
+        // The in-place writer appends to the `.ucas` and swaps the `.utoc` by
+        // rename, neither of which needs a mapping released — and it reads
+        // chunks through the mapping while it works, so releasing would break
+        // it. The lease is still taken: it refuses a second write to the same
+        // container, and it remounts the Unreal package workspace afterwards,
+        // whose parsed copy of the TOC the swap makes stale.
+        let lease = match self
+            .acquire_container_write_lease(&target_utoc, ContainerWriteMode::AppendInPlace)
+        {
+            Ok(lease) => lease,
+            Err(failure) => {
+                self.status = failure.to_string();
+                return;
+            }
+        };
+        let lease_id = self.park_container_write_lease(lease);
         let stamp = KitStamp {
             kit,
             generation: self.kits[self.active].generation,
@@ -882,8 +1132,9 @@ impl Baboon {
             root,
             containers,
             target_container,
+            wrapper_bytes,
+            diagnostics,
             source_key: key,
-            source_rel_path,
             group_tag: entry.group_tag,
             group_name: entry
                 .group_name
@@ -901,6 +1152,7 @@ impl Baboon {
             let result = run_container_duplicate(input);
             let _ = tx.send(WorkerMessage::ContainerDuplicateFinished {
                 stamp,
+                lease: lease_id,
                 result,
             });
             ctx.request_repaint();
@@ -910,8 +1162,21 @@ impl Baboon {
     pub(in crate::app) fn handle_container_duplicate_finished(
         &mut self,
         stamp: KitStamp,
+        lease: ContainerLeaseId,
         result: Result<ContainerDuplicateResult, String>,
+        ctx: &egui::Context,
     ) -> bool {
+        // Taken and settled before anything else can return early. A write that
+        // landed changed the container's `.utoc`, so the Unreal package
+        // workspace's parsed copy of it is stale either way.
+        if let Some(lease) = self.take_container_write_lease(lease) {
+            let outcome = if result.is_ok() {
+                ContainerWriteOutcome::Committed
+            } else {
+                ContainerWriteOutcome::Unchanged
+            };
+            self.release_container_write_lease(lease, outcome, ctx);
+        }
         let kit_index = self.kit_index(stamp.kit);
         let completion =
             classify_container_duplicate_completion(result.is_ok(), kit_index.is_some());
@@ -992,11 +1257,20 @@ impl Baboon {
         }
         // Recorded before anything else user-visible: this is the only evidence
         // that Baboon authored the copy, and without it the tag can never be
-        // deleted again.
+        // deleted again — nor recognised by an export as new content rather
+        // than as an edit to whatever it was copied from.
         self.created_tags.record(result.record);
         let ledger_error = self.created_tags.save().err();
         let entry = result.entry;
         let key = entry.key.clone();
+        // Stashed straight away, so the copy is in the next Export Mod whether
+        // or not anyone edits it. The document stays clean: the bytes are
+        // already in the container. A tag that will not re-serialize is simply
+        // not stashed — the copy itself is fine, and it is stashed again the
+        // moment it is edited.
+        if let Ok(bytes) = result.tag.write_to_bytes() {
+            self.stash_authored_tag(kit_index, &entry, result.package.clone(), bytes, 0.0);
+        }
         self.kits[kit_index].generation = self.kits[kit_index].generation.wrapping_add(1);
         // The field-value index is keyed by entry, so it has to be rebuilt
         // before the next search can see the copy.
@@ -1008,6 +1282,9 @@ impl Baboon {
         if self.active == kit_index {
             self.reveal_in_browser(&key);
         }
+        // A review left open while this ran is now describing a stash that has
+        // one more tag in it than it is showing.
+        self.refresh_open_mod_review(kit_index);
         self.operation_notice = Some(OperationNotice {
             title: "Tag duplicated".to_owned(),
             message: format!(
@@ -1043,12 +1320,7 @@ impl Baboon {
 fn run_container_duplicate(
     input: ContainerDuplicateWorkerInput,
 ) -> Result<ContainerDuplicateResult, String> {
-    let wrapper = read_effective_wrapper(
-        &input.root,
-        &input.containers,
-        input.target_container,
-        &input.source_rel_path,
-    )?;
+    let wrapper = &input.wrapper_bytes;
     TagFile::read_from_bytes(&input.body_bytes)
         .map_err(|error| format!("Could not parse duplicate body before mutation: {error}"))?;
     let target = input
@@ -1069,10 +1341,13 @@ fn run_container_duplicate(
         &target.utoc_path,
         &request,
     ) {
+        // The resolved paths ride along: a report that says only "path not
+        // found" leaves nobody able to tell which path was looked for or where.
         return Err(format!(
-            "Duplicate into {} failed: {error}. Backup kept at {}",
+            "Duplicate into {} failed: {error}. Backup kept at {}\n\n{}",
             input.target_label,
-            backup_paths_text(&backup)
+            backup_paths_text(&backup),
+            input.diagnostics
         ));
     }
     let reopened = crate::source::reopen_container_archive(
@@ -1146,6 +1421,206 @@ fn run_container_duplicate(
 }
 
 #[cfg(test)]
+mod provenance_tests {
+    use super::*;
+    use crate::source::ContainerPackageIndex;
+
+    /// A stand-in for the mount's directory indexes: one `Vec` of paths per
+    /// container, matched exactly the way `IoStoreArchive` matches them.
+    struct FakePaths(Vec<Vec<&'static str>>);
+
+    impl ContainerPaths for FakePaths {
+        fn count(&self) -> usize {
+            self.0.len()
+        }
+
+        fn contains(&self, container: usize, path: &str) -> bool {
+            self.0
+                .get(container)
+                .is_some_and(|paths| paths.iter().any(|entry| *entry == path))
+        }
+
+        fn find_ignoring_case(&self, container: usize, path: &str) -> Option<String> {
+            self.0
+                .get(container)?
+                .iter()
+                .find(|entry| entry.eq_ignore_ascii_case(path))
+                .map(|entry| (*entry).to_owned())
+        }
+    }
+
+    const MARINE_UBULK: &str =
+        "Meteorite/Content/Tags/objects/characters/Marine/marine-biped.ubulk";
+    const MARINE_UASSET: &str =
+        "Meteorite/Content/Tags/objects/characters/Marine/marine-biped.uasset";
+
+    #[test]
+    fn the_indexed_wrapper_wins_over_the_one_that_would_be_assembled() {
+        // The package index records what mounting saw. Even when swapping the
+        // extension happens to produce a path that also exists, the recorded
+        // one is the answer, because it is the one provenance can vouch for.
+        let mut packages = ContainerPackageIndex::default();
+        packages.insert(
+            "/game/tags/objects/characters/marine/marine-biped".to_owned(),
+            1,
+            MARINE_UASSET.to_owned(),
+        );
+        let containers = FakePaths(vec![vec![], vec![MARINE_UBULK, MARINE_UASSET]]);
+        let resolved =
+            resolve_source_uasset_in(&containers, &packages, 1, MARINE_UBULK).expect("resolved");
+        assert_eq!(resolved.rel_path, MARINE_UASSET);
+        assert_eq!(resolved.container, 1);
+        assert_eq!(resolved.how, "package index");
+    }
+
+    #[test]
+    fn a_wrapper_spelt_with_different_case_is_still_found() {
+        // The Marine case. The payload's folder is `Marine`, the wrapper's is
+        // `marine` — the same package to Unreal, whose chunk ids hash the
+        // lowercased name, and two different keys to a container directory
+        // index, which is matched byte for byte. Swapping the extension
+        // produces a path no container holds.
+        const WRAPPER: &str =
+            "Meteorite/Content/Tags/objects/characters/marine/marine-biped.uasset";
+        let containers = FakePaths(vec![vec![MARINE_UBULK, WRAPPER]]);
+        let resolved = resolve_source_uasset_in(
+            &containers,
+            &ContainerPackageIndex::default(),
+            0,
+            MARINE_UBULK,
+        )
+        .expect("resolved despite the case difference");
+        assert_eq!(resolved.rel_path, WRAPPER);
+        assert_eq!(resolved.how, "same container, different case");
+    }
+
+    #[test]
+    fn a_mod_carrying_only_the_payload_falls_back_to_the_layer_beneath_it() {
+        // Mounted last-wins, so the mod at index 1 provides the tag; the only
+        // wrapper there is is the game's own, one layer down.
+        let containers = FakePaths(vec![vec![MARINE_UBULK, MARINE_UASSET], vec![MARINE_UBULK]]);
+        let resolved = resolve_source_uasset_in(
+            &containers,
+            &ContainerPackageIndex::default(),
+            1,
+            MARINE_UBULK,
+        )
+        .expect("resolved through the lower layer");
+        assert_eq!(resolved.container, 0);
+        assert_eq!(resolved.how, "lower-priority container");
+    }
+
+    #[test]
+    fn a_stale_package_index_entry_does_not_win() {
+        // The index says container 2 has it; container 2 does not. A recorded
+        // path that no longer resolves is provenance that has gone stale, and
+        // trusting it would fail the read with the index's answer rather than
+        // finding the copy that is actually there.
+        let mut packages = ContainerPackageIndex::default();
+        packages.insert(
+            "/game/tags/objects/characters/marine/marine-biped".to_owned(),
+            2,
+            MARINE_UASSET.to_owned(),
+        );
+        let containers = FakePaths(vec![vec![MARINE_UBULK, MARINE_UASSET], vec![], vec![]]);
+        let resolved =
+            resolve_source_uasset_in(&containers, &packages, 0, MARINE_UBULK).expect("resolved");
+        assert_eq!(resolved.container, 0);
+        assert_eq!(resolved.how, "same container");
+    }
+
+    #[test]
+    fn a_missing_wrapper_says_what_it_looked_for() {
+        let containers = FakePaths(vec![vec![MARINE_UBULK]]);
+        let error = resolve_source_uasset_in(
+            &containers,
+            &ContainerPackageIndex::default(),
+            0,
+            MARINE_UBULK,
+        )
+        .expect_err("nothing carries the wrapper");
+        assert!(error.contains(MARINE_UASSET), "{error}");
+        assert!(error.contains("in any case"), "{error}");
+    }
+
+    #[test]
+    fn the_destination_is_built_from_the_source_path_not_the_display_path() {
+        // The display path is lowercased and dotted (`objects/characters/marine
+        // /marine.biped`); the container path is neither. The destination has
+        // to inherit the container's folder, in the container's case, or the
+        // copy lands in a folder the container does not have.
+        let paths = container_duplicate_paths(
+            MARINE_UBULK,
+            "objects/characters/marine/marine.biped",
+            "marine_copy",
+        )
+        .expect("built");
+        assert_eq!(
+            paths.ubulk,
+            "Meteorite/Content/Tags/objects/characters/Marine/marine_copy-biped.ubulk"
+        );
+        assert_eq!(
+            paths.uasset,
+            "Meteorite/Content/Tags/objects/characters/Marine/marine_copy-biped.uasset"
+        );
+        assert_eq!(
+            paths.package,
+            "/Game/Tags/objects/characters/Marine/marine_copy-biped"
+        );
+        assert_eq!(paths.display, "objects/characters/marine/marine_copy.biped");
+    }
+
+    #[test]
+    fn the_content_root_is_stripped_however_it_is_capitalised() {
+        for rel in [
+            "Meteorite/Content/Tags/objects/x-biped.ubulk",
+            "meteorite/content/Tags/objects/x-biped.ubulk",
+            "METEORITE/CONTENT/Tags/objects/x-biped.ubulk",
+        ] {
+            assert_eq!(
+                super::super::container_rel_to_package_path(rel).as_deref(),
+                Some("/Game/Tags/objects/x-biped"),
+                "{rel}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_diagnostic_names_every_path_a_report_would_need() {
+        let diagnostics = DuplicateDiagnostics {
+            display_path: "objects/characters/marine/marine.biped".to_owned(),
+            source_container: 3,
+            source_container_label: "pakchunk0-WinGDK".to_owned(),
+            source_utoc: PathBuf::from("D:/Game/Paks/pakchunk0-WinGDK.utoc"),
+            source_ubulk: MARINE_UBULK.to_owned(),
+            source_uasset: MARINE_UASSET.to_owned(),
+            source_uasset_container: "pakchunk0-WinGDK".to_owned(),
+            source_uasset_how: "package index",
+            source_package: "/game/tags/objects/characters/marine/marine-biped".to_owned(),
+            package_basename: "marine-biped.uasset".to_owned(),
+            destination_package: "/Game/Tags/objects/characters/Marine/marine_copy-biped"
+                .to_owned(),
+            destination_uasset: "…/marine_copy-biped.uasset".to_owned(),
+            destination_ubulk: "…/marine_copy-biped.ubulk".to_owned(),
+        };
+        let text = diagnostics.to_string();
+        for expected in [
+            "objects/characters/marine/marine.biped",
+            "pakchunk0-WinGDK",
+            "pakchunk0-WinGDK.utoc",
+            MARINE_UBULK,
+            MARINE_UASSET,
+            "package index",
+            "/game/tags/objects/characters/marine/marine-biped",
+            "marine-biped.uasset",
+            "/Game/Tags/objects/characters/Marine/marine_copy-biped",
+        ] {
+            assert!(text.contains(expected), "missing {expected} in:\n{text}");
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -1161,7 +1636,10 @@ mod tests {
     }
 
     fn test_tag() -> TagFile {
-        TagFile::new(crate::app::test_definition_path("halo4_mcc/camera_track.json")).unwrap()
+        TagFile::new(crate::app::test_definition_path(
+            "halo4_mcc/camera_track.json",
+        ))
+        .unwrap()
     }
 
     fn test_entry(key: &str, display_path: &str, group_tag: u32) -> TagEntry {
@@ -1204,20 +1682,8 @@ mod tests {
     fn duplicate_name_validation_rejects_invalid_and_reserved_leaves() {
         let existing = vec!["objects/source.model".to_owned()];
         for invalid in [
-            "",
-            " ",
-            ".",
-            "..",
-            "foo.bar",
-            r"foo\bar",
-            "foo/bar",
-            "foo<bar",
-            "foo*bar",
-            "foo ",
-            "foo\t",
-            "CON",
-            "com1",
-            "LPT9",
+            "", " ", ".", "..", "foo.bar", r"foo\bar", "foo/bar", "foo<bar", "foo*bar", "foo ",
+            "foo\t", "CON", "com1", "LPT9",
         ] {
             assert!(
                 validate_duplicate_leaf_name(invalid, "objects/new.model", &existing).is_err(),
@@ -1239,9 +1705,7 @@ mod tests {
         assert!(
             validate_duplicate_leaf_name("existing", "OBJECTS/EXISTING.model", &existing).is_err()
         );
-        assert!(
-            validate_duplicate_leaf_name("Source", "objects/Source.model", &existing).is_err()
-        );
+        assert!(validate_duplicate_leaf_name("Source", "objects/Source.model", &existing).is_err());
     }
 
     #[test]
@@ -1382,10 +1846,7 @@ mod tests {
             index.lookup(group_tag, "OBJECTS\\NEW_COPY"),
             Some((7, rel_path))
         );
-        assert_eq!(
-            index.lookup(group_tag, "objects/new_copy-biped"),
-            None
-        );
+        assert_eq!(index.lookup(group_tag, "objects/new_copy-biped"), None);
     }
 
     #[test]
@@ -1456,7 +1917,11 @@ mod tests {
                     &destination_tag,
                 )
                 .unwrap();
-                register_clean_duplicate_document(&mut kit, destination_entry.clone(), destination_tag);
+                register_clean_duplicate_document(
+                    &mut kit,
+                    destination_entry.clone(),
+                    destination_tag,
+                );
             }
 
             assert!(running.is_empty());
@@ -1465,11 +1930,7 @@ mod tests {
             let TagSource::IoStoreContainerSet { index, .. } = &source.source else {
                 panic!("test source must be a container source");
             };
-            assert!(
-                index
-                    .lookup(group_tag, "objects/new_copy")
-                    .is_none()
-            );
+            assert!(index.lookup(group_tag, "objects/new_copy").is_none());
             assert!(!kit.parsed_tags.contains_key(&destination_entry.key));
             assert!(!kit.open_tabs.contains(&destination_entry.key));
         }
@@ -1510,10 +1971,7 @@ mod tests {
         };
         assert_eq!(
             index.lookup(group_tag, "objects/new_copy"),
-            Some((
-                0,
-                "Meteorite/Content/Tags/Objects/new_copy-model.ubulk"
-            ))
+            Some((0, "Meteorite/Content/Tags/Objects/new_copy-model.ubulk"))
         );
         let source_document = kit.parsed_tags.get(&source_entry.key).unwrap();
         assert!(source_document.dirty.is_set());
@@ -1522,7 +1980,10 @@ mod tests {
         let destination_document = kit.parsed_tags.get(&destination_entry.key).unwrap();
         assert!(!destination_document.dirty.is_set());
         assert!(kit.open_tabs.contains(&destination_entry.key));
-        assert_eq!(kit.selected_key.as_deref(), Some(destination_entry.key.as_str()));
+        assert_eq!(
+            kit.selected_key.as_deref(),
+            Some(destination_entry.key.as_str())
+        );
     }
 
     #[test]
@@ -1602,17 +2063,21 @@ mod tests {
         crate::app::controller::register_created_tag_in_source(&mut source, new_entry.clone());
 
         assert_eq!(source.entries.len(), 2);
-        assert!(source.entries.iter().any(|entry| {
-            entry.key == new_entry.key && entry.group_tag == new_entry.group_tag
-        }));
+        assert!(
+            source.entries.iter().any(|entry| {
+                entry.key == new_entry.key && entry.group_tag == new_entry.group_tag
+            })
+        );
         assert!(source.all_entries.is_empty());
         assert!(source.tree.entries.contains(&1));
-        assert!(source
-            .group_tree
-            .children
-            .iter()
-            .flat_map(|node| node.entries.iter())
-            .any(|&index| source.entries[index].key == new_entry.key));
+        assert!(
+            source
+                .group_tree
+                .children
+                .iter()
+                .flat_map(|node| node.entries.iter())
+                .any(|&index| source.entries[index].key == new_entry.key)
+        );
     }
 
     #[test]

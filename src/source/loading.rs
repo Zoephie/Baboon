@@ -241,7 +241,33 @@ fn utocs_under(dir: &Path) -> Vec<PathBuf> {
             !p.file_name()
                 .is_some_and(|n| n.eq_ignore_ascii_case("global.utoc"))
         })
+        .filter(|p| !is_container_backup(p))
         .collect()
+}
+
+/// Whether a path is one of Baboon's own transactional artefacts rather than a
+/// container anyone should mount or ship.
+///
+/// A duplicate writes an immutable `<name>.utoc.baboon-duplicate-backup[-N]`
+/// beside the container before it mutates it, and an export builds its
+/// replacement in a `.baboon-export-…` folder. Neither ends in `.utoc`, so
+/// nothing mounts them today — but that is a consequence of how they happen to
+/// be named, and it is exactly the kind of thing a later rename would undo
+/// silently. Stated here, and asserted in the tests.
+pub fn is_container_backup(path: &Path) -> bool {
+    let name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if name.contains(".baboon-duplicate-backup") || name.ends_with(".previous") {
+        return true;
+    }
+    path.components().any(|component| {
+        component
+            .as_os_str()
+            .to_string_lossy()
+            .starts_with(".baboon-export-")
+    })
 }
 
 /// Other `.utoc`s in the pak tree at `root` that aren't already mounted, opened
@@ -288,6 +314,188 @@ pub fn reopen_container_archive(
     Ok(archive)
 }
 
+/// Mount one more container into an already-loaded container set.
+///
+/// The alternative — reloading the whole source — rebuilds the workspace from
+/// scratch, which costs every open tab, every unsaved document and the Mod
+/// Stash. A mod that was just exported into the game's own `Paks` is one file
+/// and a handful of tags, so it is folded into the mount that is already there.
+///
+/// The layering rules are the mount's: an override container ships no directory
+/// index, so its paths are recovered against the containers already mounted;
+/// it is a mod, so it wins collisions and contributes nothing to the shipped
+/// index; and its entries land in sorted position rather than at the end, which
+/// is the order the browser draws.
+///
+/// Returns the number of tags it contributed. Mounting a container that carries
+/// none is not an error — it just is not kept.
+pub fn mount_additional_container(source: &mut LoadedSourceData, utoc: &Path) -> Result<usize> {
+    let names = source.names.clone();
+    let (root, mounted_paths, container_index) = {
+        let TagSource::IoStoreContainerSet {
+            root, containers, ..
+        } = &source.source
+        else {
+            anyhow::bail!("not a Campaign Evolved container source");
+        };
+        if containers
+            .iter()
+            .any(|mounted| paths_are_same_file(&mounted.utoc_path, utoc))
+        {
+            return Ok(0);
+        }
+        (
+            root.clone(),
+            containers
+                .iter()
+                .map(|mounted| mounted.utoc_path.clone())
+                .collect::<Vec<_>>(),
+            containers.len(),
+        )
+    };
+    let mut archive = IoStoreArchive::open(utoc)?;
+    // Decided before recovery fills in the missing names, exactly as the mount
+    // does: shipping no directory index at all is the strongest signal there
+    // is, and `recover_entries` erases it.
+    let is_mod = archive.entries().is_empty() || !is_shipped_container_path(&root, utoc);
+    if archive.entries().is_empty() {
+        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
+            anyhow::bail!("not a Campaign Evolved container source");
+        };
+        let mut mounted = mounted_paths;
+        mounted.push(utoc.to_path_buf());
+        let references = sibling_reference_archives(&root, &mounted);
+        let bases: Vec<&IoStoreArchive> = containers
+            .iter()
+            .map(|c| c.archive.as_ref())
+            .chain(references.iter())
+            .collect();
+        archive.recover_entries(&bases, None);
+    }
+    let chunk_label = utoc
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("container")
+        .to_string();
+    let mut fresh: Vec<TagEntry> = Vec::new();
+    let mut pending_packages: Vec<(String, String)> = Vec::new();
+    let mut pending_index: Vec<(String, String)> = Vec::new();
+    for entry in archive.entries() {
+        if let Some(package) = container_package_name(&entry.path) {
+            pending_packages.push((package, entry.path.clone()));
+        }
+    }
+    for e in archive.ublock_entries() {
+        let Some((tag_name, group_longname)) = parse_ublock_stem(&e.path) else {
+            continue;
+        };
+        let Some(group_tag) = names.group_tag_for(group_longname) else {
+            continue;
+        };
+        let after = strip_tags_root(&e.path);
+        let dir = after.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
+        let logical = if dir.is_empty() {
+            tag_name.to_ascii_lowercase()
+        } else {
+            format!(
+                "{}/{}",
+                dir.to_ascii_lowercase(),
+                tag_name.to_ascii_lowercase()
+            )
+        };
+        let display_path = display_str_with_friendly_extension(&logical, group_tag, &names);
+        pending_index.push((format!("{group_tag:08x}:{logical}"), e.path.clone()));
+        fresh.push(TagEntry {
+            key: format!("ublock:{chunk_label}:{}", e.path),
+            display_path,
+            group_tag,
+            group_name: names.name_for(group_tag).map(str::to_owned),
+            location: TagEntryLocation::Container {
+                container: container_index,
+                rel_path: e.path.clone(),
+            },
+        });
+    }
+    if fresh.is_empty() {
+        return Ok(0);
+    }
+    {
+        let TagSource::IoStoreContainerSet {
+            containers,
+            index,
+            packages,
+            ..
+        } = &mut source.source
+        else {
+            anyhow::bail!("not a Campaign Evolved container source");
+        };
+        for (key, rel_path) in pending_index {
+            Arc::make_mut(index).insert(key, container_index, rel_path);
+        }
+        for (package, rel_path) in pending_packages {
+            Arc::make_mut(packages).insert(package, container_index, rel_path);
+        }
+        // Not added to the shipped index: a mod's copy of a tag is never what
+        // the game ships, and that distinction is what "what does this mod
+        // change?" is answered from.
+        containers.push(MountedContainer {
+            utoc_path: utoc.to_path_buf(),
+            chunk_label,
+            is_mod,
+            archive: Arc::new(archive),
+        });
+    }
+    let contributed = fresh.len();
+    for entry in fresh {
+        // Last-wins, exactly as the mount layers packs: a mod taking over a tag
+        // replaces the entry rather than adding a second one beside it.
+        //
+        // The superseded entry's **key is kept**. A key is this application's
+        // identity for a tag — open tabs, parsed documents, the undo journal
+        // and every cache are filed under it — and a mod's key differs from the
+        // pak's only in the container label it happens to be carried by. Minting
+        // a new one here left every tab of an exported tag pointing at an entry
+        // that no longer existed, showing its raw key and "This tag is no longer
+        // in the source", with the user's edits stranded behind it. What changed
+        // is where the tag is read from, which is `location`, not what it is.
+        layer_entry(&mut source.entries, &entry);
+        // The CE mount leaves `all_entries` empty and works off `entries`; an
+        // empty one stays empty rather than becoming a second, partial list.
+        if !source.all_entries.is_empty() {
+            layer_entry(&mut source.all_entries, &entry);
+        }
+    }
+    source.tree = build_tree(&source.entries);
+    source.group_tree = build_group_tree(if source.all_entries.is_empty() {
+        &source.entries
+    } else {
+        &source.all_entries
+    });
+    Ok(contributed)
+}
+
+/// Lay one newly mounted entry over an existing list, last-wins.
+///
+/// A superseded entry keeps its own `key`. The key is this application's
+/// identity for a tag — open tabs, parsed documents, the undo journal and every
+/// per-tag cache are filed under it — and it differs between a pak's copy and a
+/// mod's only in the container label baked into it. What a new layer changes is
+/// where the tag is *read from*, which is `location`, not what it is.
+fn layer_entry(entries: &mut Vec<TagEntry>, entry: &TagEntry) {
+    let superseded = entries.iter().position(|existing| {
+        existing.group_tag == entry.group_tag && existing.display_path == entry.display_path
+    });
+    match superseded {
+        Some(position) => {
+            entries[position].location = entry.location.clone();
+            entries[position].group_name = entry.group_name.clone();
+        }
+        None => {
+            insert_entry_sorted(entries, entry.clone());
+        }
+    }
+}
+
 fn build_container_set(
     root: PathBuf,
     utocs: Vec<PathBuf>,
@@ -320,16 +528,13 @@ fn build_container_set(
             opened.push((utoc, Some(archive)));
         }
     }
-    let needs_recovery = |slot: &Option<IoStoreArchive>|
-        matches!(slot, Some(archive) if archive.entries().is_empty());
+    let needs_recovery = |slot: &Option<IoStoreArchive>| matches!(slot, Some(archive) if archive.entries().is_empty());
     // Which of these are mods, decided before recovery fills in the missing
     // names: shipping no directory index at all is the strongest signal there
     // is, and it is gone the moment `recover_entries` runs.
     let is_mod: Vec<bool> = opened
         .iter()
-        .map(|(utoc, archive)| {
-            needs_recovery(archive) || !is_shipped_container_path(&root, utoc)
-        })
+        .map(|(utoc, archive)| needs_recovery(archive) || !is_shipped_container_path(&root, utoc))
         .collect();
     // Naming an index-less container's chunks means resolving their ids against
     // the containers it overrides. On the "open one chunk" path — a mod sitting
@@ -346,7 +551,9 @@ fn build_container_set(
             continue;
         }
         // Lift the target out so the rest can be borrowed as its references.
-        let Some(mut archive) = opened[i].1.take() else { continue; };
+        let Some(mut archive) = opened[i].1.take() else {
+            continue;
+        };
         let bases: Vec<&IoStoreArchive> = opened
             .iter()
             .filter_map(|(_, a)| a.as_ref())
@@ -633,7 +840,11 @@ pub fn paths_are_same_file(left: &Path, right: &Path) -> bool {
 pub fn read_shipped_entry_bytes(source: &TagSource, entry: &TagEntry) -> Result<Option<Vec<u8>>> {
     let (
         TagEntryLocation::Container { rel_path, .. },
-        TagSource::IoStoreContainerSet { containers, shipped, .. },
+        TagSource::IoStoreContainerSet {
+            containers,
+            shipped,
+            ..
+        },
     ) = (&entry.location, source)
     else {
         return Ok(None);
@@ -644,11 +855,12 @@ pub fn read_shipped_entry_bytes(source: &TagSource, entry: &TagEntry) -> Result<
     let mounted = containers
         .get(index)
         .context("shipped container index out of range")?;
-    mounted
-        .archive
-        .read(rel_path)
-        .map(Some)
-        .map_err(|e| anyhow!("failed to read {rel_path} from {}: {e}", mounted.chunk_label))
+    mounted.archive.read(rel_path).map(Some).map_err(|e| {
+        anyhow!(
+            "failed to read {rel_path} from {}: {e}",
+            mounted.chunk_label
+        )
+    })
 }
 
 pub fn read_shipped_entry(source: &TagSource, entry: &TagEntry) -> Result<Option<TagFile>> {
@@ -669,10 +881,12 @@ pub fn read_shipped_entry(source: &TagSource, entry: &TagEntry) -> Result<Option
     let mounted = containers
         .get(index)
         .context("shipped container index out of range")?;
-    let bytes = mounted
-        .archive
-        .read(rel_path)
-        .map_err(|e| anyhow!("failed to read {rel_path} from {}: {e}", mounted.chunk_label))?;
+    let bytes = mounted.archive.read(rel_path).map_err(|e| {
+        anyhow!(
+            "failed to read {rel_path} from {}: {e}",
+            mounted.chunk_label
+        )
+    })?;
     TagFile::read_from_bytes(&bytes)
         .map(Some)
         .map_err(|e| anyhow!("failed to parse {}: {e}", entry.display_path))
@@ -978,7 +1192,9 @@ mod container_tests {
         let hlmt = u32::from_be_bytes(*b"hlmt");
         let mut checked = false;
         for entry in loaded.entries.iter().filter(|e| e.group_tag == hlmt) {
-            let Ok(model) = read_entry(&loaded.source, entry) else { continue; };
+            let Ok(model) = read_entry(&loaded.source, entry) else {
+                continue;
+            };
             let root = model.root();
             let (Some((_, jmad_ref)), Some((_, skel_ref))) = (
                 root.read_tag_ref_with_group("animation"),
@@ -999,11 +1215,17 @@ mod container_tests {
                 .read_container_tag_by_ref(u32::from_be_bytes(*b"skel"), &skel_ref)
                 .unwrap_or_else(|e| panic!("resolve skel {skel_ref}: {e}"));
             assert_eq!(skel.group().tag, u32::from_be_bytes(*b"skel"));
-            eprintln!("resolved refs for {}: {jmad_ref} + {skel_ref}", entry.display_path);
+            eprintln!(
+                "resolved refs for {}: {jmad_ref} + {skel_ref}",
+                entry.display_path
+            );
             checked = true;
             break;
         }
-        assert!(checked, "expected an hlmt carrying both animation and skeleton model refs");
+        assert!(
+            checked,
+            "expected an hlmt carrying both animation and skeleton model refs"
+        );
     }
 }
 
@@ -1036,6 +1258,136 @@ mod paks_dir_tests {
     fn touch(path: &Path) {
         std::fs::create_dir_all(path.parent().expect("has a parent")).expect("create dirs");
         std::fs::write(path, b"").expect("write file");
+    }
+
+    /// Baboon's own transactional artefacts are not containers. A duplicate
+    /// leaves an immutable copy of the `.utoc` beside the container it is about
+    /// to mutate, and an export builds its replacement in a hidden folder
+    /// inside the destination — mounting either would show the user a mod made
+    /// of a half-finished write, and shipping either would put it in a mod.
+    #[test]
+    fn baboons_own_backups_are_never_mounted() {
+        let root = temp_dir("backups");
+        touch(&root.join("pakchunk0-WinGDK.utoc"));
+        touch(&root.join("pakchunk0-WinGDK.utoc.baboon-duplicate-backup"));
+        touch(&root.join("pakchunk0-WinGDK.utoc.baboon-duplicate-backup-3"));
+        touch(&root.join("~mods/mymod_P.utoc"));
+        touch(&root.join("~mods/mymod_P.utoc.previous"));
+        touch(&root.join("~mods/.baboon-export-1234-9/mymod_P.utoc"));
+
+        let mut mounted: Vec<String> = utocs_under(&root)
+            .iter()
+            .map(|path| {
+                path.strip_prefix(&root)
+                    .unwrap_or(path)
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect();
+        mounted.sort();
+
+        assert_eq!(
+            mounted,
+            vec![
+                "pakchunk0-WinGDK.utoc".to_owned(),
+                "~mods/mymod_P.utoc".to_owned()
+            ]
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    fn container_entry(key: &str, display_path: &str, container: usize, rel_path: &str) -> TagEntry {
+        TagEntry {
+            key: key.to_owned(),
+            display_path: display_path.to_owned(),
+            group_tag: 0x62697064,
+            group_name: Some("biped".to_owned()),
+            location: TagEntryLocation::Container {
+                container,
+                rel_path: rel_path.to_owned(),
+            },
+        }
+    }
+
+    /// Mounting a mod over a tag must not change what that tag *is*.
+    ///
+    /// The key is what open tabs, parsed documents and the undo journal are
+    /// filed under. Replacing the entry wholesale gave the tag a new identity
+    /// derived from the mod's container label, so every tab of a just-exported
+    /// tag showed its raw key and "This tag is no longer in the source", with
+    /// the user's edits stranded behind it.
+    #[test]
+    fn a_mod_layered_over_a_tag_leaves_its_identity_alone() {
+        let mut entries = vec![container_entry(
+            "ublock:pakchunk0-Windows:Meteorite/Content/Tags/objects/brute-biped.ubulk",
+            "objects/brute.biped",
+            0,
+            "Meteorite/Content/Tags/objects/brute-biped.ubulk",
+        )];
+
+        layer_entry(
+            &mut entries,
+            &container_entry(
+                "ublock:mymod_P:Meteorite/Content/Tags/objects/brute-biped.ubulk",
+                "objects/brute.biped",
+                4,
+                "Meteorite/Content/Tags/objects/brute-biped.ubulk",
+            ),
+        );
+
+        assert_eq!(entries.len(), 1, "the mod replaces rather than duplicates");
+        assert_eq!(
+            entries[0].key, "ublock:pakchunk0-Windows:Meteorite/Content/Tags/objects/brute-biped.ubulk",
+            "the tag keeps the identity its open tab is filed under"
+        );
+        // What did change is where it is read from.
+        assert!(matches!(
+            &entries[0].location,
+            TagEntryLocation::Container { container: 4, .. }
+        ));
+    }
+
+    #[test]
+    fn a_tag_only_the_mod_carries_is_added_in_sorted_position() {
+        let mut entries = vec![
+            container_entry("ublock:pak:a.ubulk", "objects/a.biped", 0, "a.ubulk"),
+            container_entry("ublock:pak:z.ubulk", "objects/z.biped", 0, "z.ubulk"),
+        ];
+
+        layer_entry(
+            &mut entries,
+            &container_entry("ublock:mymod_P:m.ubulk", "objects/m.biped", 4, "m.ubulk"),
+        );
+
+        let order: Vec<&str> = entries
+            .iter()
+            .map(|entry| entry.display_path.as_str())
+            .collect();
+        assert_eq!(
+            order,
+            ["objects/a.biped", "objects/m.biped", "objects/z.biped"],
+            "a new tag lands beside its neighbours, not at the bottom of the list"
+        );
+    }
+
+    #[test]
+    fn a_backup_is_recognised_wherever_it_sits() {
+        for path in [
+            "D:/Paks/pakchunk0.utoc.baboon-duplicate-backup",
+            "D:/Paks/pakchunk0.utoc.baboon-duplicate-backup-7",
+            "D:/Paks/pakchunk0.utoc.baboon-duplicate-backup.manifest.json",
+            "D:/Paks/~mods/mymod_P.utoc.previous",
+            "D:/Paks/~mods/.baboon-export-900-1/mymod_P.utoc",
+        ] {
+            assert!(is_container_backup(Path::new(path)), "{path}");
+        }
+        for path in [
+            "D:/Paks/pakchunk0.utoc",
+            "D:/Paks/~mods/mymod_P.utoc",
+            "D:/Paks/~mods/baboon-export/mymod_P.utoc",
+        ] {
+            assert!(!is_container_backup(Path::new(path)), "{path}");
+        }
     }
 
     /// The game root of an install that has had a mod exported into it: a
@@ -1083,7 +1435,12 @@ mod paks_dir_tests {
         }
         assert_eq!(
             find_paks_dir(Path::new(ROOT)),
-            Some(PathBuf::from(ROOT).join("Meteorite").join("Content").join("Paks"))
+            Some(
+                PathBuf::from(ROOT)
+                    .join("Meteorite")
+                    .join("Content")
+                    .join("Paks")
+            )
         );
     }
 
@@ -1118,8 +1475,7 @@ mod mod_export_tests {
         }
         let defs = Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
         let names = TagNameIndex::load_from_definitions(&defs);
-        let loaded =
-            load_iostore_container_set(PathBuf::from(PAKS), &names, &defs).expect("mount");
+        let loaded = load_iostore_container_set(PathBuf::from(PAKS), &names, &defs).expect("mount");
         let TagSource::IoStoreContainerSet { ref containers, .. } = loaded.source else {
             panic!("expected a container set");
         };
@@ -1191,12 +1547,17 @@ mod mod_export_tests {
         let ub_chunk = reopened
             .find_chunk(&ub_id)
             .expect("the override reuses the base chunk id");
-        let served = reopened.read_chunk(ub_chunk).expect("read the override chunk");
+        let served = reopened
+            .read_chunk(ub_chunk)
+            .expect("read the override chunk");
         assert_eq!(
             served, edited,
             "the exported container did not carry the edited bytes for {rel_path}"
         );
-        assert_ne!(served, original, "the exported container carried the base bytes");
+        assert_ne!(
+            served, original,
+            "the exported container carried the base bytes"
+        );
         eprintln!("override verified for {rel_path} ({} bytes)", served.len());
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -1214,8 +1575,7 @@ mod mod_export_tests {
         }
         let defs = Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
         let names = TagNameIndex::load_from_definitions(&defs);
-        let loaded =
-            load_iostore_container_set(PathBuf::from(PAKS), &names, &defs).expect("mount");
+        let loaded = load_iostore_container_set(PathBuf::from(PAKS), &names, &defs).expect("mount");
         let TagSource::IoStoreContainerSet { ref containers, .. } = loaded.source else {
             panic!("expected a container set");
         };
@@ -1223,7 +1583,10 @@ mod mod_export_tests {
             .entries
             .iter()
             .find_map(|entry| match &entry.location {
-                TagEntryLocation::Container { container, rel_path, } => {
+                TagEntryLocation::Container {
+                    container,
+                    rel_path,
+                } => {
                     let archive = &containers.get(*container)?.archive;
                     let bytes = archive.read(rel_path).ok()?;
                     (bytes.len() > 64).then(|| (*container, rel_path.clone(), bytes))
@@ -1238,7 +1601,8 @@ mod mod_export_tests {
 
         // Write the mod into the game's own Paks folder, which is where mods
         // live and therefore where they get opened from.
-        let out = PathBuf::from(PAKS).join(format!("baboon-listing-test-{}_P.utoc", std::process::id()));
+        let out =
+            PathBuf::from(PAKS).join(format!("baboon-listing-test-{}_P.utoc", std::process::id()));
         let archive = containers[container].archive.clone();
         blam_tags::iostore::writer::write_mod_container_ex(
             &[(archive.as_ref(), rel_path.as_str(), edited.as_slice())],
@@ -1258,13 +1622,10 @@ mod mod_export_tests {
             !opened.entries.is_empty(),
             "opening a mod container listed no tags at all"
         );
-        let listed = opened
-            .entries
-            .iter()
-            .any(|entry| match &entry.location {
-                TagEntryLocation::Container { rel_path: p, .. } => *p == rel_path,
-                _ => false,
-            });
+        let listed = opened.entries.iter().any(|entry| match &entry.location {
+            TagEntryLocation::Container { rel_path: p, .. } => *p == rel_path,
+            _ => false,
+        });
         assert!(listed, "the overridden tag {rel_path} was not listed");
         eprintln!(
             "mod container listed {} tag(s); found {rel_path}",
@@ -1287,8 +1648,7 @@ mod mod_export_tests {
         }
         let defs = Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
         let names = TagNameIndex::load_from_definitions(&defs);
-        let loaded =
-            load_iostore_container_set(PathBuf::from(PAKS), &names, &defs).expect("mount");
+        let loaded = load_iostore_container_set(PathBuf::from(PAKS), &names, &defs).expect("mount");
         let TagSource::IoStoreContainerSet { ref containers, .. } = loaded.source else {
             panic!("expected a container set");
         };
@@ -1296,7 +1656,10 @@ mod mod_export_tests {
             .entries
             .iter()
             .find_map(|entry| match &entry.location {
-                TagEntryLocation::Container { container, rel_path } => {
+                TagEntryLocation::Container {
+                    container,
+                    rel_path,
+                } => {
                     let archive = &containers.get(*container)?.archive;
                     let bytes = archive.read(rel_path).ok()?;
                     (bytes.len() > 64).then(|| (*container, rel_path.clone(), bytes))
@@ -1330,7 +1693,10 @@ mod mod_export_tests {
             // base pak it overrides.
             let with_mod = load_iostore_container_set(PathBuf::from(PAKS), &names, &defs)
                 .expect("remount the install");
-            let TagSource::IoStoreContainerSet { containers: ref mounted, .. } = with_mod.source
+            let TagSource::IoStoreContainerSet {
+                containers: ref mounted,
+                ..
+            } = with_mod.source
             else {
                 panic!("expected a container set");
             };
@@ -1338,7 +1704,10 @@ mod mod_export_tests {
                 .entries
                 .iter()
                 .find_map(|entry| match &entry.location {
-                    TagEntryLocation::Container { container, rel_path: p } if *p == rel_path => {
+                    TagEntryLocation::Container {
+                        container,
+                        rel_path: p,
+                    } if *p == rel_path => {
                         let mounted = mounted.get(*container)?;
                         Some((mounted.utoc_path.clone(), mounted.archive.read(p).ok()?))
                     }
@@ -1346,7 +1715,8 @@ mod mod_export_tests {
                 })
                 .expect("the overridden tag is in the mounted set");
             assert_eq!(
-                served.0, out,
+                served.0,
+                out,
                 "{rel_path} is still served by {}, not the mod under ~mods",
                 served.0.display()
             );
@@ -1390,8 +1760,7 @@ mod mod_export_tests {
         }
         let defs = Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
         let names = TagNameIndex::load_from_definitions(&defs);
-        let loaded =
-            load_iostore_container_set(PathBuf::from(PAKS), &names, &defs).expect("mount");
+        let loaded = load_iostore_container_set(PathBuf::from(PAKS), &names, &defs).expect("mount");
         let TagSource::IoStoreContainerSet { ref containers, .. } = loaded.source else {
             panic!("expected a container set");
         };
@@ -1399,7 +1768,10 @@ mod mod_export_tests {
             .entries
             .iter()
             .find_map(|entry| match &entry.location {
-                TagEntryLocation::Container { container, rel_path } => {
+                TagEntryLocation::Container {
+                    container,
+                    rel_path,
+                } => {
                     let archive = &containers.get(*container)?.archive;
                     let bytes = archive.read(rel_path).ok()?;
                     (bytes.len() > 64).then(|| (*container, rel_path.clone(), bytes))
@@ -1443,9 +1815,10 @@ mod mod_export_tests {
                 .entries
                 .iter()
                 .find_map(|entry| match &entry.location {
-                    TagEntryLocation::Container { container, rel_path: p } if *p == rel_path => {
-                        Some((*container, p.clone()))
-                    }
+                    TagEntryLocation::Container {
+                        container,
+                        rel_path: p,
+                    } if *p == rel_path => Some((*container, p.clone())),
                     _ => None,
                 })
                 .expect("the mod serves the overridden tag");

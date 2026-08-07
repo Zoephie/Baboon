@@ -1298,16 +1298,15 @@ impl Baboon {
                     ui.label(RichText::new("Mod name").color(text_dark()));
                     ui.add(egui::TextEdit::singleline(&mut name_edit).desired_width(220.0));
                     ui.label(
-                        RichText::new(format!("{stem}.utoc / .ucas / .pak"))
+                        RichText::new("names the files, not a folder")
                             .color(subtle_dark())
-                            .monospace()
                             .small(),
                     );
                 });
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Folder").color(text_dark()));
+                    ui.label(RichText::new("Export folder").color(text_dark()));
                     ui.label(
-                        RichText::new(dialog.folder.display().to_string())
+                        RichText::new(destination.display().to_string())
                             .color(subtle_dark())
                             .monospace()
                             .small(),
@@ -1316,18 +1315,20 @@ impl Baboon {
                         browse = true;
                     }
                 });
-                // The files go into a folder of their own under `~mods`, so show
-                // where they actually land rather than the folder that was
-                // picked — otherwise "Folder" names somewhere the mod is not.
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Writes to").color(text_dark()));
+                // Named in full rather than summarised: a mod is four files, the
+                // review is the last chance to notice one of them is about to
+                // land somewhere unintended, and "{stem}.utoc / .ucas / .pak"
+                // left the `.baboon` sidecar out of a list it was already
+                // writing.
+                ui.label(RichText::new("Writes").color(text_dark()));
+                for extension in MOD_FILE_EXTENSIONS {
                     ui.label(
-                        RichText::new(destination.display().to_string())
+                        RichText::new(format!("    {stem}.{extension}"))
                             .color(subtle_dark())
                             .monospace()
                             .small(),
                     );
-                });
+                }
                 if in_game_folder {
                     ui.label(
                         RichText::new(
@@ -1476,9 +1477,13 @@ impl Baboon {
                 Err(error) => error,
             };
         }
+        // Opens where the mod is currently going, rather than at whatever the
+        // OS last remembered — the common edit is "somewhere near here", and
+        // the default is already the game's own `~mods`.
         if browse
             && let Some(folder) = rfd::FileDialog::new()
                 .set_title("Export mod into folder")
+                .set_directory(&destination)
                 .pick_folder()
             && let Some(dialog) = self.mod_export.as_mut()
         {
@@ -1507,7 +1512,7 @@ impl Baboon {
             let snapshot = dialog.snapshot.clone();
             // The workspace may have been closed while this was open.
             if self.focus_navigation_kit(kit) {
-                self.write_reviewed_mod(&snapshot, &included, output);
+                self.write_reviewed_mod(&snapshot, &included, output, ctx);
             }
             self.mod_export = None;
         }
@@ -3540,6 +3545,7 @@ mod mod_export_tests {
                 selected_identity: None,
                 tabs: Vec::new(),
                 overlays: Default::default(),
+                history: Default::default(),
             },
             rows: Vec::new(),
             name: name.to_owned(),

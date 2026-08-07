@@ -101,17 +101,30 @@ impl Baboon {
         ui.separator();
         ui.label(RichText::new("Saving").color(text_dark()).strong());
         ui.add_space(4.0);
-        ui.checkbox(
-            &mut self.confirm_container_overwrite,
-            "Confirm before Save overwrites Campaign Evolved game files",
-        );
-        ui.label(
-            RichText::new(
-                "Saving a tag loaded from a Campaign Evolved container overwrites the game's pak files in place. Use File \u{2192} Export Mod\u{2026} to bundle changes into a separate mod instead.",
-            )
-            .color(subtle_dark())
-            .small(),
-        );
+        if self.expert_mode {
+            ui.checkbox(
+                &mut self.confirm_container_overwrite,
+                "Confirm before Save overwrites Campaign Evolved game files",
+            );
+            ui.label(
+                RichText::new(
+                    "Expert mode lets Save write a tag straight back into the game's own pak files. That edits the installed game in place; File \u{2192} Export Mod\u{2026} bundles the same changes into a separate mod instead.",
+                )
+                .color(subtle_dark())
+                .small(),
+            );
+        } else {
+            // The setting guards a route that is not reachable outside expert
+            // mode, and a checkbox for something that cannot happen is worse
+            // than no checkbox.
+            ui.label(
+                RichText::new(
+                    "Saving a tag loaded from a Campaign Evolved container keeps the change in this workspace and offers to export it as a mod; the game's own pak files are never written. Turn on expert mode below to allow overwriting them in place.",
+                )
+                .color(subtle_dark())
+                .small(),
+            );
+        }
 
         ui.add_space(10.0);
         ui.separator();

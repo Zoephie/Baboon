@@ -16,8 +16,14 @@
 use super::*;
 
 /// One serialized tag state plus a human-readable label for the action.
+///
+/// The bytes are shared rather than owned: the session's recovery project
+/// captures the history on every autosave tick, and a stack holding a couple of
+/// Campaign Evolved animation graphs would otherwise be copied wholesale twice
+/// a second.
+#[derive(Clone)]
 pub(super) struct Snapshot {
-    pub(super) bytes: Vec<u8>,
+    pub(super) bytes: Arc<Vec<u8>>,
     pub(super) label: String,
 }
 
@@ -33,6 +39,16 @@ pub(super) struct EditJournal {
     /// True while a run of consecutive edit frames is being coalesced into the
     /// single snapshot already pushed for this run.
     coalescing: bool,
+    /// Bumped whenever either stack changes.
+    ///
+    /// The session's recovery project rewrites its history table wholesale — an
+    /// undo stack shifts by one on every edit, so nearly every row moves and
+    /// there is nothing to reconcile row by row. Knowing cheaply that nothing
+    /// changed is therefore the difference between this and rewriting tens of
+    /// megabytes twice a second while someone drags a slider. Same trick as
+    /// [`Dirty::revision`], and for the same reason: answering it by hashing
+    /// the snapshots would only move the cost from the disk to the CPU.
+    revision: u64,
 }
 
 impl Default for EditJournal {
@@ -43,6 +59,7 @@ impl Default for EditJournal {
             limit: 64,
             byte_limit: 256 * 1024 * 1024,
             coalescing: false,
+            revision: 0,
         }
     }
 }
@@ -57,12 +74,35 @@ impl EditJournal {
         }
         if let Ok(bytes) = tag.write_to_bytes() {
             self.push_capped(Snapshot {
-                bytes,
+                bytes: Arc::new(bytes),
                 label: label.to_owned(),
             });
             self.redo.clear();
         }
         self.coalescing = true;
+    }
+
+    /// The stacks as they stand, for the session's recovery project. Oldest
+    /// first, matching the in-memory order.
+    pub(super) fn stacks(&self) -> (&[Snapshot], &[Snapshot]) {
+        (&self.undo, &self.redo)
+    }
+
+    /// How many times either stack has changed. See [`EditJournal::revision`].
+    pub(super) fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Seed a journal from a restored session.
+    ///
+    /// Replaces rather than merges: a freshly opened document has no history of
+    /// its own, and restoring into one that somehow did would interleave two
+    /// unrelated edit trails.
+    pub(super) fn restore(&mut self, undo: Vec<Snapshot>, redo: Vec<Snapshot>) {
+        self.undo = undo;
+        self.redo = redo;
+        self.coalescing = false;
+        self.revision = self.revision.wrapping_add(1);
     }
 
     /// Close the current coalescing window (call on a frame with no edits), so
@@ -81,7 +121,7 @@ impl EditJournal {
 
     /// Pop the most recent undo snapshot, recording `current` on the redo stack.
     /// Returns the bytes to restore and the action label.
-    pub(super) fn undo(&mut self, current: &TagFile) -> Option<(Vec<u8>, String)> {
+    pub(super) fn undo(&mut self, current: &TagFile) -> Option<(Arc<Vec<u8>>, String)> {
         let snapshot = self.undo.pop()?;
         if let Ok(bytes) = current.write_to_bytes() {
             push_capped_into(
@@ -89,17 +129,18 @@ impl EditJournal {
                 self.limit,
                 self.byte_limit,
                 Snapshot {
-                    bytes,
+                    bytes: Arc::new(bytes),
                     label: snapshot.label.clone(),
                 },
             );
         }
         self.coalescing = false;
+        self.revision = self.revision.wrapping_add(1);
         Some((snapshot.bytes, snapshot.label))
     }
 
     /// Pop the most recent redo snapshot, recording `current` on the undo stack.
-    pub(super) fn redo(&mut self, current: &TagFile) -> Option<(Vec<u8>, String)> {
+    pub(super) fn redo(&mut self, current: &TagFile) -> Option<(Arc<Vec<u8>>, String)> {
         let snapshot = self.redo.pop()?;
         if let Ok(bytes) = current.write_to_bytes() {
             push_capped_into(
@@ -107,17 +148,19 @@ impl EditJournal {
                 self.limit,
                 self.byte_limit,
                 Snapshot {
-                    bytes,
+                    bytes: Arc::new(bytes),
                     label: snapshot.label.clone(),
                 },
             );
         }
         self.coalescing = false;
+        self.revision = self.revision.wrapping_add(1);
         Some((snapshot.bytes, snapshot.label))
     }
 
     fn push_capped(&mut self, snapshot: Snapshot) {
         push_capped_into(&mut self.undo, self.limit, self.byte_limit, snapshot);
+        self.revision = self.revision.wrapping_add(1);
     }
 }
 
@@ -168,7 +211,7 @@ mod tests {
                 &mut stack,
                 64,
                 budget,
-                Snapshot { bytes: vec![0; 400], label: format!("edit {i}"), },
+                Snapshot { bytes: Arc::new(vec![0; 400]), label: format!("edit {i}"), },
             );
         }
         assert_eq!(stack.len(), 2, "400 x 2 fits in 1000, 400 x 3 does not");
@@ -181,7 +224,7 @@ mod tests {
             &mut lone,
             64,
             budget,
-            Snapshot { bytes: vec![0; budget * 4], label: "huge".to_owned(), },
+            Snapshot { bytes: Arc::new(vec![0; budget * 4]), label: "huge".to_owned(), },
         );
         assert_eq!(lone.len(), 1);
     }
@@ -202,7 +245,7 @@ mod tests {
         // Undo restores the pre-edit bytes and arms redo.
         let (bytes, label) = journal.undo(&tag).unwrap();
         assert_eq!(label, "Add variant");
-        assert_eq!(bytes, original);
+        assert_eq!(*bytes, original);
         tag = TagFile::read_from_bytes(&bytes).unwrap();
         assert_eq!(tag.write_to_bytes().unwrap(), original);
         assert!(!journal.can_undo());
@@ -210,7 +253,7 @@ mod tests {
 
         // Redo restores the post-edit bytes.
         let (bytes, _) = journal.redo(&tag).unwrap();
-        assert_eq!(bytes, edited);
+        assert_eq!(*bytes, edited);
         assert!(journal.can_undo());
     }
 

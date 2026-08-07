@@ -571,8 +571,7 @@ pub(crate) use index::*;
 pub use loading::*;
 pub use tree::*;
 use tree::{
-    display_path_with_friendly_extension, display_str_with_friendly_extension, natural_key,
-    path_to_display,
+    display_path_with_friendly_extension, display_str_with_friendly_extension, path_to_display,
 };
 
 #[cfg(test)]

@@ -1777,6 +1777,29 @@ impl Baboon {
         }
     }
 
+    /// What the Unreal package workspace is busy with, for a message that has
+    /// to tell the user why a container cannot be replaced. Deliberately
+    /// specific: "the workspace is open" is not something anyone can act on,
+    /// while "still indexing package types" is.
+    pub(in crate::app) fn chimp_activity(&self, kit_index: usize) -> String {
+        let Some(kit) = self.kits.get(kit_index) else {
+            return "mounted".to_owned();
+        };
+        if matches!(kit.chimp.mount, ChimpMount::Loading) {
+            return "still mounting".to_owned();
+        }
+        if kit.chimp.type_indexing {
+            return "indexing package types".to_owned();
+        }
+        if !kit.chimp.loading_packages.is_empty() {
+            return "loading a package".to_owned();
+        }
+        if self.chimp_level_job.is_some() {
+            return "exporting a level".to_owned();
+        }
+        "mounted".to_owned()
+    }
+
     pub(super) fn begin_chimp_mount(&mut self, kit_index: usize, ctx: egui::Context) {
         if !self.enable_chimp {
             return;
@@ -3323,11 +3346,20 @@ impl Baboon {
         };
         let mut close = false;
         let mut action = None;
+        let expert_mode = self.expert_mode;
         let dialog = self.kits[kit_index]
             .chimp
             .save_dialog
             .as_mut()
             .expect("checked above");
+        // Overwriting the installed game's own containers is an expert-mode
+        // route. A dialog left on that mode when expert mode is turned off
+        // would still act on it, so the mode is corrected here rather than only
+        // hidden below.
+        if !expert_mode && dialog.mode == ChimpSaveMode::OverwriteSources {
+            dialog.mode = ChimpSaveMode::ExportMod;
+            dialog.overwrite_acknowledged = false;
+        }
         egui::Window::new("Save Chimp changes")
             .id(egui::Id::new("chimp_save_changes"))
             .collapsible(false)
@@ -3347,19 +3379,32 @@ impl Baboon {
                         }
                     });
                 ui.separator();
-                let mode_before = dialog.mode;
-                ui.radio_value(
-                    &mut dialog.mode,
-                    ChimpSaveMode::ExportMod,
-                    "Export mod (recommended)",
-                );
-                ui.radio_value(
-                    &mut dialog.mode,
-                    ChimpSaveMode::OverwriteSources,
-                    "Overwrite source PAKs",
-                );
-                if dialog.mode != mode_before {
-                    dialog.overwrite_acknowledged = false;
+                // Without expert mode there is one route, so it is stated
+                // rather than offered as a choice of one.
+                if expert_mode {
+                    let mode_before = dialog.mode;
+                    ui.radio_value(
+                        &mut dialog.mode,
+                        ChimpSaveMode::ExportMod,
+                        "Export mod (recommended)",
+                    );
+                    ui.radio_value(
+                        &mut dialog.mode,
+                        ChimpSaveMode::OverwriteSources,
+                        "Overwrite source PAKs",
+                    );
+                    if dialog.mode != mode_before {
+                        dialog.overwrite_acknowledged = false;
+                    }
+                } else {
+                    ui.label(
+                        RichText::new(
+                            "Saved as a mod, leaving the installed game untouched. Overwriting \
+                             the game's own PAKs needs expert mode.",
+                        )
+                        .color(subtle_dark())
+                        .small(),
+                    );
                 }
                 ui.separator();
 
@@ -3454,6 +3499,15 @@ impl Baboon {
                 if let Some(action) = pending_close_action {
                     self.finish_chimp_close_after_save(kit_index, action, ctx);
                 }
+            }
+            // Guarded here as well as in the dialog: this is the one action in
+            // the app that edits the installed game's own containers, and it
+            // should not be reachable by any route expert mode has not opened.
+            Some(ChimpSaveAction::Overwrite) if !self.expert_mode => {
+                self.status =
+                    "Overwriting the game's own PAKs needs expert mode — save this as a mod \
+                     instead"
+                        .to_owned();
             }
             Some(ChimpSaveAction::Overwrite) => {
                 self.overwrite_all_dirty_chimp_packages(kit_index, ctx.clone());
@@ -3579,23 +3633,39 @@ impl Baboon {
             return;
         }
 
-        // The active Chimp World (and possibly Baboon's tag mount) can have the
-        // existing output memory-mapped. Finish the replacement container at a
-        // sibling path, release those mappings, then swap the triplet with a
+        // The active Chimp World (and possibly Baboon's tag mount, and possibly
+        // a second workspace on the same install) can have the existing output
+        // memory-mapped. The replacement is finished at a staging path first;
+        // taking the lease idles every Chimp mount that covers it, unmapping
+        // drops the tag mounts, and only then is the triplet swapped with a
         // rollback copy. The shipped game containers are never touched.
         drop(world);
-        self.kits[kit_index].chimp.mount = ChimpMount::Idle;
-        let released = match self.release_export_target_mappings(kit_index, &output) {
-            Ok(released) => released,
-            Err(error) => {
-                remove_chimp_triplet(&temporary);
-                self.status = error;
-                self.begin_chimp_mount(kit_index, ctx);
-                return;
-            }
-        };
+        let mut lease =
+            match self.acquire_container_write_lease(&output, ContainerWriteMode::Replace) {
+                Ok(lease) => lease,
+                Err(failure) => {
+                    remove_chimp_triplet(&temporary);
+                    self.status = failure.to_string();
+                    return;
+                }
+            };
+        if let Err(failure) = self.unmap_leased_containers(&mut lease) {
+            remove_chimp_triplet(&temporary);
+            self.status = failure.to_string();
+            self.release_container_write_lease(lease, ContainerWriteOutcome::Unchanged, &ctx);
+            return;
+        }
         let replaced = replace_chimp_triplet(&temporary, &output);
-        let reopen_failures = self.restore_released_mappings(kit_index, &released);
+        let report = self.release_container_write_lease(
+            lease,
+            if replaced.is_ok() {
+                ContainerWriteOutcome::Committed
+            } else {
+                ContainerWriteOutcome::Unchanged
+            },
+            &ctx,
+        );
+        let reopen_failures = report.reopen_failures;
         match replaced {
             Ok(()) => {
                 if let Err(error) = self.clear_chimp_recovery_packages(kit_index, &built_packages) {
@@ -3603,7 +3673,6 @@ impl Baboon {
                         "Built {} but could not clear Chimp recovery: {error}",
                         output.display()
                     );
-                    self.begin_chimp_mount(kit_index, ctx);
                     return;
                 }
                 for (package, _, _, _) in rebuilt {
@@ -3627,7 +3696,10 @@ impl Baboon {
                 self.status = format!("Could not install {}: {error}", output.display());
             }
         }
-        self.begin_chimp_mount(kit_index, ctx);
+        // Remounting is the lease's job now — it knows which workspaces it
+        // idled, which is not necessarily this one: an output outside the
+        // game's `Paks` was never mapped and never needed idling.
+        let _ = ctx;
     }
 
     fn overwrite_all_dirty_chimp_packages(&mut self, kit_index: usize, ctx: egui::Context) {
@@ -3889,18 +3961,32 @@ impl Baboon {
         }
 
         drop(world);
-        self.kits[kit_index].chimp.mount = ChimpMount::Idle;
-        let released = match self.release_export_target_mappings(kit_index, &output) {
-            Ok(released) => released,
-            Err(error) => {
-                remove_chimp_triplet(&temporary);
-                self.status = error;
-                self.begin_chimp_mount(kit_index, ctx);
-                return;
-            }
-        };
+        let mut lease =
+            match self.acquire_container_write_lease(&output, ContainerWriteMode::Replace) {
+                Ok(lease) => lease,
+                Err(failure) => {
+                    remove_chimp_triplet(&temporary);
+                    self.status = failure.to_string();
+                    return;
+                }
+            };
+        if let Err(failure) = self.unmap_leased_containers(&mut lease) {
+            remove_chimp_triplet(&temporary);
+            self.status = failure.to_string();
+            self.release_container_write_lease(lease, ContainerWriteOutcome::Unchanged, &ctx);
+            return;
+        }
         let replaced = replace_chimp_triplet(&temporary, &output);
-        let reopen_failures = self.restore_released_mappings(kit_index, &released);
+        let report = self.release_container_write_lease(
+            lease,
+            if replaced.is_ok() {
+                ContainerWriteOutcome::Committed
+            } else {
+                ContainerWriteOutcome::Unchanged
+            },
+            &ctx,
+        );
+        let reopen_failures = report.reopen_failures;
         match replaced {
             Ok(()) => {
                 if let Err(error) = self.accept_chimp_package_save(kit_index, package, bytes) {
@@ -3920,7 +4006,8 @@ impl Baboon {
                 self.status = format!("Could not install {}: {error}", output.display());
             }
         }
-        self.begin_chimp_mount(kit_index, ctx);
+        // Remounted by the lease, which knows what it idled.
+        let _ = ctx;
     }
 
     fn accept_chimp_package_save(
@@ -5153,13 +5240,10 @@ fn chimp_level_export_menu(
     });
 }
 
-fn triplet(path: &Path) -> [PathBuf; 3] {
-    [
-        path.with_extension("utoc"),
-        path.with_extension("ucas"),
-        path.with_extension("pak"),
-    ]
-}
+use super::controller::{
+    ContainerWriteMode, ContainerWriteOutcome, container_triplet as triplet,
+    remove_container_triplet,
+};
 
 fn chimp_mod_stem(name: &str) -> String {
     let sanitized = sanitize_mod_name(name);
@@ -5211,55 +5295,12 @@ fn chimp_package_container_stem(package: &str) -> String {
 }
 
 fn remove_chimp_triplet(path: &Path) {
-    for file in triplet(path) {
-        let _ = fs::remove_file(file);
-    }
+    remove_container_triplet(path);
 }
 
 fn replace_chimp_triplet(temporary: &Path, output: &Path) -> Result<(), String> {
-    let incoming = triplet(temporary);
-    let targets = triplet(output);
-    let backups = [
-        output.with_extension("utoc.previous"),
-        output.with_extension("ucas.previous"),
-        output.with_extension("pak.previous"),
-    ];
-    let mut backed_up = Vec::new();
-    for (index, target) in targets.iter().enumerate() {
-        if !target.exists() {
-            continue;
-        }
-        let _ = fs::remove_file(&backups[index]);
-        if let Err(error) = fs::rename(target, &backups[index]) {
-            for &done in backed_up.iter().rev() {
-                let _ = fs::rename(&backups[done], &targets[done]);
-            }
-            remove_chimp_triplet(temporary);
-            return Err(format!("could not back up {}: {error}", target.display()));
-        }
-        backed_up.push(index);
-    }
-    let mut installed = Vec::new();
-    for index in 0..incoming.len() {
-        if let Err(error) = fs::rename(&incoming[index], &targets[index]) {
-            for &done in installed.iter().rev() {
-                let _ = fs::remove_file(&targets[done]);
-            }
-            for &done in backed_up.iter().rev() {
-                let _ = fs::rename(&backups[done], &targets[done]);
-            }
-            remove_chimp_triplet(temporary);
-            return Err(format!(
-                "could not install {}: {error}",
-                targets[index].display()
-            ));
-        }
-        installed.push(index);
-    }
-    for index in backed_up {
-        let _ = fs::remove_file(&backups[index]);
-    }
-    Ok(())
+    super::controller::swap_container_triplet(temporary, output)
+        .map_err(|failure| failure.to_string())
 }
 
 impl Kit {

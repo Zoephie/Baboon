@@ -24,7 +24,12 @@ impl Baboon {
         match result {
             Ok(tag) => {
                 self.status = "Tag loaded".to_owned();
-                self.kits[index].parsed_tags.insert(key, TagDocument::clean(tag));
+                self.kits[index]
+                    .parsed_tags
+                    .insert(key.clone(), TagDocument::clean(tag));
+                // A restored session stages this tag's undo history before the
+                // read that produces the document, so it is waiting here.
+                self.apply_pending_history(index, &key);
             }
             Err(error) => {
                 self.terminal.lines.push(TerminalLineEntry::new(format!(
