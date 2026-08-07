@@ -177,6 +177,13 @@ fn index_item_relative_path(
         .or_else(|| entry_relative_path(root, entry))
 }
 
+/// One worker's slice of a refresh: each file it looked at, by normalized
+/// relative path, and the entry it resolved to when the file is a tag.
+///
+/// The path is carried even for a non-tag, because "every file that is still
+/// there" is what decides which cached entries were removed.
+type ResolvedFiles = Vec<(PathBuf, Option<TagEntry>)>;
+
 fn refresh_entry_index_from_cache(
     root: &Path,
     names: &TagNameIndex,
@@ -193,44 +200,101 @@ fn refresh_entry_index_from_cache(
         })
         .collect::<HashMap<_, _>>();
 
-    let mut seen = HashSet::new();
-    let mut entries = Vec::new();
-    let mut added = 0;
-    let mut updated = 0;
+    // Walking is one directory tree and stays sequential; deciding what each
+    // file is does not have to be.
+    //
+    // This runs on every open of every loose editing kit, and it is a `stat`
+    // per file plus a header read for anything that has changed — tens of
+    // thousands of round trips for a full MCC kit. A from-scratch scan has
+    // always fanned those out across every core (`scan_folder_subtree_entries_
+    // with_progress`); the incremental refresh, which is the one that runs far
+    // more often, did them one at a time.
+    let mut paths = Vec::new();
     for item in WalkDir::new(root).follow_links(false) {
         let item = item?;
         if !item.file_type().is_file() {
             continue;
         }
-        let path = item.into_path();
-        let rel = path
-            .strip_prefix(root)
-            .unwrap_or(path.as_path())
-            .to_path_buf();
-        let rel_key = normalize_rel_path(&rel);
-        seen.insert(rel_key.clone());
-        let fingerprint = file_fingerprint(&path)?;
+        paths.push(item.into_path());
+    }
 
-        if let (Some(cached), Some(current)) = (cached_by_rel.get(&rel_key), fingerprint.as_ref())
-            && cached_fingerprints
-                .get(&rel_key)
-                .is_some_and(|cached_fp| cached_fp == current)
-        {
-            entries.push(cached.clone());
-            continue;
-        }
+    let worker_count = std::thread::available_parallelism()
+        .map(|count| count.get())
+        .unwrap_or(1)
+        .clamp(1, paths.len().max(1));
+    let chunk_size = paths.len().div_ceil(worker_count).max(1);
+    let added = AtomicUsize::new(0);
+    let updated = AtomicUsize::new(0);
 
-        if let Some(entry) = loose_file_entry(root, &path, names)? {
-            if cached_by_rel.contains_key(&rel_key) {
-                updated += 1;
-            } else {
-                added += 1;
+    // Each worker returns its slice in the order it walked, so the merged list
+    // is deterministic before the sort below rather than dependent on which
+    // thread finished first.
+    let chunks: Vec<ResolvedFiles> = std::thread::scope(|scope| -> Result<Vec<ResolvedFiles>> {
+            let mut handles = Vec::new();
+            for chunk in paths.chunks(chunk_size) {
+                let cached_by_rel = &cached_by_rel;
+                let added = &added;
+                let updated = &updated;
+                handles.push(scope.spawn(move || -> Result<ResolvedFiles> {
+                        let mut resolved = Vec::with_capacity(chunk.len());
+                        for path in chunk {
+                            let rel = path.strip_prefix(root).unwrap_or(path.as_path());
+                            let rel_key = normalize_rel_path(rel);
+                            let fingerprint = file_fingerprint(path)?;
+                            if let (Some(cached), Some(current)) =
+                                (cached_by_rel.get(&rel_key), fingerprint.as_ref())
+                                && cached_fingerprints
+                                    .get(&rel_key)
+                                    .is_some_and(|cached_fp| cached_fp == current)
+                            {
+                                resolved.push((rel_key, Some(cached.clone())));
+                                continue;
+                            }
+                            let known = cached_by_rel.contains_key(&rel_key);
+                            match loose_file_entry(root, path, names)? {
+                                Some(entry) => {
+                                    if known {
+                                        updated.fetch_add(1, Ordering::Relaxed);
+                                    } else {
+                                        added.fetch_add(1, Ordering::Relaxed);
+                                    }
+                                    resolved.push((rel_key, Some(entry)));
+                                }
+                                None => {
+                                    if known {
+                                        updated.fetch_add(1, Ordering::Relaxed);
+                                    }
+                                    resolved.push((rel_key, None));
+                                }
+                            }
+                        }
+                        Ok(resolved)
+                    },
+                ));
             }
-            entries.push(entry);
-        } else if cached_by_rel.contains_key(&rel_key) {
-            updated += 1;
+            handles
+                .into_iter()
+                .map(|handle| {
+                    handle
+                        .join()
+                        .map_err(|_| anyhow!("entry index refresh worker panicked"))?
+                })
+                .collect()
+        },
+    )?;
+
+    let mut seen = HashSet::with_capacity(paths.len());
+    let mut entries = Vec::with_capacity(paths.len());
+    for chunk in chunks {
+        for (rel_key, entry) in chunk {
+            seen.insert(rel_key);
+            if let Some(entry) = entry {
+                entries.push(entry);
+            }
         }
     }
+    let added = added.load(Ordering::Relaxed);
+    let updated = updated.load(Ordering::Relaxed);
 
     let removed = cached_by_rel
         .keys()
@@ -676,3 +740,4 @@ pub fn field_row_summaries(tag: &TagFile, names: &TagNameIndex, limit: usize) ->
     }
     rows
 }
+

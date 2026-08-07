@@ -690,6 +690,64 @@ mod tests {
         assert_eq!(refresh.entries.len(), 2);
     }
 
+    /// The refresh fans its per-file work out across every core, so its result
+    /// must not depend on how the files happened to be split between workers.
+    ///
+    /// Enough files to guarantee more than one chunk on any machine, with a
+    /// mix of tags, non-tags, and a changed file, so the merged counts and the
+    /// final ordering are exercised rather than a single worker's happy path.
+    #[test]
+    fn entry_index_refresh_is_the_same_however_it_is_split_across_workers() {
+        let root = temp_dir("index_refresh_parallel");
+        let game = unique_game("index_refresh_parallel");
+        fs::create_dir_all(root.join("objects")).unwrap();
+        for i in 0..400 {
+            write_fake_tag(&root.join(format!("objects/tag{i:03}.model")), b"hlmt");
+        }
+        // Not tags: they must be walked, counted as seen, and left out.
+        for i in 0..40 {
+            fs::write(root.join(format!("objects/note{i:02}.txt")), b"not a tag").unwrap();
+        }
+        let names = TagNameIndex::default();
+        let entries = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        save_entry_index(&game, &root, &entries).unwrap();
+
+        let unchanged = refresh_entry_index(&game, &root, &names).unwrap();
+        assert!(!unchanged.changed, "nothing on disk moved");
+        assert_eq!(unchanged.added, 0);
+        assert_eq!(unchanged.updated, 0);
+        assert_eq!(unchanged.removed, 0);
+        assert_eq!(unchanged.entries.len(), 400);
+        // Sorted, and sorted the same way a full scan sorts — the browser draws
+        // folders in entry-vector order.
+        assert_eq!(
+            unchanged
+                .entries
+                .iter()
+                .map(|entry| entry.display_path.clone())
+                .collect::<Vec<_>>(),
+            entries
+                .iter()
+                .map(|entry| entry.display_path.clone())
+                .collect::<Vec<_>>()
+        );
+
+        // One file changes and one appears; the counts have to survive being
+        // tallied by whichever worker happened to see them.
+        write_fake_tag(&root.join("objects/tag007.model"), b"bipd");
+        write_fake_tag(&root.join("objects/brand_new.weapon"), b"weap");
+        let changed = refresh_entry_index(&game, &root, &names).unwrap();
+
+        remove_test_index(&game);
+        fs::remove_dir_all(&root).unwrap();
+
+        assert!(changed.changed);
+        assert_eq!(changed.added, 1, "one file appeared");
+        assert_eq!(changed.updated, 1, "one file's group changed");
+        assert_eq!(changed.removed, 0);
+        assert_eq!(changed.entries.len(), 401);
+    }
+
     #[test]
     fn entry_index_refresh_reprobes_changed_files_and_drops_deleted_files() {
         let root = temp_dir("index_refresh_changed");
