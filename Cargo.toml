@@ -2,13 +2,12 @@
 # parent workspace. The blam-tags engine is pinned to a revision, not a
 # submodule.
 #
-# The engine lives at camden-smallwood/blam-tags and the pin belongs there. It
-# points at Zoephie/blam-tags `codex/chimp-backend` while work that has not
-# reached upstream is in flight — currently the signed DXN bump-map fix
-# (camden-smallwood/blam-tags#3) and the recursive cross-game layout comparison
-# the Halo Reach → Campaign Evolved import needs. That branch is camden's
-# `master` plus those, so nothing upstream is dropped. Move the pin back to the
-# camden URL at the merge commit once they land.
+# The engine lives at camden-smallwood/blam-tags and the pin is back there. Its
+# `master` now carries both pieces that were in flight on Zoephie/blam-tags
+# `codex/chimp-backend` — the signed DXN bump-map fix (merged as
+# camden-smallwood/blam-tags#3) and the recursive cross-game layout comparison
+# the Halo Reach → Campaign Evolved import needs, merged in at `11dcd83`. The
+# old pin `f92c8ec` is an ancestor of this rev, so nothing was dropped.
 [workspace]
 members = ["."]
 default-members = ["."]
@@ -27,7 +26,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 atomic-write-file = "0.3"
-blam-tags = { git = "https://github.com/Zoephie/blam-tags", rev = "f92c8ec", features = ["audio", "iostore"] }
+blam-tags = { git = "https://github.com/camden-smallwood/blam-tags", rev = "0656e0d", features = ["audio", "iostore"] }
 directories = "6"
 display-info = "0.5"
 eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }
