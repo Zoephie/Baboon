@@ -84,7 +84,7 @@ pub(super) fn draw_model_preview_panel(
     model_preview_size: &mut f32,
     edit: &mut FieldEditContext<'_>,
 ) {
-    let is_model = is_model_group(entry.group_tag, names);
+    let is_model = is_previewable_geometry_group(entry.group_tag, names);
     if !is_model {
         return;
     }

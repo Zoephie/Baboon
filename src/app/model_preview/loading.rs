@@ -61,6 +61,25 @@ pub(super) fn load_model_preview(
     source: Option<&TagSource>,
     high_detail: bool,
 ) -> Result<ModelPreviewData, String> {
+    // `particle_model` carries its geometry inline with no wrapper, but
+    // it is not a render_model: no regions, no permutations, no
+    // materials, no nodes. Its objects are the entries of the JMI the
+    // artist imported, so each becomes a preview region and gets its own
+    // toggle in the region list.
+    if blam_tags::is_particle_model_group(model_tag.header.group_tag) {
+        let stem = preview_tag_stem(entry);
+        let preview = build_particle_model_preview(model_tag, &stem)?;
+        if preview.batches.is_empty() {
+            return Err("This particle_model has no previewable geometry.".to_owned());
+        }
+        return Ok(model_preview_data(
+            entry.key.clone(),
+            entry.display_path.clone(),
+            preview,
+            Vec::new(),
+        ));
+    }
+
     // Halo CE `gbxmodel` (mod2) and a bare `render_model` (mode) ARE the
     // render geometry — there is no `.model` (hlmt) wrapper carrying a
     // "render model" reference, so preview the tag itself.
@@ -139,6 +158,102 @@ pub(super) fn load_model_preview(
 /// `sections`, Halo CE the gbxmodel `geometries`), so batches carry the render
 /// model's own region/permutation names and stay in sync with the variant
 /// selection. JMS is export-only — never used for rendering.
+/// Tag basename, used to name gen3 particle objects (`pmdf` stores no
+/// object names — see `blam_tags::particle_model`). Falls back to the
+/// entry key when the display path has no usable leaf.
+fn preview_tag_stem(entry: &TagEntry) -> String {
+    entry
+        .display_path
+        .rsplit(['/', '\\'])
+        .next()
+        .map(|leaf| leaf.split('.').next().unwrap_or(leaf))
+        .filter(|stem| !stem.is_empty())
+        .unwrap_or("particle_model")
+        .to_owned()
+}
+
+/// Build preview geometry from a `particle_model` (`pmdf` or Halo 2
+/// `PRTM`).
+///
+/// blam-tags does the decode — splitting the merged strip at the
+/// `m_gpu_data/m_variants` boundaries (gen3) or the `models[]` ranges
+/// (Halo 2), decompressing positions through the compression bounds, and
+/// compacting each object to its own vertex set. Each object lands as a
+/// one-permutation region so the existing region list doubles as an
+/// object toggle, which is the closest thing the tag has to structure.
+pub(super) fn build_particle_model_preview(
+    tag: &TagFile,
+    stem: &str,
+) -> Result<RenderModelPreview, String> {
+    let meshes = blam_tags::particle_model_meshes(tag, stem).map_err(|e| e.to_string())?;
+
+    let mut preview = RenderModelPreview {
+        bounds_min: [f32::INFINITY; 3],
+        bounds_max: [f32::NEG_INFINITY; 3],
+        ..Default::default()
+    };
+
+    for mesh in &meshes {
+        let Ok(vertex_base) = u32::try_from(preview.vertices.len()) else {
+            continue;
+        };
+        if mesh
+            .vertices
+            .len()
+            .checked_add(preview.vertices.len())
+            .is_none_or(|count| count > u32::MAX as usize)
+        {
+            continue;
+        }
+
+        preview.vertices.reserve(mesh.vertices.len());
+        for vertex in &mesh.vertices {
+            let position = [vertex.position.x, vertex.position.y, vertex.position.z];
+            expand_preview_bounds_local(&mut preview.bounds_min, &mut preview.bounds_max, position);
+            preview.vertices.push(RenderModelPreviewVertex {
+                position,
+                normal: [vertex.normal.i, vertex.normal.j, vertex.normal.k],
+            });
+        }
+
+        let Ok(index_start) = u32::try_from(preview.indices.len()) else {
+            continue;
+        };
+        preview
+            .indices
+            .extend(mesh.indices.iter().map(|index| vertex_base + index));
+        let Ok(index_end) = u32::try_from(preview.indices.len()) else {
+            continue;
+        };
+        let index_count = index_end - index_start;
+        if index_count == 0 {
+            continue;
+        }
+
+        preview.regions.push(RenderModelPreviewRegion {
+            name: mesh.name.clone(),
+            permutations: vec![PARTICLE_OBJECT_PERMUTATION.to_owned()],
+        });
+        preview.batches.push(RenderModelPreviewBatch {
+            region_name: mesh.name.clone(),
+            permutation_name: PARTICLE_OBJECT_PERMUTATION.to_owned(),
+            material_index: 0,
+            index_start,
+            index_count,
+        });
+    }
+
+    if preview.vertices.is_empty() {
+        preview.bounds_min = [0.0; 3];
+        preview.bounds_max = [0.0; 3];
+    }
+    Ok(preview)
+}
+
+/// A particle object has no permutations; the region list still needs a
+/// selectable entry per region, so every object gets this single one.
+const PARTICLE_OBJECT_PERMUTATION: &str = "default";
+
 pub(super) fn build_render_preview(render_tag: &TagFile) -> Result<RenderModelPreview, String> {
     let render_model = RenderModel::from_tag(render_tag).map_err(|error| error.to_string())?;
     let render_meshes =
@@ -1894,3 +2009,7 @@ mod ce_repro_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/particle_model_preview.rs"]
+mod particle_model_preview;

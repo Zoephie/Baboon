@@ -135,6 +135,22 @@ pub(in crate::app) fn is_model_group(group_tag: u32, names: &TagNameIndex) -> bo
         || names.name_for(group_tag) == Some("gbxmodel")
 }
 
+/// Tags that get the Fields / Render Model tab pair and a geometry
+/// viewport — everything [`is_model_group`] covers, plus geometry-bearing
+/// tags that are not "models" in the object sense.
+///
+/// Kept separate from [`is_model_group`] on purpose: that predicate also
+/// decides whether a *tag_reference* is an object's model link
+/// (`find_model_reference`), and a `particle`'s `Model` → `pmdf` field
+/// would be misread as one, putting a bogus model summary on every
+/// particle tag.
+pub(in crate::app) fn is_previewable_geometry_group(
+    group_tag: u32,
+    names: &TagNameIndex,
+) -> bool {
+    is_model_group(group_tag, names) || blam_tags::is_particle_model_group(group_tag)
+}
+
 pub(in crate::app) fn format_reference_path(
     names: &TagNameIndex,
     group_tag: u32,
