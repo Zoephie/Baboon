@@ -3245,6 +3245,32 @@ impl Baboon {
         }
     }
 
+    /// Record the session as the event loop tears down.
+    ///
+    /// Baboon's whole shutdown chain hangs off a window close request:
+    /// `handle_app_close_request` only acts on `close_requested()`, and it is
+    /// what eventually reaches [`Self::execute_close_action`] and saves the
+    /// session. macOS never sends one for Cmd+Q — AppKit posts
+    /// `applicationWillTerminate:`, which closes each window directly rather
+    /// than asking it to close, so no `CloseRequested` is ever emitted and none
+    /// of that runs. The session file was then left holding whatever last wrote
+    /// it, which for a Campaign Evolved workspace is its project autosave: quit
+    /// with a Halo 3 kit open and the next launch restored Campaign Evolved,
+    /// because that was the last session anything had recorded.
+    ///
+    /// This runs on every shutdown, including the ordinary one that already
+    /// saved a moment earlier — the write is the same document either way. It
+    /// cannot prompt: the loop is already exiting and `LoopExiting` cannot be
+    /// vetoed, so unsaved tag edits still go unremarked on a Cmd+Q.
+    pub(super) fn persist_session_on_exit(&mut self) {
+        match self.current_session_state() {
+            Some(session) => {
+                let _ = save_last_session(&session);
+            }
+            None => clear_last_session(),
+        }
+    }
+
     /// Reopen the tags staged for the kit that just finished loading.
     fn finish_pending_session_restore(&mut self, ctx: egui::Context) {
         let restore = std::mem::take(&mut self.kits[self.active].pending_restore_tags);

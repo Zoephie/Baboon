@@ -620,5 +620,6 @@ impl eframe::App for Baboon {
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         self.window_state.persist_now();
+        self.persist_session_on_exit();
     }
 }
