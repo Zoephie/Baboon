@@ -73,6 +73,34 @@ pub(in crate::app) fn extract_geometry_for_entry(
                 }
             ))
         }
+        // A particle_model is the merged geometry of every object in the
+        // JMI it was imported from, so it comes back out as that manifest
+        // plus one JMS per object — the layout `import particle model`
+        // reads. `pmdf` is Halo 3 / Reach / Halo 4; `PRTM` is Halo 2's
+        // unrelated tag of the same name, which additionally stores the
+        // original object names.
+        b"pmdf" | b"PRTM" => {
+            let tag = read_entry(source, entry)?;
+            let stem = tag_file_stem(entry);
+            let summary =
+                blam_tags::extract::particle_model::particle_model_to_dir(&tag, output, &stem)?;
+            let objects = summary.emitted.iter().filter(|e| e.object.is_some()).count();
+            let manifest = summary
+                .emitted
+                .first()
+                .map(|e| e.path.display().to_string())
+                .unwrap_or_default();
+            Ok(format!(
+                "Extracted particle geometry {manifest} ({objects} object{}){}",
+                if objects == 1 { "" } else { "s" },
+                if summary.names_are_authentic {
+                    ""
+                } else {
+                    " — this engine stores no object names, so they are \
+                     numbered from the tag name"
+                },
+            ))
+        }
         _ => anyhow::bail!(
             "geometry extraction is not available for {}",
             format_group_tag(entry.group_tag)
@@ -971,3 +999,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "../tests/particle_model_extract_menu.rs"]
+mod particle_model_extract_menu;

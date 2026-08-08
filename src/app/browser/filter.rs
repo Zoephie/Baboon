@@ -303,6 +303,16 @@ mod tests {
                 String::from_utf8_lossy(group)
             );
         }
+        // A particle_model exports its source JMI plus one JMS per object.
+        // `pmdf` is Halo 3 / Reach / Halo 4; `PRTM` is Halo 2's unrelated
+        // tag of the same name, which routes through the same menu item.
+        for group in [b"pmdf", b"PRTM"] {
+            assert!(
+                supports_tag_extract_menu(u32::from_be_bytes(*group)),
+                "{} should enable the Extract menu",
+                String::from_utf8_lossy(group)
+            );
+        }
         // A plain weapon has no extractor at all — it must leave it disabled.
         assert!(!supports_tag_extract_menu(u32::from_be_bytes(*b"weap")));
     }
