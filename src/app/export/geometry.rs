@@ -493,6 +493,55 @@ impl blam_tags::extract::TagResolver for SourceResolver<'_> {
     }
 }
 
+/// The `.model` that owns a selected `model_animation_graph`, when swapping it
+/// in for the graph would give the export a rest pose it does not otherwise
+/// have.
+///
+/// Applied only to graphs whose `additional node data` leaves at least one
+/// skeleton bone without a rest pose, so the 2,515 Reach graphs that are
+/// already complete export byte-for-byte as before. The owner is found by the
+/// graph's own path and then **verified**: it counts only if that model's
+/// `animation` reference points back at this graph. Measured over Halo Reach,
+/// that improves 45 of the 79 short graphs (`magnum`, `plasma_pistol`, and the
+/// cinematic object graphs among them); the other 34 have no model beside them
+/// and keep today's behaviour. Halo 3's 50 short graphs have no sibling model
+/// at all, so nothing there changes.
+fn animation_graph_owner(
+    source: &TagSource,
+    entry: &TagEntry,
+    jmad: &TagFile,
+) -> Option<TagFile> {
+    if entry.group_tag != u32::from_be_bytes(*b"jmad") {
+        return None;
+    }
+    let skeleton = blam_tags::Skeleton::from_tag(jmad);
+    if skeleton.is_empty() || animation_rest_pose_is_complete(jmad, &skeleton) {
+        return None;
+    }
+    let reference = entry_reference_path(source, entry)?;
+    let model = load_referenced_tag_from_source(source, &reference, "model", b"hlmt").ok()?;
+    let names_this_graph = tag_ref_path(&model.root(), "animation")
+        .is_some_and(|r| r.eq_ignore_ascii_case(&reference));
+    names_this_graph.then_some(model)
+}
+
+/// Whether the jmad's own `additional node data` gives every skeleton bone a
+/// rest pose.
+fn animation_rest_pose_is_complete(jmad: &TagFile, skeleton: &blam_tags::Skeleton) -> bool {
+    let named: std::collections::HashSet<String> = jmad
+        .root()
+        .field_path("additional node data")
+        .and_then(|field| field.as_block())
+        .map(|block| {
+            (0..block.len())
+                .filter_map(|i| block.element(i)?.read_string_id("node name"))
+                .filter(|name| !name.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    skeleton.nodes.iter().all(|node| named.contains(&node.name))
+}
+
 /// Extract every animation in `entry` (a jmad, `.model`, object tag, or
 /// Halo CE `model_animations`) to JMA-family files under
 /// `<output>/<stem>/animations/`, in-process via `blam_tags::extract`.
@@ -504,7 +553,15 @@ pub(in crate::app) fn extract_animations_for_entry(
     let tag = read_entry(source, entry)?;
     let resolver = SourceResolver { source };
     let stem = tag_file_stem(entry);
-    let summary = blam_tags::extract::animation::animations_to_dir(&tag, &resolver, output, &stem)?;
+    // A graph extracted on its own names no render_model, so its rest pose can
+    // only come from `additional node data` — the denormalised copy inside the
+    // jmad. 79 of Halo Reach's 2,594 graphs carry none at all, and those export
+    // with every bone at identity. Hand the extractor the owning `.model`
+    // instead, exactly as if the model had been the selected tag.
+    let owner = animation_graph_owner(source, entry, &tag);
+    let input = owner.as_ref().unwrap_or(&tag);
+    let summary =
+        blam_tags::extract::animation::animations_to_dir(input, &resolver, output, &stem)?;
     let mut message = format!(
         "Extracted {} animation(s) from {} into {}",
         summary.written,
@@ -733,6 +790,94 @@ mod tests {
                 "{extension}: the export path did not resolve a skeleton — {message}"
             );
         }
+    }
+
+    /// A `model_animation_graph` that stores no `additional node data` has no
+    /// rest pose reachable from the graph alone, so extracting it on its own
+    /// wrote every bone at identity. Guards that the owning `.model` is now
+    /// found from the graph's own path and its render_model used instead.
+    ///
+    /// Ignored by default — it needs a loose Halo Reach tag tree.
+    ///
+    /// Run with:
+    ///   REACH_TAGS=~/Halo/haloreach_mcc/tags \
+    ///     cargo test animation_graph_without -- --ignored --nocapture
+    #[test]
+    #[ignore = "requires a loose Halo Reach tag tree; set REACH_TAGS"]
+    fn animation_graph_without_its_own_rest_pose_borrows_the_owning_models() {
+        let Ok(root) = std::env::var("REACH_TAGS") else {
+            eprintln!("skipping: set REACH_TAGS to a loose Halo Reach tags directory");
+            return;
+        };
+        let root = PathBuf::from(root);
+        let source = TagSource::LooseFolder {
+            root: root.clone(),
+            game: Some("haloreach_mcc".to_owned()),
+            definitions_root: crate::app::locate_definitions_root(),
+        };
+        // The magnum's own graph: five gun bones, and not one `additional node
+        // data` entry to place them with.
+        let stem = "objects/weapons/pistol/magnum/magnum";
+        let path = root.join(format!("{stem}.model_animation_graph"));
+        assert!(path.is_file(), "{} is not in this tag tree", path.display());
+        let entry = TagEntry {
+            key: format!("file:{}", path.display()),
+            display_path: format!("{stem}.model_animation_graph"),
+            group_tag: u32::from_be_bytes(*b"jmad"),
+            group_name: Some("model_animation_graph".to_owned()),
+            location: TagEntryLocation::LooseFile(path),
+        };
+
+        let jmad = read_entry(&source, &entry).expect("read the graph");
+        let skeleton = blam_tags::Skeleton::from_tag(&jmad);
+        assert!(
+            !animation_rest_pose_is_complete(&jmad, &skeleton),
+            "this graph carries its own rest pose, so it proves nothing here"
+        );
+
+        let owner = animation_graph_owner(&source, &entry, &jmad)
+            .expect("the magnum's .model should be found and should name this graph");
+        let resolved =
+            blam_tags::extract::animation::resolve_animation_inputs(&owner, &SourceResolver {
+                source: &source,
+            })
+            .expect("resolve through the owning model");
+        let render = resolved
+            .render_model
+            .as_ref()
+            .expect("the owning model names a render_model");
+
+        let object_space = blam_tags::extract::animation::additional_node_data_is_object_space(
+            &blam_tags::Animation::new(&jmad).expect("read animations"),
+        );
+        let without =
+            blam_tags::extract::animation::build_defaults(&skeleton, &jmad, None, object_space);
+        let with = blam_tags::extract::animation::build_defaults(
+            &skeleton,
+            &jmad,
+            Some(render),
+            object_space,
+        );
+
+        let posed = |set: &[blam_tags::NodeTransform]| {
+            set.iter()
+                .filter(|t| {
+                    t.translation.x != 0.0 || t.translation.y != 0.0 || t.translation.z != 0.0
+                })
+                .count()
+        };
+        assert_eq!(
+            posed(&without),
+            0,
+            "the graph-only control is supposed to be collapsed to identity; \
+             if it is not, this test proves nothing"
+        );
+        assert!(
+            posed(&with) > 1,
+            "only {}/{} bones got a rest pose from the owning model",
+            posed(&with),
+            with.len()
+        );
     }
 
     /// End-to-end against a real Campaign Evolved install: mount the pak set,
