@@ -304,3 +304,115 @@ fn walkdir_shaders(root: &std::path::Path) -> Vec<std::path::PathBuf> {
     }
     out
 }
+
+/// The row being drawn is only half of "editable" — the commit has to land.
+/// This drives the same path the widget pushes (`apply_pending_edits` at the
+/// resolved edit path) and checks the reference actually changes on the tag.
+///
+/// Ignored by default — it needs a loose Halo 3 tag tree.
+///
+/// Run with:
+///   H3_TAGS=~/Halo/halo3_mcc/tags \
+///     cargo test committing_a_structural_reference -- --ignored --nocapture
+#[test]
+#[ignore = "requires a loose Halo 3 tag tree; set H3_TAGS"]
+fn committing_a_structural_reference_rewrites_the_tag() {
+    let Ok(root) = std::env::var("H3_TAGS") else {
+        eprintln!("skipping: set H3_TAGS to a loose Halo 3 tags directory");
+        return;
+    };
+    let root = std::path::PathBuf::from(root);
+    let source = crate::source::TagSource::LooseFolder {
+        root: root.clone(),
+        game: Some("halo3_mcc".to_owned()),
+        definitions_root: crate::app::locate_definitions_root(),
+    };
+    let mut rmdf_cache = std::collections::HashMap::new();
+    let mut rmop_cache = std::collections::HashMap::new();
+
+    for entry in walkdir_shaders(&root).into_iter().take(400) {
+        let Ok(mut tag) = blam_tags::TagFile::read(&entry) else { continue };
+        let Some(model) = super::build_shader_editor_model(
+            &tag,
+            u32::from_be_bytes(*b"rmsh"),
+            Some(&source),
+            &mut rmdf_cache,
+            &mut rmop_cache,
+        ) else {
+            continue;
+        };
+        if model.definition_edit_path.is_empty() {
+            continue;
+        }
+
+        let before = model.definition_path.clone();
+        let after = "shaders\\custom_definition";
+        assert_ne!(before, after, "pick a value that is actually a change");
+
+        let mut dirty = crate::app::Dirty::default();
+        let applied = crate::app::apply_pending_edits(
+            &mut tag,
+            vec![crate::app::PendingFieldEdit {
+                path: model.definition_edit_path.clone(),
+                input: format!("{after}.render_method_definition"),
+            }],
+            &mut dirty,
+        );
+        assert!(
+            applied.outcomes.iter().all(|outcome| outcome.result.is_ok()),
+            "{}: commit failed: {:?}",
+            entry.display(),
+            applied.status
+        );
+        assert!(dirty.is_set(), "a committed edit marks the document dirty");
+
+        let field = tag
+            .root()
+            .field_path(&model.definition_edit_path)
+            .expect("definition still resolves");
+        let Some(blam_tags::TagFieldData::TagReference(reference)) = field.value() else {
+            panic!("definition stopped being a tag reference");
+        };
+        assert_eq!(
+            reference.group_tag_and_name.map(|(_, name)| name).as_deref(),
+            Some(after),
+            "{}: the reference did not take the committed value",
+            entry.display()
+        );
+        println!("{}: {before:?} -> {after:?}", entry.display());
+        return;
+    }
+    panic!("no shader in this tag tree built a grid to commit against");
+}
+
+/// The extension a tag reference is typed with has to resolve to a group tag,
+/// and that used to come from a hand-written table in the value parser — which
+/// had no `render_method_definition`, so committing a shader's definition was
+/// refused as an unknown group and the row changed nothing. The mapping now
+/// comes from the games' own `_meta.json`, so anything Baboon can open is
+/// something it can parse a reference to.
+#[test]
+fn reference_extensions_resolve_from_the_games_own_metadata() {
+    let names = crate::format::TagNameIndex::load_from_definitions(
+        &crate::app::locate_definitions_root(),
+    );
+    names.publish_as_process_group_names();
+    for (extension, fourcc) in [
+        ("render_method_definition", b"rmdf"),
+        ("render_method_template", b"rmt2"),
+        ("shader_template", b"stem"),
+    ] {
+        assert_eq!(
+            crate::format::process_group_tag_for(extension),
+            Some(u32::from_be_bytes(*fourcc)),
+            "{extension} is not in any game's tag_index"
+        );
+        // And the parser that the field editor commits through agrees.
+        let parsed = crate::app::parse_tag_reference(&format!("shaders\\example.{extension}"))
+        .unwrap_or_else(|error| panic!("{extension}: {error}"));
+        assert_eq!(
+            parsed.group_tag_and_name,
+            Some((u32::from_be_bytes(*fourcc), "shaders\\example".to_owned()))
+        );
+    }
+}

@@ -438,6 +438,7 @@ impl Baboon {
         set_dark_mode(prefs.dark_mode);
         cc.egui_ctx.set_visuals(foundation_visuals());
         let names = TagNameIndex::load_from_definitions(&locate_definitions_root());
+        names.publish_as_process_group_names();
         let (tx, rx) = mpsc::channel();
         let last_session = (!suppress_startup_popups && first_run_wizard.is_none())
             .then(load_last_session)
