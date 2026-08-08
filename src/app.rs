@@ -312,6 +312,11 @@ pub struct Baboon {
     /// File-menu actions run after the editor has rendered, so an edit being
     /// committed by focus loss is applied before its save/export snapshot.
     deferred_file_action: Option<DeferredFileAction>,
+    /// Kits whose session-restore load has not landed yet, and the one the
+    /// session named as focused. Every load ends by making its own kit active,
+    /// so the focus can only be honoured once none are outstanding.
+    restoring_kits: HashSet<KitId>,
+    restored_active_kit: Option<KitId>,
     color_popup: Option<MaterialColorPopup>,
     /// Kits owning the editing popups below. Each outlives the frame that
     /// opened it and applies an edit addressed by tag key — and a tag key is
@@ -566,6 +571,8 @@ impl Baboon {
                 .unwrap_or_default(),
             blender_path: prefs.blender_path,
             deferred_file_action: None,
+            restoring_kits: HashSet::new(),
+            restored_active_kit: None,
             color_popup: None,
             color_popup_kit: None,
             function_popup_kit: None,

@@ -737,6 +737,13 @@ fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
         .get("has_project")
         .and_then(Value::as_bool)
         .unwrap_or(project_path.is_some());
+    // Absent in every session written before the focused workspace was
+    // recorded, which reads back as "no kit was active" and leaves the restore
+    // picking whichever kit it used to.
+    let was_active = value
+        .get("active")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     // Absent in sessions written before the browser view became per-kit, and
     // in every version-1 and version-2 file. `None` means "use the default".
     let browser_mode = browser_mode_from_str(value.get("browser_mode").and_then(Value::as_str));
@@ -807,12 +814,15 @@ fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
         tags,
         chimp_packages,
         active_chimp_package,
+        was_active,
     })
 }
 
 /// Persist every kit's source and open tag keys for the launch-time restore
-/// prompt. Written only from the confirmed app-exit path, so a crash or a
-/// canceled close leaves the previous successfully closed session intact.
+/// prompt, along with which of them was focused. Written from the confirmed
+/// app-exit path and again as the event loop tears down, so a quit that never
+/// asks the window to close — macOS Cmd+Q — still records the session; a crash
+/// leaves the previous one intact.
 pub(super) fn save_last_session(session: &LastSessionState) -> Result<(), String> {
     let path = last_session_path();
     if let Some(parent) = path.parent() {
@@ -857,6 +867,13 @@ fn session_value(session: &LastSessionState) -> Value {
                 "tags": tags,
                 "chimp_packages": kit.chimp_packages,
                 "active_chimp_package": kit.active_chimp_package,
+                // Which workspace the user was looking at. Written as a flag on
+                // the kit rather than an index beside the list: the restore
+                // prompt can drop kits, and an index would then point at
+                // whichever one moved into that slot. Absent in sessions
+                // written before this, which read back as "no kit was active"
+                // and leave the restore picking as it used to.
+                "active": kit.was_active,
             })
         })
         .collect::<Vec<_>>();
@@ -1267,6 +1284,7 @@ mod session_tests {
             }],
             chimp_packages: Vec::new(),
             active_chimp_package: None,
+            was_active: false,
         }
     }
 
@@ -1285,6 +1303,7 @@ mod session_tests {
                 tags: Vec::new(),
                 chimp_packages: vec!["/Game/Vehicles/Warthog".to_owned()],
                 active_chimp_package: Some("/Game/Vehicles/Warthog".to_owned()),
+                was_active: true,
             }],
         };
         let value = session_value(&session);
@@ -1296,6 +1315,53 @@ mod session_tests {
             restored.kits[0].active_chimp_package.as_deref(),
             Some("/Game/Vehicles/Warthog")
         );
+    }
+
+    /// Which workspace the user was looking at survives the round trip, and is
+    /// carried on the kit rather than as an index beside the list — the restore
+    /// prompt can drop kits, and an index would then name whichever one moved
+    /// into that slot.
+    #[test]
+    fn the_focused_kit_is_remembered_and_travels_with_its_own_kit() {
+        let mut halo3 = kit("C:/halo3", Some(BrowserMode::Folders));
+        let mut evolved = kit("C:/evolved", Some(BrowserMode::Groups));
+        evolved.source_kind = LastSessionSourceKind::IoStoreContainerSet;
+        halo3.was_active = true;
+        evolved.was_active = false;
+        let session = LastSessionState {
+            kits: vec![evolved, halo3],
+        };
+
+        let value = session_value(&session);
+        let restored = parse_last_session(&value).expect("session parses");
+        assert_eq!(restored.kits.len(), 2);
+        assert!(!restored.kits[0].was_active, "the container kit was not focused");
+        assert!(restored.kits[1].was_active, "the Halo 3 kit was focused");
+        // It is the kit that is marked, not a position: the flag follows its
+        // own workspace when the list is filtered.
+        let kept = restored
+            .kits
+            .into_iter()
+            .filter(|kit| kit.source_kind == LastSessionSourceKind::LooseFolder)
+            .collect::<Vec<_>>();
+        assert_eq!(kept.len(), 1);
+        assert!(kept[0].was_active);
+    }
+
+    /// A session written before the focused workspace was recorded has no
+    /// `active` on any kit, and must still load rather than being rejected.
+    #[test]
+    fn a_session_without_a_focused_kit_still_loads() {
+        let value = serde_json::json!({
+            "version": 4,
+            "kits": [{
+                "source": { "kind": "loose_folder", "path": "C:/halo3" },
+                "tags": [],
+            }],
+        });
+        let restored = parse_last_session(&value).expect("session parses");
+        assert_eq!(restored.kits.len(), 1);
+        assert!(!restored.kits[0].was_active);
     }
 
     /// Each workspace keeps its own browser view, so a session holding a kit

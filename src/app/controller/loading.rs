@@ -16,6 +16,7 @@ impl Baboon {
         // the load was in flight the result is dropped rather than landing in
         // whichever kit happens to be active now.
         let Some(index) = self.resolve_kit(kit) else {
+            self.settle_restored_kit(kit);
             return true;
         };
         self.active = index;
@@ -23,6 +24,7 @@ impl Baboon {
             Ok(loaded) => loaded,
             Err(error) => {
                 self.release_source_load(kit);
+                self.settle_restored_kit(kit);
                 self.status = error;
                 return false;
             }
@@ -107,6 +109,10 @@ impl Baboon {
             self.schedule_next_entry_index_refresh(ctx);
         }
         self.finish_pending_session_restore(ctx.clone());
+        // This load made its own kit active. If a session restore is still in
+        // flight that is only provisional — the focus belongs to the kit the
+        // session named, once every restored kit has landed.
+        self.settle_restored_kit(kit);
         self.finish_pending_command_line_launch(ctx.clone());
         false
     }
