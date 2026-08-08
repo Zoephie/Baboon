@@ -190,3 +190,117 @@ mod slashed_field_names {
         }
     }
 }
+
+/// The two structural references — `definition` and `shader template` — were
+/// drawn as painted text with editing switched off, so a shader's render
+/// method definition could be read but never changed, unlike Foundation's
+/// expert mode. Guards the part that is easy to get wrong: the tag field paths
+/// the editor commits through. `definition` sits on the render_method block,
+/// but the template reference hangs off `postprocess[0]`, not the root.
+///
+/// Ignored by default — it needs a loose Halo 3 tag tree.
+///
+/// Run with:
+///   H3_TAGS=~/Halo/halo3_mcc/tags \
+///     cargo test structural_shader_references -- --ignored --nocapture
+#[test]
+#[ignore = "requires a loose Halo 3 tag tree; set H3_TAGS"]
+fn structural_shader_references_resolve_to_editable_reference_fields() {
+    let Ok(root) = std::env::var("H3_TAGS") else {
+        eprintln!("skipping: set H3_TAGS to a loose Halo 3 tags directory");
+        return;
+    };
+    let root = std::path::PathBuf::from(root);
+    let source = crate::source::TagSource::LooseFolder {
+        root: root.clone(),
+        game: Some("halo3_mcc".to_owned()),
+        definitions_root: crate::app::locate_definitions_root(),
+    };
+
+    // Any shader that resolves its render-method chain will do; walk until one
+    // builds a grid, so this does not hinge on one hand-picked tag.
+    let mut rmdf_cache = std::collections::HashMap::new();
+    let mut rmop_cache = std::collections::HashMap::new();
+    let mut checked = 0usize;
+    for entry in walkdir_shaders(&root).into_iter().take(400) {
+        let Ok(tag) = blam_tags::TagFile::read(&entry) else { continue };
+        let Some(model) = super::build_shader_editor_model(
+            &tag,
+            u32::from_be_bytes(*b"rmsh"),
+            Some(&source),
+            &mut rmdf_cache,
+            &mut rmop_cache,
+        ) else {
+            continue;
+        };
+
+        assert!(
+            !model.definition_edit_path.is_empty(),
+            "{}: no edit path for `definition`",
+            entry.display()
+        );
+        let field = tag
+            .root()
+            .field_path(&model.definition_edit_path)
+            .unwrap_or_else(|| panic!("{}: definition path does not resolve", entry.display()));
+        let Some(blam_tags::TagFieldData::TagReference(reference)) = field.value() else {
+            panic!("{}: `definition` is not a tag reference", entry.display());
+        };
+        assert_eq!(
+            reference.group_tag_and_name.map(|(_, name)| name),
+            Some(model.definition_path.clone()),
+            "{}: the edit path addresses a different reference than the row shows",
+            entry.display()
+        );
+
+        // The template only exists once a postprocess block does.
+        if let Some(template) = model.shader_template_path.as_deref() {
+            assert!(
+                !model.shader_template_edit_path.is_empty(),
+                "{}: no edit path for `shader template`",
+                entry.display()
+            );
+            let field = tag
+                .root()
+                .field_path(&model.shader_template_edit_path)
+                .unwrap_or_else(|| {
+                    panic!("{}: shader template path does not resolve", entry.display())
+                });
+            let Some(blam_tags::TagFieldData::TagReference(reference)) = field.value() else {
+                panic!("{}: `shader template` is not a tag reference", entry.display());
+            };
+            assert_eq!(
+                reference.group_tag_and_name.map(|(_, name)| name),
+                Some(template.to_owned()),
+                "{}: template edit path addresses a different reference",
+                entry.display()
+            );
+        }
+        checked += 1;
+        if checked >= 5 {
+            break;
+        }
+    }
+    assert!(checked > 0, "no shader in this tag tree built a grid to check");
+    println!("checked {checked} shader(s)");
+}
+
+fn walkdir_shaders(root: &std::path::Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.extension().is_some_and(|e| e == "shader") {
+                out.push(path);
+                if out.len() > 400 {
+                    return out;
+                }
+            }
+        }
+    }
+    out
+}

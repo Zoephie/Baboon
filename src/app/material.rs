@@ -41,7 +41,7 @@ pub(super) fn draw_material_tag(
                         )
                     });
                 if let Some(model) = model {
-                    draw_shader_editor_model(ui, &model, color_popup, function_popup, edit);
+                    draw_shader_editor_model(ui, &model, color_popup, function_popup, edit, expert_mode);
                     return;
                 }
                 // Shader grid couldn't be built (rmdf/rmop chain didn't
