@@ -27,6 +27,18 @@ pub(in crate::app) struct FolderConversionFileResult {
     pub(in crate::app) detail: String,
 }
 
+/// A tag the run declined to write because it would lose audited data.
+///
+/// Held rather than failed: it converts, and somebody who has been shown what
+/// goes missing may well still want it. Carries the loss so the question can be
+/// asked with the answer in front of them.
+pub(in crate::app) struct FolderConversionHeldBack {
+    pub(in crate::app) source: String,
+    /// Source file, so a second pass can be restricted to exactly these.
+    pub(in crate::app) path: PathBuf,
+    pub(in crate::app) losses: Vec<String>,
+}
+
 pub(in crate::app) struct FolderConversionReport {
     /// The folder the tags were read from. Kept in the report because a reader
     /// asking "where did these come from?" cannot get it from anywhere else —
@@ -37,6 +49,9 @@ pub(in crate::app) struct FolderConversionReport {
     pub(in crate::app) destination_root: PathBuf,
     pub(in crate::app) files: Vec<FolderConversionFileResult>,
     pub(in crate::app) ignored_files: Vec<String>,
+    /// Tags that convert but were not written, pending a decision about the
+    /// data they lose. Empty once the user has accepted.
+    pub(in crate::app) held_back: Vec<FolderConversionHeldBack>,
 }
 
 impl FolderConversionReport {
@@ -82,6 +97,23 @@ pub(in crate::app) struct FolderConversionJob {
     /// routed through the engines in between. Only consulted when that happens:
     /// indexing a kit walks its whole tag tree.
     pub(in crate::app) kit_roots: HashMap<String, PathBuf>,
+    /// Write tags that lose audited data instead of holding them back. Set only
+    /// for the second pass, after the user has seen what goes missing.
+    pub(in crate::app) accept_loss: bool,
+    /// Restrict the run to these source files. `None` converts the whole folder;
+    /// the second pass names exactly the tags that were held back, so accepting
+    /// the loss does not mean redoing everything.
+    pub(in crate::app) only: Option<HashSet<PathBuf>>,
+}
+
+/// What happened to one file in a folder run.
+///
+/// A third state was needed: a tag held back over data loss has not failed — it
+/// converts — and counting it as a failure would tell the user something untrue
+/// about a tag they are about to be offered.
+enum FileOutcome {
+    Written(FolderConversionFileResult),
+    HeldBack(Vec<String>),
 }
 
 fn send_folder_conversion_progress(
@@ -199,6 +231,12 @@ pub(in crate::app) fn run_folder_conversion_job(
         }
         planned.push((entry, destination));
     }
+    if let Some(only) = &job.only {
+        planned.retain(|(entry, _)| match &entry.location {
+            TagEntryLocation::LooseFile(path) => only.contains(path),
+            _ => false,
+        });
+    }
 
     let total = planned.len();
     let mut report = FolderConversionReport {
@@ -208,7 +246,11 @@ pub(in crate::app) fn run_folder_conversion_job(
         destination_root,
         files: scan_failures,
         ignored_files,
+        held_back: Vec::new(),
     };
+    // Collected on the side because a held-back tag is neither a success nor a
+    // failure: it converted, and it is waiting on an answer.
+    let mut held_back: Vec<FolderConversionHeldBack> = Vec::new();
     let mut converted = 0;
     let mut failed = report.files.len();
     let mut claimed_outputs = HashSet::<String>::new();
@@ -227,14 +269,25 @@ pub(in crate::app) fn run_folder_conversion_job(
             }
             let source_tag = read_entry(&job.source, &entry)
                 .map_err(|error| format!("Could not read source tag: {error}"))?;
-            let mut draft = convert_tag_routed(
+            let mut draft = match convert_tag_outcome(
                 &source_tag,
                 &job.source_game,
                 &job.target_game,
                 &definitions_root,
                 &kit_roots,
                 &mut templates,
-            )?;
+            ) {
+                ConversionOutcome::Clean(draft) => draft,
+                // Converts, but gives up audited data. Nothing is written until
+                // somebody has seen what goes and said to go ahead.
+                ConversionOutcome::Lossy { draft, .. } if !job.accept_loss => {
+                    return Ok(FileOutcome::HeldBack(
+                        draft.report.fail_closed_losses.clone(),
+                    ));
+                }
+                ConversionOutcome::Lossy { draft, .. } => *draft,
+                ConversionOutcome::Failed(error) => return Err(error),
+            };
             let dependency_schema = definitions_root
                 .join(&job.target_game)
                 .join("tag_dependency_list.json");
@@ -322,13 +375,13 @@ pub(in crate::app) fn run_folder_conversion_job(
                         .join(", "),
                 );
             }
-            Ok(FolderConversionFileResult {
+            Ok(FileOutcome::Written(FolderConversionFileResult {
                 source: source_label.clone(),
                 output: Some(output),
                 status,
                 overwritten,
                 detail,
-            })
+            }))
         }))
         .unwrap_or_else(|payload| {
             let detail = payload
@@ -344,9 +397,30 @@ pub(in crate::app) fn run_folder_conversion_job(
         });
 
         let file_result = match result {
-            Ok(result) => {
+            Ok(FileOutcome::Written(result)) => {
                 converted += 1;
                 result
+            }
+            // Neither converted nor failed: it is waiting on an answer, so it
+            // stays out of both counts and out of the file list.
+            Ok(FileOutcome::HeldBack(losses)) => {
+                if let TagEntryLocation::LooseFile(path) = &entry.location {
+                    held_back.push(FolderConversionHeldBack {
+                        source: source_label.clone(),
+                        path: path.clone(),
+                        losses,
+                    });
+                }
+                send_folder_conversion_progress(
+                    tx,
+                    "Converting tags",
+                    &source_label,
+                    index + 1,
+                    total,
+                    converted,
+                    failed,
+                );
+                continue;
             }
             Err(error) => {
                 failed += 1;
@@ -382,10 +456,13 @@ pub(in crate::app) fn run_folder_conversion_job(
     report
         .files
         .sort_by(|left, right| left.source.cmp(&right.source));
+    held_back.sort_by(|left, right| left.source.cmp(&right.source));
+    report.held_back = held_back;
     let _ = tx.send(WorkerMessage::TerminalLine(format!(
-        "Folder conversion complete: {} converted, {} failed, {} ignored",
+        "Folder conversion complete: {} converted, {} failed, {} held back, {} ignored",
         report.converted_count(),
         report.failed_count(),
+        report.held_back.len(),
         report.ignored_files.len()
     )));
     Ok(report)
@@ -498,6 +575,8 @@ mod tests {
                 target_tags_root: target_tags,
                 destination_parent: destination_parent.clone(),
                 kit_roots: HashMap::new(),
+                accept_loss: false,
+                only: None,
             },
             &tx,
         )

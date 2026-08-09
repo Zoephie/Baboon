@@ -161,7 +161,7 @@ pub(in crate::app) enum WorkerMessage {
     /// it — it rides on the message rather than a shared handle because it
     /// memoises internally and so is `Send` but not `Sync`.
     ImportAnalysisFinished {
-        result: Result<(TagConversionDraft, Option<SourceStamp>), String>,
+        result: Result<ImportAnalysis, String>,
         templates: NativeTemplateCache,
     },
     // Full recursive entry scan finished for a loose-folder source.

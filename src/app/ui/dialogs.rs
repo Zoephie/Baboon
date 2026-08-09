@@ -51,6 +51,12 @@ enum ImportDialogAction {
     /// conversion that would run.
     InvalidateAnalysis,
     Import,
+    /// Write the tag whose data loss the user has just been shown and accepted.
+    AcceptLosses,
+    /// Write the tags a folder run held back, same bargain.
+    AcceptHeldBack,
+    /// Throw away a lossy conversion rather than write it.
+    DiscardLossy,
 }
 
 impl Baboon {
@@ -306,6 +312,57 @@ impl Baboon {
                         }
                     });
 
+                    // The question. Nothing has been written at this point --
+                    // the tag is converted and sitting here, and the user is
+                    // being shown exactly what it costs before it lands.
+                    if !dialog.pending_losses.is_empty() {
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.label(
+                            RichText::new(format!(
+                                "\u{26a0} This tag converts, but loses {} field(s) {} has no                                  counterpart for:",
+                                dialog.pending_losses.len(),
+                                dialog.target_game
+                            ))
+                            .color(Color32::from_rgb(242, 196, 48)),
+                        );
+                        egui::ScrollArea::vertical()
+                            .id_salt("tag_import_losses")
+                            .max_height(110.0)
+                            .show(ui, |ui| {
+                                for loss in &dialog.pending_losses {
+                                    ui.label(
+                                        RichText::new(format!("    {loss}"))
+                                            .monospace()
+                                            .small()
+                                            .color(subtle_dark()),
+                                    );
+                                }
+                            });
+                        ui.label(
+                            RichText::new(
+                                "Everything else came across. Import it anyway, or leave it out                                  and nothing is written.",
+                            )
+                            .color(subtle_dark())
+                            .small(),
+                        );
+                        ui.horizontal(|ui| {
+                            if ui
+                                .button("Import anyway, losing those fields")
+                                .clicked()
+                            {
+                                action = Some(ImportDialogAction::AcceptLosses);
+                            }
+                            if ui
+                                .button("Leave it out")
+                                .on_hover_text("Discards the conversion; nothing is written")
+                                .clicked()
+                            {
+                                action = Some(ImportDialogAction::DiscardLossy);
+                            }
+                        });
+                    }
+
                     if let Some(written) = dialog.written.as_ref() {
                         ui.add_space(6.0);
                         ui.label(
@@ -390,6 +447,47 @@ impl Baboon {
                         ui.add_space(8.0);
                         ui.separator();
                         draw_folder_import_report(ui, report);
+                        if !report.held_back.is_empty() {
+                            ui.add_space(6.0);
+                            ui.label(
+                                RichText::new(format!(
+                                    "\u{26a0} {} tag(s) converted but were not written, because they                                      lose fields {} has no counterpart for.",
+                                    report.held_back.len(),
+                                    report.target_game
+                                ))
+                                .color(Color32::from_rgb(242, 196, 48)),
+                            );
+                            egui::CollapsingHeader::new("What each of them gives up")
+                                .id_salt("tag_import_held_back")
+                                .show(ui, |ui| {
+                                    for entry in &report.held_back {
+                                        ui.label(
+                                            RichText::new(format!(
+                                                "{} \u{2014} {}",
+                                                entry.source,
+                                                entry.losses.join(", ")
+                                            ))
+                                            .small()
+                                            .color(subtle_dark()),
+                                        );
+                                    }
+                                });
+                            if ui
+                                .add_enabled(
+                                    !busy,
+                                    egui::Button::new(format!(
+                                        "Import those {} too, losing those fields",
+                                        report.held_back.len()
+                                    )),
+                                )
+                                .on_hover_text(
+                                    "Converts and writes only the held-back tags; the rest are                                      already in",
+                                )
+                                .clicked()
+                            {
+                                action = Some(ImportDialogAction::AcceptHeldBack);
+                            }
+                        }
                     }
 
                     if let Some(error) = dialog.error.as_ref() {
@@ -412,6 +510,16 @@ impl Baboon {
                 }
             }
             Some(ImportDialogAction::Import) => self.begin_tag_import(),
+            Some(ImportDialogAction::AcceptLosses) => self.accept_import_losses(ctx),
+            Some(ImportDialogAction::AcceptHeldBack) => self.accept_held_back_imports(),
+            Some(ImportDialogAction::DiscardLossy) => {
+                if let Some(dialog) = self.tag_import_dialog.as_mut() {
+                    dialog.draft = None;
+                    dialog.draft_stamp = None;
+                    dialog.pending_losses.clear();
+                    dialog.error = dialog.pending_refusal.take();
+                }
+            }
             None => {}
         }
         // A running import owns the dialog: closing it would orphan the progress

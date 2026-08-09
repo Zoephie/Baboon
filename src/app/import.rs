@@ -35,6 +35,17 @@ pub(in crate::app) struct ImportSourceFacts {
 /// guarded is one user's Analyze-then-Import, not a hostile writer.
 pub(in crate::app) type SourceStamp = (u64, Option<std::time::SystemTime>);
 
+/// A converted single tag on its way back to the UI thread.
+///
+/// `losses` is non-empty when the default policy refused it — the tag is here,
+/// converted, and waiting on whether that loss is acceptable.
+pub(in crate::app) struct ImportAnalysis {
+    pub(in crate::app) draft: TagConversionDraft,
+    pub(in crate::app) stamp: Option<SourceStamp>,
+    pub(in crate::app) losses: Vec<String>,
+    pub(in crate::app) refusal: Option<String>,
+}
+
 /// Built [`NativeTemplateIndex`]es, one per game, kept between imports.
 ///
 /// Held on `Baboon` rather than in the dialog because it outlives any one
@@ -85,6 +96,87 @@ impl TemplateSource for NativeTemplateCache {
     }
 }
 
+/// What happened when a tag was converted, from the point of view of someone who
+/// has to decide what to do about it.
+pub(in crate::app) enum ConversionOutcome {
+    /// Converted with nothing the audit objects to. Write it.
+    Clean(TagConversionDraft),
+    /// Refused by default because it loses audited data, and this is the tag
+    /// that accepting the loss produces. Nothing is written until somebody says
+    /// so; `refusal` is the sentence explaining what the default objected to.
+    Lossy {
+        draft: Box<TagConversionDraft>,
+        refusal: String,
+    },
+    /// Could not be converted at all, at any loss.
+    Failed(String),
+}
+
+impl ConversionOutcome {
+    /// The audited fields this conversion gives up, empty unless it is lossy.
+    pub(in crate::app) fn losses(&self) -> &[String] {
+        match self {
+            ConversionOutcome::Lossy { draft, .. } => &draft.report.fail_closed_losses,
+            _ => &[],
+        }
+    }
+}
+
+/// Convert a tag and say which of the three things happened.
+///
+/// The default policy runs first, and it runs the whole route search — so a pair
+/// that can reach the destination without losing anything still does, and only a
+/// tag that nothing can carry cleanly pays for the second attempt.
+///
+/// Deliberately *not* trying to pick the least-lossy route once loss is on the
+/// table. Under an accepting policy every route "succeeds", so choosing between
+/// them would mean ranking by the number of audited fields lost — and audited
+/// means audited *for that pair*. Halo 3 to ODST is not audited at all, so a
+/// longer route can report fewer losses while having more places to lose
+/// something quietly. Preferring the direct conversion keeps the hops, and the
+/// opportunities, to a minimum.
+pub(in crate::app) fn convert_tag_outcome(
+    source: &TagFile,
+    source_game: &str,
+    target_game: &str,
+    definitions_root: &Path,
+    kit_roots: &HashMap<String, PathBuf>,
+    cache: &mut NativeTemplateCache,
+) -> ConversionOutcome {
+    let refusal = match convert_tag_routed(
+        source,
+        source_game,
+        target_game,
+        definitions_root,
+        kit_roots,
+        cache,
+        LossPolicy::FailClosed,
+    ) {
+        Ok(draft) => return ConversionOutcome::Clean(draft),
+        Err(refusal) => refusal,
+    };
+    match convert_tag_routed(
+        source,
+        source_game,
+        target_game,
+        definitions_root,
+        kit_roots,
+        cache,
+        LossPolicy::Accept,
+    ) {
+        // Accepting the loss got it through, so the refusal was about data going
+        // missing rather than the tag being unconvertible.
+        Ok(draft) if !draft.report.fail_closed_losses.is_empty() => ConversionOutcome::Lossy {
+            draft: Box::new(draft),
+            refusal,
+        },
+        // Succeeded with nothing recorded as lost, which means the first attempt
+        // failed for some other reason that the second happened not to hit. Trust
+        // the refusal rather than the surprise.
+        Ok(_) | Err(_) => ConversionOutcome::Failed(refusal),
+    }
+}
+
 /// Convert one tag, routing through intermediate engines when the direct pair
 /// refuses to carry it.
 ///
@@ -110,16 +202,18 @@ pub(in crate::app) fn convert_tag_routed(
     definitions_root: &Path,
     kit_roots: &HashMap<String, PathBuf>,
     cache: &mut NativeTemplateCache,
+    policy: LossPolicy,
 ) -> Result<TagConversionDraft, String> {
     if let Some(root) = kit_roots.get(target_game) {
         cache.ensure(target_game, root, definitions_root);
     }
-    let direct = analyze_conversion_with_templates(
+    let direct = analyze_conversion_with_policy(
         source,
         source_game,
         target_game,
         definitions_root,
         cache.templates_for(target_game),
+        policy,
     );
     let Err(direct_error) = direct else {
         return direct;
@@ -140,7 +234,14 @@ pub(in crate::app) fn convert_tag_routed(
             cache.ensure(game, root, definitions_root);
         }
     }
-    analyze_conversion_routed(source, source_game, target_game, definitions_root, cache)
+    analyze_conversion_routed_with_policy(
+        source,
+        source_game,
+        target_game,
+        definitions_root,
+        cache,
+        policy,
+    )
 }
 
 pub(in crate::app) struct TagImportDialog {
@@ -179,6 +280,13 @@ pub(in crate::app) struct TagImportDialog {
     /// than a preview being refreshed on its own.
     pub(in crate::app) write_when_analyzed: bool,
     pub(in crate::app) draft: Option<TagConversionDraft>,
+    /// Audited fields this tag gives up, when the default policy refused it and
+    /// the user has not yet said whether to accept. Non-empty means the dialog is
+    /// asking a question and nothing has been written.
+    pub(in crate::app) pending_losses: Vec<String>,
+    /// Why the default refused, kept beside the losses so the question can be
+    /// asked in the converter's own words rather than a paraphrase.
+    pub(in crate::app) pending_refusal: Option<String>,
     /// What the completed single-tag import wrote. Keeps the window up with its
     /// report afterwards, the way the folder import does, instead of closing on
     /// success and leaving the outcome only in the status bar.
@@ -227,6 +335,8 @@ impl TagImportDialog {
     fn invalidate_analysis(&mut self) {
         self.draft = None;
         self.draft_stamp = None;
+        self.pending_losses.clear();
+        self.pending_refusal = None;
         self.report = None;
         self.error = None;
     }
@@ -402,6 +512,8 @@ impl Baboon {
             analyzing: false,
             write_when_analyzed: false,
             draft: None,
+            pending_losses: Vec::new(),
+            pending_refusal: None,
             written: None,
             draft_stamp: None,
             running: false,
@@ -634,18 +746,30 @@ impl Baboon {
                     group_tag,
                 )
                 .map_err(|error| format!("Could not read {}: {error}", path.display()))?;
-                convert_tag_routed(
+                match convert_tag_outcome(
                     &tag,
                     &source_game,
                     &target_game,
                     &definitions_root,
                     &kit_roots,
                     &mut cache,
-                )
+                ) {
+                    ConversionOutcome::Clean(draft) => Ok((draft, Vec::new(), None)),
+                    ConversionOutcome::Lossy { draft, refusal } => {
+                        let losses = draft.report.fail_closed_losses.clone();
+                        Ok((*draft, losses, Some(refusal)))
+                    }
+                    ConversionOutcome::Failed(error) => Err(error),
+                }
             }))
             .unwrap_or_else(|_| Err("The conversion crashed while analyzing this tag".to_owned()));
             let _ = tx.send(WorkerMessage::ImportAnalysisFinished {
-                result: result.map(|draft| (draft, stamp)),
+                result: result.map(|(draft, losses, refusal)| ImportAnalysis {
+                    draft,
+                    stamp,
+                    losses,
+                    refusal,
+                }),
                 templates: cache,
             });
         });
@@ -653,7 +777,7 @@ impl Baboon {
 
     pub(super) fn handle_import_analysis_finished(
         &mut self,
-        result: Result<(TagConversionDraft, Option<SourceStamp>), String>,
+        result: Result<ImportAnalysis, String>,
         templates: NativeTemplateCache,
         ctx: &egui::Context,
     ) -> bool {
@@ -663,23 +787,37 @@ impl Baboon {
         };
         dialog.analyzing = false;
         let write = std::mem::take(&mut dialog.write_when_analyzed);
-        match result {
-            Ok((draft, stamp)) => {
-                dialog.draft = Some(draft);
-                dialog.draft_stamp = stamp;
-                dialog.error = None;
-            }
+        let analysis = match result {
+            Ok(analysis) => analysis,
             Err(error) => {
                 dialog.draft = None;
                 dialog.draft_stamp = None;
                 dialog.error = Some(error);
                 return true;
             }
-        }
-        if write {
+        };
+        let lossy = !analysis.losses.is_empty();
+        dialog.draft = Some(analysis.draft);
+        dialog.draft_stamp = analysis.stamp;
+        dialog.pending_losses = analysis.losses;
+        dialog.pending_refusal = analysis.refusal;
+        dialog.error = None;
+        // A tag that gives up audited data is never written on the strength of
+        // the Import click alone. The click asked for the tag; it did not answer
+        // a question the user had not been shown yet.
+        if write && !lossy {
             self.write_single_tag_import(ctx);
         }
         true
+    }
+
+    /// Write the tag the user was shown the cost of, having accepted it.
+    pub(super) fn accept_import_losses(&mut self, ctx: &egui::Context) {
+        if let Some(dialog) = self.tag_import_dialog.as_mut() {
+            dialog.pending_losses.clear();
+            dialog.pending_refusal = None;
+        }
+        self.write_single_tag_import(ctx);
     }
 
     /// Run the import.
@@ -800,6 +938,34 @@ impl Baboon {
     }
 
     fn begin_folder_tag_import(&mut self) {
+        self.run_folder_tag_import(false, None);
+    }
+
+    /// Write the tags a previous run held back, now that their loss is accepted.
+    ///
+    /// Restricted to exactly those files rather than re-running the folder: the
+    /// rest are already written, and redoing them would be minutes of work to
+    /// reach the same bytes.
+    pub(super) fn accept_held_back_imports(&mut self) {
+        let held = self
+            .tag_import_dialog
+            .as_ref()
+            .and_then(|dialog| dialog.report.as_ref())
+            .map(|report| {
+                report
+                    .held_back
+                    .iter()
+                    .map(|entry| entry.path.clone())
+                    .collect::<HashSet<PathBuf>>()
+            })
+            .unwrap_or_default();
+        if held.is_empty() {
+            return;
+        }
+        self.run_folder_tag_import(true, Some(held));
+    }
+
+    fn run_folder_tag_import(&mut self, accept_loss: bool, only: Option<HashSet<PathBuf>>) {
         let Some(dialog) = self.tag_import_dialog.as_ref() else {
             return;
         };
@@ -853,6 +1019,8 @@ impl Baboon {
                 .iter()
                 .map(|(game, root)| (game.clone(), import_tags_root(root)))
                 .collect(),
+            accept_loss,
+            only,
         };
         let tx = self.tx.clone();
         if let Some(dialog) = self.tag_import_dialog.as_mut() {
@@ -1360,6 +1528,8 @@ mod tests {
                 target_tags_root: target_tags.clone(),
                 destination_parent: plan.destination_parent,
                 kit_roots: HashMap::new(),
+                accept_loss: false,
+                only: None,
             },
             &tx,
         )
@@ -1456,6 +1626,7 @@ mod tests {
             &definitions,
             &kit_roots,
             &mut cache,
+            LossPolicy::FailClosed,
         )
         .expect("Halo 3 to Reach converts directly");
         assert_eq!(
@@ -1493,6 +1664,7 @@ mod tests {
             &definitions,
             &HashMap::new(),
             &mut cache,
+            LossPolicy::FailClosed,
         )
         .expect("the refusal should be routed around, not surfaced");
         assert_eq!(draft.route, vec!["halo2_mcc", "halo3_mcc", "haloreach_mcc"]);
@@ -1507,9 +1679,118 @@ mod tests {
             &definitions,
             &HashMap::new(),
             &mut cache,
+            LossPolicy::FailClosed,
         )
         .expect("adjacent MCC profiles convert");
         assert!(direct.route.is_empty());
+    }
+
+    /// A tag that loses audited data is held back, not failed, and comes back
+    /// carrying what it would give up.
+    ///
+    /// The three-way split is the whole point of this change. Before it, a Halo 3
+    /// light that loses `percent spherical` going to Reach was indistinguishable
+    /// from a tag that could not be converted at all — both were an error string
+    /// — so there was nothing to offer the user a choice about.
+    ///
+    /// Self-skips without the kits: a schema-built light has no authored values
+    /// to lose, so only a real one reaches this path.
+    #[test]
+    fn a_lossy_tag_is_held_back_with_its_losses_rather_than_failed() {
+        let h3 = PathBuf::from("D:/SteamLibrary/steamapps/common/H3EK/tags");
+        let reach = PathBuf::from("D:/SteamLibrary/steamapps/common/HREK/tags");
+        if !h3.is_dir() || !reach.is_dir() {
+            eprintln!("skipping: needs H3EK and HREK");
+            return;
+        }
+        let definitions = locate_definitions_root();
+        let kit_roots = HashMap::from([("haloreach_mcc".to_owned(), reach)]);
+        let mut cache = NativeTemplateCache::default();
+        let group_tag = u32::from_be_bytes(*b"ligh");
+
+        // Measured: 69 of H3EK's first 400 lights are refused, the first at
+        // index 95. Scanning fewer finds none and skips, proving nothing.
+        let mut lights: Vec<PathBuf> = blam_tags::convert::walk_files(&h3)
+            .into_iter()
+            .filter(|path| path.extension().and_then(|e| e.to_str()) == Some("light"))
+            .filter(|path| {
+                !path
+                    .components()
+                    .any(|c| c.as_os_str().eq_ignore_ascii_case("baboon_converted"))
+            })
+            .collect();
+        lights.sort();
+
+        let mut held = 0usize;
+        let mut clean = 0usize;
+        let mut example: Option<Vec<String>> = None;
+        for path in lights.into_iter().take(200) {
+            let Ok(tag) = crate::source::read_tag_at_path(
+                &path,
+                Some("halo3_mcc"),
+                Some(&definitions),
+                group_tag,
+            ) else {
+                continue;
+            };
+            match convert_tag_outcome(
+                &tag,
+                "halo3_mcc",
+                "haloreach_mcc",
+                &definitions,
+                &kit_roots,
+                &mut cache,
+            ) {
+                ConversionOutcome::Clean(_) => clean += 1,
+                ConversionOutcome::Lossy { draft, refusal } => {
+                    held += 1;
+                    // Held back means the tag is *there* — converted, writable,
+                    // waiting on an answer — and that the answer can be an
+                    // informed one.
+                    assert!(
+                        !draft.report.fail_closed_losses.is_empty(),
+                        "{}: held back without saying what it loses",
+                        path.display()
+                    );
+                    assert!(
+                        refusal.contains("was not written"),
+                        "{}: kept the wrong refusal: {refusal}",
+                        path.display()
+                    );
+                    assert!(draft.tag.write_to_bytes().is_ok(), "{}", path.display());
+                    if example.is_none() {
+                        example = Some(draft.report.fail_closed_losses.clone());
+                    }
+                }
+                ConversionOutcome::Failed(error) => {
+                    panic!("{}: lights should not fail outright: {error}", path.display())
+                }
+            }
+        }
+        assert!(clean > 0, "no H3EK light converted cleanly");
+        assert!(
+            held > 0,
+            "no H3EK light was held back; this test proves nothing on this kit"
+        );
+        eprintln!("{clean} clean, {held} held back; first gives up {example:?}");
+    }
+
+    /// A clean conversion is never routed through the held-back path.
+    #[test]
+    fn a_clean_conversion_is_not_held_back() {
+        let definitions = locate_definitions_root();
+        let source = TagFile::new(definitions.join("halo3_mcc/weapon.json")).unwrap();
+        let mut cache = NativeTemplateCache::default();
+        let outcome = convert_tag_outcome(
+            &source,
+            "halo3_mcc",
+            "haloreach_mcc",
+            &definitions,
+            &HashMap::new(),
+            &mut cache,
+        );
+        assert!(matches!(outcome, ConversionOutcome::Clean(_)));
+        assert!(outcome.losses().is_empty());
     }
 
     /// A configured kit whose game is not a conversion profile (Campaign Evolved
