@@ -1465,6 +1465,147 @@ pub(in crate::app) fn draw_shader_editable_value(
             edit.buffers.put(buffer_key, draft);
         }
 
+        // A shader's structural references: `definition` and `shader template`.
+        // Text box + Open + browse, committed straight through the generic
+        // field-edit path. Nothing is reconciled afterwards, which matches
+        // Foundation — it carries no shader-aware code to reconcile with, and
+        // its expert mode is a blanket field-panel switch.
+        ShaderRowEditKind::StructuralRef { group_tag, extension } => {
+            let (group_tag, extension) = (*group_tag, *extension);
+            let current = row_edit.current.clone();
+            let browse_rect = egui::Rect::from_min_size(
+                rect.right_top() - Vec2::new(26.0, 0.0),
+                Vec2::new(24.0, rect.height()),
+            );
+            let open_rect = egui::Rect::from_min_size(
+                rect.right_top() - Vec2::new(70.0, 0.0),
+                Vec2::new(40.0, rect.height()),
+            );
+            let text_rect = egui::Rect::from_min_size(
+                rect.left_top(),
+                Vec2::new((rect.width() - 72.0).max(40.0), rect.height()),
+            );
+            let cleaned = sanitize_ref_path(&current);
+            let open_ref = cleaned
+                .strip_suffix(&format!(".{extension}"))
+                .unwrap_or(&cleaned)
+                .replace('/', "\\");
+            let open_enabled = !open_ref.is_empty() && open_ref != "NONE";
+            ui.painter().rect_filled(
+                open_rect,
+                0.0,
+                if open_enabled { material_input() } else { material_disabled_input() },
+            );
+            ui.painter()
+                .rect_stroke(open_rect, 0.0, Stroke::new(1.0, material_input_edge()));
+            let icon_rect = egui::Rect::from_center_size(open_rect.center(), Vec2::splat(16.0));
+            paint_button_icon_at(
+                ui,
+                ButtonIcon::Open,
+                icon_rect,
+                if open_enabled { material_text() } else { material_muted_text() },
+            );
+            if open_enabled
+                && ui
+                    .interact(
+                        open_rect,
+                        ui.make_persistent_id(format!("structural_ref_open:{buffer_key}")),
+                        Sense::click(),
+                    )
+                    .on_hover_text(format!("Open the referenced {extension} tag"))
+                    .clicked()
+            {
+                *edit.open_request = Some(OpenTagRequest {
+                    group_tag,
+                    rel_path: open_ref.clone(),
+                    float: ui.input(|i| i.modifiers.alt),
+                });
+            }
+
+            let id = edit.widget_id(("structural_ref_text", &buffer_key));
+            let mut draft = edit.buffers.take(&buffer_key, &current);
+            let mut commit = None;
+            let text_response = ui
+                .scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
+                    ui.visuals_mut().extreme_bg_color = material_input();
+                    let resp = ui.add(
+                        egui::TextEdit::singleline(&mut draft.text)
+                            .id(id)
+                            .desired_width(text_rect.width())
+                            .text_color(material_text())
+                            .font(egui::TextStyle::Monospace),
+                    );
+                    text_edit_cursor_to_start_on_tab_focus(ui, &resp);
+                    draft.note_response(&resp);
+                    if draft.should_commit(ui, &resp) {
+                        commit = Some(draft.text.trim().to_owned());
+                    }
+                    resp
+                })
+                .inner;
+            let accepts = |payload: &DraggedTagRef| payload.group_tag == group_tag;
+            if let Some(payload) = text_response.dnd_hover_payload::<DraggedTagRef>() {
+                let color = if accepts(&payload) {
+                    Color32::from_rgb(120, 170, 90)
+                } else {
+                    REFERENCE_MISSING_COLOR
+                };
+                ui.painter()
+                    .rect_stroke(text_response.rect, 2.0, Stroke::new(1.5, color));
+            }
+            if edit.editable
+                && let Some(payload) = text_response.dnd_release_payload::<DraggedTagRef>()
+                && accepts(&payload)
+            {
+                commit = Some(payload.rel_path.clone());
+            }
+
+            ui.painter().rect_filled(browse_rect, 0.0, material_input());
+            ui.painter()
+                .rect_stroke(browse_rect, 0.0, Stroke::new(1.0, material_input_edge()));
+            ui.painter().text(
+                browse_rect.center(),
+                Align2::CENTER_CENTER,
+                "...",
+                FontId::proportional(11.0),
+                material_text(),
+            );
+            if ui
+                .interact(
+                    browse_rect,
+                    ui.make_persistent_id(format!("structural_ref_browse:{buffer_key}")),
+                    Sense::click(),
+                )
+                .on_hover_text(format!("Browse for a .{extension} tag file"))
+                .clicked()
+            {
+                let mut dialog = rfd::FileDialog::new()
+                    .add_filter(extension, &[extension])
+                    .set_title(format!("Select {extension} Tag"));
+                if let Some(tags_root) = edit.tags_root {
+                    dialog = dialog.set_directory(tag_reference_start_dir(tags_root, &open_ref));
+                }
+                if let Some(path) = dialog.pick_file() {
+                    match normalize_bitmap_browse_path(&path, edit.tags_root) {
+                        Ok(rel) => {
+                            draft.set_clean(rel.clone());
+                            commit = Some(rel);
+                        }
+                        Err(error) => {
+                            if let Some(status) = edit.status.as_deref_mut() {
+                                *status = error;
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(input) = commit {
+                edit.pending
+                    .push(PendingFieldEdit { path: row_edit.path.clone(), input });
+            }
+            edit.buffers.put(buffer_key, draft);
+        }
+
         ShaderRowEditKind::Bool { create } => {
             let current_raw = row_edit.current.trim().parse::<i32>().unwrap_or(0);
             let mut checked = current_raw != 0;

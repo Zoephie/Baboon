@@ -9,6 +9,7 @@ pub(in crate::app) fn draw_shader_editor_model(
     color_popup: &mut Option<MaterialColorPopup>,
     function_popup: &mut Option<FunctionPopup>,
     edit: &mut FieldEditContext<'_>,
+    expert_mode: bool,
 ) {
     // MATERIAL section only for material-bearing shader types (Guerilla
     // vtable+0x70 gate). Effect-style shaders have no global material type.
@@ -60,7 +61,13 @@ pub(in crate::app) fn draw_shader_editor_model(
             parameter_type: Some("tag reference".to_owned()),
             is_overridden: true,
             function: None,
-            edit: None,
+            edit: structural_reference_edit(
+                expert_mode,
+                &model.definition_edit_path,
+                &model.definition_path,
+                *b"rmdf",
+                "render_method_definition",
+            ),
             context_menu: None,
             create_anim_op: None,
             constant_function_view: None,
@@ -81,7 +88,13 @@ pub(in crate::app) fn draw_shader_editor_model(
             parameter_type: Some("tag reference".to_owned()),
             is_overridden: true,
             function: None,
-            edit: None,
+            edit: structural_reference_edit(
+                expert_mode,
+                &model.shader_template_edit_path,
+                template_path,
+                *b"rmt2",
+                "render_method_template",
+            ),
             context_menu: None,
             create_anim_op: None,
             constant_function_view: None,
@@ -337,6 +350,40 @@ pub(in crate::app) fn collect_shader_template_references(
             }
         }
     }
+}
+
+/// The editor for a shader's `definition` / `shader template` reference, or
+/// `None` when the field is not on this tag — in which case the row stays the
+/// read-only text it has always been rather than offering an edit that could
+/// not commit. Whether the user may actually type into it is the field
+/// editor's own `editable` gate, which is what expert mode drives.
+fn structural_reference_edit(
+    expert_mode: bool,
+    edit_path: &str,
+    current_path: &str,
+    group_tag: [u8; 4],
+    extension: &'static str,
+) -> Option<ShaderRowEdit> {
+    // Re-pointing either reference changes which parameters the tag is
+    // supposed to carry, and nothing reconciles the ones already on it —
+    // Foundation gates the same edit behind expert mode and reconciles nothing
+    // either. Outside expert mode the row stays the text it has always been.
+    if !expert_mode || edit_path.is_empty() {
+        return None;
+    }
+    let current = if current_path.is_empty() {
+        "NONE".to_owned()
+    } else {
+        format!("{}.{extension}", current_path.replace('\\', "/"))
+    };
+    Some(ShaderRowEdit {
+        path: edit_path.to_owned(),
+        current,
+        kind: ShaderRowEditKind::StructuralRef {
+            group_tag: u32::from_be_bytes(group_tag),
+            extension,
+        },
+    })
 }
 
 pub(in crate::app) fn shader_template_label(key: &str) -> String {

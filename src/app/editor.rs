@@ -50,7 +50,7 @@ pub(super) fn draw_tag(
     let is_object_family = is_object_family_group(entry.group_tag);
     let is_shaderish =
         is_material_tag(entry) || is_material_shader_tag(entry) || is_shader_tag(entry);
-    let is_model = is_model_group(entry.group_tag, names);
+    let is_model = is_previewable_geometry_group(entry.group_tag, names);
 
     draw_tag_metadata(ui, tag, entry, names);
     if !is_object_family {

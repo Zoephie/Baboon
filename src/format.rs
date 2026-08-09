@@ -8,6 +8,20 @@ use anyhow::{Context, Result};
 use blam_tags::{StringIdData, TagFieldData, TagReferenceData, format_group_tag, parse_group_tag};
 use serde_json::Value;
 
+/// Extension -> group tag, accumulated from every `_meta.json` the app loads.
+/// Consulted by the field editor, which has no game in hand at the point it
+/// parses a reference.
+fn process_group_names() -> &'static std::sync::RwLock<BTreeMap<String, u32>> {
+    static NAMES: std::sync::OnceLock<std::sync::RwLock<BTreeMap<String, u32>>> =
+        std::sync::OnceLock::new();
+    NAMES.get_or_init(|| std::sync::RwLock::new(BTreeMap::new()))
+}
+
+/// The group tag for a definition name, from the loaded games' `_meta.json`.
+pub fn process_group_tag_for(name: &str) -> Option<u32> {
+    process_group_names().read().ok()?.get(name).copied()
+}
+
 #[derive(Clone, Debug, Default)]
 /// Bidirectional group-tag/name lookup assembled from definition metadata.
 /// Merging keeps the first observed mapping so the default cross-game index is
@@ -82,6 +96,26 @@ impl TagNameIndex {
 
     pub fn group_tag_for(&self, name: &str) -> Option<u32> {
         self.group_tag_for_name.get(name).copied()
+    }
+
+    /// Publish this index as the process-wide extension -> group lookup.
+    ///
+    /// Parsing a typed tag reference (`<path>.<extension>`) has to turn the
+    /// extension back into a group tag, and it happens deep inside the field
+    /// editor, far from any loaded game. The alternative was a hand-written
+    /// table in the value parser, which is exactly the shape that silently
+    /// omits entries: it had no `render_method_definition`, so committing an
+    /// edit to a shader's definition was refused as an unknown group and the
+    /// row accepted input while changing nothing. Every mapping here comes
+    /// from the games' own `_meta.json`, so a group Baboon can open is a group
+    /// it can parse a reference to.
+    pub fn publish_as_process_group_names(&self) {
+        let Ok(mut registry) = process_group_names().write() else {
+            return;
+        };
+        for (name, group_tag) in &self.group_tag_for_name {
+            registry.entry(name.clone()).or_insert(*group_tag);
+        }
     }
 
     /// Adds only unknown mappings, preserving the receiver's precedence.

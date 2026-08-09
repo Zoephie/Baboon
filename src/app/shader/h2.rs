@@ -41,6 +41,10 @@ pub(in crate::app) fn build_h2ek_shader_editor_model(
         global_material_type: String::new(),
         global_material_edit_path: String::new(),
         definition_path: String::new(),
+        // Halo 2 shows its template through its own row, which already carries
+        // an edit; these two belong to the Halo 3-era render_method grid.
+        definition_edit_path: String::new(),
+        shader_template_edit_path: String::new(),
         shader_template_path: None,
         categories: Vec::new(),
         sections,
@@ -2131,6 +2135,7 @@ fn shader_row_edit_kind_name(kind: &ShaderRowEditKind) -> &'static str {
         ShaderRowEditKind::StringId => "string_id",
         ShaderRowEditKind::BitmapRef { .. } => "bitmap_ref",
         ShaderRowEditKind::ShaderTemplateRef => "shader_template_ref",
+        ShaderRowEditKind::StructuralRef { .. } => "structural_ref",
         ShaderRowEditKind::Bool { .. } => "bool",
         ShaderRowEditKind::Enum(_) => "enum",
         ShaderRowEditKind::Flags(_) => "flags",

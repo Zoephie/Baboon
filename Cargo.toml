@@ -3,12 +3,11 @@
 # submodule.
 #
 # The engine lives at camden-smallwood/blam-tags and the pin belongs there. It
-# points at Zoephie/blam-tags `codex/chimp-backend` while work that has not
-# reached upstream is in flight — currently the signed DXN bump-map fix
-# (camden-smallwood/blam-tags#3) and the recursive cross-game layout comparison
-# the Halo Reach → Campaign Evolved import needs. That branch is camden's
-# `master` plus those, so nothing upstream is dropped. Move the pin back to the
-# camden URL at the merge commit once they land.
+# points at Zoephie/blam-tags `cross-game-conversion` while cross-game tag
+# conversion is in flight upstream (camden-smallwood/blam-tags#4) — Import Tags
+# cannot build without it. That branch is camden's `master` merged in at
+# `9546231`, the rev this pin replaces, so nothing upstream is dropped. Move the
+# pin back to the camden URL at the merge commit once #4 lands.
 [workspace]
 members = ["."]
 default-members = ["."]
@@ -27,7 +26,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 atomic-write-file = "0.3"
-blam-tags = { git = "https://github.com/Zoephie/blam-tags", rev = "f92c8ec", features = ["audio", "iostore"] }
+blam-tags = { git = "https://github.com/Zoephie/blam-tags", rev = "85095a0", features = ["audio", "iostore"] }
 directories = "6"
 display-info = "0.5"
 eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }

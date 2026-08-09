@@ -3110,6 +3110,7 @@ impl Baboon {
 
     fn session_kit_state(&self, kit_index: usize) -> Option<LastSessionKit> {
         let kit = &self.kits[kit_index];
+        let was_active = kit_index == self.active;
         let source = kit.source.as_ref()?;
         let (source_kind, source_path) = match &source.source {
             TagSource::SingleFile { path } => (LastSessionSourceKind::SingleFile, path.clone()),
@@ -3186,6 +3187,7 @@ impl Baboon {
             tags,
             chimp_packages,
             active_chimp_package,
+            was_active,
         })
     }
 
@@ -3203,6 +3205,7 @@ impl Baboon {
             tags,
             chimp_packages,
             active_chimp_package,
+            was_active,
         } in kits
         {
             match source_kind {
@@ -3244,6 +3247,16 @@ impl Baboon {
             }
             // The loaders route to a kit and leave it active, so this stages
             // the tags on the kit the load will land in.
+            //
+            // Each load also finishes by making its own kit active, so the
+            // focused workspace would otherwise be whichever one happened to
+            // load last. Remember the kit the session named and every kit still
+            // to land, so the focus can be set once they all have.
+            let restoring = self.kits[self.active].id;
+            self.restoring_kits.insert(restoring);
+            if was_active {
+                self.restored_active_kit = Some(restoring);
+            }
             self.kits[self.active].pending_restore_tags = tags;
             self.kits[self.active].pending_restore_chimp_packages = chimp_packages;
             self.kits[self.active].pending_restore_active_chimp_package = active_chimp_package;
@@ -3263,6 +3276,54 @@ impl Baboon {
                 let restoring = self.active;
                 self.queue_campaign_project_target(restoring, project_path);
             }
+        }
+    }
+
+    /// Record the session as the event loop tears down.
+    ///
+    /// Baboon's whole shutdown chain hangs off a window close request:
+    /// `handle_app_close_request` only acts on `close_requested()`, and it is
+    /// what eventually reaches [`Self::execute_close_action`] and saves the
+    /// session. macOS never sends one for Cmd+Q — AppKit posts
+    /// `applicationWillTerminate:`, which closes each window directly rather
+    /// than asking it to close, so no `CloseRequested` is ever emitted and none
+    /// of that runs. The session file was then left holding whatever last wrote
+    /// it, which for a Campaign Evolved workspace is its project autosave: quit
+    /// with a Halo 3 kit open and the next launch restored Campaign Evolved,
+    /// because that was the last session anything had recorded.
+    ///
+    /// This runs on every shutdown, including the ordinary one that already
+    /// saved a moment earlier — the write is the same document either way. It
+    /// cannot prompt: the loop is already exiting and `LoopExiting` cannot be
+    /// vetoed, so unsaved tag edits still go unremarked on a Cmd+Q.
+    pub(super) fn persist_session_on_exit(&mut self) {
+        match self.current_session_state() {
+            Some(session) => {
+                let _ = save_last_session(&session);
+            }
+            None => clear_last_session(),
+        }
+    }
+
+    /// Mark one restored kit's load as settled, whatever became of it, and once
+    /// none are left hand the focus to the kit the session named.
+    ///
+    /// Every completed load makes its own kit active, so during a restore the
+    /// focused workspace is otherwise decided by which source finishes first —
+    /// a loose folder against a container set is not a race with a stable
+    /// winner. The saved kit is only honoured while it is still open and it
+    /// still loaded; a kit the user unchecked in the restore prompt, or whose
+    /// source has since moved, leaves the focus wherever the loads put it.
+    pub(super) fn settle_restored_kit(&mut self, kit: KitId) {
+        let Some(active) = focus_after_restore(
+            &mut self.restoring_kits,
+            &mut self.restored_active_kit,
+            kit,
+        ) else {
+            return;
+        };
+        if let Some(index) = self.kit_index(active) {
+            self.active = index;
         }
     }
 
@@ -10280,6 +10341,91 @@ mod tsv_paste_tests {
                 Some("material name^".to_owned()),
             ]
         );
+    }
+}
+
+/// Retire one restored kit's load and report the kit that should take the focus
+/// — `None` while any restore is still outstanding, or when the session named
+/// no kit and there is nothing to honour.
+///
+/// Split out from [`Baboon::settle_restored_kit`] because it is the whole
+/// decision: the app half only turns the answer into an index.
+fn focus_after_restore(
+    restoring: &mut HashSet<KitId>,
+    restored_active: &mut Option<KitId>,
+    settled: KitId,
+) -> Option<KitId> {
+    // A load that was not part of the restore settles nothing, and neither does
+    // one that still leaves others in flight.
+    if !restoring.remove(&settled) || !restoring.is_empty() {
+        return None;
+    }
+    restored_active.take()
+}
+
+#[cfg(test)]
+mod restore_focus_tests {
+    use super::*;
+
+    /// Every completed load makes its own kit active, so a restore's focus can
+    /// only be honoured once none are left in flight — otherwise whichever
+    /// source finished last would win, and a loose folder racing a container
+    /// set has no stable winner. Quitting with Halo 3 focused came back to
+    /// Campaign Evolved this way.
+    #[test]
+    fn the_focus_waits_for_every_restored_kit_to_land() {
+        let (halo3, evolved) = (KitId(1), KitId(2));
+        let mut restoring = HashSet::from([halo3, evolved]);
+        let mut active = Some(halo3);
+
+        assert_eq!(
+            focus_after_restore(&mut restoring, &mut active, evolved),
+            None,
+            "one kit is still loading, so the focus is not settled yet"
+        );
+        assert_eq!(
+            focus_after_restore(&mut restoring, &mut active, halo3),
+            Some(halo3),
+            "the last landing hands the focus to the kit the session named"
+        );
+        assert_eq!(active, None, "and it is honoured only once");
+    }
+
+    /// Load order must not change the answer.
+    #[test]
+    fn the_focused_kit_wins_whichever_lands_first() {
+        let (halo3, evolved) = (KitId(1), KitId(2));
+        for order in [[halo3, evolved], [evolved, halo3]] {
+            let mut restoring = HashSet::from([halo3, evolved]);
+            let mut active = Some(halo3);
+            let settled: Vec<_> = order
+                .into_iter()
+                .filter_map(|kit| focus_after_restore(&mut restoring, &mut active, kit))
+                .collect();
+            assert_eq!(settled, [halo3], "landing order {order:?} changed the focus");
+        }
+    }
+
+    /// A session written before the focused kit was recorded names none, and a
+    /// load that was never part of a restore must not disturb anything.
+    #[test]
+    fn nothing_is_claimed_without_a_named_kit_or_a_restore() {
+        let halo3 = KitId(1);
+        let mut restoring = HashSet::from([halo3]);
+        let mut active = None;
+        assert_eq!(
+            focus_after_restore(&mut restoring, &mut active, halo3),
+            None
+        );
+
+        let mut restoring = HashSet::new();
+        let mut active = Some(halo3);
+        assert_eq!(
+            focus_after_restore(&mut restoring, &mut active, KitId(9)),
+            None,
+            "an ordinary load is not a restore landing"
+        );
+        assert_eq!(active, Some(halo3), "and leaves the pending focus alone");
     }
 }
 

@@ -115,6 +115,15 @@ pub(super) enum ShaderRowEditKind {
         create: Option<ShaderParamCreateTarget>,
     },
     ShaderTemplateRef,
+    /// A structural tag reference — a shader's `definition`
+    /// (render_method_definition) or `shader template`
+    /// (render_method_template). Foundation exposes both for editing under
+    /// expert mode and reconciles nothing afterwards, so this commits as a
+    /// plain reference write and leaves the existing parameters alone.
+    StructuralRef {
+        group_tag: u32,
+        extension: &'static str,
+    },
     /// Boolean checkbox backed by an existing field or a new shader parameter.
     Bool {
         create: Option<ShaderParamCreateTarget>,
@@ -227,7 +236,15 @@ pub(super) struct ShaderEditorModel {
     /// string-id. Empty when the field could not be located.
     global_material_edit_path: String,
     definition_path: String,
+    /// Absolute tag field paths for the two structural references. Foundation
+    /// exposes both for editing under expert mode — its expert gate is a
+    /// blanket field-panel switch, and it carries no shader-aware code that
+    /// could reconcile parameters afterwards, so re-pointing one leaves the
+    /// existing parameters describing the old definition. Empty when the field
+    /// could not be located.
+    definition_edit_path: String,
     shader_template_path: Option<String>,
+    shader_template_edit_path: String,
     categories: Vec<ShaderEditorCategory>,
     sections: Vec<ShaderEditorSection>,
     atmosphere_flags: ShaderFlagsRow,
@@ -331,6 +348,27 @@ pub(super) fn build_shader_editor_model(
 
     let global_material_type = read_global_material_type(tag);
     let global_material_edit_path = append_field_path(&edit_prefix, "global material type");
+    // Empty when the field is not there, so the row stays read-only rather than
+    // offering an edit that would fail to commit. `render_method_existing_field_path`
+    // falls back to its first candidate whether or not it exists, which is the
+    // wrong shape here.
+    let resolve_edit_path = |candidates: &[String]| -> String {
+        candidates
+            .iter()
+            .find(|path| tag.root().field_path(path).is_some())
+            .cloned()
+            .unwrap_or_default()
+    };
+    let definition_edit_path = resolve_edit_path(&[
+        append_field_path(&edit_prefix, "definition"),
+        append_field_path(&edit_prefix, "definition*"),
+    ]);
+    // The template reference hangs off the postprocess block, not the
+    // render_method root — `RenderMethod` reads it from `postprocess[0]`.
+    let shader_template_edit_path = resolve_edit_path(&[
+        append_field_path(&edit_prefix, "postprocess[0]/shader template"),
+        append_field_path(&edit_prefix, "shader template"),
+    ]);
     let shader_flags_path =
         render_method_existing_field_path(tag, &edit_prefix, &["shader flags", "shader flags*"]);
     let custom_fog_path =
@@ -381,6 +419,8 @@ pub(super) fn build_shader_editor_model(
         global_material_type,
         global_material_edit_path,
         definition_path: render_method.definition_path,
+        definition_edit_path,
+        shader_template_edit_path,
         shader_template_path: render_method
             .postprocess_definition
             .as_ref()

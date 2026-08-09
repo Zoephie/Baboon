@@ -630,6 +630,12 @@ pub(in crate::app) fn enum_option_label(options: &[&str], selected: i64) -> Stri
 }
 
 pub(in crate::app) fn extension_to_group_tag(extension: &str) -> Option<u32> {
+    // The games' own `_meta.json` first — it covers every group Baboon can
+    // open, and does not have to be kept in step by hand. The table below
+    // remains for the cases that run before any definitions are loaded.
+    if let Some(group_tag) = crate::format::process_group_tag_for(extension) {
+        return Some(group_tag);
+    }
     let fourcc = match extension {
         "material" => "mat",
         "material_shader" => "mats",

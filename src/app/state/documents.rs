@@ -199,6 +199,11 @@ pub(in crate::app) struct LastSessionKit {
     pub(in crate::app) tags: Vec<LastSessionTag>,
     pub(in crate::app) chimp_packages: Vec<String>,
     pub(in crate::app) active_chimp_package: Option<String>,
+    /// Whether this was the kit the user was looking at. Carried per kit rather
+    /// than as an index into the list so that dropping a kit — which the
+    /// restore prompt lets the user do — cannot silently re-point it at
+    /// whichever workspace slid into that slot.
+    pub(in crate::app) was_active: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -219,6 +224,8 @@ pub(in crate::app) struct RestoreKit {
     pub(in crate::app) tags: Vec<LastSessionTag>,
     pub(in crate::app) chimp_packages: Vec<String>,
     pub(in crate::app) active_chimp_package: Option<String>,
+    /// Whether this kit was the focused one when the session was saved.
+    pub(in crate::app) was_active: bool,
 }
 
 pub(in crate::app) struct LastOpenedWindowEntry {
@@ -249,6 +256,8 @@ pub(in crate::app) struct LastOpenedWindowsKit {
     pub(in crate::app) entries: Vec<LastOpenedWindowEntry>,
     pub(in crate::app) chimp_entries: Vec<LastOpenedChimpEntry>,
     pub(in crate::app) active_chimp_package: Option<String>,
+    /// Whether this kit was the focused one when the session was saved.
+    pub(in crate::app) was_active: bool,
 }
 
 /// Launch-time restore prompt backed by `last_session.json`. OK reloads each
@@ -317,6 +326,7 @@ impl LastOpenedWindowsKit {
             entries,
             chimp_entries,
             active_chimp_package: saved.active_chimp_package,
+            was_active: saved.was_active,
         })
     }
 
@@ -377,6 +387,7 @@ impl LastOpenedWindowsPrompt {
                     tags,
                     chimp_packages,
                     active_chimp_package,
+                    was_active: kit.was_active,
                 }
             })
             .collect()
