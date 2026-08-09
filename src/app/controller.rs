@@ -888,7 +888,13 @@ impl Baboon {
                     self.handle_folder_conversion_progress(progress)
                 }
                 WorkerMessage::FolderConversionFinished(report) => {
-                    self.handle_folder_conversion_finished(report)
+                    self.handle_folder_conversion_finished(report, ctx)
+                }
+                WorkerMessage::ImportSourceResolved { input, result } => {
+                    self.handle_import_source_resolved(input, result)
+                }
+                WorkerMessage::ImportAnalysisFinished { result, templates } => {
+                    self.handle_import_analysis_finished(result, templates, ctx)
                 }
                 WorkerMessage::AllEntriesScanned { stamp, result } => {
                     self.handle_all_entries_scanned(stamp, result, ctx)
@@ -1301,6 +1307,21 @@ impl Baboon {
         };
         if output.exists() {
             self.new_tag_dialog.error = Some(format!("{} already exists", output.display()));
+            return;
+        }
+        // `TagFile::new` can only build an MCC container — it hard-codes
+        // `TagContainer::Mcc` and `Endian::Le`, and nothing synthesizes a classic
+        // 64-byte header. Writing one into an H1EK/H2EK tags tree produces a file
+        // Guerilla cannot load, and one Baboon itself re-reads as MCC, so nothing
+        // surfaces the mistake. Refuse until there is a classic constructor.
+        if CLASSIC_CONVERSION_GAMES.contains(&self.new_tag_dialog.game.as_str()) {
+            self.new_tag_dialog.error = Some(format!(
+                "Baboon cannot create a new {} tag: classic Halo CE and Halo 2 \
+                 tags carry a 64-byte header it has no writer for, so the file \
+                 would not load in the editing kit. Duplicate an existing tag \
+                 instead.",
+                self.new_tag_dialog.game
+            ));
             return;
         }
         let tag = match TagFile::new(&group.schema_path) {
@@ -3385,8 +3406,8 @@ impl Baboon {
             BrowserAction::CopyLooseFolder { rel_path, label } => {
                 self.begin_refactor_loose_folder(rel_path, label, false)
             }
-            BrowserAction::ConvertLooseFolder { rel_path, label } => {
-                self.open_folder_conversion_dialog(rel_path, label)
+            BrowserAction::ImportTagsIntoLooseFolder { rel_path } => {
+                self.open_tag_import_dialog(Some(rel_path.to_string_lossy().into_owned()))
             }
             BrowserAction::ExtractRaw(key) => self.begin_extract_raw(key, ctx),
             BrowserAction::ExtractBitmap(key) => self.begin_extract_bitmap(key, ctx),

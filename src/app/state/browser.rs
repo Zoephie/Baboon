@@ -13,7 +13,10 @@ pub(in crate::app) enum BrowserAction {
     DumpLooseFolderJson { rel_path: PathBuf, label: String, },
     MoveLooseFolder { rel_path: PathBuf, label: String, },
     CopyLooseFolder { rel_path: PathBuf, label: String, },
-    ConvertLooseFolder { rel_path: PathBuf, label: String, },
+    /// Open Import Tags aimed at this loose folder, so a tag or a whole tree
+    /// from another game's kit lands here. Carries no label: the destination is
+    /// the folder's path, and the source's own name supplies the leaf.
+    ImportTagsIntoLooseFolder { rel_path: PathBuf, },
     ExtractRaw(String),
     ExtractBitmap(String),
     ExtractBitmapFolder(Vec<String>),

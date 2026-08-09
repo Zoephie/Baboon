@@ -30,11 +30,31 @@ impl Baboon {
                             ui.close_menu();
                             self.open_new_tag_dialog();
                         }
-                        if self.current_source_is_container()
-                            && ui.button("Import Tag...").clicked()
+                        // One entry, two implementations. A container tag is a
+                        // package rather than a file, so it lands through the
+                        // Campaign Evolved path; a loose kit converts from
+                        // another game. Splitting them in the menu would make
+                        // the user answer a question about Baboon's internals
+                        // to do the same thing.
+                        let can_import = self.current_source_is_container() || self.can_import_tags();
+                        if ui
+                            .add_enabled(can_import, egui::Button::new("Import Tags..."))
+                            .on_hover_text(if self.current_source_is_container() {
+                                "Bring a tag file into these containers"
+                            } else {
+                                "Bring a tag, or a whole folder of them, in from another game's editing kit"
+                            })
+                            .on_disabled_hover_text(
+                                "Load an editing kit or a Campaign Evolved container first",
+                            )
+                            .clicked()
                         {
                             ui.close_menu();
-                            self.begin_import_tag(None);
+                            if self.current_source_is_container() {
+                                self.begin_import_tag(None);
+                            } else {
+                                self.open_tag_import_dialog(None);
+                            }
                         }
                         if ui.button("Load Tag...").clicked() {
                             ui.close_menu();
@@ -233,21 +253,6 @@ impl Baboon {
                                     DeferredFileAction::ExtractAllContainerTags,
                                     ctx,
                                 );
-                            }
-                        }
-                        if self.expert_mode {
-                            if ui
-                                .add_enabled(
-                                    self.can_convert_current_tag(),
-                                    egui::Button::new("Save Current Tag for Another Game..."),
-                                )
-                                .on_hover_text(
-                                    "Expert feature: convert the selected MCC editing-kit tag using another game's definitions",
-                                )
-                                .clicked()
-                            {
-                                ui.close_menu();
-                                self.open_tag_conversion_dialog();
                             }
                         }
                         ui.separator();
@@ -1399,8 +1404,7 @@ impl Baboon {
         self.draw_mod_export_window(ctx);
         self.draw_exported_mod_window(ctx);
         self.draw_poke_window(ctx);
-        self.draw_tag_conversion_window(ctx);
-        self.draw_folder_conversion_window(ctx);
+        self.draw_tag_import_window(ctx);
         self.draw_about_window(ctx);
         self.draw_query_results_window(ctx);
         self.draw_tag_diff_window(ctx);

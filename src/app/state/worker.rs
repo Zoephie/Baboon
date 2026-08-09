@@ -148,6 +148,22 @@ pub(in crate::app) enum WorkerMessage {
     },
     FolderConversionProgress(FolderConversionProgress),
     FolderConversionFinished(Result<FolderConversionReport, String>),
+    /// What an Import Tags source path turned out to be. Carries the input it
+    /// was measured from, because the walk can outlast the user's typing and a
+    /// result for a path they have since changed has to be dropped, not shown.
+    ImportSourceResolved {
+        input: String,
+        result: Result<ImportSourceFacts, String>,
+    },
+    /// A converted single tag, ready to write. Off-thread because it indexes
+    /// the destination kit's native layout templates, which walks its whole
+    /// tree. `templates` is that index coming back so the next import can reuse
+    /// it — it rides on the message rather than a shared handle because it
+    /// memoises internally and so is `Send` but not `Sync`.
+    ImportAnalysisFinished {
+        result: Result<(TagConversionDraft, Option<SourceStamp>), String>,
+        templates: NativeTemplateCache,
+    },
     // Full recursive entry scan finished for a loose-folder source.
     AllEntriesScanned {
         stamp: KitStamp,

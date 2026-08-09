@@ -388,6 +388,40 @@ resolving the layout differences across kits:
 - **material_effects**, **dialogue**, and **sound_classes** overview tables, with
   clickable references that jump to the related tags.
 
+### Importing tags from another game
+
+**File → Import Tags…**, or right-click any folder in the browser and choose
+**Import tags here…**, brings tags in from another game's editing kit and
+converts them to the kit you have open.
+
+- Point it at **one tag** or at a **folder** — a folder pulls in everything
+  beneath it, subfolders and all, recreating the same shape at the destination.
+- Give it the path however suits: the **Choose tag…** / **Choose folder…**
+  pickers, or paste a path straight into the box (quotes from Explorer's *Copy
+  as path* are fine).
+- Baboon works out **which game the tags came from** — from the editing kit they
+  live in, or failing that from the tag's own header and layout — and says how
+  it decided. Correct it from the dropdown when the guess is wrong.
+- A single tag shows a **preview before anything is written**: what copied
+  exactly, what was converted, what the target left at its defaults, and every
+  reference you will need to reconnect by hand.
+- The **file extension follows the target group**, not the source: a Reach
+  `.shader` imported into Halo 4 is written as a `.material`.
+
+- When a pair **cannot** carry a tag directly, Baboon routes it through the
+  engines in between rather than refusing. A Halo 2 bitmap has nowhere to put its
+  pixels in Reach, so it goes by way of Halo 3 — and the report names the route
+  it took. Nothing is written along the way: each hop hands the next the bytes a
+  save would have produced, so there is no intermediate tag left in a kit and a
+  failed hop leaves no debris.
+
+Halo CE, Halo 2, Halo 3, ODST, Reach, Halo 4 and H2A convert between each other
+in any direction; Campaign Evolved pairs with Reach only, in both directions (and
+is never a waypoint — a tag cannot reach it by way of Reach). Where a tag system
+was genuinely replaced between engines the report says so rather than quietly
+nulling the fields — see
+[`docs/tag-conversion-mappings.md`](docs/tag-conversion-mappings.md).
+
 ### Custom color palettes
 
 Save colours picked in the color editor and build reusable Baboon palettes that

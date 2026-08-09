@@ -1,4 +1,6 @@
 /target
+# Local engine path override for developing blam-tags alongside Baboon.
+/.cargo
 guerilla_tag_save/
 .baboon-last-session.json
 .baboon-prefs.json

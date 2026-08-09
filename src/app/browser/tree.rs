@@ -263,7 +263,6 @@ pub(in crate::app) fn draw_tree_lazy(
     sort: BrowserSort,
     folders_before_tags: bool,
     favorite_keys: Option<&HashSet<String>>,
-    expert_mode: bool,
 ) -> Option<BrowserAction> {
     let mut clicked = None;
     if !folders_before_tags {
@@ -301,7 +300,6 @@ pub(in crate::app) fn draw_tree_lazy(
                 sort,
                 folders_before_tags,
                 favorite_keys,
-                expert_mode,
             )
         });
     }
@@ -341,7 +339,6 @@ pub(in crate::app) fn draw_tree_node_lazy(
     sort: BrowserSort,
     folders_before_tags: bool,
     favorite_keys: Option<&HashSet<String>>,
-    expert_mode: bool,
 ) -> Option<BrowserAction> {
     if !filter.is_empty() && !lazy_node_matches(node, entries, filter) {
         return None;
@@ -428,7 +425,6 @@ pub(in crate::app) fn draw_tree_node_lazy(
                         sort,
                         folders_before_tags,
                         favorite_keys,
-                        expert_mode,
                     );
                 }
             }
@@ -477,14 +473,18 @@ pub(in crate::app) fn draw_tree_node_lazy(
             });
             ui.close_menu();
         }
-        if expert_mode {
-            if ui.button("Save folder for another game...").clicked() {
-                clicked = Some(BrowserAction::ConvertLooseFolder {
-                    rel_path: node.rel_path.clone(),
-                    label: node.label.clone(),
-                });
-                ui.close_menu();
-            }
+        // Not Expert-gated, unlike the "save this folder for another game"
+        // action it replaces: bringing another game's tags in is the headline
+        // feature now, and the write is confirmed by the dialog either way.
+        if ui
+            .button("Import tags here...")
+            .on_hover_text("Convert a tag, or a whole folder of them, from another game into this folder")
+            .clicked()
+        {
+            clicked = Some(BrowserAction::ImportTagsIntoLooseFolder {
+                rel_path: node.rel_path.clone(),
+            });
+            ui.close_menu();
         }
         ui.separator();
         if ui.button("Dump folder to JSON...").clicked() {

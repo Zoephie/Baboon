@@ -39,239 +39,322 @@ impl DiffNode {
     }
 }
 
+/// What the Import Tags window asked for this frame.
+///
+/// Collected rather than applied inline: every one of these needs `&mut self`,
+/// and the window is drawn while the dialog is already borrowed.
+enum ImportDialogAction {
+    Resolve,
+    BrowseFile,
+    BrowseFolder,
+    /// The source profile changed, so the preview no longer describes the
+    /// conversion that would run.
+    InvalidateAnalysis,
+    Import,
+}
+
 impl Baboon {
-    pub(super) fn draw_tag_conversion_window(&mut self, ctx: &egui::Context) {
-        if !self.expert_mode {
-            self.tag_conversion_dialog = None;
+    /// Import Tags: bring a tag, or a whole folder of them, in from another
+    /// game's editing kit.
+    ///
+    /// One window covers both, because the difference is a property of the path
+    /// the user gave rather than a decision they should have to make first. The
+    /// slow parts — measuring the source and building the preview — run on
+    /// workers, so a path naming a whole kit's tag tree does not stall a frame.
+    pub(super) fn draw_tag_import_window(&mut self, ctx: &egui::Context) {
+        if self.tag_import_dialog.is_none() {
             return;
         }
-        if self.tag_conversion_dialog.is_none() {
-            return;
-        }
+        // Resolved before the dialog is borrowed mutably, so the banner lags an
+        // edit by one frame. That is the same bargain the Campaign Evolved
+        // import dialog makes, and it beats re-statting the disk mid-render.
+        let (single_output, folder_output, existing) = {
+            let dialog = self.tag_import_dialog.as_ref().expect("checked above");
+            let single = dialog.single_output();
+            let folder = dialog.folder_output_root();
+            let existing = if dialog.source_is_folder() {
+                folder.as_ref().is_some_and(|path| path.is_dir())
+            } else {
+                single.as_ref().is_some_and(|path| path.is_file())
+            };
+            (single, folder, existing)
+        };
 
         let mut open = true;
-        let mut analyze = false;
-        let mut choose_and_save = false;
-        let mut confirm_inside_source = false;
-        let mut cancel_inside_source = false;
+        let mut action = None;
+        let running;
         {
-            let dialog = self.tag_conversion_dialog.as_mut().expect("checked above");
-            egui::Window::new("Save Tag for Another Game")
-                .id(egui::Id::new("tag_conversion"))
+            let dialog = self.tag_import_dialog.as_mut().expect("checked above");
+            running = dialog.running;
+            let busy = dialog.running || dialog.analyzing;
+            egui::Window::new("Import Tags")
+                .id(egui::Id::new("tag_import"))
                 .open(&mut open)
-                .default_width(680.0)
+                .default_width(720.0)
                 .show(ctx, |ui| {
-                    ui.label(RichText::new("Source tag").color(subtle_dark()).small());
-                    ui.label(
-                        RichText::new(&dialog.source_label)
-                            .color(text_dark())
-                            .monospace(),
-                    );
-                    ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new("Source profile").color(subtle_dark()));
-                        ui.label(RichText::new(&dialog.source_game).color(text_dark()));
-                    });
-
-                    let previous_target = dialog.target_game.clone();
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("Target profile").color(subtle_dark()));
-                        egui::ComboBox::from_id_salt("tag_conversion_target")
-                            .selected_text(&dialog.target_game)
-                            .width(220.0)
-                            .show_ui(ui, |ui| {
-                                for game in conversion_targets_for(&dialog.source_game) {
-                                    ui.selectable_value(
-                                        &mut dialog.target_game,
-                                        game.to_owned(),
-                                        game,
-                                    );
-                                }
-                            });
-                    });
-                    if dialog.target_game != previous_target {
-                        dialog.draft = None;
-                        dialog.error = None;
-                        dialog.pending_source_destination = None;
-                    }
-
-                    ui.add_space(8.0);
-                    if ui.button("Analyze Conversion").clicked() {
-                        analyze = true;
-                    }
-
-                    if let Some(draft) = dialog.draft.as_ref() {
-                        let report = &draft.report;
-                        ui.add_space(8.0);
-                        ui.separator();
+                        ui.label(RichText::new("Into").color(subtle_dark()));
+                        ui.label(RichText::new(&dialog.target_game).color(text_dark()).strong());
                         ui.label(
-                            RichText::new(format!(
-                                "Target: {} (.{}), group {}",
-                                dialog.target_game,
-                                draft.target_extension,
-                                draft.target_group_name
-                            ))
-                            .color(text_dark())
-                            .strong(),
-                        );
-                        draw_conversion_report(ui, report, "tag_conversion");
-                    }
-
-                    if let Some(error) = dialog.error.as_ref() {
-                        ui.add_space(6.0);
-                        ui.label(RichText::new(error).color(material_delete_text()));
-                    }
-
-                    if let Some(output) = dialog.pending_source_destination.as_ref() {
-                        ui.add_space(8.0);
-                        ui.separator();
-                        ui.label(
-                            RichText::new(
-                                "This destination is inside the currently loaded source tags folder. The converted tag uses a different profile and will not be added to the current browser.",
-                            )
-                            .color(material_delete_text()),
-                        );
-                        ui.label(
-                            RichText::new(output.display().to_string())
+                            RichText::new(dialog.target_tags_root.display().to_string())
                                 .monospace()
                                 .small()
                                 .color(subtle_dark()),
                         );
+                    });
+                    ui.add_space(8.0);
+
+                    // ── Source ────────────────────────────────────────────────
+                    ui.label(RichText::new("Source").color(subtle_dark()).small());
+                    ui.horizontal(|ui| {
+                        let response = ui.add_enabled(
+                            !busy,
+                            egui::TextEdit::singleline(&mut dialog.source_input)
+                                .hint_text("Paste a path to a tag or a folder")
+                                .desired_width(400.0),
+                        );
+                        // On leaving the box — which Enter also does — never on
+                        // a keystroke: resolving walks the path, and a path can
+                        // name a folder holding tens of thousands of files.
+                        if response.lost_focus() {
+                            action = Some(ImportDialogAction::Resolve);
+                        }
+                        if ui.add_enabled(!busy, egui::Button::new("Choose tag...")).clicked() {
+                            action = Some(ImportDialogAction::BrowseFile);
+                        }
+                        if ui
+                            .add_enabled(!busy, egui::Button::new("Choose folder..."))
+                            .on_hover_text("Every tag in the folder and all its subfolders")
+                            .clicked()
+                        {
+                            action = Some(ImportDialogAction::BrowseFolder);
+                        }
+                    });
+
+                    let typed = normalize_import_input(&dialog.source_input);
+                    if dialog.resolving {
                         ui.horizontal(|ui| {
-                            if ui.button("Save There Anyway").clicked() {
-                                confirm_inside_source = true;
-                            }
-                            if ui.button("Choose Another Location").clicked() {
-                                cancel_inside_source = true;
-                                choose_and_save = true;
-                            }
-                        });
-                    } else {
-                        ui.add_space(10.0);
-                        ui.with_layout(
-                            egui::Layout::right_to_left(egui::Align::Center),
-                            |ui| {
-                                if ui
-                                    .add_enabled(
-                                        dialog.draft.is_some(),
-                                        egui::Button::new("Choose Location and Save..."),
-                                    )
-                                    .clicked()
-                                {
-                                    choose_and_save = true;
-                                }
-                                ui.label(
-                                    RichText::new(
-                                        "Saving creates a new copy; the source tag is not modified.",
-                                    )
+                            ui.spinner();
+                            ui.label(
+                                RichText::new("Checking what is in there...")
                                     .color(subtle_dark())
                                     .small(),
-                                );
-                            },
+                            );
+                        });
+                        ctx.request_repaint();
+                    } else if typed.is_empty() {
+                        ui.label(
+                            RichText::new(
+                                "Pick a tag to convert one, or a folder to convert everything \
+                                 under it.",
+                            )
+                            .color(subtle_dark())
+                            .small(),
                         );
+                    } else if !dialog.facts_are_current() {
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new("This path has not been checked yet.")
+                                    .color(Color32::from_rgb(242, 196, 48))
+                                    .small(),
+                            );
+                            if ui.small_button("Check").clicked() {
+                                action = Some(ImportDialogAction::Resolve);
+                            }
+                        });
+                    } else if let Some(facts) = dialog.facts.as_ref() {
+                        if facts.is_folder {
+                            let mut summary = format!("{} tag(s) found", facts.tag_files);
+                            if facts.skipped_files > 0 {
+                                summary.push_str(&format!(
+                                    ", {} other file(s) will be skipped",
+                                    facts.skipped_files
+                                ));
+                            }
+                            ui.label(
+                                RichText::new(summary)
+                                    .color(if facts.tag_files == 0 {
+                                        material_delete_text()
+                                    } else {
+                                        text_dark()
+                                    })
+                                    .small(),
+                            );
+                        } else {
+                            let group = facts
+                                .group_tag
+                                .map(format_group_tag)
+                                .unwrap_or_else(|| "unknown".to_owned());
+                            ui.label(
+                                RichText::new(format!("One tag, group {group}"))
+                                    .color(text_dark())
+                                    .small(),
+                            );
+                        }
                     }
-                });
-        }
 
-        if analyze {
-            self.analyze_tag_conversion();
-        }
-        if cancel_inside_source {
-            if let Some(dialog) = self.tag_conversion_dialog.as_mut() {
-                dialog.pending_source_destination = None;
-            }
-        }
-        if confirm_inside_source {
-            self.confirm_tag_conversion_inside_source();
-        } else if choose_and_save {
-            self.choose_tag_conversion_destination();
-        }
-        if !open {
-            self.tag_conversion_dialog = None;
-        }
-    }
-
-    pub(super) fn draw_folder_conversion_window(&mut self, ctx: &egui::Context) {
-        if !self.expert_mode
-            && self
-                .folder_conversion_dialog
-                .as_ref()
-                .is_none_or(|dialog| !dialog.running)
-        {
-            self.folder_conversion_dialog = None;
-            return;
-        }
-        if self.folder_conversion_dialog.is_none() {
-            return;
-        }
-        let mut open = true;
-        let mut choose_destination = false;
-        let mut start = false;
-        let running;
-        {
-            let dialog = self
-                .folder_conversion_dialog
-                .as_mut()
-                .expect("checked above");
-            running = dialog.running;
-            egui::Window::new("Save Folder for Another Game")
-                .id(egui::Id::new("folder_conversion"))
-                .open(&mut open)
-                .default_width(760.0)
-                .show(ctx, |ui| {
-                    ui.label(RichText::new("Source folder").color(subtle_dark()).small());
-                    ui.label(RichText::new(&dialog.source_label).monospace().color(text_dark()));
+                    // ── Which game it came from ───────────────────────────────
+                    ui.add_space(6.0);
                     ui.horizontal(|ui| {
-                        ui.label(format!("Source profile: {}", dialog.source_game));
-                        ui.label("Target profile:");
-                        let previous = dialog.target_game.clone();
-                        ui.add_enabled_ui(!dialog.running, |ui| {
-                            egui::ComboBox::from_id_salt("folder_conversion_target")
-                                .selected_text(&dialog.target_game)
+                        ui.label(RichText::new("From").color(subtle_dark()));
+                        let previous = dialog.source_game.clone();
+                        ui.add_enabled_ui(!busy, |ui| {
+                            egui::ComboBox::from_id_salt("tag_import_source_game")
+                                .selected_text(&dialog.source_game)
+                                .width(200.0)
                                 .show_ui(ui, |ui| {
-                                    for game in conversion_targets_for(&dialog.source_game) {
+                                    for game in import_sources_for(&dialog.target_game) {
                                         ui.selectable_value(
-                                            &mut dialog.target_game,
+                                            &mut dialog.source_game,
                                             game.to_owned(),
                                             game,
                                         );
                                     }
                                 });
                         });
-                        if dialog.target_game != previous {
-                            dialog.destination_parent = None;
-                            dialog.report = None;
-                            dialog.error = None;
-                        }
-                    });
-                    ui.add_space(6.0);
-                    ui.horizontal(|ui| {
-                        if ui
-                            .add_enabled(!dialog.running, egui::Button::new("Choose Destination..."))
-                            .clicked()
-                        {
-                            choose_destination = true;
-                        }
-                        if let Some(destination) = dialog.destination_parent.as_ref() {
-                            ui.label(
-                                RichText::new(format!(
-                                    "{}\\{}",
-                                    destination.display(),
-                                    dialog.source_label
-                                ))
-                                .monospace()
-                                .small()
-                                .color(subtle_dark()),
-                            );
+                        if dialog.source_game != previous {
+                            dialog.source_game_note = "Chosen by hand".to_owned();
+                            action = Some(ImportDialogAction::InvalidateAnalysis);
                         }
                     });
                     ui.label(
-                        RichText::new(
-                            "Existing destination tags are replaced atomically. Reference paths are not relocated.",
-                        )
-                        .small()
-                        .color(subtle_dark()),
+                        RichText::new(&dialog.source_game_note)
+                            .color(subtle_dark())
+                            .small(),
                     );
+
+                    // ── Where it lands ────────────────────────────────────────
+                    ui.add_space(8.0);
+                    ui.label(RichText::new("Destination").color(subtle_dark()).small());
+                    ui.horizontal(|ui| {
+                        let response = ui.add_enabled(
+                            !busy,
+                            egui::TextEdit::singleline(&mut dialog.destination_rel)
+                                .hint_text("objects/characters/masterchief")
+                                .desired_width(440.0),
+                        );
+                        if response.changed() {
+                            dialog.destination_touched = true;
+                        }
+                    });
+                    let resolved = if dialog.source_is_folder() {
+                        folder_output.clone()
+                    } else {
+                        single_output.clone()
+                    };
+                    match resolved.as_ref() {
+                        Some(path) => {
+                            ui.label(
+                                RichText::new(path.display().to_string())
+                                    .monospace()
+                                    .small()
+                                    .color(subtle_dark()),
+                            );
+                        }
+                        None if !dialog.source_is_folder() && dialog.draft.is_none() => {
+                            // The extension belongs to the *target* group, so
+                            // there is no full path to show until the conversion
+                            // has said what the tag becomes.
+                            ui.label(
+                                RichText::new(
+                                    "The file extension follows from the target group, and is \
+                                     filled in once the conversion is analyzed.",
+                                )
+                                .color(subtle_dark())
+                                .small(),
+                            );
+                        }
+                        None => {}
+                    }
+                    if existing {
+                        ui.label(
+                            RichText::new(if dialog.source_is_folder() {
+                                "\u{27f3} This folder already exists — tags with matching names \
+                                 are replaced"
+                            } else {
+                                "\u{27f3} Replaces the tag already at this path"
+                            })
+                            .color(Color32::from_rgb(242, 196, 48))
+                            .small(),
+                        );
+                    }
+
+                    // ── Preview and run ───────────────────────────────────────
+                    ui.add_space(10.0);
+                    let ready = dialog.facts_are_current()
+                        && dialog
+                            .facts
+                            .as_ref()
+                            .is_some_and(|facts| facts.tag_files > 0);
+                    ui.horizontal(|ui| {
+                        // One button. Converting and writing are one intention,
+                        // and the report below appears once it has run rather
+                        // than behind a preview step nothing depends on.
+                        if ui
+                            .add_enabled(ready && !busy, egui::Button::new("Import"))
+                            .on_disabled_hover_text(
+                                "Choose a tag or a folder that holds tags first",
+                            )
+                            .clicked()
+                        {
+                            action = Some(ImportDialogAction::Import);
+                        }
+                        if dialog.analyzing {
+                            ui.spinner();
+                            ui.label(RichText::new("Converting...").color(subtle_dark()).small());
+                            ctx.request_repaint();
+                        }
+                    });
+
+                    if let Some(written) = dialog.written.as_ref() {
+                        ui.add_space(6.0);
+                        ui.label(
+                            RichText::new(format!("\u{2714} {written}"))
+                                .color(disclosure_triangle_green()),
+                        );
+                    }
+
+                    if let Some(draft) = dialog.draft.as_ref() {
+                        ui.add_space(8.0);
+                        ui.separator();
+                        ui.label(
+                            RichText::new(format!(
+                                "Becomes a {} {} tag (.{})",
+                                dialog.target_game, draft.target_group_name, draft.target_extension
+                            ))
+                            .color(text_dark())
+                            .strong(),
+                        );
+                        // A routed conversion has been through two or more
+                        // engines' worth of loss. Saying so above the numbers is
+                        // the difference between a reader trusting them and
+                        // knowing what they are.
+                        if !draft.route.is_empty() {
+                            ui.label(
+                                RichText::new(format!(
+                                    "\u{21b3} Routed via {} \u{2014} {} does not convert to {} \
+                                     directly for this tag, so it was carried through in stages. \
+                                     Nothing was written along the way.",
+                                    draft.route.join(" \u{2192} "),
+                                    dialog.source_game,
+                                    dialog.target_game,
+                                ))
+                                .color(Color32::from_rgb(242, 196, 48))
+                                .small(),
+                            );
+                        }
+                        if draft.native_layout_template.is_none() {
+                            ui.label(
+                                RichText::new(
+                                    "Built from a generated layout — native editing-kit \
+                                     compatibility is unverified",
+                                )
+                                .color(Color32::from_rgb(242, 196, 48))
+                                .small(),
+                            );
+                        }
+                        draw_conversion_report(ui, &draft.report, "tag_import");
+                    }
 
                     if let Some(progress) = dialog.progress.as_ref() {
                         ui.add_space(8.0);
@@ -285,7 +368,7 @@ impl Baboon {
                             egui::ProgressBar::new(fraction.clamp(0.0, 1.0))
                                 .animate(progress.total == 0)
                                 .text(format!(
-                                    "{} / {} — {} converted, {} failed",
+                                    "{} / {} — {} imported, {} failed",
                                     progress.processed,
                                     progress.total,
                                     progress.converted,
@@ -306,123 +389,35 @@ impl Baboon {
                     if let Some(report) = dialog.report.as_ref() {
                         ui.add_space(8.0);
                         ui.separator();
-                        ui.label(
-                            RichText::new(format!(
-                                "Completed: {} native-layout, {} generated-layout, {} failed, {} ignored",
-                                report.native_count(),
-                                report.generated_count(),
-                                report.failed_count(),
-                                report.ignored_files.len()
-                            ))
-                            .strong(),
-                        );
-                        ui.label(
-                            RichText::new(format!(
-                                "{} -> {} | Destination: {}",
-                                report.source_label,
-                                report.target_game,
-                                report.destination_root.display()
-                            ))
-                            .monospace()
-                            .small(),
-                        );
-                        egui::ScrollArea::vertical()
-                            .id_salt("folder_conversion_results")
-                            .max_height(320.0)
-                            .show(ui, |ui| {
-                                for wanted in [
-                                    FolderConversionFileStatus::NativeLayout,
-                                    FolderConversionFileStatus::GeneratedLayout,
-                                    FolderConversionFileStatus::Failed,
-                                ] {
-                                    let (label, color) = match wanted {
-                                        FolderConversionFileStatus::NativeLayout => {
-                                            ("Native-layout verified", text_dark())
-                                        }
-                                        FolderConversionFileStatus::GeneratedLayout => (
-                                            "Generated layout — native compatibility unverified",
-                                            material_delete_text(),
-                                        ),
-                                        FolderConversionFileStatus::Failed => {
-                                            ("Failed / skipped", material_delete_text())
-                                        }
-                                    };
-                                    let matching = report
-                                        .files
-                                        .iter()
-                                        .filter(|file| file.status == wanted)
-                                        .collect::<Vec<_>>();
-                                    if matching.is_empty() {
-                                        continue;
-                                    }
-                                    ui.collapsing(
-                                        RichText::new(format!("{label} ({})", matching.len()))
-                                            .color(color),
-                                        |ui| {
-                                            for file in matching {
-                                                let replaced = if file.overwritten {
-                                                    " [replaced]"
-                                                } else {
-                                                    ""
-                                                };
-                                                let output = file
-                                                    .output
-                                                    .as_ref()
-                                                    .map(|path| format!(" -> {}", path.display()))
-                                                    .unwrap_or_default();
-                                                ui.label(
-                                                    RichText::new(format!(
-                                                        "{}{}{} — {}",
-                                                        file.source, output, replaced, file.detail
-                                                    ))
-                                                    .small()
-                                                    .color(color),
-                                                );
-                                            }
-                                        },
-                                    );
-                                }
-                                if !report.ignored_files.is_empty() {
-                                    ui.collapsing(
-                                        format!("Ignored non-tag files ({})", report.ignored_files.len()),
-                                        |ui| {
-                                            for path in &report.ignored_files {
-                                                ui.label(RichText::new(path).monospace().small());
-                                            }
-                                        },
-                                    );
-                                }
-                            });
+                        draw_folder_import_report(ui, report);
                     }
+
                     if let Some(error) = dialog.error.as_ref() {
                         ui.add_space(6.0);
                         ui.label(RichText::new(error).color(material_delete_text()));
                     }
-                    ui.add_space(8.0);
-                    ui.with_layout(
-                        egui::Layout::right_to_left(egui::Align::Center),
-                        |ui| {
-                            if ui
-                                .add_enabled(
-                                    !dialog.running && dialog.destination_parent.is_some(),
-                                    egui::Button::new("Convert Folder"),
-                                )
-                                .clicked()
-                            {
-                                start = true;
-                            }
-                        },
-                    );
                 });
         }
-        if choose_destination {
-            self.choose_folder_conversion_destination();
+
+        match action {
+            Some(ImportDialogAction::Resolve) => self.resolve_import_source(),
+            Some(ImportDialogAction::BrowseFile) => self.choose_import_source_file(),
+            Some(ImportDialogAction::BrowseFolder) => self.choose_import_source_folder(),
+            Some(ImportDialogAction::InvalidateAnalysis) => {
+                if let Some(dialog) = self.tag_import_dialog.as_mut() {
+                    dialog.draft = None;
+                    dialog.draft_stamp = None;
+                    dialog.written = None;
+                    dialog.error = None;
+                }
+            }
+            Some(ImportDialogAction::Import) => self.begin_tag_import(),
+            None => {}
         }
-        if start {
-            self.begin_folder_conversion();
-        }
+        // A running import owns the dialog: closing it would orphan the progress
+        // and the report of a job that is still writing files.
         if !open && !running {
-            self.folder_conversion_dialog = None;
+            self.tag_import_dialog = None;
         }
     }
 
@@ -3634,11 +3629,110 @@ mod mod_export_tests {
     }
 }
 
+/// What a folder import actually wrote, grouped by how much can be claimed for
+/// it.
+///
+/// The three buckets are not severity levels — a generated layout is a written,
+/// readable tag whose fit with the native editing kit is simply unproven. Saying
+/// so is the point; folding it in with the successes would overstate the result,
+/// and folding it in with the failures would understate it.
+fn draw_folder_import_report(ui: &mut Ui, report: &FolderConversionReport) {
+    ui.label(
+        RichText::new(format!(
+            "Imported {} tag(s): {} native-layout, {} generated-layout. {} failed, {} ignored.",
+            report.converted_count(),
+            report.native_count(),
+            report.generated_count(),
+            report.failed_count(),
+            report.ignored_files.len()
+        ))
+        .strong(),
+    );
+    ui.label(
+        RichText::new(format!(
+            "{} ({}) -> {}",
+            report.source_root.display(),
+            report.source_game,
+            report.destination_root.display()
+        ))
+        .monospace()
+        .small()
+        .color(subtle_dark()),
+    );
+    ui.label(
+        RichText::new(format!("Target profile: {}", report.target_game))
+            .small()
+            .color(subtle_dark()),
+    );
+    egui::ScrollArea::vertical()
+        .id_salt("tag_import_results")
+        .max_height(320.0)
+        .show(ui, |ui| {
+            for wanted in [
+                FolderConversionFileStatus::NativeLayout,
+                FolderConversionFileStatus::GeneratedLayout,
+                FolderConversionFileStatus::Failed,
+            ] {
+                let (label, color) = match wanted {
+                    FolderConversionFileStatus::NativeLayout => {
+                        ("Native-layout verified", text_dark())
+                    }
+                    FolderConversionFileStatus::GeneratedLayout => (
+                        "Generated layout — native compatibility unverified",
+                        Color32::from_rgb(242, 196, 48),
+                    ),
+                    FolderConversionFileStatus::Failed => {
+                        ("Failed / skipped", material_delete_text())
+                    }
+                };
+                let matching = report
+                    .files
+                    .iter()
+                    .filter(|file| file.status == wanted)
+                    .collect::<Vec<_>>();
+                if matching.is_empty() {
+                    continue;
+                }
+                ui.collapsing(
+                    RichText::new(format!("{label} ({})", matching.len())).color(color),
+                    |ui| {
+                        for file in matching {
+                            let replaced = if file.overwritten { " [replaced]" } else { "" };
+                            let output = file
+                                .output
+                                .as_ref()
+                                .map(|path| format!(" -> {}", path.display()))
+                                .unwrap_or_default();
+                            ui.label(
+                                RichText::new(format!(
+                                    "{}{}{} — {}",
+                                    file.source, output, replaced, file.detail
+                                ))
+                                .small()
+                                .color(color),
+                            );
+                        }
+                    },
+                );
+            }
+            if !report.ignored_files.is_empty() {
+                ui.collapsing(
+                    format!("Ignored non-tag files ({})", report.ignored_files.len()),
+                    |ui| {
+                        for path in &report.ignored_files {
+                            ui.label(RichText::new(path).monospace().small());
+                        }
+                    },
+                );
+            }
+        });
+}
+
 /// The conversion summary and issue list.
 ///
-/// Shared by the "Save Tag for Another Game" window and the import dialog: both
-/// answer the same question — what will this conversion cost — and two copies
-/// would drift.
+/// Shared by the single-tag import preview and the Campaign Evolved import
+/// dialog: both answer the same question — what will this conversion cost — and
+/// two copies would drift.
 fn draw_conversion_report(ui: &mut Ui, report: &TagConversionReport, salt: &str) {
     egui::Grid::new(format!("{salt}_summary"))
         .num_columns(2)

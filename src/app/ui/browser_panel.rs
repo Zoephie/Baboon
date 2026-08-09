@@ -327,7 +327,6 @@ impl Baboon {
                                         sort,
                                         folders_before_tags,
                                         favorite_context,
-                                        self.expert_mode,
                                     )
                                 } else {
                                     draw_tree(

@@ -113,13 +113,34 @@ fn adding_campaign_evolved_left_the_editing_kit_games_alone() {
 /// an error rather than a tag stamped with someone else's.
 #[test]
 fn a_game_with_no_known_generation_is_still_rejected() {
-    for game in ["haloce_mcc", "halo2_mcc", "", "haloce_evolved_x"] {
+    for game in ["", "haloce_evolved_x", "halo5", "haloce"] {
         let mut tag = TagFile::new(definition("cinematic_scene")).expect("any tag will do");
         assert!(
             apply_editing_kit_mcc_header(&mut tag, game).is_err(),
             "{game:?} should have no known tag-header defaults"
         );
         assert_eq!(tag.header.build_version, 0, "{game:?} was stamped anyway");
+    }
+}
+
+/// The classic profiles are a deliberate no-op, not an error.
+///
+/// Halo CE and Halo 2 tags have no MCC generation: `write_classic_tag` copies the
+/// original 64-byte header through and patches only the checksum, so those three
+/// fields are not part of the format. Returning an error here would make every
+/// classic conversion fail; stamping them would corrupt the header the kit reads.
+/// The contract is "leave it alone, and say that went fine".
+#[test]
+fn a_classic_profile_is_left_unstamped_without_failing() {
+    for game in ["haloce_mcc", "halo2_mcc"] {
+        let mut tag = TagFile::new(definition("cinematic_scene")).expect("any tag will do");
+        assert!(
+            apply_editing_kit_mcc_header(&mut tag, game).is_ok(),
+            "{game:?} should be a no-op, not an error"
+        );
+        assert_eq!(tag.header.build_version, 0, "{game:?} was stamped anyway");
+        assert_eq!(tag.header.build_number, 0, "{game:?} was stamped anyway");
+        assert_eq!(tag.header.version, 0, "{game:?} was stamped anyway");
     }
 }
 

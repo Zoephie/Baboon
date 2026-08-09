@@ -111,6 +111,8 @@ mod material;
 use material::*;
 mod conversion;
 use conversion::*;
+mod import;
+use import::*;
 mod model_preview;
 use model_preview::*;
 mod map_names;
@@ -167,8 +169,15 @@ pub struct Baboon {
     active: usize,
     /// Monotonic [`KitId`] allocator; ids are never reused.
     next_kit_id: u64,
-    tag_conversion_dialog: Option<TagConversionDialog>,
-    folder_conversion_dialog: Option<FolderConversionDialog>,
+    /// Import Tags: pull loose tags from another game's kit into the active
+    /// one. One dialog for both a single tag and a whole folder — which of the
+    /// two it is follows from the path, not from a mode the user has to pick.
+    tag_import_dialog: Option<TagImportDialog>,
+    /// The last import's index of native layout templates, kept for the next
+    /// one. Building it walks the destination kit's whole tag tree — about a
+    /// second for a real kit — and the result depends only on which kit it is,
+    /// so paying that once per session beats paying it once per tag.
+    native_template_cache: Option<NativeTemplateCache>,
     /// Modeless find-in-tag dialog and its exact occurrence list.
     find: FindDialogState,
     /// Browser view a newly opened workspace starts in. The live setting is
@@ -467,8 +476,8 @@ impl Baboon {
             kit_tree: egui_tiles::Tree::empty(egui::Id::new("kit_tree")),
             active: 0,
             next_kit_id: 1,
-            tag_conversion_dialog: None,
-            folder_conversion_dialog: None,
+            tag_import_dialog: None,
+            native_template_cache: None,
             find: FindDialogState::default(),
             default_browser_mode: prefs.browser_mode,
             default_browser_sort: prefs.browser_sort,
