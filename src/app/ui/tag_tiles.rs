@@ -25,6 +25,10 @@ struct TagPaneBehavior<'a> {
     /// Deferred tab context-menu choices, applied after the tree is drawn for
     /// the same reason closes are: they mutate the layout or the open set.
     reveal: Option<String>,
+    /// Show the tab's tag in File Explorer. The browser's tag menu already
+    /// offers this; a tab is the other place a tag is "the one you have", and
+    /// reaching it through Reveal in browser first is a detour.
+    reveal_in_explorer: Option<String>,
     discard: Option<String>,
     /// Tag to expand or collapse throughout, and which of the two.
     expand: Option<(String, bool)>,
@@ -142,6 +146,10 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         button_response.context_menu(|ui| {
             if ui.button("Reveal in browser").clicked() {
                 self.reveal = Some(key.clone());
+                ui.close_menu();
+            }
+            if ui.button("Open with File Explorer").clicked() {
+                self.reveal_in_explorer = Some(key.clone());
                 ui.close_menu();
             }
             ui.separator();
@@ -385,6 +393,7 @@ impl Baboon {
             close_requests: Vec::new(),
             focused: None,
             reveal: None,
+            reveal_in_explorer: None,
             discard: None,
             expand: None,
             close_all: false,
@@ -394,6 +403,7 @@ impl Baboon {
         let close_requests = std::mem::take(&mut behavior.close_requests);
         let focused = behavior.focused.take();
         let reveal = behavior.reveal.take();
+        let reveal_in_explorer = behavior.reveal_in_explorer.take();
         let discard = behavior.discard.take();
         let expand = behavior.expand.take();
         let close_all = behavior.close_all;
@@ -416,11 +426,19 @@ impl Baboon {
         // immediately, which is what closing a tab with nothing unsaved does.
         // Without this, closing a tab in an unfocused pane of a split closes it
         // in the other game.
-        if reveal.is_some() || close_all || close_all_but.is_some() || !close_requests.is_empty() {
+        if reveal.is_some()
+            || reveal_in_explorer.is_some()
+            || close_all
+            || close_all_but.is_some()
+            || !close_requests.is_empty()
+        {
             self.active = kit_index;
         }
         if let Some(key) = reveal {
             self.reveal_in_browser(&key);
+        }
+        if let Some(key) = reveal_in_explorer {
+            self.open_entry_in_explorer(&key);
         }
         if let Some(key) = discard {
             self.discard_tag_changes(kit_index, &key, ctx);

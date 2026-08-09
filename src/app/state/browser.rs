@@ -17,6 +17,9 @@ pub(in crate::app) enum BrowserAction {
     /// from another game's kit lands here. Carries no label: the destination is
     /// the folder's path, and the source's own name supplies the leaf.
     ImportTagsIntoLooseFolder { rel_path: PathBuf, },
+    /// Show this loose folder in File Explorer. Loose only: a container folder
+    /// is a path inside a pak, with no directory to open.
+    OpenLooseFolderInExplorer { rel_path: PathBuf, },
     ExtractRaw(String),
     ExtractBitmap(String),
     ExtractBitmapFolder(Vec<String>),

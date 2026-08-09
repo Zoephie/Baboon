@@ -486,6 +486,16 @@ pub(in crate::app) fn draw_tree_node_lazy(
             });
             ui.close_menu();
         }
+        context_menu_separator(ui);
+        // The same action the tag menu offers, aimed at the folder rather than a
+        // file in it. A browser folder maps straight onto a directory under the
+        // tags root, so there is nothing to resolve beyond joining the two.
+        if context_menu_button(ui, "Open with File Explorer").clicked() {
+            clicked = Some(BrowserAction::OpenLooseFolderInExplorer {
+                rel_path: node.rel_path.clone(),
+            });
+            ui.close_menu();
+        }
         ui.separator();
         if ui.button("Dump folder to JSON...").clicked() {
             clicked = Some(BrowserAction::DumpLooseFolderJson {

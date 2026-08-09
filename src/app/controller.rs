@@ -3470,6 +3470,9 @@ impl Baboon {
             BrowserAction::ImportTagsIntoLooseFolder { rel_path } => {
                 self.open_tag_import_dialog(Some(rel_path.to_string_lossy().into_owned()))
             }
+            BrowserAction::OpenLooseFolderInExplorer { rel_path } => {
+                self.open_loose_folder_in_explorer(&rel_path)
+            }
             BrowserAction::ExtractRaw(key) => self.begin_extract_raw(key, ctx),
             BrowserAction::ExtractBitmap(key) => self.begin_extract_bitmap(key, ctx),
             BrowserAction::ExtractBitmapFolder(keys) => self.begin_extract_bitmap_folder(keys, ctx),
@@ -3585,6 +3588,20 @@ impl Baboon {
 
     fn loaded_data_root(&self) -> Option<PathBuf> {
         Some(self.editing_kit_root()?.join("data"))
+    }
+
+    /// Show a browser folder in File Explorer.
+    ///
+    /// `rel_path` is the browser's own path for the node, which for a loose kit
+    /// is the directory's path under the tags root — so the only work is joining
+    /// the two. A kit that is not a loose folder has no directory to open, and
+    /// says so rather than opening the wrong thing.
+    pub(super) fn open_loose_folder_in_explorer(&mut self, rel_path: &Path) {
+        let Some(root) = self.loaded_tags_root() else {
+            self.status = "This workspace has no tags folder on disk".to_owned();
+            return;
+        };
+        self.open_folder_in_explorer(root.join(rel_path), "Tag");
     }
 
     pub(super) fn open_folder_in_explorer(&mut self, path: PathBuf, label: &str) {
