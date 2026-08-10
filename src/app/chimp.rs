@@ -2581,17 +2581,11 @@ impl Baboon {
             Ok(world) => {
                 let packages = world.packages().len();
                 let files = world.pak_files().len();
-                let diagnostics = world.diagnostics().len();
                 self.kits[index].chimp.mount = ChimpMount::Ready(world.clone());
                 self.kits[index].chimp.type_indexing = true;
                 self.kits[index].chimp.package_types.clear();
-                self.status = if diagnostics == 0 {
-                    format!("Chimp indexed {packages} Unreal packages and {files} pak files")
-                } else {
-                    format!(
-                        "Chimp indexed {packages} Unreal packages and {files} pak files with {diagnostics} container warning(s)"
-                    )
-                };
+                self.status =
+                    format!("Chimp indexed {packages} Unreal packages and {files} pak files");
                 self.restore_chimp_recovery(index, &world);
                 self.finish_pending_chimp_session_restore(index, ctx);
             }
@@ -3160,22 +3154,11 @@ impl Baboon {
             }
         };
         self.kits[kit_index].chimp.refresh_filter(&world);
-        if !world.diagnostics().is_empty() {
-            egui::CollapsingHeader::new(format!(
-                "{} container warning(s)",
-                world.diagnostics().len()
-            ))
-            .id_salt(("chimp_diagnostics", self.kits[kit_index].id.0))
-            .show(ui, |ui| {
-                for diagnostic in world.diagnostics() {
-                    ui.colored_label(
-                        Color32::from_rgb(210, 150, 70),
-                        diagnostic.path.display().to_string(),
-                    );
-                    ui.label(&diagnostic.message);
-                }
-            });
-        }
+        // Container diagnostics are not surfaced here. A mount routinely skips
+        // archives that carry nothing Chimp reads, and reporting that above the
+        // browser on every view described the mount rather than anything the
+        // reader can act on. The Archives tab still lists what it could not
+        // open, which is where that question is actually being asked.
         if self.kits[kit_index].chimp.browser == ChimpBrowser::Archives {
             self.draw_chimp_archives(ui, &world, kit_index);
             return;
