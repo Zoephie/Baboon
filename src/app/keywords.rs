@@ -68,6 +68,30 @@ impl KeywordStore {
         }
     }
 
+    /// Carry a tag's keywords to its new key after a rename.
+    ///
+    /// The sidecar outlives the session, so a rename that skipped this would
+    /// leave the keywords filed under a key nothing resolves any more — the tag
+    /// would silently lose them, and keyword browsing would list a path that no
+    /// longer exists. Any keywords already at `new_key` are merged rather than
+    /// replaced, because the destination may be a path that was in use before.
+    pub(super) fn rekey_tag(&mut self, old_key: &str, new_key: &str) {
+        if old_key == new_key {
+            return;
+        }
+        let Some(moved) = self.by_tag.remove(old_key) else {
+            return;
+        };
+        let list = self.by_tag.entry(new_key.to_owned()).or_default();
+        for keyword in moved {
+            if !list.iter().any(|existing| existing == &keyword) {
+                list.push(keyword);
+            }
+        }
+        list.sort();
+        self.dirty = true;
+    }
+
     /// All keywords with how many tags carry each, sorted by name.
     pub(super) fn all_keywords(&self) -> Vec<(String, usize)> {
         let mut counts: BTreeMap<String, usize> = BTreeMap::new();

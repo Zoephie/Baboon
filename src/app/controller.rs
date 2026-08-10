@@ -44,6 +44,7 @@ mod container_folders;
 mod delete;
 mod duplicate;
 use duplicate::resolve_source_uasset;
+mod rename_in_place;
 
 const TERMINAL_VISIBLE_LINE_LIMIT: usize = 20_000;
 const TERMINAL_VISIBLE_LINE_TRIM_TARGET: usize = 18_000;
