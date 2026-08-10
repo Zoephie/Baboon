@@ -400,15 +400,35 @@ impl Baboon {
                                 .small(),
                             );
                         }
-                        if draft.native_layout_template.is_none() {
-                            ui.label(
-                                RichText::new(
-                                    "Built from a generated layout — native editing-kit \
-                                     compatibility is unverified",
-                                )
-                                .color(Color32::from_rgb(242, 196, 48))
-                                .small(),
-                            );
+                        match draft.native_layout_template.as_ref() {
+                            None => {
+                                ui.label(
+                                    RichText::new(
+                                        "Built from a generated layout — native editing-kit \
+                                         compatibility is unverified",
+                                    )
+                                    .color(Color32::from_rgb(242, 196, 48))
+                                    .small(),
+                                );
+                            }
+                            // Named, not just counted. A kit ships one group at
+                            // several layout revisions, so this is the single
+                            // fact that explains why the same import can behave
+                            // differently on someone else's copy of the kit —
+                            // and it is a line two people can compare.
+                            Some(template) => {
+                                let shown = template
+                                    .strip_prefix(&dialog.target_tags_root)
+                                    .unwrap_or(template);
+                                ui.label(
+                                    RichText::new(format!(
+                                        "Started from the kit's {}",
+                                        shown.display()
+                                    ))
+                                    .color(subtle_dark())
+                                    .small(),
+                                );
+                            }
                         }
                         draw_conversion_report(ui, &draft.report, "tag_import");
                     }

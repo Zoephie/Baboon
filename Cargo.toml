@@ -18,10 +18,12 @@
 # rebuilt package is no longer the one it replaces — that second one is an
 # independent bug fix and worth offering upstream on its own.
 #
-# One is conversion, and is worth offering upstream on its own too: naming a
+# Two are conversion, and are worth offering upstream on their own too: naming a
 # converted tag after the class it *became* rather than the one it was, which is
 # why a folder import refused a contrail_system into Halo 4 that imported fine
-# one tag at a time.
+# one tag at a time; and seeding a conversion from the layout revision the
+# target's definition declares, so two people with different copies of the same
+# editing kit stop getting different tags out of the same import.
 #
 # The rest are in-place rename: the general package primitive, the tag wrapper
 # over it, and two defects the round-trip found — a container header reading its
@@ -48,7 +50,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 atomic-write-file = "0.3"
-blam-tags = { git = "https://github.com/Zoephie/blam-tags", rev = "97cf34f", features = ["audio", "iostore"] }
+blam-tags = { git = "https://github.com/Zoephie/blam-tags", rev = "7ebd8ae", features = ["audio", "iostore"] }
 directories = "6"
 display-info = "0.5"
 eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }
