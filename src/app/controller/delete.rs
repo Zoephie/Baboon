@@ -136,6 +136,40 @@ pub(in crate::app) fn container_appended_thresholds(
         .collect()
 }
 
+/// What the ledger says about one container path: a target, a refusal, or
+/// nothing recorded at all.
+///
+/// Split out of the mount because this is the decision that actually protects
+/// the game's files, and it rests on nothing but Baboon's own record — which is
+/// also what makes it answerable without a container mounted.
+///
+/// The refusal exists because provenance and authorship stopped being the same
+/// question once a tag could be renamed in place. Both a copy Baboon made and a
+/// shipped tag Baboon moved have chunks Baboon appended, so both sit past the
+/// appended-chunk line; the line proves the *chunks* are Baboon's, and says
+/// nothing about whether the *tag* is. Only this record can tell them apart, and
+/// a renamed shipped tag has no other copy to lose.
+fn ledger_delete_verdict(
+    ledger: &CreatedTagLedger,
+    utoc_path: &Path,
+    rel_path: &str,
+) -> Option<Result<ContainerDeleteTarget, String>> {
+    let record = ledger.find(utoc_path, rel_path)?;
+    if record.origin == CreatedTagOrigin::RenamedFromShipped {
+        return Some(Err(
+            "This tag was renamed from one the game ships; deleting it would \
+                         remove the game's own content"
+                .to_owned(),
+        ));
+    }
+    Some(Ok(ContainerDeleteTarget {
+        package_path: record.package_path.clone(),
+        uasset_path: record.uasset_path.clone(),
+        ubulk_path: record.ubulk_path.clone(),
+        minimum_appended_index: Some(record.container_entry_count_before),
+    }))
+}
+
 /// Resolve a container tag for deletion, or say why it cannot be.
 ///
 /// Provenance comes from either of two independent records, both Baboon's own:
@@ -155,13 +189,10 @@ pub(in crate::app) fn resolve_container_delete_target(
     let target = containers
         .get(container)
         .ok_or("This tag's container is no longer mounted")?;
-    if let Some(record) = ledger.find(&target.utoc_path, rel_path) {
-        return Ok(ContainerDeleteTarget {
-            package_path: record.package_path.clone(),
-            uasset_path: record.uasset_path.clone(),
-            ubulk_path: record.ubulk_path.clone(),
-            minimum_appended_index: Some(record.container_entry_count_before),
-        });
+    // The ledger is consulted first, and is allowed to answer *both* ways,
+    // precisely so the threshold below can never re-authorise what it refused.
+    if let Some(verdict) = ledger_delete_verdict(ledger, &target.utoc_path, rel_path) {
+        return verdict;
     }
     let threshold = thresholds
         .get(container)
@@ -690,9 +721,8 @@ fn run_container_delete(
 mod tests {
     use super::*;
 
-    fn ledger_with(utoc: &str, ubulk: &str) -> CreatedTagLedger {
-        let mut ledger = CreatedTagLedger::default();
-        ledger.record(CreatedTagRecord {
+    fn record_at(utoc: &str, ubulk: &str) -> CreatedTagRecord {
+        CreatedTagRecord {
             utoc_path: utoc.to_owned(),
             chunk_label: "pakchunk240-WinGDK".to_owned(),
             package_path: "/Game/Tags/objects/copy-biped".to_owned(),
@@ -703,8 +733,14 @@ mod tests {
             group_tag: 0,
             source_display: "objects/original.biped".to_owned(),
             container_entry_count_before: 12,
+            origin: CreatedTagOrigin::Authored,
             created_unix_secs: 1,
-        });
+        }
+    }
+
+    fn ledger_with(utoc: &str, ubulk: &str) -> CreatedTagLedger {
+        let mut ledger = CreatedTagLedger::default();
+        ledger.record(record_at(utoc, ubulk));
         ledger
     }
 
@@ -731,6 +767,62 @@ mod tests {
         // against, so nothing is deletable.
         assert!(delete_eligibility(&container_entry(0, ubulk), &[], &[], &ledger).is_err());
         assert!(delete_eligibility(&container_entry(0, ubulk), &[], &[], &empty).is_err());
+    }
+
+    /// The hole this closes. A renamed tag's chunks are appended like any
+    /// other, so the appended-chunk threshold reads them as Baboon's and would
+    /// authorise the delete — of a tag the game shipped, which has no other
+    /// copy. The ledger has to answer *no*, not merely fail to answer.
+    #[test]
+    fn a_renamed_shipped_tag_is_refused_even_though_its_chunks_were_appended() {
+        let utoc = Path::new("C:/Game/Paks/pakchunk0-WinGDK.utoc");
+        let ubulk = "Meteorite/Content/Tags/objects/renamed-biped.ubulk";
+        let mut ledger = CreatedTagLedger::default();
+        ledger.record_rename(
+            "Meteorite/Content/Tags/objects/shipped-biped.ubulk",
+            CreatedTagRecord {
+                utoc_path: utoc.display().to_string(),
+                ubulk_path: ubulk.to_owned(),
+                ..record_at(utoc.to_str().unwrap(), ubulk)
+            },
+        );
+
+        let verdict = ledger_delete_verdict(&ledger, utoc, ubulk)
+            .expect("the rename is recorded, so the ledger has an answer");
+        let error = verdict.expect_err("and the answer is no");
+        assert!(error.contains("the game ships"), "{error}");
+    }
+
+    /// The other half of the same call: a copy Baboon made stays deletable
+    /// after being renamed, because the origin follows the tag rather than
+    /// being re-derived from where its chunks now sit.
+    #[test]
+    fn a_renamed_copy_is_still_deletable() {
+        let utoc = Path::new("C:/Game/Paks/pakchunk240-WinGDK.utoc");
+        let old = "Meteorite/Content/Tags/objects/copy-biped.ubulk";
+        let new = "Meteorite/Content/Tags/objects/moved-biped.ubulk";
+        let mut ledger = ledger_with(utoc.to_str().unwrap(), old);
+        ledger.record_rename(
+            old,
+            CreatedTagRecord {
+                ubulk_path: new.to_owned(),
+                ..record_at(utoc.to_str().unwrap(), new)
+            },
+        );
+
+        assert!(
+            ledger_delete_verdict(&ledger, utoc, old).is_none(),
+            "nothing is at the old path any more"
+        );
+        let target = ledger_delete_verdict(&ledger, utoc, new)
+            .expect("the copy is recorded at its new path")
+            .expect("and it is still Baboon's to delete");
+        assert_eq!(target.ubulk_path, new);
+        assert_eq!(
+            target.minimum_appended_index,
+            Some(12),
+            "the original provenance line is carried, not re-guessed"
+        );
     }
 
     #[test]

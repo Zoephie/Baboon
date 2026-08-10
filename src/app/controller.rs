@@ -39,7 +39,7 @@ mod container_write;
 pub(in crate::app) use container_write::*;
 mod created_tags;
 use created_tags::package_id_for;
-pub(super) use created_tags::{CreatedTagLedger, CreatedTagRecord};
+pub(super) use created_tags::{CreatedTagLedger, CreatedTagOrigin, CreatedTagRecord};
 mod container_folders;
 mod delete;
 mod duplicate;

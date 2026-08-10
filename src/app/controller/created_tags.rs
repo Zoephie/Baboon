@@ -24,6 +24,31 @@ const DUPLICATE_BACKUP_SUFFIX: &str = ".baboon-duplicate-backup";
 /// `-==--==--==--==-`, the IoStore TOC magic.
 const TOC_MAGIC: &[u8; 16] = b"-==--==--==--==-";
 
+/// Why a container tag is in this ledger — which decides whether deleting it
+/// would destroy something the game shipped.
+///
+/// Being in the ledger used to mean exactly one thing, so the question never
+/// arose. Renaming in place breaks that: a renamed tag's chunks are appended
+/// like any other, and the chunk-index threshold that stands in for provenance
+/// cannot tell a copy Baboon made from a shipped tag Baboon moved. Both sit past
+/// the line. Only this field can separate them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub(in crate::app) enum CreatedTagOrigin {
+    /// Baboon put this content in the container — a duplicate, or a tag created
+    /// from scratch. Deleting it removes only what Baboon added.
+    ///
+    /// The default, so every row written before this field existed reads as what
+    /// it actually was: at the time, a duplicate was the only thing the ledger
+    /// could hold.
+    #[default]
+    Authored,
+    /// The chunks are Baboon's, but the tag is not: one the game ships was
+    /// renamed, so its payload was re-emitted at a new path and the original
+    /// retired. There is no other copy of it, and deleting it would be
+    /// destroying shipped content through a path built to protect it.
+    RenamedFromShipped,
+}
+
 /// One tag Baboon duplicated into a container, identified by everything needed
 /// to prove the copy on disk is still the one that was recorded.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,6 +75,14 @@ pub(in crate::app) struct CreatedTagRecord {
     /// anything, which is what keeps a delete off the game's own tags.
     #[serde(default)]
     pub(in crate::app) container_entry_count_before: u32,
+    /// Whether deleting this tag would remove content Baboon added, or content
+    /// the game shipped that Baboon merely moved. Defaulted rather than
+    /// versioned: an older file has no `origin` and every row in it predates
+    /// renaming, so `Authored` is not a fallback but the truth. An older build
+    /// reading a newer file ignores the field, which is the safe direction —
+    /// that build cannot rename, so it can never have written the other value.
+    #[serde(default)]
+    pub(in crate::app) origin: CreatedTagOrigin,
     pub(in crate::app) created_unix_secs: u64,
 }
 
@@ -113,6 +146,58 @@ impl CreatedTagLedger {
         self.tags
             .retain(|existing| !existing.addresses(&utoc, &record.ubulk_path));
         self.tags.push(record);
+    }
+
+    /// Re-file a record after its tag was renamed inside the container.
+    ///
+    /// `moved` says where the tag is now. Its `origin` is *ignored*, and the
+    /// answer decided here instead, from whether the old path was already in the
+    /// ledger — because the caller is the one place that must not be trusted to
+    /// get it right, and both ways of getting it wrong are bad. A tag Baboon
+    /// authored that lost its record becomes undeletable; a tag the game ships
+    /// that gains an `Authored` one becomes deletable, which is the invariant
+    /// the whole ledger exists to hold.
+    ///
+    /// A tag keeps `Authored` across any number of renames, and one that started
+    /// as shipped never launders itself back — including by being renamed to a
+    /// path some earlier copy once used, since any record at the destination is
+    /// dropped rather than inherited.
+    pub(in crate::app) fn record_rename(&mut self, old_ubulk_path: &str, moved: CreatedTagRecord) {
+        let utoc = PathBuf::from(&moved.utoc_path);
+        let previous = self
+            .tags
+            .iter()
+            .find(|existing| existing.addresses(&utoc, old_ubulk_path))
+            .cloned();
+        let moved = CreatedTagRecord {
+            origin: previous
+                .as_ref()
+                .map_or(CreatedTagOrigin::RenamedFromShipped, |previous| {
+                    previous.origin
+                }),
+            // Carried from the record being replaced rather than taken from the
+            // caller: the renamed chunks were appended later still, so the line
+            // already recorded stays true and stays the conservative one.
+            container_entry_count_before: previous
+                .as_ref()
+                .map_or(moved.container_entry_count_before, |previous| {
+                    previous.container_entry_count_before
+                }),
+            created_unix_secs: previous
+                .as_ref()
+                .map_or(moved.created_unix_secs, |previous| {
+                    previous.created_unix_secs
+                }),
+            source_display: previous.as_ref().map_or(moved.source_display, |previous| {
+                previous.source_display.clone()
+            }),
+            ..moved
+        };
+        self.tags.retain(|existing| {
+            !existing.addresses(&utoc, old_ubulk_path)
+                && !existing.addresses(&utoc, &moved.ubulk_path)
+        });
+        self.tags.push(moved);
     }
 
     /// Drop the record for one copy. Returns whether anything was recorded.
@@ -200,6 +285,7 @@ mod tests {
             group_tag: 0,
             source_display: "objects/original.biped".to_owned(),
             container_entry_count_before: 4,
+            origin: CreatedTagOrigin::Authored,
             created_unix_secs: 1,
         }
     }
@@ -233,6 +319,118 @@ mod tests {
                 .is_none(),
             "the same relative path in another install is a different tag"
         );
+    }
+
+    const UTOC: &str = "C:/Game/Paks/pakchunk240-WinGDK.utoc";
+
+    fn renamed_to(ubulk: &str) -> CreatedTagRecord {
+        CreatedTagRecord {
+            // Deliberately the wrong answer, to prove the caller is not the one
+            // deciding: `record_rename` overwrites this from the ledger.
+            origin: CreatedTagOrigin::Authored,
+            ..record(UTOC, ubulk)
+        }
+    }
+
+    /// A tag the game ships has no ledger record, so the rename is the first
+    /// thing the ledger ever hears about it — and it must not conclude from the
+    /// silence that Baboon authored it.
+    #[test]
+    fn renaming_a_tag_the_ledger_never_knew_marks_it_as_shipped() {
+        let mut ledger = CreatedTagLedger::default();
+        let new = "Meteorite/Content/Tags/objects/renamed-biped.ubulk";
+        ledger.record_rename(
+            "Meteorite/Content/Tags/objects/shipped-biped.ubulk",
+            renamed_to(new),
+        );
+
+        let record = ledger.find(Path::new(UTOC), new).expect("recorded");
+        assert_eq!(record.origin, CreatedTagOrigin::RenamedFromShipped);
+    }
+
+    /// And the converse: a copy Baboon made keeps its authorship across the
+    /// move, along with the provenance line the delete path checks.
+    #[test]
+    fn renaming_a_copy_carries_its_authorship_and_its_provenance_line() {
+        let mut ledger = CreatedTagLedger::default();
+        let old = "Meteorite/Content/Tags/objects/copy-biped.ubulk";
+        let new = "Meteorite/Content/Tags/objects/moved-biped.ubulk";
+        ledger.record(record(UTOC, old));
+        ledger.record_rename(
+            old,
+            CreatedTagRecord {
+                container_entry_count_before: 9999,
+                ..renamed_to(new)
+            },
+        );
+
+        assert!(ledger.find(Path::new(UTOC), old).is_none());
+        let record = ledger.find(Path::new(UTOC), new).expect("recorded");
+        assert_eq!(record.origin, CreatedTagOrigin::Authored);
+        assert_eq!(
+            record.container_entry_count_before, 4,
+            "the line already recorded is the conservative one and is kept"
+        );
+        assert_eq!(ledger.tags.len(), 1);
+    }
+
+    /// Renaming twice must not launder a shipped tag into an authored one, and
+    /// a stale record sitting at the destination must not be inherited either —
+    /// that is the same laundering with an extra step.
+    #[test]
+    fn a_shipped_tag_stays_shipped_however_far_it_is_moved() {
+        let mut ledger = CreatedTagLedger::default();
+        let first = "Meteorite/Content/Tags/objects/once-biped.ubulk";
+        let second = "Meteorite/Content/Tags/objects/twice-biped.ubulk";
+        // A copy Baboon made once lived where the shipped tag is about to land.
+        ledger.record(record(UTOC, second));
+        ledger.record_rename(
+            "Meteorite/Content/Tags/objects/shipped-biped.ubulk",
+            renamed_to(first),
+        );
+        ledger.record_rename(first, renamed_to(second));
+
+        let record = ledger.find(Path::new(UTOC), second).expect("recorded");
+        assert_eq!(
+            record.origin,
+            CreatedTagOrigin::RenamedFromShipped,
+            "the record already at the destination is dropped, not inherited"
+        );
+        assert_eq!(ledger.tags.len(), 1);
+    }
+
+    /// Every row written before this field existed was a duplicate, because a
+    /// duplicate was the only thing the ledger could hold. `Authored` is the
+    /// truth about those rows rather than a fallback — and it has to survive
+    /// reading a file that predates the field, or every existing copy silently
+    /// stops being deletable.
+    #[test]
+    fn a_ledger_file_with_no_origin_reads_as_authored() {
+        let legacy = serde_json::json!({
+            "version": 1,
+            "tags": [{
+                "utoc_path": UTOC,
+                "chunk_label": "pakchunk240-WinGDK",
+                "package_path": "/Game/Tags/objects/copy-biped",
+                "package_id": 7,
+                "uasset_path": "Meteorite/Content/Tags/objects/copy-biped.uasset",
+                "ubulk_path": "Meteorite/Content/Tags/objects/copy-biped.ubulk",
+                "display_path": "objects/copy.biped",
+                "group_tag": 0,
+                "source_display": "objects/original.biped",
+                "container_entry_count_before": 4,
+                "created_unix_secs": 1
+            }]
+        });
+        let ledger: CreatedTagLedger =
+            serde_json::from_value(legacy).expect("a pre-origin ledger still reads");
+        let record = ledger
+            .find(
+                Path::new(UTOC),
+                "Meteorite/Content/Tags/objects/copy-biped.ubulk",
+            )
+            .expect("the row survived");
+        assert_eq!(record.origin, CreatedTagOrigin::Authored);
     }
 
     #[test]

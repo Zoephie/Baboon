@@ -1419,6 +1419,9 @@ fn run_container_duplicate(
         group_tag: input.group_tag,
         source_display: input.source_display,
         container_entry_count_before: input.entry_count_before,
+        // A duplicate is content Baboon added, so deleting it takes away only
+        // what Baboon put there.
+        origin: CreatedTagOrigin::Authored,
         created_unix_secs: std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|elapsed| elapsed.as_secs())
