@@ -5783,9 +5783,11 @@ impl Baboon {
             self.status = "Enter a new tag name".to_owned();
             return;
         }
-        // A new tag's whole path is editable, so a separator is the move half of
-        // the operation rather than a mistake.
-        if !is_new_container && new_name.contains(['/', '\\']) {
+        // Where the whole path is editable a separator is the move half of the
+        // operation rather than a mistake. That is every tag in a pak, not just
+        // an unsaved one — the field says so, and this has to agree with it or
+        // the dialog invites a path and then refuses it.
+        if !whole_path_editable && new_name.contains(['/', '\\']) {
             self.status = "Enter a name only; use Move to choose a folder".to_owned();
             return;
         }

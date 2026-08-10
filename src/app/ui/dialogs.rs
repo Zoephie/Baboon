@@ -2756,6 +2756,10 @@ impl Baboon {
             let title = match state.operation {
                 TagNameOperation::Duplicate => "Duplicate Tag",
                 TagNameOperation::Rename if state.is_new_container => "Rename / Move New Tag",
+                // Rename and Move are one operation for a tag in a pak, and both
+                // menu items land here. Saying only "Rename" made Move look like
+                // it had opened the wrong window.
+                TagNameOperation::Rename if state.whole_path_editable => "Rename / Move Tag",
                 TagNameOperation::SaveAsOverlay if state.is_new_container => "Copy New Tag",
                 TagNameOperation::SaveAsOverlay if state.is_container => {
                     "Save Tag As (New Copy)"
