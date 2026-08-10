@@ -122,6 +122,15 @@ pub(in crate::app) struct RenameTagState {
     /// destination path is editable — this is how a new tag is moved as well as
     /// renamed. Implies `is_container`.
     pub(in crate::app) is_new_container: bool,
+    /// Whether the whole destination path is editable, or only the leaf name.
+    ///
+    /// Stored rather than derived from the two booleans above, because it is a
+    /// question about the *workflow* and those two describe *storage* — which
+    /// is the distinction this module's own note warns about keeping. It is
+    /// true for a brand-new tag, whose rename and move are one in-memory edit,
+    /// and for Move on a tag already in a pak, where the folder is precisely
+    /// the thing being changed. Those two have nothing else in common.
+    pub(in crate::app) whole_path_editable: bool,
 }
 
 /// Results of a tag query (find-references / unreferenced), shown in a floating

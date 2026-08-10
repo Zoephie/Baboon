@@ -5597,18 +5597,28 @@ impl Baboon {
     /// Open the rename/move dialog for a tag, pre-listing the tags that
     /// reference it (which will be rewritten on apply).
     pub(super) fn open_rename_tag(&mut self, key: &str) {
-        self.open_name_operation(key, TagNameOperation::Rename);
+        self.open_name_operation(key, TagNameOperation::Rename, false);
+    }
+
+    /// Move a tag that lives in a pak: the same dialog as Rename, with the
+    /// whole path open for editing rather than just the leaf.
+    ///
+    /// There is no folder to browse to inside a container, so a folder picker
+    /// would have nothing to show. A move is a rename to a different parent and
+    /// goes through the same primitive.
+    pub(super) fn open_container_move(&mut self, key: &str) {
+        self.open_name_operation(key, TagNameOperation::Rename, true);
     }
 
     pub(super) fn open_container_duplicate(&mut self, key: &str) {
-        self.open_name_operation(key, TagNameOperation::SaveAsOverlay);
+        self.open_name_operation(key, TagNameOperation::SaveAsOverlay, false);
     }
 
     pub(super) fn open_duplicate_tag(&mut self, key: &str) {
-        self.open_name_operation(key, TagNameOperation::Duplicate);
+        self.open_name_operation(key, TagNameOperation::Duplicate, false);
     }
 
-    fn open_name_operation(&mut self, key: &str, operation: TagNameOperation) {
+    fn open_name_operation(&mut self, key: &str, operation: TagNameOperation, moving: bool) {
         let Some(entry) = self.entry_for_key(key).cloned() else {
             return;
         };
@@ -5662,10 +5672,11 @@ impl Baboon {
         let duplicate_parts = duplicate::duplicate_dialog_parts(&display);
         // A new tag edits its whole path (rename and move are the same in-memory
         // operation for it); everything else edits the leaf name only.
+        let whole_path_editable = is_new_container || (moving && is_container);
         let name = match operation {
             TagNameOperation::Duplicate => duplicate_parts.prefill.clone(),
             TagNameOperation::Rename | TagNameOperation::SaveAsOverlay => {
-                if is_new_container {
+                if whole_path_editable {
                     stem.clone()
                 } else {
                     leaf
@@ -5702,6 +5713,7 @@ impl Baboon {
             referrers_unavailable,
             is_container,
             is_new_container,
+            whole_path_editable,
         });
     }
 
@@ -5723,17 +5735,25 @@ impl Baboon {
             self.status = "The workspace this rename came from is closed".to_owned();
             return;
         }
-        let Some((key, old_display, new_name_raw, operation, is_container, is_new_container)) =
-            self.rename_tag.as_ref().map(|s| {
-                (
-                    s.key.clone(),
-                    s.old_display.clone(),
-                    s.new_path_input.clone(),
-                    s.operation,
-                    s.is_container,
-                    s.is_new_container,
-                )
-            })
+        let Some((
+            key,
+            old_display,
+            new_name_raw,
+            operation,
+            is_container,
+            is_new_container,
+            whole_path_editable,
+        )) = self.rename_tag.as_ref().map(|s| {
+            (
+                s.key.clone(),
+                s.old_display.clone(),
+                s.new_path_input.clone(),
+                s.operation,
+                s.is_container,
+                s.is_new_container,
+                s.whole_path_editable,
+            )
+        })
         else {
             return;
         };
@@ -5758,7 +5778,7 @@ impl Baboon {
             self.status = "Enter a name without an extension".to_owned();
             return;
         }
-        let new_rel = if is_new_container {
+        let new_rel = if whole_path_editable {
             normalize_container_tag_rel(&new_name)
         } else {
             let parent = old_display
@@ -5857,14 +5877,24 @@ impl Baboon {
     /// Starts a filesystem refactoring transaction from a captured source snapshot.
     /// Progress and the final replacement tree are applied only through worker messages.
     pub(super) fn begin_move_tag(&mut self, key: &str) {
-        // A new tag has no file to move and no folder to browse to: its whole
-        // container-relative path is editable in the rename dialog, so Move and
-        // Rename are the same in-memory operation for it.
+        // Nothing inside a pak has a folder to browse to, so the folder picker
+        // below has nothing to show either way. Both container cases edit the
+        // whole path in the rename dialog instead: for a brand-new tag that is
+        // an in-memory edit, and for one already written it is a move inside
+        // the pak that holds it — the same primitive as a rename, since a move
+        // *is* a rename to a different parent.
         if matches!(
             self.entry_for_key(key).map(|entry| &entry.location),
             Some(TagEntryLocation::NewContainer { .. })
         ) {
             self.open_rename_tag(key);
+            return;
+        }
+        if matches!(
+            self.entry_for_key(key).map(|entry| &entry.location),
+            Some(TagEntryLocation::Container { .. })
+        ) {
+            self.open_container_move(key);
             return;
         }
         if self.folder_refactor.is_some() {

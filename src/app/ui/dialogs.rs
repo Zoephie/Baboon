@@ -2817,7 +2817,7 @@ impl Baboon {
                         });
                     } else {
                         ui.label(
-                            RichText::new(if state.is_new_container {
+                            RichText::new(if state.whole_path_editable {
                                 "New path (folders allowed; extension is fixed)"
                             } else {
                                 "New name (extension is fixed)"
@@ -2837,11 +2837,11 @@ impl Baboon {
                             );
                         });
                     }
-                    // A new tag edits its whole path, so it keeps no parent from
+                    // When the whole path is editable it keeps no parent from
                     // the old one — what is typed IS the destination.
                     let preview_parent = if state.operation == TagNameOperation::Duplicate {
                         state.fixed_parent.as_str()
-                    } else if state.is_new_container {
+                    } else if state.whole_path_editable {
                         ""
                     } else {
                         state
@@ -2983,6 +2983,9 @@ impl Baboon {
                                 }
                                 TagNameOperation::SaveAsOverlay if state.is_container => {
                                     "Write a higher-priority overlay container (base game unchanged)"
+                                }
+                                TagNameOperation::Rename if state.whole_path_editable => {
+                                    "Move this tag inside the pak that already holds it"
                                 }
                                 _ => "Move the file on disk and rewrite all references",
                             })
