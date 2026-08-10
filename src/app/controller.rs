@@ -851,6 +851,11 @@ impl Baboon {
                     lease,
                     result,
                 } => self.handle_container_duplicate_finished(stamp, lease, result, ctx),
+                WorkerMessage::ContainerRenameFinished {
+                    stamp,
+                    lease,
+                    result,
+                } => self.handle_container_rename_finished(stamp, lease, result, ctx),
                 WorkerMessage::ContainerDeleteFinished { stamp, result } => {
                     self.handle_container_delete_finished(stamp, result)
                 }
@@ -5703,7 +5708,9 @@ impl Baboon {
     /// Apply the active name operation. Duplicate is routed to its own
     /// non-destructive copy/confirmation workflow; Rename and SaveAsOverlay
     /// retain their established paths below.
-    pub(super) fn begin_rename_tag(&mut self) {
+    /// `ctx` is only needed by the in-place container route, which starts a
+    /// worker and has to ask for a repaint when it finishes.
+    pub(super) fn begin_rename_tag(&mut self, ctx: &egui::Context) {
         // Everything below resolves against the active kit's tags root or
         // container set, so return to the workspace the dialog was opened for.
         // A closed workspace drops the rename rather than moving a file in
@@ -5777,6 +5784,28 @@ impl Baboon {
                 Ok(message) => self.status = message,
                 Err(error) => self.status = error,
             }
+            return;
+        }
+
+        // A tag Baboon put in a pak is moved inside that pak, which is what
+        // "rename" ought to have meant all along. Only Baboon's own: moving one
+        // the game shipped would take it out from under everything referencing
+        // it, and the pak format cannot forward those references — see
+        // `container_rename_eligibility`. Everything else keeps the overlay
+        // route, which copies rather than moves and so breaks nothing.
+        if is_container
+            && matches!(operation, TagNameOperation::Rename)
+            && self.entry_for_key(&key).is_some_and(|entry| {
+                rename_in_place::container_rename_eligibility(
+                    entry,
+                    &self.mounted_containers().unwrap_or_default(),
+                    &self.created_tags,
+                )
+                .is_ok()
+            })
+        {
+            self.rename_tag = None;
+            self.begin_container_rename_in_place(&key, &new_rel, ctx.clone());
             return;
         }
 

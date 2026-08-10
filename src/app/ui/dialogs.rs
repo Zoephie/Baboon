@@ -2999,7 +2999,7 @@ impl Baboon {
         if do_apply {
             // begin_rename_tag clears `rename_tag` on success; on a validation
             // error it leaves the dialog open with a status message.
-            self.begin_rename_tag();
+            self.begin_rename_tag(ctx);
         }
         if cancel || !open {
             self.rename_tag = None;

@@ -26,6 +26,34 @@ pub(in crate::app) struct ContainerDuplicateResult {
     pub(in crate::app) record: CreatedTagRecord,
 }
 
+/// Completed in-place Campaign Evolved rename, ready for UI-thread rekeying.
+///
+/// Carries both halves of every path, because the UI thread has to *move* state
+/// rather than insert it: three container indices are keyed by the old path and
+/// the new one, and a rename that knew only where the tag ended up could not
+/// remove where it had been.
+pub(in crate::app) struct ContainerRenameResult {
+    pub(in crate::app) old_key: String,
+    pub(in crate::app) target_container: usize,
+    pub(in crate::app) target_utoc: PathBuf,
+    pub(in crate::app) archive: Arc<blam_tags::iostore::IoStoreArchive>,
+    /// The tag at its new path, with the key the browser will address it by.
+    pub(in crate::app) entry: TagEntry,
+    pub(in crate::app) group_tag: u32,
+    pub(in crate::app) old_package: String,
+    pub(in crate::app) new_package: String,
+    pub(in crate::app) new_uasset_path: String,
+    pub(in crate::app) old_ubulk_path: String,
+    pub(in crate::app) new_ubulk_path: String,
+    pub(in crate::app) old_display: String,
+    pub(in crate::app) target_label: String,
+    pub(in crate::app) is_mod: bool,
+    pub(in crate::app) backup: DuplicateBackupPaths,
+    /// The ledger row for the tag's new home. Its origin is decided by
+    /// `record_rename` from the row being replaced, not taken from here.
+    pub(in crate::app) record: CreatedTagRecord,
+}
+
 /// Completed in-place Campaign Evolved deletion, ready for UI-thread teardown.
 pub(in crate::app) struct ContainerDeleteResult {
     pub(in crate::app) key: String,
@@ -94,6 +122,14 @@ pub(in crate::app) enum WorkerMessage {
         /// success one.
         lease: ContainerLeaseId,
         result: Result<ContainerDuplicateResult, String>,
+    },
+    ContainerRenameFinished {
+        stamp: KitStamp,
+        /// Round-tripped through the worker exactly as the duplicate's is, so
+        /// the completion handler can put back everything the lease took on the
+        /// failure path as well as the success one.
+        lease: ContainerLeaseId,
+        result: Result<ContainerRenameResult, String>,
     },
     ContainerDeleteFinished {
         stamp: KitStamp,

@@ -79,7 +79,6 @@ fn move_request(redirect: bool) -> ContainerRenameMove<'static> {
         group_tag: GROUP,
         old_package: OLD_PACKAGE,
         new_package: NEW_PACKAGE,
-        old_uasset_path: OLD_UASSET,
         new_uasset_path: NEW_UASSET,
         old_ubulk_path: OLD_UBULK,
         new_ubulk_path: NEW_UBULK,

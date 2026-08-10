@@ -375,7 +375,7 @@ impl Baboon {
         });
     }
 
-    fn mounted_containers(&self) -> Option<Vec<crate::source::MountedContainer>> {
+    pub(super) fn mounted_containers(&self) -> Option<Vec<crate::source::MountedContainer>> {
         match &self.source()?.source {
             TagSource::IoStoreContainerSet { containers, .. } => Some(containers.clone()),
             _ => None,

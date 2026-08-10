@@ -243,6 +243,11 @@ pub struct Baboon {
     container_duplicate_confirm: Option<ContainerDuplicateConfirm>,
     /// Kit ids with an in-place duplicate worker currently running.
     container_duplicate_running: HashSet<KitId>,
+    /// Kit ids with an in-place rename worker currently running. Mutually
+    /// exclusive with the duplicate and delete sets for the same reason they are
+    /// with each other: two writers on one `.utoc` race, and each invalidates
+    /// the archive handle the other validates against.
+    container_rename_running: HashSet<KitId>,
     /// Container writes currently in flight, by lease id. A lease outlives the
     /// UI-thread call that took it exactly when the write runs on a worker, and
     /// the terminal `WorkerMessage` carries the id back so the completion
@@ -531,6 +536,7 @@ impl Baboon {
             overwrite_confirm: None,
             container_duplicate_confirm: None,
             container_duplicate_running: HashSet::new(),
+            container_rename_running: HashSet::new(),
             container_write_leases: HashMap::new(),
             next_container_lease: 0,
             pending_chimp_remounts: Vec::new(),
