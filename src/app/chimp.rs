@@ -9229,13 +9229,31 @@ fn draw_chimp_header_sections(
                     ChimpReferrerState::Done(scan) => {
                         ui.label(
                             RichText::new(match scan.referrers.len() {
-                                0 => format!("Nothing imports this, of {} packages", scan.scanned),
+                                0 => format!("No hard import, of {} packages read", scan.scanned),
                                 1 => format!("1 package of {} imports this", scan.scanned),
                                 n => format!("{n} packages of {} import this", scan.scanned),
                             })
                             .color(subtle_dark())
                             .small(),
                         );
+                        if scan.referrers.is_empty() {
+                            // Deliberately not phrased as "nothing references
+                            // this". A soft object reference is FName indices
+                            // inside an export's serial data, resolved by name
+                            // at runtime; it never appears in the import table
+                            // this scan reads, and the Zen summary has no
+                            // soft-reference section to read instead. So a zero
+                            // here rules out one kind of reference, not all of
+                            // them, and it is not evidence that moving the
+                            // package is safe.
+                            ui.label(
+                                RichText::new(
+                                    "Soft references live in export data and are not counted.",
+                                )
+                                .color(subtle_dark())
+                                .small(),
+                            );
+                        }
                         if scan.unreadable > 0 {
                             // "Nothing imports this" and "nothing I could read
                             // imports this" are different answers, and only one
