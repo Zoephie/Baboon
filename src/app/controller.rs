@@ -5597,28 +5597,18 @@ impl Baboon {
     /// Open the rename/move dialog for a tag, pre-listing the tags that
     /// reference it (which will be rewritten on apply).
     pub(super) fn open_rename_tag(&mut self, key: &str) {
-        self.open_name_operation(key, TagNameOperation::Rename, false);
-    }
-
-    /// Move a tag that lives in a pak: the same dialog as Rename, with the
-    /// whole path open for editing rather than just the leaf.
-    ///
-    /// There is no folder to browse to inside a container, so a folder picker
-    /// would have nothing to show. A move is a rename to a different parent and
-    /// goes through the same primitive.
-    pub(super) fn open_container_move(&mut self, key: &str) {
-        self.open_name_operation(key, TagNameOperation::Rename, true);
+        self.open_name_operation(key, TagNameOperation::Rename);
     }
 
     pub(super) fn open_container_duplicate(&mut self, key: &str) {
-        self.open_name_operation(key, TagNameOperation::SaveAsOverlay, false);
+        self.open_name_operation(key, TagNameOperation::SaveAsOverlay);
     }
 
     pub(super) fn open_duplicate_tag(&mut self, key: &str) {
-        self.open_name_operation(key, TagNameOperation::Duplicate, false);
+        self.open_name_operation(key, TagNameOperation::Duplicate);
     }
 
-    fn open_name_operation(&mut self, key: &str, operation: TagNameOperation, moving: bool) {
+    fn open_name_operation(&mut self, key: &str, operation: TagNameOperation) {
         let Some(entry) = self.entry_for_key(key).cloned() else {
             return;
         };
@@ -5672,7 +5662,13 @@ impl Baboon {
         let duplicate_parts = duplicate::duplicate_dialog_parts(&display);
         // A new tag edits its whole path (rename and move are the same in-memory
         // operation for it); everything else edits the leaf name only.
-        let whole_path_editable = is_new_container || (moving && is_container);
+        // Any tag that lives in a pak edits its whole path, whether it got here
+        // through Rename or through Move. Inside a container those are one
+        // operation -- a move is a rename to a different parent -- and the two
+        // dialogs are indistinguishable on screen, so splitting the behaviour
+        // between them only produced "use Move to choose a folder" from a dialog
+        // that looked exactly like the one being recommended.
+        let whole_path_editable = is_container;
         let name = match operation {
             TagNameOperation::Duplicate => duplicate_parts.prefill.clone(),
             TagNameOperation::Rename | TagNameOperation::SaveAsOverlay => {
@@ -5885,16 +5881,9 @@ impl Baboon {
         // *is* a rename to a different parent.
         if matches!(
             self.entry_for_key(key).map(|entry| &entry.location),
-            Some(TagEntryLocation::NewContainer { .. })
+            Some(TagEntryLocation::NewContainer { .. } | TagEntryLocation::Container { .. })
         ) {
             self.open_rename_tag(key);
-            return;
-        }
-        if matches!(
-            self.entry_for_key(key).map(|entry| &entry.location),
-            Some(TagEntryLocation::Container { .. })
-        ) {
-            self.open_container_move(key);
             return;
         }
         if self.folder_refactor.is_some() {
