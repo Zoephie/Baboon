@@ -202,6 +202,11 @@ impl Baboon {
             // scan) so every tag is visible, not just visited folders.
             let has_all = !source.all_entries.is_empty();
             let groups_mode = matches!(mode, BrowserMode::Groups);
+            // Hoisted so the filtered and unfiltered trees cannot disagree about
+            // it: passing `false` here once cost the CE folder menu the moment a
+            // search filter was typed. `draw_tree_node` gates on `!groups_mode`
+            // itself, so this stays correct in Groups mode.
+            let is_container_source = matches!(source.source, TagSource::IoStoreContainerSet { .. });
             let favorite_context =
                 matches!(source.source, TagSource::LooseFolder { .. }).then_some(&favorite_keys);
             // One-shot "reveal in tree" request (force-open ancestors +
@@ -288,7 +293,7 @@ impl Baboon {
                                 sort,
                                 !groups_mode && folders_before_tags,
                                 favorite_context,
-                                false,
+                                is_container_source,
                             );
                             favorite_action.or(tree_action)
                         })
@@ -342,10 +347,7 @@ impl Baboon {
                                         sort,
                                         folders_before_tags,
                                         None,
-                                        matches!(
-                                            source.source,
-                                            TagSource::IoStoreContainerSet { .. }
-                                        ),
+                                        is_container_source,
                                     )
                                 }
                             }
