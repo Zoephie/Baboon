@@ -606,11 +606,12 @@ mod tests {
         )
         .unwrap();
 
-        // Built from Halo Reach's own definitions, not from the kit tag sitting
-        // in the destination: `weapon` needs no template, so the pre-existing
-        // tag at the output path is overwritten rather than copied from.
-        assert_eq!(report.generated_count(), 2);
-        assert_eq!(report.native_count(), 0);
+        // The pre-existing Reach weapon written to the output path below is a
+        // usable template, and a kit tag still wins over the definitions while
+        // the from-definitions path is unproven against the native tools. Set
+        // `BLAM_BUILD_FROM_DEFINITIONS` and these two swap.
+        assert_eq!(report.native_count(), 2);
+        assert_eq!(report.generated_count(), 0);
         assert_eq!(report.failed_count(), 1);
         assert_eq!(report.ignored_files, vec!["characters/jackal/notes.txt"]);
         assert!(report.files.iter().any(|file| {
