@@ -62,10 +62,11 @@ fn forget_tag_in_kit(kit: &mut Kit, key: &str) {
     if kit.selected_key.as_deref() == Some(key) {
         kit.selected_key = None;
     }
+    let folder_seeds = kit.folder_seeds();
     if let Some(source) = kit.source.as_mut() {
         source.entries.retain(|entry| entry.key != key);
         source.all_entries.retain(|entry| entry.key != key);
-        source.tree = crate::source::build_tree(&source.entries);
+        crate::source::rebuild_folder_tree(source, &folder_seeds);
         source.group_tree = crate::source::build_group_tree(&source.entries);
         if let Some(index) = source.reverse_dependencies.as_mut() {
             index.clear_tag(key);

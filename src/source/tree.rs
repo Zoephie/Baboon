@@ -5,6 +5,20 @@ use super::*;
 
 /// Builds a path hierarchy whose stored indices address `entries` exactly.
 pub fn build_tree(entries: &[TagEntry]) -> TagTree {
+    build_tree_with_folders(entries, &[])
+}
+
+/// [`build_tree`], plus folders that exist only because the user asked for them.
+///
+/// A container folder has no independent existence on either side: this tree is
+/// derived entirely from `display_path`, and a pak's directory index can only
+/// encode a directory that has a file beneath it. So a folder made to organise
+/// work into is carried here until the first tag lands in it, at which point the
+/// container's own index starts expressing it and the seed becomes redundant
+/// (re-seeding it is a no-op, so the row is kept rather than pruned).
+///
+/// `extra_folders` are `/`-separated paths matching `display_path` casing.
+pub fn build_tree_with_folders(entries: &[TagEntry], extra_folders: &[String]) -> TagTree {
     let mut root = TreeBuildNode::default();
     for (index, entry) in entries.iter().enumerate() {
         let parts = split_display_path(&entry.display_path);
@@ -19,6 +33,18 @@ pub fn build_tree(entries: &[TagEntry]) -> TagTree {
         }
         node.entries.push(index);
     }
+
+    // Seeded after the entries so `pending` marks only the nodes no tag reached.
+    // A folder that already exists keeps its derived identity untouched.
+    for folder in extra_folders {
+        let mut node = &mut root;
+        for part in split_display_path(folder) {
+            let fresh = !node.children.contains_key(&part);
+            node = node.children.entry(part).or_default();
+            node.pending |= fresh;
+        }
+    }
+
     TagTree {
         children: root
             .children
@@ -27,6 +53,17 @@ pub fn build_tree(entries: &[TagEntry]) -> TagTree {
             .collect(),
         entries: root.entries,
     }
+}
+
+/// Rebuilds a mounted source's folder tree, re-applying the workspace's pending
+/// folders.
+///
+/// Every site that reassigns `source.tree` for a *live* kit must go through
+/// this. A bare [`build_tree`] there is not wrong so much as forgetful: it
+/// silently drops every folder the user made and has not filled yet, and it does
+/// so on unrelated events like a delete or a duplicate.
+pub fn rebuild_folder_tree(source: &mut LoadedSourceData, pending_folders: &[String]) {
+    source.tree = build_tree_with_folders(&source.entries, pending_folders);
 }
 
 /// Groups entries by friendly tag group while preserving entry-vector indices.
@@ -377,6 +414,8 @@ fn build_folder_node(rel_path: PathBuf) -> TagTreeNode {
         children_loaded: false,
         entries: Vec::new(),
         entries_loaded: false,
+        // Loose folders are real directories on disk, so none of them is pending.
+        pending: false,
     }
 }
 
@@ -451,6 +490,7 @@ fn finish_node(label: String, node: TreeBuildNode, parent: &str) -> TagTreeNode 
         rel_path: PathBuf::from(&rel_path),
         children,
         entries: node.entries,
+        pending: node.pending,
         ..Default::default()
     }
 }
@@ -1157,6 +1197,79 @@ mod tests {
         assert_eq!(tree.children[0].label, "objects");
         assert_eq!(tree.children[0].children[0].label, "test");
         assert_eq!(tree.children[0].children[0].entries, vec![0, 1]);
+    }
+
+    fn folder_entry(key: &str, display_path: &str) -> TagEntry {
+        TagEntry {
+            key: key.into(),
+            display_path: display_path.into(),
+            group_tag: u32::from_be_bytes(*b"hlmt"),
+            group_name: None,
+            location: TagEntryLocation::LooseFile(PathBuf::from(key)),
+        }
+    }
+
+    fn child<'a>(node: &'a TagTreeNode, label: &str) -> &'a TagTreeNode {
+        node.children
+            .iter()
+            .find(|child| child.label == label)
+            .unwrap_or_else(|| panic!("no child {label:?}"))
+    }
+
+    fn root_child<'a>(tree: &'a TagTree, label: &str) -> &'a TagTreeNode {
+        tree.children
+            .iter()
+            .find(|child| child.label == label)
+            .unwrap_or_else(|| panic!("no root child {label:?}"))
+    }
+
+    /// A pak's directory index cannot encode a directory with no file beneath
+    /// it, so a folder the user made has to be carried by the tree until a tag
+    /// lands in it. Without this it vanishes the moment it is created.
+    #[test]
+    fn a_seeded_folder_appears_even_though_no_entry_reaches_it() {
+        let entries = vec![folder_entry("a", "objects/characters/a.model")];
+        let tree = build_tree_with_folders(&entries, &["objects/vehicles/warthog".to_owned()]);
+
+        let objects = root_child(&tree, "objects");
+        let vehicles = child(objects, "vehicles");
+        let warthog = child(vehicles, "warthog");
+        assert!(warthog.entries.is_empty());
+        assert!(warthog.children.is_empty());
+        // The deletable-folder rule the browser draws with.
+        assert!(warthog.pending);
+        // `objects` already existed, so seeding through it must not claim it.
+        assert!(!objects.pending);
+        // An intermediate the seed did create is pending, but it has a child, so
+        // it is not offered for deletion until the leaf goes first.
+        assert!(vehicles.pending);
+        assert!(!vehicles.children.is_empty());
+    }
+
+    /// Re-seeding a folder a tag has since landed in must not produce a second
+    /// node beside the real one, and must not relabel the real one as pending.
+    #[test]
+    fn seeding_a_folder_that_now_holds_a_tag_is_a_no_op() {
+        let entries = vec![folder_entry("a", "objects/vehicles/warthog/a.model")];
+        let tree = build_tree_with_folders(&entries, &["objects/vehicles/warthog".to_owned()]);
+
+        let vehicles = child(root_child(&tree, "objects"), "vehicles");
+        assert_eq!(vehicles.children.len(), 1, "no duplicate warthog node");
+        let warthog = child(vehicles, "warthog");
+        assert_eq!(warthog.entries, vec![0]);
+        assert!(!warthog.pending, "a folder a tag reached is not pending");
+    }
+
+    /// `build_tree` is the same code path with an empty seed list, so nothing
+    /// that does not opt in can acquire a pending node.
+    #[test]
+    fn build_tree_seeds_nothing_and_marks_nothing_pending() {
+        let entries = vec![folder_entry("a", "objects/characters/a.model")];
+        let tree = build_tree(&entries);
+        let objects = root_child(&tree, "objects");
+        assert!(!objects.pending);
+        assert!(!child(objects, "characters").pending);
+        assert_eq!(objects.children.len(), 1);
     }
 
     #[test]

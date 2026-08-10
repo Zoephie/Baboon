@@ -329,7 +329,11 @@ pub fn reopen_container_archive(
 ///
 /// Returns the number of tags it contributed. Mounting a container that carries
 /// none is not an error — it just is not kept.
-pub fn mount_additional_container(source: &mut LoadedSourceData, utoc: &Path) -> Result<usize> {
+pub fn mount_additional_container(
+    source: &mut LoadedSourceData,
+    utoc: &Path,
+    pending_folders: &[String],
+) -> Result<usize> {
     let names = source.names.clone();
     let (root, mounted_paths, container_index) = {
         let TagSource::IoStoreContainerSet {
@@ -465,7 +469,7 @@ pub fn mount_additional_container(source: &mut LoadedSourceData, utoc: &Path) ->
             layer_entry(&mut source.all_entries, &entry);
         }
     }
-    source.tree = build_tree(&source.entries);
+    crate::source::rebuild_folder_tree(source, pending_folders);
     source.group_tree = build_group_tree(if source.all_entries.is_empty() {
         &source.entries
     } else {

@@ -847,6 +847,7 @@ mod mod_export_tests {
                 tabs: Vec::new(),
                 overlays: HashMap::new(),
                 history: Default::default(),
+                folders: Default::default(),
             },
             rows: Vec::new(),
             name: name.to_owned(),

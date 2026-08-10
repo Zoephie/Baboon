@@ -146,6 +146,16 @@ pub(super) struct Kit {
     /// Project contents staged until this kit's source finishes mounting.
     pub(super) pending_campaign_project: Option<PendingCampaignProject>,
 
+    /// Folders the user made in a container source that no tag has landed in
+    /// yet, as `/`-separated `display_path`-cased paths.
+    ///
+    /// Held here rather than on `LoadedSourceData` because that is rebuilt on
+    /// every reload and snapshotted into worker threads, and a folder made to
+    /// organise work into has to outlive both. `Baboon::rebuild_kit_tree` is the
+    /// only place this is applied — every other tree rebuild routes through it,
+    /// because a site that forgets it silently deletes the user's folders.
+    pub(super) pending_container_folders: std::collections::BTreeSet<String>,
+
     /// CE-only nested surface. Chimp is not an editing kit and does not enter
     /// the top-level kit registry; it lives beside the Tags surface here.
     pub(super) surface: KitSurface,
@@ -210,6 +220,7 @@ impl Kit {
             profile: None,
             campaign_project: None,
             pending_campaign_project: None,
+            pending_container_folders: std::collections::BTreeSet::new(),
             surface: KitSurface::Tags,
             chimp: ChimpState::default(),
             pending_restore_tags: Vec::new(),
@@ -218,6 +229,11 @@ impl Kit {
             pending_restore_active_chimp_package: None,
             pending_launch_tags: None,
         }
+    }
+
+    /// The pending-folder set in the shape `build_tree_with_folders` wants.
+    pub(super) fn folder_seeds(&self) -> Vec<String> {
+        self.pending_container_folders.iter().cloned().collect()
     }
 
     /// Whether this workspace holds edits that are not written into the game:
@@ -268,6 +284,9 @@ impl Kit {
         self.pending_restore_active_chimp_package = None;
         self.pending_launch_tags = None;
         self.pending_campaign_project = None;
+        // Folders belong to the source that was being loaded, so a reused kit
+        // must not seed them into whatever mounts here next.
+        self.pending_container_folders.clear();
     }
 }
 

@@ -1414,6 +1414,7 @@ impl Baboon {
         self.draw_find_window(ctx);
         self.draw_tsv_paste_window(ctx);
         self.draw_rename_tag_window(ctx);
+        self.draw_container_folder_window(ctx);
         end_wheel_gesture(ctx);
     }
 }

@@ -173,6 +173,14 @@ pub(super) struct CampaignProjectSnapshot {
     /// and an author's step-by-step editing trail is neither their business nor
     /// something they should have to download.
     pub(super) history: BTreeMap<String, TagHistory>,
+    /// Folders the user made in the container that no tag has landed in yet.
+    ///
+    /// A pak's directory index cannot encode a directory with no file beneath
+    /// it, so these exist only in the workspace and would otherwise be gone on
+    /// the next launch. Like history, they are the author's own organisation
+    /// rather than mod content, so they are not written to the sidecar beside an
+    /// exported mod.
+    pub(super) folders: std::collections::BTreeSet<String>,
 }
 
 impl CampaignProjectSnapshot {
@@ -233,6 +241,15 @@ impl CampaignProjectSnapshot {
         // back on bytes already stashed, changes the session without changing
         // any overlay. Folding it in is what stops those going unwritten.
         hasher.update(self.history_digest());
+        // Same reasoning as history, and more sharply: making a folder changes
+        // no overlay and no tab at all, so without this the autosave would find
+        // the fingerprint unchanged, skip the write, and the folder would be
+        // gone at the next launch — having looked, all session, like it had
+        // been saved. `folders` is a `BTreeSet`, so the order is stable.
+        for folder in &self.folders {
+            hasher.update(folder.as_bytes());
+            hasher.update([0]);
+        }
         hasher.finalize().to_vec()
     }
 }
@@ -502,6 +519,9 @@ pub(super) fn save_campaign_project(
                  label TEXT NOT NULL,
                  bytes BLOB NOT NULL,
                  PRIMARY KEY (identity, stack, position)
+             );
+             CREATE TABLE IF NOT EXISTS folders (
+                 path TEXT PRIMARY KEY
              );",
         )
         .map_err(|error| format!("Could not initialize project database: {error}"))?;
@@ -630,9 +650,42 @@ pub(super) fn save_campaign_project(
             }
         }
     }
+    // Folders are replaced wholesale: the set is a handful of short strings, so
+    // reconciling it would cost more than rewriting it. Session scope only —
+    // like history, a folder is the author's own organisation, and the sidecar
+    // travels to whoever installs the mod.
+    transaction
+        .execute("DELETE FROM folders", [])
+        .map_err(|error| format!("Could not reset project folders: {error}"))?;
+    if scope == ProjectScope::Session {
+        for folder in &snapshot.folders {
+            transaction
+                .execute("INSERT INTO folders (path) VALUES (?1)", params![folder])
+                .map_err(|error| format!("Could not write project folder {folder}: {error}"))?;
+        }
+    }
     transaction
         .commit()
         .map_err(|error| format!("Could not commit project database: {error}"))
+}
+
+/// Read the pending-folder set, tolerating a project written before the table
+/// existed.
+///
+/// `CAMPAIGN_PROJECT_VERSION` is deliberately not bumped for this: the version
+/// check is a strict equality, so raising it would make every `.baboon` already
+/// on disk unreadable by the new build — for a change that only adds a table an
+/// older build silently ignores.
+fn read_project_folders(connection: &Connection) -> std::collections::BTreeSet<String> {
+    let Ok(mut statement) = connection.prepare("SELECT path FROM folders") else {
+        return Default::default();
+    };
+    let Ok(rows) = statement.query_map([], |row| row.get::<_, String>(0)) else {
+        return Default::default();
+    };
+    rows.filter_map(Result::ok)
+        .filter(|path| !path.trim().is_empty())
+        .collect()
 }
 
 pub(super) fn load_campaign_project(path: &Path) -> Result<CampaignProjectSnapshot, String> {
@@ -763,6 +816,7 @@ pub(super) fn load_campaign_project(path: &Path) -> Result<CampaignProjectSnapsh
         }
     }
 
+    let folders = read_project_folders(&connection);
     Ok(CampaignProjectSnapshot {
         game,
         source_path: PathBuf::from(source_path),
@@ -770,6 +824,7 @@ pub(super) fn load_campaign_project(path: &Path) -> Result<CampaignProjectSnapsh
         tabs,
         overlays,
         history,
+        folders,
     })
 }
 
@@ -976,6 +1031,11 @@ impl Baboon {
             Some(snapshot) => ActiveCampaignProject::adopted(path, snapshot, now),
             None => ActiveCampaignProject::fresh(path, now),
         });
+        // Folders the user made last session. Nothing else brings them back:
+        // they are not in any pak, so the mount cannot re-derive them.
+        if let Some(folders) = restored.as_ref().map(|snapshot| snapshot.folders.clone()) {
+            self.adopt_project_container_folders(kit, folders);
+        }
         if let Some(count) = restored
             .as_ref()
             .map(|snapshot| snapshot.overlays.len())
@@ -1250,6 +1310,7 @@ impl Baboon {
             tabs,
             overlays,
             history,
+            folders: self.kits[kit].pending_container_folders.clone(),
         }))
     }
 
@@ -1752,6 +1813,7 @@ impl Baboon {
             return;
         };
         let project_path = pending.path;
+        self.adopt_project_container_folders(kit, snapshot.folders.clone());
 
         let mut identity_to_key = HashMap::<String, String>::new();
         let mut restored_revisions = HashMap::<String, u64>::new();
@@ -2068,6 +2130,7 @@ mod tests {
                 .map(|overlay| (overlay.identity.clone(), overlay))
                 .collect(),
             history: BTreeMap::new(),
+            folders: Default::default(),
         }
     }
 
@@ -2240,6 +2303,100 @@ mod tests {
         )));
     }
 
+    /// Making a folder changes no overlay, no tab and no history, so if the
+    /// autosave fingerprint ignored it the write would be skipped and the
+    /// folder would be gone at the next launch — after looking, all session,
+    /// exactly as though it had been saved.
+    #[test]
+    fn the_autosave_fingerprint_notices_a_folder_only_change() {
+        let base = snapshot_of(Vec::new());
+        let mut with_folder = base.clone();
+        with_folder.folders = ["objects/vehicles".to_owned()].into_iter().collect();
+        assert_ne!(base.fingerprint(), with_folder.fingerprint());
+
+        // And a different folder is a different session.
+        let mut other = base.clone();
+        other.folders = ["objects/characters".to_owned()].into_iter().collect();
+        assert_ne!(with_folder.fingerprint(), other.fingerprint());
+
+        // Same set, same fingerprint — otherwise every tick would rewrite.
+        let mut repeat = base.clone();
+        repeat.folders = ["objects/vehicles".to_owned()].into_iter().collect();
+        assert_eq!(with_folder.fingerprint(), repeat.fingerprint());
+    }
+
+    /// A `.baboon` written before folders existed must still open.
+    ///
+    /// This is why `CAMPAIGN_PROJECT_VERSION` is not bumped for the new table:
+    /// the version check is a strict equality, so raising it would reject every
+    /// project already on disk rather than migrate it. The table is purely
+    /// additive, so an older build ignores it and a newer one reads its absence
+    /// as "no folders".
+    #[test]
+    fn a_project_written_before_the_folders_table_still_opens() {
+        let path = std::env::temp_dir().join(format!(
+            "baboon-project-v1-{}-{}.baboon",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        // The v1 schema, written literally — no `folders` table.
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE project (
+                     id INTEGER PRIMARY KEY CHECK (id = 1),
+                     version INTEGER NOT NULL,
+                     game TEXT NOT NULL,
+                     source_path TEXT NOT NULL,
+                     selected_identity TEXT
+                 );
+                 CREATE TABLE tabs (
+                     position INTEGER PRIMARY KEY,
+                     identity TEXT NOT NULL UNIQUE,
+                     label TEXT NOT NULL,
+                     group_tag INTEGER NOT NULL,
+                     logical_path TEXT NOT NULL,
+                     kind TEXT NOT NULL,
+                     package TEXT,
+                     floating INTEGER NOT NULL
+                 );
+                 CREATE TABLE overlays (
+                     identity TEXT PRIMARY KEY,
+                     group_tag INTEGER NOT NULL,
+                     logical_path TEXT NOT NULL,
+                     kind TEXT NOT NULL,
+                     package TEXT,
+                     bytes BLOB NOT NULL
+                 );
+                 CREATE TABLE history (
+                     identity TEXT NOT NULL,
+                     stack TEXT NOT NULL,
+                     position INTEGER NOT NULL,
+                     label TEXT NOT NULL,
+                     bytes BLOB NOT NULL,
+                     PRIMARY KEY (identity, stack, position)
+                 );
+                 INSERT INTO project (id, version, game, source_path, selected_identity)
+                 VALUES (1, 1, 'haloce_evolved', 'Paks', NULL);",
+            )
+            .unwrap();
+        drop(connection);
+
+        let loaded = load_campaign_project(&path).expect("a v1 project still opens");
+        assert!(loaded.folders.is_empty());
+
+        // And saving it forward adds the table without disturbing anything.
+        let mut forward = loaded.clone();
+        forward.folders = ["objects/vehicles".to_owned()].into_iter().collect();
+        save_campaign_project(&path, &forward, None, ProjectScope::Session).unwrap();
+        let reloaded = load_campaign_project(&path).unwrap();
+        assert_eq!(reloaded.folders, forward.folders);
+        let _ = fs::remove_file(path);
+    }
+
     #[test]
     fn campaign_project_round_trips_binary_overlays_and_tab_order() {
         let path = std::env::temp_dir().join(format!(
@@ -2287,6 +2444,9 @@ mod tests {
                     revision: 3,
                 },
             )]),
+            folders: ["objects/vehicles".to_owned(), "sound/new".to_owned()]
+                .into_iter()
+                .collect(),
         };
         save_campaign_project(&path, &snapshot, None, ProjectScope::Session).unwrap();
         let loaded = load_campaign_project(&path).unwrap();
@@ -2305,6 +2465,9 @@ mod tests {
         assert_eq!(restored.redo.len(), 1);
         assert_eq!(restored.redo[0].label, "Block edit");
         assert_eq!(*restored.redo[0].bytes, vec![9]);
+        // A folder no tag has landed in exists nowhere but the workspace, so
+        // without this it is gone on the next launch.
+        assert_eq!(loaded.folders, snapshot.folders);
 
         // The same snapshot written as a mod's sidecar carries the tags and
         // nothing about how they were arrived at: that file is downloaded by
@@ -2315,6 +2478,10 @@ mod tests {
         assert!(
             published.history.is_empty(),
             "an exported mod must not ship the author's undo history"
+        );
+        assert!(
+            published.folders.is_empty(),
+            "an exported mod must not ship the author's workspace folders"
         );
         assert_eq!(published.overlays.len(), snapshot.overlays.len());
         let _ = fs::remove_file(&sidecar);

@@ -482,7 +482,7 @@ fn a_freshly_written_mod_can_be_mounted_without_reloading() {
         .map(|entry| entry.key.clone())
         .collect();
 
-    let contributed = crate::source::mount_additional_container(&mut loaded, &target)
+    let contributed = crate::source::mount_additional_container(&mut loaded, &target, &[])
         .expect("mount the freshly written mod");
 
     // Mounting a mod over a tag changes where it is read from, never what it
@@ -533,7 +533,7 @@ fn a_freshly_written_mod_can_be_mounted_without_reloading() {
     }
     // Mounting the same file twice is a no-op rather than a second container.
     assert_eq!(
-        crate::source::mount_additional_container(&mut loaded, &target).expect("idempotent"),
+        crate::source::mount_additional_container(&mut loaded, &target, &[]).expect("idempotent"),
         0
     );
 

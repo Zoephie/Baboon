@@ -40,6 +40,7 @@ pub(in crate::app) use container_write::*;
 mod created_tags;
 use created_tags::package_id_for;
 pub(super) use created_tags::{CreatedTagLedger, CreatedTagRecord};
+mod container_folders;
 mod delete;
 mod duplicate;
 use duplicate::resolve_source_uasset;
@@ -382,7 +383,11 @@ pub(super) fn strip_content_root(rel: &str) -> &str {
     rel
 }
 
-pub(super) fn register_created_tag_in_source(source: &mut LoadedSourceData, entry: TagEntry) {
+pub(super) fn register_created_tag_in_source(
+    source: &mut LoadedSourceData,
+    entry: TagEntry,
+    pending_folders: &[String],
+) {
     let key = entry.key.clone();
     source.entries.retain(|existing| existing.key != key);
     crate::source::insert_entry_sorted(&mut source.entries, entry.clone());
@@ -407,7 +412,7 @@ pub(super) fn register_created_tag_in_source(source: &mut LoadedSourceData, entr
             let _ = crate::source::save_entry_index(game, root, &source.all_entries);
         }
     } else {
-        source.tree = crate::source::build_tree(&source.entries);
+        crate::source::rebuild_folder_tree(source, pending_folders);
         source.group_tree = crate::source::build_group_tree(&source.entries);
     }
 }
@@ -1941,14 +1946,14 @@ impl Baboon {
     /// otherwise open two tabs and steal the selection on every launch.
     pub(super) fn stash_in_memory_tag(&mut self, entry: TagEntry, tag: TagFile) {
         let key = entry.key.clone();
+        let folder_seeds = self.kits[self.active].folder_seeds();
         if let Some(source) = self.source_mut() {
             source.entries.retain(|existing| existing.key != key);
             source.entries.push(entry.clone());
             // Container sources keep their full set in `entries` (all_entries is
             // empty), so rebuild both trees from it.
-            let tree = crate::source::build_tree(&source.entries);
             let group_tree = crate::source::build_group_tree(&source.entries);
-            source.tree = tree;
+            crate::source::rebuild_folder_tree(source, &folder_seeds);
             source.group_tree = group_tree;
         }
         self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
@@ -2219,8 +2224,9 @@ impl Baboon {
 
     pub(super) fn register_created_tag(&mut self, entry: TagEntry, tag: TagFile) {
         let key = entry.key.clone();
+        let folder_seeds = self.kits[self.active].folder_seeds();
         if let Some(source) = self.source_mut() {
-            register_created_tag_in_source(source, entry.clone());
+            register_created_tag_in_source(source, entry.clone(), &folder_seeds);
         }
         self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
         // Keyed by entry, so a stale index would answer searches without the
@@ -2782,6 +2788,7 @@ impl Baboon {
             return false;
         }
         self.kits[kit].close_tag_pane(key);
+        let folder_seeds = self.kits[kit].folder_seeds();
         let kit_state = &mut self.kits[kit];
         kit_state.parsed_tags.remove(key);
         kit_state.loading_tags.remove(key);
@@ -2796,7 +2803,7 @@ impl Baboon {
         if let Some(source) = kit_state.source.as_mut() {
             source.entries.retain(|entry| entry.key != key);
             source.all_entries.retain(|entry| entry.key != key);
-            source.tree = crate::source::build_tree(&source.entries);
+            crate::source::rebuild_folder_tree(source, &folder_seeds);
             source.group_tree = crate::source::build_group_tree(&source.entries);
             if let Some(index) = source.reverse_dependencies.as_mut() {
                 index.clear_tag(key);
@@ -3505,6 +3512,11 @@ impl Baboon {
             BrowserAction::NewTagInFolder { folder_rel } => {
                 self.open_new_tag_dialog_in_folder(folder_rel)
             }
+            BrowserAction::NewContainerFolder { parent_rel } => {
+                self.open_new_container_folder(parent_rel)
+            }
+            BrowserAction::RenameContainerFolder { rel } => self.open_rename_container_folder(rel),
+            BrowserAction::DeleteContainerFolder { rel } => self.delete_container_folder(rel),
         }
     }
 
@@ -5407,10 +5419,10 @@ impl Baboon {
                 // only way to see it was a reload — which rebuilds the
                 // workspace and costs every open tab and the stash with it.
                 if in_place && !replaced_a_mount {
-                    let mounted = self.kits[exporting]
-                        .source
-                        .as_mut()
-                        .map(|source| crate::source::mount_additional_container(source, &output));
+                    let folder_seeds = self.kits[exporting].folder_seeds();
+                    let mounted = self.kits[exporting].source.as_mut().map(|source| {
+                        crate::source::mount_additional_container(source, &output, &folder_seeds)
+                    });
                     match mounted {
                         Some(Ok(count)) if count > 0 => {
                             self.kits[exporting].generation =

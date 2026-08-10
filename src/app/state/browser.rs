@@ -46,6 +46,35 @@ pub(in crate::app) enum BrowserAction {
     ImportTagInFolder { folder_rel: Option<String>, },
     /// Create a new Campaign Evolved tag at `folder_rel` (`None` = root).
     NewTagInFolder { folder_rel: Option<String>, },
+    /// Make a folder inside `parent_rel` (`None` = container root). Nothing is
+    /// written to any pak: a folder only reaches the container's directory
+    /// index once a tag lands in it.
+    NewContainerFolder { parent_rel: Option<String>, },
+    /// Rename a pending folder — one no tag has landed in yet, so this moves
+    /// nothing on disk.
+    RenameContainerFolder { rel: String, },
+    /// Retire a pending folder. Offered only for one drawn as empty.
+    DeleteContainerFolder { rel: String, },
+}
+
+/// The New/Rename Folder dialog for a container source.
+///
+/// A folder here is a workspace-level intention, not a container edit: a pak's
+/// directory index cannot encode a directory with no file beneath it, so this
+/// only ever moves entries in the kit's pending-folder set.
+pub(in crate::app) struct ContainerFolderDialog {
+    /// Workspace this was raised from. Resolved on apply, because a modeless
+    /// dialog outlives the frame that opened it and the user can focus another
+    /// workspace in between.
+    pub(in crate::app) kit: KitId,
+    /// Parent folder, `None` for the container root.
+    pub(in crate::app) parent_rel: Option<String>,
+    /// Full path of the folder being renamed; `None` when creating one.
+    pub(in crate::app) renaming: Option<String>,
+    pub(in crate::app) name_input: String,
+    pub(in crate::app) focus_input: bool,
+    /// Validation failure from the last apply, shown beside the field.
+    pub(in crate::app) error: Option<String>,
 }
 
 /// The name dialog's product-level operation. Storage details such as whether

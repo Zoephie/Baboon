@@ -70,37 +70,8 @@ pub(super) fn validate_duplicate_leaf_name(
     destination_display: &str,
     existing_display_paths: &[String],
 ) -> Result<String, String> {
-    if raw.chars().any(|character| character.is_ascii_control()) {
-        return Err("Tag names cannot contain control characters".to_owned());
-    }
-    if raw.ends_with([' ', '.']) {
-        return Err("Tag names cannot end with a space or dot".to_owned());
-    }
-    let name = raw.trim();
-    if name.is_empty() {
-        return Err("Enter a new tag name".to_owned());
-    }
-    if name == "." || name == ".." {
-        return Err("Tag names cannot be . or ..".to_owned());
-    }
-    if name.contains(['/', '\\']) {
-        return Err("Enter a leaf name only; the parent folder is fixed".to_owned());
-    }
-    if name.contains('.') {
-        return Err("Tag names cannot contain a dot or extension".to_owned());
-    }
-    if name.chars().any(|character| character.is_ascii_control()) {
-        return Err("Tag names cannot contain control characters".to_owned());
-    }
-    if name
-        .chars()
-        .any(|character| matches!(character, '<' | '>' | ':' | '"' | '|' | '?' | '*'))
-    {
-        return Err("Tag names contain a Windows-illegal character".to_owned());
-    }
-    if is_windows_reserved_leaf(name) {
-        return Err("That name is reserved by Windows".to_owned());
-    }
+    let name = validate_leaf_characters(raw, "Tag names", "Enter a new tag name")?;
+    let name = name.as_str();
     let destination_key = normalized_display_path(destination_display);
     if existing_display_paths
         .iter()
@@ -108,6 +79,51 @@ pub(super) fn validate_duplicate_leaf_name(
         .any(|path| path == destination_key)
     {
         return Err("A tag with that name already exists in this source".to_owned());
+    }
+    Ok(name.to_owned())
+}
+
+/// The character rules every user-named leaf shares — tags and container
+/// folders alike.
+///
+/// Extracted so the two cannot drift: a folder rejected as a tag name is a
+/// folder no tag could ever be created inside, and both end up as a directory
+/// node in a pak's index and as a path component on disk during extraction.
+/// `noun` heads the messages (`"Tag names"`); `empty_message` is used verbatim,
+/// because "enter a new tag name" and "enter a folder name" are the one place
+/// the two callers genuinely differ.
+pub(super) fn validate_leaf_characters(
+    raw: &str,
+    noun: &str,
+    empty_message: &str,
+) -> Result<String, String> {
+    if raw.chars().any(|character| character.is_ascii_control()) {
+        return Err(format!("{noun} cannot contain control characters"));
+    }
+    if raw.ends_with([' ', '.']) {
+        return Err(format!("{noun} cannot end with a space or dot"));
+    }
+    let name = raw.trim();
+    if name.is_empty() {
+        return Err(empty_message.to_owned());
+    }
+    if name == "." || name == ".." {
+        return Err(format!("{noun} cannot be . or .."));
+    }
+    if name.contains(['/', '\\']) {
+        return Err("Enter a leaf name only; the parent folder is fixed".to_owned());
+    }
+    if name.contains('.') {
+        return Err(format!("{noun} cannot contain a dot or extension"));
+    }
+    if name
+        .chars()
+        .any(|character| matches!(character, '<' | '>' | ':' | '"' | '|' | '?' | '*'))
+    {
+        return Err(format!("{noun} contain a Windows-illegal character"));
+    }
+    if is_windows_reserved_leaf(name) {
+        return Err("That name is reserved by Windows".to_owned());
     }
     Ok(name.to_owned())
 }
@@ -599,6 +615,7 @@ fn apply_container_duplicate_source_state(
     is_mod: bool,
     entry: &TagEntry,
     tag: &TagFile,
+    pending_folders: &[String],
 ) -> Result<(), String> {
     {
         let TagSource::IoStoreContainerSet {
@@ -633,7 +650,7 @@ fn apply_container_duplicate_source_state(
     if !source.all_entries.is_empty() {
         crate::source::insert_entry_sorted(&mut source.all_entries, entry.clone());
     }
-    source.tree = crate::source::build_tree(&source.entries);
+    crate::source::rebuild_folder_tree(source, pending_folders);
     source.group_tree = crate::source::build_group_tree(if source.all_entries.is_empty() {
         &source.entries
     } else {
@@ -1226,6 +1243,9 @@ impl Baboon {
             *container = target_container;
         }
         let display_for_notice = result.entry.display_path.clone();
+        // Read before the source borrow: the tree rebuild below has to re-apply
+        // the workspace's pending folders, and `source` holds `kits[kit_index]`.
+        let folder_seeds = self.kits[kit_index].folder_seeds();
         {
             let Some(source) = self.kits[kit_index].source.as_mut() else {
                 self.status = "Duplicate completed after its source was unloaded".to_owned();
@@ -1250,6 +1270,7 @@ impl Baboon {
                 result.is_mod,
                 &result.entry,
                 &result.tag,
+                &folder_seeds,
             ) {
                 self.status = error;
                 return false;
@@ -1915,6 +1936,7 @@ mod tests {
                     false,
                     &destination_entry,
                     &destination_tag,
+                    &[],
                 )
                 .unwrap();
                 register_clean_duplicate_document(
@@ -1961,6 +1983,7 @@ mod tests {
             false,
             &destination_entry,
             &destination_tag,
+            &[],
         )
         .unwrap();
         register_clean_duplicate_document(&mut kit, destination_entry.clone(), destination_tag);
@@ -2009,6 +2032,7 @@ mod tests {
             false,
             &destination_entry,
             &test_tag(),
+            &[],
         )
         .unwrap();
 
@@ -2060,7 +2084,7 @@ mod tests {
             initial_tag: None,
         };
 
-        crate::app::controller::register_created_tag_in_source(&mut source, new_entry.clone());
+        crate::app::controller::register_created_tag_in_source(&mut source, new_entry.clone(), &[]);
 
         assert_eq!(source.entries.len(), 2);
         assert!(

@@ -244,6 +244,12 @@ pub(in crate::app) fn draw_tree(
             )
         });
     }
+    // Last, so it covers whatever the tree left over. Groups mode is excluded
+    // for the same reason the folder menu is: a group node's path is a label,
+    // not a folder, and there is no root to author into.
+    if is_container && !groups_mode {
+        clicked = clicked.or_else(|| draw_container_root_target(ui));
+    }
     clicked
 }
 
@@ -681,15 +687,23 @@ pub(in crate::app) fn draw_tree_node(
         if is_container && !groups_mode {
             let folder_rel = node.rel_path.to_string_lossy().replace('\\', "/");
             let folder_rel = (!folder_rel.is_empty()).then_some(folder_rel);
-            if ui.button("New tag here...").clicked() {
-                clicked = Some(BrowserAction::NewTagInFolder {
-                    folder_rel: folder_rel.clone(),
-                });
-                ui.close_menu();
+            if let Some(action) = container_authoring_menu_items(ui, folder_rel.clone()) {
+                clicked = Some(action);
             }
-            if ui.button("Import tag here...").clicked() {
-                clicked = Some(BrowserAction::ImportTagInFolder { folder_rel });
-                ui.close_menu();
+            // Rename and Delete are offered only for a folder the user made and
+            // nothing has landed in. Once a tag is inside, the folder is
+            // expressed by the container's own directory index, and moving it
+            // means rewriting every tag beneath it — a container write, not a
+            // workspace edit, and not what this menu does.
+            if let Some(rel) = folder_rel.filter(|_| folder_is_pending_and_empty(node)) {
+                if ui.button("Rename folder...").clicked() {
+                    clicked = Some(BrowserAction::RenameContainerFolder { rel: rel.clone() });
+                    ui.close_menu();
+                }
+                if ui.button("Delete folder").clicked() {
+                    clicked = Some(BrowserAction::DeleteContainerFolder { rel });
+                    ui.close_menu();
+                }
             }
             context_menu_separator(ui);
         }
@@ -755,8 +769,80 @@ pub(in crate::app) fn draw_tree_node(
 fn folder_label_color(ui: &Ui, node: &TagTreeNode, entries: &[TagEntry]) -> Color32 {
     match browser_modified_tags(ui) {
         Some(modified) if modified.subtree_has_modified(node, entries) => modified_text(),
+        // A folder the user made that nothing has landed in yet is not in any
+        // pak, so it is drawn as the intention it is rather than as content.
+        _ if folder_is_pending_and_empty(node) => subtle_dark(),
         _ => text_dark(),
     }
+}
+
+/// The Campaign Evolved authoring items, shared by a folder's context menu and
+/// by the browser's empty space.
+///
+/// `folder_rel` is `None` at the container root. Shared so the two cannot offer
+/// different sets: the root gained these only after the fact, and a second copy
+/// is how it would quietly fall behind again.
+fn container_authoring_menu_items(
+    ui: &mut Ui,
+    folder_rel: Option<String>,
+) -> Option<BrowserAction> {
+    let mut clicked = None;
+    if ui.button("New tag here...").clicked() {
+        clicked = Some(BrowserAction::NewTagInFolder {
+            folder_rel: folder_rel.clone(),
+        });
+        ui.close_menu();
+    }
+    if ui.button("Import tag here...").clicked() {
+        clicked = Some(BrowserAction::ImportTagInFolder {
+            folder_rel: folder_rel.clone(),
+        });
+        ui.close_menu();
+    }
+    if ui.button("New folder here...").clicked() {
+        clicked = Some(BrowserAction::NewContainerFolder {
+            parent_rel: folder_rel,
+        });
+        ui.close_menu();
+    }
+    clicked
+}
+
+/// Claim the browser's empty space below the tree so the container *root* can be
+/// right-clicked.
+///
+/// Without this the root is unreachable. Every authoring menu hangs off a tree
+/// node, and a real node's `rel_path` is never empty — so `folder_rel: None`,
+/// which is the whole representation of "the container root", had no way to be
+/// produced by any gesture.
+fn draw_container_root_target(ui: &mut Ui) -> Option<BrowserAction> {
+    // Fills the empty area when the tree is short — the usual case, since
+    // folders start collapsed — and stays a right-clickable strip under the last
+    // row when the tree is long enough to have scrolled past the viewport.
+    let size = Vec2::new(
+        ui.available_width(),
+        ui.available_size_before_wrap().y.max(24.0),
+    );
+    let (_, response) = ui.allocate_exact_size(size, Sense::click());
+    let mut clicked = None;
+    response.context_menu(|ui| {
+        // Right-clicking blank space is ambiguous about what it acts on, so the
+        // menu says.
+        ui.label(RichText::new("Container root").color(subtle_dark()).small());
+        context_menu_separator(ui);
+        clicked = container_authoring_menu_items(ui, None);
+    });
+    clicked
+}
+
+/// Whether this node exists only because the user asked for it and still holds
+/// nothing — the one kind of folder the browser offers to rename or delete.
+///
+/// Emptiness is read from the tree rather than stored, so a folder that gains a
+/// tag stops being editable this way on the very next rebuild without anything
+/// having to remember to clear a flag.
+pub(in crate::app) fn folder_is_pending_and_empty(node: &TagTreeNode) -> bool {
+    node.pending && node.entries.is_empty() && node.children.is_empty()
 }
 
 fn group_tree_label_parts(label: &str) -> (&str, &str) {
@@ -1344,6 +1430,64 @@ mod tests {
             group_name: None,
             location,
         }
+    }
+
+    /// Draw one browser tree and report how much vertical space it left unused.
+    fn unused_height_after_tree(is_container: bool, groups_mode: bool) -> f32 {
+        let entries = vec![entry(TagEntryLocation::Container {
+            container: 0,
+            rel_path: "Tags/objects/example-hlmt.ubulk".to_owned(),
+        })];
+        let tree = crate::source::build_tree(&entries);
+        let ctx = egui::Context::default();
+        let mut left = 0.0;
+        ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::Vec2::new(300.0, 600.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    draw_tree(
+                        ui,
+                        &tree,
+                        &entries,
+                        None,
+                        "",
+                        false,
+                        false,
+                        groups_mode,
+                        None,
+                        BrowserSort::Natural,
+                        false,
+                        None,
+                        is_container,
+                    );
+                    left = ui.available_size_before_wrap().y;
+                });
+            },
+        );
+        left
+    }
+
+    /// The container root has no tree node — a real node's `rel_path` is never
+    /// empty — so the only way to author into it is a gesture on the browser's
+    /// empty space. If that space stops being claimed, `folder_rel: None`
+    /// becomes unreachable again and root-level New Tag / New Folder silently
+    /// disappear, with nothing failing to say so.
+    #[test]
+    fn a_container_browser_claims_its_empty_space_so_the_root_is_reachable() {
+        assert!(
+            unused_height_after_tree(true, false) < 1.0,
+            "a container tree must leave no unclaimed space below it"
+        );
+        // A loose folder has no container root to author into, and Groups mode
+        // node paths are group labels rather than folders.
+        assert!(unused_height_after_tree(false, false) > 100.0);
+        assert!(unused_height_after_tree(true, true) > 100.0);
     }
 
     #[test]

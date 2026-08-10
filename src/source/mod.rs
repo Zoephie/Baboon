@@ -547,12 +547,18 @@ pub struct TagTreeNode {
     pub children_loaded: bool,
     pub entries: Vec<usize>,
     pub entries_loaded: bool,
+    /// Seeded from the workspace's pending-folder set rather than derived from
+    /// any entry's `display_path`. A pending node that is also childless and
+    /// entryless is one nothing has landed in yet, and is the only kind the
+    /// browser offers to delete.
+    pub pending: bool,
 }
 
 #[derive(Default)]
 struct TreeBuildNode {
     entries: Vec<usize>,
     children: BTreeMap<String, TreeBuildNode>,
+    pending: bool,
 }
 
 /// Loads one self-describing tag file as an isolated source.

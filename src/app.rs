@@ -355,6 +355,8 @@ pub struct Baboon {
     def_docs_cache: HashMap<PathBuf, Rc<DefDocs>>,
     tsv_paste: Option<TsvPasteState>,
     rename_tag: Option<RenameTagState>,
+    /// New/Rename Folder dialog for a container source, if one is open.
+    container_folder_dialog: Option<ContainerFolderDialog>,
     status: String,
     /// Mirror of `status` as of the last frame, and when it changed. `status`
     /// is assigned from well over a hundred places, so rather than route them
@@ -608,6 +610,7 @@ impl Baboon {
             def_docs_cache: HashMap::new(),
             tsv_paste: None,
             rename_tag: None,
+            container_folder_dialog: None,
             status: "Ready".to_owned(),
             status_shown: String::new(),
             status_changed_at: 0.0,
@@ -1226,9 +1229,11 @@ mod tests {
                 children: vec![],
                 children_loaded: true,
                 entries_loaded: true,
+                ..Default::default()
             }],
             children_loaded: true,
             entries_loaded: true,
+            ..Default::default()
         };
 
         assert_eq!(collect_bitmap_keys(&node, &entries), vec!["bitmap"]);
