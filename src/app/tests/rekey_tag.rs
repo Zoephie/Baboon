@@ -97,7 +97,10 @@ fn a_rekey_carries_every_map_the_old_key_addressed() {
     assert!(kit.model_previews.contains_key(NEW));
     assert!(kit.ce_sound_bindings.contains_key(NEW));
     assert_eq!(kit.pending_expand.get(NEW), Some(&true));
-    assert_eq!(kit.field_search.get(NEW).map(String::as_str), Some("shield"));
+    assert_eq!(
+        kit.field_search.get(NEW).map(String::as_str),
+        Some("shield")
+    );
     assert_eq!(
         kit.field_search_applied.get(NEW).map(String::as_str),
         Some("shield")

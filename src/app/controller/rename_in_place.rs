@@ -110,6 +110,104 @@ pub(in crate::app) fn rekey_tag_in_kit(kit: &mut Kit, old: &str, new: &str) {
     kit.field_index.invalidate();
 }
 
+/// On what grounds a container tag may be renamed in place.
+///
+/// The two tiers are not degrees of caution about the same operation; they rest
+/// on different evidence, and that difference is carried all the way into
+/// `blam-tags`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app) enum RenameTier {
+    /// A copy Baboon put in this container. Its chunks provably sit at or past
+    /// the line the container held before Baboon first wrote to it, so the
+    /// writer can re-check that before it moves anything — and no tag the game
+    /// shipped can be reached through this path at all.
+    Authored { minimum_appended_index: u32 },
+    /// Anything else the container holds, the game's own tags included.
+    ///
+    /// The provenance check has to be *dropped* here, not merely relaxed: a
+    /// shipped tag's chunks sit below the appended line, so passing it would
+    /// refuse the very operation being authorised. What replaces it is policy —
+    /// Expert mode, an immutable backup, and a dialog naming the pak — because
+    /// there is no evidence left to check.
+    Shipped,
+}
+
+impl RenameTier {
+    /// What to hand the writer as its provenance guard. `None` is not "skip a
+    /// check we could have made"; it is the honest encoding of a tier where no
+    /// such evidence exists.
+    pub(in crate::app) fn minimum_appended_index(self) -> Option<u32> {
+        match self {
+            RenameTier::Authored {
+                minimum_appended_index,
+            } => Some(minimum_appended_index),
+            RenameTier::Shipped => None,
+        }
+    }
+}
+
+/// Whether a tag may be renamed inside the pak that holds it, and on what
+/// grounds — or why it may not.
+///
+/// Deliberately more permissive than `delete_eligibility`, and the asymmetry is
+/// the point. A delete destroys the only copy of a payload. A rename retires two
+/// chunks, writes equivalents, and leaves a forwarding redirect; the bytes are
+/// still there and the backup still holds the container as it was. That makes it
+/// closer to duplication, which is already offered against the game's own paks.
+///
+/// What this cannot see, and does not try to: whether the container is encrypted
+/// or signed, whether it carries ordinal-keyed blocks, whether the package owns
+/// an unexpected chunk. Those are properties of the container rather than of
+/// Baboon's records, and `blam-tags` refuses them at the point it can actually
+/// prove them.
+pub(in crate::app) fn container_rename_eligibility(
+    entry: &TagEntry,
+    containers: &[crate::source::MountedContainer],
+    ledger: &CreatedTagLedger,
+    expert_mode: bool,
+) -> Result<RenameTier, String> {
+    let (container, rel_path) = match &entry.location {
+        TagEntryLocation::Container {
+            container,
+            rel_path,
+        } => (*container, rel_path.as_str()),
+        TagEntryLocation::NewContainer { .. } => {
+            return Err(
+                "This tag is not in a pak yet — rename it from its tab, which costs nothing"
+                    .to_owned(),
+            );
+        }
+        TagEntryLocation::LooseFile(_) => {
+            return Err("Loose tags are renamed on disk, not inside a pak".to_owned());
+        }
+        TagEntryLocation::Monolithic { .. } => {
+            return Err("Monolithic cache tags are read-only".to_owned());
+        }
+    };
+    let target = containers
+        .get(container)
+        .ok_or("This tag's container is no longer mounted")?;
+
+    // A record that says `RenamedFromShipped` still names a tag the game
+    // shipped. It stops the tag being deleted; it must not promote it to a tier
+    // that skips the Expert gate, or renaming twice would launder it.
+    if let Some(record) = ledger.find(&target.utoc_path, rel_path)
+        && record.origin == CreatedTagOrigin::Authored
+    {
+        return Ok(RenameTier::Authored {
+            minimum_appended_index: record.container_entry_count_before,
+        });
+    }
+    if !expert_mode {
+        return Err(format!(
+            "Renaming a tag inside {} rewrites one of the game's own packs. \
+             Turn on Expert mode to do it.",
+            target.chunk_label
+        ));
+    }
+    Ok(RenameTier::Shipped)
+}
+
 /// Where a renamed tag was, and where it now is, in the terms the mounted
 /// source is indexed by.
 ///
@@ -159,10 +257,12 @@ pub(in crate::app) fn apply_container_rename_source_state(
         else {
             return Err("Rename completed against a non-container source".to_owned());
         };
-        let old_index_key = container_duplicate_index_key(request.group_tag, request.old_ubulk_path)
-            .ok_or("Rename completed from an invalid container path")?;
-        let new_index_key = container_duplicate_index_key(request.group_tag, request.new_ubulk_path)
-            .ok_or("Rename completed with an invalid container destination path")?;
+        let old_index_key =
+            container_duplicate_index_key(request.group_tag, request.old_ubulk_path)
+                .ok_or("Rename completed from an invalid container path")?;
+        let new_index_key =
+            container_duplicate_index_key(request.group_tag, request.new_ubulk_path)
+                .ok_or("Rename completed with an invalid container destination path")?;
         let index = Arc::make_mut(index);
         if request.redirect {
             // Mirrors what the container header now says: a reference to the
@@ -207,7 +307,9 @@ pub(in crate::app) fn apply_container_rename_source_state(
     }
 
     source.entries.retain(|existing| existing.key != old_key);
-    source.all_entries.retain(|existing| existing.key != old_key);
+    source
+        .all_entries
+        .retain(|existing| existing.key != old_key);
     // Sorted rather than pushed, for the same reason a duplicate is: the mount
     // orders by `natural_key` and the browser draws a folder in entry-vector
     // order, so a pushed entry lands at the bottom of its new folder instead of
@@ -233,6 +335,10 @@ pub(in crate::app) fn apply_container_rename_source_state(
 #[cfg(test)]
 #[path = "../tests/rekey_tag.rs"]
 mod rekey_tag_tests;
+
+#[cfg(test)]
+#[path = "../tests/rename_eligibility.rs"]
+mod rename_eligibility_tests;
 
 #[cfg(test)]
 #[path = "../tests/container_rename_state.rs"]
