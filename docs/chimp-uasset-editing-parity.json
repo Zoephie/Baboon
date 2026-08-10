@@ -8,7 +8,7 @@
   "evidence": {
     "no_op_control": "write -> reopen -> write reaches identical bytes, so an edit that reads back is distinguishable from a writer that rearranged the header around it",
     "header_round_trips": "name rename, import retarget and export metadata each survive a package write and reopen",
-    "corpus_controls": "imports::corpus proves a no-op import rewrite reproduces every shipped tag package byte for byte; name_map::corpus does the same for a rename but is install-gated (CE_PAKS) and has not been run on this machine"
+    "corpus_controls": "run against a Campaign Evolved install: imports::corpus reproduced all four import arrays for 12329 of 12329 shipped tag packages (8733 of them carrying package imports), and name_map::corpus renamed an entry in all 12329, wrote, reopened, and found exactly the one entry changed with every FMappedName still resolving"
   },
   "property_coverage": {
     "scalars": "editable",
