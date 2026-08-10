@@ -201,6 +201,25 @@ and editor state.
   every texture the materials reference, or just the ones named after the model —
   and asks the same image-format question, so they land beside the mesh in
   whichever format you picked rather than always TIFF.
+- **Header** — the package's own tables as editable rows: the name map, the
+  import map, the export map, and the package's flags and versioning. Every name
+  and import slot shows what references it, because a name is stored as an index
+  and renaming one entry retargets every reference to it at once — so the count
+  is the blast radius. Editing a name also refreshes the resolved text inside
+  decoded properties, which is what stops a later edit forking a second entry
+  rather than following the rename. Import slots retarget to another script
+  object or package export, and can be added but never removed: object
+  properties name a slot by position, so dropping one would shift every
+  reference above it. The package's own name is not editable here — the
+  container addresses the chunk serving a package by a hash of that string, so
+  moving it is a rename of the package rather than an edit of the table.
+  Changing an export's object flags re-reads the export and refuses the change
+  if the payload no longer decodes, because those flags decide how the bytes are
+  read and not merely how they are labelled. Flags and versioning are written
+  and read back before they are applied, and refused if anything did not
+  survive; the versioning fields are Expert mode only, and are not stored at all
+  while a package is unversioned — which every shipped Campaign Evolved package
+  is.
 - Save edited packages back into the container in place, or bundle them into a
   mod container.
 - Edits are checkpointed to a recovery folder, so a crash or a restart does not

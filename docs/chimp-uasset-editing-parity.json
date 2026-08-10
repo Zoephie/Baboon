@@ -5,6 +5,11 @@
     "UAssetGUI": "1338f79defb0db5a0b98918780f59686400e4cf1"
   },
   "policy": "A value is editable only when Chimp has a typed decoder, validator, symmetric writer, and reopen coverage. Unknown bytes remain read-only and byte-preserved.",
+  "evidence": {
+    "no_op_control": "write -> reopen -> write reaches identical bytes, so an edit that reads back is distinguishable from a writer that rearranged the header around it",
+    "header_round_trips": "name rename, import retarget and export metadata each survive a package write and reopen",
+    "corpus_controls": "imports::corpus proves a no-op import rewrite reproduces every shipped tag package byte for byte; name_map::corpus does the same for a rename but is install-gated (CE_PAKS) and has not been run on this machine"
+  },
   "property_coverage": {
     "scalars": "editable",
     "names_and_strings": "editable_with_name_interning_and_encoding_preservation",
@@ -23,7 +28,8 @@
     "all_dirty_export_mod": "implemented_with_priority_suffix_collision_confirmation_and_reopen_validation",
     "all_dirty_source_overwrite": "implemented_with_per_container_batching_validation_and_cross_container_utoc_rollback",
     "specialized_export_payloads": "tracked",
-    "package_name_import_export_metadata": "tracked",
+    "package_name_import_export_metadata": "name_map_rename_import_slot_retarget_export_object_name_object_flags_and_filter_flags_editable_with_validator_and_write_reopen_coverage; object_flag_changes_are_re-decoded_and_refused_if_the_payload_no_longer_reads; package_identity_class_outer_super_template_read_only; public_export_hash_recompute_is_expert_only_and_off_by_default; serial_offsets_sizes_section_offsets_and_counts_derived_on_write; bulk_data_and_dependency_arcs_read_only_preserved",
+    "package_flags_and_versioning": "package_flags_and_licensee_editable; unversioned_zen_version_and_file_versions_expert_only; every_change_is_written_and_reopened_before_it_is_applied; versioning_fields_are_not_stored_while_a_package_is_unversioned_which_is_every_shipped_campaign_evolved_package",
     "data_tables_and_property_bags": "typed_fields_editable; corpus parity tracked",
     "structured_kismet_instructions": "tracked"
   }

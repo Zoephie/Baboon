@@ -26,18 +26,25 @@ use blam_tags::iostore::container::writer::{
 };
 use blam_tags::iostore::object::archive::ExportContext;
 use blam_tags::iostore::object::edit::{
-    default_value_for_type, editable_schema_slots, property_type_for_slot, set_property_slot,
-    validate_value_for_type,
+    count_object_references, default_value_for_type, editable_schema_slots, property_type_for_slot,
+    set_property_slot, validate_value_for_type,
 };
 use blam_tags::iostore::object::export::{Export, ExportBlock, read_export_in, write_export_in};
 use blam_tags::iostore::object::hand_written as chimp_hw;
 use blam_tags::iostore::object::native::{NativeStruct, PerPlatformValue};
 use blam_tags::iostore::object::tail_models::{TailContext, parse_texture_chain_tail};
 use blam_tags::iostore::object::usmap::PropertyType;
-use blam_tags::iostore::object::value::{PropValue, PropertyBlock};
+use blam_tags::iostore::object::value::{FName, PropValue, PropertyBlock};
 use blam_tags::iostore::package::builder::{read_payloads, write_package};
+use blam_tags::iostore::package::imports::{
+    ImportSlot, ImportTarget, import_package_index, import_slot_of, public_export_hash,
+    read_import_slots, write_import_slots,
+};
+use blam_tags::iostore::package::name_map::FMappedName;
 use blam_tags::iostore::package::ue_types::{FPackageObjectIndex, FPackageObjectIndexType};
-use blam_tags::iostore::package::zen::FZenPackageHeader;
+use blam_tags::iostore::package::zen::{
+    EExportFilterFlags, EZenPackageVersion, FZenPackageHeader,
+};
 use blam_tags::iostore::skeletal_mesh::SkeletalMesh;
 use blam_tags::iostore::static_mesh::StaticMesh;
 use blam_tags::iostore::usmap::Usmap;
@@ -153,6 +160,7 @@ enum ChimpDocumentView {
     Texture,
     Mesh,
     Properties,
+    Header,
     Metadata,
 }
 
@@ -656,6 +664,123 @@ pub(super) struct ChimpDocument {
     metadata_text: String,
     metadata_line_numbers: String,
     metadata_text_dirty: bool,
+    /// Who references each name-map entry and each import slot.
+    ///
+    /// Cached because it walks every decoded export, and invalidated with the
+    /// metadata text — the two go stale together, on any header change.
+    header_usage: Option<ChimpHeaderUsage>,
+    header_name_filter: String,
+    /// The name-map row being edited, if any. Header edits commit explicitly
+    /// rather than per keystroke: a rename walks every decoded export and then
+    /// rebuilds the whole package for the recovery checkpoint, which is not
+    /// something to do between two letters of a word.
+    header_name_edit: Option<ChimpNameEdit>,
+    header_import_edit: Option<ChimpImportEdit>,
+    header_export_edit: Option<ChimpExportEdit>,
+    header_identity_edit: Option<ChimpIdentityEdit>,
+    header_error: Option<String>,
+}
+
+/// A draft of the package's flags and versioning.
+///
+/// The version fields are not metadata: `file_version_ue5` gates whether the
+/// bulk-data map is serialized at all, and the Zen version decides the header's
+/// own shape. That is why nothing here is applied without first writing the
+/// package and reading it back.
+struct ChimpIdentityEdit {
+    /// Free hex, so an unnamed bit can be set without inventing a checkbox for
+    /// every flag the engine defines.
+    package_flags: String,
+    licensee_version: i32,
+    is_unversioned: bool,
+    zen_version: EZenPackageVersion,
+    file_version_ue4: i32,
+    file_version_ue5: i32,
+}
+
+/// A draft export-map entry.
+struct ChimpExportEdit {
+    index: usize,
+    object_name: String,
+    object_flags: u32,
+    filter_flags: EExportFilterFlags,
+    /// Recompute `public_export_hash` from the new object name.
+    ///
+    /// Off by default and expert-only, because it cuts the other way from the
+    /// desync it fixes: importers hold the *old* hash, so recomputing makes this
+    /// package right and every importer wrong.
+    recompute_hash: bool,
+}
+
+struct ChimpNameEdit {
+    index: usize,
+    text: String,
+    focus: bool,
+}
+
+/// A draft import slot.
+///
+/// Both halves are kept as text because neither is recoverable from what the
+/// file stores: a script import is a one-way hash of its object path, and a
+/// package import carries only `public_export_hash`. Whatever the user types is
+/// the only name either has, and it is never written back as one.
+struct ChimpImportEdit {
+    /// The slot being edited, or `slots.len()` for one being appended.
+    slot: usize,
+    kind: ChimpImportKind,
+    /// `/Script/...` object path, for a script import.
+    script_path: String,
+    /// `/Game/...` package path, for a package import.
+    package_path: String,
+    /// Object name, hashed on commit. Never persisted: the file has no field for
+    /// it, and claiming otherwise would be inventing provenance.
+    object_name: String,
+    /// Public exports of `package_path`, once someone asked for them. Loading
+    /// another package to answer "what is hash X called" is worth doing on
+    /// request and not on every draw.
+    resolved: Option<Result<Vec<(String, u64)>, String>>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ChimpImportKind {
+    Script,
+    Package,
+    Null,
+}
+
+/// What the Header view reports about references into the package's tables.
+///
+/// The counts are the point of the view: a name-map entry is addressed by index,
+/// so editing one retargets every reference at once, and seeing how many there
+/// are — and whether one of them is the package's own identity — is what makes
+/// that safe to reason about before anything is editable.
+#[derive(Default)]
+struct ChimpHeaderUsage {
+    /// Per name-map index, parallel to the table.
+    names: Vec<ChimpNameUsage>,
+    /// Per import slot, how many object properties name it.
+    import_references: Vec<usize>,
+}
+
+#[derive(Default, Clone)]
+struct ChimpNameUsage {
+    /// Total references, including the ones `sites` summarises.
+    count: usize,
+    /// Where they are, deduplicated and capped — a tooltip, not a report.
+    sites: Vec<String>,
+    /// This entry backs `summary.name`, so it is the package's identity: the
+    /// chunk that serves the package is addressed by a hash of this string.
+    is_package_identity: bool,
+}
+
+impl ChimpNameUsage {
+    fn record(&mut self, site: impl Into<String>) {
+        self.count += 1;
+        let site = site.into();
+        if self.sites.len() < 8 && !self.sites.iter().any(|existing| *existing == site) {
+            self.sites.push(site);
+        }
+    }
 }
 
 pub(super) struct ChimpTypeIndex {
@@ -1209,6 +1334,13 @@ fn decode_chimp_document(
         metadata_text: String::new(),
         metadata_line_numbers: String::new(),
         metadata_text_dirty: true,
+        header_usage: None,
+        header_name_filter: String::new(),
+        header_name_edit: None,
+        header_import_edit: None,
+        header_export_edit: None,
+        header_identity_edit: None,
+        header_error: None,
     };
     refresh_chimp_document_text(&mut document);
     refresh_chimp_metadata_text(&mut document, world);
@@ -1647,6 +1779,10 @@ fn rebuild_chimp_document(
     world: &World,
     document: &ChimpDocument,
 ) -> Result<(Vec<u8>, blam_tags::iostore::container::header::StoreEntry), String> {
+    // Before anything is serialized: a header whose references point outside the
+    // tables they name would otherwise be caught by a panic in the name map, or
+    // not at all.
+    validate_chimp_header(document)?;
     let names = document.header.name_map.copy_raw_names();
     let resolver = world.resolver(&document.header, &document.original, &names);
     let mut payloads = document.payloads.clone();
@@ -1672,6 +1808,599 @@ fn rebuild_chimp_document(
     }
     write_package(&document.header, &payloads, CE_HEADER_VERSION)
         .map_err(|error| format!("Could not rebuild {}: {error:#}", document.package))
+}
+
+/// Structural checks over the package header itself, before it is written.
+///
+/// The property validator beside this one answers "is this value legal for its
+/// schema slot". This answers the questions that only arise once the *header*
+/// can be edited: whether every reference still lands inside the table it points
+/// at, and whether the package still is what the container says it is.
+fn validate_chimp_header(document: &ChimpDocument) -> Result<(), String> {
+    validate_chimp_header_parts(
+        &document.package,
+        &document.header,
+        document.payloads.len(),
+        &document.exports,
+    )
+}
+
+/// [`validate_chimp_header`] over the pieces it actually reads, so the checks
+/// can be exercised without a mounted package behind them.
+fn validate_chimp_header_parts(
+    package: &str,
+    header: &FZenPackageHeader,
+    payload_count: usize,
+    exports: &[ChimpExport],
+) -> Result<(), String> {
+    let names = &header.name_map;
+
+    if payload_count != header.export_map.len() {
+        return Err(format!(
+            "{package} has {payload_count} export payloads for {} export map entries",
+            header.export_map.len()
+        ));
+    }
+
+    // The most important check here. `FNameMap::get` indexes its slice directly,
+    // so an out-of-range `FMappedName` is not a validation failure but a panic —
+    // it would take the whole application down on the next draw rather than
+    // report anything.
+    if names.try_get(header.summary.name).is_none() {
+        return Err(format!(
+            "{package}: the package name points outside the name map"
+        ));
+    }
+    for (index, export) in header.export_map.iter().enumerate() {
+        if names.try_get(export.object_name).is_none() {
+            return Err(format!(
+                "{package}: export {index}'s object name points outside the name map"
+            ));
+        }
+    }
+    for (index, cell) in header.cell_export_map.iter().enumerate() {
+        if names.try_get(cell.cpp_class_info).is_none() {
+            return Err(format!(
+                "{package}: cell export {index}'s class name points outside the name map"
+            ));
+        }
+    }
+
+    // The import map has to remain resolvable as slots, because that is the form
+    // every object property addresses it in.
+    let slots = read_import_slots(header)
+        .map_err(|error| format!("{package}: import map is not resolvable: {error:#}"))?;
+    for (index, export) in exports.iter().enumerate() {
+        let Ok(decoded) = &export.decoded else {
+            continue;
+        };
+        let ExportBlock::Reflected(block) = &decoded.block else {
+            continue;
+        };
+        if let Some(bad) = first_unresolvable_object_reference(block, slots.len()) {
+            return Err(format!(
+                "{package}: export {index} references import slot {bad}, but the import map has {} slots",
+                slots.len()
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+/// The first negative `FPackageIndex` in `block` that names a slot past the end
+/// of the import map, if any.
+fn first_unresolvable_object_reference(block: &PropertyBlock, slots: usize) -> Option<usize> {
+    fn check(value: &PropValue, slots: usize) -> Option<usize> {
+        match value.unwrapped() {
+            PropValue::Object(index) if *index < 0 => {
+                let slot = import_slot_of(*index)?;
+                (slot >= slots).then_some(slot)
+            }
+            PropValue::Array(items) | PropValue::Set(items) => {
+                items.iter().find_map(|item| check(item, slots))
+            }
+            PropValue::Map(pairs) => pairs
+                .iter()
+                .find_map(|(key, value)| check(key, slots).or_else(|| check(value, slots))),
+            PropValue::Struct(nested) => nested.iter().find_map(|(_, value)| check(value, slots)),
+            _ => None,
+        }
+    }
+    block.iter().find_map(|(_, value)| check(value, slots))
+}
+
+/// Rewrite one name-map entry, and everything that displays it.
+///
+/// An `FName` is stored as an index, so the rename retargets every reference on
+/// disk by itself. What it does not do is update the *resolved* text a decoded
+/// value carries — and that is not cosmetic: interning is by string, so editing
+/// one of those fields afterwards would fork a fresh entry rather than follow the
+/// rename. Refreshing them is part of the operation, not a redraw.
+fn apply_chimp_name_rename(
+    document: &mut ChimpDocument,
+    index: usize,
+    text: &str,
+) -> Result<(), String> {
+    let text = text.trim();
+
+    // The package's own name is its identity, and the container addresses the
+    // chunk that serves it by a hash of that string. Renaming it here would
+    // leave the package claiming to be something no chunk id matches — which the
+    // in-place-rename work exists to do properly, moving the header, the chunk
+    // id and the store entry together.
+    if index == document.header.summary.name.index() as usize {
+        return Err(
+            "This entry is the package's own name. Renaming a package has to move its chunk id \
+             and container-header entry with it, so it is a rename of the package rather than an \
+             edit of this table."
+                .to_owned(),
+        );
+    }
+
+    document
+        .header
+        .name_map
+        .rename(index, text)
+        .map_err(|error| format!("{error:#}"))?;
+
+    // Every export's cached display name, as `decode_chimp_exports` derived it.
+    for (export, entry) in document
+        .exports
+        .iter_mut()
+        .zip(document.header.export_map.iter())
+    {
+        if entry.object_name.index() as usize == index {
+            export.object = document
+                .header
+                .name_map
+                .try_get(entry.object_name)
+                .map(|name| name.to_string())
+                .unwrap_or_default();
+        }
+    }
+
+    // Then the resolved text inside decoded property values. The composition
+    // has to match the reader's: a non-zero number renders as `_{number - 1}`.
+    let base = document
+        .header
+        .name_map
+        .names()
+        .get(index)
+        .cloned()
+        .unwrap_or_default();
+    for export in &mut document.exports {
+        let Ok(decoded) = &mut export.decoded else {
+            continue;
+        };
+        let ExportBlock::Reflected(block) = &mut decoded.block else {
+            continue;
+        };
+        block.visit_names_mut(&mut |name| {
+            if name.index as usize != index {
+                return;
+            }
+            let text = if name.number != 0 {
+                format!("{base}_{}", name.number - 1)
+            } else {
+                base.clone()
+            };
+            *name = FName::new(name.index, name.number, text);
+        });
+    }
+
+    Ok(())
+}
+
+/// Replace, or append, one import slot and rebuild the four arrays it feeds.
+///
+/// `write_import_slots` rederives `import_map`, `imported_packages`,
+/// `imported_package_names` and `imported_public_export_hashes` from the slot
+/// list, preserving slot order — which is what keeps every `FPackageIndex` in
+/// every export payload pointing where it did. Appending is safe for the same
+/// reason: it cannot renumber an existing slot.
+fn apply_chimp_import_slot(
+    document: &mut ChimpDocument,
+    index: usize,
+    slot: ImportSlot,
+) -> Result<(), String> {
+    let mut slots = read_import_slots(&document.header)
+        .map_err(|error| format!("Import map is not resolvable: {error:#}"))?;
+    if index > slots.len() {
+        return Err(format!(
+            "Import slot {index} is past the end of a {}-slot import map",
+            slots.len()
+        ));
+    }
+    if index == slots.len() {
+        slots.push(slot);
+    } else {
+        slots[index] = slot;
+    }
+    write_import_slots(&mut document.header, &slots)
+        .map_err(|error| format!("Could not rewrite the import map: {error:#}"))
+}
+
+/// Write a candidate header and read it straight back, reporting anything that
+/// did not survive the trip.
+///
+/// This is the parity policy's "reopen coverage" applied per edit rather than
+/// only in tests, and it exists because the version fields are format selectors:
+/// lowering `file_version_ue5` stops the bulk-data map being written at all, and
+/// nothing about the edit itself would say so. One rebuild is cheap — the
+/// recovery checkpoint already performs one on every commit.
+fn chimp_header_survives_reopen(
+    header: &FZenPackageHeader,
+    payloads: &[Vec<u8>],
+) -> Result<(), String> {
+    let (bytes, _) = write_package(header, payloads, CE_HEADER_VERSION)
+        .map_err(|error| format!("The edited header could not be written: {error:#}"))?;
+    let reopened = FZenPackageHeader::deserialize(
+        &mut Cursor::new(&bytes),
+        None,
+        CE_TOC_VERSION,
+        CE_HEADER_VERSION,
+        None,
+    )
+    .map_err(|error| format!("The edited header did not reopen: {error:#}"))?;
+
+    let mut drift: Vec<String> = Vec::new();
+    let mut check = |field: &str, intended: String, got: String| {
+        if intended != got {
+            drift.push(format!("{field} was written as {intended} and read back as {got}"));
+        }
+    };
+    check(
+        "package flags",
+        format!("0x{:08X}", header.summary.package_flags),
+        format!("0x{:08X}", reopened.summary.package_flags),
+    );
+    check(
+        "unversioned",
+        header.is_unversioned.to_string(),
+        reopened.is_unversioned.to_string(),
+    );
+    // An unversioned package carries no versioning block at all — `serialize`
+    // omits it and the reader synthesises one heuristically — so comparing those
+    // fields would report drift on every package Campaign Evolved ships. They
+    // are only real once the block is actually written.
+    if !header.is_unversioned {
+        check(
+            "Zen version",
+            format!("{:?}", header.versioning_info.zen_version),
+            format!("{:?}", reopened.versioning_info.zen_version),
+        );
+        check(
+            "UE4 file version",
+            header
+                .versioning_info
+                .package_file_version
+                .file_version_ue4
+                .to_string(),
+            reopened
+                .versioning_info
+                .package_file_version
+                .file_version_ue4
+                .to_string(),
+        );
+        check(
+            "UE5 file version",
+            header
+                .versioning_info
+                .package_file_version
+                .file_version_ue5
+                .to_string(),
+            reopened
+                .versioning_info
+                .package_file_version
+                .file_version_ue5
+                .to_string(),
+        );
+        check(
+            "licensee version",
+            header.versioning_info.licensee_version.to_string(),
+            reopened.versioning_info.licensee_version.to_string(),
+        );
+    }
+    // Counts rather than contents: these are the tables a version change can
+    // quietly stop writing.
+    check(
+        "bulk data entries",
+        header.bulk_data.len().to_string(),
+        reopened.bulk_data.len().to_string(),
+    );
+    check(
+        "name map entries",
+        header.name_map.len().to_string(),
+        reopened.name_map.len().to_string(),
+    );
+    check(
+        "import slots",
+        header.import_map.len().to_string(),
+        reopened.import_map.len().to_string(),
+    );
+    check(
+        "export map entries",
+        header.export_map.len().to_string(),
+        reopened.export_map.len().to_string(),
+    );
+
+    if drift.is_empty() {
+        Ok(())
+    } else {
+        Err(format!(
+            "The package does not read back as it was written, so the change was not applied:\n  {}",
+            drift.join("\n  ")
+        ))
+    }
+}
+
+/// Apply a drafted identity/versioning change, but only if it survives a write
+/// and reopen.
+fn apply_chimp_identity_edit(
+    document: &mut ChimpDocument,
+    edit: &ChimpIdentityEdit,
+) -> Result<(), String> {
+    let text = edit.package_flags.trim();
+    let text = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")).unwrap_or(text);
+    let package_flags = u32::from_str_radix(text, 16)
+        .map_err(|_| format!("{:?} is not a 32-bit hex value", edit.package_flags))?;
+
+    let mut candidate = document.header.clone();
+    candidate.summary.package_flags = package_flags;
+    candidate.is_unversioned = edit.is_unversioned;
+    // Kept in step because `serialize` derives it rather than reading it, and a
+    // header that disagreed with itself would reopen as the other one.
+    candidate.summary.has_versioning_info = u32::from(!edit.is_unversioned);
+    candidate.versioning_info.zen_version = edit.zen_version;
+    candidate.versioning_info.licensee_version = edit.licensee_version;
+    candidate.versioning_info.package_file_version.file_version_ue4 = edit.file_version_ue4;
+    candidate.versioning_info.package_file_version.file_version_ue5 = edit.file_version_ue5;
+
+    chimp_header_survives_reopen(&candidate, &document.payloads)?;
+    document.header = candidate;
+    Ok(())
+}
+
+/// Apply a drafted export-map entry.
+///
+/// `object_flags` is the reason this is not three independent setters. It is not
+/// inert metadata: it is fed to `read_export_in`, and `RF_CLASS_DEFAULT_OBJECT`
+/// selects a different native tail branch — so changing it changes what the same
+/// bytes *mean*. The export is therefore round-tripped through the new flags and
+/// the edit is refused if it no longer decodes, rather than left to fail at save
+/// time with the old decode still in hand.
+fn apply_chimp_export_edit(
+    world: &World,
+    document: &mut ChimpDocument,
+    edit: &ChimpExportEdit,
+) -> Result<(), String> {
+    let index = edit.index;
+    if index >= document.header.export_map.len() {
+        return Err(format!("Export {index} is no longer in this package"));
+    }
+    if edit.object_name.trim().is_empty() {
+        return Err("An export needs an object name".to_owned());
+    }
+
+    // Re-decode first, so a refusal leaves the document untouched.
+    if edit.object_flags != document.header.export_map[index].object_flags
+        && let Some(redecoded) = chimp_redecode_export(world, document, index, edit.object_flags)?
+    {
+        document.exports[index].decoded = Ok(redecoded);
+    }
+    apply_chimp_export_metadata(document, edit);
+    Ok(())
+}
+
+/// The half of an export edit that needs nothing but the document: the name,
+/// the filter flags, and the optional hash recompute.
+///
+/// Split out because `object_flags` is the only field whose change has to be
+/// proven against a decoder first, and everything else would otherwise be
+/// untestable without a mounted world behind it.
+fn apply_chimp_export_metadata(document: &mut ChimpDocument, edit: &ChimpExportEdit) {
+    let index = edit.index;
+    let object_name = edit.object_name.trim();
+    let entry = &mut document.header.export_map[index];
+    entry.object_flags = edit.object_flags;
+    entry.filter_flags = edit.filter_flags;
+    // `store` interns rather than renames: an existing entry is reused, a new
+    // one appended, and the trailing `_N` lands in the reference's number field
+    // where it belongs.
+    entry.object_name = document.header.name_map.store(object_name);
+    if edit.recompute_hash {
+        let resolved = document
+            .header
+            .name_map
+            .try_get(entry.object_name)
+            .map(|name| name.to_string())
+            .unwrap_or_else(|| object_name.to_owned());
+        document.header.export_map[index].public_export_hash = public_export_hash(&resolved);
+    }
+
+    document.exports[index].object = document
+        .header
+        .name_map
+        .try_get(document.header.export_map[index].object_name)
+        .map(|name| name.to_string())
+        .unwrap_or_default();
+}
+
+/// Round-trip one export through `object_flags` to see whether it still decodes.
+///
+/// Serializing the *current* decoded value first is what keeps unsaved property
+/// edits: re-reading `payloads[index]` would decode the bytes as they were on
+/// disk and silently discard them. `Ok(None)` means there was nothing decoded to
+/// re-interpret, so the flag is the only thing changing.
+fn chimp_redecode_export(
+    world: &World,
+    document: &ChimpDocument,
+    index: usize,
+    object_flags: u32,
+) -> Result<Option<Export>, String> {
+    let export = &document.exports[index];
+    let (Some(class), Ok(decoded)) = (export.class.as_deref(), &export.decoded) else {
+        return Ok(None);
+    };
+    let names = document.header.name_map.copy_raw_names();
+    let resolver = world.resolver(&document.header, &document.original, &names);
+    let payload = write_export_in(class, decoded, world.usmap(), Some(&resolver))
+        .map_err(|error| format!("Could not re-serialize export {index}: {error:#}"))?;
+    let bulk: Vec<(i64, i64)> = document
+        .header
+        .bulk_data
+        .iter()
+        .map(|entry| (entry.serial_offset, entry.serial_size))
+        .collect();
+    let context = ExportContext {
+        bulk_data: &bulk,
+        resolver: Some(&resolver),
+    };
+    read_export_in(
+        &payload,
+        &names,
+        world.usmap(),
+        class,
+        object_flags,
+        &context,
+    )
+    .map(Some)
+    .map_err(|error| {
+        format!(
+            "Export {index} no longer decodes with object flags 0x{object_flags:08X}: {error:#}"
+        )
+    })
+}
+
+/// The public exports of a mounted package, as `(object name, hash)`.
+///
+/// `public_export_hash` is one-way, so a hash cannot be turned back into the
+/// name it came from. This reads the package that actually holds the export and
+/// matches on the hash — the difference between a usable picker and a raw 64-bit
+/// field.
+fn chimp_public_exports_of(world: &World, package: &str) -> Result<Vec<(String, u64)>, String> {
+    let record = world
+        .package(package)
+        .ok_or_else(|| format!("{package} is not mounted"))?;
+    let provider = record
+        .active_provider()
+        .cloned()
+        .ok_or_else(|| format!("{package} has no active provider"))?;
+    let bytes = world
+        .read_provider(&provider)
+        .map_err(|error| error.to_string())?;
+    let header = FZenPackageHeader::deserialize(
+        &mut Cursor::new(&bytes),
+        None,
+        CE_TOC_VERSION,
+        CE_HEADER_VERSION,
+        None,
+    )
+    .map_err(|error| format!("{package} did not parse: {error:#}"))?;
+    let mut exports: Vec<(String, u64)> = header
+        .export_map
+        .iter()
+        .filter(|export| export.public_export_hash != 0)
+        .filter_map(|export| {
+            header
+                .name_map
+                .try_get(export.object_name)
+                .map(|name| (name.to_string(), export.public_export_hash))
+        })
+        .collect();
+    exports.sort();
+    exports.dedup();
+    Ok(exports)
+}
+
+/// Export object names this entry backs whose `public_export_hash` would no
+/// longer match, so the view can say so before the rename happens.
+///
+/// The hash is how *other* packages address an export. Renaming the object it
+/// names does not update theirs, so the two drift apart — recoverable, but only
+/// if someone knows it happened.
+fn chimp_export_hash_desyncs(
+    header: &FZenPackageHeader,
+    index: usize,
+    text: &str,
+) -> Vec<usize> {
+    header
+        .export_map
+        .iter()
+        .enumerate()
+        .filter(|(_, export)| export.object_name.index() as usize == index)
+        .filter(|(_, export)| {
+            let resolved = if export.object_name.number != 0 {
+                format!("{text}_{}", export.object_name.number - 1)
+            } else {
+                text.to_owned()
+            };
+            export.public_export_hash != public_export_hash(&resolved)
+        })
+        .map(|(index, _)| index)
+        .collect()
+}
+
+/// Recompute who references each name-map entry and each import slot.
+fn refresh_chimp_header_usage(document: &mut ChimpDocument) {
+    let mut names = vec![ChimpNameUsage::default(); document.header.name_map.len()];
+    let mut record = |mapped: FMappedName, site: &str| {
+        if let Some(usage) = names.get_mut(mapped.index() as usize) {
+            usage.record(site);
+        }
+    };
+
+    record(document.header.summary.name, "package name");
+    for (index, export) in document.header.export_map.iter().enumerate() {
+        record(export.object_name, &format!("export {index} object name"));
+    }
+    for (index, cell) in document.header.cell_export_map.iter().enumerate() {
+        record(cell.cpp_class_info, &format!("cell export {index} class"));
+    }
+    if let Some(usage) = names.get_mut(document.header.summary.name.index() as usize) {
+        usage.is_package_identity = true;
+    }
+
+    // Property values. `visit_names_mut` is the crate's only traversal over
+    // every shape a name can hide behind, and nothing is mutated here — taking
+    // it by `&mut` costs nothing and avoids a second copy of a match whose whole
+    // value is that it is exhaustive.
+    for index in 0..document.exports.len() {
+        let Ok(decoded) = &mut document.exports[index].decoded else {
+            continue;
+        };
+        let ExportBlock::Reflected(block) = &mut decoded.block else {
+            continue;
+        };
+        let site = format!("export {index} properties");
+        block.visit_names_mut(&mut |name| {
+            if let Some(usage) = names.get_mut(name.index as usize) {
+                usage.record(&site);
+            }
+        });
+    }
+
+    // Import slots, by the `FPackageIndex` an object property would carry.
+    let slot_count = document.header.import_map.len();
+    let mut import_references = vec![0usize; slot_count];
+    for slot in 0..slot_count {
+        let package_index = import_package_index(slot);
+        for export in &document.exports {
+            let Ok(decoded) = &export.decoded else {
+                continue;
+            };
+            let ExportBlock::Reflected(block) = &decoded.block else {
+                continue;
+            };
+            import_references[slot] += count_object_references(block, package_index);
+        }
+    }
+
+    document.header_usage = Some(ChimpHeaderUsage {
+        names,
+        import_references,
+    });
 }
 
 fn validate_chimp_property_block(
@@ -3017,6 +3746,9 @@ impl Baboon {
             self.extract_chimp_export(kit_index, &package);
         }
 
+        // Read before the document borrow: `document` borrows this kit, and the
+        // preference lives on the application.
+        let expert = self.expert_mode;
         let world = match &self.kits[kit_index].chimp.mount {
             ChimpMount::Ready(world) => world.clone(),
             _ => return,
@@ -3054,6 +3786,8 @@ impl Baboon {
                 "Properties",
             )
             .on_hover_text("Inspect exports and edit supported reflected scalar properties");
+            ui.selectable_value(&mut document.view, ChimpDocumentView::Header, "Header")
+                .on_hover_text("The package's name map, imports and exports, and what uses each");
             ui.selectable_value(&mut document.view, ChimpDocumentView::Metadata, "Metadata")
                 .on_hover_text("Package dependencies and physical archive providers");
         });
@@ -3125,6 +3859,9 @@ impl Baboon {
                     })
                     .inner
             }
+            ChimpDocumentView::Header => {
+                draw_chimp_header_view(ui, document, &world, expert)
+            }
             ChimpDocumentView::Metadata => {
                 if document.metadata_text_dirty {
                     refresh_chimp_metadata_text(document, &world);
@@ -3144,6 +3881,9 @@ impl Baboon {
             document.dirty = true;
             document.document_text_dirty = true;
             document.metadata_text_dirty = true;
+            // Reference counts are derived from the same header the metadata
+            // text is, so they go stale at exactly the same moment.
+            document.header_usage = None;
         }
         let _ = document;
         if changed {
@@ -7684,6 +8424,1070 @@ fn refresh_chimp_document_text(document: &mut ChimpDocument) {
     document.document_text_dirty = false;
 }
 
+/// The package header as structured rows: identity, the name map, the import
+/// map, and the export map, each with who references it.
+///
+/// Read-only for now. The Metadata view beside it stays as it is and remains the
+/// exhaustive dump — this one is the part a person can act on, and the counts
+/// are what make an edit's blast radius visible before there is anything to
+/// edit.
+fn draw_chimp_header_view(
+    ui: &mut Ui,
+    document: &mut ChimpDocument,
+    world: &World,
+    expert_mode: bool,
+) -> bool {
+    if document.header_usage.is_none() {
+        refresh_chimp_header_usage(document);
+    }
+    // Collected during the draw and applied after it: the rename needs `&mut`
+    // access to the very header and exports the rows are reading from.
+    let mut edits = ChimpHeaderEdits::default();
+    draw_chimp_header_sections(ui, document, world, expert_mode, &mut edits);
+
+    if edits.start_identity {
+        document.header_name_edit = None;
+        document.header_import_edit = None;
+        document.header_export_edit = None;
+        let versioning = &document.header.versioning_info;
+        document.header_identity_edit = Some(ChimpIdentityEdit {
+            package_flags: format!("{:08X}", document.header.summary.package_flags),
+            licensee_version: versioning.licensee_version,
+            is_unversioned: document.header.is_unversioned,
+            zen_version: versioning.zen_version,
+            file_version_ue4: versioning.package_file_version.file_version_ue4,
+            file_version_ue5: versioning.package_file_version.file_version_ue5,
+        });
+        document.header_error = None;
+    }
+    if edits.commit_identity
+        && let Some(edit) = document.header_identity_edit.take()
+    {
+        match apply_chimp_identity_edit(document, &edit) {
+            Ok(()) => {
+                document.header_error = None;
+                return true;
+            }
+            Err(error) => {
+                document.header_error = Some(error);
+                document.header_identity_edit = Some(edit);
+            }
+        }
+    }
+    if let Some(index) = edits.start_export {
+        document.header_name_edit = None;
+        document.header_import_edit = None;
+        document.header_identity_edit = None;
+        document.header_export_edit = document.header.export_map.get(index).map(|entry| {
+            ChimpExportEdit {
+                index,
+                object_name: document
+                    .header
+                    .name_map
+                    .try_get(entry.object_name)
+                    .map(|name| name.to_string())
+                    .unwrap_or_default(),
+                object_flags: entry.object_flags,
+                filter_flags: entry.filter_flags,
+                recompute_hash: false,
+            }
+        });
+        document.header_error = None;
+    }
+    if edits.commit_export
+        && let Some(edit) = document.header_export_edit.take()
+    {
+        match apply_chimp_export_edit(world, document, &edit) {
+            Ok(()) => {
+                document.header_error = None;
+                return true;
+            }
+            Err(error) => {
+                document.header_error = Some(error);
+                document.header_export_edit = Some(edit);
+            }
+        }
+    }
+    if let Some((index, text)) = edits.start_name {
+        document.header_import_edit = None;
+        document.header_name_edit = Some(ChimpNameEdit {
+            index,
+            text,
+            focus: true,
+        });
+        document.header_error = None;
+    }
+    if let Some((slot, current)) = edits.start_import {
+        document.header_name_edit = None;
+        document.header_import_edit = Some(chimp_import_edit_for(slot, &current, world));
+        document.header_error = None;
+    }
+    if edits.cancel {
+        document.header_name_edit = None;
+        document.header_import_edit = None;
+        document.header_export_edit = None;
+        document.header_identity_edit = None;
+        document.header_error = None;
+    }
+    if let Some((index, text)) = edits.commit_name {
+        match apply_chimp_name_rename(document, index, &text) {
+            Ok(()) => {
+                document.header_name_edit = None;
+                document.header_error = None;
+                return true;
+            }
+            Err(error) => document.header_error = Some(error),
+        }
+    }
+    if let Some((index, slot)) = edits.commit_import {
+        match apply_chimp_import_slot(document, index, slot) {
+            Ok(()) => {
+                document.header_import_edit = None;
+                document.header_error = None;
+                return true;
+            }
+            Err(error) => document.header_error = Some(error),
+        }
+    }
+    false
+}
+
+/// What one draw of the Header view asked for, applied once its borrows are
+/// gone.
+#[derive(Default)]
+struct ChimpHeaderEdits {
+    start_name: Option<(usize, String)>,
+    commit_name: Option<(usize, String)>,
+    start_import: Option<(usize, ImportSlot)>,
+    commit_import: Option<(usize, ImportSlot)>,
+    start_export: Option<usize>,
+    commit_export: bool,
+    start_identity: bool,
+    commit_identity: bool,
+    cancel: bool,
+}
+
+/// Seed a draft from the slot as it stands, so opening the editor shows what is
+/// there rather than an empty form.
+fn chimp_import_edit_for(slot: usize, current: &ImportSlot, world: &World) -> ChimpImportEdit {
+    let mut edit = ChimpImportEdit {
+        slot,
+        kind: ChimpImportKind::Null,
+        script_path: String::new(),
+        package_path: String::new(),
+        object_name: String::new(),
+        resolved: None,
+    };
+    match current {
+        ImportSlot::Script(index) => {
+            edit.kind = ChimpImportKind::Script;
+            // Only the mount can name a script hash; an unknown one is left
+            // blank rather than filled with something invented.
+            edit.script_path = world.class_path(index.raw_index()).unwrap_or_default().to_owned();
+        }
+        ImportSlot::Package(target) => {
+            edit.kind = ChimpImportKind::Package;
+            edit.package_path = target.package.clone();
+            // The object name is not in the file — only its hash is. Recover it
+            // from the package that holds the export, and leave it blank when
+            // that is not possible rather than guessing.
+            if let Ok(exports) = chimp_public_exports_of(world, &target.package) {
+                edit.object_name = exports
+                    .iter()
+                    .find(|(_, hash)| *hash == target.object_hash)
+                    .map(|(name, _)| name.clone())
+                    .unwrap_or_default();
+                edit.resolved = Some(Ok(exports));
+            }
+        }
+        ImportSlot::Null => {}
+    }
+    edit
+}
+
+fn draw_chimp_header_sections(
+    ui: &mut Ui,
+    document: &mut ChimpDocument,
+    world: &World,
+    expert_mode: bool,
+    edits: &mut ChimpHeaderEdits,
+) {
+    let ChimpHeaderEdits {
+        start_name: start,
+        commit_name: commit,
+        start_import,
+        commit_import,
+        start_export,
+        commit_export,
+        start_identity,
+        commit_identity,
+        cancel,
+    } = edits;
+    let usage = document
+        .header_usage
+        .as_ref()
+        .expect("refreshed by the caller");
+    let header = &document.header;
+
+    egui::ScrollArea::vertical()
+        .id_salt(("chimp_header_view", document.package.clone()))
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            egui::CollapsingHeader::new("Identity")
+                .default_open(true)
+                .show(ui, |ui| {
+                    if let Some(mut edit) = document.header_identity_edit.take() {
+                        draw_chimp_identity_panel(
+                            ui,
+                            &mut edit,
+                            expert_mode,
+                            document.header_error.as_deref(),
+                            commit_identity,
+                            cancel,
+                        );
+                        ui.add_space(4.0);
+                        document.header_identity_edit = Some(edit);
+                    } else if ui.button("Edit flags and versioning...").clicked() {
+                        *start_identity = true;
+                    }
+                    egui::Grid::new("chimp_header_identity")
+                        .num_columns(2)
+                        .spacing([18.0, 4.0])
+                        .show(ui, |ui| {
+                            header_row(ui, "Package", &document.package);
+                            header_row(
+                                ui,
+                                "Package flags",
+                                &format!("0x{:08X}", header.summary.package_flags),
+                            );
+                            header_row(ui, "Unversioned", &header.is_unversioned.to_string());
+                            header_row(
+                                ui,
+                                "Zen version",
+                                &format!("{:?}", header.versioning_info.zen_version),
+                            );
+                            header_row(
+                                ui,
+                                "Engine version",
+                                &format!(
+                                    "UE4 {} · UE5 {}",
+                                    header.versioning_info.package_file_version.file_version_ue4,
+                                    header.versioning_info.package_file_version.file_version_ue5
+                                ),
+                            );
+                        });
+                });
+
+            let names = header.name_map.names();
+            egui::CollapsingHeader::new(format!("Name map ({})", names.len()))
+                .default_open(true)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Filter").color(subtle_dark()).small());
+                        ui.add(
+                            egui::TextEdit::singleline(&mut document.header_name_filter)
+                                .desired_width(240.0)
+                                .hint_text("substring"),
+                        );
+                    });
+                    // The editor sits above the list rather than inside it: the
+                    // rows are virtualised, so an in-row editor would scroll out
+                    // from under the user mid-edit.
+                    // Taken out rather than borrowed in place: the panel reads
+                    // the rest of the document (to price the edit) while it
+                    // writes the draft, and those cannot be the same borrow.
+                    if let Some(mut edit) = document.header_name_edit.take() {
+                        let current = names.get(edit.index).cloned().unwrap_or_default();
+                        let entry_usage = usage.names.get(edit.index).cloned().unwrap_or_default();
+                        egui::Frame::group(ui.style()).show(ui, |ui| {
+                            ui.label(
+                                RichText::new(format!("Editing entry {} · {current}", edit.index))
+                                    .strong(),
+                            );
+                            let response = ui.add(
+                                egui::TextEdit::singleline(&mut edit.text)
+                                    .id(egui::Id::new(("chimp_name_edit", edit.index)))
+                                    .desired_width(320.0)
+                                    .font(egui::TextStyle::Monospace),
+                            );
+                            if edit.focus {
+                                response.request_focus();
+                                edit.focus = false;
+                            }
+                            let submitted = response.lost_focus()
+                                && ui.input(|input| input.key_pressed(egui::Key::Enter));
+
+                            // The blast radius, before the change rather than
+                            // after it. Editing by index is the useful semantic
+                            // precisely because it moves everything at once,
+                            // which is also what makes it worth seeing first.
+                            ui.label(
+                                RichText::new(match entry_usage.count {
+                                    0 => "Nothing references this entry.".to_owned(),
+                                    1 => "1 reference will follow this rename:".to_owned(),
+                                    n => format!("{n} references will follow this rename:"),
+                                })
+                                .color(subtle_dark())
+                                .small(),
+                            );
+                            for site in &entry_usage.sites {
+                                ui.label(
+                                    RichText::new(format!("    • {site}"))
+                                        .color(subtle_dark())
+                                        .small(),
+                                );
+                            }
+                            // Renaming the object an export is named after does
+                            // not update the hash other packages address it by.
+                            // Recoverable, but only if someone knows.
+                            let desyncs =
+                                chimp_export_hash_desyncs(header, edit.index, edit.text.trim());
+                            if !desyncs.is_empty() {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "Export {} is named after this entry. Its public export \
+                                         hash will no longer match the new name, so packages that \
+                                         import it by hash keep resolving the old one.",
+                                        desyncs
+                                            .iter()
+                                            .map(usize::to_string)
+                                            .collect::<Vec<_>>()
+                                            .join(", ")
+                                    ))
+                                    .color(Color32::from_rgb(170, 130, 60))
+                                    .small(),
+                                );
+                            }
+
+                            if let Some(error) = document.header_error.as_deref() {
+                                ui.label(
+                                    RichText::new(error)
+                                        .color(Color32::from_rgb(150, 56, 44))
+                                        .small(),
+                                );
+                            }
+                            ui.horizontal(|ui| {
+                                if ui.button("Apply").clicked() || submitted {
+                                    *commit = Some((edit.index, edit.text.clone()));
+                                }
+                                if ui.button("Cancel").clicked() {
+                                    *cancel = true;
+                                }
+                            });
+                        });
+                        ui.add_space(4.0);
+                        document.header_name_edit = Some(edit);
+                    }
+
+                    let filter = document.header_name_filter.trim().to_ascii_lowercase();
+                    let rows: Vec<usize> = names
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, name)| {
+                            filter.is_empty() || name.to_ascii_lowercase().contains(&filter)
+                        })
+                        .map(|(index, _)| index)
+                        .collect();
+                    if rows.is_empty() {
+                        ui.label(RichText::new("No matching names").color(subtle_dark()));
+                        return;
+                    }
+                    let row_height = ui.spacing().interact_size.y;
+                    // Virtualised: a large package's name map runs to thousands
+                    // of entries, and this view is drawn every frame.
+                    egui::ScrollArea::vertical()
+                        .id_salt("chimp_header_names")
+                        .max_height(260.0)
+                        .show_rows(ui, row_height, rows.len(), |ui, range| {
+                            egui::Grid::new("chimp_header_name_rows")
+                                .num_columns(3)
+                                .spacing([14.0, 2.0])
+                                .show(ui, |ui| {
+                                    for &index in &rows[range] {
+                                        let usage = usage
+                                            .names
+                                            .get(index)
+                                            .cloned()
+                                            .unwrap_or_default();
+                                        ui.label(
+                                            RichText::new(format!("{index}"))
+                                                .color(subtle_dark())
+                                                .monospace(),
+                                        );
+                                        let mut label = RichText::new(&names[index]).monospace();
+                                        if usage.is_package_identity {
+                                            label = label.color(foundation_blue());
+                                        } else if usage.count == 0 {
+                                            label = label.color(subtle_dark());
+                                        }
+                                        // The package's own name is not editable
+                                        // here — see `apply_chimp_name_rename`.
+                                        // Shown as a plain label so there is no
+                                        // affordance to reach for.
+                                        if usage.is_package_identity {
+                                            ui.label(label)
+                                                .on_hover_text(name_usage_tooltip(&usage));
+                                        } else if ui
+                                            .add(
+                                                egui::Label::new(label)
+                                                    .sense(egui::Sense::click()),
+                                            )
+                                            .on_hover_text(name_usage_tooltip(&usage))
+                                            .clicked()
+                                        {
+                                            *start = Some((index, names[index].clone()));
+                                        }
+                                        ui.label(
+                                            RichText::new(match usage.count {
+                                                0 => "unreferenced".to_owned(),
+                                                1 => "1 reference".to_owned(),
+                                                n => format!("{n} references"),
+                                            })
+                                            .color(subtle_dark())
+                                            .small(),
+                                        );
+                                        ui.end_row();
+                                    }
+                                });
+                        });
+                });
+
+            let slots = read_import_slots(header);
+            egui::CollapsingHeader::new(format!("Import map ({})", header.import_map.len()))
+                .default_open(true)
+                .show(ui, |ui| match &slots {
+                    Ok(slots) => {
+                        if let Some(mut edit) = document.header_import_edit.take() {
+                            draw_chimp_import_editor(
+                                ui,
+                                &mut edit,
+                                world,
+                                document.header_error.as_deref(),
+                                commit_import,
+                                cancel,
+                            );
+                            ui.add_space(4.0);
+                            document.header_import_edit = Some(edit);
+                        }
+                        egui::Grid::new("chimp_header_imports")
+                            .num_columns(4)
+                            .spacing([14.0, 2.0])
+                            .show(ui, |ui| {
+                                for (index, slot) in slots.iter().enumerate() {
+                                    ui.label(
+                                        RichText::new(format!("{index}"))
+                                            .color(subtle_dark())
+                                            .monospace(),
+                                    );
+                                    let (kind, target) = import_slot_display(slot, world);
+                                    ui.label(RichText::new(kind).color(subtle_dark()).small());
+                                    if ui
+                                        .add(
+                                            egui::Label::new(RichText::new(target).monospace())
+                                                .sense(egui::Sense::click()),
+                                        )
+                                        .on_hover_text("Retarget this import slot")
+                                        .clicked()
+                                    {
+                                        *start_import = Some((index, slot.clone()));
+                                    }
+                                    let references = usage
+                                        .import_references
+                                        .get(index)
+                                        .copied()
+                                        .unwrap_or_default();
+                                    ui.label(
+                                        RichText::new(match references {
+                                            0 => "unreferenced".to_owned(),
+                                            1 => "1 property".to_owned(),
+                                            n => format!("{n} properties"),
+                                        })
+                                        .color(subtle_dark())
+                                        .small(),
+                                    );
+                                    ui.end_row();
+                                }
+                            });
+                        ui.add_space(4.0);
+                        ui.horizontal(|ui| {
+                            if ui.button("+ Add import slot").clicked() {
+                                *start_import = Some((slots.len(), ImportSlot::Null));
+                            }
+                            ui.label(
+                                RichText::new(
+                                    "Slots cannot be removed: every object property names one by \
+                                     position, so dropping one would shift every reference above \
+                                     it.",
+                                )
+                                .color(subtle_dark())
+                                .small(),
+                            );
+                        });
+                    }
+                    Err(error) => {
+                        ui.label(
+                            RichText::new(format!("Import map is not resolvable: {error:#}"))
+                                .color(Color32::from_rgb(150, 56, 44)),
+                        );
+                    }
+                });
+
+            egui::CollapsingHeader::new(format!("Export map ({})", header.export_map.len()))
+                .default_open(false)
+                .show(ui, |ui| {
+                    if let Some(mut edit) = document.header_export_edit.take() {
+                        draw_chimp_export_edit_panel(
+                            ui,
+                            &mut edit,
+                            header,
+                            expert_mode,
+                            document.header_error.as_deref(),
+                            commit_export,
+                            cancel,
+                        );
+                        ui.add_space(4.0);
+                        document.header_export_edit = Some(edit);
+                    }
+                    egui::Grid::new("chimp_header_exports")
+                        .num_columns(4)
+                        .spacing([14.0, 2.0])
+                        .show(ui, |ui| {
+                            for (index, export) in header.export_map.iter().enumerate() {
+                                ui.label(
+                                    RichText::new(format!("{index}"))
+                                        .color(subtle_dark())
+                                        .monospace(),
+                                );
+                                if ui
+                                    .add(
+                                        egui::Label::new(
+                                            RichText::new(
+                                                header
+                                                    .name_map
+                                                    .try_get(export.object_name)
+                                                    .map(|name| name.to_string())
+                                                    .unwrap_or_else(|| {
+                                                        "<bad name reference>".to_owned()
+                                                    }),
+                                            )
+                                            .monospace(),
+                                        )
+                                        .sense(egui::Sense::click()),
+                                    )
+                                    .on_hover_text("Edit this export's name and flags")
+                                    .clicked()
+                                {
+                                    *start_export = Some(index);
+                                }
+                                ui.label(
+                                    RichText::new(
+                                        world
+                                            .class_key(header, export.class_index)
+                                            .unwrap_or_else(|| "Unknown class".to_owned()),
+                                    )
+                                    .color(subtle_dark())
+                                    .small(),
+                                );
+                                ui.label(
+                                    RichText::new(format!(
+                                        "flags 0x{:08X} · hash 0x{:016X}",
+                                        export.object_flags, export.public_export_hash
+                                    ))
+                                    .color(subtle_dark())
+                                    .small(),
+                                );
+                                ui.end_row();
+                            }
+                        });
+                });
+
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new(
+                    "Read-only. Serial offsets, sizes and section offsets are recomputed when the \
+                     package is written, so they are not shown here — the Metadata view carries \
+                     them as they stand.",
+                )
+                .color(subtle_dark())
+                .small(),
+            );
+        });
+}
+
+/// The draft panel for the package's flags and versioning.
+fn draw_chimp_identity_panel(
+    ui: &mut Ui,
+    edit: &mut ChimpIdentityEdit,
+    expert_mode: bool,
+    error: Option<&str>,
+    commit: &mut bool,
+    cancel: &mut bool,
+) {
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.label(RichText::new("Flags and versioning").strong());
+
+        ui.label(RichText::new("Package flags").color(subtle_dark()).small());
+        ui.horizontal(|ui| {
+            ui.add(
+                egui::TextEdit::singleline(&mut edit.package_flags)
+                    .desired_width(120.0)
+                    .font(egui::TextStyle::Monospace),
+            );
+            // The two values measured across every shipped Campaign Evolved tag
+            // package, so the common cases need no hex at all.
+            if ui
+                .button("0x80002200")
+                .on_hover_text("Every shipped tag group except the five cooked per level")
+                .clicked()
+            {
+                edit.package_flags = "80002200".to_owned();
+            }
+            if ui
+                .button("0x88002200")
+                .on_hover_text("The _Generated_ level groups, which carry PKG_CookGenerated")
+                .clicked()
+            {
+                edit.package_flags = "88002200".to_owned();
+            }
+        });
+
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Licensee version").color(subtle_dark()).small());
+            ui.add(egui::DragValue::new(&mut edit.licensee_version));
+        });
+
+        ui.add_space(4.0);
+        if expert_mode {
+            ui.label(
+                RichText::new(
+                    "These decide the header's shape, not just what it says. Lowering the UE5 \
+                     file version stops the bulk-data map being written at all.",
+                )
+                .color(Color32::from_rgb(170, 130, 60))
+                .small(),
+            );
+            ui.checkbox(&mut edit.is_unversioned, "Unversioned");
+            if edit.is_unversioned {
+                // Worth stating rather than leaving the fields looking live: an
+                // unversioned package stores no versioning block, so the reader
+                // synthesises these and nothing typed below is kept.
+                ui.label(
+                    RichText::new(
+                        "An unversioned package carries no versioning block, so the fields below \
+                         are not stored — the loader infers them. Uncheck this to make them real.",
+                    )
+                    .color(subtle_dark())
+                    .small(),
+                );
+            }
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("Zen version").color(subtle_dark()).small());
+                for option in [
+                    EZenPackageVersion::Initial,
+                    EZenPackageVersion::DataResourceTable,
+                    EZenPackageVersion::ImportedPackageNames,
+                    EZenPackageVersion::ExportDependencies,
+                ] {
+                    ui.selectable_value(&mut edit.zen_version, option, format!("{option:?}"));
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("File version UE4").color(subtle_dark()).small());
+                ui.add(egui::DragValue::new(&mut edit.file_version_ue4));
+                ui.label(RichText::new("UE5").color(subtle_dark()).small());
+                ui.add(egui::DragValue::new(&mut edit.file_version_ue5));
+            });
+        } else {
+            ui.label(
+                RichText::new(
+                    "Versioning fields are Expert mode only: they select the header's format, so \
+                     a wrong one produces a package that writes cleanly and loads as something \
+                     else.",
+                )
+                .color(subtle_dark())
+                .small(),
+            );
+        }
+
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(
+                "Applying writes the package and reads it back first. If anything does not \
+                 survive that, the change is refused rather than saved.",
+            )
+            .color(subtle_dark())
+            .small(),
+        );
+        if let Some(error) = error {
+            ui.label(
+                RichText::new(error)
+                    .color(Color32::from_rgb(150, 56, 44))
+                    .small(),
+            );
+        }
+        ui.horizontal(|ui| {
+            if ui.button("Apply").clicked() {
+                *commit = true;
+            }
+            if ui.button("Cancel").clicked() {
+                *cancel = true;
+            }
+        });
+    });
+}
+
+/// The five `EObjectFlags` this crate names, as `(bit, label)`.
+const CHIMP_OBJECT_FLAG_BITS: [(u32, &str); 5] = [
+    (0x0000_0001, "Public"),
+    (0x0000_0002, "Standalone"),
+    (0x0000_0008, "Transactional"),
+    (0x0000_0010, "ClassDefaultObject"),
+    (0x0000_0020, "ArchetypeObject"),
+];
+
+/// The draft panel for one export-map entry.
+fn draw_chimp_export_edit_panel(
+    ui: &mut Ui,
+    edit: &mut ChimpExportEdit,
+    header: &FZenPackageHeader,
+    expert_mode: bool,
+    error: Option<&str>,
+    commit: &mut bool,
+    cancel: &mut bool,
+) {
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.label(RichText::new(format!("Export {}", edit.index)).strong());
+
+        ui.label(RichText::new("Object name").color(subtle_dark()).small());
+        ui.add(
+            egui::TextEdit::singleline(&mut edit.object_name)
+                .desired_width(320.0)
+                .font(egui::TextStyle::Monospace),
+        );
+
+        // The engine resolves an asset as `Package.Object`, so an export named
+        // after the package leaf is the one that makes the package loadable
+        // under its own path.
+        let leaf = header
+            .package_name()
+            .rsplit('/')
+            .next()
+            .unwrap_or_default()
+            .to_owned();
+        let was_leaf = header
+            .export_map
+            .get(edit.index)
+            .and_then(|entry| header.name_map.try_get(entry.object_name))
+            .is_some_and(|name| *name == leaf);
+        if was_leaf && edit.object_name.trim() != leaf {
+            ui.label(
+                RichText::new(format!(
+                    "This export is named after the package ({leaf}). The engine resolves the \
+                     asset as {}.{leaf} — renaming it here leaves nothing at that path.",
+                    header.package_name()
+                ))
+                .color(Color32::from_rgb(170, 130, 60))
+                .small(),
+            );
+        }
+
+        let stored_hash = header
+            .export_map
+            .get(edit.index)
+            .map(|entry| entry.public_export_hash)
+            .unwrap_or_default();
+        let new_hash = public_export_hash(edit.object_name.trim());
+        if stored_hash != new_hash {
+            ui.label(
+                RichText::new(format!(
+                    "Public export hash 0x{stored_hash:016X} was computed from the old name. \
+                     Other packages import this export by that hash and are not updated either \
+                     way."
+                ))
+                .color(subtle_dark())
+                .small(),
+            );
+            if expert_mode {
+                ui.checkbox(
+                    &mut edit.recompute_hash,
+                    format!("Recompute it as 0x{new_hash:016X} (importers keep the old one)"),
+                );
+            }
+        }
+
+        ui.add_space(4.0);
+        ui.label(RichText::new("Object flags").color(subtle_dark()).small());
+        ui.horizontal_wrapped(|ui| {
+            for (bit, label) in CHIMP_OBJECT_FLAG_BITS {
+                let mut set = edit.object_flags & bit != 0;
+                if ui.checkbox(&mut set, label).changed() {
+                    if set {
+                        edit.object_flags |= bit;
+                    } else {
+                        edit.object_flags &= !bit;
+                    }
+                }
+            }
+        });
+        let named: u32 = CHIMP_OBJECT_FLAG_BITS.iter().map(|(bit, _)| bit).sum();
+        let remainder = edit.object_flags & !named;
+        ui.label(
+            RichText::new(format!(
+                "0x{:08X}{}",
+                edit.object_flags,
+                if remainder != 0 {
+                    format!(" · 0x{remainder:08X} unnamed, preserved")
+                } else {
+                    String::new()
+                }
+            ))
+            .color(subtle_dark())
+            .small(),
+        );
+        ui.label(
+            RichText::new(
+                "Object flags decide how the payload is read, not just how it is labelled. \
+                 Applying re-reads this export and refuses the change if it no longer decodes.",
+            )
+            .color(subtle_dark())
+            .small(),
+        );
+
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("Filter flags").color(subtle_dark()).small());
+            for option in [
+                EExportFilterFlags::None,
+                EExportFilterFlags::NotForClient,
+                EExportFilterFlags::NotForServer,
+            ] {
+                ui.selectable_value(&mut edit.filter_flags, option, format!("{option:?}"));
+            }
+        });
+
+        if let Some(error) = error {
+            ui.label(
+                RichText::new(error)
+                    .color(Color32::from_rgb(150, 56, 44))
+                    .small(),
+            );
+        }
+        ui.horizontal(|ui| {
+            if ui.button("Apply").clicked() {
+                *commit = true;
+            }
+            if ui.button("Cancel").clicked() {
+                *cancel = true;
+            }
+        });
+    });
+}
+
+/// The draft panel for one import slot.
+fn draw_chimp_import_editor(
+    ui: &mut Ui,
+    edit: &mut ChimpImportEdit,
+    world: &World,
+    error: Option<&str>,
+    commit: &mut Option<(usize, ImportSlot)>,
+    cancel: &mut bool,
+) {
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        ui.label(RichText::new(format!("Import slot {}", edit.slot)).strong());
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut edit.kind, ChimpImportKind::Script, "Script");
+            ui.selectable_value(&mut edit.kind, ChimpImportKind::Package, "Package");
+            ui.selectable_value(&mut edit.kind, ChimpImportKind::Null, "Null");
+        });
+
+        match edit.kind {
+            ChimpImportKind::Script => {
+                ui.label(
+                    RichText::new("Object path, e.g. /Script/Engine.StaticMesh")
+                        .color(subtle_dark())
+                        .small(),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(&mut edit.script_path)
+                        .desired_width(420.0)
+                        .font(egui::TextStyle::Monospace),
+                );
+                ui.label(
+                    RichText::new(
+                        "Stored as a one-way hash of this path. If the module is not mounted, \
+                         Baboon cannot name it back — it will read as unknown.",
+                    )
+                    .color(subtle_dark())
+                    .small(),
+                );
+            }
+            ChimpImportKind::Package => {
+                ui.label(
+                    RichText::new("Package path, e.g. /Game/Art/Meshes/SM_Crate")
+                        .color(subtle_dark())
+                        .small(),
+                );
+                ui.add(
+                    egui::TextEdit::singleline(&mut edit.package_path)
+                        .desired_width(420.0)
+                        .font(egui::TextStyle::Monospace),
+                );
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Object name").color(subtle_dark()).small());
+                    ui.add(
+                        egui::TextEdit::singleline(&mut edit.object_name)
+                            .desired_width(260.0)
+                            .font(egui::TextStyle::Monospace),
+                    );
+                    if ui
+                        .button("List exports")
+                        .on_hover_text("Read the target package and list what it exports publicly")
+                        .clicked()
+                    {
+                        edit.resolved = Some(chimp_public_exports_of(world, &edit.package_path));
+                    }
+                });
+                ui.label(
+                    RichText::new(format!(
+                        "Stored as hash 0x{:016X}",
+                        public_export_hash(edit.object_name.trim())
+                    ))
+                    .color(subtle_dark())
+                    .small(),
+                );
+                match &edit.resolved {
+                    Some(Ok(exports)) if exports.is_empty() => {
+                        ui.label(
+                            RichText::new("That package exports nothing publicly.")
+                                .color(subtle_dark())
+                                .small(),
+                        );
+                    }
+                    Some(Ok(exports)) => {
+                        let mut pick = None;
+                        egui::ScrollArea::vertical()
+                            .id_salt("chimp_import_exports")
+                            .max_height(140.0)
+                            .show(ui, |ui| {
+                                for (name, hash) in exports {
+                                    if ui
+                                        .selectable_label(
+                                            public_export_hash(edit.object_name.trim()) == *hash,
+                                            RichText::new(name).monospace(),
+                                        )
+                                        .clicked()
+                                    {
+                                        pick = Some(name.clone());
+                                    }
+                                }
+                            });
+                        if let Some(name) = pick {
+                            edit.object_name = name;
+                        }
+                    }
+                    Some(Err(error)) => {
+                        ui.label(
+                            RichText::new(error)
+                                .color(Color32::from_rgb(150, 56, 44))
+                                .small(),
+                        );
+                    }
+                    None => {}
+                }
+            }
+            ChimpImportKind::Null => {
+                ui.label(
+                    RichText::new("The slot resolves to nothing. Properties naming it read as None.")
+                        .color(subtle_dark())
+                        .small(),
+                );
+            }
+        }
+
+        ui.label(
+            RichText::new(
+                "Applying rebuilds the imported-package list, which is sorted by package id — the \
+                 Metadata view will show it reordered. Dependency arcs are not rebuilt.",
+            )
+            .color(subtle_dark())
+            .small(),
+        );
+        if let Some(error) = error {
+            ui.label(
+                RichText::new(error)
+                    .color(Color32::from_rgb(150, 56, 44))
+                    .small(),
+            );
+        }
+        ui.horizontal(|ui| {
+            if ui.button("Apply").clicked() {
+                let slot = match edit.kind {
+                    ChimpImportKind::Script => Some(ImportSlot::Script(
+                        FPackageObjectIndex::create_script_import(edit.script_path.trim()),
+                    )),
+                    ChimpImportKind::Package => Some(ImportSlot::Package(ImportTarget {
+                        package: edit.package_path.trim().to_owned(),
+                        object_hash: public_export_hash(edit.object_name.trim()),
+                    })),
+                    ChimpImportKind::Null => Some(ImportSlot::Null),
+                };
+                if let Some(slot) = slot {
+                    *commit = Some((edit.slot, slot));
+                }
+            }
+            if ui.button("Cancel").clicked() {
+                *cancel = true;
+            }
+        });
+    });
+}
+
+fn header_row(ui: &mut Ui, label: &str, value: &str) {
+    ui.label(RichText::new(label).color(subtle_dark()).small());
+    ui.label(RichText::new(value).monospace());
+    ui.end_row();
+}
+
+fn name_usage_tooltip(usage: &ChimpNameUsage) -> String {
+    let mut lines = Vec::new();
+    if usage.is_package_identity {
+        lines.push(
+            "This entry is the package's own name. The container addresses the package by a hash \
+             of it, so changing it here would not move the chunk that serves it."
+                .to_owned(),
+        );
+    }
+    match usage.count {
+        0 => lines.push("Nothing references this entry.".to_owned()),
+        _ => {
+            lines.push(format!("Referenced {} time(s) by:", usage.count));
+            lines.extend(usage.sites.iter().map(|site| format!("  • {site}")));
+            if usage.sites.len() < usage.count && usage.sites.len() == 8 {
+                lines.push("  • …".to_owned());
+            }
+        }
+    }
+    lines.join("\n")
+}
+
+fn import_slot_display(slot: &ImportSlot, world: &World) -> (String, String) {
+    match slot {
+        ImportSlot::Script(index) => (
+            "script".to_owned(),
+            world
+                .class_path(index.raw_index())
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("unknown to this mount (0x{:016X})", index.raw_index())),
+        ),
+        ImportSlot::Package(target) => (
+            "package".to_owned(),
+            format!("{}#{:016X}", target.package, target.object_hash),
+        ),
+        ImportSlot::Null => ("null".to_owned(), "None".to_owned()),
+    }
+}
+
 fn refresh_chimp_metadata_text(document: &mut ChimpDocument, world: &World) {
     document.metadata_text = serde_json::to_string_pretty(&chimp_metadata_json(document, world))
         .unwrap_or_else(|error| format!("Could not render package metadata: {error}"));
@@ -7736,6 +9540,625 @@ fn chimp_value_json(value: &PropValue) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use blam_tags::iostore::package::name_map::{EMappedNameType, FNameMap};
+    use blam_tags::iostore::package::zen::{
+        EExportCommandType, FDependencyBundleHeader, FExportBundleEntry, FExportMapEntry,
+    };
+
+    /// A header with `names` interned and one export named after the first.
+    fn header_with_names(names: &[&str]) -> FZenPackageHeader {
+        let mut header = FZenPackageHeader {
+            container_header_version: CE_HEADER_VERSION,
+            is_unversioned: true,
+            ..Default::default()
+        };
+        header.name_map = FNameMap::create(EMappedNameType::Package);
+        for name in names {
+            header.name_map.store(name);
+        }
+        header.summary.name = FMappedName::create(0, EMappedNameType::Package, 0);
+        header.export_map = vec![FExportMapEntry {
+            cooked_serial_offset: 0,
+            cooked_serial_size: 0,
+            object_name: FMappedName::create(0, EMappedNameType::Package, 0),
+            outer_index: FPackageObjectIndex::default(),
+            class_index: FPackageObjectIndex::default(),
+            super_index: FPackageObjectIndex::default(),
+            template_index: FPackageObjectIndex::default(),
+            public_export_hash: 0,
+            object_flags: 0,
+            filter_flags: EExportFilterFlags::None,
+            padding: [0; 3],
+        }];
+        // The reader enforces a Create and a Serialize command per export, plus
+        // a dependency bundle header. A header without them is not a package —
+        // which the reopen gate rightly refuses, so the fixture has to be one.
+        for command_type in [EExportCommandType::Create, EExportCommandType::Serialize] {
+            header.export_bundle_entries.push(FExportBundleEntry {
+                local_export_index: 0,
+                command_type,
+            });
+        }
+        header
+            .dependency_bundle_headers
+            .push(FDependencyBundleHeader::default());
+        header
+    }
+
+    /// `FNameMap::get` indexes its slice directly, so a reference past the end
+    /// of the table is a panic rather than an error — it would take the whole
+    /// application down on the next draw. This is the check that turns that into
+    /// a refused save.
+    #[test]
+    fn a_name_reference_past_the_end_of_the_table_is_refused_not_fatal() {
+        let mut header = header_with_names(&["Warthog"]);
+        assert!(validate_chimp_header_parts("pkg", &header, 1, &[]).is_ok());
+
+        header.summary.name = FMappedName::create(7, EMappedNameType::Package, 0);
+        let error = validate_chimp_header_parts("pkg", &header, 1, &[]).unwrap_err();
+        assert!(error.contains("package name points outside"), "{error}");
+
+        let mut header = header_with_names(&["Warthog"]);
+        header.export_map[0].object_name = FMappedName::create(7, EMappedNameType::Package, 0);
+        let error = validate_chimp_header_parts("pkg", &header, 1, &[]).unwrap_err();
+        assert!(error.contains("export 0's object name"), "{error}");
+    }
+
+    /// `write_package` pairs payloads with export map entries positionally and
+    /// errors on a mismatch; catching it here names the package instead.
+    #[test]
+    fn a_payload_count_that_does_not_match_the_export_map_is_refused() {
+        let header = header_with_names(&["Warthog"]);
+        let error = validate_chimp_header_parts("pkg", &header, 0, &[]).unwrap_err();
+        assert!(error.contains("0 export payloads for 1"), "{error}");
+    }
+
+    /// An object property addresses an import by position, so a reference past
+    /// the end of the import map would resolve to nothing at load.
+    #[test]
+    fn an_object_reference_past_the_end_of_the_import_map_is_refused() {
+        let block = PropertyBlock {
+            entries: vec![blam_tags::iostore::object::value::PropertyEntry {
+                name: "Thing".into(),
+                // `-1` is slot 0, `-4` is slot 3 — past an empty import map.
+                value: PropValue::Object(-4),
+                slot: None,
+            }],
+            layout: blam_tags::iostore::object::value::BlockLayout::Unversioned {
+                schema_len: 1,
+                leading_empty: 0,
+            },
+        };
+        assert_eq!(first_unresolvable_object_reference(&block, 0), Some(3));
+        assert_eq!(first_unresolvable_object_reference(&block, 4), None);
+    }
+
+    /// A document with two names, an export named after the second, and one
+    /// reflected property holding `FName`s that point at it.
+    fn rename_fixture() -> ChimpDocument {
+        use blam_tags::iostore::object::value::{BlockLayout, PropertyEntry};
+
+        let mut header = header_with_names(&["Warthog", "Material"]);
+        // The export is named after entry 1, leaving entry 0 as the package's
+        // own identity — the one the guard refuses.
+        header.export_map[0].object_name = FMappedName::create(1, EMappedNameType::Package, 0);
+        header.export_map[0].public_export_hash = public_export_hash("Material");
+
+        let block = PropertyBlock {
+            entries: vec![
+                PropertyEntry {
+                    name: "Plain".into(),
+                    value: PropValue::Name(FName::new(1, 0, "Material")),
+                    slot: None,
+                },
+                PropertyEntry {
+                    name: "Numbered".into(),
+                    // Number 3 renders as `_2`, which is how the reader composes
+                    // it — the refresh has to reproduce that, not just the base.
+                    value: PropValue::Array(vec![PropValue::Name(FName::new(1, 3, "Material_2"))]),
+                    slot: None,
+                },
+                PropertyEntry {
+                    name: "Other".into(),
+                    value: PropValue::Name(FName::new(0, 0, "Warthog")),
+                    slot: None,
+                },
+            ],
+            layout: BlockLayout::Unversioned {
+                schema_len: 3,
+                leading_empty: 0,
+            },
+        };
+
+        ChimpDocument {
+            package: "/Game/Test/Thing".to_owned(),
+            provider: PackageProvider {
+                container: 0,
+                entry_path: "Content/Test/Thing.uasset".to_owned(),
+                read_order: 0,
+            },
+            original: Vec::new(),
+            header,
+            payloads: vec![Vec::new()],
+            exports: vec![ChimpExport {
+                object: "Material".to_owned(),
+                class: None,
+                decoded: Ok(Export {
+                    block: ExportBlock::Reflected(block),
+                    trailer: blam_tags::iostore::object::export::Trailer::NoGuid,
+                    tail: Vec::new(),
+                }),
+            }],
+            texture_previews: Vec::new(),
+            mesh_kind: None,
+            mesh_preview: None,
+            mesh_preview_state: Default::default(),
+            selected_export: 0,
+            dirty: false,
+            view: ChimpDocumentView::Header,
+            document_text: String::new(),
+            document_line_numbers: String::new(),
+            document_text_dirty: false,
+            metadata_text: String::new(),
+            metadata_line_numbers: String::new(),
+            metadata_text_dirty: false,
+            header_usage: None,
+            header_name_filter: String::new(),
+            header_name_edit: None,
+            header_import_edit: None,
+            header_export_edit: None,
+            header_identity_edit: None,
+            header_error: None,
+        }
+    }
+
+    /// The package's own name is its identity, and the chunk that serves it is
+    /// addressed by a hash of that string — so renaming it here would leave the
+    /// package claiming to be something no chunk id matches.
+    #[test]
+    fn renaming_the_packages_own_name_is_refused() {
+        let mut document = rename_fixture();
+        let error = apply_chimp_name_rename(&mut document, 0, "Scorpion").unwrap_err();
+        assert!(error.contains("package's own name"), "{error}");
+        assert_eq!(document.header.name_map.names(), ["Warthog", "Material"]);
+    }
+
+    /// The silent-fork case. An `FName` is written as an index, so the rename
+    /// lands on disk either way — but the resolved text a decoded value carries
+    /// is what a later edit interns *by string*, so a stale one would fork a new
+    /// entry instead of following the rename.
+    #[test]
+    fn a_rename_refreshes_every_resolved_name_including_numbered_ones() {
+        let mut document = rename_fixture();
+        apply_chimp_name_rename(&mut document, 1, "Surface").unwrap();
+
+        assert_eq!(document.header.name_map.names(), ["Warthog", "Surface"]);
+        // The export's cached display name.
+        assert_eq!(document.exports[0].object, "Surface");
+
+        let mut seen = Vec::new();
+        let Ok(decoded) = &mut document.exports[0].decoded else {
+            panic!("fixture decodes");
+        };
+        let ExportBlock::Reflected(block) = &mut decoded.block else {
+            panic!("fixture is reflected");
+        };
+        block.visit_names_mut(&mut |name| seen.push(name.to_string()));
+        seen.sort();
+        // `Surface_2` proves the number suffix was recomposed, not dropped, and
+        // `Warthog` proves an unrelated entry was left alone.
+        assert_eq!(seen, ["Surface", "Surface_2", "Warthog"]);
+    }
+
+    /// Renaming the entry an export is named after does not update the hash
+    /// other packages import it by, so the view has to say so first.
+    #[test]
+    fn an_export_hash_desync_is_reported_before_the_rename() {
+        let document = rename_fixture();
+        assert_eq!(
+            chimp_export_hash_desyncs(&document.header, 1, "Surface"),
+            vec![0]
+        );
+        // Renaming it back to what the hash was computed from is no desync, and
+        // an entry no export is named after never is.
+        assert!(chimp_export_hash_desyncs(&document.header, 1, "Material").is_empty());
+        assert!(chimp_export_hash_desyncs(&document.header, 0, "Anything").is_empty());
+    }
+
+    /// Retargeting a slot must leave every other slot where it was: an object
+    /// property names an import by position, so a reordered list would silently
+    /// repoint properties nobody edited.
+    #[test]
+    fn retargeting_one_import_slot_leaves_the_others_in_place() {
+        let mut document = rename_fixture();
+        let slots = vec![
+            ImportSlot::Script(FPackageObjectIndex::create_script_import("/Script/Engine.Actor")),
+            ImportSlot::Package(ImportTarget {
+                package: "/Game/One".to_owned(),
+                object_hash: public_export_hash("One"),
+            }),
+            ImportSlot::Null,
+        ];
+        write_import_slots(&mut document.header, &slots).unwrap();
+
+        apply_chimp_import_slot(
+            &mut document,
+            1,
+            ImportSlot::Package(ImportTarget {
+                package: "/Game/Two".to_owned(),
+                object_hash: public_export_hash("Two"),
+            }),
+        )
+        .unwrap();
+
+        let after = read_import_slots(&document.header).unwrap();
+        assert_eq!(after.len(), 3);
+        assert_eq!(after[0], slots[0], "slot 0 moved");
+        assert_eq!(after[2], ImportSlot::Null, "slot 2 moved");
+        let ImportSlot::Package(target) = &after[1] else {
+            panic!("slot 1 is a package import");
+        };
+        assert_eq!(target.package, "/Game/Two");
+        assert_eq!(target.object_hash, public_export_hash("Two"));
+    }
+
+    /// Appending cannot renumber anything, which is why it is offered while
+    /// removal is not.
+    #[test]
+    fn an_appended_slot_lands_at_the_end_and_is_refused_past_it() {
+        let mut document = rename_fixture();
+        write_import_slots(&mut document.header, &[ImportSlot::Null]).unwrap();
+
+        apply_chimp_import_slot(&mut document, 1, ImportSlot::Null).unwrap();
+        assert_eq!(read_import_slots(&document.header).unwrap().len(), 2);
+
+        let error = apply_chimp_import_slot(&mut document, 5, ImportSlot::Null).unwrap_err();
+        assert!(error.contains("past the end"), "{error}");
+        assert_eq!(read_import_slots(&document.header).unwrap().len(), 2);
+    }
+
+    /// The stored hash is case-folded, so the object-name box cannot be used to
+    /// tell two spellings apart — worth pinning, because the editor shows the
+    /// hash it computed and a user could reasonably expect casing to matter.
+    #[test]
+    fn an_import_object_hash_ignores_the_case_it_was_typed_in() {
+        let hash = public_export_hash("Crate");
+        assert_eq!(public_export_hash("crate"), hash);
+        assert_eq!(public_export_hash("CRATE"), hash);
+        assert_ne!(public_export_hash("Crates"), hash);
+    }
+
+    /// Object flags decide how a payload is *read*, so a wrong one is not a
+    /// mislabel — it is a different interpretation of the same bytes. The named
+    /// bits have to be the ones the engine uses.
+    #[test]
+    fn the_named_object_flag_bits_match_the_engine_values() {
+        let named: Vec<(u32, &str)> = CHIMP_OBJECT_FLAG_BITS.to_vec();
+        assert_eq!(named[0], (0x0000_0001, "Public"));
+        assert_eq!(named[1], (0x0000_0002, "Standalone"));
+        assert_eq!(named[2], (0x0000_0008, "Transactional"));
+        // The one that actually changes decoding, via the native tail branch.
+        assert_eq!(named[3], (0x0000_0010, "ClassDefaultObject"));
+        assert_eq!(named[4], (0x0000_0020, "ArchetypeObject"));
+
+        // Campaign Evolved's measured tag flags decompose into these, with
+        // nothing unnamed left over: 0xb is Public + Standalone + Transactional.
+        let all: u32 = CHIMP_OBJECT_FLAG_BITS.iter().map(|(bit, _)| bit).sum();
+        assert_eq!(0xb_u32 & !all, 0, "0xb is fully named");
+        assert_eq!(0x1_u32 & !all, 0, "the generated-group value is fully named");
+    }
+
+    /// Interning rather than renaming is the difference between "this export is
+    /// now called X" and "everything called Y is now called X".
+    fn export_edit(document: &ChimpDocument, object_name: &str) -> ChimpExportEdit {
+        ChimpExportEdit {
+            index: 0,
+            object_name: object_name.to_owned(),
+            object_flags: document.header.export_map[0].object_flags,
+            filter_flags: document.header.export_map[0].filter_flags,
+            recompute_hash: false,
+        }
+    }
+
+    /// Interning rather than renaming is the difference between "this export is
+    /// now called X" and "everything called Y is now called X" — the second is
+    /// what the name-map row does, and confusing the two would silently move
+    /// every other reference to that entry.
+    #[test]
+    fn renaming_an_export_interns_a_name_instead_of_rewriting_the_table() {
+        let mut document = rename_fixture();
+        let before = document.header.name_map.names().to_vec();
+
+        let edit = export_edit(&document, "Surface");
+        apply_chimp_export_metadata(&mut document, &edit);
+
+        // `Material` is still entry 1, untouched, and `Surface` was appended.
+        assert_eq!(&document.header.name_map.names()[..before.len()], &before[..]);
+        assert_eq!(document.header.name_map.names().last().unwrap(), "Surface");
+        assert_eq!(document.exports[0].object, "Surface");
+    }
+
+    /// Off by default, because it cuts both ways: recomputing makes this package
+    /// self-consistent and every importer holding the old hash wrong.
+    #[test]
+    fn an_export_hash_moves_only_when_the_recompute_is_asked_for() {
+        let mut document = rename_fixture();
+        let original = document.header.export_map[0].public_export_hash;
+        assert_eq!(original, public_export_hash("Material"));
+
+        let edit = export_edit(&document, "Surface");
+        apply_chimp_export_metadata(&mut document, &edit);
+        assert_eq!(
+            document.header.export_map[0].public_export_hash, original,
+            "the hash must not follow the name on its own"
+        );
+
+        let mut edit = export_edit(&document, "Surface");
+        edit.recompute_hash = true;
+        apply_chimp_export_metadata(&mut document, &edit);
+        assert_eq!(
+            document.header.export_map[0].public_export_hash,
+            public_export_hash("Surface")
+        );
+    }
+
+    /// A trailing `_N` belongs in the reference's number field, and `store` is
+    /// what puts it there — so the round trip has to give the name back whole.
+    #[test]
+    fn an_export_name_with_a_number_suffix_round_trips_through_the_reference() {
+        let mut document = rename_fixture();
+        let edit = export_edit(&document, "Surface_3");
+        apply_chimp_export_metadata(&mut document, &edit);
+
+        assert_eq!(document.exports[0].object, "Surface_3");
+        // Stored as base + number, not as a literal entry.
+        assert_eq!(document.header.name_map.names().last().unwrap(), "Surface");
+        assert_eq!(document.header.export_map[0].object_name.number, 4);
+    }
+
+    fn identity_edit(document: &ChimpDocument) -> ChimpIdentityEdit {
+        let versioning = &document.header.versioning_info;
+        ChimpIdentityEdit {
+            package_flags: format!("{:08X}", document.header.summary.package_flags),
+            licensee_version: versioning.licensee_version,
+            is_unversioned: document.header.is_unversioned,
+            zen_version: versioning.zen_version,
+            file_version_ue4: versioning.package_file_version.file_version_ue4,
+            file_version_ue5: versioning.package_file_version.file_version_ue5,
+        }
+    }
+
+    /// The gate has to pass the thing it is guarding, or it is just a refusal.
+    #[test]
+    fn a_flag_change_that_reopens_as_itself_is_applied() {
+        let mut document = rename_fixture();
+        let mut edit = identity_edit(&document);
+        edit.package_flags = "80002200".to_owned();
+
+        apply_chimp_identity_edit(&mut document, &edit).unwrap();
+        assert_eq!(document.header.summary.package_flags, 0x8000_2200);
+
+        // `0x` is accepted as well as bare hex, since the view shows it both ways.
+        let mut edit = identity_edit(&document);
+        edit.package_flags = "0x88002200".to_owned();
+        apply_chimp_identity_edit(&mut document, &edit).unwrap();
+        assert_eq!(document.header.summary.package_flags, 0x8800_2200);
+    }
+
+    /// Campaign Evolved's packages are unversioned, and an unversioned package
+    /// stores no versioning block — the loader infers one. So a version edit
+    /// there cannot persist, and the gate must not pretend it did.
+    #[test]
+    fn versioning_fields_are_not_stored_while_a_package_is_unversioned() {
+        let document = rename_fixture();
+        assert!(document.header.is_unversioned, "the fixture is CE-shaped");
+
+        let mut candidate = document.header.clone();
+        candidate.versioning_info.licensee_version = 7;
+        candidate.versioning_info.package_file_version.file_version_ue5 = 1;
+
+        // The gate passes, because those fields are simply not written...
+        chimp_header_survives_reopen(&candidate, &document.payloads).unwrap();
+
+        // ...and this is what actually comes back.
+        let (bytes, _) =
+            write_package(&candidate, &document.payloads, CE_HEADER_VERSION).unwrap();
+        let reopened = FZenPackageHeader::deserialize(
+            &mut Cursor::new(&bytes),
+            None,
+            CE_TOC_VERSION,
+            CE_HEADER_VERSION,
+            None,
+        )
+        .unwrap();
+        assert_eq!(reopened.versioning_info.licensee_version, 0);
+        assert_ne!(
+            reopened.versioning_info.package_file_version.file_version_ue5,
+            1
+        );
+    }
+
+    /// A refused edit must leave the document exactly as it was — the candidate
+    /// is written and reopened before anything is assigned.
+    #[test]
+    fn an_unparseable_flag_value_changes_nothing() {
+        let mut document = rename_fixture();
+        let before = document.header.summary.package_flags;
+        let mut edit = identity_edit(&document);
+        edit.package_flags = "not hex".to_owned();
+
+        let error = apply_chimp_identity_edit(&mut document, &edit).unwrap_err();
+        assert!(error.contains("hex value"), "{error}");
+        assert_eq!(document.header.summary.package_flags, before);
+    }
+
+    /// Turning versioning on makes the block real, and `has_versioning_info` is
+    /// derived on write — a draft that moved one without the other would reopen
+    /// as the opposite thing.
+    #[test]
+    fn turning_versioning_on_makes_the_fields_persist() {
+        let mut document = rename_fixture();
+        let mut edit = identity_edit(&document);
+        edit.is_unversioned = false;
+        edit.licensee_version = 7;
+        edit.file_version_ue5 = 1013;
+
+        apply_chimp_identity_edit(&mut document, &edit).unwrap();
+        assert!(!document.header.is_unversioned);
+        assert_eq!(document.header.summary.has_versioning_info, 1);
+        assert_eq!(document.header.versioning_info.licensee_version, 7);
+
+        // Now that the block is written, the gate is comparing real fields — so
+        // the same edit round-trips instead of being silently dropped.
+        chimp_header_survives_reopen(&document.header, &document.payloads).unwrap();
+
+        let mut edit = identity_edit(&document);
+        edit.is_unversioned = true;
+        apply_chimp_identity_edit(&mut document, &edit).unwrap();
+        assert!(document.header.is_unversioned);
+        assert_eq!(document.header.summary.has_versioning_info, 0);
+    }
+
+    /// The gate's first job is catching a header that cannot be read back at
+    /// all — which is exactly what an export with no bundle commands is.
+    #[test]
+    fn the_reopen_gate_refuses_a_header_that_cannot_be_read_back() {
+        let document = rename_fixture();
+        let mut candidate = document.header.clone();
+        candidate.export_bundle_entries.clear();
+
+        let error = chimp_header_survives_reopen(&candidate, &document.payloads).unwrap_err();
+        assert!(error.contains("did not reopen"), "{error}");
+    }
+
+    fn reopen(bytes: &[u8]) -> FZenPackageHeader {
+        FZenPackageHeader::deserialize(
+            &mut Cursor::new(bytes),
+            None,
+            CE_TOC_VERSION,
+            CE_HEADER_VERSION,
+            None,
+        )
+        .expect("the package reopens")
+    }
+
+    /// The fixture, put through one write and reopen so its summary holds real
+    /// section offsets.
+    ///
+    /// A hand-built header starts with every offset and `header_size` at zero —
+    /// a state no file is ever in, because the writer fills them. Round-trip
+    /// properties are about well-formed headers, and reopening is how one is
+    /// obtained; comparing against the unwritten form would only measure the
+    /// fixture.
+    fn normalized_fixture() -> ChimpDocument {
+        let mut document = rename_fixture();
+        let (bytes, _) =
+            write_package(&document.header, &document.payloads, CE_HEADER_VERSION).unwrap();
+        document.header = reopen(&bytes);
+        document
+    }
+
+    /// The control every other round-trip rests on.
+    ///
+    /// Without it, "the edit read back" would be equally true of a writer that
+    /// quietly rearranged half the header — the edited field would survive and
+    /// everything around it would have moved. Writing, reopening and writing
+    /// again has to reach the same bytes, which is what separates rebuilt from
+    /// rearranged.
+    #[test]
+    fn writing_a_package_is_a_fixpoint_over_reopening_it() {
+        let document = normalized_fixture();
+        let (first, _) =
+            write_package(&document.header, &document.payloads, CE_HEADER_VERSION).unwrap();
+        let (second, _) =
+            write_package(&reopen(&first), &document.payloads, CE_HEADER_VERSION).unwrap();
+        assert_eq!(first, second, "an unedited package must rebuild identically");
+    }
+
+    /// A rename has to survive the writer, not just the in-memory table.
+    #[test]
+    fn a_renamed_entry_survives_a_write_and_reopen() {
+        let mut document = rename_fixture();
+        let before = document.header.name_map.names().to_vec();
+        apply_chimp_name_rename(&mut document, 1, "Surface").unwrap();
+
+        let (bytes, _) =
+            write_package(&document.header, &document.payloads, CE_HEADER_VERSION).unwrap();
+        let reopened = reopen(&bytes);
+
+        let mut expected = before;
+        expected[1] = "Surface".to_owned();
+        assert_eq!(reopened.name_map.names(), expected.as_slice());
+        // And the export that referenced it now resolves to the new text.
+        assert_eq!(
+            reopened
+                .name_map
+                .try_get(reopened.export_map[0].object_name)
+                .as_deref(),
+            Some("Surface")
+        );
+    }
+
+    /// Retargeting rebuilds four parallel arrays from the slot list, so the
+    /// proof it worked is that the slots come back as they were set — not that
+    /// the arrays look plausible.
+    #[test]
+    fn a_retargeted_import_survives_a_write_and_reopen() {
+        let mut document = normalized_fixture();
+        let slots = vec![
+            ImportSlot::Script(FPackageObjectIndex::create_script_import("/Script/Engine.Actor")),
+            ImportSlot::Package(ImportTarget {
+                package: "/Game/One".to_owned(),
+                object_hash: public_export_hash("One"),
+            }),
+        ];
+        write_import_slots(&mut document.header, &slots).unwrap();
+        apply_chimp_import_slot(
+            &mut document,
+            1,
+            ImportSlot::Package(ImportTarget {
+                package: "/Game/Two".to_owned(),
+                object_hash: public_export_hash("Two"),
+            }),
+        )
+        .unwrap();
+
+        let (bytes, _) =
+            write_package(&document.header, &document.payloads, CE_HEADER_VERSION).unwrap();
+        let after = read_import_slots(&reopen(&bytes)).unwrap();
+
+        assert_eq!(after[0], slots[0]);
+        assert_eq!(
+            after[1],
+            ImportSlot::Package(ImportTarget {
+                package: "/Game/Two".to_owned(),
+                object_hash: public_export_hash("Two"),
+            })
+        );
+    }
+
+    /// Export metadata is written verbatim, so this is the check that it is not
+    /// being recomputed out from under the edit.
+    #[test]
+    fn edited_export_metadata_survives_a_write_and_reopen() {
+        let mut document = rename_fixture();
+        let mut edit = export_edit(&document, "Surface");
+        edit.filter_flags = EExportFilterFlags::NotForServer;
+        edit.recompute_hash = true;
+        apply_chimp_export_metadata(&mut document, &edit);
+
+        let (bytes, _) =
+            write_package(&document.header, &document.payloads, CE_HEADER_VERSION).unwrap();
+        let reopened = reopen(&bytes);
+        let entry = &reopened.export_map[0];
+
+        assert_eq!(
+            reopened.name_map.try_get(entry.object_name).as_deref(),
+            Some("Surface")
+        );
+        assert_eq!(entry.filter_flags, EExportFilterFlags::NotForServer);
+        assert_eq!(entry.public_export_hash, public_export_hash("Surface"));
+    }
 
     #[test]
     fn a_mesh_import_is_a_material_by_the_prefix_the_game_uses() {
