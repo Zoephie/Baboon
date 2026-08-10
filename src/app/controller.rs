@@ -44,6 +44,7 @@ mod container_folders;
 mod delete;
 mod duplicate;
 use duplicate::resolve_source_uasset;
+mod group_report;
 mod rename_in_place;
 
 const TERMINAL_VISIBLE_LINE_LIMIT: usize = 20_000;
@@ -1185,6 +1186,7 @@ impl Baboon {
             groups: Vec::new(),
             selected_group: 0,
             error: None,
+                    authorability: None,
         };
         self.refresh_new_tag_groups();
         self.new_tag_open = true;
@@ -1201,6 +1203,11 @@ impl Baboon {
     }
 
     pub(super) fn refresh_new_tag_groups(&mut self) {
+        self.refresh_new_tag_groups_inner();
+        self.refresh_group_authorability();
+    }
+
+    fn refresh_new_tag_groups_inner(&mut self) {
         match load_new_tag_groups(&self.new_tag_dialog.game) {
             Ok(groups) if groups.is_empty() => {
                 self.new_tag_dialog.groups = groups;

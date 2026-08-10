@@ -3245,7 +3245,19 @@ impl Baboon {
                         }
                     }
                 });
+                if let Some((authorable, note)) = self.new_tag_dialog.authorability.clone() {
+                    ui.label(
+                        RichText::new(note)
+                            .color(if authorable {
+                                subtle_dark()
+                            } else {
+                                Color32::from_rgb(170, 130, 60)
+                            })
+                            .small(),
+                    );
+                }
                 if self.new_tag_dialog.selected_group != selected_group_before {
+                    self.refresh_group_authorability();
                     // The container path is group-independent (the user types it);
                     // only the loose filesystem output path is tied to the group.
                     if !is_container {

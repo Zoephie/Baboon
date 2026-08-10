@@ -784,6 +784,15 @@ pub(in crate::app) struct NewTagDialog {
     pub(in crate::app) groups: Vec<NewTagGroup>,
     pub(in crate::app) selected_group: usize,
     pub(in crate::app) error: Option<String>,
+    /// Whether the selected group can actually be created, and why not when it
+    /// cannot. `None` for games other than Campaign Evolved, where the question
+    /// does not arise: a loose tag is a file, not a package with a native class
+    /// behind it.
+    ///
+    /// Cached rather than computed per frame because answering it parses the
+    /// game's whole mapping table; it is refreshed when the group or the game
+    /// changes, which is the only time it can move.
+    pub(in crate::app) authorability: Option<(bool, String)>,
 }
 
 impl Default for NewTagDialog {
@@ -796,6 +805,7 @@ impl Default for NewTagDialog {
             groups: Vec::new(),
             selected_group: 0,
             error: None,
+            authorability: None,
         }
     }
 }
