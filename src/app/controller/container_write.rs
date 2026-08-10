@@ -937,6 +937,65 @@ mod tests {
         let _ = fs::remove_dir_all(&scratch);
     }
 
+    /// The other half of the mapping story, and the one every in-place write
+    /// actually depends on.
+    ///
+    /// `AppendInPlace` leaves every Chimp `World` mounted and its `.ucas`
+    /// mapped, then appends to that file and renames a new `.utoc` over the old
+    /// one. Truncation is refused under a mapping — the test above is that —
+    /// but append and rename are different operations, and the whole lease
+    /// design rests on them being permitted. Nothing pinned that.
+    #[cfg(windows)]
+    #[test]
+    fn a_mapped_partition_still_allows_append_and_a_utoc_rename() {
+        let scratch = std::env::temp_dir().join(format!(
+            "baboon-lease-append-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&scratch).expect("scratch dir");
+        let utoc = scratch.join("leased_P.utoc");
+        let mut writer = blam_tags::iostore::writer::OverrideContainerWriter::new("../../../");
+        let mut id = [0u8; 12];
+        id[..8].copy_from_slice(&0x0bad_f00d_dead_beefu64.to_le_bytes());
+        id[11] = blam_tags::iostore::CHUNK_TYPE_BULK_DATA;
+        writer.add_chunk(blam_tags::iostore::FIoChunkId(id), vec![7u8; 2048]);
+        writer.write(&utoc).expect("write a container to lease");
+
+        let archive = blam_tags::iostore::IoStoreArchive::open(&utoc).expect("open");
+        assert!(archive.is_partition_mapped());
+        let ucas = utoc.with_extension("ucas");
+        let before = fs::metadata(&ucas).expect("ucas exists").len();
+
+        // Appending while mapped: what `append_ucas_items` does.
+        {
+            use std::io::Write as _;
+            let mut file = std::fs::OpenOptions::new()
+                .append(true)
+                .open(&ucas)
+                .expect("a mapped .ucas opens for append");
+            file.write_all(&[0xAB; 64])
+                .expect("a mapped .ucas accepts appended bytes");
+        }
+        assert_eq!(
+            fs::metadata(&ucas).expect("ucas exists").len(),
+            before + 64,
+            "the appended bytes landed"
+        );
+
+        // Renaming a fresh .utoc over the open one: what `atomic_replace_file`
+        // does. The .utoc is read into an owned buffer at open and never held.
+        let staged = scratch.join("staged.utoc");
+        fs::copy(&utoc, &staged).expect("stage a replacement");
+        fs::rename(&staged, &utoc).expect("a .utoc can be replaced while its .ucas is mapped");
+
+        drop(archive);
+        let _ = fs::remove_dir_all(&scratch);
+    }
+
     #[test]
     fn the_triplet_is_the_three_files_the_engine_loads() {
         let files = container_triplet(Path::new("D:/Game/Paks/~mods/mymod_P.utoc"));
