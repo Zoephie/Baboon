@@ -68,6 +68,14 @@ pub(in crate::app) enum WorkerMessage {
         package: String,
         result: Result<ChimpDocument, String>,
     },
+    /// A sweep for the packages that import `package`. There is no reverse
+    /// index in the paks, so this reads every mounted header and cannot run on
+    /// the UI thread.
+    ChimpReferrersScanned {
+        stamp: KitStamp,
+        package: String,
+        scan: ChimpReferrerScan,
+    },
     TagLoaded {
         kit: KitId,
         key: String,

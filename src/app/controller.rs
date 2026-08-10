@@ -829,6 +829,11 @@ impl Baboon {
                 WorkerMessage::ChimpTypesIndexed { stamp, index } => {
                     self.handle_chimp_types_indexed(stamp, index)
                 }
+                WorkerMessage::ChimpReferrersScanned {
+                    stamp,
+                    package,
+                    scan,
+                } => self.handle_chimp_referrers_scanned(stamp, package, scan),
                 WorkerMessage::ChimpPackageLoaded {
                     stamp,
                     package,

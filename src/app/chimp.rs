@@ -679,6 +679,21 @@ pub(super) struct ChimpDocument {
     header_export_edit: Option<ChimpExportEdit>,
     header_identity_edit: Option<ChimpIdentityEdit>,
     header_error: Option<String>,
+    /// Who imports this package. Not derived at load: there is no reverse index
+    /// in the paks, so answering it means reading every mounted header.
+    referrers: ChimpReferrerState,
+    /// The mounted containers no longer provide this package, so `provider` no
+    /// longer describes anything and nothing may be written back through it.
+    /// The document keeps its bytes, so reading and extraction still work.
+    orphaned: bool,
+}
+
+#[derive(Default)]
+enum ChimpReferrerState {
+    #[default]
+    Idle,
+    Scanning,
+    Done(ChimpReferrerScan),
 }
 
 /// A draft of the package's flags and versioning.
@@ -1341,6 +1356,8 @@ fn decode_chimp_document(
         header_export_edit: None,
         header_identity_edit: None,
         header_error: None,
+        referrers: ChimpReferrerState::Idle,
+        orphaned: false,
     };
     refresh_chimp_document_text(&mut document);
     refresh_chimp_metadata_text(&mut document, world);
@@ -1775,10 +1792,94 @@ fn index_chimp_package_types_with_prefixes(
     }
 }
 
+/// What a sweep for "who imports this package" found.
+#[derive(Clone, Debug, Default)]
+pub(super) struct ChimpReferrerScan {
+    /// Packages whose import map names the target, in mount order.
+    pub(super) referrers: Vec<String>,
+    /// How many packages were examined.
+    pub(super) scanned: usize,
+    /// How many could not be read, and so could not be ruled out.
+    ///
+    /// Reported rather than swallowed: "nothing imports this" and "nothing I
+    /// could read imports this" are different answers, and only one of them
+    /// makes renaming safe.
+    pub(super) unreadable: usize,
+}
+
+/// Find every mounted package whose import map names `target`.
+///
+/// A package's imports are the only record of the dependency — there is no
+/// reverse index in the paks — so answering this at all means reading every
+/// package header. That is the same sweep the type index already performs at
+/// mount, and it uses the same prefix ladder: most Zen headers fit in one
+/// 64 KiB compression block, so the larger reads are the exception.
+fn scan_chimp_referrers(world: &World, target: &str) -> ChimpReferrerScan {
+    const HEADER_PREFIXES: [usize; 2] = [64 * 1024, 1024 * 1024];
+    let mut scan = ChimpReferrerScan::default();
+    for package in world.packages() {
+        if package.name.eq_ignore_ascii_case(target) {
+            continue;
+        }
+        scan.scanned += 1;
+        let header = (|| {
+            let provider = package.active_provider()?;
+            let archive = world.archives().get(provider.container)?;
+            for &max_bytes in &HEADER_PREFIXES {
+                let prefix = archive.read_prefix(&provider.entry_path, max_bytes).ok()?;
+                if let Ok(decoded) = FZenPackageHeader::deserialize(
+                    &mut Cursor::new(&prefix),
+                    None,
+                    CE_TOC_VERSION,
+                    CE_HEADER_VERSION,
+                    None,
+                ) {
+                    return Some(decoded);
+                }
+                if prefix.len() < max_bytes {
+                    break;
+                }
+            }
+            world.read_provider(provider).ok().and_then(|bytes| {
+                FZenPackageHeader::deserialize(
+                    &mut Cursor::new(bytes),
+                    None,
+                    CE_TOC_VERSION,
+                    CE_HEADER_VERSION,
+                    None,
+                )
+                .ok()
+            })
+        })();
+        let Some(header) = header else {
+            scan.unreadable += 1;
+            continue;
+        };
+        if header
+            .imported_package_names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(target))
+        {
+            scan.referrers.push(package.name.clone());
+        }
+    }
+    scan
+}
+
 fn rebuild_chimp_document(
     world: &World,
     document: &ChimpDocument,
 ) -> Result<(Vec<u8>, blam_tags::iostore::container::header::StoreEntry), String> {
+    // A remount can leave a document whose package is no longer provided by any
+    // mounted container. Its `provider` addresses a container positionally, so
+    // writing through it would land the bytes somewhere they never came from.
+    if document.orphaned {
+        return Err(format!(
+            "{} is no longer in the mounted containers, so it cannot be written back. Its bytes \
+             are still here and can be extracted.",
+            document.package
+        ));
+    }
     // Before anything is serialized: a header whose references point outside the
     // tables they name would otherwise be caught by a panic in the name map, or
     // not at all.
@@ -2586,6 +2687,7 @@ impl Baboon {
                 self.kits[index].chimp.package_types.clear();
                 self.status =
                     format!("Chimp indexed {packages} Unreal packages and {files} pak files");
+                self.reconcile_chimp_providers(index, &world);
                 self.restore_chimp_recovery(index, &world);
                 self.finish_pending_chimp_session_restore(index, ctx);
             }
@@ -2595,6 +2697,50 @@ impl Baboon {
             }
         }
         false
+    }
+
+    /// Re-resolve every open document's provider against the world that just
+    /// mounted.
+    ///
+    /// A `PackageProvider` addresses its container *positionally*, and a remount
+    /// rebuilds that list — so after one, an open document's provider names
+    /// whatever now sits at that index. It is read by `rebuild_chimp_document`
+    /// and by both save paths, which is how an edit could be written into a
+    /// container it never came from.
+    ///
+    /// This is not new to any one feature: every remount already has the
+    /// problem — changing the USMAP, overwriting source paks, and the write
+    /// lease's own remount all leave the providers behind. The panes keep
+    /// drawing either way, because a `ChimpDocument` holds its own bytes.
+    fn reconcile_chimp_providers(&mut self, kit_index: usize, world: &World) {
+        let mut orphaned = Vec::new();
+        for (package, document) in &mut self.kits[kit_index].chimp.documents {
+            match world
+                .package(package)
+                .and_then(|record| record.active_provider())
+            {
+                Some(provider) => {
+                    document.provider = provider.clone();
+                    document.orphaned = false;
+                }
+                // Left addressing its old container would be worse than saying
+                // so: the document still holds its bytes, and extraction still
+                // works, but nothing may be written back through a provider
+                // that no longer describes anything.
+                None => {
+                    document.orphaned = true;
+                    orphaned.push(package.clone());
+                }
+            }
+        }
+        if !orphaned.is_empty() {
+            orphaned.sort();
+            self.status = format!(
+                "{} open Chimp package(s) are no longer in the mounted containers: {}",
+                orphaned.len(),
+                orphaned.join(", ")
+            );
+        }
     }
 
     fn finish_pending_chimp_session_restore(&mut self, kit_index: usize, ctx: egui::Context) {
@@ -2930,6 +3076,54 @@ impl Baboon {
             });
             ctx.request_repaint();
         });
+    }
+
+    /// Start a sweep for the packages that import `package`.
+    ///
+    /// On a worker because there is no reverse index in the paks: the only way
+    /// to answer it is to read every mounted header, which is the same cost as
+    /// the type index at mount and far too much for a draw.
+    fn begin_chimp_referrer_scan(&mut self, kit_index: usize, package: String, ctx: egui::Context) {
+        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+            return;
+        };
+        let world = world.clone();
+        let Some(document) = self.kits[kit_index].chimp.documents.get_mut(&package) else {
+            return;
+        };
+        if matches!(document.referrers, ChimpReferrerState::Scanning) {
+            return;
+        }
+        document.referrers = ChimpReferrerState::Scanning;
+        let stamp = KitStamp {
+            kit: self.kits[kit_index].id,
+            generation: self.kits[kit_index].generation,
+        };
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let scan = scan_chimp_referrers(&world, &package);
+            let _ = tx.send(WorkerMessage::ChimpReferrersScanned {
+                stamp,
+                package,
+                scan,
+            });
+            ctx.request_repaint();
+        });
+    }
+
+    pub(super) fn handle_chimp_referrers_scanned(
+        &mut self,
+        stamp: KitStamp,
+        package: String,
+        scan: ChimpReferrerScan,
+    ) -> bool {
+        let Some(index) = self.resolve_stamp(stamp) else {
+            return true;
+        };
+        if let Some(document) = self.kits[index].chimp.documents.get_mut(&package) {
+            document.referrers = ChimpReferrerState::Done(scan);
+        }
+        false
     }
 
     pub(super) fn handle_chimp_package_loaded(
@@ -3732,6 +3926,7 @@ impl Baboon {
         // Read before the document borrow: `document` borrows this kit, and the
         // preference lives on the application.
         let expert = self.expert_mode;
+        let mut scan_referrers = false;
         let world = match &self.kits[kit_index].chimp.mount {
             ChimpMount::Ready(world) => world.clone(),
             _ => return,
@@ -3752,6 +3947,15 @@ impl Baboon {
             ))
             .color(subtle_dark()),
         );
+        if document.orphaned {
+            ui.label(
+                RichText::new(
+                    "No mounted container provides this package any more. It can still be read and \
+                     extracted, but not written back.",
+                )
+                .color(Color32::from_rgb(170, 130, 60)),
+            );
+        }
         ui.horizontal(|ui| {
             ui.selectable_value(&mut document.view, ChimpDocumentView::Document, "Document")
                 .on_hover_text("Readable JSON representation of the complete decoded package");
@@ -3843,7 +4047,7 @@ impl Baboon {
                     .inner
             }
             ChimpDocumentView::Header => {
-                draw_chimp_header_view(ui, document, &world, expert)
+                draw_chimp_header_view(ui, document, &world, expert, &mut scan_referrers)
             }
             ChimpDocumentView::Metadata => {
                 if document.metadata_text_dirty {
@@ -3871,6 +4075,10 @@ impl Baboon {
         let _ = document;
         if changed {
             self.checkpoint_chimp_document(kit_index, &package);
+        }
+        if scan_referrers {
+            let ctx = ui.ctx().clone();
+            self.begin_chimp_referrer_scan(kit_index, package.clone(), ctx);
         }
     }
 
@@ -8419,6 +8627,7 @@ fn draw_chimp_header_view(
     document: &mut ChimpDocument,
     world: &World,
     expert_mode: bool,
+    scan_referrers: &mut bool,
 ) -> bool {
     if document.header_usage.is_none() {
         refresh_chimp_header_usage(document);
@@ -8427,6 +8636,9 @@ fn draw_chimp_header_view(
     // access to the very header and exports the rows are reading from.
     let mut edits = ChimpHeaderEdits::default();
     draw_chimp_header_sections(ui, document, world, expert_mode, &mut edits);
+    // Passed out rather than started here: the scan needs the application, and
+    // this call is holding a mutable borrow of one of its documents.
+    *scan_referrers = edits.scan_referrers;
 
     if edits.start_identity {
         document.header_name_edit = None;
@@ -8547,6 +8759,7 @@ struct ChimpHeaderEdits {
     commit_export: bool,
     start_identity: bool,
     commit_identity: bool,
+    scan_referrers: bool,
     cancel: bool,
 }
 
@@ -8604,6 +8817,7 @@ fn draw_chimp_header_sections(
         commit_export,
         start_identity,
         commit_identity,
+        scan_referrers,
         cancel,
     } = edits;
     let usage = document
@@ -8984,12 +9198,77 @@ fn draw_chimp_header_sections(
                         });
                 });
 
+            // The inverse of the import map, and the only question here that
+            // cannot be answered from this package alone.
+            egui::CollapsingHeader::new("Referenced by")
+                .default_open(false)
+                .show(ui, |ui| match &document.referrers {
+                    ChimpReferrerState::Idle => {
+                        ui.label(
+                            RichText::new(
+                                "The paks carry no reverse index, so this means reading every \
+                                 mounted package header once.",
+                            )
+                            .color(subtle_dark())
+                            .small(),
+                        );
+                        if ui.button("Find packages that import this").clicked() {
+                            *scan_referrers = true;
+                        }
+                    }
+                    ChimpReferrerState::Scanning => {
+                        ui.horizontal(|ui| {
+                            ui.spinner();
+                            ui.label(
+                                RichText::new("Reading package headers...")
+                                    .color(subtle_dark())
+                                    .small(),
+                            );
+                        });
+                    }
+                    ChimpReferrerState::Done(scan) => {
+                        ui.label(
+                            RichText::new(match scan.referrers.len() {
+                                0 => format!("Nothing imports this, of {} packages", scan.scanned),
+                                1 => format!("1 package of {} imports this", scan.scanned),
+                                n => format!("{n} packages of {} import this", scan.scanned),
+                            })
+                            .color(subtle_dark())
+                            .small(),
+                        );
+                        if scan.unreadable > 0 {
+                            // "Nothing imports this" and "nothing I could read
+                            // imports this" are different answers, and only one
+                            // of them makes a rename safe.
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} package(s) could not be read and are not ruled out.",
+                                    scan.unreadable
+                                ))
+                                .color(Color32::from_rgb(170, 130, 60))
+                                .small(),
+                            );
+                        }
+                        egui::ScrollArea::vertical()
+                            .id_salt("chimp_header_referrers")
+                            .max_height(180.0)
+                            .show(ui, |ui| {
+                                for referrer in &scan.referrers {
+                                    ui.label(RichText::new(referrer).monospace());
+                                }
+                            });
+                        if ui.button("Scan again").clicked() {
+                            *scan_referrers = true;
+                        }
+                    }
+                });
+
             ui.add_space(6.0);
             ui.label(
                 RichText::new(
-                    "Read-only. Serial offsets, sizes and section offsets are recomputed when the \
-                     package is written, so they are not shown here — the Metadata view carries \
-                     them as they stand.",
+                    "Serial offsets, sizes and section offsets are recomputed when the package is \
+                     written, so they are not shown here — the Metadata view carries them as they \
+                     stand.",
                 )
                 .color(subtle_dark())
                 .small(),
@@ -9692,6 +9971,8 @@ mod tests {
             header_export_edit: None,
             header_identity_edit: None,
             header_error: None,
+            referrers: ChimpReferrerState::Idle,
+            orphaned: false,
         }
     }
 
@@ -10141,6 +10422,27 @@ mod tests {
         );
         assert_eq!(entry.filter_flags, EExportFilterFlags::NotForServer);
         assert_eq!(entry.public_export_hash, public_export_hash("Surface"));
+    }
+
+    /// "Nothing imports this" and "nothing I could read imports this" are
+    /// different answers, and a rename is only safe under the first. A scan
+    /// that swallowed unreadable packages would report the safe one.
+    #[test]
+    fn a_referrer_scan_keeps_what_it_could_not_rule_out_separate_from_what_it_cleared() {
+        let clean = ChimpReferrerScan {
+            referrers: Vec::new(),
+            scanned: 100,
+            unreadable: 0,
+        };
+        let partial = ChimpReferrerScan {
+            referrers: Vec::new(),
+            scanned: 100,
+            unreadable: 3,
+        };
+        // Both found nothing; only one of them looked everywhere.
+        assert!(clean.referrers.is_empty() && partial.referrers.is_empty());
+        assert_eq!(clean.unreadable, 0);
+        assert_ne!(partial.unreadable, 0);
     }
 
     #[test]
