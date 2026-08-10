@@ -2905,12 +2905,31 @@ impl Baboon {
                             .color(subtle_dark())
                             .small(),
                         );
+                    } else if let Some(pak) = state.in_place_pak.clone() {
+                        ui.label(
+                            RichText::new(format!(
+                                "Moves this tag inside {pak}, the pack that already holds it. No \
+                                 new container is written."
+                            ))
+                            .color(text_dark()),
+                        );
+                        ui.label(
+                            RichText::new(
+                                "That pack is backed up first. Only tags Baboon created can be \
+                                 moved this way — the game's own are copied into an overlay \
+                                 instead, because moving one would break every reference to it.",
+                            )
+                            .color(subtle_dark())
+                            .small(),
+                        );
                     } else if state.is_container {
                         if state.operation == TagNameOperation::Rename {
                             ui.label(
                                 RichText::new(
-                                    "Existing references will be redirected to the new tag via the \
-                                     overlay container.",
+                                    "This is one of the game's own tags, so it is copied to the \
+                                     new path in an overlay container rather than moved. Moving it \
+                                     would break every reference to it, and a pak cannot forward \
+                                     them.",
                                 )
                                 .color(text_dark()),
                             );

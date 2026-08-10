@@ -131,6 +131,14 @@ pub(in crate::app) struct RenameTagState {
     /// and for Move on a tag already in a pak, where the folder is precisely
     /// the thing being changed. Those two have nothing else in common.
     pub(in crate::app) whole_path_editable: bool,
+    /// For a Rename of a tag already in a pak: the pack it would be moved
+    /// inside, or `None` when applying writes an overlay container instead.
+    ///
+    /// Resolved once, when the dialog opens, and then used by *both* the
+    /// consequence text and the apply. Deciding it twice is how a dialog comes
+    /// to promise one thing and do another — which is exactly what it did while
+    /// the text was hard-coded to describe the overlay route.
+    pub(in crate::app) in_place_pak: Option<String>,
 }
 
 /// Results of a tag query (find-references / unreferenced), shown in a floating

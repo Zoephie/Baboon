@@ -5669,6 +5669,22 @@ impl Baboon {
         // between them only produced "use Move to choose a folder" from a dialog
         // that looked exactly like the one being recommended.
         let whole_path_editable = is_container;
+        // Resolved here rather than at apply time, so the text the user reads
+        // and the branch that runs come from one answer. It depends on Baboon's
+        // ledger, which cannot change while the dialog is open.
+        let in_place_pak = if operation == TagNameOperation::Rename {
+            let containers = self.mounted_containers().unwrap_or_default();
+            rename_in_place::container_rename_eligibility(&entry, &containers, &self.created_tags)
+                .ok()
+                .and_then(|_| match &entry.location {
+                    TagEntryLocation::Container { container, .. } => containers
+                        .get(*container)
+                        .map(|target| target.chunk_label.clone()),
+                    _ => None,
+                })
+        } else {
+            None
+        };
         let name = match operation {
             TagNameOperation::Duplicate => duplicate_parts.prefill.clone(),
             TagNameOperation::Rename | TagNameOperation::SaveAsOverlay => {
@@ -5710,6 +5726,7 @@ impl Baboon {
             is_container,
             is_new_container,
             whole_path_editable,
+            in_place_pak,
         });
     }
 
@@ -5739,6 +5756,7 @@ impl Baboon {
             is_container,
             is_new_container,
             whole_path_editable,
+            in_place_pak,
         )) = self.rename_tag.as_ref().map(|s| {
             (
                 s.key.clone(),
@@ -5748,6 +5766,7 @@ impl Baboon {
                 s.is_container,
                 s.is_new_container,
                 s.whole_path_editable,
+                s.in_place_pak.clone(),
             )
         })
         else {
@@ -5809,17 +5828,7 @@ impl Baboon {
         // it, and the pak format cannot forward those references — see
         // `container_rename_eligibility`. Everything else keeps the overlay
         // route, which copies rather than moves and so breaks nothing.
-        if is_container
-            && matches!(operation, TagNameOperation::Rename)
-            && self.entry_for_key(&key).is_some_and(|entry| {
-                rename_in_place::container_rename_eligibility(
-                    entry,
-                    &self.mounted_containers().unwrap_or_default(),
-                    &self.created_tags,
-                )
-                .is_ok()
-            })
-        {
+        if in_place_pak.is_some() {
             self.rename_tag = None;
             self.begin_container_rename_in_place(&key, &new_rel, ctx.clone());
             return;
