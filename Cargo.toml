@@ -25,7 +25,8 @@
 # target's definition declares, so two people with different copies of the same
 # editing kit stop getting different tags out of the same import; and seeding a
 # ported fx tag's material with the inputs its render method came with, so the
-# texture reaches the half of a Halo 4 particle that actually draws.
+# texture reaches the half of a Halo 4 particle that actually draws, which also
+# stopped a converted decal_system crashing Halo 4 the moment it was triggered.
 #
 # The rest are in-place rename: the general package primitive, the tag wrapper
 # over it, and two defects the round-trip found — a container header reading its
@@ -52,7 +53,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 atomic-write-file = "0.3"
-blam-tags = { git = "https://github.com/Zoephie/blam-tags", rev = "25575b2", features = ["audio", "iostore"] }
+blam-tags = { git = "https://github.com/Zoephie/blam-tags", rev = "4226504", features = ["audio", "iostore"] }
 directories = "6"
 display-info = "0.5"
 eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }
