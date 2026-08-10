@@ -195,7 +195,34 @@ pub(in crate::app) fn run_folder_conversion_job(
 
     let definitions_root = locate_definitions_root();
     let source_groups = GameTagIndex::load(&definitions_root, &job.source_game)?;
-    let target_groups = GameTagIndex::load(&definitions_root, &job.target_game)?;
+    // What each source class becomes in the target, asked once per class rather
+    // than once per tag: the answer depends only on the group, and getting it can
+    // mean walking a route. The engine answers, because a folder run naming its
+    // own output by canonical name disagrees with the converter exactly where a
+    // class was renamed — which is every contrail_system into Halo 4, and every
+    // shader into a game that still declares `shader` and ships none.
+    let mut landing_groups: HashMap<u32, Result<(u32, String), String>> = HashMap::new();
+    for entry in &entries {
+        if landing_groups.contains_key(&entry.group_tag) {
+            continue;
+        }
+        let landed = match source_groups.by_tag.get(&entry.group_tag) {
+            Some(name) => converted_group(
+                name,
+                &job.source_game,
+                &job.target_game,
+                &definitions_root,
+            )
+            .and_then(|found| {
+                found.ok_or_else(|| format!("Target profile has no {name} group"))
+            }),
+            None => Err(format!(
+                "Unknown source group {}",
+                format_group_tag(entry.group_tag)
+            )),
+        };
+        landing_groups.insert(entry.group_tag, landed);
+    }
     send_folder_conversion_progress(
         tx,
         "Indexing native target layouts",
@@ -216,13 +243,8 @@ pub(in crate::app) fn run_folder_conversion_job(
     let mut planned = Vec::new();
     let mut destination_counts = HashMap::<String, usize>::new();
     for entry in entries {
-        let destination = target_destination_for_entry(
-            &entry,
-            &source_folder,
-            &destination_root,
-            &source_groups,
-            &target_groups,
-        );
+        let destination =
+            target_destination_for_entry(&entry, &source_folder, &destination_root, &landing_groups);
         if let Ok(path) = &destination {
             let key = normalize_conversion_path(path)
                 .to_string_lossy()
@@ -257,7 +279,7 @@ pub(in crate::app) fn run_folder_conversion_job(
     for (index, (entry, destination)) in planned.into_iter().enumerate() {
         let source_label = entry.display_path.clone();
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let output = destination?;
+            let mut output = destination?;
             let key = normalize_conversion_path(&output)
                 .to_string_lossy()
                 .to_ascii_lowercase();
@@ -288,6 +310,12 @@ pub(in crate::app) fn run_folder_conversion_job(
                 ConversionOutcome::Lossy { draft, .. } => *draft,
                 ConversionOutcome::Failed(error) => return Err(error),
             };
+            // The planned name was a prediction; this is what the tag turned out
+            // to be. The two agree unless the direct pair was refused and the
+            // route renamed the class further than the direct pair would have, and
+            // a file whose extension disagrees with its own group header is one
+            // the destination's tools will not open.
+            output.set_extension(&draft.target_extension);
             let dependency_schema = definitions_root
                 .join(&job.target_game)
                 .join("tag_dependency_list.json");
@@ -468,12 +496,17 @@ pub(in crate::app) fn run_folder_conversion_job(
     Ok(report)
 }
 
+/// Where one source tag is expected to land.
+///
+/// Expected, not decided: the extension comes from the class the converter is
+/// predicted to produce, and the draft has the final say once the tag has
+/// actually been through. This runs first only because two sources colliding on
+/// one destination has to be caught before either is written.
 fn target_destination_for_entry(
     entry: &TagEntry,
     source_folder: &Path,
     destination_root: &Path,
-    source_groups: &GameTagIndex,
-    target_groups: &GameTagIndex,
+    landing_groups: &HashMap<u32, Result<(u32, String), String>>,
 ) -> Result<PathBuf, String> {
     let TagEntryLocation::LooseFile(source_path) = &entry.location else {
         return Err("Folder conversion only supports loose tags".to_owned());
@@ -482,21 +515,12 @@ fn target_destination_for_entry(
         .strip_prefix(source_folder)
         .map(Path::to_path_buf)
         .map_err(|_| "Source tag escapes the selected folder".to_owned())?;
-    let source_group_name = source_groups
-        .by_tag
+    let (target_group, target_group_name) = landing_groups
         .get(&entry.group_tag)
-        .ok_or_else(|| format!("Unknown source group {}", format_group_tag(entry.group_tag)))?;
-    let target_group = target_groups
-        .by_name
-        .get(&source_group_name.to_ascii_lowercase())
-        .copied()
-        .ok_or_else(|| format!("Target profile has no {source_group_name} group"))?;
-    let target_group_name = target_groups
-        .by_tag
-        .get(&target_group)
-        .map(String::as_str)
-        .unwrap_or(source_group_name);
-    let extension = group_tag_to_extension(target_group).unwrap_or(target_group_name);
+        .ok_or_else(|| format!("Unknown source group {}", format_group_tag(entry.group_tag)))?
+        .as_ref()
+        .map_err(String::clone)?;
+    let extension = group_tag_to_extension(*target_group).unwrap_or(target_group_name);
     let mut output = normalize_conversion_path(&destination_root.join(relative));
     output.set_extension(extension);
     if !output.starts_with(destination_root) {
@@ -601,6 +625,85 @@ mod tests {
                 .join("jackal/nested/jackal_alt.weapon")
                 .is_file()
         );
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    /// A folder run names a renamed class the way the converter does.
+    ///
+    /// Halo 4 calls Halo 3's `contrail_system` a `tracer_system`. Importing one
+    /// tag worked and importing the folder it sits in failed on the same tag,
+    /// because the folder run planned its output by canonical name: Halo 4 has no
+    /// `contrail_system` group, so the file could not be named and the tag was
+    /// reported as unconvertible before anything tried to convert it.
+    ///
+    /// The quieter half of the same bug is worse and is why the extension comes
+    /// from the draft as well: Halo 4 *does* still declare `shader`, so a Reach
+    /// shader was named `.shader` while the converter built a `.material`.
+    #[test]
+    fn a_folder_run_writes_a_renamed_class_under_its_new_name() {
+        let definitions = locate_definitions_root();
+        let unique = format!(
+            "baboon_renamed_class_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let root = std::env::temp_dir().join(unique);
+        let source_root = root.join("source_tags");
+        let source_folder = source_root.join("fx");
+        let target_tags = root.join("target_tags");
+        let destination_parent = target_tags.join("fx");
+        fs::create_dir_all(&source_folder).unwrap();
+        fs::create_dir_all(&target_tags).unwrap();
+
+        let mut source = TagFile::new(definitions.join("halo3_mcc/contrail_system.json")).unwrap();
+        apply_editing_kit_mcc_header(&mut source, "halo3_mcc").unwrap();
+        source
+            .write_atomic(source_folder.join("smoke.contrail_system"))
+            .unwrap();
+
+        let source = TagSource::LooseFolder {
+            root: source_root,
+            game: Some("halo3_mcc".to_owned()),
+            definitions_root: definitions.clone(),
+        };
+        let names = TagNameIndex::load_from_definitions(&definitions);
+        let (tx, _rx) = mpsc::channel();
+        let report = run_folder_conversion_job(
+            FolderConversionJob {
+                source,
+                names,
+                source_rel_path: PathBuf::from("fx"),
+                destination_label: "fx".to_owned(),
+                source_game: "halo3_mcc".to_owned(),
+                target_game: "halo4_mcc".to_owned(),
+                target_tags_root: target_tags,
+                destination_parent: destination_parent.clone(),
+                kit_roots: HashMap::new(),
+                accept_loss: true,
+                only: None,
+            },
+            &tx,
+        )
+        .unwrap();
+
+        let written = destination_parent.join("fx/smoke.tracer_system");
+        assert_eq!(
+            report.failed_count(),
+            0,
+            "{:?}",
+            report
+                .files
+                .iter()
+                .map(|file| file.detail.clone())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(report.converted_count(), 1);
+        assert!(written.is_file(), "expected {}", written.display());
+        assert!(!destination_parent.join("fx/smoke.contrail_system").exists());
 
         fs::remove_dir_all(root).unwrap();
     }

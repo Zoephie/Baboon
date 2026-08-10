@@ -502,7 +502,7 @@ dependencies = [
 [[package]]
 name = "blam-tags"
 version = "0.1.0"
-source = "git+https://github.com/Zoephie/blam-tags?rev=e018e53#e018e5359edbc93605882829688ab3c186eb253f"
+source = "git+https://github.com/Zoephie/blam-tags?rev=97cf34f#97cf34f483535f1658680f7f133105751e56c7de"
 dependencies = [
  "anyhow",
  "bcdec_rs",
