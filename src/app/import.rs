@@ -1609,14 +1609,14 @@ mod tests {
         // visible; a folder called `tags` would have hidden it.
         let target_root = root.join("reach_content");
         fs::create_dir_all(&target_root).unwrap();
-        let mut native = TagFile::new(definitions.join("haloreach_mcc/weapon.json")).unwrap();
+        let mut native = TagFile::new(definitions.join("haloreach_mcc/particle.json")).unwrap();
         apply_editing_kit_mcc_header(&mut native, "haloreach_mcc").unwrap();
         // A recorded source revision is what marks a tag as kit-authored and so
         // eligible to be a template.
         native.header.version = 8;
-        native.write_atomic(target_root.join("stock.weapon")).unwrap();
+        native.write_atomic(target_root.join("stock.particle")).unwrap();
 
-        let source = TagFile::new(definitions.join("halo3_mcc/weapon.json")).unwrap();
+        let source = TagFile::new(definitions.join("halo3_mcc/particle.json")).unwrap();
         let kit_roots = HashMap::from([("haloreach_mcc".to_owned(), target_root.clone())]);
         let mut cache = NativeTemplateCache::default();
         let draft = convert_tag_routed(
@@ -1631,7 +1631,7 @@ mod tests {
         .expect("Halo 3 to Reach converts directly");
         assert_eq!(
             draft.native_layout_template.as_deref(),
-            Some(target_root.join("stock.weapon").as_path()),
+            Some(target_root.join("stock.particle").as_path()),
             "the template in the configured root should have been used"
         );
         assert!(

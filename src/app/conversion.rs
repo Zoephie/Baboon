@@ -380,9 +380,9 @@ pub(in crate::app) fn run_folder_conversion_job(
                 FolderConversionFileStatus::GeneratedLayout
             };
             let mut detail = if let Some(template) = native_layout_template {
-                format!("Native layout template: {}", template.display())
+                format!("Started from kit tag: {}", template.display())
             } else {
-                "Generated layout; native editing-kit compatibility is unverified".to_owned()
+                "Built from the target profile's own definitions".to_owned()
             };
             if !route.is_empty() {
                 // Named per file, not once per run: a folder can hold a mix, and
@@ -606,8 +606,11 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(report.native_count(), 2);
-        assert_eq!(report.generated_count(), 0);
+        // Built from Halo Reach's own definitions, not from the kit tag sitting
+        // in the destination: `weapon` needs no template, so the pre-existing
+        // tag at the output path is overwritten rather than copied from.
+        assert_eq!(report.generated_count(), 2);
+        assert_eq!(report.native_count(), 0);
         assert_eq!(report.failed_count(), 1);
         assert_eq!(report.ignored_files, vec!["characters/jackal/notes.txt"]);
         assert!(report.files.iter().any(|file| {

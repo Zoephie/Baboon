@@ -403,11 +403,12 @@ impl Baboon {
                         match draft.native_layout_template.as_ref() {
                             None => {
                                 ui.label(
-                                    RichText::new(
-                                        "Built from a generated layout — native editing-kit \
-                                         compatibility is unverified",
-                                    )
-                                    .color(Color32::from_rgb(242, 196, 48))
+                                    RichText::new(format!(
+                                        "Built from {}'s own definitions — no tag in your kit \
+                                         was used or needed",
+                                        dialog.target_game
+                                    ))
+                                    .color(subtle_dark())
                                     .small(),
                                 );
                             }
@@ -422,10 +423,12 @@ impl Baboon {
                                     .unwrap_or(template);
                                 ui.label(
                                     RichText::new(format!(
-                                        "Started from the kit's {}",
-                                        shown.display()
+                                        "Started from the kit's {} — {} cannot be built from the \
+                                         definitions alone, so its layout came from that tag",
+                                        shown.display(),
+                                        draft.target_group_name
                                     ))
-                                    .color(subtle_dark())
+                                    .color(Color32::from_rgb(242, 196, 48))
                                     .small(),
                                 );
                             }
@@ -3895,17 +3898,18 @@ mod mod_export_tests {
 /// What a folder import actually wrote, grouped by how much can be claimed for
 /// it.
 ///
-/// The three buckets are not severity levels — a generated layout is a written,
-/// readable tag whose fit with the native editing kit is simply unproven. Saying
-/// so is the point; folding it in with the successes would overstate the result,
-/// and folding it in with the failures would understate it.
+/// The three buckets are not severity levels. Built-from-definitions is the
+/// ordinary path and the cleaner one: the tag holds what the source gave it and
+/// what the schema defaults to, nothing else. Started-from-a-kit-tag is the
+/// exception, taken only for the handful of groups whose schema cannot express
+/// them, and it is worth naming because that tag's layout revision came with it.
 fn draw_folder_import_report(ui: &mut Ui, report: &FolderConversionReport) {
     ui.label(
         RichText::new(format!(
-            "Imported {} tag(s): {} native-layout, {} generated-layout. {} failed, {} ignored.",
+            "Imported {} tag(s): {} from the definitions, {} from a kit tag. {} failed, {} ignored.",
             report.converted_count(),
-            report.native_count(),
             report.generated_count(),
+            report.native_count(),
             report.failed_count(),
             report.ignored_files.len()
         ))
@@ -3937,13 +3941,13 @@ fn draw_folder_import_report(ui: &mut Ui, report: &FolderConversionReport) {
                 FolderConversionFileStatus::Failed,
             ] {
                 let (label, color) = match wanted {
-                    FolderConversionFileStatus::NativeLayout => {
-                        ("Native-layout verified", text_dark())
-                    }
-                    FolderConversionFileStatus::GeneratedLayout => (
-                        "Generated layout — native compatibility unverified",
+                    FolderConversionFileStatus::NativeLayout => (
+                        "Started from a kit tag — the definitions cannot build this group",
                         Color32::from_rgb(242, 196, 48),
                     ),
+                    FolderConversionFileStatus::GeneratedLayout => {
+                        ("Built from the target's own definitions", text_dark())
+                    }
                     FolderConversionFileStatus::Failed => {
                         ("Failed / skipped", material_delete_text())
                     }
