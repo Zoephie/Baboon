@@ -4,19 +4,25 @@
 #
 # The engine lives at camden-smallwood/blam-tags and the pin belongs there. It
 # points at Zoephie/blam-tags `chimp-header-editing`, which is camden's `master`
-# at `25aa5dc` plus four commits, so nothing upstream is dropped — #4, which
+# at `25aa5dc` plus the commits below, so nothing upstream is dropped — #4, which
 # brought cross-game conversion itself, is merged and part of that `master`.
 #
-# Two of those four are fx fixes in flight upstream (camden-smallwood/blam-tags#5):
-# a Reach particle's render method arriving with too few option slots for Halo 4
-# to open, and contrail_system carrying across as the tracer_system it became.
-# They sit on `halo4-particle-and-tracer`, which this branch was cut from.
+# Two are fx fixes in flight upstream (camden-smallwood/blam-tags#5): a Reach
+# particle's render method arriving with too few option slots for Halo 4 to
+# open, and contrail_system carrying across as the tracer_system it became. They
+# sit on `halo4-particle-and-tracer`, which this branch was cut from.
 #
-# The other two are what Chimp's Header view needs: `FNameMap::rename` with the
+# Two are what Chimp's Header view needs: `FNameMap::rename` with the
 # `visit_names_mut` traversals that keep decoded names from going stale behind
 # it, and a refusal in `add_package_override_to_writer` for an override whose
 # rebuilt package is no longer the one it replaces — that second one is an
 # independent bug fix and worth offering upstream on its own.
+#
+# The rest are in-place rename: the general package primitive, the tag wrapper
+# over it, and two defects the round-trip found — a container header reading its
+# localized-source set from the wrong list, so any package renamed once could
+# not be moved again, and member enumeration collecting a package's own
+# tombstones. Both are independent bug fixes.
 #
 # Move the pin back to the camden URL once those land.
 [workspace]
@@ -37,7 +43,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 atomic-write-file = "0.3"
-blam-tags = { git = "https://github.com/Zoephie/blam-tags", rev = "05d53b3", features = ["audio", "iostore"] }
+blam-tags = { git = "https://github.com/Zoephie/blam-tags", rev = "08d7d4b", features = ["audio", "iostore"] }
 directories = "6"
 display-info = "0.5"
 eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }

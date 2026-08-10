@@ -110,62 +110,50 @@ pub(in crate::app) fn rekey_tag_in_kit(kit: &mut Kit, old: &str, new: &str) {
     kit.field_index.invalidate();
 }
 
-/// On what grounds a container tag may be renamed in place.
+/// What a rename is allowed to proceed on: the provenance line the writer
+/// re-checks before it moves anything.
 ///
-/// The two tiers are not degrees of caution about the same operation; they rest
-/// on different evidence, and that difference is carried all the way into
-/// `blam-tags`.
+/// Only ever produced for a tag Baboon itself put in the container, and that is
+/// the whole safety argument — see [`container_rename_eligibility`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(in crate::app) enum RenameTier {
-    /// A copy Baboon put in this container. Its chunks provably sit at or past
-    /// the line the container held before Baboon first wrote to it, so the
-    /// writer can re-check that before it moves anything — and no tag the game
-    /// shipped can be reached through this path at all.
-    Authored { minimum_appended_index: u32 },
-    /// Anything else the container holds, the game's own tags included.
-    ///
-    /// The provenance check has to be *dropped* here, not merely relaxed: a
-    /// shipped tag's chunks sit below the appended line, so passing it would
-    /// refuse the very operation being authorised. What replaces it is policy —
-    /// Expert mode, an immutable backup, and a dialog naming the pak — because
-    /// there is no evidence left to check.
-    Shipped,
+pub(in crate::app) struct AuthoredRename {
+    /// How many chunks the container held before Baboon first wrote to it.
+    /// Every chunk of the tag being moved sits at or past this, which the
+    /// writer proves again for itself.
+    pub(in crate::app) minimum_appended_index: u32,
 }
 
-impl RenameTier {
-    /// What to hand the writer as its provenance guard. `None` is not "skip a
-    /// check we could have made"; it is the honest encoding of a tier where no
-    /// such evidence exists.
-    pub(in crate::app) fn minimum_appended_index(self) -> Option<u32> {
-        match self {
-            RenameTier::Authored {
-                minimum_appended_index,
-            } => Some(minimum_appended_index),
-            RenameTier::Shipped => None,
-        }
-    }
-}
-
-/// Whether a tag may be renamed inside the pak that holds it, and on what
-/// grounds — or why it may not.
+/// Whether a tag may be renamed inside the pak that holds it — or why it may
+/// not.
 ///
-/// Deliberately more permissive than `delete_eligibility`, and the asymmetry is
-/// the point. A delete destroys the only copy of a payload. A rename retires two
-/// chunks, writes equivalents, and leaves a forwarding redirect; the bytes are
-/// still there and the backup still holds the container as it was. That makes it
-/// closer to duplication, which is already offered against the game's own paks.
+/// Only a tag **Baboon authored** may be. This was going to be a two-tier
+/// policy, with the game's own tags behind Expert mode and a confirmation, on
+/// the reasoning that a rename is closer to duplication than to deletion: it
+/// retires two chunks, writes equivalents, and leaves a forwarding redirect.
+///
+/// The redirect does not forward. That was measured in the game rather than
+/// argued about: renaming `assault_rifle-weapon` removes the assault rifle,
+/// and renaming it with a redirect verified present in the rewritten container
+/// removes it just the same. So a rename does not relocate a tag that anything
+/// points at — it deletes it and leaves a copy under a name nothing asks for.
+///
+/// A tag Baboon authored is safe for exactly one reason: nothing the game
+/// shipped can reference it, because it did not exist when the game was built.
+/// Whatever references it, the user made, and can move with it.
+///
+/// The shipped case is refused rather than gated, because a warning cannot make
+/// a broken reference work. Renaming those needs every referrer's import table
+/// rewritten in the same transaction, which is a separate piece of work.
 ///
 /// What this cannot see, and does not try to: whether the container is encrypted
 /// or signed, whether it carries ordinal-keyed blocks, whether the package owns
 /// an unexpected chunk. Those are properties of the container rather than of
-/// Baboon's records, and `blam-tags` refuses them at the point it can actually
-/// prove them.
+/// Baboon's records, and `blam-tags` refuses them where it can prove them.
 pub(in crate::app) fn container_rename_eligibility(
     entry: &TagEntry,
     containers: &[crate::source::MountedContainer],
     ledger: &CreatedTagLedger,
-    expert_mode: bool,
-) -> Result<RenameTier, String> {
+) -> Result<AuthoredRename, String> {
     let (container, rel_path) = match &entry.location {
         TagEntryLocation::Container {
             container,
@@ -189,23 +177,21 @@ pub(in crate::app) fn container_rename_eligibility(
         .ok_or("This tag's container is no longer mounted")?;
 
     // A record that says `RenamedFromShipped` still names a tag the game
-    // shipped. It stops the tag being deleted; it must not promote it to a tier
-    // that skips the Expert gate, or renaming twice would launder it.
+    // shipped, so it does not qualify — otherwise renaming twice would launder
+    // one into a tag that renames freely.
     if let Some(record) = ledger.find(&target.utoc_path, rel_path)
         && record.origin == CreatedTagOrigin::Authored
     {
-        return Ok(RenameTier::Authored {
+        return Ok(AuthoredRename {
             minimum_appended_index: record.container_entry_count_before,
         });
     }
-    if !expert_mode {
-        return Err(format!(
-            "Renaming a tag inside {} rewrites one of the game's own packs. \
-             Turn on Expert mode to do it.",
-            target.chunk_label
-        ));
-    }
-    Ok(RenameTier::Shipped)
+    Err(format!(
+        "{} is one of the game's own tags. Renaming it inside {} would move it \
+         out from under everything that references it, and the pak format has no \
+         way to forward those references. Duplicate it instead, and rename the copy.",
+        entry.display_path, target.chunk_label
+    ))
 }
 
 /// Where a renamed tag was, and where it now is, in the terms the mounted
