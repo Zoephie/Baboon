@@ -580,6 +580,29 @@ pub(in crate::app) fn classify_overlay(
     }
 }
 
+/// Which wrapper the exporter hands the writer for a tag it writes whole.
+///
+/// The two ways a tag reaches that path want opposite treatment, and the
+/// difference is already in the location. A copy Baboon made sits in a
+/// container under `Container`, and the `.uasset` resolved for it is the tag it
+/// was copied from — so its bindings are this tag's bindings. A tag authored
+/// through New Tag sits under `NewContainer` with a *donor* recorded, some
+/// unrelated tag that supplies structure only.
+///
+/// Getting this backwards is not a loud failure: an authored tag that kept its
+/// donor's bindings presents as the donor, and a copy that lost its own
+/// presents as nothing at all.
+pub(in crate::app) fn wrapper_origin_for(
+    location: &TagEntryLocation,
+) -> Option<blam_tags::iostore::writer::WrapperOrigin> {
+    use blam_tags::iostore::writer::WrapperOrigin;
+    match location {
+        TagEntryLocation::Container { .. } => Some(WrapperOrigin::Copy),
+        TagEntryLocation::NewContainer { .. } => Some(WrapperOrigin::Template),
+        _ => None,
+    }
+}
+
 impl Baboon {
     /// Resolve (and cache) the Wwise media a Campaign Evolved `sound` tag binds
     /// to. Returns `None` for every other game and source kind.
@@ -5206,7 +5229,15 @@ impl Baboon {
             String,
             std::sync::Arc<Vec<u8>>,
         )> = Vec::new();
-        let mut new_pkgs: Vec<(Vec<u8>, std::sync::Arc<Vec<u8>>, String)> = Vec::new();
+        // The origin rides along because the two ways a tag gets here want
+        // opposite treatment of the wrapper: a copy keeps the bindings of what
+        // it was copied from, an authored tag must not inherit its donor's.
+        let mut new_pkgs: Vec<(
+            Vec<u8>,
+            std::sync::Arc<Vec<u8>>,
+            String,
+            blam_tags::iostore::writer::WrapperOrigin,
+        )> = Vec::new();
         let mut skipped = 0usize;
         for overlay in snapshot.overlays.values() {
             if !included.contains(&overlay.identity) {
@@ -5248,7 +5279,16 @@ impl Baboon {
                         skipped += 1;
                         continue;
                     };
-                    new_pkgs.push((template, overlay.bytes.clone(), package));
+                    // A copy Baboon made: the template resolved just above is
+                    // the very tag it was copied from, so its wrapper is this
+                    // tag's wrapper. Stripping it would drop the Blueprint the
+                    // copy presents as, and for a model would refuse the export
+                    // outright over the region table it still names.
+                    let Some(origin) = wrapper_origin_for(&entry.location) else {
+                        skipped += 1;
+                        continue;
+                    };
+                    new_pkgs.push((template, overlay.bytes.clone(), package, origin));
                 }
                 TagEntryLocation::Container {
                     container,
@@ -5284,7 +5324,13 @@ impl Baboon {
                         skipped += 1;
                         continue;
                     };
-                    new_pkgs.push((template, overlay.bytes.clone(), package.clone()));
+                    // Authored from a recorded donor, which is some other tag:
+                    // its bindings say nothing true about this one.
+                    let Some(origin) = wrapper_origin_for(&entry.location) else {
+                        skipped += 1;
+                        continue;
+                    };
+                    new_pkgs.push((template, overlay.bytes.clone(), package.clone(), origin));
                 }
                 _ => skipped += 1,
             }
@@ -5327,14 +5373,16 @@ impl Baboon {
         let new_refs: Vec<blam_tags::iostore::writer::NewPackage> = new_pkgs
             .iter()
             .map(
-                |(template, bytes, package)| blam_tags::iostore::writer::NewPackage {
+                |(template, bytes, package, origin)| blam_tags::iostore::writer::NewPackage {
                     template_uasset: template.as_slice(),
                     tag_bytes: bytes.as_slice(),
                     new_package_path: package.as_str(),
                     redirect_from: None,
-                    // A new tag's wrapper is built from the template with the
-                    // donor's own bindings stripped; nothing here chooses one.
+                    // Only ever set deliberately, and nothing here chooses one:
+                    // an authored tag gets none, and a copy keeps whatever its
+                    // original had rather than being handed a new one.
                     asset_reference: None,
+                    origin: *origin,
                 },
             )
             .collect();

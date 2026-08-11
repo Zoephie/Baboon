@@ -598,3 +598,55 @@ fn an_overlay_identical_to_the_shipped_tag_is_not_a_change() {
         ModExportChange::Unresolved
     );
 }
+
+/// A copy and an authored tag are handed different wrappers, and the location
+/// is what decides.
+///
+/// Both reach the exporter as `CampaignProjectTagKind::New` and are written
+/// whole, so the kind cannot tell them apart — the location can. A copy Baboon
+/// made lives in a container, and the `.uasset` resolved for it is the tag it
+/// was copied from; a tag from New Tag lives in a `NewContainer` with a donor
+/// recorded against it.
+///
+/// This is gated because getting it backwards fails quietly in both directions.
+/// A copy stripped of its wrapper exports fine and presents as nothing in game —
+/// which is what shipped, and what users hit as an export that could never
+/// succeed once the tag was a `model`, since a model's wrapper names a region
+/// string table that stripping orphans.
+#[test]
+fn a_copy_keeps_its_wrapper_and_an_authored_tag_does_not() {
+    use blam_tags::iostore::writer::WrapperOrigin;
+
+    // A copy: it sits in a container like any other tag.
+    assert_eq!(
+        wrapper_origin_for(&TagEntryLocation::Container {
+            container: 0,
+            rel_path: "Meteorite/Content/Tags/objects/x/y-model.ubulk".to_owned(),
+        }),
+        Some(WrapperOrigin::Copy),
+        "a copy must keep the bindings of the tag it was copied from"
+    );
+
+    // Authored through New Tag, both ways a wrapper is obtained: donated from
+    // an unrelated same-group tag, or derived from the group's own rules.
+    // Neither carries bindings that belong to the tag being created.
+    for template in [
+        NewContainerTemplate::Donor {
+            container: 0,
+            rel_path: "Meteorite/Content/Tags/objects/other/donor-model.ubulk".to_owned(),
+        },
+        NewContainerTemplate::Derived {
+            group: "model".to_owned(),
+        },
+    ] {
+        assert_eq!(
+            wrapper_origin_for(&TagEntryLocation::NewContainer {
+                template,
+                package: "/Game/Tags/objects/x/y-model".to_owned(),
+                group_tag: u32::from_be_bytes(*b"mode"),
+            }),
+            Some(WrapperOrigin::Template),
+            "an authored tag must not inherit its donor's bindings"
+        );
+    }
+}
