@@ -24,9 +24,16 @@ fn h2_particle_mapping_field_edit_targets_exact_field() {
             .find(|f| f.name() == "color" && f.as_struct().is_some())
             .expect("color struct");
         let color = color_field.as_struct().unwrap();
+        // `color` used to hold two fields named `Mapping` -- the struct, and a
+        // `custom` placeholder ahead of it -- and this reached the struct
+        // through that ambiguity. The ambiguity was Baboon's own: a
+        // kit-authored layout names no `custom`, and once the builder stopped
+        // naming them the duplicate went away. The placeholder is still there,
+        // unnamed. Disambiguation against a duplicate a tag really has is
+        // gated by `h2_contrail_derived_path_targets_the_second_duplicate`.
         assert!(
-            color.field("Mapping").and_then(|f| f.as_struct()).is_none(),
-            "first 'Mapping' should be the non-struct custom placeholder"
+            color.fields_all().any(|f| f.name().is_empty()),
+            "the custom placeholder should still be there, just unnamed"
         );
         let mapping_field = color
             .fields_all()
@@ -52,6 +59,57 @@ fn h2_particle_mapping_field_edit_targets_exact_field() {
         matches!(value, Some(TagFieldData::CharInteger(4))),
         "Function Type not set via positional path: {value:?}"
     );
+}
+
+/// The path the editor derives for a field must reach *that* field, when the
+/// tag really does name two the same.
+///
+/// This is the case positional paths exist for. It runs against a duplicate an
+/// H2 contrail actually ships -- `bitmap` twice at the root -- rather than one
+/// Baboon created for itself by naming a `custom`, which is what the particle
+/// fixture above used to rely on. 709 of the kit's 28,195 tags carry a real
+/// duplicate.
+#[test]
+fn h2_contrail_derived_path_targets_the_second_duplicate() {
+    let tag_path = "/Users/camden/Halo/halo2_mcc/tags/effects/objects/weapons/rifle/sniper_rifle/sniper.contrail";
+    let def = test_definition_path("halo2_mcc/contrail.json");
+    if !std::path::Path::new(tag_path).exists() || !std::path::Path::new(&def).exists() {
+        eprintln!("skipping: H2 contrail/definition not present");
+        return;
+    }
+    let bytes = std::fs::read(tag_path).unwrap();
+    let layout = blam_tags::layout::TagLayout::from_json(&def).unwrap();
+    let tag = blam_tags::classic::read_classic_tag_file(&bytes, layout).unwrap();
+    let root = tag.root();
+
+    let duplicates: Vec<_> = root.fields_all().filter(|f| f.name() == "bitmap").collect();
+    assert_eq!(
+        duplicates.len(),
+        2,
+        "this contrail should declare `bitmap` twice"
+    );
+
+    // Derive each path the way the editor does, then resolve it back. The
+    // second is the one a bare name can never reach.
+    for field in &duplicates {
+        let path = append_field_path_for("", field);
+        let resolved = root
+            .field_path(&path)
+            .unwrap_or_else(|| panic!("derived path {path} no longer resolves"));
+        assert_eq!(
+            resolved.ordinal(),
+            field.ordinal(),
+            "derived path {path} resolved to a different field"
+        );
+    }
+
+    // And the two really are distinct, so the loop above is not passing by
+    // resolving the same field twice.
+    let derived: Vec<String> = duplicates
+        .iter()
+        .map(|f| append_field_path_for("", f))
+        .collect();
+    assert_ne!(derived[0], derived[1], "both duplicates derived one path");
 }
 
 fn load_h2_tag(tag_path: &str, def_rel: &str) -> Option<blam_tags::TagFile> {
