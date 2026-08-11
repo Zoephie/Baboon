@@ -2,49 +2,13 @@
 # parent workspace. The blam-tags engine is pinned to a revision, not a
 # submodule.
 #
-# The engine lives at camden-smallwood/blam-tags and the pin belongs there. It
-# points at `fix-h2-lod-section-selection`, which is Zoephie/blam-tags
-# `chimp-header-editing` at `233cbd2` plus one commit, so nothing the previous
-# pin carried is dropped — `233cbd2` is what main pinned, tag-build explanation
-# fields and unnamed customs included. That branch is in turn camden's `master`
-# at `25aa5dc` plus the commits below — #4, which brought cross-game conversion
-# itself, is merged and part of that `master`.
-#
-# The one commit on top is the Halo 2 LOD fix: a permutation now draws the
-# section its own `L1..L6 section index` slots name rather than whichever
-# section is largest, because the vertex-count rule read `total vertex count`
-# off the section element, where it does not live. See the commit for the
-# corpus numbers.
-#
-# Two are fx fixes in flight upstream (camden-smallwood/blam-tags#5): a Reach
-# particle's render method arriving with too few option slots for Halo 4 to
-# open, and contrail_system carrying across as the tracer_system it became. They
-# sit on `halo4-particle-and-tracer`, which this branch was cut from.
-#
-# Two are what Chimp's Header view needs: `FNameMap::rename` with the
-# `visit_names_mut` traversals that keep decoded names from going stale behind
-# it, and a refusal in `add_package_override_to_writer` for an override whose
-# rebuilt package is no longer the one it replaces — that second one is an
-# independent bug fix and worth offering upstream on its own.
-#
-# Three are conversion, and are worth offering upstream on their own too: naming a
-# converted tag after the class it *became* rather than the one it was, which is
-# why a folder import refused a contrail_system into Halo 4 that imported fine
-# one tag at a time; and seeding a conversion from the layout revision the
-# target's definition declares, so two people with different copies of the same
-# editing kit stop getting different tags out of the same import; and seeding a
-# ported fx tag's material with the inputs its render method came with, so the
-# texture reaches the half of a Halo 4 particle that actually draws, which also
-# stopped a converted decal_system crashing Halo 4 the moment it was triggered.
-#
-# The rest are in-place rename: the general package primitive, the tag wrapper
-# over it, and two defects the round-trip found — a container header reading its
-# localized-source set from the wrong list, so any package renamed once could
-# not be moved again, and member enumeration collecting a package's own
-# tombstones. Both are independent bug fixes.
-#
-# The pin is on the camden URL because the Halo 2 fix lives there; the Zoephie
-# commits under it still want landing on camden's `master`.
+# The engine lives at camden-smallwood/blam-tags and the pin points at its
+# `master`. Everything Baboon had been carrying on feature branches — Zoephie's
+# Chimp header-editing and in-place rename work, the cross-game conversion
+# fixes, the tag-build shape fixes the kits' tools require, and the Halo 2 LOD
+# fix — is merged there as of `f6a5d11`, so the pin no longer needs a branch
+# that only exists to hold commits master is missing. Move it by merging into
+# `master` and bumping the rev; there is nothing else to reconcile.
 [workspace]
 members = ["."]
 default-members = ["."]
@@ -63,7 +27,7 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 atomic-write-file = "0.3"
-blam-tags = { git = "https://github.com/camden-smallwood/blam-tags", rev = "e8576da", features = ["audio", "iostore"] }
+blam-tags = { git = "https://github.com/camden-smallwood/blam-tags", rev = "f6a5d11", features = ["audio", "iostore"] }
 directories = "6"
 display-info = "0.5"
 eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }
