@@ -508,6 +508,16 @@ memory**, and exporting a mod is the way changes are committed:
   provides are counted as skipped. It is tens of thousands of decompressed reads
   and file writes, so it confirms first, reports progress in the status bar, and
   can be cancelled from there; Baboon stays usable while it runs.
+- **Extract tags to folder…** (right-click a folder in the browser) — the same
+  extraction aimed at one folder instead of the whole workspace, and **not**
+  Expert-gated: the scope is bounded and deliberately chosen. The count in the
+  menu is what actually gets written — tags authored this session have no shipped
+  payload to read, so they are excluded from it rather than promised and skipped.
+  Tags keep their **full** paths, so the result lands under `objects/characters/…`
+  inside the folder you pick and several folder extractions into one destination
+  merge into a single **Load Folder**-able kit. Offered in *Folders* mode only: a
+  *Groups* node is a group label rather than a folder, and the on-disk layout
+  follows the tags' own paths, so the result would not resemble the node clicked.
 
 Any in-place write to a container **drops that pak's perfect-hash lookup table**.
 The table maps a chunk id to a *slot* in the chunk-id array, so both the chunk

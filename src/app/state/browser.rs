@@ -30,6 +30,11 @@ pub(in crate::app) enum BrowserAction {
     ExtractMaterialShaderSourceFolder(Vec<String>),
     ExtractHlslIncludeSource(String),
     ExtractHlslIncludeFolder(Vec<String>),
+    /// Write every shipped tag beneath one container folder to a chosen folder,
+    /// laid out like an editing kit. The narrow-scope twin of File → Extract All
+    /// Tags to Folder, and it shares that action's worker, progress and cancel.
+    /// `label` is the folder's display path, carried for the confirmation only.
+    ExtractContainerFolderTags { label: String, keys: Vec<String>, },
     /// Write a scenario's `source files` block out as a folder of `.hsc` files.
     ExtractScenarioScripts(String),
     /// Replace a scenario's `source files` block from a folder of `.hsc` files.

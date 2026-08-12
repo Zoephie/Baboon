@@ -719,6 +719,30 @@ pub(in crate::app) fn draw_tree_node(
             ui.close_menu();
         }
 
+        // Folders mode only. In Groups mode this node is a group label rather
+        // than a folder, and the extraction lays tags out by their own paths —
+        // so a group node would write a tree that has nothing to do with the
+        // node that was clicked.
+        if is_container && !groups_mode {
+            let container_keys = collect_container_tag_keys(node, entries);
+            if container_keys.is_empty() {
+                ui.label(RichText::new("No shipped tags in this folder").color(subtle_dark()));
+            } else if ui
+                .button(format!("Extract tags to folder... ({})", container_keys.len()))
+                .on_hover_text(
+                    "Write every tag this folder ships to a folder on disk, laid out like an \
+                     editing kit",
+                )
+                .clicked()
+            {
+                clicked = Some(BrowserAction::ExtractContainerFolderTags {
+                    label: folder_display_path(node),
+                    keys: container_keys,
+                });
+                ui.close_menu();
+            }
+        }
+
         let bitmap_keys = collect_bitmap_keys(node, entries);
         if bitmap_keys.is_empty() {
             ui.label(RichText::new("No bitmap tags in this folder").color(subtle_dark()));
@@ -938,6 +962,47 @@ pub(in crate::app) fn collect_tag_keys_into(
     }
     for child in &node.children {
         collect_tag_keys_into(child, entries, keys);
+    }
+}
+
+/// A folder node's path for display, in the forward-slash form the rest of the
+/// container UI uses. Falls back to the node's own label for a node with no
+/// relative path, so the root still names itself in a confirmation.
+fn folder_display_path(node: &TagTreeNode) -> String {
+    let rel = node.rel_path.to_string_lossy().replace('\\', "/");
+    if rel.is_empty() { node.label.clone() } else { rel }
+}
+
+/// Keys beneath `node` for tags the container actually ships.
+///
+/// Deliberately narrower than [`collect_tag_keys`]: the extraction reads each
+/// tag's shipped payload back out of the mounted `.ucas`, so an entry authored
+/// in this session has nothing to read and is silently skipped by the worker.
+/// Counting those would put a number in the menu that the run then fails to
+/// deliver, so they are excluded here and the label reports what will be written.
+pub(in crate::app) fn collect_container_tag_keys(
+    node: &TagTreeNode,
+    entries: &[TagEntry],
+) -> Vec<String> {
+    let mut keys = Vec::new();
+    collect_container_tag_keys_into(node, entries, &mut keys);
+    keys
+}
+
+fn collect_container_tag_keys_into(
+    node: &TagTreeNode,
+    entries: &[TagEntry],
+    keys: &mut Vec<String>,
+) {
+    for &entry_index in &node.entries {
+        if let Some(entry) = entries.get(entry_index) {
+            if matches!(entry.location, TagEntryLocation::Container { .. }) {
+                keys.push(entry.key.clone());
+            }
+        }
+    }
+    for child in &node.children {
+        collect_container_tag_keys_into(child, entries, keys);
     }
 }
 
