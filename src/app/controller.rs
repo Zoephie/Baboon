@@ -518,6 +518,37 @@ fn ensure_export_directory(output: &Path) -> Result<(), String> {
         .map_err(|error| format!("Could not create {}: {error}", directory.display()))
 }
 
+/// The entries an extraction covers, resolved by one function so the count shown
+/// in the confirmation and the set handed to the worker cannot disagree.
+///
+/// `Container` is the only location with a shipped payload to read, so both
+/// scopes filter on it — a folder holding nothing but tags authored this session
+/// resolves to empty here rather than starting a run that writes no files.
+///
+/// Borrows rather than clones: the confirmation only needs to count, and cloning
+/// twelve thousand entries to call `.len()` on them is a waste the user pays for
+/// in the gap between picking a folder and seeing the dialog.
+fn container_dump_entries<'a>(
+    entries: &'a [TagEntry],
+    scope: &ContainerDumpScope,
+) -> Vec<&'a TagEntry> {
+    let wanted = match scope {
+        ContainerDumpScope::AllShipped => None,
+        ContainerDumpScope::Folder { keys, .. } => {
+            Some(keys.iter().map(String::as_str).collect::<HashSet<_>>())
+        }
+    };
+    entries
+        .iter()
+        .filter(|entry| matches!(entry.location, TagEntryLocation::Container { .. }))
+        .filter(|entry| {
+            wanted
+                .as_ref()
+                .is_none_or(|keys| keys.contains(entry.key.as_str()))
+        })
+        .collect()
+}
+
 /// Create the folder a mod is about to be written into.
 fn ensure_mod_output_dir(output: &Path) -> Result<(), String> {
     let Some(directory) = output.parent() else {
@@ -3539,6 +3570,9 @@ impl Baboon {
             BrowserAction::ExtractHlslIncludeFolder(keys) => {
                 self.begin_extract_hlsl_include_folder(keys, ctx)
             }
+            BrowserAction::ExtractContainerFolderTags { label, keys } => {
+                self.begin_extract_container_folder_tags(label, keys)
+            }
             BrowserAction::ExtractScenarioScripts(key) => {
                 self.begin_extract_scenario_scripts(key, ctx)
             }
@@ -3928,12 +3962,31 @@ impl Baboon {
     ///
     /// Expert-only, and re-checked here rather than trusting the menu: this is
     /// the one action in the application that writes tens of thousands of files
-    /// in one go, and it should not be reachable by a stale request.
+    /// in one go, and it should not be reachable by a stale request. The folder-
+    /// scoped twin below carries no such gate, because it is bounded and aimed.
     pub(super) fn begin_extract_all_container_tags(&mut self, _ctx: egui::Context) {
         if !self.expert_mode {
             self.status = "Extracting all tags requires Expert mode".to_owned();
             return;
         }
+        self.raise_container_dump_confirm(ContainerDumpScope::AllShipped, "Extract All Tags");
+    }
+
+    /// Asks where to put the shipped tags beneath one browser folder.
+    ///
+    /// The keys are the ones collected when the menu was drawn, so what runs is
+    /// what the count in the menu promised.
+    pub(super) fn begin_extract_container_folder_tags(&mut self, label: String, keys: Vec<String>) {
+        self.raise_container_dump_confirm(
+            ContainerDumpScope::Folder { label, keys },
+            "Extract Folder Tags",
+        );
+    }
+
+    /// The shared front half of both extractions: refuse to stack a second run,
+    /// require a container mount, count what the scope actually covers, pick a
+    /// destination, and keep that destination out of the game's own Paks folder.
+    fn raise_container_dump_confirm(&mut self, scope: ContainerDumpScope, dialog_title: &str) {
         if self.container_dump_job.is_some() {
             self.status = "An extraction is already running".to_owned();
             return;
@@ -3942,33 +3995,36 @@ impl Baboon {
             return;
         };
         let TagSource::IoStoreContainerSet { root, .. } = &source_data.source else {
-            self.status = "Extracting all tags needs a Campaign Evolved container".to_owned();
+            self.status = "Extracting tags needs a Campaign Evolved container".to_owned();
             return;
         };
         let root = root.clone();
         // A container mount enumerates every tag up front, so this is the whole
         // set — there is no background scan to wait on first.
-        let total = source_data
-            .entries
-            .iter()
-            .filter(|entry| matches!(entry.location, TagEntryLocation::Container { .. }))
-            .count();
+        let total = container_dump_entries(&source_data.entries, &scope).len();
         if total == 0 {
-            self.status = "This workspace has no container tags to extract".to_owned();
+            self.status = match &scope {
+                ContainerDumpScope::AllShipped => {
+                    "This workspace has no container tags to extract".to_owned()
+                }
+                ContainerDumpScope::Folder { label, .. } => {
+                    format!("{label} has no shipped tags to extract")
+                }
+            };
             return;
         }
         let Some(output) = rfd::FileDialog::new()
-            .set_title("Extract All Tags")
+            .set_title(dialog_title)
             .pick_folder()
         else {
             return;
         };
-        // Tens of thousands of files landing in the game's own Paks folder would
-        // be found by the next mount and are a nuisance to unpick by hand.
+        // Files landing in the game's own Paks folder would be found by the next
+        // mount and are a nuisance to unpick by hand.
         if output.starts_with(&root) {
             self.status = format!(
                 "Choose a folder outside {} — extracting into the game's own Paks folder would \
-                 leave tens of thousands of files beside its containers",
+                 leave the extracted tags beside its containers",
                 root.display()
             );
             return;
@@ -3977,11 +4033,18 @@ impl Baboon {
             kit: self.active_kit_id(),
             output,
             total,
+            scope,
         });
     }
 
     /// Runs the confirmed extraction on a worker thread.
-    pub(super) fn start_container_dump(&mut self, kit: KitId, output: PathBuf, ctx: egui::Context) {
+    pub(super) fn start_container_dump(
+        &mut self,
+        kit: KitId,
+        output: PathBuf,
+        scope: ContainerDumpScope,
+        ctx: egui::Context,
+    ) {
         if self.container_dump_job.is_some() {
             self.status = "An extraction is already running".to_owned();
             return;
@@ -3995,15 +4058,23 @@ impl Baboon {
         // Cloning the source is cheap: the mounted archives are behind `Arc`, so
         // this shares them rather than re-mapping the containers.
         let source = source_data.source.clone();
-        let entries: Vec<TagEntry> = source_data
-            .entries
-            .iter()
-            .filter(|entry| matches!(entry.location, TagEntryLocation::Container { .. }))
+        // Re-resolved rather than carried over from the confirmation: the user
+        // can edit the workspace while a modeless confirm is up, so this is the
+        // set as it stands at the moment the run actually starts.
+        let entries: Vec<TagEntry> = container_dump_entries(&source_data.entries, &scope)
+            .into_iter()
             .cloned()
             .collect();
         let total = entries.len();
         if total == 0 {
-            self.status = "This workspace has no container tags to extract".to_owned();
+            self.status = match &scope {
+                ContainerDumpScope::AllShipped => {
+                    "This workspace has no container tags to extract".to_owned()
+                }
+                ContainerDumpScope::Folder { label, .. } => {
+                    format!("{label} has no shipped tags to extract")
+                }
+            };
             return;
         }
         let stamp = KitStamp {
@@ -8244,6 +8315,10 @@ mod campaign_new_tag_tests;
 #[cfg(test)]
 #[path = "tests/campaign_import_gate.rs"]
 mod campaign_import_gate_tests;
+
+#[cfg(test)]
+#[path = "tests/container_folder_extract.rs"]
+mod container_folder_extract_tests;
 
 enum SaveChangesPromptAction {
     None,
