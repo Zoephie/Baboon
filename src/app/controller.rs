@@ -4515,6 +4515,12 @@ impl Baboon {
             .clone();
         let rel_path = rel_path.clone();
         let group = entry.group_name.clone().unwrap_or_default();
+        // What the `.uasset` about to be reused is *to* this tag. It is read
+        // back out of this tag's own package below, so its bindings are this
+        // tag's bindings -- `wrapper_origin_for` is the one place that call is
+        // made, so a Save As cannot start disagreeing with an Export Mod.
+        let wrapper_origin =
+            wrapper_origin_for(&entry.location).ok_or("Not a Campaign Evolved container tag")?;
 
         // Tag content: current edited bytes if the tag is loaded, else the
         // original `.ubulk`.
@@ -4570,6 +4576,7 @@ impl Baboon {
                     } else {
                         None
                     },
+                    wrapper_origin,
                     &output,
                 )
                 .map_err(|e| format!("write container: {e}"))?;
@@ -4729,6 +4736,12 @@ impl Baboon {
                 }
             }
         };
+        // An authored tag's wrapper came from an unrelated donor, so the
+        // writer has to strip the donor's bindings rather than carry them.
+        let Some(wrapper_origin) = wrapper_origin_for(&entry.location) else {
+            self.status = "Not a new container tag".to_owned();
+            return;
+        };
         let leaf = package.rsplit('/').next().unwrap_or("tag");
         let Some(output) = pick_override_utoc(&format!("{leaf}_P.utoc")) else {
             return;
@@ -4738,7 +4751,12 @@ impl Baboon {
             return;
         }
         match blam_tags::iostore::writer::write_new_tag_container(
-            &template, &bytes, package, None, &output,
+            &template,
+            &bytes,
+            package,
+            None,
+            wrapper_origin,
+            &output,
         ) {
             Ok(()) => {
                 if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(key) {
