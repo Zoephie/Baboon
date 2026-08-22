@@ -449,8 +449,8 @@ haloce_evolved,haloreach_mcc,scenario,scenario_block_struct#0,vignettes,block,,,
 haloce_evolved,haloreach_mcc,scenario,scenario_cutscene_title_struct,name2,string id,,,source_only,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_cutscene_title_struct,name3,string id,,,source_only,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_cutscene_title_struct,transition type,short enum,,,source_only,schema,
-haloce_evolved,haloreach_mcc,scenario,scenario_players_block_struct#79,campaign player slot,char enum,,,source_only,schema,
-haloce_evolved,haloreach_mcc,scenario,scenario_players_block_struct#79,insertion point index,short block index,,,source_only,schema,
+haloce_evolved,haloreach_mcc,scenario,scenario_players_block_struct#78,campaign player slot,char enum,,,source_only,schema,
+haloce_evolved,haloreach_mcc,scenario,scenario_players_block_struct#78,insertion point index,short block index,,,source_only,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_profiles_block,starting grenades,array,,,source_only,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_scenery_datum_struct_v4,pathfinding references,block,,,source_only,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_structure_bsp_reference_block,world bounds x,real bounds,,,source_only,schema,
@@ -1002,7 +1002,7 @@ haloreach_mcc,haloce_evolved,scenario,scenario_cluster_data_block,weather proper
 haloreach_mcc,haloce_evolved,scenario,scenario_control_struct,DON'T TOUCH THIS,short integer,,,source_only,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_designer_zone_block,budget_reference,block,,,source_only,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_object_datum_struct,transform flags,word flags,,,source_only,schema,
-haloreach_mcc,haloce_evolved,scenario,scenario_players_block#79,insertion point index,short integer,,,source_only,schema,
+haloreach_mcc,haloce_evolved,scenario,scenario_players_block#78,insertion point index,short integer,,,source_only,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_scenery_datum_struct_v4,Lightmapping policy,short enum,,,source_only,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_scenery_datum_struct_v4,ai spawning squad,short block index,,,source_only,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_scenery_datum_struct_v4,havok mopp index,short integer,,,source_only,schema,
@@ -1581,65 +1581,49 @@ haloce_evolved,haloreach_mcc,ai_dialogue_globals,vocalization_patterns_block,sub
 haloce_evolved,haloreach_mcc,big_battle_creature,big_battle_creature_block_struct,default team,short enum,default team,short enum,option_loss,schema,"no counterpart for: flood, sentinel, heretic, prophet, guilty, berserk_hostile_to_all, unused14, unused15"
 haloce_evolved,haloreach_mcc,big_battle_creature,big_battle_creature_block_struct,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: infection form
 haloce_evolved,haloreach_mcc,big_battle_creature,character_physics_struct,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: enable clambering prototype
-haloce_evolved,haloreach_mcc,biped,biped_block_struct#0,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: doesn't drop weapons when starting relaxation#when starting relaxation (such as when entering dead physics), the biped will not drop its weapons if set, replicate ragdoll#continues to replicate object transform and velocity when dead if set"
+haloce_evolved,haloreach_mcc,biped,biped_block_struct#0,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: doesn't drop weapons when starting relaxation, replicate ragdoll"
 haloce_evolved,haloreach_mcc,biped,character_physics_struct,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: enable clambering prototype
-haloce_evolved,haloreach_mcc,biped,unit_seat_block,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: invisible#completely enclosed by vehicle and no dialogue from units in seat
 haloce_evolved,haloreach_mcc,biped,unit_struct_definition,default team,short enum,default team,short enum,option_loss,schema,"no counterpart for: flood, sentinel, heretic, prophet, guilty, berserk_hostile_to_all, unused14, unused15"
 haloce_evolved,haloreach_mcc,character,character_charge_block,Charge flags,long flags,Charge flags,long flags,option_loss,schema,"no counterpart for: permanent berserk, berserk hostile to everyone, bursting disallows entering melee"
-haloce_evolved,haloreach_mcc,character,character_equipment_usage_block,use when,short enum,use when,short enum,option_loss,schema,"no counterpart for: combat#used in the combat behavior group, cover#used in the self preservation behavior group, shield#used in the combat behavior group when shield vitality drops below half, health#used in the combat behavior group when body vitality drops below half, uncover#used in the engage behavior group during presearch, berserk#used in the combat behavior group when going berserk, investigate#used in the investigate behavior group, anti vehicle#used in the combat behavior group when target is a vehicle or carrying a support weapon"
-haloce_evolved,haloreach_mcc,character,character_general_block,general flags,long flags,general flags,long flags,option_loss,schema,no counterpart for: has active camo#only used when teleporting hero characters
 haloce_evolved,haloreach_mcc,character,character_general_block,type,short enum,type,short enum,option_loss,schema,"no counterpart for: combat_form, infection_form, carrier_form, pure_form_stealth, pure_form_tank, pure_form_ranged, sentinel"
-haloce_evolved,haloreach_mcc,character,character_movement_block,movement flags,long flags,movement flags,long flags,option_loss,schema,"no counterpart for: prefer to combat near friends{prefer to combar near friends}, hop (to cover path segments){hop (to cover path segements)}, use halo 3 ground movement facing logic"
+haloce_evolved,haloreach_mcc,character,character_movement_block,movement flags,long flags,movement flags,long flags,option_loss,schema,"no counterpart for: prefer to combat near friends, hop (to cover path segments), use halo 3 ground movement facing logic"
 haloce_evolved,haloreach_mcc,character,character_movement_block,movement hints,long flags,movement hints,long flags,option_loss,schema,no counterpart for: hoist step
 haloce_evolved,haloreach_mcc,character,character_search_block,Search flags,long flags,Search flags,long flags,option_loss,schema,no counterpart for: maximize throttle on investigate
 haloce_evolved,haloreach_mcc,chud_definition,chud_widget_base_struct,scripting class,char enum,scripting class,char enum,option_loss,schema,no counterpart for: equipment
 haloce_evolved,haloreach_mcc,chud_definition,chud_widget_update_cache_block,scripting class,char enum,scripting class,char enum,option_loss,schema,no counterpart for: equipment
-haloce_evolved,haloreach_mcc,cinematic_scene,cinematic_scene_object_block_struct,lightmap shadow flags,long block flags,lightmap shadow flags,long block flags,option_loss,schema,no counterpart for: Stop Music At Frame (rather than starting it)
-haloce_evolved,haloreach_mcc,cinematic_scene,cinematic_scene_object_block_struct,shots active flags,long block flags,shots active flags,long block flags,option_loss,schema,no counterpart for: Stop Music At Frame (rather than starting it)
 haloce_evolved,haloreach_mcc,collision_model,surfaces_block_struct,flags,word flags,flags,byte flags,option_loss,schema,no counterpart for: pathfinding only
 haloce_evolved,haloreach_mcc,creature,character_physics_struct,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: enable clambering prototype
 haloce_evolved,haloreach_mcc,creature,creature_block_struct#0,default team,short enum,default team,short enum,option_loss,schema,"no counterpart for: flood, sentinel, heretic, prophet, guilty, berserk_hostile_to_all, unused14, unused15"
 haloce_evolved,haloreach_mcc,creature,creature_block_struct#0,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: infection form
-haloce_evolved,haloreach_mcc,damage_effect,damage_effect_block_struct#0,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: can cause insta-kill headshots{can cause headshots}, only hurts one infection form, infection form pop, does not hurt players#aoe damage does not hurt units directly controlled or driven by players, units only gunned by players can still be hurt, does not unzoom units"
-haloce_evolved,haloreach_mcc,equipment,equipment_struct_definition#0,activation mode,char enum,activation mode,char enum,option_loss,schema,no counterpart for: latch#activates when X is pressed but does not deactivate when X is pressed again
-haloce_evolved,haloreach_mcc,equipment,equipment_struct_definition#0,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: suppresses weapons while active#firing your weapon(s) is not allowed while this equipment is active, suppresses reload while active#reloading your weapon(s) is not allowed while this equipment is active, suppresses melee while active#meleeing is not allowed while this equipment is active, suppresses grenades while active#throwing a grenade is not allowed while this equipment is active, suppresses device interaction while active#interacting with a device is not allowed while this equipment is active, queue for activation if owner is busy#if the unit is busy (excluding reloading, for which we have a separate flag) when it attempts to activate the equipment, defer its activation until the unit is no longer busy, queue for activation if owner is reloading#if the unit is reloading when it attempts to activate the equipment, defer its activation until the unit is no longer reloading, cancel queued activation when toggled#if the equipment is queued for (re)activation and the owner toggles it again, should it be dequeued?"
-haloce_evolved,haloreach_mcc,giant,unit_seat_block,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: invisible#completely enclosed by vehicle and no dialogue from units in seat
+haloce_evolved,haloreach_mcc,damage_effect,damage_effect_block_struct#0,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: can cause insta-kill headshots, only hurts one infection form, infection form pop, does not unzoom units"
+haloce_evolved,haloreach_mcc,equipment,equipment_struct_definition#0,activation mode,char enum,activation mode,char enum,option_loss,schema,no counterpart for: latch
+haloce_evolved,haloreach_mcc,equipment,equipment_struct_definition#0,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: suppresses reload while active, queue for activation if owner is busy, queue for activation if owner is reloading, cancel queued activation when toggled"
 haloce_evolved,haloreach_mcc,giant,unit_struct_definition,default team,short enum,default team,short enum,option_loss,schema,"no counterpart for: flood, sentinel, heretic, prophet, guilty, berserk_hostile_to_all, unused14, unused15"
-haloce_evolved,haloreach_mcc,model,instantaneous_damage_repsonse_block,body threshold flags,long flags,body threshold flags,long flags,option_loss,schema,no counterpart for: body threshold active#this response fires when the body health fraction crosses this boundary
-haloce_evolved,haloreach_mcc,model,model_block_struct,runtime flags,long flags,runtime flags,long flags,option_loss,schema,"no counterpart for: built regions from render_model!, built regions from collision_model!, built regions from skeleton!"
-haloce_evolved,haloreach_mcc,model,model_target_block_new,flags,byte flags,flags,byte flags,option_loss,schema,no counterpart for: shows tracking reticle#use this model targets center for displaying the targeting reticle
-haloce_evolved,haloreach_mcc,model,new_instantaneous_damage_response_block,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: kills weapon primary barrel{kills weapon primary trigger}, kills weapon secondary barrel{kills weapon secondary trigger}, damages weapon primary barrel{damages weapon primary trigger}, damages weapon secondary barrel{damages weapon secondary trigger}"
+haloce_evolved,haloreach_mcc,model,model_block_struct,runtime flags,long flags,runtime flags,long flags,option_loss,schema,"no counterpart for: built regions from render_model, built regions from collision_model, built regions from skeleton"
+haloce_evolved,haloreach_mcc,model,new_instantaneous_damage_response_block,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: kills weapon primary barrel, kills weapon secondary barrel, damages weapon primary barrel, damages weapon secondary barrel"
 haloce_evolved,haloreach_mcc,model_animation_graph,new_animation_blend_screen_block_struct,pitch source,short enum,pitch source,short enum,option_loss,schema,"no counterpart for: first person yaw, first person rise, first person look offset yaw, first person look offset pitch"
 haloce_evolved,haloreach_mcc,model_animation_graph,new_animation_blend_screen_block_struct,yaw source,short enum,yaw source,short enum,option_loss,schema,"no counterpart for: first person yaw, first person rise, first person look offset yaw, first person look offset pitch"
-haloce_evolved,haloreach_mcc,projectile,projectile_struct_definition#0,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: prime initial translation by damage owner round-trip time#consider for large/visible, slow-moving instantly-predicted projectiles"
+haloce_evolved,haloreach_mcc,projectile,projectile_struct_definition#0,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: prime initial translation by damage owner round-trip time
 haloce_evolved,haloreach_mcc,scenario,hs_globals_block,type,short enum,type,short enum,option_loss,schema,"no counterpart for: insertion_point, user_interface_objective, actor_combat_status"
 haloce_evolved,haloreach_mcc,scenario,hs_script_parameters_block,return type,short enum,return type,short enum,option_loss,schema,"no counterpart for: insertion_point, user_interface_objective, actor_combat_status"
 haloce_evolved,haloreach_mcc,scenario,hs_scripts_block,return type,short enum,return type,short enum,option_loss,schema,"no counterpart for: insertion_point, user_interface_objective, actor_combat_status"
 haloce_evolved,haloreach_mcc,scenario,scenario_object_datum_struct,can attach to bsp flags,long block flags,can attach to bsp flags,word block flags,option_loss,schema,re-encoded from 4 to 2 bytes
 haloce_evolved,haloreach_mcc,scenario,scenario_object_datum_struct,manual bsp flags,long block flags,manual bsp flags,word block flags,option_loss,schema,re-encoded from 4 to 2 bytes
-haloce_evolved,haloreach_mcc,scenario,scenario_soft_ceilings_block,runtime flags,word flags,runtime flags,word flags,option_loss,schema,no counterpart for: auto generated!*
+haloce_evolved,haloreach_mcc,scenario,scenario_soft_ceilings_block,runtime flags,word flags,runtime flags,word flags,option_loss,schema,no counterpart for: auto generated
 haloce_evolved,haloreach_mcc,scenario,scenario_structure_bsp_reference_block,flags,word flags,flags,word flags,option_loss,schema,no counterpart for: no default structure pathfinding
-haloce_evolved,haloreach_mcc,scenario,scenario_zone_debugger_block_definition_struct,active designer zones,long block flags,active designer zones,long block flags,option_loss,schema,"no counterpart for: bounding box, sector"
-haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_block,cinematic zones,long block flags,cinematic zones,long block flags,option_loss,schema,"no counterpart for: acceleration, soft kill, slip surface"
-haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_block,forbidden designer zones,long block flags,forbidden designer zones,long block flags,option_loss,schema,"no counterpart for: bounding box, sector"
-haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_block,required designer zones,long block flags,required designer zones,long block flags,option_loss,schema,"no counterpart for: bounding box, sector"
-haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_block,sruntime tructure design zone flags,long block flags,sruntime tructure design zone flags,long block flags,option_loss,schema,"no counterpart for: default, top, center, bottom"
-haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_block,structure design zone flags,long block flags,structure design zone flags,long block flags,option_loss,schema,"no counterpart for: default, top, center, bottom"
-haloce_evolved,haloreach_mcc,scenario,spawn_points_block_struct,flags,word flags,flags,word flags,option_loss,schema,no counterpart for: swarm lock on position!*
-haloce_evolved,haloreach_mcc,scenario,squads_block_struct,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: squad is runtime(DO NOT USE)!*
+haloce_evolved,haloreach_mcc,scenario,spawn_points_block_struct,flags,word flags,flags,word flags,option_loss,schema,no counterpart for: swarm lock on position
 haloce_evolved,haloreach_mcc,scenario,squads_block_struct,team,short enum,team,short enum,option_loss,schema,"no counterpart for: flood, sentinel, heretic, prophet, guilty, berserk_hostile_to_all, unused14, unused15"
 haloce_evolved,haloreach_mcc,scenario,tasks_block_struct,filter,short enum,filter,short enum,option_loss,schema,"no counterpart for: flood team, sentinel team, combat form, carrier form, pureform, sentinel"
 haloce_evolved,haloreach_mcc,scenario,tasks_block_struct,inhibit groups,word flags,inhibit groups,word flags,option_loss,schema,"no counterpart for: Pureform Ranged, Pureform Tank, Pureform Stalker"
 haloce_evolved,haloreach_mcc,scenario,zone_block,runtime bsp flags,long block flags,runtime bsp flags,word block flags,option_loss,schema,re-encoded from 4 to 2 bytes
-haloce_evolved,haloreach_mcc,scenario_ai_resource,scenario_object_datum_struct,can attach to bsp flags,long block flags,can attach to bsp flags,word block flags,option_loss,schema,no counterpart for: single use
-haloce_evolved,haloreach_mcc,scenario_ai_resource,scenario_object_datum_struct,manual bsp flags,long block flags,manual bsp flags,word block flags,option_loss,schema,no counterpart for: single use
+haloce_evolved,haloreach_mcc,scenario_ai_resource,scenario_object_datum_struct,can attach to bsp flags,long block flags,can attach to bsp flags,word block flags,option_loss,schema,re-encoded from 4 to 2 bytes
+haloce_evolved,haloreach_mcc,scenario_ai_resource,scenario_object_datum_struct,manual bsp flags,long block flags,manual bsp flags,word block flags,option_loss,schema,re-encoded from 4 to 2 bytes
 haloce_evolved,haloreach_mcc,scenario_ai_resource,scenario_structure_bsp_reference_block,flags,word flags,flags,word flags,option_loss,schema,no counterpart for: no default structure pathfinding
-haloce_evolved,haloreach_mcc,scenario_ai_resource,spawn_points_block_struct,flags,word flags,flags,word flags,option_loss,schema,no counterpart for: swarm lock on position!*
-haloce_evolved,haloreach_mcc,scenario_ai_resource,squads_block_struct,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: squad is runtime(DO NOT USE)!*
+haloce_evolved,haloreach_mcc,scenario_ai_resource,spawn_points_block_struct,flags,word flags,flags,word flags,option_loss,schema,no counterpart for: swarm lock on position
 haloce_evolved,haloreach_mcc,scenario_ai_resource,squads_block_struct,team,short enum,team,short enum,option_loss,schema,"no counterpart for: flood, sentinel, heretic, prophet, guilty, berserk_hostile_to_all, unused14, unused15"
 haloce_evolved,haloreach_mcc,scenario_ai_resource,tasks_block_struct,filter,short enum,filter,short enum,option_loss,schema,"no counterpart for: flood team, sentinel team, combat form, carrier form, pureform, sentinel"
 haloce_evolved,haloreach_mcc,scenario_ai_resource,tasks_block_struct,inhibit groups,word flags,inhibit groups,word flags,option_loss,schema,"no counterpart for: Pureform Ranged, Pureform Tank, Pureform Stalker"
-haloce_evolved,haloreach_mcc,scenario_ai_resource,zone_block,runtime bsp flags,long block flags,runtime bsp flags,word block flags,option_loss,schema,no counterpart for: single use
+haloce_evolved,haloreach_mcc,scenario_ai_resource,zone_block,runtime bsp flags,long block flags,runtime bsp flags,word block flags,option_loss,schema,re-encoded from 4 to 2 bytes
 haloce_evolved,haloreach_mcc,scenario_bipeds_resource,scenario_object_datum_struct,can attach to bsp flags,long block flags,can attach to bsp flags,word block flags,option_loss,schema,re-encoded from 4 to 2 bytes
 haloce_evolved,haloreach_mcc,scenario_bipeds_resource,scenario_object_datum_struct,manual bsp flags,long block flags,manual bsp flags,word block flags,option_loss,schema,re-encoded from 4 to 2 bytes
 haloce_evolved,haloreach_mcc,scenario_bipeds_resource,scenario_structure_bsp_reference_block,flags,word flags,flags,word flags,option_loss,schema,no counterpart for: no default structure pathfinding
@@ -1649,8 +1633,8 @@ haloce_evolved,haloreach_mcc,scenario_creature_resource,scenario_structure_bsp_r
 haloce_evolved,haloreach_mcc,scenario_devices_resource,scenario_object_datum_struct,can attach to bsp flags,long block flags,can attach to bsp flags,word block flags,option_loss,schema,re-encoded from 4 to 2 bytes
 haloce_evolved,haloreach_mcc,scenario_devices_resource,scenario_object_datum_struct,manual bsp flags,long block flags,manual bsp flags,word block flags,option_loss,schema,re-encoded from 4 to 2 bytes
 haloce_evolved,haloreach_mcc,scenario_devices_resource,scenario_structure_bsp_reference_block,flags,word flags,flags,word flags,option_loss,schema,no counterpart for: no default structure pathfinding
-haloce_evolved,haloreach_mcc,scenario_effect_scenery_resource,scenario_object_datum_struct,can attach to bsp flags,long block flags,can attach to bsp flags,word block flags,option_loss,schema,"no counterpart for: biped, vehicle, weapon, equipment, terminal, projectile, scenery, machine, control, sound_scenery, crate, creature, giant, effect_scenery"
-haloce_evolved,haloreach_mcc,scenario_effect_scenery_resource,scenario_object_datum_struct,manual bsp flags,long block flags,manual bsp flags,word block flags,option_loss,schema,"no counterpart for: biped, vehicle, weapon, equipment, terminal, projectile, scenery, machine, control, sound_scenery, crate, creature, giant, effect_scenery"
+haloce_evolved,haloreach_mcc,scenario_effect_scenery_resource,scenario_object_datum_struct,can attach to bsp flags,long block flags,can attach to bsp flags,word block flags,option_loss,schema,re-encoded from 4 to 2 bytes
+haloce_evolved,haloreach_mcc,scenario_effect_scenery_resource,scenario_object_datum_struct,manual bsp flags,long block flags,manual bsp flags,word block flags,option_loss,schema,re-encoded from 4 to 2 bytes
 haloce_evolved,haloreach_mcc,scenario_effect_scenery_resource,scenario_structure_bsp_reference_block,flags,word flags,flags,word flags,option_loss,schema,no counterpart for: no default structure pathfinding
 haloce_evolved,haloreach_mcc,scenario_equipment_resource,scenario_object_datum_struct,can attach to bsp flags,long block flags,can attach to bsp flags,word block flags,option_loss,schema,re-encoded from 4 to 2 bytes
 haloce_evolved,haloreach_mcc,scenario_equipment_resource,scenario_object_datum_struct,manual bsp flags,long block flags,manual bsp flags,word block flags,option_loss,schema,re-encoded from 4 to 2 bytes
@@ -1668,60 +1652,50 @@ haloce_evolved,haloreach_mcc,scenario_structure_bsp,structure_bsp_cluster_portal
 haloce_evolved,haloreach_mcc,scenario_structure_bsp,surfaces_block_struct,flags,word flags,flags,byte flags,option_loss,schema,no counterpart for: pathfinding only
 haloce_evolved,haloreach_mcc,scenario_structure_bsp,vertex_buffers_block,d3d buffer data,int64 integer,d3d buffer data,long integer,option_loss,schema,re-encoded from 8 to 4 bytes
 haloce_evolved,haloreach_mcc,scenario_structure_bsp,vertex_buffers_block,d3d hardware format,int64 integer,d3d hardware format,long integer,option_loss,schema,re-encoded from 8 to 4 bytes
-haloce_evolved,haloreach_mcc,scenario_vehicles_resource,scenario_object_datum_struct,can attach to bsp flags,long block flags,can attach to bsp flags,word block flags,option_loss,schema,"no counterpart for: alpha, bravo, charlie, delta, echo, foxtrot, golf, hotel, india, juliet, kilo, lima, mike, november, oscar, papa, quebec, romeo, sierra, tango, uniform, victor, whiskey, xray, yankee, zulu"
-haloce_evolved,haloreach_mcc,scenario_vehicles_resource,scenario_object_datum_struct,manual bsp flags,long block flags,manual bsp flags,word block flags,option_loss,schema,"no counterpart for: alpha, bravo, charlie, delta, echo, foxtrot, golf, hotel, india, juliet, kilo, lima, mike, november, oscar, papa, quebec, romeo, sierra, tango, uniform, victor, whiskey, xray, yankee, zulu"
+haloce_evolved,haloreach_mcc,scenario_vehicles_resource,scenario_object_datum_struct,can attach to bsp flags,long block flags,can attach to bsp flags,word block flags,option_loss,schema,re-encoded from 4 to 2 bytes
+haloce_evolved,haloreach_mcc,scenario_vehicles_resource,scenario_object_datum_struct,manual bsp flags,long block flags,manual bsp flags,word block flags,option_loss,schema,re-encoded from 4 to 2 bytes
 haloce_evolved,haloreach_mcc,scenario_vehicles_resource,scenario_structure_bsp_reference_block,flags,word flags,flags,word flags,option_loss,schema,no counterpart for: no default structure pathfinding
-haloce_evolved,haloreach_mcc,scenario_weapons_resource,scenario_object_datum_struct,can attach to bsp flags,long block flags,can attach to bsp flags,word block flags,option_loss,schema,"no counterpart for: alpha, bravo, charlie, delta, echo, foxtrot, golf, hotel, india, juliet, kilo, lima, mike, november, oscar, papa, quebec, romeo, sierra, tango, uniform, victor, whiskey, xray, yankee, zulu"
-haloce_evolved,haloreach_mcc,scenario_weapons_resource,scenario_object_datum_struct,manual bsp flags,long block flags,manual bsp flags,word block flags,option_loss,schema,"no counterpart for: alpha, bravo, charlie, delta, echo, foxtrot, golf, hotel, india, juliet, kilo, lima, mike, november, oscar, papa, quebec, romeo, sierra, tango, uniform, victor, whiskey, xray, yankee, zulu"
+haloce_evolved,haloreach_mcc,scenario_weapons_resource,scenario_object_datum_struct,can attach to bsp flags,long block flags,can attach to bsp flags,word block flags,option_loss,schema,re-encoded from 4 to 2 bytes
+haloce_evolved,haloreach_mcc,scenario_weapons_resource,scenario_object_datum_struct,manual bsp flags,long block flags,manual bsp flags,word block flags,option_loss,schema,re-encoded from 4 to 2 bytes
 haloce_evolved,haloreach_mcc,scenario_weapons_resource,scenario_structure_bsp_reference_block,flags,word flags,flags,word flags,option_loss,schema,no counterpart for: no default structure pathfinding
-haloce_evolved,haloreach_mcc,style,special_movement_block,Special movement 1,long flags,Special movement 1,long flags,option_loss,schema,no counterpart for: breakable floor{n/a}
+haloce_evolved,haloreach_mcc,style,special_movement_block,Special movement 1,long flags,Special movement 1,long flags,option_loss,schema,no counterpart for: breakable floor
 haloce_evolved,haloreach_mcc,style,style_struct_definition,Behaviors2,long flags,Behaviors2,long flags,option_loss,schema,"no counterpart for: perimeter, perimeter@timeout_morph, perimeter@infection_spew, shield_down_berserk"
 haloce_evolved,haloreach_mcc,style,style_struct_definition,Behaviors3,long flags,Behaviors3,long flags,option_loss,schema,"no counterpart for: search, find_pursuit, investigate, flee impulse"
 haloce_evolved,haloreach_mcc,style,style_struct_definition,Behaviors4,long flags,Behaviors4,long flags,option_loss,schema,"no counterpart for: surprise_retreat, overheated_weapon_retreat, ------AMBUSH------, ambush"
 haloce_evolved,haloreach_mcc,style,style_struct_definition,Behaviors5,long flags,Behaviors5,long flags,option_loss,schema,"no counterpart for: vehicle_engage_wander_impulse, ------POSTCOMBAT------, postcombat, post_postcombat, ------SWARMS------, swarm_root, swarm_attack, support_attack, infect, scatter, ------COMBATFORMS------, combat form berserk control, eject parasite, ------SENTINELS------, enforcer weapon control, grapple"
 haloce_evolved,haloreach_mcc,style,style_struct_definition,Behaviors6,long flags,Behaviors6,long flags,option_loss,schema,"no counterpart for: engineer_control@free, engineer_control@equipment, engineer_explode, engineer_broken_detonation, boost_allies, ------PUREFORMS------, group_morph_impulse, arrival_morph_impulse, pureform_default_impulse, search_morph, stealth_active_camo_control, stealth_damage_morph, stealth_stalk, stealth_stalk@thwarted, stealth_stalk_group, stealth_charge_recover, ranged_proximity_morph, tank_distance_damage_morph, tank_throttle_control, stealth_morph, tank_morph, ranged_morph, ranged_turtle, ranged_uncover, ------SCARAB------, scarab_root, scarab_cure_isolation, scarab_combat, scarab_fight, scarab_target_lock, scarab_search, scarab_search_pause"
 haloce_evolved,haloreach_mcc,style,style_struct_definition,Behaviors7,long flags,Behaviors7,long flags,option_loss,schema,"no counterpart for: ------FLYING------, flying_root, flying_idle, flying_combat, flying_approach, flying_cover, flying_evade, flying_retreat, flying_tail, flying_strafe, flying_dodge_impulse, ------LOD------, lod_root, lod_idle, lod_combat, ------ATOMS------, go_to, ------ACTIVITIES------, activity, posture, activity_default, ------SPECIAL------, formation, grunt scared by elite, stunned, cure_isolation, deploy_turret, control, arrange sync action"
-haloce_evolved,haloreach_mcc,unit,unit_seat_block,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: invisible#completely enclosed by vehicle and no dialogue from units in seat
 haloce_evolved,haloreach_mcc,unit,unit_struct_definition,default team,short enum,default team,short enum,option_loss,schema,"no counterpart for: flood, sentinel, heretic, prophet, guilty, berserk_hostile_to_all, unused14, unused15"
 haloce_evolved,haloreach_mcc,unit,unit_struct_definition,unit flags,long flags,flags,long flags,option_loss,schema,no counterpart for: disable transition animations
-haloce_evolved,haloreach_mcc,vehicle,flight_surface_struct,normal axis,char enum,normal axis,char enum,option_loss,schema,no counterpart for: forward{foward}
-haloce_evolved,haloreach_mcc,vehicle,flight_surface_struct,offset axis,char enum,offset axis,char enum,option_loss,schema,no counterpart for: forward{foward}
-haloce_evolved,haloreach_mcc,vehicle,flight_surface_struct,pivot axis,char enum,pivot axis,char enum,option_loss,schema,no counterpart for: forward{foward}
-haloce_evolved,haloreach_mcc,vehicle,flight_surface_struct,rotation axis,char enum,rotation axis,char enum,option_loss,schema,no counterpart for: forward{foward}
-haloce_evolved,haloreach_mcc,vehicle,havok_vehicle_physics_struct,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: has airborne angular stabilization*!
-haloce_evolved,haloreach_mcc,vehicle,turret_block,flags,word flags,flags,word flags,option_loss,schema,no counterpart for: powered by parent#this is basically a flag for the wolverine.  This turret pops up when the wolverine activates
-haloce_evolved,haloreach_mcc,vehicle,unit_seat_block,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: invisible#completely enclosed by vehicle and no dialogue from units in seat
+haloce_evolved,haloreach_mcc,vehicle,flight_surface_struct,normal axis,char enum,normal axis,char enum,option_loss,schema,no counterpart for: forward
+haloce_evolved,haloreach_mcc,vehicle,flight_surface_struct,offset axis,char enum,offset axis,char enum,option_loss,schema,no counterpart for: forward
+haloce_evolved,haloreach_mcc,vehicle,flight_surface_struct,pivot axis,char enum,pivot axis,char enum,option_loss,schema,no counterpart for: forward
+haloce_evolved,haloreach_mcc,vehicle,flight_surface_struct,rotation axis,char enum,rotation axis,char enum,option_loss,schema,no counterpart for: forward
+haloce_evolved,haloreach_mcc,vehicle,havok_vehicle_physics_struct,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: has airborne angular stabilization
 haloce_evolved,haloreach_mcc,vehicle,unit_struct_definition,default team,short enum,default team,short enum,option_loss,schema,"no counterpart for: flood, sentinel, heretic, prophet, guilty, berserk_hostile_to_all, unused14, unused15"
 haloce_evolved,haloreach_mcc,vehicle,vehicle_block_struct#0,player training vehicle type,char enum,player training vehicle type,char enum,option_loss,schema,no counterpart for: seraph
-haloce_evolved,haloreach_mcc,weapon,weapon_block_struct#0,secondary flags,long flags,secondary flags,long flags,option_loss,schema,"no counterpart for: cannot be manually dropped#disallows units from voluntarily dropping this weapon, deleted when ready#weapon will be dropped and deleted once its ""weapon ready-for-use time"" expires, zoom switches power mode#this weapon's power can only be toggled while zoomed, but flashlight equipment can only be toggled while not zoomed"
+haloce_evolved,haloreach_mcc,weapon,weapon_block_struct#0,secondary flags,long flags,secondary flags,long flags,option_loss,schema,"no counterpart for: cannot be manually dropped, deleted when ready, zoom switches power mode"
 haloce_evolved,haloreach_mcc,weapon,weapon_screen_effect_block,flags,byte flags,flags,byte flags,option_loss,schema,no counterpart for: zoom level 3
 haloreach_mcc,haloce_evolved,big_battle_creature,big_battle_creature_block_struct,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: unused, immune to falling damage, rotate while airborne"
 haloreach_mcc,haloce_evolved,biped,biped_leaping_data_struct,leap flags,long flags,leap flags,long flags,option_loss,schema,no counterpart for: force early roll
-haloreach_mcc,haloce_evolved,biped,unit_seat_block,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: invisible#completely enclosed by vehicle, not valid without driver"
-haloreach_mcc,haloce_evolved,character,character_equipment_usage_block,use when,short enum,use when,short enum,option_loss,schema,"no counterpart for: combat, cover, shield, health, uncover, berserk, investigate, anti vehicle"
-haloreach_mcc,haloce_evolved,character,character_general_block,general flags,long flags,general flags,long flags,option_loss,schema,no counterpart for: has active camo
+haloreach_mcc,haloce_evolved,biped,unit_seat_block,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: not valid without driver
 haloreach_mcc,haloce_evolved,character,character_movement_block,movement flags,long flags,movement flags,long flags,option_loss,schema,"no counterpart for: prefer to combar near friends, hop (to cover path segements)"
-haloreach_mcc,haloce_evolved,character,character_movement_block,movement hints,long flags,movement hints,long flags,option_loss,schema,"no counterpart for: unused0!, unused1!, unused2!, unused3!, unused4!, unused5!, unused6!, unused7!, unused8!"
+haloreach_mcc,haloce_evolved,character,character_movement_block,movement hints,long flags,movement hints,long flags,option_loss,schema,"no counterpart for: unused0, unused1, unused2, unused3, unused4, unused5, unused6, unused7, unused8"
 haloreach_mcc,haloce_evolved,character,character_presearch_block,Pre-search flags,long flags,Pre-search flags,long flags,option_loss,schema,no counterpart for: Flag1
 haloreach_mcc,haloce_evolved,character,character_retreat_block,Retreat flags,long flags,Retreat flags,long flags,option_loss,schema,"no counterpart for: Zig-zag when fleeing, Unused1"
 haloreach_mcc,haloce_evolved,character,character_struct_definition#0,Character flags,long flags,Character flags,long flags,option_loss,schema,no counterpart for: Flag1
 haloreach_mcc,haloce_evolved,cinematic,cinematic_block_struct,channel type,short enum,channel type,short enum,option_loss,schema,no counterpart for: bink briefing
-haloreach_mcc,haloce_evolved,cinematic_scene,cinematic_scene_object_block_struct,lightmap shadow flags,long block flags,lightmap shadow flags,long block flags,option_loss,schema,no counterpart for: persists across shots
-haloreach_mcc,haloce_evolved,cinematic_scene,cinematic_scene_object_block_struct,shots active flags,long block flags,shots active flags,long block flags,option_loss,schema,no counterpart for: persists across shots
 haloreach_mcc,haloce_evolved,crate,crate_struct_definition,flags,word flags,flags,word flags,option_loss,schema,"no counterpart for: attach texture camera hack, interesting for AI (obsolete)"
 haloreach_mcc,haloce_evolved,creature,creature_struct_definition#0,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: unused, immune to falling damage, rotate while airborne"
-haloreach_mcc,haloce_evolved,damage_effect,damage_effect_group#0,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: can cause headshots, transfer dmg always uses min, does not hurt players"
+haloreach_mcc,haloce_evolved,damage_effect,damage_effect_group#0,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: can cause headshots, transfer dmg always uses min"
 haloreach_mcc,haloce_evolved,device,device_struct_definition,flags,long flags,device flags,long flags,option_loss,schema,no counterpart for: (unused)
-haloreach_mcc,haloce_evolved,effect,effect_block_struct,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: force use own lightprobe#Do not adopt parent object's lightprobe, even when it's available"
-haloreach_mcc,haloce_evolved,equipment,equipment_group#0,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: suppresses weapons while active#firing your weapon turns off equipment, suppresses melee while active#meleeing turns off equipment, suppresses grenades while active#throwing a grenade turns off equipment, suppresses device interaction while active"
-haloreach_mcc,haloce_evolved,giant,unit_seat_block,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: invisible#completely enclosed by vehicle, not valid without driver"
+haloreach_mcc,haloce_evolved,effect,effect_block_struct,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: force use own lightprobe
+haloreach_mcc,haloce_evolved,giant,unit_seat_block,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: not valid without driver
 haloreach_mcc,haloce_evolved,globals,materials_sweeteners_struct,sweetener inheritance flags,long flags,sweetener inheritance flags,long flags,option_loss,schema,"no counterpart for: water_ripple_small, water_ripple_medium, water_ripple_large"
-haloreach_mcc,haloce_evolved,model,global_damage_section_block,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: unused0!, unused1!"
-haloreach_mcc,haloce_evolved,model,instantaneous_damage_repsonse_block,body threshold flags,long flags,body threshold flags,long flags,option_loss,schema,no counterpart for: body threshold active#this resoponse fires when the body healh fraction crosses this boundary
-haloreach_mcc,haloce_evolved,model,model_target_block_new,flags,byte flags,flags,byte flags,option_loss,schema,no counterpart for: shows tracking reticle#use this model targets center for displaying the targetting reticle
-haloreach_mcc,haloce_evolved,model,new_instantaneous_damage_response_block,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: kills weapon primary trigger, kills weapon secondary trigger, damages weapon primary trigger#destroys the primary trigger on the unit's current weapon, damages weapon secondary trigger#destroys the secondary trigger on the unit's current weapon"
+haloreach_mcc,haloce_evolved,model,global_damage_section_block,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: unused0, unused1"
+haloreach_mcc,haloce_evolved,model,new_instantaneous_damage_response_block,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: kills weapon primary trigger, kills weapon secondary trigger, damages weapon primary trigger, damages weapon secondary trigger"
 haloreach_mcc,haloce_evolved,object,object_struct_definition#0,flags,long flags,object flags,long flags,option_loss,schema,no counterpart for: Damage non-networked children on distributed client on object death
-haloreach_mcc,haloce_evolved,physics_model,physics_model_struct_definition#0,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: mopp codes 64bit*!
+haloreach_mcc,haloce_evolved,physics_model,physics_model_struct_definition#0,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: mopp codes 64bit
 haloreach_mcc,haloce_evolved,scenario,ai_spawn_conditions_struct,difficulty flags,word flags,difficulty flags,byte flags,option_loss,schema,re-encoded from 2 to 1 bytes
 haloreach_mcc,haloce_evolved,scenario,areas_block_struct,area flags,long flags,area flags,long flags,option_loss,schema,no counterpart for: deprecated0
 haloreach_mcc,haloce_evolved,scenario,hs_globals_block,type,short enum,type,short enum,option_loss,schema,"no counterpart for: cutscene_recording, ai_orders, conversation, damage_effect, bitmap, shader, render_model, structure_definition, lightmap_definition, cinematic_transition_definition, bink_definition, cui_screen_definition, button_preset, joystick_preset, player_color, player_model_choice, voice_output_setting, voice_mask, subtitle_setting, cinematic_lightprobe, animation_budget_reference, looping_sound_budget_reference, sound_budget_reference"
@@ -1730,32 +1704,24 @@ haloreach_mcc,haloce_evolved,scenario,hs_scripts_block,return type,short enum,re
 haloreach_mcc,haloce_evolved,scenario,scenario_equipment_datum_struct,equipment flags,long flags,equipment flags,long flags,option_loss,schema,"no counterpart for: OBSOLETE0, OBSOLETE1"
 haloreach_mcc,haloce_evolved,scenario,scenario_object_datum_struct,placement flags,long flags,placement flags,long flags,option_loss,schema,"no counterpart for: unused0, unused1, unused2"
 haloreach_mcc,haloce_evolved,scenario,scenario_soft_ceilings_block,runtime flags,word flags,runtime flags,word flags,option_loss,schema,"no counterpart for: ignore bipeds, ignore vehicles, ignore camera, ignore huge vehicles"
-haloreach_mcc,haloce_evolved,scenario,scenario_struct_definition#0,flags,word flags,flags,word flags,option_loss,schema,"no counterpart for: always draw sky#always draw sky 0, even if no +sky polygons are visible, symmetric multiplayer map, lightmaps smooth palettes with neighbors, always run lightmaps per-bsp"
+haloreach_mcc,haloce_evolved,scenario,scenario_struct_definition#0,flags,word flags,flags,word flags,option_loss,schema,"no counterpart for: always draw sky, symmetric multiplayer map, lightmaps smooth palettes with neighbors, always run lightmaps per-bsp"
 haloreach_mcc,haloce_evolved,scenario,scenario_structure_bsp_reference_block,flags,word flags,flags,word flags,option_loss,schema,"no counterpart for: default sky enabled, per vertex only lightmap, never lightmap, generate fake small lightmaps, ray trace adjacent bsps on sky hits, lightmaps use conservative subcharts, lightmaps reduce stretch hack, lightmaps use extended gathering (very slow), lightmaps final gather ignores backfacing hits, shared bsp, dont use extra lighting bsps for cubemaps"
 haloreach_mcc,haloce_evolved,scenario,scenario_weapon_datum_struct,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: obsolete
-haloreach_mcc,haloce_evolved,scenario,scenario_zone_set_block,cinematic zones,long block flags,cinematic zones,long block flags,option_loss,schema,"no counterpart for: none, enemy is advancing, enemy is charging, enemy is falling back, advance, charge, fall_back, move on{moveone}, follow_player, arriving into combat, end combat, investigate, spread out, hold position{hold}, find cover, covering fire"
-haloreach_mcc,haloce_evolved,scenario,scenario_zone_set_block,sruntime tructure design zone flags,long block flags,sruntime tructure design zone flags,long block flags,option_loss,schema,"no counterpart for: normal{core}, search, core{leader}"
-haloreach_mcc,haloce_evolved,scenario,scenario_zone_set_block,structure design zone flags,long block flags,structure design zone flags,long block flags,option_loss,schema,"no counterpart for: normal{core}, search, core{leader}"
 haloreach_mcc,haloce_evolved,scenario,spawn_points_block_struct,flags,word flags,flags,word flags,option_loss,schema,no counterpart for: n/a
-haloreach_mcc,haloce_evolved,scenario,squads_block_struct,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: unused, squad is runtime(DO NOT USE)!"
+haloreach_mcc,haloce_evolved,scenario,squads_block_struct,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: unused
 haloreach_mcc,haloce_evolved,scenario,user_hint_jump_block,Flags,word flags,Flags,word flags,option_loss,schema,no counterpart for: closed
 haloreach_mcc,haloce_evolved,scenario_ai_resource,ai_spawn_conditions_struct,difficulty flags,word flags,difficulty flags,byte flags,option_loss,schema,re-encoded from 2 to 1 bytes
 haloreach_mcc,haloce_evolved,scenario_ai_resource,areas_block_struct,area flags,long flags,area flags,long flags,option_loss,schema,no counterpart for: deprecated0
-haloreach_mcc,haloce_evolved,scenario_ai_resource,scenario_object_datum_struct,can attach to bsp flags,word block flags,can attach to bsp flags,long block flags,option_loss,schema,"no counterpart for: group 1, group 2, group 3"
-haloreach_mcc,haloce_evolved,scenario_ai_resource,scenario_object_datum_struct,manual bsp flags,word block flags,manual bsp flags,long block flags,option_loss,schema,"no counterpart for: group 1, group 2, group 3"
 haloreach_mcc,haloce_evolved,scenario_ai_resource,scenario_object_datum_struct,placement flags,long flags,placement flags,long flags,option_loss,schema,"no counterpart for: unused0, unused1, unused2"
 haloreach_mcc,haloce_evolved,scenario_ai_resource,scenario_structure_bsp_reference_block,flags,word flags,flags,word flags,option_loss,schema,"no counterpart for: default sky enabled, per vertex only lightmap, never lightmap, generate fake small lightmaps, ray trace adjacent bsps on sky hits, lightmaps use conservative subcharts, lightmaps reduce stretch hack, lightmaps use extended gathering (very slow), lightmaps final gather ignores backfacing hits, shared bsp, dont use extra lighting bsps for cubemaps"
 haloreach_mcc,haloce_evolved,scenario_ai_resource,spawn_points_block_struct,flags,word flags,flags,word flags,option_loss,schema,no counterpart for: n/a
-haloreach_mcc,haloce_evolved,scenario_ai_resource,squads_block_struct,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: unused, squad is runtime(DO NOT USE)!"
-haloreach_mcc,haloce_evolved,scenario_ai_resource,zone_block,runtime bsp flags,word block flags,runtime bsp flags,long block flags,option_loss,schema,"no counterpart for: group 1, group 2, group 3"
+haloreach_mcc,haloce_evolved,scenario_ai_resource,squads_block_struct,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: unused
 haloreach_mcc,haloce_evolved,scenario_bipeds_resource,scenario_object_datum_struct,placement flags,long flags,placement flags,long flags,option_loss,schema,"no counterpart for: unused0, unused1, unused2"
 haloreach_mcc,haloce_evolved,scenario_bipeds_resource,scenario_structure_bsp_reference_block,flags,word flags,flags,word flags,option_loss,schema,"no counterpart for: default sky enabled, per vertex only lightmap, never lightmap, generate fake small lightmaps, ray trace adjacent bsps on sky hits, lightmaps use conservative subcharts, lightmaps reduce stretch hack, lightmaps use extended gathering (very slow), lightmaps final gather ignores backfacing hits, shared bsp, dont use extra lighting bsps for cubemaps"
 haloreach_mcc,haloce_evolved,scenario_creature_resource,scenario_object_datum_struct,placement flags,long flags,placement flags,long flags,option_loss,schema,"no counterpart for: unused0, unused1, unused2"
 haloreach_mcc,haloce_evolved,scenario_creature_resource,scenario_structure_bsp_reference_block,flags,word flags,flags,word flags,option_loss,schema,"no counterpart for: default sky enabled, per vertex only lightmap, never lightmap, generate fake small lightmaps, ray trace adjacent bsps on sky hits, lightmaps use conservative subcharts, lightmaps reduce stretch hack, lightmaps use extended gathering (very slow), lightmaps final gather ignores backfacing hits, shared bsp, dont use extra lighting bsps for cubemaps"
 haloreach_mcc,haloce_evolved,scenario_devices_resource,scenario_object_datum_struct,placement flags,long flags,placement flags,long flags,option_loss,schema,"no counterpart for: unused0, unused1, unused2"
 haloreach_mcc,haloce_evolved,scenario_devices_resource,scenario_structure_bsp_reference_block,flags,word flags,flags,word flags,option_loss,schema,"no counterpart for: default sky enabled, per vertex only lightmap, never lightmap, generate fake small lightmaps, ray trace adjacent bsps on sky hits, lightmaps use conservative subcharts, lightmaps reduce stretch hack, lightmaps use extended gathering (very slow), lightmaps final gather ignores backfacing hits, shared bsp, dont use extra lighting bsps for cubemaps"
-haloreach_mcc,haloce_evolved,scenario_effect_scenery_resource,scenario_object_datum_struct,can attach to bsp flags,word block flags,can attach to bsp flags,long block flags,option_loss,schema,"no counterpart for: default, always placed, manual bsp placement"
-haloreach_mcc,haloce_evolved,scenario_effect_scenery_resource,scenario_object_datum_struct,manual bsp flags,word block flags,manual bsp flags,long block flags,option_loss,schema,"no counterpart for: default, always placed, manual bsp placement"
 haloreach_mcc,haloce_evolved,scenario_effect_scenery_resource,scenario_object_datum_struct,placement flags,long flags,placement flags,long flags,option_loss,schema,"no counterpart for: unused0, unused1, unused2"
 haloreach_mcc,haloce_evolved,scenario_effect_scenery_resource,scenario_structure_bsp_reference_block,flags,word flags,flags,word flags,option_loss,schema,"no counterpart for: default sky enabled, per vertex only lightmap, never lightmap, generate fake small lightmaps, ray trace adjacent bsps on sky hits, lightmaps use conservative subcharts, lightmaps reduce stretch hack, lightmaps use extended gathering (very slow), lightmaps final gather ignores backfacing hits, shared bsp, dont use extra lighting bsps for cubemaps"
 haloreach_mcc,haloce_evolved,scenario_equipment_resource,scenario_equipment_datum_struct,equipment flags,long flags,equipment flags,long flags,option_loss,schema,"no counterpart for: OBSOLETE0, OBSOLETE1"
@@ -1773,17 +1739,13 @@ haloreach_mcc,haloce_evolved,scenario_structure_bsp,structure_bsp_instanced_geom
 haloreach_mcc,haloce_evolved,scenario_structure_bsp,structure_bsp_instanced_geometry_instances_without_names_block,flags,word flags,flags,word flags,option_loss,schema,"no counterpart for: not in lightprobes, decal spacing, rain blocker, vertical rain sheet"
 haloreach_mcc,haloce_evolved,scenario_structure_bsp,structure_bsp_marker_block,marker type,char enum,marker type,char enum,option_loss,schema,"no counterpart for: cheap light, falling leaf generator, light, sky (unused)"
 haloreach_mcc,haloce_evolved,scenario_structure_bsp,structure_instance_group_definition,flags,word flags,flags,word flags,option_loss,schema,"no counterpart for: contains card imposters, contains poly imposters"
-haloreach_mcc,haloce_evolved,scenario_vehicles_resource,scenario_object_datum_struct,can attach to bsp flags,word block flags,can attach to bsp flags,long block flags,option_loss,schema,"no counterpart for: not automatically, unused0, unused1, unused2, lock type to env. object, lock transform to env. object, never placed, lock name to env. object, create at rest, store orientations, pvs bound, startup"
-haloreach_mcc,haloce_evolved,scenario_vehicles_resource,scenario_object_datum_struct,manual bsp flags,word block flags,manual bsp flags,long block flags,option_loss,schema,"no counterpart for: not automatically, unused0, unused1, unused2, lock type to env. object, lock transform to env. object, never placed, lock name to env. object, create at rest, store orientations, pvs bound, startup"
 haloreach_mcc,haloce_evolved,scenario_vehicles_resource,scenario_object_datum_struct,placement flags,long flags,placement flags,long flags,option_loss,schema,"no counterpart for: unused0, unused1, unused2"
 haloreach_mcc,haloce_evolved,scenario_vehicles_resource,scenario_structure_bsp_reference_block,flags,word flags,flags,word flags,option_loss,schema,"no counterpart for: default sky enabled, per vertex only lightmap, never lightmap, generate fake small lightmaps, ray trace adjacent bsps on sky hits, lightmaps use conservative subcharts, lightmaps reduce stretch hack, lightmaps use extended gathering (very slow), lightmaps final gather ignores backfacing hits, shared bsp, dont use extra lighting bsps for cubemaps"
-haloreach_mcc,haloce_evolved,scenario_weapons_resource,scenario_object_datum_struct,can attach to bsp flags,word block flags,can attach to bsp flags,long block flags,option_loss,schema,"no counterpart for: not automatically, unused0, unused1, unused2, lock type to env. object, lock transform to env. object, never placed, lock name to env. object, create at rest, store orientations, pvs bound, startup"
-haloreach_mcc,haloce_evolved,scenario_weapons_resource,scenario_object_datum_struct,manual bsp flags,word block flags,manual bsp flags,long block flags,option_loss,schema,"no counterpart for: not automatically, unused0, unused1, unused2, lock type to env. object, lock transform to env. object, never placed, lock name to env. object, create at rest, store orientations, pvs bound, startup"
 haloreach_mcc,haloce_evolved,scenario_weapons_resource,scenario_object_datum_struct,placement flags,long flags,placement flags,long flags,option_loss,schema,"no counterpart for: unused0, unused1, unused2"
 haloreach_mcc,haloce_evolved,scenario_weapons_resource,scenario_structure_bsp_reference_block,flags,word flags,flags,word flags,option_loss,schema,"no counterpart for: default sky enabled, per vertex only lightmap, never lightmap, generate fake small lightmaps, ray trace adjacent bsps on sky hits, lightmaps use conservative subcharts, lightmaps reduce stretch hack, lightmaps use extended gathering (very slow), lightmaps final gather ignores backfacing hits, shared bsp, dont use extra lighting bsps for cubemaps"
 haloreach_mcc,haloce_evolved,scenario_weapons_resource,scenario_weapon_datum_struct,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: obsolete
-haloreach_mcc,haloce_evolved,sound,sound_block_struct,flags,long flags,flags,byte flags,option_loss,schema,"no counterpart for: fit to adpcm blocksize, always spatialize#always play as 3d sound, even in first person, never obstruct#disable occlusion/obstruction for this sound, facial animation data stripped!, use huge sound transmission, link count to owner unit, pitch range is language, don't use sound class speaker flag, don't use lipsync data, instant sound propagation, fake spatialization with distance"
-haloreach_mcc,haloce_evolved,sound_classes,sound_class_block_struct,flags,word flags,flags,byte flags,option_loss,schema,"no counterpart for: plays during pause, bypass default dsp effects{dry stereo mix}, no object obstruction!, use center speaker unspatialized, send (mono) to lfe, use huge transmission, always use speakers, don't strip from main menu, ignore stereo headroom, loop fade out is linear, don't fade on game over, don't promote priority by proximity"
+haloreach_mcc,haloce_evolved,sound,sound_block_struct,flags,long flags,flags,byte flags,option_loss,schema,"no counterpart for: fit to adpcm blocksize, always spatialize, never obstruct, facial animation data stripped, use huge sound transmission, link count to owner unit, pitch range is language, don't use sound class speaker flag, don't use lipsync data, instant sound propagation, fake spatialization with distance"
+haloreach_mcc,haloce_evolved,sound_classes,sound_class_block_struct,flags,word flags,flags,byte flags,option_loss,schema,"no counterpart for: plays during pause, bypass default dsp effects, no object obstruction, use center speaker unspatialized, send (mono) to lfe, use huge transmission, always use speakers, don't strip from main menu, ignore stereo headroom, loop fade out is linear, don't fade on game over, don't promote priority by proximity"
 haloreach_mcc,haloce_evolved,sound_classes,sound_class_block_struct,internal flags,word flags,internal flags,byte flags,option_loss,schema,"no counterpart for: scripted, stops with object, valid xma compression level, valid doppler factor, valid obstruction factor, don't strip languages, valid underwater propagation, valid suppress spatialization"
 haloreach_mcc,haloce_evolved,squad_template,ai_spawn_conditions_struct,difficulty flags,word flags,difficulty flags,byte flags,option_loss,schema,re-encoded from 2 to 1 bytes
 haloreach_mcc,haloce_evolved,style,special_movement_block,Special movement 1,long flags,Special movement 1,long flags,option_loss,schema,no counterpart for: n/a
@@ -1792,14 +1754,14 @@ haloreach_mcc,haloce_evolved,style,style_struct_definition,Behaviors3,long flags
 haloreach_mcc,haloce_evolved,style,style_struct_definition,Behaviors4,long flags,Behaviors4,long flags,option_loss,schema,"no counterpart for: vehicle_engage_wander_impulse, ------POSTCOMBAT------, postcombat, post_postcombat"
 haloreach_mcc,haloce_evolved,style,style_struct_definition,Behaviors5,long flags,Behaviors5,long flags,option_loss,schema,"no counterpart for: engineer_control@free, engineer_control@equipment, engineer_explode, engineer_broken_detonation, boost_allies, ------SCARAB------, scarab_root, scarab_cure_isolation, scarab_combat, scarab_fight, scarab_target_lock, scarab_search, scarab_search_pause, ------FLYING------, flying_root, flying_idle"
 haloreach_mcc,haloce_evolved,style,style_struct_definition,Behaviors6,long flags,Behaviors6,long flags,option_loss,schema,"no counterpart for: flying_combat, flying_approach, flying_cover, flying_evade, flying_retreat, flying_tail, flying_strafe, flying_dodge_impulse, ------LOD------, lod_root, lod_idle, lod_combat, ------ATOMS------, go_to, ------ACTIVITIES------, activity, posture, activity_default, ------SPECIAL------, formation, grunt scared by elite, cure_isolation, deploy_turret, control, arrange sync action"
-haloreach_mcc,haloce_evolved,unit,unit_seat_block,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: invisible#completely enclosed by vehicle, not valid without driver"
+haloreach_mcc,haloce_evolved,unit,unit_seat_block,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: not valid without driver
 haloreach_mcc,haloce_evolved,vehicle,flight_surface_struct,normal axis,char enum,normal axis,char enum,option_loss,schema,no counterpart for: foward
 haloreach_mcc,haloce_evolved,vehicle,flight_surface_struct,offset axis,char enum,offset axis,char enum,option_loss,schema,no counterpart for: foward
 haloreach_mcc,haloce_evolved,vehicle,flight_surface_struct,pivot axis,char enum,pivot axis,char enum,option_loss,schema,no counterpart for: foward
 haloreach_mcc,haloce_evolved,vehicle,flight_surface_struct,rotation axis,char enum,rotation axis,char enum,option_loss,schema,no counterpart for: foward
-haloreach_mcc,haloce_evolved,vehicle,turret_block,flags,word flags,flags,word flags,option_loss,schema,no counterpart for: powered by parent#this is basicly a flag for the wolverine.  This turret pops up when the wolverine activates
-haloreach_mcc,haloce_evolved,vehicle,unit_seat_block,flags,long flags,flags,long flags,option_loss,schema,"no counterpart for: invisible#completely enclosed by vehicle, not valid without driver"
+haloreach_mcc,haloce_evolved,vehicle,unit_seat_block,flags,long flags,flags,long flags,option_loss,schema,no counterpart for: not valid without driver
 haloreach_mcc,haloce_evolved,wave_template,ai_spawn_conditions_struct,difficulty flags,word flags,difficulty flags,byte flags,option_loss,schema,re-encoded from 2 to 1 bytes
+haloce_evolved,haloreach_mcc,biped,unit_seat_block,flags,long flags,flags,long flags,type_changed_safe,schema,31 option(s) move ordinal
 haloce_evolved,haloreach_mcc,chud_globals_definition,chud_globals_definition_struct_definition,allied_ft_leader_frame,byte integer,allied_ft_leader_frame,char integer,type_changed_safe,schema,SameWidthInteger
 haloce_evolved,haloreach_mcc,chud_globals_definition,chud_globals_definition_struct_definition,allied_ft_leader_sequence,byte integer,allied_ft_leader_sequence,char integer,type_changed_safe,schema,SameWidthInteger
 haloce_evolved,haloreach_mcc,chud_globals_definition,chud_globals_definition_struct_definition,allied_ft_leader_should_orient,byte integer,allied_ft_leader_should_orient,char integer,type_changed_safe,schema,SameWidthInteger
@@ -1844,6 +1806,7 @@ haloce_evolved,haloreach_mcc,effect_globals,effect_component_holdback_block,abso
 haloce_evolved,haloreach_mcc,effect_globals,effect_component_holdbacks_block,overall budget,dword integer,overall budget,long integer,type_changed_safe,schema,SameWidthInteger
 haloce_evolved,haloreach_mcc,game_engine_settings_definition,game_engine_team_options_team_block,number of fireteams,byte integer,number of fireteams,char integer,type_changed_safe,schema,SameWidthInteger
 haloce_evolved,haloreach_mcc,game_medal_globals,game_medal_block_struct,sequence index,byte integer,sequence index,char integer,type_changed_safe,schema,SameWidthInteger
+haloce_evolved,haloreach_mcc,giant,unit_seat_block,flags,long flags,flags,long flags,type_changed_safe,schema,31 option(s) move ordinal
 haloce_evolved,haloreach_mcc,model,global_damage_section_block,flags,long flags,flags,long flags,type_changed_safe,schema,9 option(s) move ordinal
 haloce_evolved,haloreach_mcc,model,model_variant_region_block,runtime flags,byte integer,runtime flags,char integer,type_changed_safe,schema,SameWidthInteger
 haloce_evolved,haloreach_mcc,model_animation_graph,animation_ik_chain_events_struct,chain index,byte integer,chain index,char integer,type_changed_safe,schema,SameWidthInteger
@@ -1886,12 +1849,14 @@ haloce_evolved,haloreach_mcc,scenario,scenario_weapon_datum_struct,flags,long fl
 haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_bsp_checksum_block,bsp checksum,dword integer,bsp checksum,long integer,type_changed_safe,schema,SameWidthInteger
 haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_cluster_pvs_bit_vector_block,dword,dword integer,dword,long integer,type_changed_safe,schema,SameWidthInteger
 haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_cluster_reference_block,cluster index,byte integer,cluster index,char integer,type_changed_safe,schema,SameWidthInteger
+haloce_evolved,haloreach_mcc,scenario,squads_block_struct,flags,long flags,flags,long flags,type_changed_safe,schema,8 option(s) move ordinal
 haloce_evolved,haloreach_mcc,scenario,structure_device_portal_association_block,game portal count,word integer,game portal count,short integer,type_changed_safe,schema,SameWidthInteger
 haloce_evolved,haloreach_mcc,scenario_ai_resource,ai_spawn_conditions_struct,difficulty flags,byte flags,difficulty flags,word flags,type_changed_safe,schema,re-encoded from 1 to 2 bytes
 haloce_evolved,haloreach_mcc,scenario_ai_resource,areas_block_struct,area flags,long flags,area flags,long flags,type_changed_safe,schema,4 option(s) move ordinal
 haloce_evolved,haloreach_mcc,scenario_ai_resource,flock_source_block,cluster index,byte integer,cluster index,char integer,type_changed_safe,schema,SameWidthInteger
 haloce_evolved,haloreach_mcc,scenario_ai_resource,scenario_object_datum_struct,placement flags,long flags,placement flags,long flags,type_changed_safe,schema,9 option(s) move ordinal
 haloce_evolved,haloreach_mcc,scenario_ai_resource,scenario_object_node_orientations_bit_vector_block,data,byte integer,data,char integer,type_changed_safe,schema,SameWidthInteger
+haloce_evolved,haloreach_mcc,scenario_ai_resource,squads_block_struct,flags,long flags,flags,long flags,type_changed_safe,schema,8 option(s) move ordinal
 haloce_evolved,haloreach_mcc,scenario_bipeds_resource,scenario_object_datum_struct,placement flags,long flags,placement flags,long flags,type_changed_safe,schema,9 option(s) move ordinal
 haloce_evolved,haloreach_mcc,scenario_bipeds_resource,scenario_object_node_orientations_bit_vector_block,data,byte integer,data,char integer,type_changed_safe,schema,SameWidthInteger
 haloce_evolved,haloreach_mcc,scenario_creature_resource,scenario_object_datum_struct,placement flags,long flags,placement flags,long flags,type_changed_safe,schema,9 option(s) move ordinal
@@ -1980,6 +1945,8 @@ haloce_evolved,haloreach_mcc,sound_classes,sound_class_block_struct,internal fla
 haloce_evolved,haloreach_mcc,squad_template,ai_spawn_conditions_struct,difficulty flags,byte flags,difficulty flags,word flags,type_changed_safe,schema,re-encoded from 1 to 2 bytes
 haloce_evolved,haloreach_mcc,structure_design,mopp_code_data_definition_block,mopp data,byte integer,mopp data,char integer,type_changed_safe,schema,SameWidthInteger
 haloce_evolved,haloreach_mcc,structure_seams,mopp_code_data_definition_block,mopp data,byte integer,mopp data,char integer,type_changed_safe,schema,SameWidthInteger
+haloce_evolved,haloreach_mcc,unit,unit_seat_block,flags,long flags,flags,long flags,type_changed_safe,schema,31 option(s) move ordinal
+haloce_evolved,haloreach_mcc,vehicle,unit_seat_block,flags,long flags,flags,long flags,type_changed_safe,schema,31 option(s) move ordinal
 haloce_evolved,haloreach_mcc,wave_template,ai_spawn_conditions_struct,difficulty flags,byte flags,difficulty flags,word flags,type_changed_safe,schema,re-encoded from 1 to 2 bytes
 haloreach_mcc,haloce_evolved,ai_dialogue_globals,vocalization_patterns_block,cause actor type,short enum,cause actor type,short enum,type_changed_safe,schema,17 option(s) move ordinal
 haloreach_mcc,haloce_evolved,ai_dialogue_globals,vocalization_patterns_block,subject actor type,short enum,subject actor type,short enum,type_changed_safe,schema,17 option(s) move ordinal
@@ -2031,6 +1998,7 @@ haloreach_mcc,haloce_evolved,effect,effect_block_struct,fixed random seed,long i
 haloreach_mcc,haloce_evolved,effect_globals,effect_component_holdback_block,How many available at this priority,long integer,How many available at this priority,dword integer,type_changed_safe,schema,SameWidthInteger
 haloreach_mcc,haloce_evolved,effect_globals,effect_component_holdback_block,absolute count,long integer,absolute count,dword integer,type_changed_safe,schema,SameWidthInteger
 haloreach_mcc,haloce_evolved,effect_globals,effect_component_holdbacks_block,overall budget,long integer,overall budget,dword integer,type_changed_safe,schema,SameWidthInteger
+haloreach_mcc,haloce_evolved,equipment,equipment_group#0,flags,long flags,flags,long flags,type_changed_safe,schema,24 option(s) move ordinal
 haloreach_mcc,haloce_evolved,game_engine_settings_definition,game_engine_team_options_team_block,number of fireteams,char integer,number of fireteams,byte integer,type_changed_safe,schema,SameWidthInteger
 haloreach_mcc,haloce_evolved,game_medal_globals,game_medal_block_struct,sequence index,char integer,sequence index,byte integer,type_changed_safe,schema,SameWidthInteger
 haloreach_mcc,haloce_evolved,model,model_variant_region_block,runtime flags,char integer,runtime flags,byte integer,type_changed_safe,schema,SameWidthInteger
@@ -2077,9 +2045,12 @@ haloreach_mcc,haloce_evolved,scenario,tasks_block_struct,filter,short enum,filte
 haloreach_mcc,haloce_evolved,scenario,tasks_block_struct,inhibit groups,word flags,inhibit groups,word flags,type_changed_safe,schema,7 option(s) move ordinal
 haloreach_mcc,haloce_evolved,scenario,zone_block,runtime bsp flags,word block flags,runtime bsp flags,long block flags,type_changed_safe,schema,re-encoded from 2 to 4 bytes
 haloreach_mcc,haloce_evolved,scenario_ai_resource,flock_source_block,cluster index,char integer,cluster index,byte integer,type_changed_safe,schema,SameWidthInteger
+haloreach_mcc,haloce_evolved,scenario_ai_resource,scenario_object_datum_struct,can attach to bsp flags,word block flags,can attach to bsp flags,long block flags,type_changed_safe,schema,re-encoded from 2 to 4 bytes
+haloreach_mcc,haloce_evolved,scenario_ai_resource,scenario_object_datum_struct,manual bsp flags,word block flags,manual bsp flags,long block flags,type_changed_safe,schema,re-encoded from 2 to 4 bytes
 haloreach_mcc,haloce_evolved,scenario_ai_resource,scenario_object_node_orientations_bit_vector_block,data,char integer,data,byte integer,type_changed_safe,schema,SameWidthInteger
 haloreach_mcc,haloce_evolved,scenario_ai_resource,tasks_block_struct,filter,short enum,filter,short enum,type_changed_safe,schema,49 option(s) move ordinal
 haloreach_mcc,haloce_evolved,scenario_ai_resource,tasks_block_struct,inhibit groups,word flags,inhibit groups,word flags,type_changed_safe,schema,7 option(s) move ordinal
+haloreach_mcc,haloce_evolved,scenario_ai_resource,zone_block,runtime bsp flags,word block flags,runtime bsp flags,long block flags,type_changed_safe,schema,re-encoded from 2 to 4 bytes
 haloreach_mcc,haloce_evolved,scenario_bipeds_resource,scenario_object_datum_struct,can attach to bsp flags,word block flags,can attach to bsp flags,long block flags,type_changed_safe,schema,re-encoded from 2 to 4 bytes
 haloreach_mcc,haloce_evolved,scenario_bipeds_resource,scenario_object_datum_struct,manual bsp flags,word block flags,manual bsp flags,long block flags,type_changed_safe,schema,re-encoded from 2 to 4 bytes
 haloreach_mcc,haloce_evolved,scenario_bipeds_resource,scenario_object_node_orientations_bit_vector_block,data,char integer,data,byte integer,type_changed_safe,schema,SameWidthInteger
@@ -2089,6 +2060,8 @@ haloreach_mcc,haloce_evolved,scenario_creature_resource,scenario_object_node_ori
 haloreach_mcc,haloce_evolved,scenario_devices_resource,scenario_object_datum_struct,can attach to bsp flags,word block flags,can attach to bsp flags,long block flags,type_changed_safe,schema,re-encoded from 2 to 4 bytes
 haloreach_mcc,haloce_evolved,scenario_devices_resource,scenario_object_datum_struct,manual bsp flags,word block flags,manual bsp flags,long block flags,type_changed_safe,schema,re-encoded from 2 to 4 bytes
 haloreach_mcc,haloce_evolved,scenario_devices_resource,scenario_object_node_orientations_bit_vector_block,data,char integer,data,byte integer,type_changed_safe,schema,SameWidthInteger
+haloreach_mcc,haloce_evolved,scenario_effect_scenery_resource,scenario_object_datum_struct,can attach to bsp flags,word block flags,can attach to bsp flags,long block flags,type_changed_safe,schema,re-encoded from 2 to 4 bytes
+haloreach_mcc,haloce_evolved,scenario_effect_scenery_resource,scenario_object_datum_struct,manual bsp flags,word block flags,manual bsp flags,long block flags,type_changed_safe,schema,re-encoded from 2 to 4 bytes
 haloreach_mcc,haloce_evolved,scenario_effect_scenery_resource,scenario_object_node_orientations_bit_vector_block,data,char integer,data,byte integer,type_changed_safe,schema,SameWidthInteger
 haloreach_mcc,haloce_evolved,scenario_equipment_resource,scenario_object_datum_struct,can attach to bsp flags,word block flags,can attach to bsp flags,long block flags,type_changed_safe,schema,re-encoded from 2 to 4 bytes
 haloreach_mcc,haloce_evolved,scenario_equipment_resource,scenario_object_datum_struct,manual bsp flags,word block flags,manual bsp flags,long block flags,type_changed_safe,schema,re-encoded from 2 to 4 bytes
@@ -2140,7 +2113,11 @@ haloreach_mcc,haloce_evolved,scenario_structure_bsp,vertex_buffers_block,declara
 haloreach_mcc,haloce_evolved,scenario_structure_bsp,vertex_buffers_block,stride,char integer,stride,byte integer,type_changed_safe,schema,SameWidthInteger
 haloreach_mcc,haloce_evolved,scenario_structure_bsp,vertices_block,first edge,short integer,first edge,word integer,type_changed_safe,schema,SameWidthInteger
 haloreach_mcc,haloce_evolved,scenario_trigger_volumes_resource,mopp_code_data_definition_block,mopp data,char integer,mopp data,byte integer,type_changed_safe,schema,SameWidthInteger
+haloreach_mcc,haloce_evolved,scenario_vehicles_resource,scenario_object_datum_struct,can attach to bsp flags,word block flags,can attach to bsp flags,long block flags,type_changed_safe,schema,re-encoded from 2 to 4 bytes
+haloreach_mcc,haloce_evolved,scenario_vehicles_resource,scenario_object_datum_struct,manual bsp flags,word block flags,manual bsp flags,long block flags,type_changed_safe,schema,re-encoded from 2 to 4 bytes
 haloreach_mcc,haloce_evolved,scenario_vehicles_resource,scenario_object_node_orientations_bit_vector_block,data,char integer,data,byte integer,type_changed_safe,schema,SameWidthInteger
+haloreach_mcc,haloce_evolved,scenario_weapons_resource,scenario_object_datum_struct,can attach to bsp flags,word block flags,can attach to bsp flags,long block flags,type_changed_safe,schema,re-encoded from 2 to 4 bytes
+haloreach_mcc,haloce_evolved,scenario_weapons_resource,scenario_object_datum_struct,manual bsp flags,word block flags,manual bsp flags,long block flags,type_changed_safe,schema,re-encoded from 2 to 4 bytes
 haloreach_mcc,haloce_evolved,scenario_weapons_resource,scenario_object_node_orientations_bit_vector_block,data,char integer,data,byte integer,type_changed_safe,schema,SameWidthInteger
 haloreach_mcc,haloce_evolved,shader,constant_buffer_indices_block,pixel,short integer,pixel,word integer,type_changed_safe,schema,SameWidthInteger
 haloreach_mcc,haloce_evolved,shader,constant_buffer_indices_block,vertex,short integer,vertex,word integer,type_changed_safe,schema,SameWidthInteger
@@ -2651,7 +2628,7 @@ haloce_evolved,haloreach_mcc,scenario,scenario_cluster_data_block,,,weather prop
 haloce_evolved,haloreach_mcc,scenario,scenario_control_struct,,,DON'T TOUCH THIS,short integer,target_only,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_designer_zone_block,,,budget_reference,block,target_only,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_object_datum_struct,,,transform flags,word flags,target_only,schema,
-haloce_evolved,haloreach_mcc,scenario,scenario_players_block_struct#79,,,insertion point index,short integer,target_only,schema,
+haloce_evolved,haloreach_mcc,scenario,scenario_players_block_struct#78,,,insertion point index,short integer,target_only,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_scenery_datum_struct_v4,,,Lightmapping policy,short enum,target_only,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_scenery_datum_struct_v4,,,havok mopp index,short integer,target_only,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_scenery_datum_struct_v4,,,pathfinding references,block,target_only,schema,
@@ -3395,8 +3372,8 @@ haloreach_mcc,haloce_evolved,scenario,player_representation_block,,,intrinsic se
 haloreach_mcc,haloce_evolved,scenario,scenario_cutscene_title_struct,,,name2,string id,target_only,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_cutscene_title_struct,,,name3,string id,target_only,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_cutscene_title_struct,,,transition type,short enum,target_only,schema,
-haloreach_mcc,haloce_evolved,scenario,scenario_players_block#79,,,campaign player slot,char enum,target_only,schema,
-haloreach_mcc,haloce_evolved,scenario,scenario_players_block#79,,,insertion point index,short block index,target_only,schema,
+haloreach_mcc,haloce_evolved,scenario,scenario_players_block#78,,,campaign player slot,char enum,target_only,schema,
+haloreach_mcc,haloce_evolved,scenario,scenario_players_block#78,,,insertion point index,short block index,target_only,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_profiles_block,,,starting grenades,array,target_only,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_scenery_datum_struct_v4,,,ai spawning squad,short block index,target_only,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_struct_definition#0,,,cutscene spline points,block,target_only,schema,
@@ -3855,8 +3832,6 @@ haloce_evolved,haloreach_mcc,big_battle_creature,character_physics_ground_struct
 haloce_evolved,haloreach_mcc,big_battle_creature,character_physics_ground_struct,uphill cutoff angle,angle,uphill cutoff angle,angle,identical,schema,
 haloce_evolved,haloreach_mcc,big_battle_creature,character_physics_ground_struct,uphill falloff angle,angle,uphill falloff angle,angle,identical,schema,
 haloce_evolved,haloreach_mcc,big_battle_creature,character_physics_ground_struct,uphill velocity scale,real,uphill velocity scale,real,identical,schema,
-haloce_evolved,haloreach_mcc,big_battle_creature,character_physics_struct,,,,useless pad,identical,schema,
-haloce_evolved,haloreach_mcc,big_battle_creature,character_physics_struct,,,,useless pad,identical,schema,
 haloce_evolved,haloreach_mcc,big_battle_creature,character_physics_struct,dead material name,string id,dead material name,string id,identical,schema,
 haloce_evolved,haloreach_mcc,big_battle_creature,character_physics_struct,dead sphere shapes,block,dead sphere shapes,block,identical,schema,
 haloce_evolved,haloreach_mcc,big_battle_creature,character_physics_struct,flying physics,struct,flying physics,struct,identical,schema,
@@ -3918,11 +3893,6 @@ haloce_evolved,haloreach_mcc,big_battle_creature,spheres_block_struct,pad64_00,p
 haloce_evolved,haloreach_mcc,big_battle_creature,spheres_block_struct,sphere shape,struct,sphere shape,struct,identical,schema,
 haloce_evolved,haloreach_mcc,big_battle_creature,spheres_block_struct,translate shape,struct,translate shape,struct,identical,schema,
 haloce_evolved,haloreach_mcc,biped,biped_block_struct#0,$DESTINYS_CHILD,pad,$DESTINYS_CHILD,pad,identical,schema,
-haloce_evolved,haloreach_mcc,biped,biped_block_struct#0,,,,useless pad,identical,schema,
-haloce_evolved,haloreach_mcc,biped,biped_block_struct#0,,,,useless pad,identical,schema,
-haloce_evolved,haloreach_mcc,biped,biped_block_struct#0,,,,useless pad,identical,schema,
-haloce_evolved,haloreach_mcc,biped,biped_block_struct#0,,,,useless pad,identical,schema,
-haloce_evolved,haloreach_mcc,biped,biped_block_struct#0,,,,useless pad,identical,schema,
 haloce_evolved,haloreach_mcc,biped,biped_block_struct#0,JWSSY,pad,JWSSY,pad,identical,schema,
 haloce_evolved,haloreach_mcc,biped,biped_block_struct#0,TQYQEWG,pad,TQYQEWG,pad,identical,schema,
 haloce_evolved,haloreach_mcc,biped,biped_block_struct#0,aim compensate maximum distance,real,aim compensate maximum distance,real,identical,schema,
@@ -4072,8 +4042,6 @@ haloce_evolved,haloreach_mcc,biped,character_physics_ground_struct,scale ground 
 haloce_evolved,haloreach_mcc,biped,character_physics_ground_struct,uphill cutoff angle,angle,uphill cutoff angle,angle,identical,schema,
 haloce_evolved,haloreach_mcc,biped,character_physics_ground_struct,uphill falloff angle,angle,uphill falloff angle,angle,identical,schema,
 haloce_evolved,haloreach_mcc,biped,character_physics_ground_struct,uphill velocity scale,real,uphill velocity scale,real,identical,schema,
-haloce_evolved,haloreach_mcc,biped,character_physics_struct,,,,useless pad,identical,schema,
-haloce_evolved,haloreach_mcc,biped,character_physics_struct,,,,useless pad,identical,schema,
 haloce_evolved,haloreach_mcc,biped,character_physics_struct,dead material name,string id,dead material name,string id,identical,schema,
 haloce_evolved,haloreach_mcc,biped,character_physics_struct,dead sphere shapes,block,dead sphere shapes,block,identical,schema,
 haloce_evolved,haloreach_mcc,biped,character_physics_struct,flying physics,struct,flying physics,struct,identical,schema,
@@ -4087,7 +4055,6 @@ haloce_evolved,haloreach_mcc,biped,character_physics_struct,radius,real,radius,r
 haloce_evolved,haloreach_mcc,biped,character_physics_struct,runtime dead global material type,short integer,runtime dead global material type,short integer,identical,schema,
 haloce_evolved,haloreach_mcc,biped,character_physics_struct,runtime global material type,short integer,runtime global material type,short integer,identical,schema,
 haloce_evolved,haloreach_mcc,biped,character_physics_struct,sphere shapes,block,sphere shapes,block,identical,schema,
-haloce_evolved,haloreach_mcc,biped,contact_point_block,,,,useless pad,identical,schema,
 haloce_evolved,haloreach_mcc,biped,gamepad_stick_info_block,F,pad,F,pad,identical,schema,
 haloce_evolved,haloreach_mcc,biped,gamepad_stick_info_block,input mapping function,block,input mapping function,block,identical,schema,
 haloce_evolved,haloreach_mcc,biped,gamepad_stick_info_block,input shape,char enum,input shape,char enum,identical,schema,
@@ -4527,10 +4494,8 @@ haloce_evolved,haloreach_mcc,camera_shake,camera_shake_struct,wobble function pe
 haloce_evolved,haloreach_mcc,camera_shake,camera_shake_struct,wobble function,short enum,wobble function,short enum,identical,schema,
 haloce_evolved,haloreach_mcc,camera_shake,camera_shake_struct,wobble weight,real fraction,wobble weight,real fraction,identical,schema,
 haloce_evolved,haloreach_mcc,camera_shake,mapping_function,data,data,data,data,identical,schema,
-haloce_evolved,haloreach_mcc,camera_track,camera_track_control_point_block,,,,useless pad,identical,schema,
 haloce_evolved,haloreach_mcc,camera_track,camera_track_control_point_block,orientation,real quaternion,orientation,real quaternion,identical,schema,
 haloce_evolved,haloreach_mcc,camera_track,camera_track_control_point_block,position,real vector 3d,position,real vector 3d,identical,schema,
-haloce_evolved,haloreach_mcc,camera_track,camera_track_struct_definition,,,,useless pad,identical,schema,
 haloce_evolved,haloreach_mcc,camera_track,camera_track_struct_definition,control points,block,control points,block,identical,schema,
 haloce_evolved,haloreach_mcc,camo,camo_scalar_function_struct,Input Variable,string id,Input Variable,string id,identical,schema,
 haloce_evolved,haloreach_mcc,camo,camo_scalar_function_struct,Mapping,struct,Mapping,struct,identical,schema,
@@ -4717,6 +4682,7 @@ haloce_evolved,haloreach_mcc,character,character_equipment_block,relative drop c
 haloce_evolved,haloreach_mcc,character,character_equipment_usage_block,easy\normal,real,easy\normal,real,identical,schema,
 haloce_evolved,haloreach_mcc,character,character_equipment_usage_block,legendary,real,legendary,real,identical,schema,
 haloce_evolved,haloreach_mcc,character,character_equipment_usage_block,use how,short enum,use how,short enum,identical,schema,
+haloce_evolved,haloreach_mcc,character,character_equipment_usage_block,use when,short enum,use when,short enum,identical,schema,
 haloce_evolved,haloreach_mcc,character,character_evasion_block,Evasion chance,real,Evasion chance,real,identical,schema,
 haloce_evolved,haloreach_mcc,character,character_evasion_block,Evasion danger threshold,real,Evasion danger threshold,real,identical,schema,
 haloce_evolved,haloreach_mcc,character,character_evasion_block,Evasion delay timer,real,Evasion delay timer,real,identical,schema,
@@ -4793,6 +4759,7 @@ haloce_evolved,haloreach_mcc,character,character_general_block,behavior tree roo
 haloce_evolved,haloreach_mcc,character,character_general_block,default grenade type,short enum,default grenade type,short enum,identical,schema,
 haloce_evolved,haloreach_mcc,character,character_general_block,disallowed weapons from trading,block,disallowed weapons from trading,block,identical,schema,
 haloce_evolved,haloreach_mcc,character,character_general_block,follower positioning,short enum,follower positioning,short enum,identical,schema,
+haloce_evolved,haloreach_mcc,character,character_general_block,general flags,long flags,general flags,long flags,identical,schema,
 haloce_evolved,haloreach_mcc,character,character_general_block,max leader dist,real,max leader dist,real,identical,schema,
 haloce_evolved,haloreach_mcc,character,character_general_block,max player dialogue dist,real,max player dialogue dist,real,identical,schema,
 haloce_evolved,haloreach_mcc,character,character_general_block,post-combat-position-padding,pad,post-combat-position-padding,pad,identical,schema,
@@ -5733,10 +5700,12 @@ haloce_evolved,haloreach_mcc,cinematic_scene,cinematic_scene_object_block_struct
 haloce_evolved,haloreach_mcc,cinematic_scene,cinematic_scene_object_block_struct,custom don't create condition,struct,custom don't create condition,struct,identical,schema,
 haloce_evolved,haloreach_mcc,cinematic_scene,cinematic_scene_object_block_struct,flags,long flags,flags,long flags,identical,schema,
 haloce_evolved,haloreach_mcc,cinematic_scene,cinematic_scene_object_block_struct,identifier,string id,identifier,string id,identical,schema,
+haloce_evolved,haloreach_mcc,cinematic_scene,cinematic_scene_object_block_struct,lightmap shadow flags,long block flags,lightmap shadow flags,long block flags,identical,schema,
 haloce_evolved,haloreach_mcc,cinematic_scene,cinematic_scene_object_block_struct,model animation graph,tag reference,model animation graph,tag reference,identical,schema,
 haloce_evolved,haloreach_mcc,cinematic_scene,cinematic_scene_object_block_struct,name,string id,name,string id,identical,schema,
 haloce_evolved,haloreach_mcc,cinematic_scene,cinematic_scene_object_block_struct,object type,tag reference,object type,tag reference,identical,schema,
 haloce_evolved,haloreach_mcc,cinematic_scene,cinematic_scene_object_block_struct,override creation flags,long flags,override creation flags,long flags,identical,schema,
+haloce_evolved,haloreach_mcc,cinematic_scene,cinematic_scene_object_block_struct,shots active flags,long block flags,shots active flags,long block flags,identical,schema,
 haloce_evolved,haloreach_mcc,cinematic_scene,cinematic_scene_object_block_struct,variant name,string id,variant name,string id,identical,schema,
 haloce_evolved,haloreach_mcc,cinematic_scene,cinematic_scene_struct_definition,anchor,string id,anchor,string id,identical,schema,
 haloce_evolved,haloreach_mcc,cinematic_scene,cinematic_scene_struct_definition,extra camera frame data,block,extra camera frame data,block,identical,schema,
@@ -5929,7 +5898,6 @@ haloce_evolved,haloreach_mcc,collision_model,collision_model_block_struct#0,mate
 haloce_evolved,haloreach_mcc,collision_model,collision_model_block_struct#0,nodes,block,nodes,block,identical,schema,
 haloce_evolved,haloreach_mcc,collision_model,collision_model_block_struct#0,pathfinding spheres,block,pathfinding spheres,block,identical,schema,
 haloce_evolved,haloreach_mcc,collision_model,collision_model_block_struct#0,regions,block,regions,block,identical,schema,
-haloce_evolved,haloreach_mcc,collision_model,collision_model_bsp_block,,,,useless pad,identical,schema,
 haloce_evolved,haloreach_mcc,collision_model,collision_model_bsp_block,KXGCEIEI,pad,KXGCEIEI,pad,identical,schema,
 haloce_evolved,haloreach_mcc,collision_model,collision_model_bsp_block,bsp,struct,bsp,struct,identical,schema,
 haloce_evolved,haloreach_mcc,collision_model,collision_model_bsp_block,node index,short integer,node index,short integer,identical,schema,
@@ -5939,7 +5907,6 @@ haloce_evolved,haloreach_mcc,collision_model,collision_model_node_block,first ch
 haloce_evolved,haloreach_mcc,collision_model,collision_model_node_block,name,string id,name,string id,identical,schema,
 haloce_evolved,haloreach_mcc,collision_model,collision_model_node_block,next sibling node,short block index,next sibling node,short block index,identical,schema,
 haloce_evolved,haloreach_mcc,collision_model,collision_model_node_block,parent node,short block index,parent node,short block index,identical,schema,
-haloce_evolved,haloreach_mcc,collision_model,collision_model_pathfinding_sphere_block,,,,useless pad,identical,schema,
 haloce_evolved,haloreach_mcc,collision_model,collision_model_pathfinding_sphere_block,center,real point 3d,center,real point 3d,identical,schema,
 haloce_evolved,haloreach_mcc,collision_model,collision_model_pathfinding_sphere_block,flags,word flags,flags,word flags,identical,schema,
 haloce_evolved,haloreach_mcc,collision_model,collision_model_pathfinding_sphere_block,node,short block index,node,short block index,identical,schema,
@@ -6008,7 +5975,7 @@ haloce_evolved,haloreach_mcc,collision_model,global_error_report_categories_bloc
 haloce_evolved,haloreach_mcc,collision_model,global_error_report_categories_block,report type,short enum,report type,short enum,identical,schema,
 haloce_evolved,haloreach_mcc,collision_model,global_error_report_categories_block,reports,block,reports,block,identical,schema,
 haloce_evolved,haloreach_mcc,collision_model,global_error_report_categories_block,runtime generation flags,short integer,runtime generation flags,short integer,identical,schema,
-haloce_evolved,haloreach_mcc,collision_model,global_error_report_categories_block,runtime something~,long integer,runtime something~,long integer,identical,schema,
+haloce_evolved,haloreach_mcc,collision_model,global_error_report_categories_block,runtime something,long integer,runtime something,long integer,identical,schema,
 haloce_evolved,haloreach_mcc,collision_model,havok_shape_collection_struct,VDVAPBSS,pad,VDVAPBSS,pad,identical,schema,
 haloce_evolved,haloreach_mcc,collision_model,havok_shape_collection_struct,base,struct,base,struct,identical,schema,
 haloce_evolved,haloreach_mcc,collision_model,havok_shape_collection_struct,collection type,char integer,collection type,char integer,identical,schema,
@@ -6041,7 +6008,7 @@ haloce_evolved,haloreach_mcc,collision_model,mopp_bv_tree_shape_struct,pad64_02,
 haloce_evolved,haloreach_mcc,collision_model,mopp_code_definition_block,,,total shit pad1,pad,identical,schema,
 haloce_evolved,haloreach_mcc,collision_model,mopp_code_definition_block,,,total shit pad2,pad,identical,schema,
 haloce_evolved,haloreach_mcc,collision_model,mopp_code_definition_block,align_pad,pad,align_pad,pad,identical,schema,
-haloce_evolved,haloreach_mcc,collision_model,mopp_code_definition_block,count~,short integer,count~,short integer,identical,schema,
+haloce_evolved,haloreach_mcc,collision_model,mopp_code_definition_block,count,short integer,count,short integer,identical,schema,
 haloce_evolved,haloreach_mcc,collision_model,mopp_code_definition_block,field pointer skip,int64 integer,field pointer skip,int64 integer,identical,schema,
 haloce_evolved,haloreach_mcc,collision_model,mopp_code_definition_block,int m_capacityAndFlags,long integer,int m_capacityAndFlags,long integer,identical,schema,
 haloce_evolved,haloreach_mcc,collision_model,mopp_code_definition_block,int m_size,long integer,int m_size,long integer,identical,schema,
@@ -6255,8 +6222,6 @@ haloce_evolved,haloreach_mcc,creature,character_physics_ground_struct,scale grou
 haloce_evolved,haloreach_mcc,creature,character_physics_ground_struct,uphill cutoff angle,angle,uphill cutoff angle,angle,identical,schema,
 haloce_evolved,haloreach_mcc,creature,character_physics_ground_struct,uphill falloff angle,angle,uphill falloff angle,angle,identical,schema,
 haloce_evolved,haloreach_mcc,creature,character_physics_ground_struct,uphill velocity scale,real,uphill velocity scale,real,identical,schema,
-haloce_evolved,haloreach_mcc,creature,character_physics_struct,,,,useless pad,identical,schema,
-haloce_evolved,haloreach_mcc,creature,character_physics_struct,,,,useless pad,identical,schema,
 haloce_evolved,haloreach_mcc,creature,character_physics_struct,dead material name,string id,dead material name,string id,identical,schema,
 haloce_evolved,haloreach_mcc,creature,character_physics_struct,dead sphere shapes,block,dead sphere shapes,block,identical,schema,
 haloce_evolved,haloreach_mcc,creature,character_physics_struct,flying physics,struct,flying physics,struct,identical,schema,
@@ -6456,12 +6421,6 @@ haloce_evolved,haloreach_mcc,creature,water_physics_hull_surface_definition_bloc
 haloce_evolved,haloreach_mcc,creature,water_physics_material_override,drag,struct,drag,struct,identical,schema,
 haloce_evolved,haloreach_mcc,creature,water_physics_material_override,material,string id,material,string id,identical,schema,
 haloce_evolved,haloreach_mcc,damage_effect,custom_damage_response_label_block,custom label,string id,custom label,string id,identical,schema,
-haloce_evolved,haloreach_mcc,damage_effect,damage_effect_block_struct#0,,,,useless pad,identical,schema,
-haloce_evolved,haloreach_mcc,damage_effect,damage_effect_block_struct#0,,,,useless pad,identical,schema,
-haloce_evolved,haloreach_mcc,damage_effect,damage_effect_block_struct#0,,,,useless pad,identical,schema,
-haloce_evolved,haloreach_mcc,damage_effect,damage_effect_block_struct#0,,,,useless pad,identical,schema,
-haloce_evolved,haloreach_mcc,damage_effect,damage_effect_block_struct#0,,,,useless pad,identical,schema,
-haloce_evolved,haloreach_mcc,damage_effect,damage_effect_block_struct#0,,,,useless pad,identical,schema,
 haloce_evolved,haloreach_mcc,damage_effect,damage_effect_block_struct#0,AI stun bounds,real bounds,AI stun bounds,real bounds,identical,schema,
 haloce_evolved,haloreach_mcc,damage_effect,damage_effect_block_struct#0,AI stun radius,real,AI stun radius,real,identical,schema,
 haloce_evolved,haloreach_mcc,damage_effect,damage_effect_block_struct#0,AOE core radius,real,AOE core radius,real,identical,schema,
@@ -6552,9 +6511,6 @@ haloce_evolved,haloreach_mcc,death_program_selector,death_program_velocity_gate_
 haloce_evolved,haloreach_mcc,death_program_selector,death_program_velocity_gate_block,death program scale,real,death program scale,real,identical,schema,
 haloce_evolved,haloreach_mcc,death_program_selector,death_program_velocity_gate_block,death program,long enum,death program,long enum,identical,schema,
 haloce_evolved,haloreach_mcc,death_program_selector,death_program_velocity_gate_block,minimum velocity,real,minimum velocity,real,identical,schema,
-haloce_evolved,haloreach_mcc,device,device_struct_definition,,,,useless pad,identical,schema,
-haloce_evolved,haloreach_mcc,device,device_struct_definition,,,,useless pad,identical,schema,
-haloce_evolved,haloreach_mcc,device,device_struct_definition,,,,useless pad,identical,schema,
 haloce_evolved,haloreach_mcc,device,device_struct_definition,,,ZHBMT,pad,identical,schema,
 haloce_evolved,haloreach_mcc,device,device_struct_definition,automatic activation radius,real,automatic activation radius,real,identical,schema,
 haloce_evolved,haloreach_mcc,device,device_struct_definition,close (down),tag reference,close (down),tag reference,identical,schema,
@@ -6695,7 +6651,6 @@ haloce_evolved,haloreach_mcc,device,water_physics_hull_surface_definition_block,
 haloce_evolved,haloreach_mcc,device,water_physics_hull_surface_definition_block,radius,real,radius,real,identical,schema,
 haloce_evolved,haloreach_mcc,device,water_physics_material_override,drag,struct,drag,struct,identical,schema,
 haloce_evolved,haloreach_mcc,device,water_physics_material_override,material,string id,material,string id,identical,schema,
-haloce_evolved,haloreach_mcc,device_control,device_control_struct_definition,,,,useless pad,identical,schema,
 haloce_evolved,haloreach_mcc,device_control,device_control_struct_definition,action string,string id,action string,string id,identical,schema,
 haloce_evolved,haloreach_mcc,device_control,device_control_struct_definition,call value,real,call value,real,identical,schema,
 haloce_evolved,haloreach_mcc,device_control,device_control_struct_definition,deny,tag reference,deny,tag reference,identical,schema,
@@ -6704,9 +6659,6 @@ haloce_evolved,haloreach_mcc,device_control,device_control_struct_definition,off
 haloce_evolved,haloreach_mcc,device_control,device_control_struct_definition,on,tag reference,on,tag reference,identical,schema,
 haloce_evolved,haloreach_mcc,device_control,device_control_struct_definition,triggers when,short enum,triggers when,short enum,identical,schema,
 haloce_evolved,haloreach_mcc,device_control,device_control_struct_definition,type,short enum,type,short enum,identical,schema,
-haloce_evolved,haloreach_mcc,device_control,device_struct_definition,,,,useless pad,identical,schema,
-haloce_evolved,haloreach_mcc,device_control,device_struct_definition,,,,useless pad,identical,schema,
-haloce_evolved,haloreach_mcc,device_control,device_struct_definition,,,,useless pad,identical,schema,
 haloce_evolved,haloreach_mcc,device_control,device_struct_definition,,,ZHBMT,pad,identical,schema,
 haloce_evolved,haloreach_mcc,device_control,device_struct_definition,automatic activation radius,real,automatic activation radius,real,identical,schema,
 haloce_evolved,haloreach_mcc,device_control,device_struct_definition,close (down),tag reference,close (down),tag reference,identical,schema,
@@ -6847,8 +6799,6 @@ haloce_evolved,haloreach_mcc,device_control,water_physics_hull_surface_definitio
 haloce_evolved,haloreach_mcc,device_control,water_physics_hull_surface_definition_block,radius,real,radius,real,identical,schema,
 haloce_evolved,haloreach_mcc,device_control,water_physics_material_override,drag,struct,drag,struct,identical,schema,
 haloce_evolved,haloreach_mcc,device_control,water_physics_material_override,material,string id,material,string id,identical,schema,
-haloce_evolved,haloreach_mcc,device_machine,device_machine_struct_definition,,,,useless pad,identical,schema,
-haloce_evolved,haloreach_mcc,device_machine,device_machine_struct_definition,,,,useless pad,identical,schema,
 haloce_evolved,haloreach_mcc,device_machine,device_machine_struct_definition,,,R,pad,identical,schema,
 haloce_evolved,haloreach_mcc,device_machine,device_machine_struct_definition,device,struct,device,struct,identical,schema,
 haloce_evolved,haloreach_mcc,device_machine,device_machine_struct_definition,door occlusion bounds,fraction bounds,door occlusion bounds,fraction bounds,identical,schema,
@@ -6859,9 +6809,6 @@ haloce_evolved,haloreach_mcc,device_machine,device_machine_struct_definition,pat
 haloce_evolved,haloreach_mcc,device_machine,device_machine_struct_definition,shield function,string id,shield function,string id,identical,schema,
 haloce_evolved,haloreach_mcc,device_machine,device_machine_struct_definition,shield name,string id,shield name,string id,identical,schema,
 haloce_evolved,haloreach_mcc,device_machine,device_machine_struct_definition,type,short enum,type,short enum,identical,schema,
-haloce_evolved,haloreach_mcc,device_machine,device_struct_definition,,,,useless pad,identical,schema,
-haloce_evolved,haloreach_mcc,device_machine,device_struct_definition,,,,useless pad,identical,schema,
-haloce_evolved,haloreach_mcc,device_machine,device_struct_definition,,,,useless pad,identical,schema,
 haloce_evolved,haloreach_mcc,device_machine,device_struct_definition,,,ZHBMT,pad,identical,schema,
 haloce_evolved,haloreach_mcc,device_machine,device_struct_definition,automatic activation radius,real,automatic activation radius,real,identical,schema,
 haloce_evolved,haloreach_mcc,device_machine,device_struct_definition,close (down),tag reference,close (down),tag reference,identical,schema,
@@ -7002,9 +6949,6 @@ haloce_evolved,haloreach_mcc,device_machine,water_physics_hull_surface_definitio
 haloce_evolved,haloreach_mcc,device_machine,water_physics_hull_surface_definition_block,radius,real,radius,real,identical,schema,
 haloce_evolved,haloreach_mcc,device_machine,water_physics_material_override,drag,struct,drag,struct,identical,schema,
 haloce_evolved,haloreach_mcc,device_machine,water_physics_material_override,material,string id,material,string id,identical,schema,
-haloce_evolved,haloreach_mcc,device_terminal,device_struct_definition,,,,useless pad,identical,schema,
-haloce_evolved,haloreach_mcc,device_terminal,device_struct_definition,,,,useless pad,identical,schema,
-haloce_evolved,haloreach_mcc,device_terminal,device_struct_definition,,,,useless pad,identical,schema,
 haloce_evolved,haloreach_mcc,device_terminal,device_struct_definition,,,ZHBMT,pad,identical,schema,
 haloce_evolved,haloreach_mcc,device_terminal,device_struct_definition,automatic activation radius,real,automatic activation radius,real,identical,schema,
 haloce_evolved,haloreach_mcc,device_terminal,device_struct_definition,close (down),tag reference,close (down),tag reference,identical,schema,
@@ -9232,7 +9176,6 @@ haloce_evolved,haloreach_mcc,material_effects,material_effect_material_block,run
 haloce_evolved,haloreach_mcc,material_effects,material_effect_material_block,secondary tag (effect or sound),tag reference,secondary tag (effect or sound),tag reference,identical,schema,
 haloce_evolved,haloreach_mcc,material_effects,material_effect_material_block,sweetener mode,char enum,sweetener mode,char enum,identical,schema,
 haloce_evolved,haloreach_mcc,material_effects,material_effect_material_block,tag (effect or sound),tag reference,tag (effect or sound),tag reference,identical,schema,
-haloce_evolved,haloreach_mcc,material_effects,material_effects_block_struct,,,,useless pad,identical,schema,
 haloce_evolved,haloreach_mcc,material_effects,material_effects_block_struct,effects,block,effects,block,identical,schema,
 haloce_evolved,haloreach_mcc,megalo_string_id_table,megalo_string_id_block,string_id,string id,string_id,string id,identical,schema,
 haloce_evolved,haloreach_mcc,megalo_string_id_table,megalo_string_id_table_struct_definition,megalo string_ids,block,megalo string_ids,block,identical,schema,
@@ -9430,6 +9373,7 @@ haloce_evolved,haloreach_mcc,model,health_transfer_block,seat label,string id,se
 haloce_evolved,haloreach_mcc,model,health_transfer_block,transfer amount,real,transfer amount,real,identical,schema,
 haloce_evolved,haloreach_mcc,model,health_transfer_block,transfer function,short enum,transfer function,short enum,identical,schema,
 haloce_evolved,haloreach_mcc,model,instantaneous_damage_repsonse_block,body damage threshold,real,body damage threshold,real,identical,schema,
+haloce_evolved,haloreach_mcc,model,instantaneous_damage_repsonse_block,body threshold flags,long flags,body threshold flags,long flags,identical,schema,
 haloce_evolved,haloreach_mcc,model,instantaneous_damage_repsonse_block,constraint damage type,short enum,constraint damage type,short enum,identical,schema,
 haloce_evolved,haloreach_mcc,model,instantaneous_damage_repsonse_block,constraint\group name,string id,constraint\group name,string id,identical,schema,
 haloce_evolved,haloreach_mcc,model,instantaneous_damage_repsonse_block,custom response behavior,short enum,custom response behavior,short enum,identical,schema,
@@ -9560,6 +9504,7 @@ haloce_evolved,haloreach_mcc,model,model_target_block_new,MTBNP1,pad,MTBNP1,pad,
 haloce_evolved,haloreach_mcc,model,model_target_block_new,aoe exclusion radius,real,aoe exclusion radius,real,identical,schema,
 haloce_evolved,haloreach_mcc,model,model_target_block_new,cone angle,angle,cone angle,angle,identical,schema,
 haloce_evolved,haloreach_mcc,model,model_target_block_new,damage section,short block index,damage section,short block index,identical,schema,
+haloce_evolved,haloreach_mcc,model,model_target_block_new,flags,byte flags,flags,byte flags,identical,schema,
 haloce_evolved,haloreach_mcc,model,model_target_block_new,lock-on data,struct,lock-on data,struct,identical,schema,
 haloce_evolved,haloreach_mcc,model,model_target_block_new,marker name,string id,marker name,string id,identical,schema,
 haloce_evolved,haloreach_mcc,model,model_target_block_new,size,real,size,real,identical,schema,
@@ -10462,7 +10407,7 @@ haloce_evolved,haloreach_mcc,physics_model,global_error_report_categories_block,
 haloce_evolved,haloreach_mcc,physics_model,global_error_report_categories_block,report type,short enum,report type,short enum,identical,schema,
 haloce_evolved,haloreach_mcc,physics_model,global_error_report_categories_block,reports,block,reports,block,identical,schema,
 haloce_evolved,haloreach_mcc,physics_model,global_error_report_categories_block,runtime generation flags,short integer,runtime generation flags,short integer,identical,schema,
-haloce_evolved,haloreach_mcc,physics_model,global_error_report_categories_block,runtime something~,long integer,runtime something~,long integer,identical,schema,
+haloce_evolved,haloreach_mcc,physics_model,global_error_report_categories_block,runtime something,long integer,runtime something,long integer,identical,schema,
 haloce_evolved,haloreach_mcc,physics_model,havok_convex_shape_struct,base,struct,base,struct,identical,schema,
 haloce_evolved,haloreach_mcc,physics_model,havok_convex_shape_struct,pad64_00,pad,pad64_00,pad,identical,schema,
 haloce_evolved,haloreach_mcc,physics_model,havok_convex_shape_struct,radius,real,radius,real,identical,schema,
@@ -11139,7 +11084,6 @@ haloce_evolved,haloreach_mcc,render_method,tag_block_index_block,block index,str
 haloce_evolved,haloreach_mcc,rumble,mapping_function,data,data,data,data,identical,schema,
 haloce_evolved,haloreach_mcc,rumble,rumble_definition_struct,high frequency rumble,struct,high frequency rumble,struct,identical,schema,
 haloce_evolved,haloreach_mcc,rumble,rumble_definition_struct,low frequency rumble,struct,low frequency rumble,struct,identical,schema,
-haloce_evolved,haloreach_mcc,rumble,rumble_frequency_definition_struct,,,,useless pad,identical,schema,
 haloce_evolved,haloreach_mcc,rumble,rumble_frequency_definition_struct,dirty whore,struct,dirty whore,struct,identical,schema,
 haloce_evolved,haloreach_mcc,rumble,rumble_frequency_definition_struct,duration,real,duration,real,identical,schema,
 haloce_evolved,haloreach_mcc,rumble,rumble_struct_definition,rumble,struct,rumble,struct,identical,schema,
@@ -11188,7 +11132,7 @@ haloce_evolved,haloreach_mcc,scenario,ai_reference_frame_block,flags,word flags,
 haloce_evolved,haloreach_mcc,scenario,ai_reference_frame_block,node index,short integer,node index,short integer,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,ai_reference_frame_block,object id,struct,object id,struct,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,ai_reference_frame_block,projection axis,short integer,projection axis,short integer,identical,schema,
-haloce_evolved,haloreach_mcc,scenario,ai_scenario_mission_dialogue_block_struct#218,mission dialogue,tag reference,mission dialogue,tag reference,identical,schema,
+haloce_evolved,haloreach_mcc,scenario,ai_scenario_mission_dialogue_block_struct#217,mission dialogue,tag reference,mission dialogue,tag reference,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,ai_spawn_conditions_struct,post-difficulty-flags-padding,pad,post-difficulty-flags-padding,pad,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,area_cluster_occupancy_bitvector_array,bitvector data,long integer,bitvector data,long integer,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,area_sector_point_block,normal,real euler angles 2d,normal,real euler angles 2d,identical,schema,
@@ -11424,7 +11368,7 @@ haloce_evolved,haloreach_mcc,scenario,hs_source_files_block,name,string,name,str
 haloce_evolved,haloreach_mcc,scenario,hs_source_files_block,source,data,source,data,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,hs_syntax_datum_block,HMM,short integer,HMM,short integer,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,hs_syntax_datum_block,data,long integer,data,long integer,identical,schema,
-haloce_evolved,haloreach_mcc,scenario,hs_syntax_datum_block,datum header~,short integer,datum header~,short integer,identical,schema,
+haloce_evolved,haloreach_mcc,scenario,hs_syntax_datum_block,datum header,short integer,datum header,short integer,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,hs_syntax_datum_block,flags,short integer,flags,short integer,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,hs_syntax_datum_block,line number,short integer,line number,short integer,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,hs_syntax_datum_block,next node index,long integer,next node index,long integer,identical,schema,
@@ -11459,7 +11403,7 @@ haloce_evolved,haloreach_mcc,scenario,mapping_function,data,data,data,data,ident
 haloce_evolved,haloreach_mcc,scenario,mopp_code_definition_block,,,total shit pad1,pad,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,mopp_code_definition_block,,,total shit pad2,pad,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,mopp_code_definition_block,align_pad,pad,align_pad,pad,identical,schema,
-haloce_evolved,haloreach_mcc,scenario,mopp_code_definition_block,count~,short integer,count~,short integer,identical,schema,
+haloce_evolved,haloreach_mcc,scenario,mopp_code_definition_block,count,short integer,count,short integer,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,mopp_code_definition_block,field pointer skip,int64 integer,field pointer skip,int64 integer,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,mopp_code_definition_block,int m_capacityAndFlags,long integer,int m_capacityAndFlags,long integer,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,mopp_code_definition_block,int m_size,long integer,int m_size,long integer,identical,schema,
@@ -11757,8 +11701,6 @@ haloce_evolved,haloreach_mcc,scenario,scenario_creature_block,name,short block i
 haloce_evolved,haloreach_mcc,scenario,scenario_creature_block,object data,struct,object data,struct,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_creature_block,type,short block index,type,short block index,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_creature_palette_block,name,tag reference,name,tag reference,identical,schema,
-haloce_evolved,haloreach_mcc,scenario,scenario_cutscene_camera_point_block,,,,useless pad,identical,schema,
-haloce_evolved,haloreach_mcc,scenario,scenario_cutscene_camera_point_block,,,,useless pad,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_cutscene_camera_point_block,,,pad,pad,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_cutscene_camera_point_block,flags,word flags,flags,word flags,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_cutscene_camera_point_block,name,string,name,string,identical,schema,
@@ -11806,7 +11748,6 @@ haloce_evolved,haloreach_mcc,scenario,scenario_designer_zone_block,weapon,block,
 haloce_evolved,haloreach_mcc,scenario,scenario_device_struct,flags,long flags,flags,long flags,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_device_struct,position group,short block index,position group,short block index,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_device_struct,power group,short block index,power group,short block index,identical,schema,
-haloce_evolved,haloreach_mcc,scenario,scenario_effect_scenery_block,effect scenery data,struct,effect scenery data,struct,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_effect_scenery_block,multiplayer data,struct,multiplayer data,struct,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_effect_scenery_block,name,short block index,name,short block index,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_effect_scenery_block,object data,struct,object data,struct,identical,schema,
@@ -11983,12 +11924,12 @@ haloce_evolved,haloreach_mcc,scenario,scenario_performances_block_struct,templat
 haloce_evolved,haloreach_mcc,scenario,scenario_performances_block_struct,template index,long integer,template index,long integer,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_performances_block_struct,template,string id,template,string id,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_performances_block_struct,thespian radius,real,thespian radius,real,identical,schema,
-haloce_evolved,haloreach_mcc,scenario,scenario_players_block_struct#79,ANDYNDGE,pad,ANDYNDGE,pad,identical,schema,
-haloce_evolved,haloreach_mcc,scenario,scenario_players_block_struct#79,editor folder,short block index,editor folder,short block index,identical,schema,
-haloce_evolved,haloreach_mcc,scenario,scenario_players_block_struct#79,facing,angle,facing,angle,identical,schema,
-haloce_evolved,haloreach_mcc,scenario,scenario_players_block_struct#79,flags,word flags,flags,word flags,identical,schema,
-haloce_evolved,haloreach_mcc,scenario,scenario_players_block_struct#79,pitch,angle,pitch,angle,identical,schema,
-haloce_evolved,haloreach_mcc,scenario,scenario_players_block_struct#79,position,real point 3d,position,real point 3d,identical,schema,
+haloce_evolved,haloreach_mcc,scenario,scenario_players_block_struct#78,ANDYNDGE,pad,ANDYNDGE,pad,identical,schema,
+haloce_evolved,haloreach_mcc,scenario,scenario_players_block_struct#78,editor folder,short block index,editor folder,short block index,identical,schema,
+haloce_evolved,haloreach_mcc,scenario,scenario_players_block_struct#78,facing,angle,facing,angle,identical,schema,
+haloce_evolved,haloreach_mcc,scenario,scenario_players_block_struct#78,flags,word flags,flags,word flags,identical,schema,
+haloce_evolved,haloreach_mcc,scenario,scenario_players_block_struct#78,pitch,angle,pitch,angle,identical,schema,
+haloce_evolved,haloreach_mcc,scenario,scenario_players_block_struct#78,position,real point 3d,position,real point 3d,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_profiles_block,AHDVHJE,pad,AHDVHJE,pad,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_profiles_block,SDVJHERN,pad,SDVJHERN,pad,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_profiles_block,editor folder,short block index,editor folder,short block index,identical,schema,
@@ -12113,14 +12054,20 @@ haloce_evolved,haloreach_mcc,scenario,scenario_weapon_datum_struct,rounds loaded
 haloce_evolved,haloreach_mcc,scenario,scenario_weapon_palette_block,name,tag reference,name,tag reference,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_weather_palette_block,name,string id,name,string id,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_weather_palette_block,rain,tag reference,rain,tag reference,identical,schema,
+haloce_evolved,haloreach_mcc,scenario,scenario_zone_debugger_block_definition_struct,active designer zones,long block flags,active designer zones,long block flags,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_block,audibility index,long block index,audibility index,long block index,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_block,bsp zone flags,long block flags,bsp zone flags,long block flags,identical,schema,
+haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_block,cinematic zones,long block flags,cinematic zones,long block flags,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_block,flags,long flags,flags,long flags,identical,schema,
+haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_block,forbidden designer zones,long block flags,forbidden designer zones,long block flags,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_block,hint previous zone set,long block index,hint previous zone set,long block index,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_block,name string,long string,name string,long string,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_block,name,string id,name,string id,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_block,pvs index,long block index,pvs index,long block index,identical,schema,
+haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_block,required designer zones,long block flags,required designer zones,long block flags,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_block,runtime bsp zone flags,long block flags,runtime bsp zone flags,long block flags,identical,schema,
+haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_block,sruntime tructure design zone flags,long block flags,sruntime tructure design zone flags,long block flags,identical,schema,
+haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_block,structure design zone flags,long block flags,structure design zone flags,long block flags,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_bsp_bits_block,bits,block,bits,block,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_bsp_pvs_block,bsp cluster mapings,block,bsp cluster mapings,block,identical,schema,
 haloce_evolved,haloreach_mcc,scenario,scenario_zone_set_bsp_pvs_block,cluster pvs doors closed,block,cluster pvs doors closed,block,identical,schema,
@@ -12921,8 +12868,6 @@ haloce_evolved,haloreach_mcc,scenario_cinematics_resource,scenario_cinematics_re
 haloce_evolved,haloreach_mcc,scenario_cinematics_resource,scenario_cinematics_resource_struct_definition,cinematics,block,cinematics,block,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_cinematics_resource,scenario_cinematics_resource_struct_definition,editor folders,block,editor folders,block,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_cinematics_resource,scenario_cinematics_resource_struct_definition,flags,block,flags,block,identical,schema,
-haloce_evolved,haloreach_mcc,scenario_cinematics_resource,scenario_cutscene_camera_point_block,,,,useless pad,identical,schema,
-haloce_evolved,haloreach_mcc,scenario_cinematics_resource,scenario_cutscene_camera_point_block,,,,useless pad,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_cinematics_resource,scenario_cutscene_camera_point_block,,,pad,pad,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_cinematics_resource,scenario_cutscene_camera_point_block,flags,word flags,flags,word flags,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_cinematics_resource,scenario_cutscene_camera_point_block,name,string,name,string,identical,schema,
@@ -13146,7 +13091,6 @@ haloce_evolved,haloreach_mcc,scenario_effect_scenery_resource,dont_use_me_scenar
 haloce_evolved,haloreach_mcc,scenario_effect_scenery_resource,dont_use_me_scenario_environment_object_block,unique id,long integer,unique id,long integer,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_effect_scenery_resource,g_scenario_editor_folder_block,name,long string,name,long string,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_effect_scenery_resource,g_scenario_editor_folder_block,parent folder,long block index,parent folder,long block index,identical,schema,
-haloce_evolved,haloreach_mcc,scenario_effect_scenery_resource,scenario_effect_scenery_block,effect scenery data,struct,effect scenery data,struct,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_effect_scenery_resource,scenario_effect_scenery_block,multiplayer data,struct,multiplayer data,struct,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_effect_scenery_resource,scenario_effect_scenery_block,name,short block index,name,short block index,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_effect_scenery_resource,scenario_effect_scenery_block,object data,struct,object data,struct,identical,schema,
@@ -13797,7 +13741,7 @@ haloce_evolved,haloreach_mcc,scenario_structure_bsp,global_error_report_categori
 haloce_evolved,haloreach_mcc,scenario_structure_bsp,global_error_report_categories_block,report type,short enum,report type,short enum,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_structure_bsp,global_error_report_categories_block,reports,block,reports,block,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_structure_bsp,global_error_report_categories_block,runtime generation flags,short integer,runtime generation flags,short integer,identical,schema,
-haloce_evolved,haloreach_mcc,scenario_structure_bsp,global_error_report_categories_block,runtime something~,long integer,runtime something~,long integer,identical,schema,
+haloce_evolved,haloreach_mcc,scenario_structure_bsp,global_error_report_categories_block,runtime something,long integer,runtime something,long integer,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_structure_bsp,global_geometry_material_block,breakable surface index,char integer,breakable surface index,char integer,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_structure_bsp,global_geometry_material_block,pad0,pad,,,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_structure_bsp,global_geometry_material_block,render method,tag reference,render method,tag reference,identical,schema,
@@ -13924,7 +13868,7 @@ haloce_evolved,haloreach_mcc,scenario_structure_bsp,mopp_bv_tree_shape_struct,pa
 haloce_evolved,haloreach_mcc,scenario_structure_bsp,mopp_code_definition_block,,,total shit pad1,pad,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_structure_bsp,mopp_code_definition_block,,,total shit pad2,pad,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_structure_bsp,mopp_code_definition_block,align_pad,pad,align_pad,pad,identical,schema,
-haloce_evolved,haloreach_mcc,scenario_structure_bsp,mopp_code_definition_block,count~,short integer,count~,short integer,identical,schema,
+haloce_evolved,haloreach_mcc,scenario_structure_bsp,mopp_code_definition_block,count,short integer,count,short integer,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_structure_bsp,mopp_code_definition_block,field pointer skip,int64 integer,field pointer skip,int64 integer,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_structure_bsp,mopp_code_definition_block,int m_capacityAndFlags,long integer,int m_capacityAndFlags,long integer,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_structure_bsp,mopp_code_definition_block,int m_size,long integer,int m_size,long integer,identical,schema,
@@ -14375,7 +14319,7 @@ haloce_evolved,haloreach_mcc,scenario_trigger_volumes_resource,g_scenario_editor
 haloce_evolved,haloreach_mcc,scenario_trigger_volumes_resource,mopp_code_definition_block,,,total shit pad1,pad,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_trigger_volumes_resource,mopp_code_definition_block,,,total shit pad2,pad,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_trigger_volumes_resource,mopp_code_definition_block,align_pad,pad,align_pad,pad,identical,schema,
-haloce_evolved,haloreach_mcc,scenario_trigger_volumes_resource,mopp_code_definition_block,count~,short integer,count~,short integer,identical,schema,
+haloce_evolved,haloreach_mcc,scenario_trigger_volumes_resource,mopp_code_definition_block,count,short integer,count,short integer,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_trigger_volumes_resource,mopp_code_definition_block,field pointer skip,int64 integer,field pointer skip,int64 integer,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_trigger_volumes_resource,mopp_code_definition_block,int m_capacityAndFlags,long integer,int m_capacityAndFlags,long integer,identical,schema,
 haloce_evolved,haloreach_mcc,scenario_trigger_volumes_resource,mopp_code_definition_block,int m_size,long integer,int m_size,long integer,identical,schema,
@@ -14729,7 +14673,6 @@ haloce_evolved,haloreach_mcc,scenery,object_spawn_effects_block,multiplayer spaw
 haloce_evolved,haloreach_mcc,scenery,object_spawn_effects_block,survival spawn effect,tag reference,survival spawn effect,tag reference,identical,schema,
 haloce_evolved,haloreach_mcc,scenery,physics_force_function_struct,max velocity,real,max velocity,real,identical,schema,
 haloce_evolved,haloreach_mcc,scenery,physics_force_function_struct,velocity to pressure,struct,velocity to pressure,struct,identical,schema,
-haloce_evolved,haloreach_mcc,scenery,scenery_block_struct#0,,,,useless pad,identical,schema,
 haloce_evolved,haloreach_mcc,scenery,scenery_block_struct#0,,,WGW,pad,identical,schema,
 haloce_evolved,haloreach_mcc,scenery,scenery_block_struct#0,flags,word flags,flags,word flags,identical,schema,
 haloce_evolved,haloreach_mcc,scenery,scenery_block_struct#0,object,struct,object,struct,identical,schema,
@@ -14911,7 +14854,7 @@ haloce_evolved,haloreach_mcc,simulation_interpolation,single_domain_velocity_bum
 haloce_evolved,haloreach_mcc,simulation_interpolation,single_domain_velocity_bumps_configuration_struct,velocity_min,real,velocity_min,real,identical,schema,
 haloce_evolved,haloreach_mcc,simulation_interpolation,single_domain_velocity_bumps_configuration_struct,velocity_scale,real,velocity_scale,real,identical,schema,
 haloce_evolved,haloreach_mcc,sound,sound_block_struct,,,pad,pad,identical,schema,
-haloce_evolved,haloreach_mcc,sound,sound_block_struct,,,runtime pad~,pad,identical,schema,
+haloce_evolved,haloreach_mcc,sound,sound_block_struct,,,runtime pad,pad,identical,schema,
 haloce_evolved,haloreach_mcc,sound,sound_block_struct,class,char enum,class,char enum,identical,schema,
 haloce_evolved,haloreach_mcc,sound,sound_block_struct,pad_class_index,pad,,,identical,schema,
 haloce_evolved,haloreach_mcc,sound,sound_block_struct,pitch ranges,block,pitch ranges,block,identical,schema,
@@ -14925,10 +14868,10 @@ haloce_evolved,haloreach_mcc,sound,sound_permutations_block_struct#8,name,string
 haloce_evolved,haloreach_mcc,sound,sound_permutations_block_struct#8,pad_play_fraction_type,pad,,,identical,schema,
 haloce_evolved,haloreach_mcc,sound,sound_permutations_block_struct#8,play fraction type,short block index,play fraction type,short block index,identical,schema,
 haloce_evolved,haloreach_mcc,sound,sound_permutations_block_struct#8,skip fraction,real fraction,skip fraction,real fraction,identical,schema,
-haloce_evolved,haloreach_mcc,sound,sound_pitch_range_block,,,KCTSDWPP~,pad,identical,schema,
-haloce_evolved,haloreach_mcc,sound,sound_pitch_range_block,,,YAMTVB~,pad,identical,schema,
+haloce_evolved,haloreach_mcc,sound,sound_pitch_range_block,,,KCTSDWPP,pad,identical,schema,
+haloce_evolved,haloreach_mcc,sound,sound_pitch_range_block,,,YAMTVB,pad,identical,schema,
 haloce_evolved,haloreach_mcc,sound,sound_pitch_range_block,,,asdf,pad,identical,schema,
-haloce_evolved,haloreach_mcc,sound,sound_pitch_range_block,KCTSDWPP~,pad,,,identical,schema,
+haloce_evolved,haloreach_mcc,sound,sound_pitch_range_block,KCTSDWPP,pad,,,identical,schema,
 haloce_evolved,haloreach_mcc,sound,sound_pitch_range_block,name,string id,name,string id,identical,schema,
 haloce_evolved,haloreach_mcc,sound,sound_pitch_range_block,pad_usable_permutation_count,pad,,,identical,schema,
 haloce_evolved,haloreach_mcc,sound,sound_pitch_range_block,permutations,block,permutations,block,identical,schema,
@@ -14947,7 +14890,7 @@ haloce_evolved,haloreach_mcc,sound,sound_promotion_rule_block,maximum playing co
 haloce_evolved,haloreach_mcc,sound,sound_promotion_rule_block,pitch range,short block index,pitch range,short block index,identical,schema,
 haloce_evolved,haloreach_mcc,sound,sound_promotion_rule_block,runtime rollover time,long integer,runtime rollover time,long integer,identical,schema,
 haloce_evolved,haloreach_mcc,sound,sound_promotion_rule_block,suppression time,real,suppression time,real,identical,schema,
-haloce_evolved,haloreach_mcc,sound,sound_promotion_runtime_timer_block,timer storage~,long integer,timer storage~,long integer,identical,schema,
+haloce_evolved,haloreach_mcc,sound,sound_promotion_runtime_timer_block,timer storage,long integer,timer storage,long integer,identical,schema,
 haloce_evolved,haloreach_mcc,sound,sound_scale_modifiers_struct,skip fraction modifier,fraction bounds,skip fraction modifier,fraction bounds,identical,schema,
 haloce_evolved,haloreach_mcc,sound_classes,sound_class_block_struct,,,B,pad,identical,schema,
 haloce_evolved,haloreach_mcc,sound_classes,sound_class_block_struct,distance parameters,struct,distance parameters,struct,identical,schema,
@@ -15173,7 +15116,6 @@ haloce_evolved,haloreach_mcc,sound_scenery,object_spawn_effects_block,multiplaye
 haloce_evolved,haloreach_mcc,sound_scenery,object_spawn_effects_block,survival spawn effect,tag reference,survival spawn effect,tag reference,identical,schema,
 haloce_evolved,haloreach_mcc,sound_scenery,physics_force_function_struct,max velocity,real,max velocity,real,identical,schema,
 haloce_evolved,haloreach_mcc,sound_scenery,physics_force_function_struct,velocity to pressure,struct,velocity to pressure,struct,identical,schema,
-haloce_evolved,haloreach_mcc,sound_scenery,sound_scenery_struct_definition,,,,useless pad,identical,schema,
 haloce_evolved,haloreach_mcc,sound_scenery,sound_scenery_struct_definition,YJNXHAWAO1,long integer,YJNXHAWAO1,long integer,identical,schema,
 haloce_evolved,haloreach_mcc,sound_scenery,sound_scenery_struct_definition,YJNXHAWAO2,long integer,YJNXHAWAO2,long integer,identical,schema,
 haloce_evolved,haloreach_mcc,sound_scenery,sound_scenery_struct_definition,YJNXHAWAO3,long integer,YJNXHAWAO3,long integer,identical,schema,
@@ -15245,7 +15187,7 @@ haloce_evolved,haloreach_mcc,structure_design,global_structure_physics_design_st
 haloce_evolved,haloreach_mcc,structure_design,mopp_code_definition_block,,,total shit pad1,pad,identical,schema,
 haloce_evolved,haloreach_mcc,structure_design,mopp_code_definition_block,,,total shit pad2,pad,identical,schema,
 haloce_evolved,haloreach_mcc,structure_design,mopp_code_definition_block,align_pad,pad,align_pad,pad,identical,schema,
-haloce_evolved,haloreach_mcc,structure_design,mopp_code_definition_block,count~,short integer,count~,short integer,identical,schema,
+haloce_evolved,haloreach_mcc,structure_design,mopp_code_definition_block,count,short integer,count,short integer,identical,schema,
 haloce_evolved,haloreach_mcc,structure_design,mopp_code_definition_block,field pointer skip,int64 integer,field pointer skip,int64 integer,identical,schema,
 haloce_evolved,haloreach_mcc,structure_design,mopp_code_definition_block,int m_capacityAndFlags,long integer,int m_capacityAndFlags,long integer,identical,schema,
 haloce_evolved,haloreach_mcc,structure_design,mopp_code_definition_block,int m_size,long integer,int m_size,long integer,identical,schema,
@@ -15343,11 +15285,11 @@ haloce_evolved,haloreach_mcc,structure_seams,global_error_report_categories_bloc
 haloce_evolved,haloreach_mcc,structure_seams,global_error_report_categories_block,report type,short enum,report type,short enum,identical,schema,
 haloce_evolved,haloreach_mcc,structure_seams,global_error_report_categories_block,reports,block,reports,block,identical,schema,
 haloce_evolved,haloreach_mcc,structure_seams,global_error_report_categories_block,runtime generation flags,short integer,runtime generation flags,short integer,identical,schema,
-haloce_evolved,haloreach_mcc,structure_seams,global_error_report_categories_block,runtime something~,long integer,runtime something~,long integer,identical,schema,
+haloce_evolved,haloreach_mcc,structure_seams,global_error_report_categories_block,runtime something,long integer,runtime something,long integer,identical,schema,
 haloce_evolved,haloreach_mcc,structure_seams,mopp_code_definition_block,,,total shit pad1,pad,identical,schema,
 haloce_evolved,haloreach_mcc,structure_seams,mopp_code_definition_block,,,total shit pad2,pad,identical,schema,
 haloce_evolved,haloreach_mcc,structure_seams,mopp_code_definition_block,align_pad,pad,align_pad,pad,identical,schema,
-haloce_evolved,haloreach_mcc,structure_seams,mopp_code_definition_block,count~,short integer,count~,short integer,identical,schema,
+haloce_evolved,haloreach_mcc,structure_seams,mopp_code_definition_block,count,short integer,count,short integer,identical,schema,
 haloce_evolved,haloreach_mcc,structure_seams,mopp_code_definition_block,field pointer skip,int64 integer,field pointer skip,int64 integer,identical,schema,
 haloce_evolved,haloreach_mcc,structure_seams,mopp_code_definition_block,int m_capacityAndFlags,long integer,int m_capacityAndFlags,long integer,identical,schema,
 haloce_evolved,haloreach_mcc,structure_seams,mopp_code_definition_block,int m_size,long integer,int m_size,long integer,identical,schema,
@@ -16320,6 +16262,7 @@ haloce_evolved,haloreach_mcc,vehicle,steering_animation_struct,max angle,angle,m
 haloce_evolved,haloreach_mcc,vehicle,torque_curve_struct,Pad64_00,pad,Pad64_00,pad,identical,schema,
 haloce_evolved,haloreach_mcc,vehicle,torque_curve_struct,function,struct,function,struct,identical,schema,
 haloce_evolved,haloreach_mcc,vehicle,tracking_type_block,tracking type,string id,tracking type,string id,identical,schema,
+haloce_evolved,haloreach_mcc,vehicle,turret_block,flags,word flags,flags,word flags,identical,schema,
 haloce_evolved,haloreach_mcc,vehicle,turret_block,operating elevation angle,angle,operating elevation angle,angle,identical,schema,
 haloce_evolved,haloreach_mcc,vehicle,turret_block,pad,pad,pad,pad,identical,schema,
 haloce_evolved,haloreach_mcc,vehicle,turret_block,physical elevate node,string id,physical elevate node,string id,identical,schema,
@@ -17307,8 +17250,6 @@ haloreach_mcc,haloce_evolved,big_battle_creature,character_physics_ground_struct
 haloreach_mcc,haloce_evolved,big_battle_creature,character_physics_ground_struct,uphill cutoff angle,angle,uphill cutoff angle,angle,identical,schema,
 haloreach_mcc,haloce_evolved,big_battle_creature,character_physics_ground_struct,uphill falloff angle,angle,uphill falloff angle,angle,identical,schema,
 haloreach_mcc,haloce_evolved,big_battle_creature,character_physics_ground_struct,uphill velocity scale,real,uphill velocity scale,real,identical,schema,
-haloreach_mcc,haloce_evolved,big_battle_creature,character_physics_struct,,useless pad,,,identical,schema,
-haloreach_mcc,haloce_evolved,big_battle_creature,character_physics_struct,,useless pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,big_battle_creature,character_physics_struct,dead material name,string id,dead material name,string id,identical,schema,
 haloreach_mcc,haloce_evolved,big_battle_creature,character_physics_struct,dead sphere shapes,block,dead sphere shapes,block,identical,schema,
 haloreach_mcc,haloce_evolved,big_battle_creature,character_physics_struct,flying physics,struct,flying physics,struct,identical,schema,
@@ -17403,11 +17344,6 @@ haloreach_mcc,haloce_evolved,biped,biped_ground_fitting_data_struct,root offset 
 haloreach_mcc,haloce_evolved,biped,biped_ground_fitting_data_struct,root offset max scale moving,real,root offset max scale moving,real,identical,schema,
 haloreach_mcc,haloce_evolved,biped,biped_ground_fitting_data_struct,stance width scale,real,stance width scale,real,identical,schema,
 haloreach_mcc,haloce_evolved,biped,biped_group#0,$DESTINYS_CHILD,pad,$DESTINYS_CHILD,pad,identical,schema,
-haloreach_mcc,haloce_evolved,biped,biped_group#0,,useless pad,,,identical,schema,
-haloreach_mcc,haloce_evolved,biped,biped_group#0,,useless pad,,,identical,schema,
-haloreach_mcc,haloce_evolved,biped,biped_group#0,,useless pad,,,identical,schema,
-haloreach_mcc,haloce_evolved,biped,biped_group#0,,useless pad,,,identical,schema,
-haloreach_mcc,haloce_evolved,biped,biped_group#0,,useless pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,biped,biped_group#0,JWSSY,pad,JWSSY,pad,identical,schema,
 haloreach_mcc,haloce_evolved,biped,biped_group#0,TQYQEWG,pad,TQYQEWG,pad,identical,schema,
 haloreach_mcc,haloce_evolved,biped,biped_group#0,aim compensate maximum distance,real,aim compensate maximum distance,real,identical,schema,
@@ -17524,8 +17460,6 @@ haloreach_mcc,haloce_evolved,biped,character_physics_ground_struct,scale ground 
 haloreach_mcc,haloce_evolved,biped,character_physics_ground_struct,uphill cutoff angle,angle,uphill cutoff angle,angle,identical,schema,
 haloreach_mcc,haloce_evolved,biped,character_physics_ground_struct,uphill falloff angle,angle,uphill falloff angle,angle,identical,schema,
 haloreach_mcc,haloce_evolved,biped,character_physics_ground_struct,uphill velocity scale,real,uphill velocity scale,real,identical,schema,
-haloreach_mcc,haloce_evolved,biped,character_physics_struct,,useless pad,,,identical,schema,
-haloreach_mcc,haloce_evolved,biped,character_physics_struct,,useless pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,biped,character_physics_struct,dead material name,string id,dead material name,string id,identical,schema,
 haloreach_mcc,haloce_evolved,biped,character_physics_struct,dead sphere shapes,block,dead sphere shapes,block,identical,schema,
 haloreach_mcc,haloce_evolved,biped,character_physics_struct,flying physics,struct,flying physics,struct,identical,schema,
@@ -17539,7 +17473,6 @@ haloreach_mcc,haloce_evolved,biped,character_physics_struct,radius,real,radius,r
 haloreach_mcc,haloce_evolved,biped,character_physics_struct,runtime dead global material type,short integer,runtime dead global material type,short integer,identical,schema,
 haloreach_mcc,haloce_evolved,biped,character_physics_struct,runtime global material type,short integer,runtime global material type,short integer,identical,schema,
 haloreach_mcc,haloce_evolved,biped,character_physics_struct,sphere shapes,block,sphere shapes,block,identical,schema,
-haloreach_mcc,haloce_evolved,biped,contact_point_block,,useless pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,biped,gamepad_stick_info_block,F,pad,F,pad,identical,schema,
 haloreach_mcc,haloce_evolved,biped,gamepad_stick_info_block,input mapping function,block,input mapping function,block,identical,schema,
 haloreach_mcc,haloce_evolved,biped,gamepad_stick_info_block,input shape,char enum,input shape,char enum,identical,schema,
@@ -17980,10 +17913,8 @@ haloreach_mcc,haloce_evolved,camera_shake,camera_shake_struct,wobble weight,real
 haloreach_mcc,haloce_evolved,camera_shake,camera_shake_struct_definition#0,camera impulse,struct,camera impulse,struct,identical,schema,
 haloreach_mcc,haloce_evolved,camera_shake,camera_shake_struct_definition#0,camera shake,struct,camera shake,struct,identical,schema,
 haloreach_mcc,haloce_evolved,camera_shake,mapping_function,data,data,data,data,identical,schema,
-haloreach_mcc,haloce_evolved,camera_track,camera_track_control_point_block,,useless pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,camera_track,camera_track_control_point_block,orientation,real quaternion,orientation,real quaternion,identical,schema,
 haloreach_mcc,haloce_evolved,camera_track,camera_track_control_point_block,position,real vector 3d,position,real vector 3d,identical,schema,
-haloreach_mcc,haloce_evolved,camera_track,camera_track_struct_definition,,useless pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,camera_track,camera_track_struct_definition,control points,block,control points,block,identical,schema,
 haloreach_mcc,haloce_evolved,camo,camo_scalar_function_struct,Input Variable,string id,Input Variable,string id,identical,schema,
 haloreach_mcc,haloce_evolved,camo,camo_scalar_function_struct,Mapping,struct,Mapping,struct,identical,schema,
@@ -18120,6 +18051,7 @@ haloreach_mcc,haloce_evolved,character,character_equipment_block,relative drop c
 haloreach_mcc,haloce_evolved,character,character_equipment_usage_block,easy\normal,real,easy\normal,real,identical,schema,
 haloreach_mcc,haloce_evolved,character,character_equipment_usage_block,legendary,real,legendary,real,identical,schema,
 haloreach_mcc,haloce_evolved,character,character_equipment_usage_block,use how,short enum,use how,short enum,identical,schema,
+haloreach_mcc,haloce_evolved,character,character_equipment_usage_block,use when,short enum,use when,short enum,identical,schema,
 haloreach_mcc,haloce_evolved,character,character_evasion_block,Evasion chance,real,Evasion chance,real,identical,schema,
 haloreach_mcc,haloce_evolved,character,character_evasion_block,Evasion danger threshold,real,Evasion danger threshold,real,identical,schema,
 haloreach_mcc,haloce_evolved,character,character_evasion_block,Evasion delay timer,real,Evasion delay timer,real,identical,schema,
@@ -18196,6 +18128,7 @@ haloreach_mcc,haloce_evolved,character,character_general_block,behavior tree roo
 haloreach_mcc,haloce_evolved,character,character_general_block,default grenade type,short enum,default grenade type,short enum,identical,schema,
 haloreach_mcc,haloce_evolved,character,character_general_block,disallowed weapons from trading,block,disallowed weapons from trading,block,identical,schema,
 haloreach_mcc,haloce_evolved,character,character_general_block,follower positioning,short enum,follower positioning,short enum,identical,schema,
+haloreach_mcc,haloce_evolved,character,character_general_block,general flags,long flags,general flags,long flags,identical,schema,
 haloreach_mcc,haloce_evolved,character,character_general_block,max leader dist,real,max leader dist,real,identical,schema,
 haloreach_mcc,haloce_evolved,character,character_general_block,max player dialogue dist,real,max player dialogue dist,real,identical,schema,
 haloreach_mcc,haloce_evolved,character,character_general_block,post-combat-position-padding,pad,post-combat-position-padding,pad,identical,schema,
@@ -19184,10 +19117,12 @@ haloreach_mcc,haloce_evolved,cinematic_scene,cinematic_scene_object_block_struct
 haloreach_mcc,haloce_evolved,cinematic_scene,cinematic_scene_object_block_struct,custom don't create condition,struct,custom don't create condition,struct,identical,schema,
 haloreach_mcc,haloce_evolved,cinematic_scene,cinematic_scene_object_block_struct,flags,long flags,flags,long flags,identical,schema,
 haloreach_mcc,haloce_evolved,cinematic_scene,cinematic_scene_object_block_struct,identifier,string id,identifier,string id,identical,schema,
+haloreach_mcc,haloce_evolved,cinematic_scene,cinematic_scene_object_block_struct,lightmap shadow flags,long block flags,lightmap shadow flags,long block flags,identical,schema,
 haloreach_mcc,haloce_evolved,cinematic_scene,cinematic_scene_object_block_struct,model animation graph,tag reference,model animation graph,tag reference,identical,schema,
 haloreach_mcc,haloce_evolved,cinematic_scene,cinematic_scene_object_block_struct,name,string id,name,string id,identical,schema,
 haloreach_mcc,haloce_evolved,cinematic_scene,cinematic_scene_object_block_struct,object type,tag reference,object type,tag reference,identical,schema,
 haloreach_mcc,haloce_evolved,cinematic_scene,cinematic_scene_object_block_struct,override creation flags,long flags,override creation flags,long flags,identical,schema,
+haloreach_mcc,haloce_evolved,cinematic_scene,cinematic_scene_object_block_struct,shots active flags,long block flags,shots active flags,long block flags,identical,schema,
 haloreach_mcc,haloce_evolved,cinematic_scene,cinematic_scene_object_block_struct,variant name,string id,variant name,string id,identical,schema,
 haloreach_mcc,haloce_evolved,cinematic_scene,cinematic_scene_struct_definition,anchor,string id,anchor,string id,identical,schema,
 haloreach_mcc,haloce_evolved,cinematic_scene,cinematic_scene_struct_definition,extra camera frame data,block,extra camera frame data,block,identical,schema,
@@ -19372,7 +19307,6 @@ haloreach_mcc,haloce_evolved,collision_model,collision_geometry_shape_struct,sca
 haloreach_mcc,haloce_evolved,collision_model,collision_geometry_shape_struct,structure_bsp_index,char integer,structure_bsp_index,char integer,identical,schema,
 haloreach_mcc,haloce_evolved,collision_model,collision_leaf_struct,flags,byte flags,flags,byte flags,identical,schema,
 haloreach_mcc,haloce_evolved,collision_model,collision_leaf_struct,pad,pad,pad,pad,identical,schema,
-haloreach_mcc,haloce_evolved,collision_model,collision_model_bsp_block,,useless pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,collision_model,collision_model_bsp_block,KXGCEIEI,pad,KXGCEIEI,pad,identical,schema,
 haloreach_mcc,haloce_evolved,collision_model,collision_model_bsp_block,bsp,struct,bsp,struct,identical,schema,
 haloreach_mcc,haloce_evolved,collision_model,collision_model_bsp_block,node index,short integer,node index,short integer,identical,schema,
@@ -19382,7 +19316,6 @@ haloreach_mcc,haloce_evolved,collision_model,collision_model_node_block,first ch
 haloreach_mcc,haloce_evolved,collision_model,collision_model_node_block,name,string id,name,string id,identical,schema,
 haloreach_mcc,haloce_evolved,collision_model,collision_model_node_block,next sibling node,short block index,next sibling node,short block index,identical,schema,
 haloreach_mcc,haloce_evolved,collision_model,collision_model_node_block,parent node,short block index,parent node,short block index,identical,schema,
-haloreach_mcc,haloce_evolved,collision_model,collision_model_pathfinding_sphere_block,,useless pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,collision_model,collision_model_pathfinding_sphere_block,center,real point 3d,center,real point 3d,identical,schema,
 haloreach_mcc,haloce_evolved,collision_model,collision_model_pathfinding_sphere_block,flags,word flags,flags,word flags,identical,schema,
 haloreach_mcc,haloce_evolved,collision_model,collision_model_pathfinding_sphere_block,node,short block index,node,short block index,identical,schema,
@@ -19459,7 +19392,7 @@ haloreach_mcc,haloce_evolved,collision_model,global_error_report_categories_bloc
 haloreach_mcc,haloce_evolved,collision_model,global_error_report_categories_block,report type,short enum,report type,short enum,identical,schema,
 haloreach_mcc,haloce_evolved,collision_model,global_error_report_categories_block,reports,block,reports,block,identical,schema,
 haloreach_mcc,haloce_evolved,collision_model,global_error_report_categories_block,runtime generation flags,short integer,runtime generation flags,short integer,identical,schema,
-haloreach_mcc,haloce_evolved,collision_model,global_error_report_categories_block,runtime something~,long integer,runtime something~,long integer,identical,schema,
+haloreach_mcc,haloce_evolved,collision_model,global_error_report_categories_block,runtime something,long integer,runtime something,long integer,identical,schema,
 haloreach_mcc,haloce_evolved,collision_model,havok_shape_collection_struct,VDVAPBSS,pad,VDVAPBSS,pad,identical,schema,
 haloreach_mcc,haloce_evolved,collision_model,havok_shape_collection_struct,base,struct,base,struct,identical,schema,
 haloreach_mcc,haloce_evolved,collision_model,havok_shape_collection_struct,collection type,char integer,collection type,char integer,identical,schema,
@@ -19492,7 +19425,7 @@ haloreach_mcc,haloce_evolved,collision_model,mopp_bv_tree_shape_struct,pad64_02,
 haloreach_mcc,haloce_evolved,collision_model,mopp_code_definition_block,,,total bad pad1,pad,identical,schema,
 haloreach_mcc,haloce_evolved,collision_model,mopp_code_definition_block,,,total bad pad2,pad,identical,schema,
 haloreach_mcc,haloce_evolved,collision_model,mopp_code_definition_block,align_pad,pad,align_pad,pad,identical,schema,
-haloreach_mcc,haloce_evolved,collision_model,mopp_code_definition_block,count~,short integer,count~,short integer,identical,schema,
+haloreach_mcc,haloce_evolved,collision_model,mopp_code_definition_block,count,short integer,count,short integer,identical,schema,
 haloreach_mcc,haloce_evolved,collision_model,mopp_code_definition_block,field pointer skip,int64 integer,field pointer skip,int64 integer,identical,schema,
 haloreach_mcc,haloce_evolved,collision_model,mopp_code_definition_block,int m_capacityAndFlags,long integer,int m_capacityAndFlags,long integer,identical,schema,
 haloreach_mcc,haloce_evolved,collision_model,mopp_code_definition_block,int m_size,long integer,int m_size,long integer,identical,schema,
@@ -19705,8 +19638,6 @@ haloreach_mcc,haloce_evolved,creature,character_physics_ground_struct,scale grou
 haloreach_mcc,haloce_evolved,creature,character_physics_ground_struct,uphill cutoff angle,angle,uphill cutoff angle,angle,identical,schema,
 haloreach_mcc,haloce_evolved,creature,character_physics_ground_struct,uphill falloff angle,angle,uphill falloff angle,angle,identical,schema,
 haloreach_mcc,haloce_evolved,creature,character_physics_ground_struct,uphill velocity scale,real,uphill velocity scale,real,identical,schema,
-haloreach_mcc,haloce_evolved,creature,character_physics_struct,,useless pad,,,identical,schema,
-haloreach_mcc,haloce_evolved,creature,character_physics_struct,,useless pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,creature,character_physics_struct,dead material name,string id,dead material name,string id,identical,schema,
 haloreach_mcc,haloce_evolved,creature,character_physics_struct,dead sphere shapes,block,dead sphere shapes,block,identical,schema,
 haloreach_mcc,haloce_evolved,creature,character_physics_struct,flying physics,struct,flying physics,struct,identical,schema,
@@ -19907,12 +19838,6 @@ haloreach_mcc,haloce_evolved,creature,water_physics_hull_surface_definition_bloc
 haloreach_mcc,haloce_evolved,creature,water_physics_material_override,drag,struct,drag,struct,identical,schema,
 haloreach_mcc,haloce_evolved,creature,water_physics_material_override,material,string id,material,string id,identical,schema,
 haloreach_mcc,haloce_evolved,damage_effect,custom_damage_response_label_block,custom label,string id,custom label,string id,identical,schema,
-haloreach_mcc,haloce_evolved,damage_effect,damage_effect_group#0,,useless pad,,,identical,schema,
-haloreach_mcc,haloce_evolved,damage_effect,damage_effect_group#0,,useless pad,,,identical,schema,
-haloreach_mcc,haloce_evolved,damage_effect,damage_effect_group#0,,useless pad,,,identical,schema,
-haloreach_mcc,haloce_evolved,damage_effect,damage_effect_group#0,,useless pad,,,identical,schema,
-haloreach_mcc,haloce_evolved,damage_effect,damage_effect_group#0,,useless pad,,,identical,schema,
-haloreach_mcc,haloce_evolved,damage_effect,damage_effect_group#0,,useless pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,damage_effect,damage_effect_group#0,AI stun bounds,real bounds,AI stun bounds,real bounds,identical,schema,
 haloreach_mcc,haloce_evolved,damage_effect,damage_effect_group#0,AI stun radius,real,AI stun radius,real,identical,schema,
 haloreach_mcc,haloce_evolved,damage_effect,damage_effect_group#0,AOE core radius,real,AOE core radius,real,identical,schema,
@@ -20003,9 +19928,6 @@ haloreach_mcc,haloce_evolved,death_program_selector,death_program_velocity_gate_
 haloreach_mcc,haloce_evolved,death_program_selector,death_program_velocity_gate_block,death program scale,real,death program scale,real,identical,schema,
 haloreach_mcc,haloce_evolved,death_program_selector,death_program_velocity_gate_block,death program,long enum,death program,long enum,identical,schema,
 haloreach_mcc,haloce_evolved,death_program_selector,death_program_velocity_gate_block,minimum velocity,real,minimum velocity,real,identical,schema,
-haloreach_mcc,haloce_evolved,device,device_struct_definition,,useless pad,,,identical,schema,
-haloreach_mcc,haloce_evolved,device,device_struct_definition,,useless pad,,,identical,schema,
-haloreach_mcc,haloce_evolved,device,device_struct_definition,,useless pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,device,device_struct_definition,ZHBMT,pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,device,device_struct_definition,automatic activation radius,real,automatic activation radius,real,identical,schema,
 haloreach_mcc,haloce_evolved,device,device_struct_definition,close (down),tag reference,close (down),tag reference,identical,schema,
@@ -20146,7 +20068,6 @@ haloreach_mcc,haloce_evolved,device,water_physics_hull_surface_definition_block,
 haloreach_mcc,haloce_evolved,device,water_physics_hull_surface_definition_block,radius,real,radius,real,identical,schema,
 haloreach_mcc,haloce_evolved,device,water_physics_material_override,drag,struct,drag,struct,identical,schema,
 haloreach_mcc,haloce_evolved,device,water_physics_material_override,material,string id,material,string id,identical,schema,
-haloreach_mcc,haloce_evolved,device_control,device_control_struct_definition,,useless pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,device_control,device_control_struct_definition,action string,string id,action string,string id,identical,schema,
 haloreach_mcc,haloce_evolved,device_control,device_control_struct_definition,call value,real,call value,real,identical,schema,
 haloreach_mcc,haloce_evolved,device_control,device_control_struct_definition,deny,tag reference,deny,tag reference,identical,schema,
@@ -20155,9 +20076,6 @@ haloreach_mcc,haloce_evolved,device_control,device_control_struct_definition,off
 haloreach_mcc,haloce_evolved,device_control,device_control_struct_definition,on,tag reference,on,tag reference,identical,schema,
 haloreach_mcc,haloce_evolved,device_control,device_control_struct_definition,triggers when,short enum,triggers when,short enum,identical,schema,
 haloreach_mcc,haloce_evolved,device_control,device_control_struct_definition,type,short enum,type,short enum,identical,schema,
-haloreach_mcc,haloce_evolved,device_control,device_struct_definition,,useless pad,,,identical,schema,
-haloreach_mcc,haloce_evolved,device_control,device_struct_definition,,useless pad,,,identical,schema,
-haloreach_mcc,haloce_evolved,device_control,device_struct_definition,,useless pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,device_control,device_struct_definition,ZHBMT,pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,device_control,device_struct_definition,automatic activation radius,real,automatic activation radius,real,identical,schema,
 haloreach_mcc,haloce_evolved,device_control,device_struct_definition,close (down),tag reference,close (down),tag reference,identical,schema,
@@ -20298,8 +20216,6 @@ haloreach_mcc,haloce_evolved,device_control,water_physics_hull_surface_definitio
 haloreach_mcc,haloce_evolved,device_control,water_physics_hull_surface_definition_block,radius,real,radius,real,identical,schema,
 haloreach_mcc,haloce_evolved,device_control,water_physics_material_override,drag,struct,drag,struct,identical,schema,
 haloreach_mcc,haloce_evolved,device_control,water_physics_material_override,material,string id,material,string id,identical,schema,
-haloreach_mcc,haloce_evolved,device_machine,device_machine_struct_definition,,useless pad,,,identical,schema,
-haloreach_mcc,haloce_evolved,device_machine,device_machine_struct_definition,,useless pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,device_machine,device_machine_struct_definition,R,pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,device_machine,device_machine_struct_definition,device,struct,device,struct,identical,schema,
 haloreach_mcc,haloce_evolved,device_machine,device_machine_struct_definition,door occlusion bounds,fraction bounds,door occlusion bounds,fraction bounds,identical,schema,
@@ -20310,9 +20226,6 @@ haloreach_mcc,haloce_evolved,device_machine,device_machine_struct_definition,pat
 haloreach_mcc,haloce_evolved,device_machine,device_machine_struct_definition,shield function,string id,shield function,string id,identical,schema,
 haloreach_mcc,haloce_evolved,device_machine,device_machine_struct_definition,shield name,string id,shield name,string id,identical,schema,
 haloreach_mcc,haloce_evolved,device_machine,device_machine_struct_definition,type,short enum,type,short enum,identical,schema,
-haloreach_mcc,haloce_evolved,device_machine,device_struct_definition,,useless pad,,,identical,schema,
-haloreach_mcc,haloce_evolved,device_machine,device_struct_definition,,useless pad,,,identical,schema,
-haloreach_mcc,haloce_evolved,device_machine,device_struct_definition,,useless pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,device_machine,device_struct_definition,ZHBMT,pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,device_machine,device_struct_definition,automatic activation radius,real,automatic activation radius,real,identical,schema,
 haloreach_mcc,haloce_evolved,device_machine,device_struct_definition,close (down),tag reference,close (down),tag reference,identical,schema,
@@ -20453,9 +20366,6 @@ haloreach_mcc,haloce_evolved,device_machine,water_physics_hull_surface_definitio
 haloreach_mcc,haloce_evolved,device_machine,water_physics_hull_surface_definition_block,radius,real,radius,real,identical,schema,
 haloreach_mcc,haloce_evolved,device_machine,water_physics_material_override,drag,struct,drag,struct,identical,schema,
 haloreach_mcc,haloce_evolved,device_machine,water_physics_material_override,material,string id,material,string id,identical,schema,
-haloreach_mcc,haloce_evolved,device_terminal,device_struct_definition,,useless pad,,,identical,schema,
-haloreach_mcc,haloce_evolved,device_terminal,device_struct_definition,,useless pad,,,identical,schema,
-haloreach_mcc,haloce_evolved,device_terminal,device_struct_definition,,useless pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,device_terminal,device_struct_definition,ZHBMT,pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,device_terminal,device_struct_definition,automatic activation radius,real,automatic activation radius,real,identical,schema,
 haloreach_mcc,haloce_evolved,device_terminal,device_struct_definition,close (down),tag reference,close (down),tag reference,identical,schema,
@@ -22683,7 +22593,6 @@ haloreach_mcc,haloce_evolved,material_effects,material_effect_material_block,run
 haloreach_mcc,haloce_evolved,material_effects,material_effect_material_block,secondary tag (effect or sound),tag reference,secondary tag (effect or sound),tag reference,identical,schema,
 haloreach_mcc,haloce_evolved,material_effects,material_effect_material_block,sweetener mode,char enum,sweetener mode,char enum,identical,schema,
 haloreach_mcc,haloce_evolved,material_effects,material_effect_material_block,tag (effect or sound),tag reference,tag (effect or sound),tag reference,identical,schema,
-haloreach_mcc,haloce_evolved,material_effects,material_effects_block_struct,,useless pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,material_effects,material_effects_block_struct,effects,block,effects,block,identical,schema,
 haloreach_mcc,haloce_evolved,megalo_string_id_table,megalo_string_id_block,string_id,string id,string_id,string id,identical,schema,
 haloreach_mcc,haloce_evolved,megalo_string_id_table,megalo_string_id_table_struct_definition,megalo string_ids,block,megalo string_ids,block,identical,schema,
@@ -22881,6 +22790,7 @@ haloreach_mcc,haloce_evolved,model,health_transfer_block,seat label,string id,se
 haloreach_mcc,haloce_evolved,model,health_transfer_block,transfer amount,real,transfer amount,real,identical,schema,
 haloreach_mcc,haloce_evolved,model,health_transfer_block,transfer function,short enum,transfer function,short enum,identical,schema,
 haloreach_mcc,haloce_evolved,model,instantaneous_damage_repsonse_block,body damage threshold,real,body damage threshold,real,identical,schema,
+haloreach_mcc,haloce_evolved,model,instantaneous_damage_repsonse_block,body threshold flags,long flags,body threshold flags,long flags,identical,schema,
 haloreach_mcc,haloce_evolved,model,instantaneous_damage_repsonse_block,constraint damage type,short enum,constraint damage type,short enum,identical,schema,
 haloreach_mcc,haloce_evolved,model,instantaneous_damage_repsonse_block,constraint\group name,string id,constraint\group name,string id,identical,schema,
 haloreach_mcc,haloce_evolved,model,instantaneous_damage_repsonse_block,custom response behavior,short enum,custom response behavior,short enum,identical,schema,
@@ -23012,6 +22922,7 @@ haloreach_mcc,haloce_evolved,model,model_target_block_new,MTBNP1,pad,MTBNP1,pad,
 haloreach_mcc,haloce_evolved,model,model_target_block_new,aoe exclusion radius,real,aoe exclusion radius,real,identical,schema,
 haloreach_mcc,haloce_evolved,model,model_target_block_new,cone angle,angle,cone angle,angle,identical,schema,
 haloreach_mcc,haloce_evolved,model,model_target_block_new,damage section,short block index,damage section,short block index,identical,schema,
+haloreach_mcc,haloce_evolved,model,model_target_block_new,flags,byte flags,flags,byte flags,identical,schema,
 haloreach_mcc,haloce_evolved,model,model_target_block_new,lock-on data,struct,lock-on data,struct,identical,schema,
 haloreach_mcc,haloce_evolved,model,model_target_block_new,marker name,string id,marker name,string id,identical,schema,
 haloreach_mcc,haloce_evolved,model,model_target_block_new,size,real,size,real,identical,schema,
@@ -23914,7 +23825,7 @@ haloreach_mcc,haloce_evolved,physics_model,global_error_report_categories_block,
 haloreach_mcc,haloce_evolved,physics_model,global_error_report_categories_block,report type,short enum,report type,short enum,identical,schema,
 haloreach_mcc,haloce_evolved,physics_model,global_error_report_categories_block,reports,block,reports,block,identical,schema,
 haloreach_mcc,haloce_evolved,physics_model,global_error_report_categories_block,runtime generation flags,short integer,runtime generation flags,short integer,identical,schema,
-haloreach_mcc,haloce_evolved,physics_model,global_error_report_categories_block,runtime something~,long integer,runtime something~,long integer,identical,schema,
+haloreach_mcc,haloce_evolved,physics_model,global_error_report_categories_block,runtime something,long integer,runtime something,long integer,identical,schema,
 haloreach_mcc,haloce_evolved,physics_model,havok_convex_shape_struct,base,struct,base,struct,identical,schema,
 haloreach_mcc,haloce_evolved,physics_model,havok_convex_shape_struct,pad64_00,pad,pad64_00,pad,identical,schema,
 haloreach_mcc,haloce_evolved,physics_model,havok_convex_shape_struct,radius,real,radius,real,identical,schema,
@@ -24591,7 +24502,6 @@ haloreach_mcc,haloce_evolved,render_method,tag_block_index_block,block index,str
 haloreach_mcc,haloce_evolved,rumble,mapping_function,data,data,data,data,identical,schema,
 haloreach_mcc,haloce_evolved,rumble,rumble_definition_struct,high frequency rumble,struct,high frequency rumble,struct,identical,schema,
 haloreach_mcc,haloce_evolved,rumble,rumble_definition_struct,low frequency rumble,struct,low frequency rumble,struct,identical,schema,
-haloreach_mcc,haloce_evolved,rumble,rumble_frequency_definition_struct,,useless pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,rumble,rumble_frequency_definition_struct,dirty whore,struct,dirty whore,struct,identical,schema,
 haloreach_mcc,haloce_evolved,rumble,rumble_frequency_definition_struct,duration,real,duration,real,identical,schema,
 haloreach_mcc,haloce_evolved,rumble,rumble_struct_definition,rumble,struct,rumble,struct,identical,schema,
@@ -24640,7 +24550,7 @@ haloreach_mcc,haloce_evolved,scenario,ai_reference_frame_block,flags,word flags,
 haloreach_mcc,haloce_evolved,scenario,ai_reference_frame_block,node index,short integer,node index,short integer,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,ai_reference_frame_block,object id,struct,object id,struct,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,ai_reference_frame_block,projection axis,short integer,projection axis,short integer,identical,schema,
-haloreach_mcc,haloce_evolved,scenario,ai_scenario_mission_dialogue_block#218,mission dialogue,tag reference,mission dialogue,tag reference,identical,schema,
+haloreach_mcc,haloce_evolved,scenario,ai_scenario_mission_dialogue_block#217,mission dialogue,tag reference,mission dialogue,tag reference,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,ai_spawn_conditions_struct,post-difficulty-flags-padding,pad,post-difficulty-flags-padding,pad,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,area_cluster_occupancy_bitvector_array,bitvector data,long integer,bitvector data,long integer,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,area_sector_point_block,normal,real euler angles 2d,normal,real euler angles 2d,identical,schema,
@@ -24876,7 +24786,7 @@ haloreach_mcc,haloce_evolved,scenario,hs_source_files_block,name,string,name,str
 haloreach_mcc,haloce_evolved,scenario,hs_source_files_block,source,data,source,data,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,hs_syntax_datum_block,HMM,short integer,HMM,short integer,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,hs_syntax_datum_block,data,long integer,data,long integer,identical,schema,
-haloreach_mcc,haloce_evolved,scenario,hs_syntax_datum_block,datum header~,short integer,datum header~,short integer,identical,schema,
+haloreach_mcc,haloce_evolved,scenario,hs_syntax_datum_block,datum header,short integer,datum header,short integer,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,hs_syntax_datum_block,flags,short integer,flags,short integer,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,hs_syntax_datum_block,line number,short integer,line number,short integer,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,hs_syntax_datum_block,next node index,long integer,next node index,long integer,identical,schema,
@@ -24911,7 +24821,7 @@ haloreach_mcc,haloce_evolved,scenario,mapping_function,data,data,data,data,ident
 haloreach_mcc,haloce_evolved,scenario,mopp_code_definition_block,,,total bad pad1,pad,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,mopp_code_definition_block,,,total bad pad2,pad,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,mopp_code_definition_block,align_pad,pad,align_pad,pad,identical,schema,
-haloreach_mcc,haloce_evolved,scenario,mopp_code_definition_block,count~,short integer,count~,short integer,identical,schema,
+haloreach_mcc,haloce_evolved,scenario,mopp_code_definition_block,count,short integer,count,short integer,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,mopp_code_definition_block,field pointer skip,int64 integer,field pointer skip,int64 integer,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,mopp_code_definition_block,int m_capacityAndFlags,long integer,int m_capacityAndFlags,long integer,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,mopp_code_definition_block,int m_size,long integer,int m_size,long integer,identical,schema,
@@ -25077,8 +24987,6 @@ haloreach_mcc,haloce_evolved,scenario,scenario_creature_block,name,short block i
 haloreach_mcc,haloce_evolved,scenario,scenario_creature_block,object data,struct,object data,struct,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_creature_block,type,short block index,type,short block index,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_creature_palette_block,name,tag reference,name,tag reference,identical,schema,
-haloreach_mcc,haloce_evolved,scenario,scenario_cutscene_camera_point_block,,useless pad,,,identical,schema,
-haloreach_mcc,haloce_evolved,scenario,scenario_cutscene_camera_point_block,,useless pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_cutscene_camera_point_block,flags,word flags,flags,word flags,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_cutscene_camera_point_block,name,string,name,string,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_cutscene_camera_point_block,orientation,real euler angles 3d,orientation,real euler angles 3d,identical,schema,
@@ -25126,7 +25034,6 @@ haloreach_mcc,haloce_evolved,scenario,scenario_designer_zone_block,weapon,block,
 haloreach_mcc,haloce_evolved,scenario,scenario_device_struct,flags,long flags,flags,long flags,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_device_struct,position group,short block index,position group,short block index,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_device_struct,power group,short block index,power group,short block index,identical,schema,
-haloreach_mcc,haloce_evolved,scenario,scenario_effect_scenery_block,effect scenery data,struct,effect scenery data,struct,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_effect_scenery_block,multiplayer data,struct,multiplayer data,struct,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_effect_scenery_block,name,short block index,name,short block index,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_effect_scenery_block,object data,struct,object data,struct,identical,schema,
@@ -25303,12 +25210,12 @@ haloreach_mcc,haloce_evolved,scenario,scenario_performances_block_struct,templat
 haloreach_mcc,haloce_evolved,scenario,scenario_performances_block_struct,template index,long integer,template index,long integer,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_performances_block_struct,template,string id,template,string id,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_performances_block_struct,thespian radius,real,thespian radius,real,identical,schema,
-haloreach_mcc,haloce_evolved,scenario,scenario_players_block#79,ANDYNDGE,pad,ANDYNDGE,pad,identical,schema,
-haloreach_mcc,haloce_evolved,scenario,scenario_players_block#79,editor folder,short block index,editor folder,short block index,identical,schema,
-haloreach_mcc,haloce_evolved,scenario,scenario_players_block#79,facing,angle,facing,angle,identical,schema,
-haloreach_mcc,haloce_evolved,scenario,scenario_players_block#79,flags,word flags,flags,word flags,identical,schema,
-haloreach_mcc,haloce_evolved,scenario,scenario_players_block#79,pitch,angle,pitch,angle,identical,schema,
-haloreach_mcc,haloce_evolved,scenario,scenario_players_block#79,position,real point 3d,position,real point 3d,identical,schema,
+haloreach_mcc,haloce_evolved,scenario,scenario_players_block#78,ANDYNDGE,pad,ANDYNDGE,pad,identical,schema,
+haloreach_mcc,haloce_evolved,scenario,scenario_players_block#78,editor folder,short block index,editor folder,short block index,identical,schema,
+haloreach_mcc,haloce_evolved,scenario,scenario_players_block#78,facing,angle,facing,angle,identical,schema,
+haloreach_mcc,haloce_evolved,scenario,scenario_players_block#78,flags,word flags,flags,word flags,identical,schema,
+haloreach_mcc,haloce_evolved,scenario,scenario_players_block#78,pitch,angle,pitch,angle,identical,schema,
+haloreach_mcc,haloce_evolved,scenario,scenario_players_block#78,position,real point 3d,position,real point 3d,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_profiles_block,AHDVHJE,pad,AHDVHJE,pad,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_profiles_block,SDVJHERN,pad,SDVJHERN,pad,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_profiles_block,editor folder,short block index,editor folder,short block index,identical,schema,
@@ -25568,6 +25475,7 @@ haloreach_mcc,haloce_evolved,scenario,scenario_weather_palette_block,rain,tag re
 haloreach_mcc,haloce_evolved,scenario,scenario_zone_debugger_block_definition_struct,active designer zones,long block flags,active designer zones,long block flags,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_zone_set_block,audibility index,long block index,audibility index,long block index,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_zone_set_block,bsp zone flags,long block flags,bsp zone flags,long block flags,identical,schema,
+haloreach_mcc,haloce_evolved,scenario,scenario_zone_set_block,cinematic zones,long block flags,cinematic zones,long block flags,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_zone_set_block,flags,long flags,flags,long flags,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_zone_set_block,forbidden designer zones,long block flags,forbidden designer zones,long block flags,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_zone_set_block,hint previous zone set,long block index,hint previous zone set,long block index,identical,schema,
@@ -25576,6 +25484,8 @@ haloreach_mcc,haloce_evolved,scenario,scenario_zone_set_block,name,string id,nam
 haloreach_mcc,haloce_evolved,scenario,scenario_zone_set_block,pvs index,long block index,pvs index,long block index,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_zone_set_block,required designer zones,long block flags,required designer zones,long block flags,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_zone_set_block,runtime bsp zone flags,long block flags,runtime bsp zone flags,long block flags,identical,schema,
+haloreach_mcc,haloce_evolved,scenario,scenario_zone_set_block,sruntime tructure design zone flags,long block flags,sruntime tructure design zone flags,long block flags,identical,schema,
+haloreach_mcc,haloce_evolved,scenario,scenario_zone_set_block,structure design zone flags,long block flags,structure design zone flags,long block flags,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_zone_set_bsp_bits_block,bits,block,bits,block,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_zone_set_bsp_pvs_block,bsp cluster mapings,block,bsp cluster mapings,block,identical,schema,
 haloreach_mcc,haloce_evolved,scenario,scenario_zone_set_bsp_pvs_block,cluster pvs doors closed,block,cluster pvs doors closed,block,identical,schema,
@@ -26377,8 +26287,6 @@ haloreach_mcc,haloce_evolved,scenario_cinematics_resource,scenario_cinematics_re
 haloreach_mcc,haloce_evolved,scenario_cinematics_resource,scenario_cinematics_resource_struct_definition,cinematics,block,cinematics,block,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_cinematics_resource,scenario_cinematics_resource_struct_definition,editor folders,block,editor folders,block,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_cinematics_resource,scenario_cinematics_resource_struct_definition,flags,block,flags,block,identical,schema,
-haloreach_mcc,haloce_evolved,scenario_cinematics_resource,scenario_cutscene_camera_point_block,,useless pad,,,identical,schema,
-haloreach_mcc,haloce_evolved,scenario_cinematics_resource,scenario_cutscene_camera_point_block,,useless pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_cinematics_resource,scenario_cutscene_camera_point_block,flags,word flags,flags,word flags,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_cinematics_resource,scenario_cutscene_camera_point_block,name,string,name,string,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_cinematics_resource,scenario_cutscene_camera_point_block,orientation,real euler angles 3d,orientation,real euler angles 3d,identical,schema,
@@ -26602,7 +26510,6 @@ haloreach_mcc,haloce_evolved,scenario_effect_scenery_resource,dont_use_me_scenar
 haloreach_mcc,haloce_evolved,scenario_effect_scenery_resource,dont_use_me_scenario_environment_object_block,unique id,long integer,unique id,long integer,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_effect_scenery_resource,g_scenario_editor_folder_block,name,long string,name,long string,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_effect_scenery_resource,g_scenario_editor_folder_block,parent folder,long block index,parent folder,long block index,identical,schema,
-haloreach_mcc,haloce_evolved,scenario_effect_scenery_resource,scenario_effect_scenery_block,effect scenery data,struct,effect scenery data,struct,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_effect_scenery_resource,scenario_effect_scenery_block,multiplayer data,struct,multiplayer data,struct,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_effect_scenery_resource,scenario_effect_scenery_block,name,short block index,name,short block index,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_effect_scenery_resource,scenario_effect_scenery_block,object data,struct,object data,struct,identical,schema,
@@ -27251,7 +27158,7 @@ haloreach_mcc,haloce_evolved,scenario_structure_bsp,global_error_report_categori
 haloreach_mcc,haloce_evolved,scenario_structure_bsp,global_error_report_categories_block,report type,short enum,report type,short enum,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_structure_bsp,global_error_report_categories_block,reports,block,reports,block,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_structure_bsp,global_error_report_categories_block,runtime generation flags,short integer,runtime generation flags,short integer,identical,schema,
-haloreach_mcc,haloce_evolved,scenario_structure_bsp,global_error_report_categories_block,runtime something~,long integer,runtime something~,long integer,identical,schema,
+haloreach_mcc,haloce_evolved,scenario_structure_bsp,global_error_report_categories_block,runtime something,long integer,runtime something,long integer,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_structure_bsp,global_geometry_material_block,,,pad0,pad,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_structure_bsp,global_geometry_material_block,breakable surface index,char integer,breakable surface index,char integer,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_structure_bsp,global_geometry_material_block,render method,tag reference,render method,tag reference,identical,schema,
@@ -27378,7 +27285,7 @@ haloreach_mcc,haloce_evolved,scenario_structure_bsp,mopp_bv_tree_shape_struct,pa
 haloreach_mcc,haloce_evolved,scenario_structure_bsp,mopp_code_definition_block,,,total bad pad1,pad,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_structure_bsp,mopp_code_definition_block,,,total bad pad2,pad,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_structure_bsp,mopp_code_definition_block,align_pad,pad,align_pad,pad,identical,schema,
-haloreach_mcc,haloce_evolved,scenario_structure_bsp,mopp_code_definition_block,count~,short integer,count~,short integer,identical,schema,
+haloreach_mcc,haloce_evolved,scenario_structure_bsp,mopp_code_definition_block,count,short integer,count,short integer,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_structure_bsp,mopp_code_definition_block,field pointer skip,int64 integer,field pointer skip,int64 integer,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_structure_bsp,mopp_code_definition_block,int m_capacityAndFlags,long integer,int m_capacityAndFlags,long integer,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_structure_bsp,mopp_code_definition_block,int m_size,long integer,int m_size,long integer,identical,schema,
@@ -27831,7 +27738,7 @@ haloreach_mcc,haloce_evolved,scenario_trigger_volumes_resource,g_scenario_editor
 haloreach_mcc,haloce_evolved,scenario_trigger_volumes_resource,mopp_code_definition_block,,,total bad pad1,pad,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_trigger_volumes_resource,mopp_code_definition_block,,,total bad pad2,pad,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_trigger_volumes_resource,mopp_code_definition_block,align_pad,pad,align_pad,pad,identical,schema,
-haloreach_mcc,haloce_evolved,scenario_trigger_volumes_resource,mopp_code_definition_block,count~,short integer,count~,short integer,identical,schema,
+haloreach_mcc,haloce_evolved,scenario_trigger_volumes_resource,mopp_code_definition_block,count,short integer,count,short integer,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_trigger_volumes_resource,mopp_code_definition_block,field pointer skip,int64 integer,field pointer skip,int64 integer,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_trigger_volumes_resource,mopp_code_definition_block,int m_capacityAndFlags,long integer,int m_capacityAndFlags,long integer,identical,schema,
 haloreach_mcc,haloce_evolved,scenario_trigger_volumes_resource,mopp_code_definition_block,int m_size,long integer,int m_size,long integer,identical,schema,
@@ -28185,7 +28092,6 @@ haloreach_mcc,haloce_evolved,scenery,object_struct_definition#1,vertical acceler
 haloreach_mcc,haloce_evolved,scenery,object_struct_definition#1,water density,char enum,water density,char enum,identical,schema,
 haloreach_mcc,haloce_evolved,scenery,physics_force_function_struct,max velocity,real,max velocity,real,identical,schema,
 haloreach_mcc,haloce_evolved,scenery,physics_force_function_struct,velocity to pressure,struct,velocity to pressure,struct,identical,schema,
-haloreach_mcc,haloce_evolved,scenery,scenery_group#0,,useless pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,scenery,scenery_group#0,WGW,pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,scenery,scenery_group#0,flags,word flags,flags,word flags,identical,schema,
 haloreach_mcc,haloce_evolved,scenery,scenery_group#0,object,struct,object,struct,identical,schema,
@@ -28372,7 +28278,7 @@ haloreach_mcc,haloce_evolved,sound,sound_block_struct,pad,pad,,,identical,schema
 haloreach_mcc,haloce_evolved,sound,sound_block_struct,pitch ranges,block,pitch ranges,block,identical,schema,
 haloreach_mcc,haloce_evolved,sound,sound_block_struct,playback,struct,playback,struct,identical,schema,
 haloreach_mcc,haloce_evolved,sound,sound_block_struct,promotion,struct,promotion,struct,identical,schema,
-haloreach_mcc,haloce_evolved,sound,sound_block_struct,runtime pad~,pad,,,identical,schema,
+haloreach_mcc,haloce_evolved,sound,sound_block_struct,runtime pad,pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,sound,sound_block_struct,scale,struct,scale,struct,identical,schema,
 haloreach_mcc,haloce_evolved,sound,sound_distance_parameters_struct,maximum distance,real,maximum distance,real,identical,schema,
 haloreach_mcc,haloce_evolved,sound,sound_distance_parameters_struct,minimum distance,real,minimum distance,real,identical,schema,
@@ -28382,8 +28288,8 @@ haloreach_mcc,haloce_evolved,sound,sound_permutations_block#8,name,string id,nam
 haloreach_mcc,haloce_evolved,sound,sound_permutations_block#8,play fraction type,short block index,play fraction type,short block index,identical,schema,
 haloreach_mcc,haloce_evolved,sound,sound_permutations_block#8,skip fraction,real fraction,skip fraction,real fraction,identical,schema,
 haloreach_mcc,haloce_evolved,sound,sound_pitch_range_block,,,pad_usable_permutation_count,pad,identical,schema,
-haloreach_mcc,haloce_evolved,sound,sound_pitch_range_block,KCTSDWPP~,pad,KCTSDWPP~,pad,identical,schema,
-haloreach_mcc,haloce_evolved,sound,sound_pitch_range_block,YAMTVB~,pad,,,identical,schema,
+haloreach_mcc,haloce_evolved,sound,sound_pitch_range_block,KCTSDWPP,pad,KCTSDWPP,pad,identical,schema,
+haloreach_mcc,haloce_evolved,sound,sound_pitch_range_block,YAMTVB,pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,sound,sound_pitch_range_block,asdf,pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,sound,sound_pitch_range_block,name,string id,name,string id,identical,schema,
 haloreach_mcc,haloce_evolved,sound,sound_pitch_range_block,permutations,block,permutations,block,identical,schema,
@@ -28401,7 +28307,7 @@ haloreach_mcc,haloce_evolved,sound,sound_promotion_rule_block,maximum playing co
 haloreach_mcc,haloce_evolved,sound,sound_promotion_rule_block,pitch range,short block index,pitch range,short block index,identical,schema,
 haloreach_mcc,haloce_evolved,sound,sound_promotion_rule_block,runtime rollover time,long integer,runtime rollover time,long integer,identical,schema,
 haloreach_mcc,haloce_evolved,sound,sound_promotion_rule_block,suppression time,real,suppression time,real,identical,schema,
-haloreach_mcc,haloce_evolved,sound,sound_promotion_runtime_timer_block,timer storage~,long integer,timer storage~,long integer,identical,schema,
+haloreach_mcc,haloce_evolved,sound,sound_promotion_runtime_timer_block,timer storage,long integer,timer storage,long integer,identical,schema,
 haloreach_mcc,haloce_evolved,sound,sound_scale_modifiers_struct,skip fraction modifier,fraction bounds,skip fraction modifier,fraction bounds,identical,schema,
 haloreach_mcc,haloce_evolved,sound_classes,sound_class_block_struct,B,pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,sound_classes,sound_class_block_struct,distance parameters,struct,distance parameters,struct,identical,schema,
@@ -28627,7 +28533,6 @@ haloreach_mcc,haloce_evolved,sound_scenery,object_struct_definition#1,vertical a
 haloreach_mcc,haloce_evolved,sound_scenery,object_struct_definition#1,water density,char enum,water density,char enum,identical,schema,
 haloreach_mcc,haloce_evolved,sound_scenery,physics_force_function_struct,max velocity,real,max velocity,real,identical,schema,
 haloreach_mcc,haloce_evolved,sound_scenery,physics_force_function_struct,velocity to pressure,struct,velocity to pressure,struct,identical,schema,
-haloreach_mcc,haloce_evolved,sound_scenery,sound_scenery_struct_definition,,useless pad,,,identical,schema,
 haloreach_mcc,haloce_evolved,sound_scenery,sound_scenery_struct_definition,YJNXHAWAO1,long integer,YJNXHAWAO1,long integer,identical,schema,
 haloreach_mcc,haloce_evolved,sound_scenery,sound_scenery_struct_definition,YJNXHAWAO2,long integer,YJNXHAWAO2,long integer,identical,schema,
 haloreach_mcc,haloce_evolved,sound_scenery,sound_scenery_struct_definition,YJNXHAWAO3,long integer,YJNXHAWAO3,long integer,identical,schema,
@@ -28699,7 +28604,7 @@ haloreach_mcc,haloce_evolved,structure_design,global_structure_physics_design_st
 haloreach_mcc,haloce_evolved,structure_design,mopp_code_definition_block,,,total bad pad1,pad,identical,schema,
 haloreach_mcc,haloce_evolved,structure_design,mopp_code_definition_block,,,total bad pad2,pad,identical,schema,
 haloreach_mcc,haloce_evolved,structure_design,mopp_code_definition_block,align_pad,pad,align_pad,pad,identical,schema,
-haloreach_mcc,haloce_evolved,structure_design,mopp_code_definition_block,count~,short integer,count~,short integer,identical,schema,
+haloreach_mcc,haloce_evolved,structure_design,mopp_code_definition_block,count,short integer,count,short integer,identical,schema,
 haloreach_mcc,haloce_evolved,structure_design,mopp_code_definition_block,field pointer skip,int64 integer,field pointer skip,int64 integer,identical,schema,
 haloreach_mcc,haloce_evolved,structure_design,mopp_code_definition_block,int m_capacityAndFlags,long integer,int m_capacityAndFlags,long integer,identical,schema,
 haloreach_mcc,haloce_evolved,structure_design,mopp_code_definition_block,int m_size,long integer,int m_size,long integer,identical,schema,
@@ -28797,11 +28702,11 @@ haloreach_mcc,haloce_evolved,structure_seams,global_error_report_categories_bloc
 haloreach_mcc,haloce_evolved,structure_seams,global_error_report_categories_block,report type,short enum,report type,short enum,identical,schema,
 haloreach_mcc,haloce_evolved,structure_seams,global_error_report_categories_block,reports,block,reports,block,identical,schema,
 haloreach_mcc,haloce_evolved,structure_seams,global_error_report_categories_block,runtime generation flags,short integer,runtime generation flags,short integer,identical,schema,
-haloreach_mcc,haloce_evolved,structure_seams,global_error_report_categories_block,runtime something~,long integer,runtime something~,long integer,identical,schema,
+haloreach_mcc,haloce_evolved,structure_seams,global_error_report_categories_block,runtime something,long integer,runtime something,long integer,identical,schema,
 haloreach_mcc,haloce_evolved,structure_seams,mopp_code_definition_block,,,total bad pad1,pad,identical,schema,
 haloreach_mcc,haloce_evolved,structure_seams,mopp_code_definition_block,,,total bad pad2,pad,identical,schema,
 haloreach_mcc,haloce_evolved,structure_seams,mopp_code_definition_block,align_pad,pad,align_pad,pad,identical,schema,
-haloreach_mcc,haloce_evolved,structure_seams,mopp_code_definition_block,count~,short integer,count~,short integer,identical,schema,
+haloreach_mcc,haloce_evolved,structure_seams,mopp_code_definition_block,count,short integer,count,short integer,identical,schema,
 haloreach_mcc,haloce_evolved,structure_seams,mopp_code_definition_block,field pointer skip,int64 integer,field pointer skip,int64 integer,identical,schema,
 haloreach_mcc,haloce_evolved,structure_seams,mopp_code_definition_block,int m_capacityAndFlags,long integer,int m_capacityAndFlags,long integer,identical,schema,
 haloreach_mcc,haloce_evolved,structure_seams,mopp_code_definition_block,int m_size,long integer,int m_size,long integer,identical,schema,
@@ -29777,6 +29682,7 @@ haloreach_mcc,haloce_evolved,vehicle,steering_animation_struct,max angle,angle,m
 haloreach_mcc,haloce_evolved,vehicle,torque_curve_struct,Pad64_00,pad,Pad64_00,pad,identical,schema,
 haloreach_mcc,haloce_evolved,vehicle,torque_curve_struct,function,struct,function,struct,identical,schema,
 haloreach_mcc,haloce_evolved,vehicle,tracking_type_block,tracking type,string id,tracking type,string id,identical,schema,
+haloreach_mcc,haloce_evolved,vehicle,turret_block,flags,word flags,flags,word flags,identical,schema,
 haloreach_mcc,haloce_evolved,vehicle,turret_block,operating elevation angle,angle,operating elevation angle,angle,identical,schema,
 haloreach_mcc,haloce_evolved,vehicle,turret_block,pad,pad,pad,pad,identical,schema,
 haloreach_mcc,haloce_evolved,vehicle,turret_block,physical elevate node,string id,physical elevate node,string id,identical,schema,
