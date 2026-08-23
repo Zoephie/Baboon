@@ -2383,7 +2383,7 @@ fn classic_shader_row_edit(
         // typing back what was shown divided the value by 57.3.
         TagFieldData::Angle(value) => Some(ShaderRowEdit {
             path: path.to_owned(),
-            current: crate::app::foundation::fmt_degrees(*value),
+            current: crate::app::foundation::fmt_angle(*value),
             kind: ShaderRowEditKind::Scalar,
         }),
         TagFieldData::CharInteger(value) => classic_int_edit(path, *value as i64, formatted),

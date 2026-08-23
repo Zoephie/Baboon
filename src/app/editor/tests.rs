@@ -1349,6 +1349,7 @@ mod tests {
     #[test]
     fn angle_fields_are_edited_in_degrees_and_stored_in_radians() {
         use crate::app::foundation::{format_foundation_scalar_value, foundation_bounds_values};
+        let _units = crate::format::AngleUnitGuard::set(true);
         let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
         let root = tag.root();
         let names = TagNameIndex::default();
@@ -1395,12 +1396,115 @@ mod tests {
         );
     }
 
+    /// With degrees turned off, an angle is shown and typed as the radians it
+    /// actually holds — no conversion in either direction.
+    ///
+    /// The failure this guards against is a half-flipped switch: a display that
+    /// still converted while the parser did not would divide every angle the
+    /// user retyped by 57.3, silently, which is the exact bug that made degrees
+    /// unconditional in the first place.
+    #[test]
+    fn angles_are_shown_and_typed_as_radians_when_degrees_are_off() {
+        use crate::app::foundation::{format_foundation_scalar_value, foundation_bounds_values};
+        let _units = crate::format::AngleUnitGuard::set(false);
+        let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
+        let root = tag.root();
+        let names = TagNameIndex::default();
+
+        // 0.15 typed now means 0.15 radians, stored verbatim.
+        let angle = root.field("angle").unwrap();
+        let TagFieldData::Angle(stored) = parse_gui_field_value(&angle, "0.15").unwrap() else {
+            panic!("expected an angle");
+        };
+        assert_eq!(stored, 0.15, "radians mode must store what was typed");
+
+        // The same value the degrees test reads as 8.59437.
+        assert_eq!(
+            format_foundation_scalar_value(&names, &TagFieldData::Angle(0.15)),
+            "0.15"
+        );
+
+        let bounds = root.field("angle bounds").unwrap();
+        let TagFieldData::AngleBounds(stored) =
+            parse_gui_field_value(&bounds, "0.25..2").unwrap()
+        else {
+            panic!("expected angle bounds");
+        };
+        assert_eq!((stored.lower, stored.upper), (0.25, 2.0));
+        assert_eq!(
+            foundation_bounds_values(&TagFieldData::AngleBounds(blam_tags::math::AngleBounds {
+                lower: 0.25,
+                upper: 2.0,
+            })),
+            Some(("0.25".to_owned(), "2".to_owned())),
+        );
+    }
+
+    /// Radians are not rounded to the six significant digits degrees get: there
+    /// is no conversion to be inexact, so the shortest round-tripping decimal is
+    /// both exact and already a fixed point. Rounding here would lose precision
+    /// with nothing to buy it.
+    #[test]
+    fn radians_round_trip_exactly_rather_than_to_six_digits() {
+        use crate::app::foundation::format_foundation_scalar_value;
+        let _units = crate::format::AngleUnitGuard::set(false);
+        let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
+        let angle = tag.root().field("angle").unwrap();
+        let names = TagNameIndex::default();
+
+        // A value with more than six significant digits, which degrees mode
+        // would round: 0.34906584 is 20 degrees.
+        let mut value = 0.34906584f32;
+        for step in 0..8 {
+            let shown = format_foundation_scalar_value(&names, &TagFieldData::Angle(value));
+            let TagFieldData::Angle(reparsed) = parse_gui_field_value(&angle, &shown).unwrap()
+            else {
+                panic!("expected an angle");
+            };
+            assert_eq!(
+                reparsed, value,
+                "step {step} changed {value} to {reparsed} via {shown:?}"
+            );
+            value = reparsed;
+        }
+    }
+
+    /// Euler angles are angles, so they follow the unit too — in both the
+    /// editable and the read-only renderer, which used to disagree.
+    #[test]
+    fn euler_angles_follow_the_unit_in_both_renderers() {
+        use crate::app::foundation::{foundation_editable_component_parts, foundation_value_parts};
+        let euler = TagFieldData::RealEulerAngles3d(blam_tags::math::RealEulerAngles3d {
+            yaw: std::f32::consts::FRAC_PI_2,
+            pitch: 0.0,
+            roll: 0.0,
+        });
+
+        {
+            let _units = crate::format::AngleUnitGuard::set(true);
+            let editable = foundation_editable_component_parts(&euler).unwrap();
+            let read_only = foundation_value_parts(&euler).unwrap();
+            assert_eq!(editable[0].1, "90", "half pi is 90 degrees");
+            assert_eq!(
+                read_only, editable,
+                "a read-only euler field used to show radians while an editable one showed degrees"
+            );
+        }
+
+        let _units = crate::format::AngleUnitGuard::set(false);
+        let editable = foundation_editable_component_parts(&euler).unwrap();
+        let read_only = foundation_value_parts(&euler).unwrap();
+        assert!(editable[0].1.starts_with("1.57"), "{editable:?}");
+        assert_eq!(read_only, editable);
+    }
+
     /// Editing an angle repeatedly must not walk it: degrees are shown to six
     /// significant digits, so the display has to be a fixed point of
     /// parse-then-format even though rad↔deg is not exact.
     #[test]
     fn angle_display_survives_repeated_edits() {
         use crate::app::foundation::format_foundation_scalar_value;
+        let _units = crate::format::AngleUnitGuard::set(true);
         let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
         let field = tag.root().field("angle").unwrap();
         let names = TagNameIndex::default();
@@ -1481,6 +1585,7 @@ mod tests {
 
     #[test]
     fn euler_angle_parser_accepts_complete_tuples_and_rejects_invalid_input() {
+        let _units = crate::format::AngleUnitGuard::set(true);
         let tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
         let root = tag.root();
         let euler2d = root.field("real euler angles 2d").unwrap();
@@ -1514,6 +1619,7 @@ mod tests {
 
     #[test]
     fn euler_angle_edit_round_trips_through_tag_serialization() {
+        let _units = crate::format::AngleUnitGuard::set(true);
         let mut tag = TagFile::new(test_definition_path("haloreach_mcc/test_tag.json")).unwrap();
         let mut dirty = Dirty::default();
 

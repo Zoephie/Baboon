@@ -451,13 +451,18 @@ pub(in crate::app) fn foundation_value_parts(
             ("k".to_owned(), fmt_real(q.k)),
             ("w".to_owned(), fmt_real(q.w)),
         ]),
+        // Angles, so `fmt_angle` like every other angle-typed value. This path
+        // draws the read-only copy of a field the editable path renders with
+        // `foundation_editable_component_parts`; the two used to disagree, so a
+        // euler field in a read-only tag showed radians while the same field in
+        // a loose one showed degrees.
         TagFieldData::RealEulerAngles2d(e) => {
-            pair("yaw", fmt_real(e.yaw), "pitch", fmt_real(e.pitch))
+            pair("yaw", fmt_angle(e.yaw), "pitch", fmt_angle(e.pitch))
         }
         TagFieldData::RealEulerAngles3d(e) => Some(vec![
-            ("yaw".to_owned(), fmt_real(e.yaw)),
-            ("pitch".to_owned(), fmt_real(e.pitch)),
-            ("roll".to_owned(), fmt_real(e.roll)),
+            ("yaw".to_owned(), fmt_angle(e.yaw)),
+            ("pitch".to_owned(), fmt_angle(e.pitch)),
+            ("roll".to_owned(), fmt_angle(e.roll)),
         ]),
         TagFieldData::RealPlane2d(p) => {
             triple("i", fmt_real(p.i), "j", fmt_real(p.j), "d", fmt_real(p.d))
@@ -472,7 +477,7 @@ pub(in crate::app) fn foundation_value_parts(
             pair("low", b.lower.to_string(), "high", b.upper.to_string())
         }
         TagFieldData::AngleBounds(b) => {
-            pair("low", fmt_degrees(b.lower), "high", fmt_degrees(b.upper))
+            pair("low", fmt_angle(b.lower), "high", fmt_angle(b.upper))
         }
         TagFieldData::RealBounds(b) | TagFieldData::FractionBounds(b) => {
             pair("low", fmt_real(b.lower), "high", fmt_real(b.upper))
@@ -484,7 +489,7 @@ pub(in crate::app) fn foundation_value_parts(
 pub(in crate::app) fn foundation_bounds_values(value: &TagFieldData) -> Option<(String, String)> {
     match value {
         TagFieldData::ShortIntegerBounds(b) => Some((b.lower.to_string(), b.upper.to_string())),
-        TagFieldData::AngleBounds(b) => Some((fmt_degrees(b.lower), fmt_degrees(b.upper))),
+        TagFieldData::AngleBounds(b) => Some((fmt_angle(b.lower), fmt_angle(b.upper))),
         TagFieldData::RealBounds(b) | TagFieldData::FractionBounds(b) => {
             Some((fmt_real(b.lower), fmt_real(b.upper)))
         }
@@ -522,13 +527,13 @@ pub(in crate::app) fn foundation_editable_component_parts(
         ]),
         // Euler angles are radians on disk too, and are edited in degrees.
         TagFieldData::RealEulerAngles2d(e) => Some(vec![
-            ("yaw".to_owned(), fmt_degrees(e.yaw)),
-            ("pitch".to_owned(), fmt_degrees(e.pitch)),
+            ("yaw".to_owned(), fmt_angle(e.yaw)),
+            ("pitch".to_owned(), fmt_angle(e.pitch)),
         ]),
         TagFieldData::RealEulerAngles3d(e) => Some(vec![
-            ("yaw".to_owned(), fmt_degrees(e.yaw)),
-            ("pitch".to_owned(), fmt_degrees(e.pitch)),
-            ("roll".to_owned(), fmt_degrees(e.roll)),
+            ("yaw".to_owned(), fmt_angle(e.yaw)),
+            ("pitch".to_owned(), fmt_angle(e.pitch)),
+            ("roll".to_owned(), fmt_angle(e.roll)),
         ]),
         _ => None,
     }
@@ -610,8 +615,8 @@ pub(in crate::app) fn format_foundation_scalar_value(
     value: &TagFieldData,
 ) -> String {
     match value {
-        // Radians on disk, degrees in the editor — see `fmt_degrees`.
-        TagFieldData::Angle(v) => fmt_degrees(*v),
+        // Radians on disk, degrees in the editor — see `fmt_angle`.
+        TagFieldData::Angle(v) => fmt_angle(*v),
         TagFieldData::Real(v) | TagFieldData::RealSlider(v) | TagFieldData::RealFraction(v) => {
             fmt_real(*v)
         }
@@ -666,19 +671,28 @@ pub(in crate::app) fn fmt_real(value: f32) -> String {
 /// digit for digit.
 const ANGLE_SIGNIFICANT_DIGITS: i32 = 6;
 
-/// An angle-typed value as editable text, in **degrees**.
+/// An angle-typed value as editable text, in whichever unit is selected.
 ///
 /// Angle fields — `angle`, `angle_bounds`, `real_euler_angles_2d/3d` — hold
 /// radians on disk, and every Halo tool presents them in degrees; the field names
 /// themselves say `:degrees`. Showing the stored radians instead made a
 /// `0.01 degrees` field read as `0` (0.000175 rad, below the old two-decimal
 /// display) and, worse, made a `0.15` typed into a box labelled degrees mean
-/// 0.15 *radians* — 8.59°, fifty-seven times what was asked for.
+/// 0.15 *radians* — 8.59°, fifty-seven times what was asked for. So degrees are
+/// the default, and [`crate::format::angles_in_degrees`] turns them off for
+/// anyone who wants to see what is actually stored.
 ///
-/// Rounded to six significant digits rather than round-tripped exactly, because
-/// the conversion itself is inexact: 20° stored is `0.34906584`, which comes back
-/// as 19.999998. Six digits shows that as `20`, and repeated edits are stable.
-pub(in crate::app) fn fmt_degrees(radians: f32) -> String {
+/// Degrees are rounded to six significant digits rather than round-tripped
+/// exactly, because the conversion itself is inexact: 20° stored is
+/// `0.34906584`, which comes back as 19.999998. Six digits shows that as `20`,
+/// and repeated edits are stable. **Radians get no such rounding** — nothing is
+/// converted, so the shortest decimal that reads back as the same `f32` is both
+/// exact and stable, and rounding 0.15 rad to six digits of *radians* would be
+/// a precision loss with nothing to buy it.
+pub(in crate::app) fn fmt_angle(radians: f32) -> String {
+    if !crate::format::angles_in_degrees() {
+        return fmt_real(radians);
+    }
     let degrees = radians.to_degrees();
     if !degrees.is_finite() {
         return degrees.to_string();

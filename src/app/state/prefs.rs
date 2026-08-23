@@ -338,6 +338,10 @@ pub(in crate::app) struct GuiPrefs {
     pub(in crate::app) update_channel: UpdateChannel,
     pub(in crate::app) check_updates_on_startup: bool,
     pub(in crate::app) show_block_sizes: bool,
+    /// Show angle fields in degrees, as Guerilla does, rather than the
+    /// radians they hold on disk. Default on: it is what every other Halo
+    /// tool shows, and what the field names themselves claim.
+    pub(in crate::app) angles_in_degrees: bool,
     pub(in crate::app) scroll_to_cycle_dropdowns: bool,
     /// Warn before Save overwrites Campaign Evolved pak files in place.
     pub(in crate::app) confirm_container_overwrite: bool,
@@ -377,6 +381,7 @@ impl Default for GuiPrefs {
             folders_before_tags: false,
             double_click_to_open_tags: false,
             show_block_sizes: false,
+            angles_in_degrees: true,
             scroll_to_cycle_dropdowns: true,
             confirm_container_overwrite: true,
             confirm_runtime_poke: true,

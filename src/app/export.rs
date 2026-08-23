@@ -8,6 +8,7 @@ pub(super) mod container_dump;
 pub(super) mod geometry;
 pub(super) mod import_info;
 pub(super) mod json;
+pub(super) mod references;
 pub(super) mod scripts;
 pub(super) mod shader_source;
 
@@ -16,6 +17,7 @@ pub(super) use container_dump::*;
 pub(super) use geometry::*;
 pub(super) use import_info::*;
 pub(super) use json::*;
+pub(super) use references::*;
 pub(super) use scripts::*;
 pub(super) use shader_source::*;
 

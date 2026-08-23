@@ -109,6 +109,12 @@ pub(in crate::app) enum WorkerMessage {
         key: String,
         result: Result<TagFile, String>,
     },
+    /// One Bitmap Library thumbnail, decoded off the UI thread.
+    BitmapThumbnailDecoded {
+        stamp: KitStamp,
+        key: String,
+        result: Result<ThumbnailImage, String>,
+    },
     BitmapReimportFinished {
         kit: KitId,
         key: String,

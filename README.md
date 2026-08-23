@@ -115,7 +115,13 @@ core, which is roughly a 3× saving on the reconciliation for a full MCC kit
 - **Context actions** — per-tag and per-folder right-click actions for JSON dump,
   raw extraction, bitmap/geometry/animation extraction, *Rename / Move* (with
   automatic reference fix-up across every referencing tag), *Duplicate*,
-  *Delete*, and *Open in File Explorer*.
+  *Delete*, *Dump Tag References*, and *Open in File Explorer*.
+- **Launch a scenario from the browser** — right-click any `.scenario` for *Open
+  in Sapien* / *Open in tag_test*, the same two launches the tag's own header
+  offers, without opening the tag first. Both follow the same rules as the
+  header: Sapien is not offered at all for kits whose Sapien takes no scenario
+  (Combat Evolved, Campaign Evolved), and either is greyed out when its
+  executable is not in the kit.
 
 ### Duplicating & deleting tags
 
@@ -242,6 +248,11 @@ and editor state.
 - **Content Explorer** — a reference-graph navigator centred on one tag: who
   references it (parents) and what it references (children), with back/forward
   history and a filter box.
+- **Dump Tag References** — right-click a tag to write everything it pulls in,
+  recursively, to a text file: an indented tree of the whole dependency
+  subtree. Tag graphs contain cycles and shared leaves, so a tag already listed
+  is marked `(see above)` rather than expanded twice, and a dependency with no
+  tag behind it is marked `(missing)`. Needs the reference index.
 - **Unreferenced tags** — scan for tags that nothing else points at.
 - **Keyword tagging** — attach freeform keywords to tags (stored in a per-game
   sidecar, outside the tags) and browse or filter by them.
@@ -277,6 +288,8 @@ window.
   games.
 - **Right-click a tab** to reveal that tag in the browser tree, or to close all
   tabs / all tabs but this one.
+- **`Ctrl+W`** closes the current tab, prompting first if it has unsaved edits.
+  On the Chimp surface it closes the selected package instead.
 - Tabs remain open until explicitly closed; the practical document limit is
   available memory. Drag a tab against a pane edge to split the editor and view
   two tags at once.
@@ -307,6 +320,12 @@ pageable resources — with inline editing for loose little-endian tags:
   contain them; everything else is hidden. Available on every field-tree tag,
   including sound tags. Blocks and structs keep their expand state as you page
   through a block's elements, and structs are expanded by default.
+- **Angle units** — `angle`, `angle_bounds` and both euler types hold radians on
+  disk and are shown and typed in **degrees**, as Guerilla and the other Halo
+  tools do. *View ▸ Angles in degrees* (also in *Settings ▸ Appearance*) turns
+  that off to read and edit the stored radians instead. Field search, TSV
+  copy/paste and the tag diff all follow the same setting, so a round trip never
+  changes units halfway.
 - **Expert mode** toggle to reveal advanced/normally-hidden fields.
 - Monolithic-cache and big-endian tags are opened **read-only**; only
   little-endian loose tags can be saved back to disk.
@@ -366,6 +385,34 @@ For `bitmap` tags, a built-in texture viewer:
   background-colour toggle behind transparent images.
 - Under-cursor **pixel coordinate + RGBA readout**.
 - Reports format, type, dimensions, and image count.
+
+### Bitmap Browser
+
+*Tools ▸ Assets ▸ Bitmap Browser* opens a **Bitmap Library** tab listing every
+bitmap in the workspace as a thumbnail grid.
+
+- **Search** by name with the tag browser's own filter grammar — space is AND,
+  `|` is OR, `^foo` / `foo$` / `^foo$` anchor to the name — so typing `grass`
+  narrows to the grass textures and `grass | metal` covers both.
+- **Size slider** scales the grid from thumbnails to large previews.
+- **Double-click** a thumbnail to open that bitmap tag in its own tab.
+- **Right-click** a thumbnail to *Extract bitmap images…* — the same TIFF
+  extraction the browser tree offers, without leaving the grid.
+- **Drag a thumbnail** onto a shader's bitmap slot, or any Foundation tag-
+  reference cell, to set that reference — the same drag the browser tree
+  supports. Drag the *Bitmap Library* tab against a pane edge first to split the
+  editor, so the library and the shader are visible side by side.
+- Thumbnails decode on background threads, only for the cells actually on
+  screen, and from the smallest mip level that still fills the cell — so a kit
+  with thousands of bitmaps scrolls without stalling the UI. The decoded set is
+  capped and evicts least-recently-shown first, rather than growing without
+  bound.
+- On a loose editing kit the browser needs the full background index to see
+  every folder, and asks for it on open if it has not run yet.
+- **Left open, it comes back.** A workspace that had the Bitmap Library open
+  reopens it on the next session restore, alongside that workspace's tags. It
+  travels with its own workspace, so opening it in one game does not open it in
+  another.
 
 ### Model preview
 
@@ -601,7 +648,8 @@ per game:
 Launchers are disabled until the relevant executable is found in the kit.
 
 When a loose `.scenario` tag is open, its editor header also provides Sapien and
-tag_test buttons. Baboon saves pending edits and passes the absolute scenario
+tag_test buttons, and the same two are on the tag's right-click menu in the
+browser. Baboon saves pending edits and passes the absolute scenario
 file directly to Sapien. **Halo: Combat Evolved has no Sapien button at all** —
 that kit's Sapien takes no scenario on its command line, so there is no way to
 open one in it, and a control that can never work is not offered greyed out.
@@ -618,7 +666,7 @@ assembled command runs in the integrated terminal.
 
 ### Preferences
 
-Browser mode, prefix display, expert mode, dark/light theme, the Blender path,
+Browser mode, prefix display, expert mode, angle units, dark/light theme, the Blender path,
 custom editing-kit folder names, recent folders, keyword and palette sidecars,
 and per-kit terminal state are persisted to `%APPDATA%\Baboon` and restored on
 launch.

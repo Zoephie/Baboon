@@ -3792,6 +3792,26 @@ impl Baboon {
         }
     }
 
+    /// Close one Chimp package pane and drop its document.
+    ///
+    /// Returns `false` when the package was kept because it holds unsaved
+    /// edits. Chimp has no save-changes prompt of its own — a dirty package
+    /// simply refuses to close — so the caller reports that, since one blocked
+    /// package in a "close all" is not worth a message per package.
+    pub(in crate::app) fn close_chimp_package(&mut self, kit_index: usize, package: &str) -> bool {
+        if self.kits[kit_index]
+            .chimp
+            .documents
+            .get(package)
+            .is_some_and(|document| document.dirty)
+        {
+            return false;
+        }
+        self.kits[kit_index].chimp.close_document_pane(package);
+        self.kits[kit_index].chimp.documents.remove(package);
+        true
+    }
+
     fn draw_chimp_tiles(&mut self, ui: &mut Ui, ctx: &egui::Context, kit_index: usize) {
         let Some(mut tree) = self.kits[kit_index].chimp.document_tree.take() else {
             ui.centered_and_justified(|ui| {
@@ -3849,17 +3869,9 @@ impl Baboon {
         requested.dedup();
         let mut blocked = false;
         for package in requested {
-            if self.kits[kit_index]
-                .chimp
-                .documents
-                .get(&package)
-                .is_some_and(|document| document.dirty)
-            {
+            if !self.close_chimp_package(kit_index, &package) {
                 blocked = true;
-                continue;
             }
-            self.kits[kit_index].chimp.close_document_pane(&package);
-            self.kits[kit_index].chimp.documents.remove(&package);
         }
         if blocked {
             self.status = "Save or discard modified Chimp packages before closing them.".to_owned();

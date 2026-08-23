@@ -125,6 +125,8 @@ mod button_icons;
 use button_icons::*;
 mod editor;
 use editor::*;
+mod bitmap_browser;
+use bitmap_browser::*;
 mod audio;
 mod sound_extract;
 use sound_extract::*;
@@ -205,6 +207,10 @@ pub struct Baboon {
     /// the outcome after the status line has expired.
     last_update_check: Option<UpdateCheckResult>,
     show_block_sizes: bool,
+    /// Mirrors [`crate::format::angles_in_degrees`], which is where the
+    /// formatters actually read it; this field is what gets persisted and
+    /// what the checkboxes bind to.
+    angles_in_degrees: bool,
     scroll_to_cycle_dropdowns: bool,
     /// Warn before Save overwrites Campaign Evolved pak files in place.
     confirm_container_overwrite: bool,
@@ -504,6 +510,7 @@ impl Baboon {
             available_update: None,
             last_update_check: None,
             show_block_sizes: prefs.show_block_sizes,
+            angles_in_degrees: prefs.angles_in_degrees,
             scroll_to_cycle_dropdowns: prefs.scroll_to_cycle_dropdowns,
             confirm_container_overwrite: prefs.confirm_container_overwrite,
             confirm_runtime_poke: prefs.confirm_runtime_poke,

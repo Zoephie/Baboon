@@ -70,6 +70,14 @@ impl Baboon {
                 .as_ref()
                 .and_then(|source| source.game.clone()),
         );
+        set_browser_scenario_launch(
+            ui,
+            self.kits[kit_index]
+                .source
+                .as_ref()
+                .map(crate::app::controller::scenario_launch_availability)
+                .unwrap_or_default(),
+        );
         self.refresh_deletable_keys(kit_index);
         set_browser_deletable_keys(
             ui,

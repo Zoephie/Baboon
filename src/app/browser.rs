@@ -103,6 +103,30 @@ pub(in crate::app) fn browser_game_is_campaign_evolved(ui: &Ui) -> bool {
         .is_some_and(|game| game == "haloce_evolved")
 }
 
+/// What the kit currently being drawn can launch a scenario in, published the
+/// same way and for the same reason as the modified set: the row menu offers
+/// Sapien and tag_test, and the tree's drawing functions have no other route to
+/// the executables on disk.
+fn scenario_launch_id() -> egui::Id {
+    egui::Id::new("browser_scenario_launch")
+}
+
+pub(in crate::app) fn set_browser_scenario_launch(
+    ui: &Ui,
+    availability: crate::app::controller::ScenarioLaunchAvailability,
+) {
+    ui.data_mut(|data| data.insert_temp(scenario_launch_id(), availability));
+}
+
+pub(in crate::app) fn browser_scenario_launch(
+    ui: &Ui,
+) -> crate::app::controller::ScenarioLaunchAvailability {
+    ui.data(|data| {
+        data.get_temp::<crate::app::controller::ScenarioLaunchAvailability>(scenario_launch_id())
+    })
+    .unwrap_or_default()
+}
+
 /// Colour for a tag that this workspace created, with no counterpart in the
 /// game. Paired with a `+` marker wherever it is used, so the meaning does not
 /// rest on colour alone.

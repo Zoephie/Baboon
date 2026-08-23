@@ -17,6 +17,9 @@ use terminal::{
 mod tools;
 use tools::*;
 mod scenario_launch;
+// Re-exported: the browser's row menus gate on this, and its drawing functions
+// reach it through egui memory rather than through `Baboon`.
+pub(super) use scenario_launch::{ScenarioLaunchAvailability, scenario_launch_availability};
 use scenario_launch::*;
 mod queries;
 use queries::*;
@@ -966,6 +969,9 @@ impl Baboon {
                 }
                 WorkerMessage::ImportAnalysisFinished { result, templates } => {
                     self.handle_import_analysis_finished(result, templates, ctx)
+                }
+                WorkerMessage::BitmapThumbnailDecoded { stamp, key, result } => {
+                    self.handle_bitmap_thumbnail_decoded(stamp, key, result, ctx)
                 }
                 WorkerMessage::AllEntriesScanned { stamp, result } => {
                     self.handle_all_entries_scanned(stamp, result, ctx)
@@ -3266,6 +3272,12 @@ impl Baboon {
             tags,
             chimp_packages,
             active_chimp_package,
+            // Read off the open tabs rather than the tag list: the library's
+            // pane key resolves to no entry, so the loop above skipped it.
+            bitmap_library_open: kit
+                .open_tabs
+                .iter()
+                .any(|key| key == BITMAP_LIBRARY_KEY),
             was_active,
         })
     }
@@ -3284,6 +3296,7 @@ impl Baboon {
             tags,
             chimp_packages,
             active_chimp_package,
+            bitmap_library_open,
             was_active,
         } in kits
         {
@@ -3338,6 +3351,7 @@ impl Baboon {
             }
             self.kits[self.active].pending_restore_tags = tags;
             self.kits[self.active].pending_restore_chimp_packages = chimp_packages;
+            self.kits[self.active].pending_restore_bitmap_library = bitmap_library_open;
             self.kits[self.active].pending_restore_active_chimp_package = active_chimp_package;
             // Its browser view is staged the same way: `install_loaded_source`
             // carries it across the load rather than resetting it, so each
@@ -3408,6 +3422,12 @@ impl Baboon {
 
     /// Reopen the tags staged for the kit that just finished loading.
     fn finish_pending_session_restore(&mut self, ctx: egui::Context) {
+        // Ahead of the early return below: a workspace whose only open tab was
+        // the Bitmap Library has no tags staged, and would otherwise come back
+        // without it.
+        if std::mem::take(&mut self.kits[self.active].pending_restore_bitmap_library) {
+            self.open_bitmap_library();
+        }
         let restore = std::mem::take(&mut self.kits[self.active].pending_restore_tags);
         if restore.is_empty() {
             return;
@@ -3582,6 +3602,9 @@ impl Baboon {
             BrowserAction::DeleteTag(key) => self.open_delete_tag(&key),
             BrowserAction::FindReferences(key) => self.show_references_for(&key),
             BrowserAction::ExploreReferences(key) => self.open_content_explorer(&key),
+            BrowserAction::DumpReferences(key) => self.begin_dump_tag_references(&key, ctx),
+            BrowserAction::LaunchScenarioInSapien(key) => self.launch_scenario_in_sapien(&key),
+            BrowserAction::LaunchScenarioInTagTest(key) => self.launch_scenario_in_tag_test(&key),
             BrowserAction::MoveTag(key) => self.begin_move_tag(&key),
             BrowserAction::ImportTagInFolder { folder_rel } => self.begin_import_tag(folder_rel),
             BrowserAction::NewTagInFolder { folder_rel } => {
@@ -3709,6 +3732,53 @@ impl Baboon {
             let _ = path;
             self.status = "Open folder is only available on Windows".to_owned();
         }
+    }
+
+    /// Write the whole tree of tags this one pulls in to a text file.
+    ///
+    /// Runs on the UI thread, unlike the JSON dump beside it: that one re-parses
+    /// the tag from disk, while this reads an index already in memory and a walk
+    /// over it costs microseconds. Cloning the index onto a worker would be the
+    /// expensive half of the job.
+    pub(super) fn begin_dump_tag_references(&mut self, key: &str, _ctx: egui::Context) {
+        let Some(source) = self.source() else {
+            self.status = "No tag source is loaded".to_owned();
+            return;
+        };
+        let Some(index) = source.reverse_dependencies.as_ref() else {
+            self.status =
+                "Build the reference index first — Tools ▸ Build/Rebuild Reference Index".to_owned();
+            return;
+        };
+        let Some(root) = self.entry_for_key(key).cloned() else {
+            self.status = "That tag is no longer in the source".to_owned();
+            return;
+        };
+        // Built once over the whole entry set. `children_of_entry` rebuilds this
+        // per call, which is fine for one hop and quadratic inside a recursion.
+        let mut by_dependency_key: HashMap<String, TagEntry> = HashMap::new();
+        for entry in source.full_entry_set() {
+            if let Some(rel) = dependency_entry_reference_path(entry, self.names()) {
+                by_dependency_key
+                    .entry(crate::source::dependency_key(entry.group_tag, &rel))
+                    .or_insert_with(|| entry.clone());
+            }
+        }
+        let report = tag_reference_tree_text(index, &by_dependency_key, &root);
+
+        let default_name = format!("{}-references.txt", tag_file_stem(&root));
+        let Some(output) = rfd::FileDialog::new()
+            .set_title("Dump Tag References")
+            .add_filter("Text file", &["txt"])
+            .set_file_name(&default_name)
+            .save_file()
+        else {
+            return;
+        };
+        self.status = match fs::write(&output, report) {
+            Ok(()) => format!("Wrote {}", output.display()),
+            Err(error) => format!("Could not write {}: {error}", output.display()),
+        };
     }
 
     /// Starts potentially expensive source or export work off the UI thread.
@@ -7271,6 +7341,7 @@ impl Baboon {
             update_channel: self.update_channel,
             check_updates_on_startup: self.check_updates_on_startup,
             show_block_sizes: self.show_block_sizes,
+            angles_in_degrees: self.angles_in_degrees,
             scroll_to_cycle_dropdowns: self.scroll_to_cycle_dropdowns,
             confirm_container_overwrite: self.confirm_container_overwrite,
             confirm_runtime_poke: self.confirm_runtime_poke,

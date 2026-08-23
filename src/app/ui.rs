@@ -572,6 +572,27 @@ impl Baboon {
         }
     }
 
+    /// Tools ▸ Assets: the asset libraries, browsed across the whole kit rather
+    /// than one tag at a time.
+    fn draw_assets_tools_menu(&mut self, ui: &mut Ui) {
+        let enabled = self.source().is_some();
+        let response = ui
+            .add_enabled_ui(enabled, |ui| {
+                ui.menu_button("Assets", |ui| {
+                    ui.set_min_width(210.0);
+                    if ui.button("Bitmap Browser").clicked() {
+                        self.open_bitmap_library();
+                        ui.close_menu();
+                    }
+                })
+                .response
+            })
+            .inner;
+        if !enabled {
+            response.on_disabled_hover_text("Load an editing kit to browse its assets");
+        }
+    }
+
     /// Per-tag keyword chips (add via Enter/Add, remove via the chip button).
     /// Keywords live in an external sidecar, not the tag binary.
     fn draw_keyword_bar(&mut self, ui: &mut Ui, kit_index: usize, tag_key: &str) {

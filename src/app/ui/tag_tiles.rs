@@ -44,6 +44,18 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         pane: &mut String,
     ) -> egui_tiles::UiResponse {
         let key = pane.clone();
+        // The one pane that is not a tag. Handled before the entry lookup,
+        // because nothing in the source answers to its key by design.
+        if key == BITMAP_LIBRARY_KEY {
+            if ui.input(|input| input.pointer.any_pressed())
+                && ui.rect_contains_pointer(ui.max_rect())
+            {
+                self.focused = Some(key.clone());
+            }
+            self.app
+                .draw_bitmap_library(ui, &self.ctx, self.kit_index);
+            return egui_tiles::UiResponse::None;
+        }
         let Some(entry) = self.app.kits[self.kit_index]
             .source
             .as_ref()
@@ -89,6 +101,9 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
     }
 
     fn tab_title_for_pane(&mut self, pane: &String) -> egui::WidgetText {
+        if pane == BITMAP_LIBRARY_KEY {
+            return RichText::new(BITMAP_LIBRARY_TITLE).color(text_dark()).into();
+        }
         let dirty = self.app.kits[self.kit_index]
             .parsed_tags
             .get(pane)
@@ -323,6 +338,11 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
 
 impl TagPaneBehavior<'_> {
     fn group_tag_for_key(&self, key: &str) -> Option<u32> {
+        // The Bitmap Library is not a tag and has no group icon; `Some(0)` here
+        // would reserve icon space and paint whatever group zero resolves to.
+        if key == BITMAP_LIBRARY_KEY {
+            return None;
+        }
         self.tab_labels.get(key).map(|(_, group_tag)| *group_tag)
     }
 }
@@ -344,6 +364,12 @@ impl Baboon {
         for tile in tree.tiles.tiles() {
             let egui_tiles::Tile::Pane(key) = tile else { continue; };
             if labels.contains_key(key) {
+                continue;
+            }
+            if key == BITMAP_LIBRARY_KEY {
+                // No group, so no icon: `group_tag_for_key` reads this map, and
+                // the bitmap group's icon would claim this is a bitmap tag.
+                labels.insert(key.clone(), (BITMAP_LIBRARY_TITLE.to_owned(), 0));
                 continue;
             }
             let found = kit
@@ -409,6 +435,22 @@ impl Baboon {
         let close_all = behavior.close_all;
         let close_all_but = behavior.close_all_but.take();
         self.kits[kit_index].tag_tree = tree;
+
+        // A bitmap double-clicked in the Bitmap Library. Applied here, with the
+        // tree back in place: the grid draws while it is moved out, so opening
+        // from inside the walk writes the tab into the discarded placeholder.
+        if let Some(key) = self.kits[kit_index].bitmap_browser.pending_open.take() {
+            self.active = kit_index;
+            self.select_entry(key, ctx.clone());
+        }
+        // Likewise the extract, which additionally opens a blocking folder
+        // picker — not something to do part-way through drawing the pane that
+        // asked for it. `begin_extract_bitmap` resolves the tag against the
+        // active kit, so that has to be this one first.
+        if let Some(key) = self.kits[kit_index].bitmap_browser.pending_extract.take() {
+            self.active = kit_index;
+            self.begin_extract_bitmap(key, ctx.clone());
+        }
 
         // The tree owns the layout, so a drag or split there is what changes
         // the open set — re-derive it rather than the other way round.

@@ -16,6 +16,11 @@ pub(in crate::app) enum DeferredFileAction {
     ExtractAllContainerTags,
     PokeCurrentTag,
     Close(PendingCloseAction),
+    /// Close whatever the active workspace currently has selected — a tag tab,
+    /// or a Chimp package when that surface is up. Which one it is cannot be
+    /// decided at `Ctrl+W` time without duplicating the surface check that
+    /// `SaveCurrentTag` already defers, so this resolves alongside it.
+    CloseCurrentTab,
 }
 
 #[derive(Clone, Debug)]

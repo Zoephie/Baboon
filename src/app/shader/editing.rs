@@ -937,7 +937,7 @@ fn decode_shader_bitmap_thumbnail(
 }
 
 /// Nearest-neighbour downscale of an RGBA8 image to fit within `max` px.
-pub(super) fn downscale_rgba(
+pub(in crate::app) fn downscale_rgba(
     rgba: &[u8],
     width: u32,
     height: u32,

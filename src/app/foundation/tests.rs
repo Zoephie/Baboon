@@ -22,6 +22,7 @@ mod tests {
     /// in radians, and the editor edits degrees like every other Halo tool.
     #[test]
     fn euler_angles_use_editable_named_components() {
+        let _units = crate::format::AngleUnitGuard::set(true);
         let parts = foundation_editable_component_parts(&TagFieldData::RealEulerAngles2d(
             blam_tags::math::RealEulerAngles2d {
                 yaw: 45f32.to_radians(),

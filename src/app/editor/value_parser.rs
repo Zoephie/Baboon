@@ -136,6 +136,19 @@ pub(in crate::app) fn is_text_editable_value(value: &TagFieldData) -> bool {
     )
 }
 
+/// A typed angle in whatever unit is selected, as the radians the tag stores.
+///
+/// The inverse of [`crate::app::foundation::fmt_angle`], and the two must be
+/// switched by the same flag: a display that showed degrees while the parser
+/// read radians would divide every angle the user retyped by 57.3.
+fn angle_to_radians(typed: f32) -> f32 {
+    if crate::format::angles_in_degrees() {
+        typed.to_radians()
+    } else {
+        typed
+    }
+}
+
 pub(in crate::app) fn parse_gui_field_value(
     field: &TagField<'_>,
     input: &str,
@@ -153,11 +166,12 @@ pub(in crate::app) fn parse_gui_field_value(
         TagFieldType::Tag => parse_group_tag(trimmed)
             .map(TagFieldData::Tag)
             .ok_or_else(|| "expected 1..=4 ASCII group tag".to_owned()),
-        // Typed in degrees, stored in radians. The display side
-        // (`foundation::fmt_degrees`) is the other half of this; the two are kept
+        // Typed in the selected unit, always stored in radians. The display side
+        // (`foundation::fmt_angle`) is the other half of this; the two are kept
         // honest by `angle_fields_round_trip_through_degrees`.
-        TagFieldType::Angle => parse_value(trimmed, "f32")
-            .map(|degrees: f32| TagFieldData::Angle(degrees.to_radians())),
+        TagFieldType::Angle => {
+            parse_value(trimmed, "f32").map(|typed: f32| TagFieldData::Angle(angle_to_radians(typed)))
+        }
         TagFieldType::ShortIntegerBounds => {
             let (lower, upper) = parse_short_bounds(trimmed, "short bounds")?;
             Ok(TagFieldData::ShortIntegerBounds(
@@ -167,8 +181,8 @@ pub(in crate::app) fn parse_gui_field_value(
         TagFieldType::AngleBounds => {
             let (lower, upper) = parse_float_bounds(trimmed, "angle bounds")?;
             Ok(TagFieldData::AngleBounds(blam_tags::math::AngleBounds {
-                lower: lower.to_radians(),
-                upper: upper.to_radians(),
+                lower: angle_to_radians(lower),
+                upper: angle_to_radians(upper),
             }))
         }
         TagFieldType::RealBounds => {
@@ -220,13 +234,13 @@ pub(in crate::app) fn parse_gui_field_value(
                 blam_tags::math::RealQuaternion { i, j, k, w },
             ))
         }
-        // Euler angles are angles: degrees in, radians stored.
+        // Euler angles are angles: converted in, radians stored.
         TagFieldType::RealEulerAngles2d => {
             let [yaw, pitch] = parse_float_channels::<2>(trimmed, "real euler angles 2d")?;
             Ok(TagFieldData::RealEulerAngles2d(
                 blam_tags::math::RealEulerAngles2d {
-                    yaw: yaw.to_radians(),
-                    pitch: pitch.to_radians(),
+                    yaw: angle_to_radians(yaw),
+                    pitch: angle_to_radians(pitch),
                 },
             ))
         }
@@ -234,9 +248,9 @@ pub(in crate::app) fn parse_gui_field_value(
             let [yaw, pitch, roll] = parse_float_channels::<3>(trimmed, "real euler angles 3d")?;
             Ok(TagFieldData::RealEulerAngles3d(
                 blam_tags::math::RealEulerAngles3d {
-                    yaw: yaw.to_radians(),
-                    pitch: pitch.to_radians(),
-                    roll: roll.to_radians(),
+                    yaw: angle_to_radians(yaw),
+                    pitch: angle_to_radians(pitch),
+                    roll: angle_to_radians(roll),
                 },
             ))
         }

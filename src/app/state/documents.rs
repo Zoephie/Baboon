@@ -199,6 +199,12 @@ pub(in crate::app) struct LastSessionKit {
     pub(in crate::app) tags: Vec<LastSessionTag>,
     pub(in crate::app) chimp_packages: Vec<String>,
     pub(in crate::app) active_chimp_package: Option<String>,
+    /// Whether this workspace had the Bitmap Library tab open.
+    ///
+    /// Carried as a flag rather than as a `tags` entry: it is not a tag, has no
+    /// document behind it, and nothing in the source resolves its pane key — the
+    /// tag loop would drop it on the way out and again on the way back in.
+    pub(in crate::app) bitmap_library_open: bool,
     /// Whether this was the kit the user was looking at. Carried per kit rather
     /// than as an index into the list so that dropping a kit — which the
     /// restore prompt lets the user do — cannot silently re-point it at
@@ -224,6 +230,12 @@ pub(in crate::app) struct RestoreKit {
     pub(in crate::app) tags: Vec<LastSessionTag>,
     pub(in crate::app) chimp_packages: Vec<String>,
     pub(in crate::app) active_chimp_package: Option<String>,
+    /// Whether this workspace had the Bitmap Library tab open.
+    ///
+    /// Carried as a flag rather than as a `tags` entry: it is not a tag, has no
+    /// document behind it, and nothing in the source resolves its pane key — the
+    /// tag loop would drop it on the way out and again on the way back in.
+    pub(in crate::app) bitmap_library_open: bool,
     /// Whether this kit was the focused one when the session was saved.
     pub(in crate::app) was_active: bool,
 }
@@ -255,6 +267,12 @@ pub(in crate::app) struct LastOpenedWindowsKit {
     pub(in crate::app) browser_sort: Option<BrowserSort>,
     pub(in crate::app) entries: Vec<LastOpenedWindowEntry>,
     pub(in crate::app) chimp_entries: Vec<LastOpenedChimpEntry>,
+    /// Whether this workspace had the Bitmap Library tab open.
+    ///
+    /// Carried as a flag rather than as a `tags` entry: it is not a tag, has no
+    /// document behind it, and nothing in the source resolves its pane key — the
+    /// tag loop would drop it on the way out and again on the way back in.
+    pub(in crate::app) bitmap_library_open: bool,
     pub(in crate::app) active_chimp_package: Option<String>,
     /// Whether this kit was the focused one when the session was saved.
     pub(in crate::app) was_active: bool,
@@ -326,6 +344,10 @@ impl LastOpenedWindowsKit {
             entries,
             chimp_entries,
             active_chimp_package: saved.active_chimp_package,
+            // Restored with the workspace rather than offered as a checkbox,
+            // like the browser view beside it: the library is a view onto the
+            // kit, not a document that could be missing or unsaved.
+            bitmap_library_open: saved.bitmap_library_open && source_available,
             was_active: saved.was_active,
         })
     }
@@ -387,6 +409,7 @@ impl LastOpenedWindowsPrompt {
                     tags,
                     chimp_packages,
                     active_chimp_package,
+                    bitmap_library_open: kit.bitmap_library_open,
                     was_active: kit.was_active,
                 }
             })

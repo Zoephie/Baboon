@@ -42,6 +42,13 @@ pub(in crate::app) enum BrowserAction {
     ImportScenarioScripts(String),
     FindReferences(String),
     ExploreReferences(String),
+    /// Write every tag this one pulls in, recursively, to a text file the user
+    /// picks. Outbound only — the inbound half is [`BrowserAction::FindReferences`].
+    DumpReferences(String),
+    /// Open this scenario in the kit's own tools. Same two launches the tag
+    /// pane's header offers, reachable without opening the tag first.
+    LaunchScenarioInSapien(String),
+    LaunchScenarioInTagTest(String),
     RenameTag(String),
     DuplicateTag(String),
     DeleteTag(String),

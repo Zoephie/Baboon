@@ -116,6 +116,10 @@ fn prefs_from_value(value: &Value) -> GuiPrefs {
             .get("show_block_sizes")
             .and_then(Value::as_bool)
             .unwrap_or(false),
+        angles_in_degrees: value
+            .get("angles_in_degrees")
+            .and_then(Value::as_bool)
+            .unwrap_or(true),
         scroll_to_cycle_dropdowns: value
             .get("scroll_to_cycle_dropdowns")
             .and_then(Value::as_bool)
@@ -546,6 +550,7 @@ fn prefs_to_value(
         "update_channel": prefs.update_channel.as_str(),
         "check_updates_on_startup": prefs.check_updates_on_startup,
         "show_block_sizes": prefs.show_block_sizes,
+        "angles_in_degrees": prefs.angles_in_degrees,
         "scroll_to_cycle_dropdowns": prefs.scroll_to_cycle_dropdowns,
         "confirm_container_overwrite": prefs.confirm_container_overwrite,
         "confirm_runtime_poke": prefs.confirm_runtime_poke,
@@ -685,9 +690,11 @@ fn parse_last_session(value: &Value) -> Option<LastSessionState> {
         // kit. They are both accepted because they were both written: v1 by
         // released Baboon, v2 by the build that added `.baboon` projects.
         1 | 2 => vec![parse_session_kit(value)?],
-        // Versions 3 and 4 are that same per-kit object, once per open kit.
-        // Version 4 adds optional Chimp package tabs.
-        3 | 4 => value
+        // Versions 3 to 5 are that same per-kit object, once per open kit.
+        // Version 4 adds optional Chimp package tabs, version 5 the Bitmap
+        // Library flag. Each field is optional on the way in, so the older
+        // files still load and only lack what they never recorded.
+        3 | 4 | 5 => value
             .get("kits")?
             .as_array()?
             .iter()
@@ -800,6 +807,12 @@ fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
         .map(str::trim)
         .filter(|package| chimp_packages.iter().any(|open| open == package))
         .map(str::to_owned);
+    // Absent in every session written before the Bitmap Library existed, which
+    // reads back as "it was not open" — the right answer for those files.
+    let bitmap_library_open = value
+        .get("bitmap_library")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     // Keep source-only workspaces. The source path is meaningful session state
     // even when no tag window or project was open in that workspace.
     Some(LastSessionKit {
@@ -814,6 +827,7 @@ fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
         tags,
         chimp_packages,
         active_chimp_package,
+        bitmap_library_open,
         was_active,
     })
 }
@@ -867,6 +881,7 @@ fn session_value(session: &LastSessionState) -> Value {
                 "tags": tags,
                 "chimp_packages": kit.chimp_packages,
                 "active_chimp_package": kit.active_chimp_package,
+                "bitmap_library": kit.bitmap_library_open,
                 // Which workspace the user was looking at. Written as a flag on
                 // the kit rather than an index beside the list: the restore
                 // prompt can drop kits, and an index would then point at
@@ -878,7 +893,7 @@ fn session_value(session: &LastSessionState) -> Value {
         })
         .collect::<Vec<_>>();
     json!({
-        "version": 4,
+        "version": 5,
         "kits": kits,
     })
 }
@@ -1284,6 +1299,7 @@ mod session_tests {
             }],
             chimp_packages: Vec::new(),
             active_chimp_package: None,
+            bitmap_library_open: false,
             was_active: false,
         }
     }
@@ -1303,11 +1319,12 @@ mod session_tests {
                 tags: Vec::new(),
                 chimp_packages: vec!["/Game/Vehicles/Warthog".to_owned()],
                 active_chimp_package: Some("/Game/Vehicles/Warthog".to_owned()),
+                bitmap_library_open: false,
                 was_active: true,
             }],
         };
         let value = session_value(&session);
-        assert_eq!(value["version"], 4);
+        assert_eq!(value["version"], 5);
         let restored = parse_last_session(&value).expect("session parses");
         assert_eq!(restored.kits.len(), 1);
         assert_eq!(restored.kits[0].chimp_packages, ["/Game/Vehicles/Warthog"]);
@@ -1315,6 +1332,50 @@ mod session_tests {
             restored.kits[0].active_chimp_package.as_deref(),
             Some("/Game/Vehicles/Warthog")
         );
+    }
+
+    /// The Bitmap Library comes back open, and a workspace that had *only* the
+    /// library open still survives the round trip.
+    ///
+    /// It cannot ride in `tags`: its pane key resolves to no entry, so the tag
+    /// loop drops it on the way out. A kit with no tags and no Chimp packages is
+    /// the case that would silently lose it.
+    #[test]
+    fn the_bitmap_library_round_trips_on_a_kit_with_nothing_else_open() {
+        let mut only_library = kit("C:/halo3", Some(BrowserMode::Folders));
+        only_library.tags = Vec::new();
+        only_library.bitmap_library_open = true;
+        let session = LastSessionState {
+            kits: vec![only_library, kit("C:/reach", Some(BrowserMode::Groups))],
+        };
+
+        let restored = parse_last_session(&session_value(&session)).expect("session parses");
+
+        assert_eq!(restored.kits.len(), 2, "an empty workspace is still a workspace");
+        assert!(restored.kits[0].bitmap_library_open);
+        assert!(
+            !restored.kits[1].bitmap_library_open,
+            "the flag belongs to its own kit, not to the session"
+        );
+    }
+
+    /// Sessions written before the Bitmap Library existed carry no flag, and
+    /// must read back as "it was not open" rather than failing to parse.
+    #[test]
+    fn a_session_without_the_bitmap_library_flag_still_loads() {
+        let mut value = session_value(&LastSessionState {
+            kits: vec![kit("C:/halo3", Some(BrowserMode::Folders))],
+        });
+        // Exactly what a version-4 file looks like: the field never written.
+        value["version"] = serde_json::json!(4);
+        value["kits"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("bitmap_library");
+
+        let restored = parse_last_session(&value).expect("an older session still parses");
+        assert!(!restored.kits[0].bitmap_library_open);
+        assert_eq!(restored.kits[0].tags.len(), 1, "its tags still come back");
     }
 
     /// Which workspace the user was looking at survives the round trip, and is

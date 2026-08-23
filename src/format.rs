@@ -22,6 +22,73 @@ pub fn process_group_tag_for(name: &str) -> Option<u32> {
     process_group_names().read().ok()?.get(name).copied()
 }
 
+/// Whether angle-typed fields are shown and typed in degrees rather than the
+/// radians they hold on disk. On by default, because that is what Guerilla and
+/// every other Halo tool does.
+///
+/// A process-wide flag rather than a threaded parameter, following
+/// [`crate::app::set_dark_mode`]. The two halves of the conversion sit on
+/// opposite sides of the frame — the display side runs inside the render pass
+/// with a `FieldEditContext` in hand, and the parse side runs after it with
+/// nothing — so a parameter would reach only one of them. They must agree:
+/// TSV export formats and TSV import parses, and a unit that flipped between
+/// them would silently scale a copy/paste round trip by 180/π.
+static ANGLES_IN_DEGREES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
+
+pub fn set_angles_in_degrees(enabled: bool) {
+    ANGLES_IN_DEGREES.store(enabled, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn angles_in_degrees() -> bool {
+    ANGLES_IN_DEGREES.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Holds the process-wide angle unit still for the duration of a test, and puts
+/// it back to the default afterwards.
+///
+/// The unit is a global, so a test that flips it would otherwise race every
+/// other test that formats or parses an angle. **Every angle test takes this
+/// guard**, including the ones that want the default, because a lock only one
+/// side holds serializes nothing.
+#[cfg(test)]
+pub(crate) struct AngleUnitGuard(
+    /// Held, never read: the lock is released by dropping it, which is the
+    /// whole point of the guard.
+    #[allow(dead_code)]
+    std::sync::MutexGuard<'static, ()>,
+);
+
+#[cfg(test)]
+impl AngleUnitGuard {
+    pub(crate) fn set(degrees: bool) -> Self {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        // A test that panicked mid-guard poisoned the lock but left nothing
+        // broken behind it, since `Drop` still restored the unit.
+        let guard = LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        set_angles_in_degrees(degrees);
+        Self(guard)
+    }
+}
+
+#[cfg(test)]
+impl Drop for AngleUnitGuard {
+    fn drop(&mut self) {
+        set_angles_in_degrees(true);
+    }
+}
+
+/// A stored angle in the unit currently selected, for the summary formatters
+/// here. The editor's own text goes through `foundation::fmt_angle`, which
+/// additionally rounds degrees to Guerilla's six significant digits so a value
+/// typed back is stable; nothing is typed back through this one.
+fn shown_angle(radians: f32) -> f32 {
+    if angles_in_degrees() {
+        radians.to_degrees()
+    } else {
+        radians
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 /// Bidirectional group-tag/name lookup assembled from definition metadata.
 /// Merging keeps the first observed mapping so the default cross-game index is
@@ -192,7 +259,16 @@ fn write_value(index: &TagNameIndex, out: &mut String, value: &TagFieldData, hex
             write_block_index(out, *v as i64)
         }
 
-        TagFieldData::Angle(v) => write!(out, "{v:.4} rad ({:.2} deg)", v.to_degrees()).unwrap(),
+        // Both units, ordered so the selected one leads. This is the read-only
+        // summary formatter — nothing is typed back through it — so it can
+        // afford to show the conversion rather than choose between the two.
+        TagFieldData::Angle(v) => {
+            if angles_in_degrees() {
+                write!(out, "{:.2} deg ({v:.4} rad)", v.to_degrees()).unwrap()
+            } else {
+                write!(out, "{v:.4} rad ({:.2} deg)", v.to_degrees()).unwrap()
+            }
+        }
         TagFieldData::Real(v) | TagFieldData::RealSlider(v) | TagFieldData::RealFraction(v) => {
             write!(out, "{v}").unwrap()
         }
@@ -208,12 +284,23 @@ fn write_value(index: &TagNameIndex, out: &mut String, value: &TagFieldData, hex
         TagFieldData::RealQuaternion(q) => {
             write!(out, "i={}, j={}, k={}, w={}", q.i, q.j, q.k, q.w).unwrap()
         }
-        TagFieldData::RealEulerAngles2d(e) => {
-            write!(out, "yaw={}, pitch={}", e.yaw, e.pitch).unwrap()
-        }
-        TagFieldData::RealEulerAngles3d(e) => {
-            write!(out, "yaw={}, pitch={}, roll={}", e.yaw, e.pitch, e.roll).unwrap()
-        }
+        // Euler angles hold radians like every other angle type, so they follow
+        // the same unit rather than always printing what is stored.
+        TagFieldData::RealEulerAngles2d(e) => write!(
+            out,
+            "yaw={}, pitch={}",
+            shown_angle(e.yaw),
+            shown_angle(e.pitch)
+        )
+        .unwrap(),
+        TagFieldData::RealEulerAngles3d(e) => write!(
+            out,
+            "yaw={}, pitch={}, roll={}",
+            shown_angle(e.yaw),
+            shown_angle(e.pitch),
+            shown_angle(e.roll)
+        )
+        .unwrap(),
         TagFieldData::RealPlane2d(p) => write!(out, "i={}, j={}, d={}", p.i, p.j, p.d).unwrap(),
         TagFieldData::RealPlane3d(p) => {
             write!(out, "i={}, j={}, k={}, d={}", p.i, p.j, p.k, p.d).unwrap()
@@ -236,9 +323,16 @@ fn write_value(index: &TagNameIndex, out: &mut String, value: &TagFieldData, hex
         }
 
         TagFieldData::ShortIntegerBounds(b) => write!(out, "{}..{}", b.lower, b.upper).unwrap(),
-        TagFieldData::AngleBounds(b)
-        | TagFieldData::RealBounds(b)
-        | TagFieldData::FractionBounds(b) => write!(out, "{}..{}", b.lower, b.upper).unwrap(),
+        TagFieldData::AngleBounds(b) => write!(
+            out,
+            "{}..{}",
+            shown_angle(b.lower),
+            shown_angle(b.upper)
+        )
+        .unwrap(),
+        TagFieldData::RealBounds(b) | TagFieldData::FractionBounds(b) => {
+            write!(out, "{}..{}", b.lower, b.upper).unwrap()
+        }
 
         TagFieldData::Custom(d) => write!(out, "custom [{} bytes]", d.len()).unwrap(),
     }

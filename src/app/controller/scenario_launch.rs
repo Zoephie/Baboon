@@ -124,6 +124,60 @@ pub(super) fn sapien_supports_scenario_argument(game: &str) -> bool {
     )
 }
 
+/// What a kit can launch a scenario in, decided without reference to any one
+/// tag.
+///
+/// The browser's row menus need this. Their drawing functions are free
+/// functions with no `&Baboon`, so they cannot run the per-entry validation
+/// `scenario_launch_context` does; they gate on the kit-wide half here and let
+/// the controller report anything that only the entry can rule out.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(in crate::app) struct ScenarioLaunchAvailability {
+    /// This kit can launch scenarios at all: a supported MCC game, mounted as a
+    /// loose `tags` folder. False for cache and container sources.
+    pub(in crate::app) supported: bool,
+    /// This kit's Sapien accepts a scenario on its command line — see
+    /// [`sapien_supports_scenario_argument`]. Decides whether the item is shown
+    /// at all, not whether it is enabled.
+    pub(in crate::app) offers_sapien: bool,
+    pub(in crate::app) sapien_present: bool,
+    pub(in crate::app) tag_test_present: bool,
+}
+
+pub(in crate::app) fn scenario_launch_availability(
+    source: &LoadedSourceData,
+) -> ScenarioLaunchAvailability {
+    let unsupported = ScenarioLaunchAvailability::default();
+    let Some(game) = source
+        .game
+        .as_deref()
+        .filter(|game| SUPPORTED_SCENARIO_LAUNCH_GAMES.contains(game))
+    else {
+        return unsupported;
+    };
+    let TagSource::LooseFolder { root, .. } = &source.source else {
+        return unsupported;
+    };
+    if !root
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| name.eq_ignore_ascii_case("tags"))
+    {
+        return unsupported;
+    }
+    let Some(kit_root) = root.parent() else {
+        return unsupported;
+    };
+    ScenarioLaunchAvailability {
+        supported: true,
+        offers_sapien: sapien_supports_scenario_argument(game),
+        sapien_present: kit_root.join("sapien.exe").is_file(),
+        tag_test_present: kit_root
+            .join(tag_test_executable_for_game(Some(game)))
+            .is_file(),
+    }
+}
+
 pub(super) fn scenario_startup_command(game: &str, scenario_path: &str) -> String {
     let command = if game == "haloce_mcc" {
         "map_name"
@@ -375,6 +429,46 @@ mod tests {
         assert_eq!(context.scenario_file, scenario_file);
         assert_eq!(context.scenario_path, "levels\\test\\my map\\my map");
         assert_eq!(context.game, "halo3_mcc");
+    }
+
+    /// The browser's row menu gates on this rather than on the per-entry
+    /// context, so what it refuses is worth pinning separately: a kit that
+    /// cannot launch at all must offer neither item, and a kit whose Sapien
+    /// takes no scenario must offer only tag_test.
+    #[test]
+    fn availability_refuses_unsupported_kits_and_hides_halo_ce_sapien() {
+        let tags_root = std::env::temp_dir().join("baboon-availability").join("tags");
+
+        let unsupported = scenario_launch_availability(&loaded_source(
+            tags_root.clone(),
+            "haloce_evolved",
+        ));
+        assert!(
+            !unsupported.supported,
+            "Campaign Evolved launches no scenarios"
+        );
+        assert!(!unsupported.offers_sapien);
+
+        // Combat Evolved keeps tag_test but can never take a scenario in Sapien.
+        let halo_ce = scenario_launch_availability(&loaded_source(tags_root.clone(), "haloce_mcc"));
+        assert!(halo_ce.supported);
+        assert!(
+            !halo_ce.offers_sapien,
+            "Halo CE's Sapien takes no scenario argument"
+        );
+
+        let halo3 = scenario_launch_availability(&loaded_source(tags_root.clone(), "halo3_mcc"));
+        assert!(halo3.supported && halo3.offers_sapien);
+        // Nothing is on disk under a temp path, so neither executable is found
+        // and both items would draw disabled rather than missing.
+        assert!(!halo3.sapien_present && !halo3.tag_test_present);
+
+        // A folder that is not the kit's `tags` root cannot resolve a kit root.
+        let not_tags = scenario_launch_availability(&loaded_source(
+            tags_root.parent().unwrap().to_path_buf(),
+            "halo3_mcc",
+        ));
+        assert!(!not_tags.supported);
     }
 
     #[test]

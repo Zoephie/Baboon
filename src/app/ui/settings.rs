@@ -858,6 +858,13 @@ impl Baboon {
         ui.label(RichText::new("Appearance").color(text_dark()).strong());
         ui.add_space(4.0);
         ui.checkbox(&mut self.dark_mode, "Dark mode");
+        ui.checkbox(&mut self.angles_in_degrees, "Angles in degrees")
+            .on_hover_text(
+                "Angle fields hold radians on disk. Guerilla and the other Halo tools show them \
+                 in degrees, and so does Baboon — turn this off to read and type the stored \
+                 radians instead. Field search, TSV copy/paste and the tag diff follow the same \
+                 setting.",
+            );
         ui.horizontal(|ui| {
             ui.label(RichText::new("UI scale").color(subtle_dark()));
             ui.add(

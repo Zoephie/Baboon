@@ -259,7 +259,7 @@ impl Baboon {
                         if ui
                             .add_enabled(
                                 self.kits[self.active].selected_key.is_some(),
-                                egui::Button::new("Close Current Tag"),
+                                egui::Button::new("Close Current Tag    Ctrl+W"),
                             )
                             .clicked()
                         {
@@ -433,6 +433,7 @@ impl Baboon {
                             self.tool_commands.open = true;
                         }
                         self.draw_monitor_tools_menu(ui);
+                        self.draw_assets_tools_menu(ui);
                         ui.separator();
                         if ui
                             .add_enabled(
@@ -566,6 +567,12 @@ impl Baboon {
                         ui.separator();
                         ui.checkbox(&mut self.show_browser_prefixes, "Show [tag]/[folder]");
                         ui.checkbox(&mut self.show_block_sizes, "Show block sizes");
+                        ui.checkbox(&mut self.angles_in_degrees, "Angles in degrees")
+                            .on_hover_text(
+                                "Angle fields hold radians on disk. Guerilla and the other Halo \
+                                 tools show them in degrees, and so does Baboon — turn this off to \
+                                 read and type the stored radians instead.",
+                            );
                         ui.checkbox(
                             &mut self.scroll_to_cycle_dropdowns,
                             "Scroll wheel cycles dropdowns",
@@ -1319,6 +1326,23 @@ impl Baboon {
             }
             Some(DeferredFileAction::PokeCurrentTag) => self.begin_poke_current_tag(ctx.clone()),
             Some(DeferredFileAction::Close(action)) => self.request_close_action(action, ctx),
+            Some(DeferredFileAction::CloseCurrentTab)
+                if self.enable_chimp && self.kits[self.active].surface == KitSurface::Chimp =>
+            {
+                if let Some(package) = self.kits[self.active].chimp.selected_package.clone() {
+                    let kit = self.active;
+                    if !self.close_chimp_package(kit, &package) {
+                        self.status =
+                            "Save or discard modified Chimp packages before closing them."
+                                .to_owned();
+                    }
+                }
+            }
+            Some(DeferredFileAction::CloseCurrentTab) => {
+                if let Some(key) = self.kits[self.active].selected_key.clone() {
+                    self.request_close_action(PendingCloseAction::CloseTab(key), ctx);
+                }
+            }
             None => {}
         }
     }
@@ -1343,6 +1367,10 @@ impl Baboon {
         self.handle_pixels_per_point_change(ctx);
         self.maybe_refresh_entry_index(ctx.clone());
         set_dark_mode(self.dark_mode);
+        // Pushed the same way and for the same reason as the theme: the two
+        // halves of the angle conversion are free functions on opposite sides
+        // of the frame, and neither can reach `Baboon`.
+        crate::format::set_angles_in_degrees(self.angles_in_degrees);
         ctx.set_visuals(foundation_visuals());
         set_combo_scroll_cycle_enabled(ctx, self.scroll_to_cycle_dropdowns);
         // Opened before any pane draws and settled after the last one, so a
@@ -1359,6 +1387,12 @@ impl Baboon {
         }
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::P)) {
             self.defer_file_action(DeferredFileAction::PokeCurrentTag, ctx);
+        }
+        // Deferred like the File menu's Close Current Tag: the close runs after
+        // the editor renders, so an edit still focused in a field is committed
+        // before the dirty check decides whether to prompt.
+        if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::W)) {
+            self.defer_file_action(DeferredFileAction::CloseCurrentTab, ctx);
         }
         // Undo: Ctrl+Z. Redo: Ctrl+Shift+Z or Ctrl+Y.
         if ctx.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Z)) {

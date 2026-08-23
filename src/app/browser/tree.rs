@@ -48,7 +48,7 @@ pub(in crate::app) fn entry_reference_input(entry: &TagEntry) -> String {
 
 /// Forward-slash, extension-less relative path of an entry — the form shader
 /// bitmap rows use for their references.
-fn entry_rel_path(entry: &TagEntry) -> String {
+pub(in crate::app) fn entry_rel_path(entry: &TagEntry) -> String {
     let display = &entry.display_path;
     let without_ext = match display.rfind('.') {
         Some(dot) => &display[..dot],
@@ -57,7 +57,7 @@ fn entry_rel_path(entry: &TagEntry) -> String {
     without_ext.replace('\\', "/")
 }
 
-fn context_menu_button(ui: &mut Ui, label: &str) -> egui::Response {
+pub(in crate::app) fn context_menu_button(ui: &mut Ui, label: &str) -> egui::Response {
     let text = RichText::new(label).color(text_dark());
     let button = match context_menu_icon(label) {
         Some(icon) => {
@@ -90,6 +90,8 @@ fn context_menu_icon(label: &str) -> Option<ButtonIcon> {
         "Copy Tag Path" => Some(ButtonIcon::CopyPath),
         "Find Tag References..." => Some(ButtonIcon::Find),
         "Dump Tag to JSON..." => Some(ButtonIcon::Json),
+        "Dump Tag References..." => Some(ButtonIcon::Doc),
+        "Open in Sapien" | "Open in tag_test" => Some(ButtonIcon::Open),
         _ => None,
     }
 }
@@ -100,7 +102,7 @@ fn context_menu_separator(ui: &mut Ui) {
     ui.add_space(3.0);
 }
 
-fn style_tag_context_menu(ui: &mut Ui) {
+pub(in crate::app) fn style_tag_context_menu(ui: &mut Ui) {
     ui.set_min_width(300.0);
     ui.spacing_mut().item_spacing = Vec2::new(0.0, 1.0);
     ui.spacing_mut().button_padding = Vec2::new(8.0, 4.0);
@@ -1344,6 +1346,42 @@ pub(in crate::app) fn draw_entry(
             }
         }
 
+        // The same two launches the tag pane's header offers, so a scenario can
+        // be opened in the kit's tools without opening the tag first. Shown only
+        // where the kit can launch at all; Sapien is *hidden* rather than
+        // disabled where it takes no scenario argument, matching the toolbar —
+        // a control that can never work is not offered greyed out.
+        let launch = browser_scenario_launch(ui);
+        if launch.supported && is_scenario_group(entry.group_tag) {
+            context_menu_separator(ui);
+            if launch.offers_sapien {
+                let response = ui
+                    .add_enabled_ui(launch.sapien_present, |ui| {
+                        context_menu_button(ui, "Open in Sapien")
+                    })
+                    .inner;
+                if response.clicked() {
+                    action = Some(BrowserAction::LaunchScenarioInSapien(entry.key.clone()));
+                    ui.close_menu();
+                }
+                if !launch.sapien_present {
+                    response.on_disabled_hover_text("sapien.exe was not found in this editing kit");
+                }
+            }
+            let response = ui
+                .add_enabled_ui(launch.tag_test_present, |ui| {
+                    context_menu_button(ui, "Open in tag_test")
+                })
+                .inner;
+            if response.clicked() {
+                action = Some(BrowserAction::LaunchScenarioInTagTest(entry.key.clone()));
+                ui.close_menu();
+            }
+            if !launch.tag_test_present {
+                response.on_disabled_hover_text("This kit's tag_test was not found in it");
+            }
+        }
+
         context_menu_separator(ui);
         if context_menu_button(ui, "Open with File Explorer").clicked() {
             action = Some(BrowserAction::OpenInExplorer(entry.key.clone()));
@@ -1376,6 +1414,10 @@ pub(in crate::app) fn draw_entry(
         context_menu_separator(ui);
         if context_menu_button(ui, "Dump Tag to JSON...").clicked() {
             action = Some(BrowserAction::DumpJson(entry.key.clone()));
+            ui.close_menu();
+        }
+        if context_menu_button(ui, "Dump Tag References...").clicked() {
+            action = Some(BrowserAction::DumpReferences(entry.key.clone()));
             ui.close_menu();
         }
     });
