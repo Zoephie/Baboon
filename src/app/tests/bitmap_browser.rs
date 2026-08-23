@@ -424,7 +424,7 @@ fn real_kit_bitmaps_decode_at_thumbnail_size() {
         };
         // Some shipped bitmaps genuinely hold no images; that is a `None`
         // thumbnail in the grid, not a failure here.
-        let Ok(image) = decode_thumbnail(&tag, CELL) else {
+        let Ok(image) = decode_thumbnail(&tag, 0, CELL) else {
             continue;
         };
         assert!(

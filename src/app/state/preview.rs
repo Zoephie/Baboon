@@ -137,6 +137,12 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) loaded_high_detail: bool,
     pub(in crate::app) render_mode: ModelRenderMode,
     pub(in crate::app) show_backfaces: bool,
+    /// Sample the model's own shader textures rather than the flat per-material
+    /// palette. Off falls back to the untextured view, which stays useful for
+    /// reading silhouette and topology.
+    pub(in crate::app) shaded: bool,
+    /// A texture-resolve job is running for the loaded model.
+    pub(in crate::app) textures_pending: bool,
     pub(in crate::app) scale: f32,
     pub(in crate::app) yaw: f32,
     pub(in crate::app) pitch: f32,
@@ -159,6 +165,8 @@ impl Default for ModelPreviewState {
             loaded_high_detail: false,
             render_mode: ModelRenderMode::Shaded,
             show_backfaces: false,
+            shaded: true,
+            textures_pending: false,
             scale: 1.0,
             yaw: -0.45,
             pitch: 0.25,
@@ -239,6 +247,11 @@ pub(in crate::app) struct ModelPreviewData {
     /// Monotonic identity used by the shared GL upload cache. Unlike a pointer,
     /// it cannot be accidentally reused after a preview reload.
     pub(in crate::app) geometry_id: u64,
+    /// One entry per `RenderModelPreview::materials`, once the worker has
+    /// resolved them. `None` while that job is still running — the panel shows
+    /// its spinner rather than drawing the model untextured, so a model never
+    /// appears half-shaded and then changes under the cursor.
+    pub(in crate::app) textures: Option<std::sync::Arc<Vec<MaterialTextures>>>,
     pub(in crate::app) variants: Vec<ModelVariantPreview>,
 }
 

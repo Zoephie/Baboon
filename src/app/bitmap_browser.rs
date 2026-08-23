@@ -166,22 +166,27 @@ pub(in crate::app) struct ThumbnailImage {
 /// the bitmaps that ship no mips at all.
 pub(in crate::app) fn decode_thumbnail(
     tag: &TagFile,
+    image_index: usize,
     max_edge: u32,
 ) -> anyhow::Result<ThumbnailImage> {
     let bitmap = Bitmap::new(tag)?;
     if bitmap.is_empty() {
         anyhow::bail!("bitmap tag has no images");
     }
+    // Clamped rather than rejected: a shader may name an image index the
+    // bitmap it points at no longer has, and one stale index should cost the
+    // wrong image rather than the whole material.
+    let image_index = image_index.min(bitmap.len() - 1);
     let image = bitmap
-        .image(0)
-        .ok_or_else(|| anyhow::anyhow!("bitmap tag has no first image"))?;
+        .image(image_index)
+        .ok_or_else(|| anyhow::anyhow!("bitmap tag has no image {image_index}"))?;
     let mip = smallest_mip_covering(
         image.width(),
         image.height(),
         (image.mipmap_levels() as usize).max(1),
         max_edge,
     );
-    let data = build_bitmap_preview(tag, 0, mip)?;
+    let data = build_bitmap_preview(tag, image_index, mip)?;
     let (rgba, width, height) = crate::app::shader::downscale_rgba(
         &data.rgba,
         data.width as u32,
@@ -667,7 +672,7 @@ impl Baboon {
                 // how each stores its tags — including the JSON layout classic
                 // Halo CE and Halo 2 bitmaps need to parse at all.
                 let result = crate::source::read_entry(&source, &entry)
-                    .and_then(|tag| decode_thumbnail(&tag, max_edge))
+                    .and_then(|tag| decode_thumbnail(&tag, 0, max_edge))
                     .map_err(|error| error.to_string());
                 let _ = tx.send(WorkerMessage::BitmapThumbnailDecoded { stamp, key, result });
                 ctx.request_repaint();

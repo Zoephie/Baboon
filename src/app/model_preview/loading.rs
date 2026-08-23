@@ -213,6 +213,9 @@ pub(super) fn build_particle_model_preview(
             preview.vertices.push(RenderModelPreviewVertex {
                 position,
                 normal: [vertex.normal.i, vertex.normal.j, vertex.normal.k],
+                // Particle models carry no tangent frame, and this path has no
+                // materials to texture with — the defaults leave it unshaded.
+                ..Default::default()
             });
         }
 

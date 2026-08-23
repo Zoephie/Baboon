@@ -115,6 +115,17 @@ pub(in crate::app) enum WorkerMessage {
         key: String,
         result: Result<ThumbnailImage, String>,
     },
+    /// One model's materials resolved to decoded textures, off the UI thread.
+    ModelTexturesResolved {
+        stamp: KitStamp,
+        /// The tag whose `ModelPreviewState` asked for these.
+        key: String,
+        /// Identifies which load this answers, so a reply that arrives after the
+        /// user switched detail level or reloaded is dropped rather than paired
+        /// with geometry it does not belong to.
+        geometry_id: u64,
+        textures: Vec<MaterialTextures>,
+    },
     BitmapReimportFinished {
         kit: KitId,
         key: String,

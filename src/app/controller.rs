@@ -970,6 +970,12 @@ impl Baboon {
                 WorkerMessage::ImportAnalysisFinished { result, templates } => {
                     self.handle_import_analysis_finished(result, templates, ctx)
                 }
+                WorkerMessage::ModelTexturesResolved {
+                    stamp,
+                    key,
+                    geometry_id,
+                    textures,
+                } => self.handle_model_textures_resolved(stamp, key, geometry_id, textures),
                 WorkerMessage::BitmapThumbnailDecoded { stamp, key, result } => {
                     self.handle_bitmap_thumbnail_decoded(stamp, key, result, ctx)
                 }
@@ -3732,6 +3738,85 @@ impl Baboon {
             let _ = path;
             self.status = "Open folder is only available on Windows".to_owned();
         }
+    }
+
+    /// Start resolving a loaded model's materials to textures, if it needs it.
+    ///
+    /// Idempotent and cheap to call every frame: it only spawns when a model is
+    /// loaded, shading is on, its textures are still absent, and no job for it
+    /// is already running.
+    pub(in crate::app) fn maybe_request_model_textures(
+        &mut self,
+        kit_index: usize,
+        key: &str,
+        ctx: &egui::Context,
+    ) {
+        let Some(state) = self.kits[kit_index].model_previews.get(key) else {
+            return;
+        };
+        if !state.shaded || state.textures_pending {
+            return;
+        }
+        let Some(Ok(data)) = state.data.as_ref() else {
+            return;
+        };
+        if data.textures.is_some() || data.preview.materials.is_empty() {
+            return;
+        }
+        let Some(source) = self.kits[kit_index]
+            .source
+            .as_ref()
+            .map(|source| source.source.clone())
+        else {
+            return;
+        };
+        let materials = data.preview.materials.clone();
+        let geometry_id = data.geometry_id;
+        let stamp = KitStamp {
+            kit: self.kits[kit_index].id,
+            generation: self.kits[kit_index].generation,
+        };
+        if let Some(state) = self.kits[kit_index].model_previews.get_mut(key) {
+            state.textures_pending = true;
+        }
+
+        let (tx, ctx, key) = (self.tx.clone(), ctx.clone(), key.to_owned());
+        thread::spawn(move || {
+            let textures = resolve_model_textures(&source, &materials);
+            let _ = tx.send(WorkerMessage::ModelTexturesResolved {
+                stamp,
+                key,
+                geometry_id,
+                textures,
+            });
+            ctx.request_repaint();
+        });
+    }
+
+    pub(in crate::app) fn handle_model_textures_resolved(
+        &mut self,
+        stamp: KitStamp,
+        key: String,
+        geometry_id: u64,
+        textures: Vec<MaterialTextures>,
+    ) -> bool {
+        let Some(kit_index) = self.resolve_stamp(stamp) else {
+            return true;
+        };
+        let Some(state) = self.kits[kit_index].model_previews.get_mut(&key) else {
+            return true;
+        };
+        state.textures_pending = false;
+        let Some(Ok(data)) = state.data.as_mut() else {
+            return true;
+        };
+        // The model was reloaded while this ran — different geometry, and these
+        // textures are indexed against the materials of the old one.
+        if data.geometry_id != geometry_id {
+            return true;
+        }
+        data.textures = Some(std::sync::Arc::new(textures));
+        false
     }
 
     /// Write the whole tree of tags this one pulls in to a text file.

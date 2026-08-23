@@ -305,7 +305,7 @@ impl Baboon {
             });
         }
 
-        kit.parsed_tags.insert(key, doc);
+        kit.parsed_tags.insert(key.clone(), doc);
         // These ops are applied *after* the pane has been drawn, so the frame
         // on screen still shows the tag as it was before the edit. egui only
         // redraws when new input arrives, so nothing here is guaranteed to be
@@ -323,5 +323,9 @@ impl Baboon {
             self.active = kit_index;
             self.begin_reimport_bitmap(key, ctx.clone());
         }
+        // The model preview panel draws without `&mut Baboon`, so it cannot
+        // start its own texture job. Started here instead, once the panel has
+        // had its frame to load the geometry the textures belong to.
+        self.maybe_request_model_textures(kit_index, &key, ctx);
     }
 }

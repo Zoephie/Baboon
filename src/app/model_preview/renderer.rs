@@ -51,6 +51,10 @@ pub(super) fn draw_model_viewport(
         camera: camera.gpu_uniforms(),
         render_mode: state.render_mode,
         show_backfaces: state.show_backfaces,
+        textures: state
+            .shaded
+            .then(|| data.textures.clone())
+            .flatten(),
     };
     painter.add(egui::PaintCallback {
         rect,
@@ -118,6 +122,8 @@ struct ModelGpuFrame {
     camera: ModelGpuCamera,
     render_mode: ModelRenderMode,
     show_backfaces: bool,
+    /// `None` until the worker has resolved them, or when shading is off.
+    textures: Option<Arc<Vec<MaterialTextures>>>,
 }
 
 thread_local! {
@@ -179,6 +185,162 @@ fn paint_model_gl(
     });
 }
 
+/// Sampler uniform per slot, in `TextureSlot` order — the fragment shader binds
+/// texture unit `i` to `SAMPLER_UNIFORMS[i]`.
+const SAMPLER_UNIFORMS: [&str; SLOT_COUNT] = [
+    "u_tex_base",
+    "u_tex_detail",
+    "u_tex_bump",
+    "u_tex_bump_detail",
+    "u_tex_alpha",
+];
+
+/// Build the two GLSL sources.
+///
+/// Split out of `ModelGlRenderer::new` so the shaders can be checked
+/// without a GL context: a compile failure here disables the whole preview
+/// and the only signal is a line on stderr, which no test would see.
+fn model_shader_sources(version_declaration: &str, modern: bool, precision: &str) -> (String, String) {
+        let (attribute, varying_out, varying_in, fragment_output, output_name, sample) = if modern
+        {
+            ("in", "out", "in", "out vec4 out_color;", "out_color", "texture")
+        } else {
+            ("attribute", "varying", "varying", "", "gl_FragColor", "texture2D")
+        };
+        // Position and normal are required; the rest are read only on the
+        // shaded path and a driver may drop them from an unused program.
+        let vertex_source = format!(
+            "{}{precision}\
+             {attribute} vec3 a_position;\n\
+             {attribute} vec3 a_normal;\n\
+             {attribute} vec2 a_texcoord;\n\
+             {attribute} vec3 a_tangent;\n\
+             {attribute} vec3 a_binormal;\n\
+             uniform vec3 u_center;\n\
+             uniform float u_scale;\n\
+             uniform vec2 u_angles;\n\
+             uniform vec2 u_clip_scale;\n\
+             uniform vec2 u_pan_clip;\n\
+             uniform float u_depth_scale;\n\
+             {varying_out} vec2 v_uv;\n\
+             {varying_out} vec3 v_normal;\n\
+             {varying_out} vec3 v_tangent;\n\
+             {varying_out} vec3 v_binormal;\n\
+             vec3 rotate_view(vec3 value) {{\n\
+                 float sy = sin(u_angles.x);\n\
+                 float cy = cos(u_angles.x);\n\
+                 float sp = sin(u_angles.y);\n\
+                 float cp = cos(u_angles.y);\n\
+                 vec3 yawed = vec3(value.x * cy - value.y * sy, value.x * sy + value.y * cy, value.z);\n\
+                 return vec3(yawed.x, yawed.y * cp - yawed.z * sp, yawed.y * sp + yawed.z * cp);\n\
+             }}\n\
+             void main() {{\n\
+                 vec3 view = rotate_view((a_position - u_center) * u_scale);\n\
+                 gl_Position = vec4(view.x * u_clip_scale.x + u_pan_clip.x, view.z * u_clip_scale.y + u_pan_clip.y, view.y * u_depth_scale, 1.0);\n\
+                 vec3 source_normal = length(a_normal) > 0.0001 ? normalize(a_normal) : vec3(0.0, 0.0, 1.0);\n\
+                 v_normal = rotate_view(source_normal);\n\
+                 v_tangent = rotate_view(a_tangent);\n\
+                 v_binormal = rotate_view(a_binormal);\n\
+                 v_uv = a_texcoord;\n\
+             }}\n",
+            version_declaration
+        );
+        // The lighting rig is the one this preview has always used — a key, a
+        // fill, a rim and an overhead term, all in view space so they follow the
+        // camera. It moved from the vertex shader to here so a normal map has
+        // something to perturb: per-vertex lighting would sample the map and
+        // then throw the result away between vertices.
+        let fragment_source = format!(
+            "{}{precision}\
+             {varying_in} vec2 v_uv;\n\
+             {varying_in} vec3 v_normal;\n\
+             {varying_in} vec3 v_tangent;\n\
+             {varying_in} vec3 v_binormal;\n\
+             uniform sampler2D u_tex_base;\n\
+             uniform sampler2D u_tex_detail;\n\
+             uniform sampler2D u_tex_bump;\n\
+             uniform sampler2D u_tex_bump_detail;\n\
+             uniform sampler2D u_tex_alpha;\n\
+             // Which slots this material bound, and each one's UV multiplier.\n\
+             // Slots 0-3 in the `_a` vectors, slot 4 in `_b.x`.\n\
+             uniform vec4 u_have_a;\n\
+             uniform vec4 u_have_b;\n\
+             uniform vec4 u_uv_scale_a;\n\
+             uniform vec4 u_uv_scale_b;\n\
+             uniform vec3 u_base_color;\n\
+             uniform float u_unlit;\n\
+             uniform float u_shaded;\n\
+             {fragment_output}\n\
+             vec3 to_linear(vec3 c) {{ return pow(c, vec3(2.2)); }}\n\
+             vec3 to_srgb(vec3 c) {{ return pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.2)); }}\n\
+             void main() {{\n\
+                 vec3 albedo = u_base_color;\n\
+                 bool shaded = u_shaded > 0.5;\n\
+                 if (shaded) {{\n\
+                     // Alpha test first: a discarded fragment costs nothing else.\n\
+                     // This is the ONLY thing that discards. A base map's alpha\n\
+                     // is not opacity in Halo — it carries a mask, most often\n\
+                     // specular — so treating it as coverage punched holes\n\
+                     // through every character whose diffuse had a dark mask.\n\
+                     if (u_have_b.x > 0.5 && {sample}(u_tex_alpha, v_uv * u_uv_scale_b.x).a < 0.5) discard;\n\
+                     if (u_have_a.x > 0.5) {{\n\
+                         albedo = to_linear({sample}(u_tex_base, v_uv * u_uv_scale_a.x).rgb);\n\
+                     }}\n\
+                     // Halo detail maps are grey-centred and modulate: mid-grey\n\
+                     // leaves the base untouched, darker and lighter push it.\n\
+                     // They tile — commonly sixteen times — so the scale matters.\n\
+                     if (u_have_a.y > 0.5) {{\n\
+                         vec3 detail = to_linear({sample}(u_tex_detail, v_uv * u_uv_scale_a.y).rgb);\n\
+                         albedo = clamp(albedo * detail * 2.0, 0.0, 1.0);\n\
+                     }}\n\
+                 }}\n\
+                 vec3 normal = normalize(v_normal);\n\
+                 if (shaded && (u_have_a.z > 0.5 || u_have_a.w > 0.5)) {{\n\
+                     // Tangent space, using the frame the tag authored rather\n\
+                     // than a reconstructed one — mirrored UV islands need the\n\
+                     // binormal's own sign to come out the right way round.\n\
+                     vec3 t = normalize(v_tangent);\n\
+                     vec3 b = normalize(v_binormal);\n\
+                     if (length(v_tangent) > 0.0001 && length(v_binormal) > 0.0001) {{\n\
+                         vec3 tn = vec3(0.0, 0.0, 1.0);\n\
+                         if (u_have_a.z > 0.5) {{\n\
+                             tn = {sample}(u_tex_bump, v_uv * u_uv_scale_a.z).xyz * 2.0 - 1.0;\n\
+                         }}\n\
+                         // A detail normal tiles far finer than the base one\n\
+                         // and adds to it rather than replacing it. Summing the\n\
+                         // tangent-plane components and keeping the base\n\
+                         // normal's z stays stable when either map is flat;\n\
+                         // sampling one over the other would erase whichever\n\
+                         // came second.\n\
+                         if (u_have_a.w > 0.5) {{\n\
+                             vec3 dn = {sample}(u_tex_bump_detail, v_uv * u_uv_scale_a.w).xyz * 2.0 - 1.0;\n\
+                             tn = vec3(tn.xy + dn.xy, tn.z);\n\
+                         }}\n\
+                         tn = normalize(tn);\n\
+                         normal = normalize(t * tn.x + b * tn.y + normal * tn.z);\n\
+                     }}\n\
+                 }}\n\
+                 // The rig this preview has always used — a key, a fill, a rim\n\
+                 // and an overhead term, in view space so they follow the camera.\n\
+                 // Neutral on purpose: the maps supply the colour, and anything\n\
+                 // that tried to supply more needed a scene this preview has not\n\
+                 // got.\n\
+                 float key = max(dot(normal, normalize(vec3(-0.35, -0.55, 0.76))), 0.0);\n\
+                 float fill = max(dot(normal, normalize(vec3(0.72, 0.22, 0.36))), 0.0);\n\
+                 float rim = pow(clamp(1.0 - abs(normal.y), 0.0, 1.0), 2.0);\n\
+                 float overhead = clamp(normal.z * 0.5 + 0.5, 0.0, 1.0);\n\
+                 float shade = clamp(0.42 + key * 0.46 + fill * 0.16 + rim * 0.10 + overhead * 0.08, 0.32, 1.22);\n\
+                 vec3 lit = albedo * shade + vec3(key * key * (22.0 / 255.0));\n\
+                 vec3 flat_color = shaded ? to_srgb(albedo) : u_base_color;\n\
+                 vec3 result = mix(to_srgb(lit), flat_color, u_unlit);\n\
+                 {output_name} = vec4(result, 1.0);\n\
+             }}\n",
+            version_declaration
+        );
+
+        (vertex_source, fragment_source)
+}
+
 struct ModelGlRenderer {
     program: glow::NativeProgram,
     vertex_array: glow::NativeVertexArray,
@@ -192,7 +354,34 @@ struct ModelGlRenderer {
     depth_scale: glow::NativeUniformLocation,
     base_color: glow::NativeUniformLocation,
     unlit: glow::NativeUniformLocation,
+    shaded: Option<glow::NativeUniformLocation>,
+    have_a: Option<glow::NativeUniformLocation>,
+    have_b: Option<glow::NativeUniformLocation>,
+    uv_scale_a: Option<glow::NativeUniformLocation>,
+    uv_scale_b: Option<glow::NativeUniformLocation>,
+    /// One sampler location per slot, in `TextureSlot` order.
+    samplers: [Option<glow::NativeUniformLocation>; SLOT_COUNT],
     uploaded_geometry: Option<u64>,
+    /// GL textures per material, in `RenderModelPreview::materials` order.
+    materials: Vec<MaterialGlTextures>,
+    /// The geometry the uploaded `materials` belong to, so a reloaded model
+    /// re-uploads rather than drawing the previous model's textures.
+    uploaded_textures: Option<u64>,
+}
+
+/// One material's textures on the GPU, in `TextureSlot` order.
+struct MaterialGlTextures {
+    textures: [Option<glow::NativeTexture>; SLOT_COUNT],
+    uv_scales: [f32; SLOT_COUNT],
+}
+
+impl Default for MaterialGlTextures {
+    fn default() -> Self {
+        Self {
+            textures: Default::default(),
+            uv_scales: [1.0; SLOT_COUNT],
+        }
+    }
 }
 
 impl ModelGlRenderer {
@@ -203,53 +392,10 @@ impl ModelGlRenderer {
             .is_embedded()
             .then_some("precision mediump float;\n")
             .unwrap_or("");
-        let (attribute, varying_out, varying_in, fragment_output, output_name) = if modern {
-            ("in", "out", "in", "out vec4 out_color;", "out_color")
-        } else {
-            ("attribute", "varying", "varying", "", "gl_FragColor")
-        };
-        let vertex_source = format!(
-            "{}{precision}\
-             {attribute} vec3 a_position;\n\
-             {attribute} vec3 a_normal;\n\
-             uniform vec3 u_center;\n\
-             uniform float u_scale;\n\
-             uniform vec2 u_angles;\n\
-             uniform vec2 u_clip_scale;\n\
-             uniform vec2 u_pan_clip;\n\
-             uniform float u_depth_scale;\n\
-             uniform vec3 u_base_color;\n\
-             uniform float u_unlit;\n\
-             {varying_out} vec3 v_color;\n\
-             vec3 rotate_view(vec3 value) {{\n\
-                 float sy = sin(u_angles.x);\n\
-                 float cy = cos(u_angles.x);\n\
-                 float sp = sin(u_angles.y);\n\
-                 float cp = cos(u_angles.y);\n\
-                 vec3 yawed = vec3(value.x * cy - value.y * sy, value.x * sy + value.y * cy, value.z);\n\
-                 return vec3(yawed.x, yawed.y * cp - yawed.z * sp, yawed.y * sp + yawed.z * cp);\n\
-             }}\n\
-             void main() {{\n\
-                 vec3 view = rotate_view((a_position - u_center) * u_scale);\n\
-                 gl_Position = vec4(view.x * u_clip_scale.x + u_pan_clip.x, view.z * u_clip_scale.y + u_pan_clip.y, view.y * u_depth_scale, 1.0);\n\
-                 vec3 source_normal = length(a_normal) > 0.0001 ? normalize(a_normal) : vec3(0.0, 0.0, 1.0);\n\
-                 vec3 normal_view = normalize(rotate_view(source_normal));\n\
-                 float key = max(dot(normal_view, normalize(vec3(-0.35, -0.55, 0.76))), 0.0);\n\
-                 float fill = max(dot(normal_view, normalize(vec3(0.72, 0.22, 0.36))), 0.0);\n\
-                 float rim = pow(clamp(1.0 - abs(normal_view.y), 0.0, 1.0), 2.0);\n\
-                 float overhead = clamp(normal_view.z * 0.5 + 0.5, 0.0, 1.0);\n\
-                 float shade = clamp(0.42 + key * 0.46 + fill * 0.16 + rim * 0.10 + overhead * 0.08, 0.32, 1.22);\n\
-                 vec3 shaded = clamp(u_base_color * shade + vec3(key * key * (22.0 / 255.0)), 0.0, 1.0);\n\
-                 v_color = mix(shaded, u_base_color, u_unlit);\n\
-             }}\n",
-            shader_version.version_declaration()
-        );
-        let fragment_source = format!(
-            "{}{precision}\
-             {varying_in} vec3 v_color;\n\
-             {fragment_output}\n\
-             void main() {{ {output_name} = vec4(v_color, 1.0); }}\n",
-            shader_version.version_declaration()
+        let (vertex_source, fragment_source) = model_shader_sources(
+            shader_version.version_declaration(),
+            modern,
+            precision,
         );
 
         unsafe {
@@ -288,6 +434,21 @@ impl ModelGlRenderer {
             gl.vertex_attrib_pointer_f32(position, 3, glow::FLOAT, false, stride, 0);
             gl.enable_vertex_attrib_array(normal);
             gl.vertex_attrib_pointer_f32(normal, 3, glow::FLOAT, false, stride, 12);
+            // Optional, unlike the two above: the untextured paths (particle
+            // models, Chimp's UE meshes) leave these at zero, and a driver is
+            // free to optimise an unread attribute out of the program entirely.
+            // A missing location is therefore not an error — offsets are pinned
+            // by `gpu_vertex_layout_matches_the_hand_written_attribute_offsets`.
+            for (name, size, offset) in [
+                ("a_texcoord", 2, 24),
+                ("a_tangent", 3, 32),
+                ("a_binormal", 3, 44),
+            ] {
+                if let Some(location) = gl.get_attrib_location(program, name) {
+                    gl.enable_vertex_attrib_array(location);
+                    gl.vertex_attrib_pointer_f32(location, size, glow::FLOAT, false, stride, offset);
+                }
+            }
             gl.bind_vertex_array(None);
 
             let uniform = |name| {
@@ -307,7 +468,19 @@ impl ModelGlRenderer {
                 depth_scale: uniform("u_depth_scale")?,
                 base_color: uniform("u_base_color")?,
                 unlit: uniform("u_unlit")?,
+                // Optional: a driver is free to drop a uniform the program does
+                // not end up reading, and the untextured path reads none of
+                // these. Missing is not an error.
+                shaded: gl.get_uniform_location(program, "u_shaded"),
+                have_a: gl.get_uniform_location(program, "u_have_a"),
+                have_b: gl.get_uniform_location(program, "u_have_b"),
+                uv_scale_a: gl.get_uniform_location(program, "u_uv_scale_a"),
+                uv_scale_b: gl.get_uniform_location(program, "u_uv_scale_b"),
+                samplers: SAMPLER_UNIFORMS
+                    .map(|name| gl.get_uniform_location(program, name)),
                 uploaded_geometry: None,
+                materials: Vec::new(),
+                uploaded_textures: None,
             })
         }
     }
@@ -331,8 +504,16 @@ impl ModelGlRenderer {
                 self.uploaded_geometry = Some(frame.geometry_id);
             }
 
+            self.sync_textures(gl, frame);
+
             gl.use_program(Some(self.program));
             gl.bind_vertex_array(Some(self.vertex_array));
+            // Sampler i reads texture unit i, fixed for the life of the program.
+            for (unit, location) in self.samplers.iter().enumerate() {
+                if let Some(location) = location {
+                    gl.uniform_1_i32(Some(location), unit as i32);
+                }
+            }
             gl.enable(glow::DEPTH_TEST);
             gl.depth_func(glow::LESS);
             gl.depth_mask(true);
@@ -386,6 +567,84 @@ impl ModelGlRenderer {
         }
     }
 
+    /// Bring the GPU's textures in line with the frame's, re-uploading only
+    /// when the model changed or its textures arrived.
+    unsafe fn sync_textures(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
+        let wanted = frame.textures.as_ref().map(|_| frame.geometry_id);
+        if self.uploaded_textures == wanted {
+            return;
+        }
+        unsafe { self.release_textures(gl) };
+        self.uploaded_textures = wanted;
+        let Some(textures) = frame.textures.as_ref() else {
+            return;
+        };
+        self.materials = textures
+            .iter()
+            .map(|material| {
+                let mut uploaded = MaterialGlTextures::default();
+                for (slot, _) in SLOT_PARAMETERS {
+                    let index = slot as usize;
+                    uploaded.uv_scales[index] = 1.0;
+                    let Some(image) = material.get(slot) else {
+                        continue;
+                    };
+                    uploaded.uv_scales[index] = image.scale;
+                    uploaded.textures[index] = unsafe { upload_texture(gl, image) };
+                }
+                uploaded
+            })
+            .collect();
+    }
+
+    unsafe fn release_textures(&mut self, gl: &glow::Context) {
+        for material in self.materials.drain(..) {
+            for texture in material.textures.into_iter().flatten() {
+                unsafe { gl.delete_texture(texture) };
+            }
+        }
+    }
+
+    /// Bind one material's textures, and tell the shader which slots are live.
+    ///
+    /// A slot with no texture is left unbound and flagged absent rather than
+    /// bound to a dummy: sampling an unbound unit is defined to return black,
+    /// which a `have` flag of zero makes the shader skip entirely.
+    unsafe fn bind_material(&self, gl: &glow::Context, material: Option<&MaterialGlTextures>) {
+        let mut have = [0.0f32; SLOT_COUNT];
+        let mut scales = [1.0f32; SLOT_COUNT];
+        for (slot, _) in SLOT_PARAMETERS {
+            let index = slot as usize;
+            let texture = material.and_then(|material| material.textures[index]);
+            have[index] = if texture.is_some() { 1.0 } else { 0.0 };
+            if let Some(material) = material {
+                scales[index] = material.uv_scales[index];
+            }
+            unsafe {
+                gl.active_texture(glow::TEXTURE0 + index as u32);
+                gl.bind_texture(glow::TEXTURE_2D, texture);
+            }
+        }
+        unsafe {
+            gl.active_texture(glow::TEXTURE0);
+            if let Some(location) = &self.shaded {
+                gl.uniform_1_f32(Some(location), if material.is_some() { 1.0 } else { 0.0 });
+            }
+            if let Some(location) = &self.have_a {
+                gl.uniform_4_f32(Some(location), have[0], have[1], have[2], have[3]);
+            }
+            if let Some(location) = &self.have_b {
+                gl.uniform_4_f32(Some(location), have[4], 0.0, 0.0, 0.0);
+            }
+            if let Some(location) = &self.uv_scale_a {
+                gl.uniform_4_f32(Some(location), scales[0], scales[1], scales[2], scales[3]);
+            }
+            if let Some(location) = &self.uv_scale_b {
+                gl.uniform_4_f32(Some(location), scales[4], 1.0, 1.0, 1.0);
+            }
+        }
+    }
+
     unsafe fn draw_batches(&self, gl: &glow::Context, frame: &ModelGpuFrame, wire: bool) {
         for &batch_index in &frame.visible_batches {
             let Some(batch) = frame.preview.batches.get(batch_index) else {
@@ -403,7 +662,13 @@ impl ModelGlRenderer {
             } else {
                 material_color(batch.material_index)
             };
+            // The wireframe pass draws flat on purpose, so it never binds a
+            // texture — and neither does a batch whose material did not resolve.
+            let material = (!wire)
+                .then(|| self.materials.get(batch.material_index as usize))
+                .flatten();
             unsafe {
+                self.bind_material(gl, material);
                 gl.uniform_3_f32(
                     Some(&self.base_color),
                     color.r() as f32 / 255.0,
@@ -482,13 +747,120 @@ mod gpu_renderer_tests {
         assert_eq!(model_draw_range(20, 3, 14), None);
     }
 
+    /// The attribute offsets in `ModelGlRenderer::new` are hand-written against
+    /// this layout, and nothing else checks them — a reordered or resized field
+    /// would silently feed the shader the wrong bytes and show as a model that
+    /// renders but looks wrong.
+    /// A malformed shader disables the whole preview and reports it only on
+    /// stderr, so these check the structure no GPU is here to check.
     #[test]
-    fn gpu_vertex_layout_is_two_tightly_packed_vec3_values() {
-        assert_eq!(std::mem::size_of::<RenderModelPreviewVertex>(), 24);
+    fn both_shader_dialects_declare_what_the_renderer_binds() {
+        for (declaration, modern, precision) in [
+            ("#version 330\n", true, ""),
+            ("#version 100\n", false, "precision mediump float;\n"),
+        ] {
+            let (vertex, fragment) = model_shader_sources(declaration, modern, precision);
+
+            // Every attribute the vertex array points at, and every uniform the
+            // renderer looks up, has to actually be declared.
+            for name in ["a_position", "a_normal", "a_texcoord", "a_tangent", "a_binormal"] {
+                assert!(vertex.contains(name), "{name} missing from vertex shader");
+            }
+            for name in SAMPLER_UNIFORMS {
+                assert!(fragment.contains(name), "{name} missing from fragment shader");
+            }
+            for name in ["u_have_a", "u_have_b", "u_uv_scale_a", "u_uv_scale_b", "u_shaded"] {
+                assert!(fragment.contains(name), "{name} missing from fragment shader");
+            }
+            assert!(fragment.contains("uniform vec4 u_have_b;"));
+            assert!(fragment.contains("uniform vec4 u_uv_scale_b;"));
+            // The environment term must stay behind the ambient-strength gate: a
+            // shader that asks for none of it has to light exactly as it did
+            // before the term existed.
+
+            // A surface with no specular mask must reflect LESS, not more.
+            // Having that backwards buried dervish's bare skin — which carries
+            // no mask — under a flat wash of environment tint.
+
+
+
+            // The detail normal adds to the base one rather than replacing it.
+            assert!(
+                fragment.contains("tn = vec3(tn.xy + dn.xy, tn.z);"),
+                "bump_detail_map should blend into the base normal"
+            );
+            assert!(
+                fragment.contains("u_have_a.z > 0.5 || u_have_a.w > 0.5"),
+                "a detail normal with no base bump map should still perturb"
+            );
+            for name in ["u_center", "u_scale", "u_angles", "u_clip_scale", "u_pan_clip", "u_depth_scale"] {
+                assert!(vertex.contains(name), "{name} missing from vertex shader");
+            }
+            for name in ["u_base_color", "u_unlit"] {
+                assert!(fragment.contains(name), "{name} missing from fragment shader");
+            }
+
+            // The varyings must be declared on both sides or the link fails.
+            for name in ["v_uv", "v_normal", "v_tangent", "v_binormal"] {
+                assert!(vertex.contains(name) && fragment.contains(name), "{name} not on both sides");
+            }
+
+            // Dialect: `texture` vs `texture2D`, and the output keyword pair.
+            if modern {
+                assert!(fragment.contains("out vec4 out_color;"));
+                assert!(fragment.contains("texture(u_tex_base"));
+                assert!(vertex.contains("in vec3 a_position"));
+            } else {
+                assert!(fragment.contains("gl_FragColor"));
+                assert!(fragment.contains("texture2D(u_tex_base"));
+                assert!(vertex.contains("attribute vec3 a_position"));
+            }
+
+            // Only the alpha-test map may discard.
+            //
+            // A base map's alpha channel carries a mask in Halo — usually
+            // specular — not coverage. Discarding on it made dervish, and every
+            // other character with a dark diffuse mask, render mostly
+            // see-through, while masterchief happened to look fine because his
+            // mask is bright. One `discard`, in the alpha-test branch.
+            assert_eq!(
+                fragment.matches("discard;").count(),
+                1,
+                "the fragment shader should discard only on the alpha-test map"
+            );
+            assert!(
+                fragment.contains("u_tex_alpha, v_uv * u_uv_scale_b.x).a < 0.5) discard"),
+                "the one discard should be the alpha-test map's"
+            );
+
+            for (label, source) in [("vertex", &vertex), ("fragment", &fragment)] {
+                assert_eq!(
+                    source.matches('{').count(),
+                    source.matches('}').count(),
+                    "unbalanced braces in the {label} shader — a `format!` escape slipped"
+                );
+                assert!(
+                    source.starts_with(declaration),
+                    "the {label} shader must open with its version declaration"
+                );
+                assert!(
+                    !source.contains("{{") && !source.contains("}}"),
+                    "a `format!` brace escape survived into the {label} source"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn gpu_vertex_layout_matches_the_hand_written_attribute_offsets() {
+        assert_eq!(std::mem::size_of::<RenderModelPreviewVertex>(), 56);
         let vertex = RenderModelPreviewVertex::default();
         let base = std::ptr::addr_of!(vertex) as usize;
-        let normal = std::ptr::addr_of!(vertex.normal) as usize;
-        assert_eq!(normal - base, 12);
+        let offset = |field: usize| field - base;
+        assert_eq!(offset(std::ptr::addr_of!(vertex.normal) as usize), 12);
+        assert_eq!(offset(std::ptr::addr_of!(vertex.texcoord) as usize), 24);
+        assert_eq!(offset(std::ptr::addr_of!(vertex.tangent) as usize), 32);
+        assert_eq!(offset(std::ptr::addr_of!(vertex.binormal) as usize), 44);
     }
 
     #[test]
@@ -749,6 +1121,16 @@ pub(super) fn render_model_to_preview(
                     .collect(),
             })
             .collect(),
+        // Index-aligned with `RenderMeshPart::material_index`, which is what
+        // the batches carry, so a batch's shader is `materials[index]`.
+        materials: model
+            .materials
+            .iter()
+            .map(|material| RenderModelPreviewMaterial {
+                shader_path: material.render_method.clone(),
+                shader_group: material.render_method_group,
+            })
+            .collect(),
         bounds_min: [f32::INFINITY; 3],
         bounds_max: [f32::NEG_INFINITY; 3],
         ..Default::default()
@@ -814,6 +1196,12 @@ fn append_render_mesh_to_preview(
         preview.vertices.push(RenderModelPreviewVertex {
             position,
             normal: vector3_to_array(vertex.normal),
+            // Already decompressed: `derive_render_meshes` applies the mesh's
+            // compression bounds, so these are real UVs rather than the packed
+            // [0,1] the buffer stores for the UShort2N formats.
+            texcoord: [vertex.texcoord.x, vertex.texcoord.y],
+            tangent: vector3_to_array(vertex.tangent),
+            binormal: vector3_to_array(vertex.binormal),
         });
     }
 
@@ -939,4 +1327,54 @@ pub(super) fn point3_to_array(p: RealPoint3d) -> [f32; 3] {
 
 pub(super) fn vector3_to_array(v: RealVector3d) -> [f32; 3] {
     [v.i, v.j, v.k]
+}
+
+
+/// Upload one decoded texture, with mipmaps and the wrap modes the shader
+/// authored.
+///
+/// Mipmaps matter here beyond quality: a detail map tiling twenty times across
+/// a model aliases into noise without them, which is exactly where a preview
+/// looks worst.
+unsafe fn upload_texture(gl: &glow::Context, image: &TextureImage) -> Option<glow::NativeTexture> {
+    if image.width == 0 || image.height == 0 {
+        return None;
+    }
+    unsafe {
+        let texture = gl.create_texture().ok()?;
+        gl.bind_texture(glow::TEXTURE_2D, Some(texture));
+        gl.tex_image_2d(
+            glow::TEXTURE_2D,
+            0,
+            glow::RGBA8 as i32,
+            image.width as i32,
+            image.height as i32,
+            0,
+            glow::RGBA,
+            glow::UNSIGNED_BYTE,
+            Some(&image.rgba),
+        );
+        gl.generate_mipmap(glow::TEXTURE_2D);
+        let wrap = |repeat: bool| {
+            if repeat {
+                glow::REPEAT as i32
+            } else {
+                glow::CLAMP_TO_EDGE as i32
+            }
+        };
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_S, wrap(image.repeat_x));
+        gl.tex_parameter_i32(glow::TEXTURE_2D, glow::TEXTURE_WRAP_T, wrap(image.repeat_y));
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_MIN_FILTER,
+            glow::LINEAR_MIPMAP_LINEAR as i32,
+        );
+        gl.tex_parameter_i32(
+            glow::TEXTURE_2D,
+            glow::TEXTURE_MAG_FILTER,
+            glow::LINEAR as i32,
+        );
+        gl.bind_texture(glow::TEXTURE_2D, None);
+        Some(texture)
+    }
 }

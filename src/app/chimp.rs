@@ -1520,7 +1520,13 @@ fn chimp_mesh_preview_base(
         }
         preview
             .vertices
-            .push(RenderModelPreviewVertex { position, normal });
+            .push(RenderModelPreviewVertex {
+                position,
+                normal,
+                // UE meshes reach the preview without a resolved tangent frame;
+                // they render with the untextured path.
+                ..Default::default()
+            });
     }
     if preview.vertices.is_empty() {
         preview.bounds_min = [-1.0; 3];

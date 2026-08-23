@@ -8,10 +8,14 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 pub(in crate::app) mod loading;
+pub(in crate::app) mod materials;
 mod renderer;
 mod variants;
 
 use loading::*;
+// Re-exported up to `crate::app`: the preview state and the worker message
+// both name these, and neither lives under this module.
+pub(in crate::app) use materials::*;
 use renderer::*;
 use variants::*;
 
@@ -23,6 +27,11 @@ pub(crate) struct RenderModelPreview {
     pub vertices: Vec<RenderModelPreviewVertex>,
     pub indices: Vec<u32>,
     pub batches: Vec<RenderModelPreviewBatch>,
+    /// One entry per `RenderModelPreviewBatch::material_index`, naming the
+    /// shader tag that batch draws with. Kept as the raw reference rather than
+    /// resolved textures: resolving reads other tags off disk, which belongs on
+    /// a worker rather than in the geometry walk.
+    pub materials: Vec<RenderModelPreviewMaterial>,
     pub markers: Vec<RenderModelPreviewMarker>,
     pub bounds_min: [f32; 3],
     pub bounds_max: [f32; 3],
@@ -34,11 +43,36 @@ pub(crate) struct RenderModelPreviewRegion {
     pub permutations: Vec<String>,
 }
 
+/// One vertex as the GL program consumes it. `#[repr(C)]` because the whole
+/// buffer is uploaded as raw bytes; the attribute offsets in
+/// [`renderer::ModelGlRenderer::new`] are hand-written to match this order and
+/// a test pins them.
+///
+/// `tangent` and `binormal` are carried rather than reconstructed: a normal map
+/// needs the handedness the tag authored, and `cross(normal, tangent)` alone
+/// cannot recover a mirrored UV island's sign — which is most of a Halo
+/// character, since they mirror left to right to halve texture space.
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct RenderModelPreviewVertex {
     pub position: [f32; 3],
     pub normal: [f32; 3],
+    pub texcoord: [f32; 2],
+    pub tangent: [f32; 3],
+    pub binormal: [f32; 3],
+}
+
+/// The shader one material draws with, as named by the render_model.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RenderModelPreviewMaterial {
+    /// Tag-relative path, no extension — e.g.
+    /// `objects\characters\masterchief\shaders\masterchief`. Empty when
+    /// the tag_ref was null.
+    pub shader_path: String,
+    /// Group FOURCC of the shader reference (`rmsh`, `rmtr`, `shad`, ...).
+    /// Decides which extension the path resolves with, and which resolver
+    /// understands the tag behind it.
+    pub shader_group: u32,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -70,6 +104,7 @@ fn model_preview_data(
         render_model_path,
         preview: Arc::new(preview),
         geometry_id: NEXT_MODEL_GEOMETRY_ID.fetch_add(1, Ordering::Relaxed),
+        textures: None,
         variants,
     }
 }
@@ -145,6 +180,10 @@ pub(super) fn draw_model_preview_panel(
                             ui.selectable_value(&mut state.render_mode, mode, mode.label());
                         }
                     });
+                ui.checkbox(&mut state.shaded, "Shaded")
+                    .on_hover_text(
+                        "Sample each part's own shader — diffuse, detail, normal, specular and                          self-illumination. Off draws the flat per-material colours, which stay                          useful for reading silhouette and topology.",
+                    );
                 ui.checkbox(&mut state.show_backfaces, "Backfaces");
                 // Campaign Evolved: static pieces are Nanite. Full detail is
                 // the faithful default; users can opt into the coarse fallback
@@ -263,6 +302,24 @@ fn draw_model_viewport_with_stats(
     state: &mut ModelPreviewState,
     desired_size: Vec2,
 ) {
+    // Hold the viewport until the textures land, rather than drawing the model
+    // untextured and re-shading it a second later — a model that changes
+    // appearance under the cursor reads as a glitch, not as progress.
+    if state.shaded && state.textures_pending && data.textures.is_none() {
+        let (rect, _) = ui.allocate_exact_size(desired_size, Sense::hover());
+        ui.painter()
+            .rect_stroke(rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
+        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), |ui| {
+            ui.centered_and_justified(|ui| {
+                ui.horizontal_centered(|ui| {
+                    ui.spinner();
+                    ui.label(RichText::new("Loading shaders…").color(subtle_dark()));
+                });
+            });
+        });
+        ui.ctx().request_repaint();
+        return;
+    }
     draw_model_viewport(ui, data, state, desired_size);
     ui.small(
         RichText::new(format!(
