@@ -745,6 +745,28 @@ pub(in crate::app) fn draw_tree_node(
             }
         }
 
+        // Monolithic caches only. The tags in one are big-endian and read-only,
+        // so the way out of a cache is a conversion into a kit rather than a copy
+        // — and the destination is the kit's tags root, because a cache tag has
+        // to land at its own path for every reference to it to resolve.
+        if !groups_mode {
+            let cache_tags = count_cache_tags(node, entries);
+            if cache_tags > 0
+                && ui
+                    .button(format!("Import into editing kit... ({cache_tags})"))
+                    .on_hover_text(
+                        "Convert this folder to little-endian tags in an open editing kit, \
+                         at the same paths, pulling in whatever they reference",
+                    )
+                    .clicked()
+            {
+                clicked = Some(BrowserAction::ImportCacheFolderIntoKit {
+                    prefix: folder_display_path(node),
+                });
+                ui.close_menu();
+            }
+        }
+
         let bitmap_keys = collect_bitmap_keys(node, entries);
         if bitmap_keys.is_empty() {
             ui.label(RichText::new("No bitmap tags in this folder").color(subtle_dark()));
@@ -1006,6 +1028,24 @@ fn collect_container_tag_keys_into(
     for child in &node.children {
         collect_container_tag_keys_into(child, entries, keys);
     }
+}
+
+/// How many tags beneath `node` come out of a monolithic cache.
+///
+/// Only the count is wanted, not the keys: the import filters the cache by name
+/// prefix on the worker thread, so carrying a list of thousands of keys through
+/// a context menu would be work done twice. The number is what the menu says.
+pub(in crate::app) fn count_cache_tags(node: &TagTreeNode, entries: &[TagEntry]) -> usize {
+    let mut count = node
+        .entries
+        .iter()
+        .filter_map(|&index| entries.get(index))
+        .filter(|entry| matches!(entry.location, TagEntryLocation::Monolithic { .. }))
+        .count();
+    for child in &node.children {
+        count += count_cache_tags(child, entries);
+    }
+    count
 }
 
 pub(in crate::app) fn collect_bitmap_keys(node: &TagTreeNode, entries: &[TagEntry]) -> Vec<String> {
@@ -1676,6 +1716,45 @@ mod tests {
         assert_eq!(
             context_menu_icon("Duplicate"),
             Some(ButtonIcon::Duplicate)
+        );
+    }
+
+    /// The count that decides whether a folder offers the cache import at all.
+    ///
+    /// Recursive, and monolithic-only: a workspace can hold a mix after a
+    /// browser rebuild, and offering "import 40 tags" on a folder holding 3
+    /// cache tags and 37 loose ones would promise a run that converts 3.
+    #[test]
+    fn a_folder_counts_only_the_cache_tags_beneath_it() {
+        let entries = vec![
+            entry(TagEntryLocation::Monolithic {
+                name: r"objects\weapons\rifle\assault_rifle".to_owned(),
+                group_tag: u32::from_be_bytes(*b"weap"),
+            }),
+            entry(TagEntryLocation::Monolithic {
+                name: r"objects\weapons\rifle\scope\scope".to_owned(),
+                group_tag: u32::from_be_bytes(*b"weap"),
+            }),
+            entry(TagEntryLocation::LooseFile(PathBuf::from(
+                "D:/HREK/tags/objects/weapons/rifle/assault_rifle.weapon",
+            ))),
+        ];
+        let node = |rel: &str, entries: Vec<usize>| crate::source::TagTreeNode {
+            label: rel.rsplit('/').next().unwrap_or(rel).to_owned(),
+            rel_path: PathBuf::from(rel),
+            children: Vec::new(),
+            children_loaded: true,
+            entries,
+            entries_loaded: true,
+            pending: false,
+        };
+        let mut tree = node("objects/weapons/rifle", vec![0, 2]);
+        assert_eq!(count_cache_tags(&tree, &entries), 1, "the loose tag was counted");
+        tree.children.push(node("objects/weapons/rifle/scope", vec![1]));
+        assert_eq!(
+            count_cache_tags(&tree, &entries),
+            2,
+            "a subfolder's tags were not counted"
         );
     }
 }

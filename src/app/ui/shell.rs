@@ -1439,6 +1439,7 @@ impl Baboon {
         self.draw_exported_mod_window(ctx);
         self.draw_poke_window(ctx);
         self.draw_tag_import_window(ctx);
+        self.draw_cache_import_window(ctx);
         self.draw_about_window(ctx);
         self.draw_query_results_window(ctx);
         self.draw_tag_diff_window(ctx);

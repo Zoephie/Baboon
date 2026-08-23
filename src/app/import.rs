@@ -955,8 +955,8 @@ impl Baboon {
                 report
                     .held_back
                     .iter()
-                    .map(|entry| entry.path.clone())
-                    .collect::<HashSet<PathBuf>>()
+                    .map(|entry| entry.key.clone())
+                    .collect::<HashSet<String>>()
             })
             .unwrap_or_default();
         if held.is_empty() {
@@ -965,7 +965,7 @@ impl Baboon {
         self.run_folder_tag_import(true, Some(held));
     }
 
-    fn run_folder_tag_import(&mut self, accept_loss: bool, only: Option<HashSet<PathBuf>>) {
+    fn run_folder_tag_import(&mut self, accept_loss: bool, only: Option<HashSet<String>>) {
         let Some(dialog) = self.tag_import_dialog.as_ref() else {
             return;
         };
@@ -1008,12 +1008,14 @@ impl Baboon {
         let job = FolderConversionJob {
             source,
             names,
-            source_rel_path: plan.source_rel_path,
-            destination_label: plan.destination_label,
+            scope: FolderConversionScope::LooseSubtree {
+                source_rel_path: plan.source_rel_path,
+                destination_label: plan.destination_label,
+                destination_parent: plan.destination_parent,
+            },
             source_game: dialog.source_game.clone(),
             target_game: dialog.target_game.clone(),
             target_tags_root: dialog.target_tags_root.clone(),
-            destination_parent: plan.destination_parent,
             kit_roots: self
                 .editing_kit_paths
                 .iter()
@@ -1021,6 +1023,10 @@ impl Baboon {
                 .collect(),
             accept_loss,
             only,
+            // Nothing offers to cancel a loose-folder import: it converts one
+            // folder out of a kit already sitting on the disk it writes to. The
+            // cache import is the long one, and that has a button.
+            cancel: Arc::new(AtomicBool::new(false)),
         };
         let tx = self.tx.clone();
         if let Some(dialog) = self.tag_import_dialog.as_mut() {
@@ -1096,7 +1102,7 @@ impl Baboon {
     /// Returns to the kit the import was started from first: the tags landed in
     /// that kit's tree, and refreshing whichever workspace happens to be focused
     /// would rescan the wrong one and leave the right one stale.
-    fn refresh_after_import(&mut self, kit: KitId, ctx: &egui::Context) {
+    pub(in crate::app) fn refresh_after_import(&mut self, kit: KitId, ctx: &egui::Context) {
         if !self.focus_navigation_kit(kit) {
             return;
         }
@@ -1107,7 +1113,7 @@ impl Baboon {
 }
 
 /// A kit path may be configured as the kit root or as its `tags` folder.
-fn import_tags_root(path: &Path) -> PathBuf {
+pub(in crate::app) fn import_tags_root(path: &Path) -> PathBuf {
     if path
         .file_name()
         .and_then(|name| name.to_str())
@@ -1521,15 +1527,18 @@ mod tests {
                     definitions_root: definitions.clone(),
                 },
                 names: TagNameIndex::load_from_definitions(&definitions),
-                source_rel_path: plan.source_rel_path,
-                destination_label: plan.destination_label,
+                scope: FolderConversionScope::LooseSubtree {
+                    source_rel_path: plan.source_rel_path,
+                    destination_label: plan.destination_label,
+                    destination_parent: plan.destination_parent,
+                },
                 source_game: "halo3_mcc".to_owned(),
                 target_game: "haloreach_mcc".to_owned(),
                 target_tags_root: target_tags.clone(),
-                destination_parent: plan.destination_parent,
                 kit_roots: HashMap::new(),
                 accept_loss: false,
                 only: None,
+                cancel: Arc::new(AtomicBool::new(false)),
             },
             &tx,
         )

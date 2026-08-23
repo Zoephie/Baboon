@@ -20,6 +20,13 @@ pub(in crate::app) enum BrowserAction {
     /// Show this loose folder in File Explorer. Loose only: a container folder
     /// is a path inside a pak, with no directory to open.
     OpenLooseFolderInExplorer { rel_path: PathBuf, },
+    /// Convert this monolithic-cache folder into an open editing kit.
+    ///
+    /// Carries the folder's path as a tag-name prefix rather than a list of
+    /// keys: the run follows references out of the folder, so the set it ends up
+    /// converting is not knowable from the browser — and filtering by prefix is
+    /// the worker's job either way.
+    ImportCacheFolderIntoKit { prefix: String, },
     ExtractRaw(String),
     ExtractBitmap(String),
     ExtractBitmapFolder(Vec<String>),

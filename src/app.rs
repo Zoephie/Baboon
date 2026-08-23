@@ -113,6 +113,8 @@ mod conversion;
 use conversion::*;
 mod import;
 use import::*;
+mod cache_import;
+use cache_import::*;
 mod model_preview;
 use model_preview::*;
 mod map_names;
@@ -175,6 +177,11 @@ pub struct Baboon {
     /// one. One dialog for both a single tag and a whole folder — which of the
     /// two it is follows from the path, not from a mode the user has to pick.
     tag_import_dialog: Option<TagImportDialog>,
+    /// Import Cache Folder: convert a folder of a monolithic cache's big-endian
+    /// tags into an open editing kit, at their own paths, following references.
+    /// Separate from `tag_import_dialog` because almost nothing is shared: there
+    /// is no path to resolve, no game to guess, and no destination to choose.
+    cache_import_dialog: Option<CacheImportDialog>,
     /// The last import's index of native layout templates, kept for the next
     /// one. Building it walks the destination kit's whole tag tree — about a
     /// second for a real kit — and the result depends only on which kit it is,
@@ -496,6 +503,7 @@ impl Baboon {
             active: 0,
             next_kit_id: 1,
             tag_import_dialog: None,
+            cache_import_dialog: None,
             native_template_cache: None,
             find: FindDialogState::default(),
             default_browser_mode: prefs.browser_mode,

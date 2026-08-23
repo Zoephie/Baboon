@@ -69,8 +69,10 @@ ones rather than replacing them:
   kit root, e.g. `H3EK`; Baboon locates the `tags` folder and identifies the
   game automatically). The folder tree is loaded **lazily**, expanding
   directories only as you open them, so even a full kit opens instantly.
-- **Monolithic cache** — open a Halo 4 `blob_index.dat` monolithic tag cache and
-  browse its contents as if they were loose files (read-only).
+- **Monolithic cache** — open a `blob_index.dat` monolithic tag cache (a Halo 4
+  development build, or the Halo Reach 2011 tags build) and browse its contents
+  as if they were loose files. Read-only, and big-endian — see *Importing a
+  monolithic cache into an editing kit* for the way out.
 - **Campaign Evolved container** — point **Load Folder** at the Halo: Campaign
   Evolved game directory (or its `Meteorite/Content/Paks`). Baboon finds the
   container directory inside the install itself, and remembers the folder you
@@ -494,6 +496,48 @@ is never a waypoint — a tag cannot reach it by way of Reach). Where a tag syst
 was genuinely replaced between engines the report says so rather than quietly
 nulling the fields — see
 [`docs/tag-conversion-mappings.md`](docs/tag-conversion-mappings.md).
+
+### Importing a monolithic cache into an editing kit
+
+An Xbox 360 tag build (`tag_cache/blob_index.dat`) holds big-endian tags no
+editing kit can open. Right-click a folder in one and choose **Import into
+editing kit…** to convert the lot into an open loose kit.
+
+- Tags land at **their own paths** — `objects\characters\elite` in the build
+  becomes `<kit>\tags\objects\characters\elite`. That is what keeps references
+  working: a reference carries the path the build gave it, so a tag written
+  anywhere else would be pointed at by nothing.
+- **It brings the folder, then asks about the rest.** Nothing outside the
+  folder is converted behind your back. When the tags that landed point at
+  something the kit does not have, the run reports it — grouped by folder with
+  counts, so a character folder reaching two thousand tags is still a question
+  you can answer — and you tick which folders to bring before a second run
+  fetches them. Anything left unticked stays out, and the tags pointing at it
+  keep a reference the kit cannot resolve.
+- **Pixels and geometry come across.** A 360 bitmap arrives whole — every mip
+  level, every cube face and array layer — un-tiled out of its texture
+  resources and byte-swapped into the shared `processed pixel data` blob a PC
+  tag reads. Formats the PC build ships decoded (`ctx1`, `dxn_mono_alpha`, the
+  `dxt3a`/`dxt5a` family) are decoded on the way. A render model's vertex and
+  index buffers arrive as the inline author-format blocks an MCC tag stores.
+- **Sounds, scenarios and BSPs come too.** A sound's samples and a BSP's
+  resource interface do not cross, but MCC Reach does not carry either — its
+  own sounds name an FMOD bank and its own BSPs keep their meshes inline — so
+  those tags arrive in the shape the kit's own are in. A converted sound finds
+  its audio by name in the kit's banks; one the kit has no bank for is silent.
+- **What cannot cross is held back, not written empty.** Animation graphs keep
+  their substance in a 360 codec stream that MCC does carry and nothing here
+  reinterprets, so they are listed with the reason instead of landing as a tag
+  full of metadata that plays nothing.
+- References naming a tag the build itself no longer holds are reported
+  separately: those were already broken in the source.
+- The run has a **Cancel** button. A whole build's worth of tags is a long job,
+  and everything written before you stop it stays written.
+
+Halo 4 development caches and the Halo Reach 2011 tags build are both this
+format. The destination profile is the kit you pick; a big-endian source is the
+one case where a profile converts to *itself*, because the byte order — and
+usually the schema revision — really do differ.
 
 ### Custom color palettes
 

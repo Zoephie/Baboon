@@ -32,7 +32,7 @@ impl DiffNode {
         while self.sections.is_empty() && self.children.len() == 1 && !self.title.is_empty() {
             let child = self.children.remove(0);
             // A chevron the shipped fonts carry -- see the glyph fallback work.
-            self.title = format!("{} \u{203a} {}", self.title, child.title);
+            self.title = format!("{} › {}", self.title, child.title);
             self.children = child.children;
             self.sections = child.sections;
         }
@@ -58,6 +58,371 @@ enum ImportDialogAction {
     /// Throw away a lossy conversion rather than write it.
     DiscardLossy,
 }
+
+/// What the Import Cache Folder window asks for, collected during the render
+/// pass and applied after it.
+///
+/// Same reason the Import Tags dialog does it: every handler wants `&mut self`
+/// while the dialog it was clicked in is still borrowed.
+enum CacheImportAction {
+    Start,
+    /// Run again over the ticked folders of what the last run reached for.
+    ImportOutside,
+    Cancel,
+    Close,
+}
+
+/// Everything inside the Import Cache Folder window.
+///
+/// Split out from the window itself so it can be rendered against a dialog on
+/// its own. A window body is where an egui id collision or a borrow that only
+/// fails at runtime shows up, and neither is visible to a compile.
+fn draw_cache_import_body(
+    ui: &mut Ui,
+    ctx: &egui::Context,
+    dialog: &mut CacheImportDialog,
+) -> Option<CacheImportAction> {
+    let mut action = None;
+    ui.label(RichText::new("From").strong());
+    ui.label(
+        RichText::new(if dialog.prefix.is_empty() {
+            format!("the whole cache — {} tag(s)", dialog.selected)
+        } else {
+            format!("{} — {} tag(s)", dialog.prefix, dialog.selected)
+        })
+        .monospace(),
+    );
+
+    ui.add_space(8.0);
+    ui.label(RichText::new("Into").strong());
+    let selected_label = dialog
+        .target()
+        .map(|target| format!("{} ({})", target.label, target.game))
+        .unwrap_or_else(|| "no kit loaded".to_owned());
+    ui.add_enabled_ui(!dialog.running, |ui| {
+        egui::ComboBox::from_id_salt("cache_import_target")
+            .selected_text(selected_label)
+            .show_ui(ui, |ui| {
+                for (index, target) in dialog.targets.iter().enumerate() {
+                    ui.selectable_value(
+                        &mut dialog.target_index,
+                        index,
+                        format!("{} ({})", target.label, target.game),
+                    );
+                }
+            });
+    });
+    if let Some(target) = dialog.target() {
+        ui.label(
+            RichText::new(format!(
+                "Tags land at their own paths under {}",
+                target.tags_root.display()
+            ))
+            .small()
+            .color(subtle_dark()),
+        );
+    }
+
+
+    ui.add_space(10.0);
+    ui.horizontal(|ui| {
+        if dialog.running {
+            if ui.button("Cancel").clicked() {
+                action = Some(CacheImportAction::Cancel);
+            }
+            ui.label(RichText::new("Importing...").color(subtle_dark()));
+        } else {
+            if ui
+                .add_enabled(
+                    dialog.target().is_some(),
+                    egui::Button::new("Import"),
+                )
+                .clicked()
+            {
+                action = Some(CacheImportAction::Start);
+            }
+            if dialog.report.is_some() && ui.button("Close").clicked() {
+                action = Some(CacheImportAction::Close);
+            }
+        }
+    });
+    ui.label(
+        RichText::new(
+            "Existing tags at the same paths are replaced. Nothing is written for a \
+             tag whose data cannot come across; the report names those.",
+        )
+        .small()
+        .color(subtle_dark()),
+    );
+
+    if let Some(error) = dialog.error.as_ref() {
+        ui.add_space(8.0);
+        ui.label(RichText::new(error).color(material_delete_text()));
+    }
+
+    if let Some(progress) = dialog.progress.as_ref() {
+        ui.add_space(8.0);
+        let fraction = if progress.total == 0 {
+            0.0
+        } else {
+            progress.processed as f32 / progress.total as f32
+        };
+        ui.label(RichText::new(&progress.phase).strong());
+        ui.add(
+            egui::ProgressBar::new(fraction.clamp(0.0, 1.0))
+                .animate(progress.total == 0)
+                .text(format!(
+                    "{} / {} — {} imported, {} failed",
+                    progress.processed,
+                    progress.total,
+                    progress.converted,
+                    progress.failed
+                )),
+        );
+        if !progress.current.is_empty() {
+            ui.label(
+                RichText::new(&progress.current)
+                    .monospace()
+                    .small()
+                    .color(subtle_dark()),
+            );
+        }
+        // The total grows as references are followed, so the bar can
+        // move backwards. Said once here rather than left to be
+        // discovered.
+        ui.label(
+            RichText::new(
+                "The total climbs as referenced tags are found, so the bar can slip \
+                 back.",
+            )
+            .small()
+            .color(subtle_dark()),
+        );
+        ctx.request_repaint();
+    }
+
+    // Folder counts for the outside-reference question, tallied once rather
+    // than per frame inside the list.
+    let counts: Vec<(String, usize)> = {
+        let mut tally: std::collections::BTreeMap<String, usize> = Default::default();
+        if let Some(report) = dialog.report.as_ref() {
+            for reference in &report.outside_references {
+                *tally.entry(reference.folder.clone()).or_default() += 1;
+            }
+        }
+        tally.into_iter().collect()
+    };
+    if let Some(report) = dialog.report.as_ref() {
+        ui.add_space(8.0);
+        if report.cancelled {
+            ui.label(
+                RichText::new("Stopped early. Everything below was written.")
+                    .color(Color32::from_rgb(242, 196, 48)),
+            );
+        }
+        if !report.outside_references.is_empty() {
+            ui.add_space(6.0);
+            ui.label(
+                RichText::new(format!(
+                    "{} tag(s) outside this folder are referenced by what just \
+                     landed. Import them too?",
+                    report.outside_references.len()
+                ))
+                .strong(),
+            );
+            ui.label(
+                RichText::new(
+                    "Grouped by folder. Anything left unticked stays out, and the \
+                     tags that point at it keep a reference to a tag the kit does \
+                     not have.",
+                )
+                .small()
+                .color(subtle_dark()),
+            );
+            ui.horizontal(|ui| {
+                if ui.button("All").clicked() {
+                    for folder in dialog.outside_groups.values_mut() {
+                        *folder = true;
+                    }
+                }
+                if ui.button("None").clicked() {
+                    for folder in dialog.outside_groups.values_mut() {
+                        *folder = false;
+                    }
+                }
+                let picked = dialog
+                    .outside_groups
+                    .values()
+                    .filter(|wanted| **wanted)
+                    .count();
+                ui.label(
+                    RichText::new(format!(
+                        "{picked} of {} folder(s)",
+                        dialog.outside_groups.len()
+                    ))
+                    .small()
+                    .color(subtle_dark()),
+                );
+            });
+            egui::ScrollArea::vertical()
+                .id_salt("cache_import_outside")
+                .max_height(220.0)
+                .show(ui, |ui| {
+                    for (folder, count) in &counts {
+                        let Some(wanted) = dialog.outside_groups.get_mut(folder) else {
+                            continue;
+                        };
+                        ui.checkbox(wanted, format!("{folder}  ({count})"));
+                    }
+                });
+            let picked: usize = counts
+                .iter()
+                .filter(|(folder, _)| {
+                    dialog.outside_groups.get(folder).copied().unwrap_or(false)
+                })
+                .map(|(_, count)| *count)
+                .sum();
+            if ui
+                .add_enabled(
+                    picked > 0 && !dialog.running,
+                    egui::Button::new(format!("Import those too ({picked})")),
+                )
+                .clicked()
+            {
+                action = Some(CacheImportAction::ImportOutside);
+            }
+        }
+        if !report.unresolved_references.is_empty() {
+            ui.collapsing(
+                RichText::new(format!(
+                    "{} reference(s) name a tag the build does not hold",
+                    report.unresolved_references.len()
+                ))
+                .color(subtle_dark()),
+                |ui| {
+                    ui.label(
+                        RichText::new(
+                            "Already broken in the source: these tags were gone \
+                             before the build was made, so nothing here could bring \
+                             them across.",
+                        )
+                        .small()
+                        .color(subtle_dark()),
+                    );
+                    for missing in &report.unresolved_references {
+                        ui.label(RichText::new(missing).monospace().small());
+                    }
+                },
+            );
+        }
+        if !report.held_back.is_empty() {
+            ui.label(
+                RichText::new(format!(
+                    "{} tag(s) were not written, because their data has no way \
+                     across:",
+                    report.held_back.len()
+                ))
+                .color(Color32::from_rgb(242, 196, 48)),
+            );
+            egui::ScrollArea::vertical()
+                .id_salt("cache_import_held_back")
+                .max_height(140.0)
+                .show(ui, |ui| {
+                    for entry in &report.held_back {
+                        ui.label(
+                            RichText::new(format!(
+                                "{} — {}",
+                                entry.source,
+                                entry.losses.join("; ")
+                            ))
+                            .monospace()
+                            .small(),
+                        );
+                    }
+                });
+        }
+        draw_folder_import_report(ui, report);
+    }
+    action
+}
+
+impl Baboon {
+    /// Import Cache Folder: convert a monolithic cache's tags into an editing
+    /// kit.
+    ///
+    /// The window stays up for the whole run and keeps its report afterwards.
+    /// A run of this can reach thousands of tags — following references out of
+    /// a folder is the point — so the outcome is a document to read, not a
+    /// status-bar line to catch.
+    pub(super) fn draw_cache_import_window(&mut self, ctx: &egui::Context) {
+        if self.cache_import_dialog.is_none() {
+            return;
+        }
+        let mut open = true;
+        let mut action = None;
+        egui::Window::new("Import Cache Folder")
+            .id(egui::Id::new("cache_import"))
+            .open(&mut open)
+            .resizable(true)
+            .default_width(560.0)
+            .show(ctx, |ui| {
+                if let Some(dialog) = self.cache_import_dialog.as_mut() {
+                    action = draw_cache_import_body(ui, ctx, dialog);
+                }
+            });
+
+        match action {
+            Some(CacheImportAction::Start) => self.start_cache_import(ctx.clone(), None),
+            Some(CacheImportAction::ImportOutside) => {
+                let picked = self
+                    .cache_import_dialog
+                    .as_ref()
+                    .map(|dialog| {
+                        dialog
+                            .report
+                            .as_ref()
+                            .map(|report| {
+                                report
+                                    .outside_references
+                                    .iter()
+                                    .filter(|reference| {
+                                        dialog
+                                            .outside_groups
+                                            .get(&reference.folder)
+                                            .copied()
+                                            .unwrap_or(false)
+                                    })
+                                    .map(|reference| reference.key.clone())
+                                    .collect::<HashSet<String>>()
+                            })
+                            .unwrap_or_default()
+                    })
+                    .unwrap_or_default();
+                if !picked.is_empty() {
+                    self.start_cache_import(ctx.clone(), Some(picked));
+                }
+            }
+            Some(CacheImportAction::Cancel) => {
+                if let Some(dialog) = self.cache_import_dialog.as_ref() {
+                    dialog.cancel.store(true, Ordering::Relaxed);
+                }
+                self.status = "Stopping the cache import".to_owned();
+            }
+            Some(CacheImportAction::Close) => self.cache_import_dialog = None,
+            None => {}
+        }
+        // A run owns its window: closing it would leave a worker writing into a
+        // kit with nothing left to report to.
+        let running = self
+            .cache_import_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.running);
+        if !open && !running {
+            self.cache_import_dialog = None;
+        }
+    }
+}
+
 
 impl Baboon {
     /// Import Tags: bring a tag, or a whole folder of them, in from another
@@ -389,7 +754,7 @@ impl Baboon {
                         if !draft.route.is_empty() {
                             ui.label(
                                 RichText::new(format!(
-                                    "\u{21b3} Routed via {} \u{2014} {} does not convert to {} \
+                                    "\u{21b3} Routed via {} — {} does not convert to {} \
                                      directly for this tag, so it was carried through in stages. \
                                      Nothing was written along the way.",
                                     draft.route.join(" \u{2192} "),
@@ -486,7 +851,7 @@ impl Baboon {
                                     for entry in &report.held_back {
                                         ui.label(
                                             RichText::new(format!(
-                                                "{} \u{2014} {}",
+                                                "{} — {}",
                                                 entry.source,
                                                 entry.losses.join(", ")
                                             ))
@@ -1010,7 +1375,7 @@ impl Baboon {
                 }
                 if !label.is_empty() {
                     let detail = label
-                        .split_once(" \u{2014} ")
+                        .split_once(" — ")
                         .map(|(_, rest)| rest)
                         .unwrap_or(label.as_str());
                     if detail != format!("element {}", index.unwrap_or_default()) {
@@ -2020,8 +2385,8 @@ impl Baboon {
                             "Tags keep their full paths, so this lands under {label}/ inside the \
                              folder you pick and can be reopened with File \u{2192} Load Folder.",
                         ),
-                        None => "Tags are laid out like an editing kit \u{2014} levels/, objects/, \
-                                 shaders/ \u{2014} so the result can be reopened with File \
+                        None => "Tags are laid out like an editing kit — levels/, objects/, \
+                                 shaders/ — so the result can be reopened with File \
                                  \u{2192} Load Folder."
                             .to_owned(),
                     })
@@ -3766,7 +4131,7 @@ mod mod_export_tests {
             row(
                 "zone set pvs[3]",
                 Some("zone set pvs[3]"),
-                "removed \u{2014} element 3",
+                "removed — element 3",
                 "",
             ),
         ];
@@ -3775,7 +4140,7 @@ mod mod_export_tests {
             let path = format!("zone set pvs[3]/{field}");
             rows.push(row(&path, Some(&path), "11", ""));
         }
-        rows.push(row("zone sets[5]", None, "", "added \u{2014} element 5"));
+        rows.push(row("zone sets[5]", None, "", "added — element 5"));
         for field in ["cinematic zones", "hint previous zone set"] {
             rows.push(row(&format!("zone sets[5]/{field}"), None, "", "0"));
         }
@@ -3829,7 +4194,7 @@ mod mod_export_tests {
         // drops it because the section row states it.
         assert_eq!(
             chain.title,
-            "structure bsp pvs[0] \u{203a} cluster pvs[0] \u{203a} cluster pvs bit vectors",
+            "structure bsp pvs[0] › cluster pvs[0] › cluster pvs bit vectors",
         );
         assert_eq!(chain.sections.len(), 1);
         assert!(chain.children.is_empty());
@@ -4095,4 +4460,120 @@ fn draw_conversion_report(ui: &mut Ui, report: &TagConversionReport, salt: &str)
                 );
             }
         });
+}
+
+#[cfg(test)]
+mod cache_import_window_tests {
+    use super::*;
+
+    fn dialog(report: Option<FolderConversionReport>) -> CacheImportDialog {
+        CacheImportDialog {
+            kit: KitId(0),
+            prefix: r"objects\weapons\rifle".to_owned(),
+            selected: 12,
+            targets: vec![CacheImportTarget {
+                kit: KitId(1),
+                label: "HREK".to_owned(),
+                game: "haloreach_mcc".to_owned(),
+                tags_root: PathBuf::from("D:/HREK/tags"),
+            }],
+            target_index: 0,
+            outside_groups: [
+                ("fx/decals".to_owned(), true),
+                ("shaders/shader_templates".to_owned(), false),
+            ]
+            .into_iter()
+            .collect(),
+            running: false,
+            cancel: Arc::new(AtomicBool::new(false)),
+            progress: None,
+            report,
+            error: None,
+        }
+    }
+
+    fn render(dialog: &mut CacheImportDialog) {
+        let ctx = egui::Context::default();
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::Vec2::new(700.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    draw_cache_import_body(ui, ctx, dialog);
+                });
+            },
+        );
+    }
+
+    /// Every state the window can be in draws.
+    ///
+    /// Worth a test on its own because none of what breaks here is visible to a
+    /// compile: an egui id used twice, a scroll area nested where it cannot be,
+    /// a borrow that only fails once the closure actually runs. The window has
+    /// four shapes — asking, running, failed, done — and the done one carries
+    /// every list it can show at once.
+    #[test]
+    fn the_cache_import_window_draws_in_every_state() {
+        render(&mut dialog(None));
+
+        let mut running = dialog(None);
+        running.running = true;
+        running.progress = Some(FolderConversionProgress {
+            phase: "Converting tags".to_owned(),
+            current: r"objects\weapons\rifle\assault_rifle".to_owned(),
+            processed: 40,
+            total: 210,
+            converted: 38,
+            failed: 2,
+        });
+        render(&mut running);
+
+        let mut failed = dialog(None);
+        failed.error = Some("the destination kit went away".to_owned());
+        render(&mut failed);
+
+        let mut done = dialog(Some(FolderConversionReport {
+            source_root: PathBuf::from(r"objects\weapons\rifle"),
+            source_game: "haloreach_mcc".to_owned(),
+            target_game: "haloreach_mcc".to_owned(),
+            destination_root: PathBuf::from("D:/HREK/tags"),
+            files: vec![FolderConversionFileResult {
+                source: "objects/weapons/rifle/assault_rifle.weapon".to_owned(),
+                output: Some(PathBuf::from(
+                    "D:/HREK/tags/objects/weapons/rifle/assault_rifle.weapon",
+                )),
+                status: FolderConversionFileStatus::GeneratedLayout,
+                overwritten: true,
+                detail: "Built from the target profile's own definitions".to_owned(),
+            }],
+            ignored_files: Vec::new(),
+            held_back: vec![FolderConversionHeldBack {
+                source: "objects/weapons/rifle/fp_assault_rifle.model_animation_graph".to_owned(),
+                key: r"cache:jmad:objects\weapons\rifle\fp_assault_rifle".to_owned(),
+                losses: vec!["the animation payload has no way across".to_owned()],
+            }],
+            outside_references: vec![
+                OutsideReference {
+                    key: r"cache:bitm:fx\decals\_bitmaps\scorch".to_owned(),
+                    display_path: "fx/decals/_bitmaps/scorch.bitmap".to_owned(),
+                    folder: "fx/decals".to_owned(),
+                },
+                OutsideReference {
+                    key: r"cache:rmt2:shaders\shader_templates\_0_0".to_owned(),
+                    display_path: "shaders/shader_templates/_0_0.render_method_template".to_owned(),
+                    folder: "shaders/shader_templates".to_owned(),
+                },
+            ],
+            unresolved_references: ["fx/decals/_bitmaps/gone.bitmap".to_owned()]
+                .into_iter()
+                .collect(),
+            cancelled: true,
+        }));
+        render(&mut done);
+    }
 }

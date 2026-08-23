@@ -964,6 +964,12 @@ impl Baboon {
                 WorkerMessage::FolderConversionFinished(report) => {
                     self.handle_folder_conversion_finished(report, ctx)
                 }
+                WorkerMessage::CacheImportProgress(progress) => {
+                    self.handle_cache_import_progress(progress)
+                }
+                WorkerMessage::CacheImportFinished { stamp, result } => {
+                    self.handle_cache_import_finished(stamp, result, ctx)
+                }
                 WorkerMessage::ImportSourceResolved { input, result } => {
                     self.handle_import_source_resolved(input, result)
                 }
@@ -3577,6 +3583,9 @@ impl Baboon {
             }
             BrowserAction::OpenLooseFolderInExplorer { rel_path } => {
                 self.open_loose_folder_in_explorer(&rel_path)
+            }
+            BrowserAction::ImportCacheFolderIntoKit { prefix } => {
+                self.open_cache_import_dialog(prefix)
             }
             BrowserAction::ExtractRaw(key) => self.begin_extract_raw(key, ctx),
             BrowserAction::ExtractBitmap(key) => self.begin_extract_bitmap(key, ctx),
@@ -9558,7 +9567,7 @@ fn collect_tag_references(
 /// Indexing walks every element of every block across the whole tag set, where
 /// building a path string per visited field dominates the cost — and the
 /// dependency index discards those paths.
-fn collect_tag_dependency_refs(tag_struct: TagStruct<'_>, refs: &mut Vec<DependencyRef>) {
+pub(in crate::app) fn collect_tag_dependency_refs(tag_struct: TagStruct<'_>, refs: &mut Vec<DependencyRef>) {
     for field in tag_struct.fields() {
         match field.value() {
             Some(TagFieldData::TagReference(reference)) => {

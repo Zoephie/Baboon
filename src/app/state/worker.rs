@@ -209,6 +209,18 @@ pub(in crate::app) enum WorkerMessage {
     },
     FolderConversionProgress(FolderConversionProgress),
     FolderConversionFinished(Result<FolderConversionReport, String>),
+    /// The same shape, for the import that reads a monolithic cache. Kept apart
+    /// from the pair above because the two have separate windows and nothing
+    /// stops both running — one stream feeding both would put a cache run's
+    /// numbers in the Import Tags progress bar.
+    CacheImportProgress(FolderConversionProgress),
+    /// Stamped, unlike its loose-folder twin: this run writes into a *different*
+    /// workspace from the one it reads, over minutes, and the destination can be
+    /// closed or reloaded while it works.
+    CacheImportFinished {
+        stamp: KitStamp,
+        result: Result<FolderConversionReport, String>,
+    },
     /// What an Import Tags source path turned out to be. Carries the input it
     /// was measured from, because the walk can outlast the user's typing and a
     /// result for a path they have since changed has to be dropped, not shown.
