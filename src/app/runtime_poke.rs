@@ -44,14 +44,56 @@ pub(in crate::app) struct RuntimeBuildProfile {
 
 /// Every build the runtime poker knows how to address, newest first.
 ///
-/// A build is only ever identified by the SHA-256 of the host executable and
-/// the tag module; the RVAs below were measured against those exact files and
-/// mean nothing for any other pair.
-const PROFILES: &[RuntimeBuildProfile] = &[NEXT_PROFILE, CU2_PROFILE, CU2_XBOXAPP_PROFILE];
+/// A build is selected by the SHA-256 of the tag module alone — that is the
+/// image every RVA below is an offset into. `host_sha256` records which
+/// executable the measurement was taken against and is not consulted, which is
+/// what lets one set of RVAs serve both the Steam and XboxApp packagings of the
+/// same tag module. The RVAs mean nothing for any other tag module.
+const PROFILES: &[RuntimeBuildProfile] = &[
+    STEAM_2026_08_11_PROFILE,
+    STEAM_2026_07_25_PROFILE,
+    CU2_PROFILE,
+    CU2_XBOXAPP_PROFILE,
+];
+
+/// Tag module built 2026-08-11.
+///
+/// Every RVA below is *the same value* as the 2026-07-25 profile, which is a
+/// claim that has to be earned rather than assumed. The two modules are the
+/// same size to the byte with every section at the same virtual address, and
+/// `.reloc` is identical, so no relocated pointer changed address. `.text` got
+/// one 16-byte insertion at 0x1C0AA0, displacing everything up to 0x5C75EC by
+/// +0x10 and leaving the rest in place. Measured against that:
+///
+/// * Each address here is reached by exactly as many RIP-relative instructions
+///   in the new module as in the old (1244, 3776, 11, 12, 7, 9, 12 and 2
+///   respectively), matching one-for-one under the +0x10 displacement. A global
+///   that had moved would have lost every reference to its old address.
+/// * All 53 `string_id` reference sites sit in functions that disassemble
+///   instruction-for-instruction identically once the code shift is normalised
+///   away, so the hardcoded bucket/entry/storage/builtin constants above still
+///   describe this build.
+/// * 32,639 of 33,052 `.pdata` functions are identical under that
+///   normalisation; every remaining difference is either in the two churn
+///   clusters at the shift boundaries or trailing jump-table data decoded as
+///   code, none of it structural.
+const STEAM_2026_08_11_PROFILE: RuntimeBuildProfile = RuntimeBuildProfile {
+    label: "Steam post-CU2 (tag module 2026.08.11)",
+    host_sha256: "EB1DACA659207F2B5C8A6FD922917195AE9C8AE19E771E396E08906282A4B152",
+    dll_sha256: "C8C144404ADF61A9DE821C996682A7E66ABADD7E530397D3BBDE31C123203BF7",
+    tag_table_pointer_rva: 0x0182_D1E8,
+    segment_table_rva: 0x02C2_CCC0,
+    string_id_storage_rva: 0x0135_7490,
+    string_id_storage_used_rva: 0x0135_7498,
+    string_id_strings_rva: 0x0135_74A0,
+    string_id_count_rva: 0x0135_74A8,
+    string_id_mapping_table_rva: 0x0135_74C0,
+    string_id_builtin_table_rva: 0x0082_F0A0,
+};
 
 /// Tag module built 2026-07-25 (the update that shipped after CU2). The game
 /// embeds no build number, so the label carries the tag module's PE date.
-const NEXT_PROFILE: RuntimeBuildProfile = RuntimeBuildProfile {
+const STEAM_2026_07_25_PROFILE: RuntimeBuildProfile = RuntimeBuildProfile {
     label: "Steam post-CU2 (tag module 2026.07.25)",
     host_sha256: "4D20DC56611B29CD710D591C86CF5DE55B914EB986838C42E719B82CCD367753",
     dll_sha256: "82B8A3A006BA3F981D6857DC7F4E4E929AE5282587F31F92F77A3FA78F4B2DAC",

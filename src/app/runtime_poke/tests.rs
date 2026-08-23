@@ -115,6 +115,37 @@ fn last_poke_for_test(patch: PokePatch, original: Vec<u8>) -> LastPoke {
     }
 }
 
+/// The profile table is searched by tag-module hash and the first match wins,
+/// so a duplicate hash would silently shadow a profile, and a hash written in
+/// the wrong case or length would never match at all — either way the profile
+/// is dead code that looks alive.
+#[test]
+fn profile_table_hashes_are_unique_and_comparable() {
+    let mut seen = Vec::new();
+    for profile in PROFILES {
+        assert_eq!(
+            profile.dll_sha256.len(),
+            64,
+            "{} has a malformed tag-module hash",
+            profile.label
+        );
+        assert!(
+            profile
+                .dll_sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'A'..=b'F').contains(&byte)),
+            "{} must spell its tag-module hash in uppercase hex to match `format!(\"{{:X}}\")`",
+            profile.label
+        );
+        assert!(
+            !seen.contains(&profile.dll_sha256),
+            "{} repeats a tag-module hash already claimed by an earlier profile",
+            profile.label
+        );
+        seen.push(profile.dll_sha256);
+    }
+}
+
 #[test]
 fn checked_rva_math_rejects_overflow() {
     assert_eq!(
