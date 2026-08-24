@@ -519,7 +519,12 @@ editing kit…** to convert the lot into an open loose kit.
   resources and byte-swapped into the shared `processed pixel data` blob a PC
   tag reads. Formats the PC build ships decoded (`ctx1`, `dxn_mono_alpha`, the
   `dxt3a`/`dxt5a` family) are decoded on the way. A render model's vertex and
-  index buffers arrive as the inline author-format blocks an MCC tag stores.
+  index buffers arrive as the inline author-format blocks an MCC tag stores,
+  and the meshes stop describing GPU buffers that did not come with them.
+- **Lightmaps too.** A level's lightmap textures describe their images only in
+  the tag's 360 mirror, so the PC image block is built from it — which is what
+  a kit's own copy of the same texture holds. The lightmap BSP data comes
+  across whole wherever the build actually has it.
 - **Sounds, scenarios and BSPs come too.** A sound's samples and a BSP's
   resource interface do not cross, but MCC Reach does not carry either — its
   own sounds name an FMOD bank and its own BSPs keep their meshes inline — so
@@ -531,7 +536,10 @@ editing kit…** to convert the lot into an open loose kit.
   from the schema alone is one the kit's own loader refuses, so it is reported
   instead. Both are listed with the reason rather than landing broken.
 - References naming a tag the build itself no longer holds are reported
-  separately: those were already broken in the source.
+  separately: those were already broken in the source. A build is a working
+  store rather than an archive, so its index can name a tag it kept no bytes
+  for — most of a 2011 Reach build's lightmap BSP data is like that — and those
+  are reported in the same words rather than as a parse failure.
 - The run has a **Cancel** button. A whole build's worth of tags is a long job,
   and everything written before you stop it stays written.
 
