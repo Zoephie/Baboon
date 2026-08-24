@@ -47,6 +47,21 @@ answer usually is: the crash callback only sees the shell's halt, while the
 assertion, or an `AccessViolationException` inside native `tag_load`, prints
 here first.
 
+## One process per tag
+
+`drive.ps1` loads everything in one process, which is fast and **lies**. The
+engine accumulates state across loads, and a run of several hundred reports
+crashes on tags that load perfectly well on their own: in one sweep, 65 of 69
+"crashers" were this.
+
+Use it to find candidates, then confirm them with `isolate.ps1`, which gives
+each tag its own process. Slower, and the only verdict worth quoting.
+
+```powershell
+.\isolate.ps1 -Kit "D:\SteamLibrary\steamapps\common\HREK" `
+               -WorkList work.txt -Results results.txt
+```
+
 ## Reading a verdict
 
 - **OK** — loaded, and its fields were walked. Not a claim that the contents are
