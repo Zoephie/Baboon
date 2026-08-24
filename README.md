@@ -525,11 +525,13 @@ editing kit…** to convert the lot into an open loose kit.
   the tag's 360 mirror, so the PC image block is built from it — which is what
   a kit's own copy of the same texture holds. The lightmap BSP data comes
   across whole wherever the build actually has it.
-- **Sounds, scenarios and BSPs come too.** A sound's samples and a BSP's
-  resource interface do not cross, but MCC Reach does not carry either — its
-  own sounds name an FMOD bank and its own BSPs keep their meshes inline — so
-  those tags arrive in the shape the kit's own are in. A converted sound finds
-  its audio by name in the kit's banks; one the kit has no bank for is silent.
+- **Sounds, scenarios and BSPs come too.** A sound's samples do not cross, and
+  do not need to — MCC Reach's own sounds name an FMOD bank rather than
+  carrying audio, so a converted sound finds its audio by name and one the kit
+  has no bank for is silent. A BSP's structure resource does cross: the
+  collision hierarchy and the instanced geometry definitions are read out of
+  the build's own control data and written where a loose tag keeps them, so
+  the instances have something to point at.
 - **Animations come across too.** A graph keeps its animations in a pageable
   resource, which a 360 build stores as the engine had it in memory rather than
   as the inline members a loose tag holds. They are read out of that and
