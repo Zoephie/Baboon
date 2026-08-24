@@ -509,11 +509,15 @@ editing kit…** to convert the lot into an open loose kit.
   anywhere else would be pointed at by nothing.
 - **It brings the folder, then asks about the rest.** Nothing outside the
   folder is converted behind your back. When the tags that landed point at
-  something the kit does not have, the run reports it — grouped by folder with
-  counts, so a character folder reaching two thousand tags is still a question
-  you can answer — and you tick which folders to bring before a second run
-  fetches them. Anything left unticked stays out, and the tags pointing at it
-  keep a reference the kit cannot resolve.
+  something the kit does not have, the run reports it as a folder tree you can
+  open — tick a whole branch, or go down to the individual tag — and a second
+  run fetches what you ticked. Anything left unticked stays out, and the tags
+  pointing at it keep a reference the kit cannot resolve.
+- **One tag at a time, too.** Right-click a tag in a cache and *Import into
+  editing kit…* converts just that one, either at its own path or at a folder
+  you choose. Choosing one says so plainly: a reference names the path the
+  build gave a tag, nothing here rewrites those, so a tag moved elsewhere is a
+  tag nothing points at. It still reports what the tag reached for.
 - **Pixels and geometry come across.** A 360 bitmap arrives whole — every mip
   level, every cube face and array layer — un-tiled out of its texture
   resources and byte-swapped into the shared `processed pixel data` blob a PC
@@ -545,6 +549,11 @@ editing kit…** to convert the lot into an open loose kit.
   store rather than an archive, so its index can name a tag it kept no bytes
   for — most of a 2011 Reach build's lightmap BSP data is like that — and those
   are reported in the same words rather than as a parse failure.
+- **A level with no lightmap is called out on its own.** A `scenario_lightmap_bsp_data`
+  the build kept no bytes for is not one failed tag among hundreds: Sapien will
+  not open a level whose lighting is missing, and the error it gives names the
+  BSP and never mentions lighting. The run lists those levels and says what it
+  means.
 - The run has a **Cancel** button. A whole build's worth of tags is a long job,
   and everything written before you stop it stays written.
 

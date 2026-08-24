@@ -72,6 +72,72 @@ enum CacheImportAction {
     Close,
 }
 
+/// One folder of the outside-reference tree, and everything under it.
+///
+/// A folder's tick is whether *all* of its subtree is ticked, and setting it
+/// sets the subtree; the count beside it is what says the answer is partial,
+/// which a two-state box on its own cannot. Folders that hold exactly one thing
+/// still get a row, because collapsing them would hide where a tag lives, and
+/// where it lives is most of what the answer is being given about.
+fn draw_outside_folder(
+    ui: &mut egui::Ui,
+    tree: &OutsideTree,
+    picked: &mut std::collections::BTreeMap<String, bool>,
+    folder: &str,
+    depth: usize,
+) {
+    let (chosen, total) = tree.tally(folder, picked);
+    let leaf = folder.rsplit('/').next().unwrap_or(folder);
+    let mut all = chosen == total && total > 0;
+    let id = ui.make_persistent_id(("cache_import_outside_folder", folder));
+    // Open at the top so the first level is readable without a click, closed
+    // below it so a folder of two thousand tags does not arrive expanded.
+    let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
+        ui.ctx(),
+        id,
+        depth == 0,
+    );
+    state
+        .show_header(ui, |ui| {
+            if ui.checkbox(&mut all, "").changed() {
+                for key in tree.keys_under(folder) {
+                    picked.insert(key, all);
+                }
+            }
+            let label = if chosen == total {
+                format!("{leaf}  ({total})")
+            } else {
+                format!("{leaf}  ({chosen} of {total})")
+            };
+            let text = RichText::new(label);
+            ui.label(if chosen == 0 {
+                text.color(subtle_dark())
+            } else {
+                text
+            });
+        })
+        .body(|ui| {
+            if let Some(children) = tree.folders.get(folder) {
+                for child in children {
+                    let path = if folder.is_empty() {
+                        child.clone()
+                    } else {
+                        format!("{folder}/{child}")
+                    };
+                    draw_outside_folder(ui, tree, picked, &path, depth + 1);
+                }
+            }
+            if let Some(tags) = tree.tags.get(folder) {
+                for (key, name) in tags {
+                    let mut wanted = picked.get(key).copied().unwrap_or(false);
+                    if ui.checkbox(&mut wanted, RichText::new(name).monospace()).changed() {
+                        picked.insert(key.clone(), wanted);
+                    }
+                }
+            }
+        });
+}
+
 /// Everything inside the Import Cache Folder window.
 ///
 /// Split out from the window itself so it can be rendered against a dialog on
@@ -85,10 +151,12 @@ fn draw_cache_import_body(
     let mut action = None;
     ui.label(RichText::new("From").strong());
     ui.label(
-        RichText::new(if dialog.prefix.is_empty() {
-            format!("the whole cache — {} tag(s)", dialog.selected)
-        } else {
-            format!("{} — {} tag(s)", dialog.prefix, dialog.selected)
+        RichText::new(match dialog.single.as_ref() {
+            Some(single) => single.display_path.clone(),
+            None if dialog.prefix.is_empty() => {
+                format!("the whole cache — {} tag(s)", dialog.selected)
+            }
+            None => format!("{} — {} tag(s)", dialog.prefix, dialog.selected),
         })
         .monospace(),
     );
@@ -112,15 +180,70 @@ fn draw_cache_import_body(
                 }
             });
     });
-    if let Some(target) = dialog.target() {
-        ui.label(
-            RichText::new(format!(
-                "Tags land at their own paths under {}",
-                target.tags_root.display()
-            ))
-            .small()
-            .color(subtle_dark()),
-        );
+    // Where it lands. A folder import is fixed at the tags root -- every
+    // reference names the path the build gave a tag, so a tag written anywhere
+    // else is one nothing points at. A single tag is the case where the user
+    // may want it somewhere of their own, and can be told what that costs.
+    let tags_root = dialog.target().map(|target| target.tags_root.clone());
+    if let Some(tags_root) = tags_root {
+        match dialog.single.as_mut() {
+            None => {
+                ui.label(
+                    RichText::new(format!(
+                        "Tags land at their own paths under {}",
+                        tags_root.display()
+                    ))
+                    .small()
+                    .color(subtle_dark()),
+                );
+            }
+            Some(single) => {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(!dialog.running, egui::Button::new("Choose folder..."))
+                        .clicked()
+                        && let Some(picked) = rfd::FileDialog::new()
+                            .set_directory(&tags_root)
+                            .pick_folder()
+                    {
+                        // Inside the kit or not at all: a tag written outside
+                        // the tags root is not in the kit, whatever the path
+                        // says.
+                        match picked.strip_prefix(&tags_root) {
+                            Ok(relative) => single.destination = Some(relative.to_path_buf()),
+                            Err(_) => single.destination = None,
+                        }
+                    }
+                    if single.destination.is_some()
+                        && ui
+                            .add_enabled(!dialog.running, egui::Button::new("Its own path"))
+                            .clicked()
+                    {
+                        single.destination = None;
+                    }
+                });
+                let leaf = single
+                    .display_path
+                    .rsplit(['\\', '/'])
+                    .next()
+                    .unwrap_or(&single.display_path);
+                let landing = match single.destination.as_ref() {
+                    Some(folder) => tags_root.join(folder).join(leaf),
+                    None => tags_root.join(single.display_path.replace('\\', "/")),
+                };
+                ui.label(RichText::new(landing.display().to_string()).monospace().small());
+                if single.destination.is_some() {
+                    ui.label(
+                        RichText::new(
+                            "Moved off its own path, so the tags that reference it will not                              find it: a reference names the path the build gave it, and                              nothing here rewrites those.",
+                        )
+                        .small()
+                        .color(Color32::from_rgb(242, 196, 48)),
+                    );
+                }
+            }
+        }
     }
 
 
@@ -201,17 +324,6 @@ fn draw_cache_import_body(
         ctx.request_repaint();
     }
 
-    // Folder counts for the outside-reference question, tallied once rather
-    // than per frame inside the list.
-    let counts: Vec<(String, usize)> = {
-        let mut tally: std::collections::BTreeMap<String, usize> = Default::default();
-        if let Some(report) = dialog.report.as_ref() {
-            for reference in &report.outside_references {
-                *tally.entry(reference.folder.clone()).or_default() += 1;
-            }
-        }
-        tally.into_iter().collect()
-    };
     if let Some(report) = dialog.report.as_ref() {
         ui.add_space(8.0);
         if report.cancelled {
@@ -232,56 +344,66 @@ fn draw_cache_import_body(
             );
             ui.label(
                 RichText::new(
-                    "Grouped by folder. Anything left unticked stays out, and the \
-                     tags that point at it keep a reference to a tag the kit does \
-                     not have.",
+                    "Open a folder to answer inside it. Anything left unticked stays                      out, and the tags that point at it keep a reference to a tag the                      kit does not have.",
                 )
                 .small()
                 .color(subtle_dark()),
             );
             ui.horizontal(|ui| {
                 if ui.button("All").clicked() {
-                    for folder in dialog.outside_groups.values_mut() {
-                        *folder = true;
+                    for wanted in dialog.outside_picked.values_mut() {
+                        *wanted = true;
                     }
                 }
                 if ui.button("None").clicked() {
-                    for folder in dialog.outside_groups.values_mut() {
-                        *folder = false;
+                    for wanted in dialog.outside_picked.values_mut() {
+                        *wanted = false;
                     }
                 }
-                let picked = dialog
-                    .outside_groups
+                let chosen = dialog
+                    .outside_picked
                     .values()
                     .filter(|wanted| **wanted)
                     .count();
                 ui.label(
                     RichText::new(format!(
-                        "{picked} of {} folder(s)",
-                        dialog.outside_groups.len()
+                        "{chosen} of {} tag(s)",
+                        dialog.outside_picked.len()
                     ))
                     .small()
                     .color(subtle_dark()),
                 );
             });
+            // Borrowed field by field: the report is held open around this, and
+            // reaching for the whole dialog inside the closure would collide
+            // with it.
+            let outside_tree = &dialog.outside_tree;
+            let outside_picked = &mut dialog.outside_picked;
             egui::ScrollArea::vertical()
                 .id_salt("cache_import_outside")
-                .max_height(220.0)
+                .max_height(260.0)
                 .show(ui, |ui| {
-                    for (folder, count) in &counts {
-                        let Some(wanted) = dialog.outside_groups.get_mut(folder) else {
-                            continue;
-                        };
-                        ui.checkbox(wanted, format!("{folder}  ({count})"));
+                    for root in &outside_tree.roots {
+                        draw_outside_folder(ui, outside_tree, outside_picked, root, 0);
+                    }
+                    // Tags with no folder of their own, if a build has any.
+                    let loose: Vec<(String, String)> =
+                        outside_tree.tags.get("").cloned().unwrap_or_default();
+                    for (key, name) in loose {
+                        let mut wanted = outside_picked.get(&key).copied().unwrap_or(false);
+                        if ui
+                            .checkbox(&mut wanted, RichText::new(&name).monospace())
+                            .changed()
+                        {
+                            outside_picked.insert(key, wanted);
+                        }
                     }
                 });
-            let picked: usize = counts
-                .iter()
-                .filter(|(folder, _)| {
-                    dialog.outside_groups.get(folder).copied().unwrap_or(false)
-                })
-                .map(|(_, count)| *count)
-                .sum();
+            let picked = dialog
+                .outside_picked
+                .values()
+                .filter(|wanted| **wanted)
+                .count();
             if ui
                 .add_enabled(
                     picked > 0 && !dialog.running,
@@ -291,6 +413,34 @@ fn draw_cache_import_body(
             {
                 action = Some(CacheImportAction::ImportOutside);
             }
+        }
+        // Ahead of the rest, because it is the difference between a level that
+        // runs and one that cannot, and the engine's own error for it names the
+        // bsp and never mentions lighting.
+        if !report.levels_without_lighting.is_empty() {
+            ui.label(
+                RichText::new(format!(
+                    "{} level(s) came across without their baked lighting",
+                    report.levels_without_lighting.len()
+                ))
+                .strong()
+                .color(Color32::from_rgb(242, 196, 48)),
+            );
+            ui.label(
+                RichText::new(
+                    "This build kept no lightmap data for them — nothing here could                      bring it. Sapien will not open a level whose lighting is missing:                      it reports the bsp as having failed to load, which is what a bsp                      with no lightmap looks like from the inside. Bake lightmaps for                      these, or work with a level this build did keep them for.",
+                )
+                .small()
+                .color(subtle_dark()),
+            );
+            egui::ScrollArea::vertical()
+                .id_salt("cache_import_no_lighting")
+                .max_height(110.0)
+                .show(ui, |ui| {
+                    for level in &report.levels_without_lighting {
+                        ui.label(RichText::new(level).monospace().small());
+                    }
+                });
         }
         if !report.unresolved_references.is_empty() {
             ui.collapsing(
@@ -387,8 +537,8 @@ impl Baboon {
                                     .iter()
                                     .filter(|reference| {
                                         dialog
-                                            .outside_groups
-                                            .get(&reference.folder)
+                                            .outside_picked
+                                            .get(&reference.key)
                                             .copied()
                                             .unwrap_or(false)
                                     })
@@ -4478,12 +4628,9 @@ mod cache_import_window_tests {
                 tags_root: PathBuf::from("D:/HREK/tags"),
             }],
             target_index: 0,
-            outside_groups: [
-                ("fx/decals".to_owned(), true),
-                ("shaders/shader_templates".to_owned(), false),
-            ]
-            .into_iter()
-            .collect(),
+            outside_tree: OutsideTree::default(),
+            outside_picked: std::collections::BTreeMap::new(),
+            single: None,
             running: false,
             cancel: Arc::new(AtomicBool::new(false)),
             progress: None,
@@ -4515,8 +4662,9 @@ mod cache_import_window_tests {
     /// Worth a test on its own because none of what breaks here is visible to a
     /// compile: an egui id used twice, a scroll area nested where it cannot be,
     /// a borrow that only fails once the closure actually runs. The window has
-    /// four shapes — asking, running, failed, done — and the done one carries
-    /// every list it can show at once.
+    /// five shapes — asking for a folder, asking for one tag, running, failed,
+    /// done — and the done one carries every list it can show at once,
+    /// including a reference tree several folders deep.
     #[test]
     fn the_cache_import_window_draws_in_every_state() {
         render(&mut dialog(None));
@@ -4536,6 +4684,20 @@ mod cache_import_window_tests {
         let mut failed = dialog(None);
         failed.error = Some("the destination kit went away".to_owned());
         render(&mut failed);
+
+        // One tag, at its own path and at one the user picked: the second draws
+        // a warning the first does not.
+        let mut single = dialog(None);
+        single.single = Some(SingleTagImport {
+            key: r"cache:bitm:objects\weapons\rifle\bitmaps\ar_diffuse".to_owned(),
+            display_path: r"objects\weapons\rifle\bitmaps\ar_diffuse.bitmap".to_owned(),
+            destination: None,
+        });
+        render(&mut single);
+        if let Some(single_tag) = single.single.as_mut() {
+            single_tag.destination = Some(PathBuf::from("scratch/imported"));
+        }
+        render(&mut single);
 
         let mut done = dialog(Some(FolderConversionReport {
             source_root: PathBuf::from(r"objects\weapons\rifle"),
@@ -4572,8 +4734,21 @@ mod cache_import_window_tests {
             unresolved_references: ["fx/decals/_bitmaps/gone.bitmap".to_owned()]
                 .into_iter()
                 .collect(),
+            levels_without_lighting: [r"levels\multirchive8_boneyard_v2".to_owned()]
+                .into_iter()
+                .collect(),
             cancelled: true,
         }));
+        // The tree the window draws is built when a run reports, so a fixture
+        // that skips that step would exercise an empty one.
+        if let Some(report) = done.report.as_ref() {
+            done.outside_tree = OutsideTree::build(&report.outside_references);
+            done.outside_picked = report
+                .outside_references
+                .iter()
+                .map(|reference| (reference.key.clone(), true))
+                .collect();
+        }
         render(&mut done);
     }
 }

@@ -6,7 +6,7 @@
 
 use super::*;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// The Import Cache Folder window, from the question it asks to the report it
 /// leaves behind.
@@ -29,17 +29,138 @@ pub(in crate::app) struct CacheImportDialog {
     /// cursor, and a kit that closes mid-run is caught by the stamp instead.
     pub(in crate::app) targets: Vec<CacheImportTarget>,
     pub(in crate::app) target_index: usize,
-    /// Which folders of the last run's outside references the user has ticked,
-    /// keyed by [`OutsideReference::folder`]. Rebuilt each time a run finishes,
-    /// all ticked, because bringing everything the folder needs is the common
-    /// answer and unticking is the deliberate one.
-    pub(in crate::app) outside_groups: BTreeMap<String, bool>,
+    /// The last run's outside references as a folder tree.
+    pub(in crate::app) outside_tree: OutsideTree,
+    /// Which of them the user has ticked, keyed by [`OutsideReference::key`].
+    /// Rebuilt each time a run finishes, all ticked, because bringing
+    /// everything the folder needs is the common answer and leaving something
+    /// out is the deliberate one.
+    pub(in crate::app) outside_picked: BTreeMap<String, bool>,
+    /// Set when the window was opened for one tag rather than a folder.
+    ///
+    /// A folder import lands every tag at its own path, because that is what
+    /// keeps references working. One tag is the case where somebody wants it
+    /// somewhere else, and is in a position to know what that costs.
+    pub(in crate::app) single: Option<SingleTagImport>,
     pub(in crate::app) running: bool,
     /// Set from the UI thread by Cancel; the worker reads it between tags.
     pub(in crate::app) cancel: Arc<AtomicBool>,
     pub(in crate::app) progress: Option<FolderConversionProgress>,
     pub(in crate::app) report: Option<FolderConversionReport>,
     pub(in crate::app) error: Option<String>,
+}
+
+/// The outside references arranged the way they are stored, so the question can
+/// be answered at whatever depth the answer lives at.
+///
+/// The flat list this replaces grouped by the first two path segments, which is
+/// readable but blunt: `objects/characters` is one tick and two thousand tags,
+/// and wanting the elite but not the whole cast meant taking both or neither.
+/// A folder here is a real folder, opens, and can be answered at any level down
+/// to the individual tag.
+///
+/// Built once when a run reports, not per frame: a run can reach thousands of
+/// references and the shape does not change while the answer is being given.
+#[derive(Default)]
+pub(in crate::app) struct OutsideTree {
+    /// Folder path → the folders directly inside it.
+    pub(in crate::app) folders: BTreeMap<String, BTreeSet<String>>,
+    /// Folder path → the tags directly in it, as `(key, leaf name)`.
+    pub(in crate::app) tags: BTreeMap<String, Vec<(String, String)>>,
+    /// Folder path → how many tags its whole subtree holds.
+    pub(in crate::app) totals: BTreeMap<String, usize>,
+    /// The folders with no parent.
+    pub(in crate::app) roots: BTreeSet<String>,
+}
+
+impl OutsideTree {
+    /// Arrange a run's outside references into folders.
+    pub(in crate::app) fn build(references: &[OutsideReference]) -> Self {
+        let mut tree = Self::default();
+        for reference in references {
+            let normalized = reference.display_path.replace('\\', "/");
+            let (folder, leaf) = match normalized.rsplit_once('/') {
+                Some((folder, leaf)) => (folder.to_owned(), leaf.to_owned()),
+                // A tag at the top with no folder of its own still needs one to
+                // hang from, and an empty name is what the roots loop skips.
+                None => (String::new(), normalized.clone()),
+            };
+            tree.tags
+                .entry(folder.clone())
+                .or_default()
+                .push((reference.key.clone(), leaf));
+            // Every ancestor, so a folder that only holds folders still appears.
+            let mut path = folder.as_str();
+            loop {
+                *tree.totals.entry(path.to_owned()).or_default() += 1;
+                match path.rsplit_once('/') {
+                    Some((parent, child)) => {
+                        tree.folders
+                            .entry(parent.to_owned())
+                            .or_default()
+                            .insert(child.to_owned());
+                        path = parent;
+                    }
+                    None => {
+                        if !path.is_empty() {
+                            tree.roots.insert(path.to_owned());
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        for tags in tree.tags.values_mut() {
+            tags.sort();
+        }
+        tree
+    }
+
+    /// Every tag key at or under `folder`.
+    pub(in crate::app) fn keys_under(&self, folder: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut pending = vec![folder.to_owned()];
+        while let Some(path) = pending.pop() {
+            if let Some(tags) = self.tags.get(&path) {
+                out.extend(tags.iter().map(|(key, _)| key.clone()));
+            }
+            if let Some(children) = self.folders.get(&path) {
+                for child in children {
+                    pending.push(if path.is_empty() {
+                        child.clone()
+                    } else {
+                        format!("{path}/{child}")
+                    });
+                }
+            }
+        }
+        out
+    }
+
+    /// How many tags under `folder` are ticked, and how many there are.
+    pub(in crate::app) fn tally(
+        &self,
+        folder: &str,
+        picked: &BTreeMap<String, bool>,
+    ) -> (usize, usize) {
+        let keys = self.keys_under(folder);
+        let total = keys.len();
+        let chosen = keys
+            .iter()
+            .filter(|key| picked.get(*key).copied().unwrap_or(false))
+            .count();
+        (chosen, total)
+    }
+}
+
+/// The one tag a single-tag import is for, and where the user wants it.
+pub(in crate::app) struct SingleTagImport {
+    /// The cache key, which is what the run converts.
+    pub(in crate::app) key: String,
+    /// Its path in the build, for the window to name it by.
+    pub(in crate::app) display_path: String,
+    /// Folder inside the target's tags root, or `None` for the tag's own path.
+    pub(in crate::app) destination: Option<PathBuf>,
 }
 
 /// One editing kit an import could land in.
@@ -98,7 +219,62 @@ impl Baboon {
             selected,
             targets,
             target_index: 0,
-            outside_groups: BTreeMap::new(),
+            outside_tree: OutsideTree::default(),
+            outside_picked: BTreeMap::new(),
+            single: None,
+            running: false,
+            cancel: Arc::new(AtomicBool::new(false)),
+            progress: None,
+            report: None,
+            error: None,
+        });
+    }
+
+    /// Open the window for one tag in the active cache workspace.
+    ///
+    /// Same window as the folder import, seeded with a single tag and a
+    /// destination the user chooses. Sharing the window rather than adding
+    /// another keeps one place to read what happened, and a single tag can
+    /// still reach for others -- the outside-reference question is the same
+    /// question whether one tag asked it or a thousand.
+    pub(super) fn open_cache_import_dialog_for_tag(&mut self, key: String) {
+        if self.cache_import_dialog.is_some() {
+            self.status = "A cache import is already open".to_owned();
+            return;
+        }
+        let kit = self.active_kit_id();
+        let Some(source_data) = self.source() else {
+            return;
+        };
+        if !matches!(source_data.source, TagSource::MonolithicCache { .. }) {
+            self.status = "This is not a monolithic cache workspace".to_owned();
+            return;
+        }
+        let Some(entry) = source_data.entries.iter().find(|entry| entry.key == key) else {
+            self.status = "That tag is no longer in this cache".to_owned();
+            return;
+        };
+        let display_path = entry.display_path.clone();
+        let targets = self.cache_import_targets();
+        if targets.is_empty() {
+            self.status =
+                "Open the editing kit this tag should land in first — File › Load Folder"
+                    .to_owned();
+            return;
+        }
+        self.cache_import_dialog = Some(CacheImportDialog {
+            kit,
+            prefix: display_path.clone(),
+            selected: 1,
+            targets,
+            target_index: 0,
+            outside_tree: OutsideTree::default(),
+            outside_picked: BTreeMap::new(),
+            single: Some(SingleTagImport {
+                key,
+                display_path,
+                destination: None,
+            }),
             running: false,
             cancel: Arc::new(AtomicBool::new(false)),
             progress: None,
@@ -159,6 +335,16 @@ impl Baboon {
             return;
         };
         let (kit, prefix) = (dialog.kit, dialog.prefix.clone());
+        // A single-tag run converts that tag on the first pass; a second pass
+        // for its references is the same as any other, and lands them at their
+        // own paths, because that is where the references point.
+        let (single_seed, relocate_to) = match (dialog.single.as_ref(), only.is_none()) {
+            (Some(single), true) => (
+                Some(HashSet::from([single.key.clone()])),
+                single.destination.clone(),
+            ),
+            _ => (None, None),
+        };
         let (target_game, target_tags_root) = (target.game.clone(), target.tags_root.clone());
         let cancel = dialog.cancel.clone();
         cancel.store(false, Ordering::Relaxed);
@@ -191,10 +377,11 @@ impl Baboon {
             scope: FolderConversionScope::CacheSubtree {
                 prefix,
                 entries,
-                seed: match only {
-                    Some(keys) => CacheSeed::Keys(keys),
-                    None => CacheSeed::Folder,
+                seed: match (only, single_seed) {
+                    (Some(keys), _) | (None, Some(keys)) => CacheSeed::Keys(keys),
+                    (None, None) => CacheSeed::Folder,
                 },
+                relocate_to,
             },
             source_game,
             target_game,
@@ -268,10 +455,11 @@ impl Baboon {
             Ok(report) => {
                 // All ticked: bringing what the folder needs is the common
                 // answer, and leaving something out is the deliberate one.
-                dialog.outside_groups = report
+                dialog.outside_tree = OutsideTree::build(&report.outside_references);
+                dialog.outside_picked = report
                     .outside_references
                     .iter()
-                    .map(|reference| (reference.folder.clone(), true))
+                    .map(|reference| (reference.key.clone(), true))
                     .collect();
                 self.status = format!(
                     "Imported {} tag(s), {} failed, {} held back{}",
@@ -293,5 +481,79 @@ impl Baboon {
             }
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod outside_tree_tests {
+    use super::*;
+
+    fn reference(path: &str) -> OutsideReference {
+        OutsideReference {
+            key: format!("cache:bitm:{}", path.replace('/', "\\")),
+            display_path: path.to_owned(),
+            folder: String::new(),
+        }
+    }
+
+    /// A folder holds what is under it, however deep that is.
+    ///
+    /// The point of the tree over the flat list it replaced: `objects` counting
+    /// only the tags directly inside it would report two thousand tags as none,
+    /// and ticking it would bring nothing.
+    #[test]
+    fn a_folder_counts_and_carries_its_whole_subtree() {
+        let tree = OutsideTree::build(&[
+            reference("objects/characters/elite/elite.biped"),
+            reference("objects/characters/elite/bitmaps/elite_diffuse.bitmap"),
+            reference("objects/weapons/rifle/assault_rifle.weapon"),
+            reference("fx/decals/scorch.bitmap"),
+        ]);
+
+        assert_eq!(tree.roots.iter().cloned().collect::<Vec<_>>(), ["fx", "objects"]);
+        assert_eq!(tree.totals.get("objects").copied(), Some(3));
+        assert_eq!(tree.totals.get("objects/characters/elite").copied(), Some(2));
+        assert_eq!(tree.keys_under("objects").len(), 3);
+        assert_eq!(tree.keys_under("objects/weapons").len(), 1);
+        // The leaves hang off the folder that actually holds them, not off the
+        // first two segments the old grouping used.
+        assert_eq!(
+            tree.tags
+                .get("objects/characters/elite")
+                .map(|tags| tags.len()),
+            Some(1),
+        );
+    }
+
+    /// A folder's tick reports how much of it is chosen, not just whether any is.
+    #[test]
+    fn a_partly_chosen_folder_says_so() {
+        let references = [
+            reference("objects/characters/elite/elite.biped"),
+            reference("objects/characters/elite/bitmaps/elite_diffuse.bitmap"),
+            reference("objects/weapons/rifle/assault_rifle.weapon"),
+        ];
+        let tree = OutsideTree::build(&references);
+        let mut picked: BTreeMap<String, bool> =
+            references.iter().map(|r| (r.key.clone(), false)).collect();
+
+        assert_eq!(tree.tally("objects", &picked), (0, 3));
+        picked.insert(references[0].key.clone(), true);
+        assert_eq!(tree.tally("objects", &picked), (1, 3));
+        assert_eq!(tree.tally("objects/characters", &picked), (1, 2));
+        assert_eq!(tree.tally("objects/weapons", &picked), (0, 1));
+        for wanted in picked.values_mut() {
+            *wanted = true;
+        }
+        assert_eq!(tree.tally("objects", &picked), (3, 3));
+    }
+
+    /// A tag with no folder still lands somewhere the window can draw it.
+    #[test]
+    fn a_tag_at_the_top_is_not_lost() {
+        let tree = OutsideTree::build(&[reference("globals.globals")]);
+        assert!(tree.roots.is_empty());
+        assert_eq!(tree.tags.get("").map(|tags| tags.len()), Some(1));
+        assert_eq!(tree.keys_under("").len(), 1);
     }
 }

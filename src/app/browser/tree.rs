@@ -1251,6 +1251,21 @@ pub(in crate::app) fn draw_entry(
     response.context_menu(|ui| {
         style_tag_context_menu(ui);
 
+        // A cache tag's way out is a conversion, and one tag is the case where
+        // the user may want it somewhere other than the path the build gave it.
+        if matches!(entry.location, TagEntryLocation::Monolithic { .. })
+            && context_menu_button(ui, "Import into editing kit...")
+                .on_hover_text(
+                    "Convert this tag to a little-endian tag in an open editing kit, at a                      folder you choose",
+                )
+                .clicked()
+        {
+            action = Some(BrowserAction::ImportCacheTagIntoKit {
+                key: entry.key.clone(),
+            });
+            ui.close_menu();
+        }
+
         let rename_enabled = supports_rename_menu(entry);
         let duplicate_enabled = supports_duplicate_menu(entry);
         let deletable = browser_deletable_keys(ui);

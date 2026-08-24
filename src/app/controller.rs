@@ -3587,6 +3587,9 @@ impl Baboon {
             BrowserAction::ImportCacheFolderIntoKit { prefix } => {
                 self.open_cache_import_dialog(prefix)
             }
+            BrowserAction::ImportCacheTagIntoKit { key } => {
+                self.open_cache_import_dialog_for_tag(key)
+            }
             BrowserAction::ExtractRaw(key) => self.begin_extract_raw(key, ctx),
             BrowserAction::ExtractBitmap(key) => self.begin_extract_bitmap(key, ctx),
             BrowserAction::ExtractBitmapFolder(keys) => self.begin_extract_bitmap_folder(keys, ctx),

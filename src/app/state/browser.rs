@@ -27,6 +27,9 @@ pub(in crate::app) enum BrowserAction {
     /// converting is not knowable from the browser — and filtering by prefix is
     /// the worker's job either way.
     ImportCacheFolderIntoKit { prefix: String, },
+    /// One cache tag, landing somewhere the user picks rather than at its
+    /// own path.
+    ImportCacheTagIntoKit { key: String },
     ExtractRaw(String),
     ExtractBitmap(String),
     ExtractBitmapFolder(Vec<String>),

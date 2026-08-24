@@ -71,6 +71,17 @@ pub(in crate::app) struct FolderConversionReport {
     /// these came from. Saying nothing would leave the user hunting a hole in
     /// the destination for a hole that was in the source.
     pub(in crate::app) unresolved_references: BTreeSet<String>,
+    /// Levels whose baked lighting did not come across, by folder.
+    ///
+    /// Its own list because of what it costs. A level's
+    /// `scenario_lightmap_bsp_data` is what the engine loads its lighting from,
+    /// and a bsp whose lightmap will not load is one the environment reports as
+    /// having *failed to load completely* -- Sapien refuses the whole scenario
+    /// over it, with an error that names the bsp and says nothing about lighting.
+    /// Most of a 2011 build's lightmaps were never in it, so this is the
+    /// difference between a level that runs and one that cannot, and it needs
+    /// saying in those words rather than as one failed tag among hundreds.
+    pub(in crate::app) levels_without_lighting: BTreeSet<String>,
     /// Whether the user stopped the run. A cancelled report is still a real
     /// report — everything it lists was written — but it is not a complete
     /// one, and saying so is the difference between a short run and a silently
@@ -140,6 +151,14 @@ pub(in crate::app) enum FolderConversionScope {
         entries: Vec<TagEntry>,
         /// Which of `entries` this run converts.
         seed: CacheSeed,
+        /// Where the tags land, when the user has chosen somewhere other than
+        /// their own path. A folder relative to the target's tags root.
+        ///
+        /// Only ever set for a single tag, and the dialog says what it costs:
+        /// every reference to this tag names the path the build gave it, and
+        /// nothing rewrites those, so a tag moved somewhere else is a tag
+        /// nothing points at any more.
+        relocate_to: Option<PathBuf>,
     },
 }
 
@@ -297,6 +316,7 @@ fn scan_folder_conversion_source(
         FolderConversionScope::CacheSubtree {
             prefix,
             entries: all,
+            relocate_to: _,
             seed,
         } => {
             if !matches!(job.source, TagSource::MonolithicCache { .. }) {
@@ -476,6 +496,7 @@ pub(in crate::app) fn run_folder_conversion_job(
         held_back: Vec::new(),
         outside_references: Vec::new(),
         unresolved_references: BTreeSet::new(),
+        levels_without_lighting: BTreeSet::new(),
         cancelled: false,
     };
     // Collected on the side because a held-back tag is neither a success nor a
@@ -692,6 +713,15 @@ pub(in crate::app) fn run_folder_conversion_job(
             }
             Err(error) => {
                 failed += 1;
+                if entry.group_tag == u32::from_be_bytes(*b"Lbsp")
+                    && let TagEntryLocation::Monolithic { name, .. } = &entry.location
+                {
+                    let folder = name
+                        .rsplit_once(['\\', '/'])
+                        .map(|(folder, _)| folder.to_owned())
+                        .unwrap_or_else(|| name.clone());
+                    report.levels_without_lighting.insert(folder);
+                }
                 FolderConversionFileResult {
                     source: source_label.clone(),
                     output: None,
@@ -922,8 +952,23 @@ fn target_destination_for_entry(
         // The tag's own name, so it lands where the cache said it lived. Not a
         // convenience: every reference in every other tag names this path, and
         // nothing rewrites them.
-        (TagEntryLocation::Monolithic { name, .. }, FolderConversionScope::CacheSubtree { .. }) => {
-            PathBuf::from(name.replace('\\', "/"))
+        (
+            TagEntryLocation::Monolithic { name, .. },
+            FolderConversionScope::CacheSubtree { relocate_to, .. },
+        ) => {
+            let own = PathBuf::from(name.replace('\\', "/"));
+            match relocate_to {
+                // Somewhere the user picked: the tag keeps its own name and
+                // nothing else of its path.
+                Some(folder) => {
+                    let leaf = own
+                        .file_name()
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| own.clone());
+                    folder.join(leaf)
+                }
+                None => own,
+            }
         }
         _ => return Err("Folder conversion cannot place this tag".to_owned()),
     };
@@ -946,6 +991,64 @@ mod tests {
     // the bare name ambiguous. Name the engine's explicitly: this scaffolding is a
     // copy of the engine's own, so it should key fields the way the engine does.
     use blam_tags::convert::clean_field_key;
+
+    /// A cache tag lands at its own path, unless the user picked one.
+    ///
+    /// Its own path is what makes a folder import work at all: a reference
+    /// carries the path string the build gave it and nothing rewrites those, so
+    /// a tag written where the cache said it lived is a tag every other tag
+    /// already points at. Somewhere else is the single-tag case, where the
+    /// window says what it costs and the user answers anyway.
+    #[test]
+    fn a_relocated_cache_tag_keeps_its_name_and_nothing_else_of_its_path() {
+        let entry = TagEntry {
+            key: r"cache:bitm:objects\weapons\rifle\bitmaps\ar_diffuse".to_owned(),
+            display_path: r"objects\weapons\rifle\bitmaps\ar_diffuse.bitmap".to_owned(),
+            group_tag: u32::from_be_bytes(*b"bitm"),
+            group_name: Some("bitmap".to_owned()),
+            location: TagEntryLocation::Monolithic {
+                name: r"objects\weapons\rifle\bitmaps\ar_diffuse".to_owned(),
+                group_tag: u32::from_be_bytes(*b"bitm"),
+            },
+        };
+        let landed = Ok((u32::from_be_bytes(*b"bitm"), "bitmap".to_owned()));
+        let destination_root = PathBuf::from("D:/HREK/tags");
+        let scope = |relocate_to: Option<PathBuf>| FolderConversionScope::CacheSubtree {
+            prefix: String::new(),
+            entries: Vec::new(),
+            seed: CacheSeed::Folder,
+            relocate_to,
+        };
+
+        let own = target_destination_for_entry(
+            &entry,
+            &scope(None),
+            Path::new(""),
+            &destination_root,
+            &landed,
+        )
+        .expect("its own path");
+        assert_eq!(
+            normalize_conversion_path(&own),
+            normalize_conversion_path(&destination_root
+                .join("objects/weapons/rifle/bitmaps/ar_diffuse.bitmap")),
+        );
+
+        let moved = target_destination_for_entry(
+            &entry,
+            &scope(Some(PathBuf::from("scratch/imported"))),
+            Path::new(""),
+            &destination_root,
+            &landed,
+        )
+        .expect("the folder that was picked");
+        assert_eq!(
+            normalize_conversion_path(&moved),
+            normalize_conversion_path(
+                &destination_root.join("scratch/imported/ar_diffuse.bitmap")
+            ),
+        );
+    }
 
     #[test]
     fn folder_conversion_recurses_overwrites_and_continues_after_failure() {
@@ -1337,6 +1440,7 @@ mod tests {
                     source: loaded.source.clone(),
                     names: names.clone(),
                     scope: FolderConversionScope::CacheSubtree {
+                        relocate_to: None,
                         prefix: prefix.clone(),
                         entries: loaded.entries.clone(),
                         seed,
