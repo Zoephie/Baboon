@@ -527,8 +527,9 @@ editing kit…** to convert the lot into an open loose kit.
   its audio by name in the kit's banks; one the kit has no bank for is silent.
 - **What cannot cross is held back, not written empty.** Animation graphs keep
   their substance in a 360 codec stream that MCC does carry and nothing here
-  reinterprets, so they are listed with the reason instead of landing as a tag
-  full of metadata that plays nothing.
+  reinterprets. Neither is a class your kit ships no example of — a tag built
+  from the schema alone is one the kit's own loader refuses, so it is reported
+  instead. Both are listed with the reason rather than landing broken.
 - References naming a tag the build itself no longer holds are reported
   separately: those were already broken in the source.
 - The run has a **Cancel** button. A whole build's worth of tags is a long job,
