@@ -221,6 +221,13 @@ pub(in crate::app) enum WorkerMessage {
         stamp: KitStamp,
         result: Result<FolderConversionReport, String>,
     },
+    /// Which of the tags an import would write are already in the destination
+    /// kit. Off the UI thread because answering it is one `exists` per tag and
+    /// the whole cache is a hundred thousand of them.
+    CacheImportConflicts {
+        stamp: KitStamp,
+        conflicts: Vec<OutsideReference>,
+    },
     /// What an Import Tags source path turned out to be. Carries the input it
     /// was measured from, because the walk can outlast the user's typing and a
     /// result for a path they have since changed has to be dropped, not shown.

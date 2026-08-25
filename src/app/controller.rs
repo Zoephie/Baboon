@@ -970,6 +970,9 @@ impl Baboon {
                 WorkerMessage::CacheImportFinished { stamp, result } => {
                     self.handle_cache_import_finished(stamp, result, ctx)
                 }
+                WorkerMessage::CacheImportConflicts { stamp, conflicts } => {
+                    self.handle_cache_import_conflicts(stamp, conflicts)
+                }
                 WorkerMessage::ImportSourceResolved { input, result } => {
                     self.handle_import_source_resolved(input, result)
                 }

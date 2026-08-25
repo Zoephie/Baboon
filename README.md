@@ -506,7 +506,18 @@ editing kit…** to convert the lot into an open loose kit.
 - Tags land at **their own paths** — `objects\characters\elite` in the build
   becomes `<kit>\tags\objects\characters\elite`. That is what keeps references
   working: a reference carries the path the build gave it, so a tag written
-  anywhere else would be pointed at by nothing.
+  anywhere else would be pointed at by nothing. **Or somewhere you pick** —
+  under *Where*, choose a folder and the import lands there instead, keeping
+  its shape below the folder you asked for: `objects\weapons` into `scratch`
+  puts the rifle's bitmaps at `scratch\rifle\bitmaps`. The window says what
+  that costs — nothing rewrites references, so the tags pointing at these will
+  not find them.
+- **You decide what gets replaced.** Under *Tags the kit already has*: replace
+  them, keep them, or pick. Picking scans the destination and lists what is
+  already there as the same folder tree — tick a branch or a single tag. Untick
+  one and it is left exactly as the kit has it, and the report says which ones
+  were kept. Replacing is still the default, which is what a kit being filled
+  from a build wants; keeping is what a kit you have worked in wants.
 - **It brings the folder, then asks about the rest.** Nothing outside the
   folder is converted behind your back. When the tags that landed point at
   something the kit does not have, the run reports it as a folder tree you can
@@ -515,9 +526,8 @@ editing kit…** to convert the lot into an open loose kit.
   pointing at it keep a reference the kit cannot resolve.
 - **One tag at a time, too.** Right-click a tag in a cache and *Import into
   editing kit…* converts just that one, either at its own path or at a folder
-  you choose. Choosing one says so plainly: a reference names the path the
-  build gave a tag, nothing here rewrites those, so a tag moved elsewhere is a
-  tag nothing points at. It still reports what the tag reached for.
+  you choose — one tag keeps only its name, rather than the folders above it.
+  It still reports what the tag reached for.
 - **Pixels and geometry come across.** A 360 bitmap arrives whole — every mip
   level, every cube face and array layer — un-tiled out of its texture
   resources and byte-swapped into the shared `processed pixel data` blob a PC

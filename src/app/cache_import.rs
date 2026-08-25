@@ -37,11 +37,24 @@ pub(in crate::app) struct CacheImportDialog {
     /// out is the deliberate one.
     pub(in crate::app) outside_picked: BTreeMap<String, bool>,
     /// Set when the window was opened for one tag rather than a folder.
-    ///
-    /// A folder import lands every tag at its own path, because that is what
-    /// keeps references working. One tag is the case where somebody wants it
-    /// somewhere else, and is in a position to know what that costs.
     pub(in crate::app) single: Option<SingleTagImport>,
+    /// Folder inside the target's tags root, or `None` for each tag's own path.
+    ///
+    /// Its own path is the default for both a folder and a single tag, and the
+    /// window says why: every reference names the path the build gave a tag,
+    /// and nothing rewrites those. A folder sent somewhere else keeps its shape
+    /// under the folder that was picked; a single tag keeps only its name.
+    pub(in crate::app) destination: Option<PathBuf>,
+    /// What to do about tags the destination kit already holds.
+    pub(in crate::app) replace: ReplaceChoice,
+    /// Those tags, as a folder tree, once the scan has run.
+    pub(in crate::app) conflicts: OutsideTree,
+    /// Which of them to replace, keyed by [`TagEntry::key`].
+    pub(in crate::app) conflict_picked: BTreeMap<String, bool>,
+    /// Set while the scan for them is running, and again whenever the answer it
+    /// gave stops being about the destination now selected.
+    pub(in crate::app) conflicts_stale: bool,
+    pub(in crate::app) scanning: bool,
     pub(in crate::app) running: bool,
     /// Set from the UI thread by Cancel; the worker reads it between tags.
     pub(in crate::app) cancel: Arc<AtomicBool>,
@@ -153,14 +166,31 @@ impl OutsideTree {
     }
 }
 
-/// The one tag a single-tag import is for, and where the user wants it.
+/// The one tag a single-tag import is for.
 pub(in crate::app) struct SingleTagImport {
     /// The cache key, which is what the run converts.
     pub(in crate::app) key: String,
     /// Its path in the build, for the window to name it by.
     pub(in crate::app) display_path: String,
-    /// Folder inside the target's tags root, or `None` for the tag's own path.
-    pub(in crate::app) destination: Option<PathBuf>,
+    /// The folder that path sits in, which is what a relocation strips so the
+    /// tag lands as its bare name.
+    pub(in crate::app) parent: String,
+}
+
+/// What the window has been told to do about tags the kit already has.
+///
+/// Separate from [`ReplacePolicy`] because the window holds a tick per tag and
+/// the job wants the set: the user changes their mind about individual tags
+/// several times before pressing Import, and rebuilding a `HashSet` each frame
+/// to store an answer nobody has given yet is work for nothing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::app) enum ReplaceChoice {
+    /// Overwrite whatever the kit has. What the importer always did.
+    Always,
+    /// Leave every tag the kit already has alone.
+    Never,
+    /// Replace the ones ticked in the conflict tree.
+    Chosen,
 }
 
 /// One editing kit an import could land in.
@@ -222,6 +252,12 @@ impl Baboon {
             outside_tree: OutsideTree::default(),
             outside_picked: BTreeMap::new(),
             single: None,
+            destination: None,
+            replace: ReplaceChoice::Always,
+            conflicts: OutsideTree::default(),
+            conflict_picked: BTreeMap::new(),
+            conflicts_stale: true,
+            scanning: false,
             running: false,
             cancel: Arc::new(AtomicBool::new(false)),
             progress: None,
@@ -272,9 +308,18 @@ impl Baboon {
             outside_picked: BTreeMap::new(),
             single: Some(SingleTagImport {
                 key,
+                parent: display_path
+                    .rsplit_once(['\\', '/'])
+                    .map(|(folder, _)| folder.to_owned())
+                    .unwrap_or_default(),
                 display_path,
-                destination: None,
             }),
+            destination: None,
+            replace: ReplaceChoice::Always,
+            conflicts: OutsideTree::default(),
+            conflict_picked: BTreeMap::new(),
+            conflicts_stale: true,
+            scanning: false,
             running: false,
             cancel: Arc::new(AtomicBool::new(false)),
             progress: None,
@@ -338,12 +383,38 @@ impl Baboon {
         // A single-tag run converts that tag on the first pass; a second pass
         // for its references is the same as any other, and lands them at their
         // own paths, because that is where the references point.
-        let (single_seed, relocate_to) = match (dialog.single.as_ref(), only.is_none()) {
-            (Some(single), true) => (
-                Some(HashSet::from([single.key.clone()])),
-                single.destination.clone(),
+        let single_seed = match (dialog.single.as_ref(), only.is_none()) {
+            (Some(single), true) => Some(HashSet::from([single.key.clone()])),
+            _ => None,
+        };
+        // A second pass brings the references the first one reached for, and
+        // those land at their own paths whatever the first pass chose: a
+        // reference names the path the build gave it, so a shader moved into
+        // the folder that needed it is a shader the next tag will not find.
+        let destination = match (dialog.destination.as_ref(), only.is_none()) {
+            (Some(root), true) => CacheDestination::Folder {
+                root: root.clone(),
+                strip: match dialog.single.as_ref() {
+                    Some(single) => single.parent.clone(),
+                    None => prefix.clone(),
+                },
+            },
+            _ => CacheDestination::OwnPath,
+        };
+        let replace = match dialog.replace {
+            ReplaceChoice::Always => ReplacePolicy::Always,
+            ReplaceChoice::Never => ReplacePolicy::Never,
+            // Only the ticked ones. A tag the kit does not have is not in this
+            // set and does not need to be -- nothing is being replaced, so
+            // nothing has to be allowed.
+            ReplaceChoice::Chosen => ReplacePolicy::Chosen(
+                dialog
+                    .conflict_picked
+                    .iter()
+                    .filter(|(_, wanted)| **wanted)
+                    .map(|(key, _)| key.clone())
+                    .collect(),
             ),
-            _ => (None, None),
         };
         let (target_game, target_tags_root) = (target.game.clone(), target.tags_root.clone());
         let cancel = dialog.cancel.clone();
@@ -381,7 +452,7 @@ impl Baboon {
                     (Some(keys), _) | (None, Some(keys)) => CacheSeed::Keys(keys),
                     (None, None) => CacheSeed::Folder,
                 },
-                relocate_to,
+                destination,
             },
             source_game,
             target_game,
@@ -392,6 +463,7 @@ impl Baboon {
                 .map(|(game, root)| (game.clone(), import_tags_root(root)))
                 .collect(),
             accept_loss: false,
+            replace,
             only: None,
             cancel,
         };
@@ -432,6 +504,110 @@ impl Baboon {
         false
     }
 
+    /// Find out which of the tags this import would write the kit already has.
+    ///
+    /// Predicted from the cache entry rather than measured by converting:
+    /// asking properly would mean converting every tag twice, and a cache
+    /// import is a byte-order upgrade, so a tag's group -- and therefore its
+    /// extension -- is the same on both sides. Where the prediction is wrong
+    /// the run errs towards keeping: [`ReplacePolicy::Chosen`] is keyed by the
+    /// source tag, so a tag whose extension turned out to differ is one that
+    /// was not at the path the scan checked, and so was never at risk.
+    pub(super) fn scan_cache_import_conflicts(&mut self, ctx: egui::Context) {
+        let Some(dialog) = self.cache_import_dialog.as_ref() else {
+            return;
+        };
+        let Some(target) = dialog.target() else {
+            return;
+        };
+        if dialog.running || dialog.scanning {
+            return;
+        }
+        let tags_root = target.tags_root.clone();
+        let destination = match dialog.destination.as_ref() {
+            Some(root) => CacheDestination::Folder {
+                root: root.clone(),
+                strip: match dialog.single.as_ref() {
+                    Some(single) => single.parent.clone(),
+                    None => dialog.prefix.clone(),
+                },
+            },
+            None => CacheDestination::OwnPath,
+        };
+        let (kit, prefix) = (dialog.kit, dialog.prefix.clone());
+        let single = dialog.single.as_ref().map(|single| single.key.clone());
+        let Some(index) = self.kit_index(kit) else {
+            return;
+        };
+        let Some(source_data) = self.kits[index].source.as_ref() else {
+            return;
+        };
+        let entries = source_data
+            .entries
+            .iter()
+            .filter(|entry| match single.as_ref() {
+                Some(key) => &entry.key == key,
+                None => cache_entry_is_under(entry, &prefix),
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        let stamp = KitStamp {
+            kit,
+            generation: self.kits[index].generation,
+        };
+        if let Some(dialog) = self.cache_import_dialog.as_mut() {
+            dialog.scanning = true;
+            dialog.conflicts_stale = false;
+        }
+        let tx = self.tx.clone();
+        thread::spawn(move || {
+            let mut conflicts = Vec::new();
+            for entry in &entries {
+                let TagEntryLocation::Monolithic { name, group_tag } = &entry.location else {
+                    continue;
+                };
+                let extension = group_tag_to_extension(*group_tag)
+                    .map(str::to_owned)
+                    .or_else(|| entry.group_name.clone());
+                let Some(extension) = extension else { continue };
+                let mut relative = destination.place(name);
+                relative.set_extension(&extension);
+                if !tags_root.join(&relative).exists() {
+                    continue;
+                }
+                conflicts.push(OutsideReference {
+                    key: entry.key.clone(),
+                    display_path: relative.to_string_lossy().replace('\\', "/"),
+                    folder: String::new(),
+                });
+            }
+            let _ = tx.send(WorkerMessage::CacheImportConflicts { stamp, conflicts });
+            ctx.request_repaint();
+        });
+    }
+
+    /// Take the scan's answer, ticked, because replacing is what the importer
+    /// has always done and keeping something is the deliberate choice.
+    pub(super) fn handle_cache_import_conflicts(
+        &mut self,
+        stamp: KitStamp,
+        conflicts: Vec<OutsideReference>,
+    ) -> bool {
+        let Some(dialog) = self.cache_import_dialog.as_mut() else {
+            return false;
+        };
+        if dialog.kit != stamp.kit {
+            return false;
+        }
+        dialog.scanning = false;
+        dialog.conflict_picked = conflicts
+            .iter()
+            .map(|conflict| (conflict.key.clone(), true))
+            .collect();
+        dialog.conflicts = OutsideTree::build(&conflicts);
+        true
+    }
+
     pub(super) fn handle_cache_import_finished(
         &mut self,
         stamp: KitStamp,
@@ -450,6 +626,10 @@ impl Baboon {
         };
         dialog.running = false;
         dialog.progress = None;
+        // The kit holds what the run just wrote, so the tags it already has are
+        // not the tags it had a minute ago -- and a second pass over the
+        // references is asked for from this same window.
+        dialog.conflicts_stale = true;
         let target_kit = dialog.target().map(|target| target.kit);
         match result {
             Ok(report) => {

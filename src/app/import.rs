@@ -1022,6 +1022,7 @@ impl Baboon {
                 .map(|(game, root)| (game.clone(), import_tags_root(root)))
                 .collect(),
             accept_loss,
+            replace: ReplacePolicy::Always,
             only,
             // Nothing offers to cancel a loose-folder import: it converts one
             // folder out of a kit already sitting on the disk it writes to. The
@@ -1537,6 +1538,7 @@ mod tests {
                 target_tags_root: target_tags.clone(),
                 kit_roots: HashMap::new(),
                 accept_loss: false,
+                replace: ReplacePolicy::Always,
                 only: None,
                 cancel: Arc::new(AtomicBool::new(false)),
             },

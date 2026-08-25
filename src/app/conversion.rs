@@ -19,6 +19,8 @@ pub(in crate::app) use blam_tags::convert::*;
 pub(in crate::app) enum FolderConversionFileStatus {
     NativeLayout,
     GeneratedLayout,
+    /// Already in the kit, and the run was told to leave it alone.
+    Kept,
     Failed,
 }
 
@@ -151,15 +153,52 @@ pub(in crate::app) enum FolderConversionScope {
         entries: Vec<TagEntry>,
         /// Which of `entries` this run converts.
         seed: CacheSeed,
-        /// Where the tags land, when the user has chosen somewhere other than
-        /// their own path. A folder relative to the target's tags root.
-        ///
-        /// Only ever set for a single tag, and the dialog says what it costs:
-        /// every reference to this tag names the path the build gave it, and
-        /// nothing rewrites those, so a tag moved somewhere else is a tag
-        /// nothing points at any more.
-        relocate_to: Option<PathBuf>,
+        /// Where the tags land.
+        destination: CacheDestination,
     },
+}
+
+/// Where an imported cache tag is written.
+///
+/// The default is not a convenience. Every reference in every other tag names
+/// the path the build gave a tag, and nothing here rewrites those, so a tag
+/// written where the cache said it lived is a tag the rest of the import
+/// already points at correctly. Anywhere else is a choice the dialog spells
+/// out the cost of before it is made.
+pub(in crate::app) enum CacheDestination {
+    /// The tag's own path under the target's tags root.
+    OwnPath,
+    /// A folder the user picked, relative to the target's tags root.
+    ///
+    /// `strip` is the leading part of a tag's name that is dropped before the
+    /// rest is joined under `root`, which is what lets a folder keep its shape:
+    /// importing `levels\multi\70_boneyard` into `scratch` puts
+    /// `levels\multi\70_boneyard\sky\sky` at `scratch\sky\sky`. Stripping the
+    /// whole parent folder, as a single-tag import does, leaves just the leaf.
+    Folder { root: PathBuf, strip: String },
+}
+
+impl CacheDestination {
+    /// Where a tag with this cache name lands, relative to the tags root.
+    pub(in crate::app) fn place(&self, name: &str) -> PathBuf {
+        let own = name.replace('\\', "/");
+        let Self::Folder { root, strip } = self else {
+            return PathBuf::from(own);
+        };
+        let strip = strip.replace('\\', "/");
+        let strip = strip.trim_end_matches('/');
+        // The remainder after the folder that was asked for, or the bare leaf
+        // when the name does not sit under it -- a tag that arrived by another
+        // route still has to land somewhere, and somewhere inside the folder
+        // the user named is the only answer that keeps the run inside its own
+        // destination.
+        let rest = own
+            .strip_prefix(strip)
+            .map(|rest| rest.trim_start_matches('/'))
+            .filter(|rest| !rest.is_empty() && !strip.is_empty())
+            .unwrap_or_else(|| own.rsplit('/').next().unwrap_or(&own));
+        root.join(rest)
+    }
 }
 
 /// Which cache tags a run converts.
@@ -209,10 +248,46 @@ pub(in crate::app) struct FolderConversionJob {
     /// converts the whole folder; the second pass names exactly the tags that
     /// were held back, so accepting the loss does not mean redoing everything.
     pub(in crate::app) only: Option<HashSet<String>>,
+    /// What to do about a tag the destination already has.
+    pub(in crate::app) replace: ReplacePolicy,
     /// Set from the UI thread by the Cancel button. Checked between tags, which
     /// is as fine-grained as this can be: a single `scenario_structure_bsp` is
     /// minutes of work with no safe point inside it.
     pub(in crate::app) cancel: Arc<AtomicBool>,
+}
+
+/// What a run does when the destination already holds the tag it is about to
+/// write.
+///
+/// Overwriting used to be the only behaviour, which is right for a kit being
+/// filled from a build and wrong for one that has been worked in: a kit's own
+/// `70_boneyard` is thousands of hours of somebody's edits, and an import that
+/// eats it without asking is not recoverable from inside Baboon.
+pub(in crate::app) enum ReplacePolicy {
+    /// Overwrite whatever is there.
+    Always,
+    /// Leave every existing tag alone. The run reports each one it kept, so the
+    /// answer to "why is this one still the old one?" is in the same place as
+    /// everything else.
+    Never,
+    /// Overwrite only these, by [`TagEntry::key`].
+    ///
+    /// Named by the tag it came from rather than the file it lands as, because
+    /// the two are worked out at different times: the dialog lists conflicts
+    /// before anything is converted, and a converted tag's extension is only
+    /// known afterwards. Keying by source means the two sides cannot disagree.
+    Chosen(HashSet<String>),
+}
+
+impl ReplacePolicy {
+    /// Whether a run may write over a tag the destination already has.
+    fn allows(&self, entry_key: &str) -> bool {
+        match self {
+            Self::Always => true,
+            Self::Never => false,
+            Self::Chosen(chosen) => chosen.contains(entry_key),
+        }
+    }
 }
 
 /// What happened to one file in a folder run.
@@ -223,6 +298,11 @@ pub(in crate::app) struct FolderConversionJob {
 enum FileOutcome {
     Written(FolderConversionFileResult),
     HeldBack(Vec<String>),
+    /// The destination already had this tag and the run was told not to
+    /// replace it. Converted, then thrown away -- the cost of knowing what a
+    /// tag would have become is the conversion itself, and the alternative is
+    /// deciding before the extension is known.
+    Kept(PathBuf),
 }
 
 fn send_folder_conversion_progress(
@@ -316,7 +396,7 @@ fn scan_folder_conversion_source(
         FolderConversionScope::CacheSubtree {
             prefix,
             entries: all,
-            relocate_to: _,
+            destination: _,
             seed,
         } => {
             if !matches!(job.source, TagSource::MonolithicCache { .. }) {
@@ -596,6 +676,14 @@ pub(in crate::app) fn run_folder_conversion_job(
                 }
             }
             claimed_outputs.extend(local_outputs);
+            // Asked before anything is written, and about every file the tag
+            // would land as: a companion left behind while its tag is replaced
+            // is a pair that no longer agrees.
+            if !job.replace.allows(&entry.key)
+                && let Some(existing) = all_outputs.iter().find(|path| path.exists())
+            {
+                return Ok(FileOutcome::Kept((*existing).clone()));
+            }
             let overwritten = all_outputs.iter().any(|path| path.exists());
             let native_layout_template = draft.native_layout_template.clone();
             let route = draft.route.clone();
@@ -691,6 +779,16 @@ pub(in crate::app) fn run_folder_conversion_job(
                 converted += 1;
                 result
             }
+            // Neither converted nor failed: the kit already had it and said so.
+            // Listed rather than counted, because a run that kept two thousand
+            // tags and converted three should not read as five converted.
+            Ok(FileOutcome::Kept(existing)) => FolderConversionFileResult {
+                source: source_label.clone(),
+                output: Some(existing),
+                status: FolderConversionFileStatus::Kept,
+                overwritten: false,
+                detail: "Already in the kit, and left as it was".to_owned(),
+            },
             // Neither converted nor failed: it is waiting on an answer, so it
             // stays out of both counts and out of the file list.
             Ok(FileOutcome::HeldBack(losses)) => {
@@ -734,6 +832,7 @@ pub(in crate::app) fn run_folder_conversion_job(
         let status_label = match file_result.status {
             FolderConversionFileStatus::NativeLayout => "native",
             FolderConversionFileStatus::GeneratedLayout => "generated",
+            FolderConversionFileStatus::Kept => "kept",
             FolderConversionFileStatus::Failed => "failed",
         };
         let _ = tx.send(WorkerMessage::TerminalLine(format!(
@@ -954,22 +1053,8 @@ fn target_destination_for_entry(
         // nothing rewrites them.
         (
             TagEntryLocation::Monolithic { name, .. },
-            FolderConversionScope::CacheSubtree { relocate_to, .. },
-        ) => {
-            let own = PathBuf::from(name.replace('\\', "/"));
-            match relocate_to {
-                // Somewhere the user picked: the tag keeps its own name and
-                // nothing else of its path.
-                Some(folder) => {
-                    let leaf = own
-                        .file_name()
-                        .map(PathBuf::from)
-                        .unwrap_or_else(|| own.clone());
-                    folder.join(leaf)
-                }
-                None => own,
-            }
-        }
+            FolderConversionScope::CacheSubtree { destination, .. },
+        ) => destination.place(name),
         _ => return Err("Folder conversion cannot place this tag".to_owned()),
     };
     let (target_group, target_group_name) = landed.as_ref().map_err(String::clone)?;
@@ -997,8 +1082,14 @@ mod tests {
     /// Its own path is what makes a folder import work at all: a reference
     /// carries the path string the build gave it and nothing rewrites those, so
     /// a tag written where the cache said it lived is a tag every other tag
-    /// already points at. Somewhere else is the single-tag case, where the
-    /// window says what it costs and the user answers anyway.
+    /// already points at. Somewhere else is a real answer to a real question --
+    /// trying a build's version of a level beside the kit's own -- and the
+    /// window says what it costs rather than refusing.
+    ///
+    /// The two relocations differ, and the difference is the point: a whole
+    /// folder keeps its shape under the folder that was picked, while a single
+    /// tag keeps only its name. Both fall out of the same rule, which is that
+    /// what gets stripped is the part the user already named.
     #[test]
     fn a_relocated_cache_tag_keeps_its_name_and_nothing_else_of_its_path() {
         let entry = TagEntry {
@@ -1013,41 +1104,166 @@ mod tests {
         };
         let landed = Ok((u32::from_be_bytes(*b"bitm"), "bitmap".to_owned()));
         let destination_root = PathBuf::from("D:/HREK/tags");
-        let scope = |relocate_to: Option<PathBuf>| FolderConversionScope::CacheSubtree {
+        let scope = |destination: CacheDestination| FolderConversionScope::CacheSubtree {
             prefix: String::new(),
             entries: Vec::new(),
             seed: CacheSeed::Folder,
-            relocate_to,
+            destination,
         };
 
-        let own = target_destination_for_entry(
-            &entry,
-            &scope(None),
-            Path::new(""),
-            &destination_root,
-            &landed,
-        )
-        .expect("its own path");
+        let place = |destination: CacheDestination| {
+            target_destination_for_entry(
+                &entry,
+                &scope(destination),
+                Path::new(""),
+                &destination_root,
+                &landed,
+            )
+            .map(|path| normalize_conversion_path(&path))
+        };
+        let expect = |relative: &str| normalize_conversion_path(&destination_root.join(relative));
+
         assert_eq!(
-            normalize_conversion_path(&own),
-            normalize_conversion_path(&destination_root
-                .join("objects/weapons/rifle/bitmaps/ar_diffuse.bitmap")),
+            place(CacheDestination::OwnPath).expect("its own path"),
+            expect("objects/weapons/rifle/bitmaps/ar_diffuse.bitmap"),
         );
 
-        let moved = target_destination_for_entry(
-            &entry,
-            &scope(Some(PathBuf::from("scratch/imported"))),
-            Path::new(""),
-            &destination_root,
-            &landed,
-        )
-        .expect("the folder that was picked");
+        // One tag, so what is stripped is the folder it sits in and what is
+        // left is the name.
         assert_eq!(
-            normalize_conversion_path(&moved),
-            normalize_conversion_path(
-                &destination_root.join("scratch/imported/ar_diffuse.bitmap")
-            ),
+            place(CacheDestination::Folder {
+                root: PathBuf::from("scratch/imported"),
+                strip: r"objects\weapons\rifle\bitmaps".to_owned(),
+            })
+            .expect("the folder that was picked"),
+            expect("scratch/imported/ar_diffuse.bitmap"),
         );
+
+        // A folder, so what is stripped is the folder that was asked for and
+        // the shape below it survives. Importing `objects\weapons` into
+        // `scratch` has to keep the rifle and its bitmaps apart from every
+        // other weapon's, or a folder of two thousand tags lands as two
+        // thousand files in one directory.
+        assert_eq!(
+            place(CacheDestination::Folder {
+                root: PathBuf::from("scratch"),
+                strip: r"objects\weapons".to_owned(),
+            })
+            .expect("the folder that was picked"),
+            expect("scratch/rifle/bitmaps/ar_diffuse.bitmap"),
+        );
+
+        // A tag that does not sit under the folder that was named still has to
+        // land inside it: a second pass brings references from anywhere in the
+        // build, and a path that escaped the destination would be refused
+        // outright rather than written somewhere surprising.
+        assert_eq!(
+            place(CacheDestination::Folder {
+                root: PathBuf::from("scratch"),
+                strip: r"levels\multi".to_owned(),
+            })
+            .expect("inside the folder that was picked"),
+            expect("scratch/ar_diffuse.bitmap"),
+        );
+    }
+
+    /// A run told not to replace a tag leaves the one the kit has alone.
+    ///
+    /// The importer only ever overwrote, which is right for a kit being filled
+    /// from a build and wrong for one that has been worked in: a kit's own
+    /// level is somebody's edits, and an import that eats it cannot be undone
+    /// from inside Baboon. Checked by the version stamp rather than by the
+    /// file's date, because a keep and a replace-with-identical-bytes look the
+    /// same to a timestamp on a fast disk.
+    #[test]
+    fn a_run_told_to_keep_a_tag_does_not_write_over_it() {
+        let definitions = locate_definitions_root();
+        let unique = format!(
+            "baboon_replace_policy_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let root = std::env::temp_dir().join(unique);
+        let source_root = root.join("source_tags");
+        let source_folder = source_root.join("characters/jackal");
+        let target_tags = root.join("target_tags");
+        let destination_parent = target_tags.join("objects/characters");
+        fs::create_dir_all(&source_folder).unwrap();
+        fs::create_dir_all(&target_tags).unwrap();
+
+        let mut source = TagFile::new(definitions.join("halo3_mcc/weapon.json")).unwrap();
+        seed_weapon_fields(&mut source);
+        apply_editing_kit_mcc_header(&mut source, "halo3_mcc").unwrap();
+        source
+            .write_atomic(source_folder.join("jackal.weapon"))
+            .unwrap();
+
+        // The kit's own copy, marked so a replacement is recognisable.
+        let output = destination_parent.join("jackal/jackal.weapon");
+        fs::create_dir_all(output.parent().unwrap()).unwrap();
+        let mut existing = TagFile::new(definitions.join("haloreach_mcc/weapon.json")).unwrap();
+        apply_editing_kit_mcc_header(&mut existing, "haloreach_mcc").unwrap();
+        existing.header.version = 4321;
+        existing.write_atomic(&output).unwrap();
+
+        let run = |replace: ReplacePolicy| {
+            let (tx, _rx) = mpsc::channel();
+            run_folder_conversion_job(
+                FolderConversionJob {
+                    source: TagSource::LooseFolder {
+                        root: source_root.clone(),
+                        game: Some("halo3_mcc".to_owned()),
+                        definitions_root: definitions.clone(),
+                    },
+                    names: TagNameIndex::load_from_definitions(&definitions),
+                    scope: FolderConversionScope::LooseSubtree {
+                        source_rel_path: PathBuf::from("characters/jackal"),
+                        destination_label: "jackal".to_owned(),
+                        destination_parent: destination_parent.clone(),
+                    },
+                    source_game: "halo3_mcc".to_owned(),
+                    target_game: "haloreach_mcc".to_owned(),
+                    target_tags_root: target_tags.clone(),
+                    kit_roots: HashMap::new(),
+                    accept_loss: false,
+                    replace,
+                    only: None,
+                    cancel: Arc::new(AtomicBool::new(false)),
+                },
+                &tx,
+            )
+            .unwrap()
+        };
+
+        let kept = run(ReplacePolicy::Never);
+        assert_eq!(
+            TagFile::read(&output).unwrap().header.version,
+            4321,
+            "the kit's own tag was written over"
+        );
+        assert_eq!(kept.converted_count(), 0);
+        assert!(
+            kept.files
+                .iter()
+                .any(|file| file.status == FolderConversionFileStatus::Kept),
+            "a kept tag has to be reported, or the answer to \"why is this one still the \
+             old one?\" is nowhere",
+        );
+
+        // And the other way, so a passing test is not one where the run simply
+        // did nothing at all.
+        let replaced = run(ReplacePolicy::Always);
+        assert_ne!(
+            TagFile::read(&output).unwrap().header.version,
+            4321,
+            "the import did not write"
+        );
+        assert_eq!(replaced.converted_count(), 1);
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -1113,6 +1329,7 @@ mod tests {
                 target_tags_root: target_tags,
                 kit_roots: HashMap::new(),
                 accept_loss: false,
+                replace: ReplacePolicy::Always,
                 only: None,
                 cancel: Arc::new(AtomicBool::new(false)),
             },
@@ -1204,6 +1421,7 @@ mod tests {
                 target_tags_root: target_tags,
                 kit_roots: HashMap::new(),
                 accept_loss: true,
+                replace: ReplacePolicy::Always,
                 only: None,
                 cancel: Arc::new(AtomicBool::new(false)),
             },
@@ -1440,7 +1658,7 @@ mod tests {
                     source: loaded.source.clone(),
                     names: names.clone(),
                     scope: FolderConversionScope::CacheSubtree {
-                        relocate_to: None,
+                        destination: CacheDestination::OwnPath,
                         prefix: prefix.clone(),
                         entries: loaded.entries.clone(),
                         seed,
@@ -1452,6 +1670,7 @@ mod tests {
                     target_tags_root: target_tags.clone(),
                     kit_roots: HashMap::new(),
                     accept_loss: false,
+                    replace: ReplacePolicy::Always,
                     only: None,
                     cancel: Arc::new(AtomicBool::new(false)),
                 },
