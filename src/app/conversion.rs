@@ -298,7 +298,7 @@ fn scan_folder_conversion_source(
                         output: None,
                         status: FolderConversionFileStatus::Failed,
                         overwritten: false,
-                        detail: format!("Could not identify tag: {error}"),
+                        detail: format!("Could not identify tag: {error:#}"),
                     }),
                 }
                 send_folder_conversion_progress(
@@ -542,7 +542,7 @@ pub(in crate::app) fn run_folder_conversion_job(
                 ));
             }
             let source_tag = read_entry(&job.source, &entry)
-                .map_err(|error| format!("Could not read source tag: {error}"))?;
+                .map_err(|error| format!("Could not read source tag: {error:#}"))?;
             if wants_outside_report {
                 collect_tag_dependency_refs(source_tag.root(), &mut discovered);
             }
