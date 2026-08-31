@@ -148,7 +148,15 @@ pub(in crate::app) fn is_previewable_geometry_group(
     group_tag: u32,
     names: &TagNameIndex,
 ) -> bool {
-    is_model_group(group_tag, names) || blam_tags::is_particle_model_group(group_tag)
+    is_model_group(group_tag, names)
+        || blam_tags::is_particle_model_group(group_tag)
+        // A bare `render_model` (mode) IS the render geometry — the preview
+        // loader draws the tag itself instead of chasing an hlmt's reference.
+        // Not part of `is_model_group` for the same reason particle models are
+        // not: an hlmt's own `render model` field must not read as an object's
+        // model link.
+        || group_tag == u32::from_be_bytes(*b"mode")
+        || names.name_for(group_tag) == Some("render_model")
 }
 
 pub(in crate::app) fn format_reference_path(

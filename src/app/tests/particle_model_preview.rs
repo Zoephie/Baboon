@@ -128,6 +128,18 @@ fn particle_model_is_previewable_without_becoming_a_model() {
     }
 }
 
+/// The panel gate opens for a bare `render_model` (mode) — the preview loader
+/// draws the tag itself, so the viewport belongs inside the tag too.
+#[test]
+fn render_model_is_previewable() {
+    let names = names();
+    let tag = u32::from_be_bytes(*b"mode");
+    assert!(
+        is_previewable_geometry_group(tag, &names),
+        "`mode` must open the Render Model tab",
+    );
+}
+
 /// A multi-object gen3 tag: one region per JMI object, batches wired to
 /// those regions, and geometry the right way round.
 #[test]
@@ -282,6 +294,44 @@ fn load_model_preview_derives_object_names_from_the_entry() {
     // preview — but nothing must invent entries for it, or the combo
     // would offer selections that change nothing.
     assert!(data.variants.is_empty(), "a particle_model has no variants");
+}
+
+/// A shipped Halo 3 `render_model` opened on its own must produce a preview
+/// with geometry: `load_model_preview` draws the tag itself, no `hlmt`
+/// wrapper involved, which is what the Render Model tab inside the tag shows.
+#[test]
+fn a_shipped_render_model_previews_on_its_own() {
+    let Some(tags) = kit_tags("halo3") else {
+        eprintln!("skipping: no halo3 tag set");
+        return;
+    };
+    let rel = "objects/weapons/rifle/assault_rifle/assault_rifle.render_model";
+    let path = tags.join(rel);
+    if !path.is_file() {
+        eprintln!("skipping: no {rel} in this kit");
+        return;
+    }
+    let tag = read(&path, "halo3_mcc");
+    let names = names();
+    assert!(
+        is_previewable_geometry_group(tag.header.group_tag, &names),
+        "`mode` must open the Render Model tab",
+    );
+    let entry = crate::source::TagEntry {
+        key: format!("file:{}", path.display()),
+        display_path: rel.to_owned(),
+        group_tag: tag.header.group_tag,
+        group_name: Some("render_model".to_owned()),
+        location: crate::source::TagEntryLocation::LooseFile(path.clone()),
+    };
+    let data = crate::app::model_preview::loading::load_model_preview(
+        &tag, &entry, &names, None, false,
+    )
+    .expect("a shipped render_model must preview");
+    assert!(
+        !data.preview.batches.is_empty(),
+        "the preview came back with no draw batches"
+    );
 }
 
 /// Every shipped particle_model in every present kit must produce a
