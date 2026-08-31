@@ -18,6 +18,23 @@ mod tag_pane;
 mod welcome;
 mod tag_tiles;
 mod tool_commands;
+mod blam;
+
+/// Mouse wheel over a tile tab bar scrolls it sideways.
+///
+/// `egui_tiles` keeps a per-bar scroll offset and shows arrow buttons when the
+/// tabs overflow, but the bar itself ignores the wheel. Vertical wheel motion
+/// maps onto the horizontal offset (up = left, down = right, matching how
+/// browsers treat their tab strips), and sideways wheel/touchpad motion passes
+/// through directly. Called from `top_bar_right_ui`, which runs before the bar
+/// clamps the offset to the content, so no clamping is needed here.
+fn wheel_scroll_tab_bar(ui: &Ui, scroll_offset: &mut f32) {
+    if !ui.rect_contains_pointer(ui.max_rect()) {
+        return;
+    }
+    let delta = ui.input(|input| input.smooth_scroll_delta);
+    *scroll_offset -= delta.x + delta.y;
+}
 
 /// A toolbar launcher button: shows the decoded `.ico` icon when available,
 /// otherwise falls back to a single-letter label. Returns the response so the
@@ -582,6 +599,15 @@ impl Baboon {
                     ui.set_min_width(210.0);
                     if ui.button("Bitmap Browser").clicked() {
                         self.open_bitmap_library();
+                        ui.close_menu();
+                    }
+                    // Baboon's own import pipelines only cover Halo 3 so far,
+                    // so the entry only appears there.
+                    if self.active_kit_is_halo3() && ui.button("Blam!").clicked() {
+                        // Re-detect on every open: the data folder may have
+                        // changed since the pane was last shown.
+                        self.kits[self.active].blam.scanned_path = None;
+                        self.kits[self.active].open_tag_pane(BLAM_KEY);
                         ui.close_menu();
                     }
                 })

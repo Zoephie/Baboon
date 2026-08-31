@@ -44,8 +44,8 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         pane: &mut String,
     ) -> egui_tiles::UiResponse {
         let key = pane.clone();
-        // The one pane that is not a tag. Handled before the entry lookup,
-        // because nothing in the source answers to its key by design.
+        // The panes that are not tags. Handled before the entry lookup,
+        // because nothing in the source answers to their keys by design.
         if key == BITMAP_LIBRARY_KEY {
             if ui.input(|input| input.pointer.any_pressed())
                 && ui.rect_contains_pointer(ui.max_rect())
@@ -54,6 +54,15 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             }
             self.app
                 .draw_bitmap_library(ui, &self.ctx, self.kit_index);
+            return egui_tiles::UiResponse::None;
+        }
+        if key == BLAM_KEY {
+            if ui.input(|input| input.pointer.any_pressed())
+                && ui.rect_contains_pointer(ui.max_rect())
+            {
+                self.focused = Some(key.clone());
+            }
+            self.app.draw_blam_pane(ui, self.kit_index);
             return egui_tiles::UiResponse::None;
         }
         let Some(entry) = self.app.kits[self.kit_index]
@@ -100,9 +109,23 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         egui_tiles::UiResponse::None
     }
 
+    fn top_bar_right_ui(
+        &mut self,
+        _tiles: &egui_tiles::Tiles<String>,
+        ui: &mut Ui,
+        _tile_id: egui_tiles::TileId,
+        _tabs: &egui_tiles::Tabs,
+        scroll_offset: &mut f32,
+    ) {
+        wheel_scroll_tab_bar(ui, scroll_offset);
+    }
+
     fn tab_title_for_pane(&mut self, pane: &String) -> egui::WidgetText {
         if pane == BITMAP_LIBRARY_KEY {
             return RichText::new(BITMAP_LIBRARY_TITLE).color(text_dark()).into();
+        }
+        if pane == BLAM_KEY {
+            return RichText::new(BLAM_TITLE).color(text_dark()).into();
         }
         let dirty = self.app.kits[self.kit_index]
             .parsed_tags
@@ -338,9 +361,10 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
 
 impl TagPaneBehavior<'_> {
     fn group_tag_for_key(&self, key: &str) -> Option<u32> {
-        // The Bitmap Library is not a tag and has no group icon; `Some(0)` here
-        // would reserve icon space and paint whatever group zero resolves to.
-        if key == BITMAP_LIBRARY_KEY {
+        // The Bitmap Library and Blam! are not tags and have no group icon;
+        // `Some(0)` here would reserve icon space and paint whatever group zero
+        // resolves to.
+        if key == BITMAP_LIBRARY_KEY || key == BLAM_KEY {
             return None;
         }
         self.tab_labels.get(key).map(|(_, group_tag)| *group_tag)
@@ -370,6 +394,10 @@ impl Baboon {
                 // No group, so no icon: `group_tag_for_key` reads this map, and
                 // the bitmap group's icon would claim this is a bitmap tag.
                 labels.insert(key.clone(), (BITMAP_LIBRARY_TITLE.to_owned(), 0));
+                continue;
+            }
+            if key == BLAM_KEY {
+                labels.insert(key.clone(), (BLAM_TITLE.to_owned(), 0));
                 continue;
             }
             let found = kit

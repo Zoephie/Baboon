@@ -121,6 +121,8 @@ mod map_names;
 use map_names::*;
 mod tool_commands;
 use tool_commands::*;
+mod blam;
+use blam::*;
 mod tag_icons;
 use tag_icons::*;
 mod button_icons;

@@ -164,6 +164,9 @@ pub(super) struct Kit {
     /// the top-level kit registry; it lives beside the Tags surface here.
     pub(super) surface: KitSurface,
     pub(super) chimp: ChimpState,
+    /// Halo 3 only: state of this kit's Blam! import pane ([`BLAM_KEY`] in
+    /// `tag_tree`).
+    pub(super) blam: BlamUiState,
 
     /// Tags staged by a session restore, drained once this kit's source
     /// finishes loading. Held per kit rather than in one shared slot so
@@ -232,6 +235,7 @@ impl Kit {
             pending_container_folders: std::collections::BTreeSet::new(),
             surface: KitSurface::Tags,
             chimp: ChimpState::default(),
+            blam: BlamUiState::default(),
             pending_restore_tags: Vec::new(),
             pending_history: HashMap::new(),
             pending_restore_chimp_packages: Vec::new(),

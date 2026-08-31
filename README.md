@@ -290,6 +290,9 @@ window.
   games.
 - **Right-click a tab** to reveal that tag in the browser tree, or to close all
   tabs / all tabs but this one.
+- When a tab bar overflows, **scroll the mouse wheel over it** to move along it
+  (up = left, down = right) — on the editor's tag tabs and the workspace tabs
+  alike — alongside the arrow buttons that appear at its ends.
 - **`Ctrl+W`** closes the current tab, prompting first if it has unsaved edits.
   On the Chimp surface it closes the selected package instead.
 - Tabs remain open until explicitly closed; the practical document limit is
@@ -747,6 +750,19 @@ A **Run Tool Command** window lists each game's `tool` commands (from per-game
 JSON), with a form for their parameters — enum dropdowns, file/path pickers, and
 **inline validation** that flags empty required parameters before running. The
 assembled command runs in the integrated terminal.
+
+A **Blam!** pane (*Tools → Blam!*, Halo 3 kits only for now) fronts Baboon's
+own import pipelines instead of the kit's `tool.exe`. It opens as a tab in the
+workspace's editor area — like the Bitmap Library, it can be dragged into a
+split, resized, and rearranged like any open tag. Point it at an asset's
+data folder and it detects which tool source folders are there — `render`
+(render_model, with an optional PRT pass), `collision` (collision_model),
+`physics` (physics_model), and `structure` (structure_bsp) — ticking the
+pipelines it found and disabling the ones with no source folder. A single
+Import button runs everything ticked. **The pane is currently a preview: the
+pipelines themselves have not landed in `blam-tags` yet, so in current builds
+the Import button does not import anything** — the pane says so itself, and its
+status bar only reports what would run.
 
 ### Preferences
 

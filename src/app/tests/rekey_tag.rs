@@ -246,6 +246,7 @@ fn every_field_of_a_kit_is_accounted_for() {
         active_favorite_entries: _,
 
         // Not addressed by a tag key at all.
+        blam: _,
         id: _,
         names: _,
         browser_mode: _,

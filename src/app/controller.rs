@@ -7468,7 +7468,12 @@ impl Baboon {
     }
 
     pub(super) fn editing_kit_root(&self) -> Option<PathBuf> {
-        let TagSource::LooseFolder { root, .. } = &self.source()?.source else {
+        self.editing_kit_root_for(self.active)
+    }
+
+    pub(super) fn editing_kit_root_for(&self, kit_index: usize) -> Option<PathBuf> {
+        let TagSource::LooseFolder { root, .. } = &self.kits[kit_index].source.as_ref()?.source
+        else {
             return None;
         };
         if root

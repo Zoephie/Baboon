@@ -153,8 +153,9 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
         ui: &mut Ui,
         _tile_id: egui_tiles::TileId,
         _tabs: &egui_tiles::Tabs,
-        _scroll_offset: &mut f32,
+        scroll_offset: &mut f32,
     ) {
+        wheel_scroll_tab_bar(ui, scroll_offset);
         let recents = self.app.recent_folders.clone();
         ui.menu_button("+", |ui| {
             ui.set_min_width(240.0);
