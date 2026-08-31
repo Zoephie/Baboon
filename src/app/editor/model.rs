@@ -157,6 +157,14 @@ pub(in crate::app) fn is_previewable_geometry_group(
         // model link.
         || group_tag == u32::from_be_bytes(*b"mode")
         || names.name_for(group_tag) == Some("render_model")
+        // Derived previews: collision BSPs walked into triangles, physics
+        // primitives tessellated, structure BSPs and scenario composites
+        // through the ASS/JMS scene builders. Same tab pair, different
+        // geometry source (`model_preview::derived`).
+        || matches!(
+            &group_tag.to_be_bytes(),
+            b"coll" | b"phmo" | b"sbsp" | b"scnr"
+        )
 }
 
 pub(in crate::app) fn format_reference_path(

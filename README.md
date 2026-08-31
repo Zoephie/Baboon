@@ -419,11 +419,49 @@ bitmap in the workspace as a thumbnail grid.
   travels with its own workspace, so opening it in one game does not open it in
   another.
 
+### Model Browser
+
+*Tools ▸ Assets ▸ Model Browser* opens a **Model Library** tab listing every
+render model in the workspace (`render_model`, and Halo CE `gbxmodel`) as a
+thumbnail grid.
+
+- **Thumbnails are real geometry** — each render model is rasterized
+  flat-shaded on a background thread, in the same pose the editor's 3D preview
+  opens with.
+- **Search** with the tag browser's own filter grammar and a **size slider**,
+  exactly as in the Bitmap Library.
+- **Double-click** a thumbnail to open the **`.model` that owns it** — resolved
+  by the sibling-path convention — falling back to the render model itself when
+  no `.model` exists beside it (Halo CE gbxmodels always open themselves).
+  **Right-click** offers the render model tag directly.
+- **Drag a thumbnail** onto any tag-reference cell to set that reference.
+- Same bounded thumbnail cache, visible-cells-only decode, background-index
+  request, and session-restore behavior as the Bitmap Library.
+
 ### Model preview
 
-For `model` (`hlmt`) and `render_model` (`mode`) tags, a real-time 3D preview:
+For `model` (`hlmt`), `render_model` (`mode`), `collision_model`,
+`physics_model`, `scenario_structure_bsp`, and `scenario` tags, a real-time 3D
+preview:
 
-- Renders the model with orbit/pan/zoom camera controls.
+- **Orbit / pan / zoom camera** built for levels as much as props: panning
+  moves the orbit point in world space, so the camera orbits and zooms around
+  whatever was framed; scrolling **zooms toward the cursor**; the zoom range
+  runs 0.02–500× on a logarithmic slider. An optional **Perspective**
+  projection replaces the default orthographic one — matched exactly at the
+  orbit point, so toggling never jumps.
+- `.model` tags can overlay their referenced **collision model** (orange) and
+  **physics model** (blue) over the render model, posed on the same skeleton,
+  with a **Render** toggle to view the overlays alone. `collision_model` and
+  `physics_model` tags preview the same geometry standalone — physics spheres,
+  boxes, pills, and convex hulls are tessellated from the tag's parametric
+  shapes.
+- **Structure BSPs** preview their full render geometry — textured on the
+  Halo 3 family, through the same shader pipeline as models — with the sealed
+  collision BSP and cluster portals as separately toggleable layers.
+- **Scenarios** preview a composite of their structure BSPs: a checkbox per
+  entry in the `structure bsps` block loads that BSP's render geometry, and
+  each loaded BSP becomes its own region toggle.
 - **Textured shading** (Halo 3 and Reach) — each mesh part is drawn with its own
   shader's maps, resolved through the render_model's materials: **diffuse**,
   **detail** (tiling at the shader's own scale), **normal**, and a **detail

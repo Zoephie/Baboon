@@ -221,10 +221,11 @@ fn every_field_of_a_kit_is_accounted_for() {
         modified_tags: _,
         deletable_keys: _,
         deletable_keys_generation: _,
-        // The Bitmap Library's snapshot and thumbnail cache. Keyed on the kit
-        // generation, which a rename bumps, so both are rebuilt against the new
-        // key rather than carried across it.
+        // The Bitmap and Model Libraries' snapshots and thumbnail caches. Keyed
+        // on the kit generation, which a rename bumps, so both are rebuilt
+        // against the new key rather than carried across it.
         bitmap_browser: _,
+        model_browser: _,
 
         // The source's own entries, tree and indices, which the rename moves
         // through `apply_container_rename_source_state` rather than here: it
@@ -262,6 +263,7 @@ fn every_field_of_a_kit_is_accounted_for() {
         pending_container_folders: _,
         // Staged session-restore state, consumed once the source lands.
         pending_restore_bitmap_library: _,
+        pending_restore_model_library: _,
         pending_launch_tags: _,
     } = Kit::empty(KitId(9), TagNameIndex::default());
 }

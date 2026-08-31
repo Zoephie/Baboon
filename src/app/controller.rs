@@ -988,6 +988,9 @@ impl Baboon {
                 WorkerMessage::BitmapThumbnailDecoded { stamp, key, result } => {
                     self.handle_bitmap_thumbnail_decoded(stamp, key, result, ctx)
                 }
+                WorkerMessage::ModelThumbnailRendered { stamp, key, result } => {
+                    self.handle_model_thumbnail_rendered(stamp, key, result, ctx)
+                }
                 WorkerMessage::AllEntriesScanned { stamp, result } => {
                     self.handle_all_entries_scanned(stamp, result, ctx)
                 }
@@ -3287,12 +3290,16 @@ impl Baboon {
             tags,
             chimp_packages,
             active_chimp_package,
-            // Read off the open tabs rather than the tag list: the library's
-            // pane key resolves to no entry, so the loop above skipped it.
+            // Read off the open tabs rather than the tag list: the libraries'
+            // pane keys resolve to no entry, so the loop above skipped them.
             bitmap_library_open: kit
                 .open_tabs
                 .iter()
                 .any(|key| key == BITMAP_LIBRARY_KEY),
+            model_library_open: kit
+                .open_tabs
+                .iter()
+                .any(|key| key == MODEL_LIBRARY_KEY),
             was_active,
         })
     }
@@ -3312,6 +3319,7 @@ impl Baboon {
             chimp_packages,
             active_chimp_package,
             bitmap_library_open,
+            model_library_open,
             was_active,
         } in kits
         {
@@ -3367,6 +3375,7 @@ impl Baboon {
             self.kits[self.active].pending_restore_tags = tags;
             self.kits[self.active].pending_restore_chimp_packages = chimp_packages;
             self.kits[self.active].pending_restore_bitmap_library = bitmap_library_open;
+            self.kits[self.active].pending_restore_model_library = model_library_open;
             self.kits[self.active].pending_restore_active_chimp_package = active_chimp_package;
             // Its browser view is staged the same way: `install_loaded_source`
             // carries it across the load rather than resetting it, so each
@@ -3442,6 +3451,9 @@ impl Baboon {
         // without it.
         if std::mem::take(&mut self.kits[self.active].pending_restore_bitmap_library) {
             self.open_bitmap_library();
+        }
+        if std::mem::take(&mut self.kits[self.active].pending_restore_model_library) {
+            self.open_model_library();
         }
         let restore = std::mem::take(&mut self.kits[self.active].pending_restore_tags);
         if restore.is_empty() {

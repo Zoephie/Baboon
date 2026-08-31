@@ -271,7 +271,11 @@ fn load_model_preview_derives_object_names_from_the_entry() {
     };
 
     let data = crate::app::model_preview::loading::load_model_preview(
-        &tag, &entry, &names, None, false,
+        &tag,
+        &entry,
+        &names,
+        None,
+        &crate::app::model_preview::loading::PreviewLoadSettings::default(),
     )
     .expect("preview loads without a loose-folder source — geometry is inline");
 
@@ -325,7 +329,11 @@ fn a_shipped_render_model_previews_on_its_own() {
         location: crate::source::TagEntryLocation::LooseFile(path.clone()),
     };
     let data = crate::app::model_preview::loading::load_model_preview(
-        &tag, &entry, &names, None, false,
+        &tag,
+        &entry,
+        &names,
+        None,
+        &crate::app::model_preview::loading::PreviewLoadSettings::default(),
     )
     .expect("a shipped render_model must preview");
     assert!(
@@ -379,7 +387,11 @@ fn every_shipped_particle_model_previews() {
                 };
                 checked += 1;
                 match crate::app::model_preview::loading::load_model_preview(
-                    &tag, &tag_entry, &names, None, false,
+                    &tag,
+                    &tag_entry,
+                    &names,
+                    None,
+                    &crate::app::model_preview::loading::PreviewLoadSettings::default(),
                 ) {
                     Ok(data) => {
                         if data.preview.indices.is_empty() || data.preview.regions.is_empty() {

@@ -73,7 +73,7 @@ pub(super) fn draw_tag(
     }
 
     if is_model {
-        draw_model_tag_panel_tabs(ui, model_preview);
+        draw_model_tag_panel_tabs(ui, model_preview, entry.group_tag);
     }
     ui.add_space(6.0);
 
@@ -108,7 +108,7 @@ pub(super) fn draw_tag(
     );
 }
 
-fn draw_model_tag_panel_tabs(ui: &mut Ui, model_preview: &mut ModelPreviewState) {
+fn draw_model_tag_panel_tabs(ui: &mut Ui, model_preview: &mut ModelPreviewState, group_tag: u32) {
     ui.horizontal(|ui| {
         ui.selectable_value(
             &mut model_preview.active_tab,
@@ -118,7 +118,7 @@ fn draw_model_tag_panel_tabs(ui: &mut Ui, model_preview: &mut ModelPreviewState)
         ui.selectable_value(
             &mut model_preview.active_tab,
             ModelTagPanelTab::RenderModel,
-            "Render model",
+            preview_panel_title(group_tag),
         );
     });
 }

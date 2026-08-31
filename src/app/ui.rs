@@ -601,6 +601,10 @@ impl Baboon {
                         self.open_bitmap_library();
                         ui.close_menu();
                     }
+                    if ui.button("Model Browser").clicked() {
+                        self.open_model_library();
+                        ui.close_menu();
+                    }
                     // Baboon's own import pipelines only cover Halo 3 so far,
                     // so the entry only appears there.
                     if self.active_kit_is_halo3() && ui.button("Blam!").clicked() {

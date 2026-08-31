@@ -189,6 +189,17 @@ fn resolve_one_material(
         };
         textures.slots[slot as usize] = cached_bitmap(source, &binding, caches);
     }
+    // Foliage is the one family whose base alpha IS coverage: leaves are
+    // authored as cutouts in the base map and the shader often names no
+    // `alpha_test_map` at all. Everywhere else a base map's alpha carries a
+    // mask (usually specular), which is why this stays scoped to `rmfl`
+    // instead of becoming a general fallback.
+    if material.shader_group.to_be_bytes() == *b"rmfl"
+        && textures.slots[TextureSlot::AlphaTest as usize].is_none()
+    {
+        textures.slots[TextureSlot::AlphaTest as usize] =
+            textures.slots[TextureSlot::Base as usize].clone();
+    }
     textures
 }
 

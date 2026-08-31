@@ -15,12 +15,37 @@ pub(super) fn draw_model_viewport(
     let (rect, response) = ui.allocate_exact_size(desired_size, Sense::click_and_drag());
     let painter = ui.painter_at(rect);
 
+    // Pixels → world units at the current zoom, for the pan and zoom-to-cursor
+    // math below. Uses the same bounds-derived fit as `PreviewCamera`.
+    let (_, radius) = preview_center_radius(&data.preview);
+    let fit = rect.width().min(rect.height()) / (radius * 2.2).max(0.001);
+    let world_per_pixel = 1.0 / (fit * state.scale).max(0.0001);
+
+    // Panning moves the world-space orbit point, not a screen offset: the
+    // camera then orbits and zooms around whatever the user framed, which is
+    // what makes a corner of a BSP inspectable. Screen-space panning kept the
+    // orbit pivot at the model's center, so orbiting a panned view swung the
+    // framed geometry away.
+    let mut pan_world = |state: &mut ModelPreviewState, delta: Vec2| {
+        let moved = unrotate_view_vector(
+            state.yaw,
+            state.pitch,
+            [
+                -delta.x * world_per_pixel,
+                0.0,
+                delta.y * world_per_pixel,
+            ],
+        );
+        state.focus[0] += moved[0];
+        state.focus[1] += moved[1];
+        state.focus[2] += moved[2];
+    };
     if response.dragged_by(egui::PointerButton::Middle) {
-        state.pan += response.drag_delta();
+        pan_world(state, response.drag_delta());
     } else if response.dragged_by(egui::PointerButton::Primary) {
         let delta = response.drag_delta();
         if ui.input(|i| i.modifiers.shift) {
-            state.pan += delta;
+            pan_world(state, delta);
         } else {
             state.yaw += delta.x * 0.01;
             state.pitch = (state.pitch + delta.y * 0.01).clamp(-1.45, 1.45);
@@ -29,7 +54,25 @@ pub(super) fn draw_model_viewport(
     if response.hovered() {
         let scroll = ui.input(|i| i.raw_scroll_delta.y);
         if scroll.abs() > f32::EPSILON {
-            state.scale = (state.scale * (scroll / 450.0).exp()).clamp(0.05, 5.0);
+            let old_scale = state.scale.clamp(MIN_PREVIEW_SCALE, MAX_PREVIEW_SCALE);
+            let new_scale =
+                (old_scale * (scroll / 450.0).exp()).clamp(MIN_PREVIEW_SCALE, MAX_PREVIEW_SCALE);
+            // Zoom toward the cursor: shift the orbit point so the geometry
+            // under the pointer stays put. Without this, zooming into a BSP
+            // always dives at its center and the doorway drifts offscreen.
+            if let Some(pointer) = ui.input(|i| i.pointer.hover_pos()) {
+                let towards = pointer - rect.center();
+                let factor = 1.0 / (fit * old_scale) - 1.0 / (fit * new_scale);
+                let moved = unrotate_view_vector(
+                    state.yaw,
+                    state.pitch,
+                    [towards.x * factor, 0.0, -towards.y * factor],
+                );
+                state.focus[0] += moved[0];
+                state.focus[1] += moved[1];
+                state.focus[2] += moved[2];
+            }
+            state.scale = new_scale;
         }
     }
 
@@ -40,6 +83,14 @@ pub(super) fn draw_model_viewport(
         .iter()
         .enumerate()
         .filter_map(|(index, batch)| {
+            // "Render off" leaves only the derived overlay layers on screen —
+            // a frame-level filter, so the toggle never rebuilds geometry.
+            if !state.show_render
+                && batch.region_name != COLLISION_REGION
+                && batch.region_name != PHYSICS_REGION
+            {
+                return None;
+            }
             let selection = state.region_selections.get(&batch.region_name)?;
             (selection.enabled && selection.permutation == batch.permutation_name).then_some(index)
         })
@@ -111,9 +162,20 @@ struct ModelGpuCamera {
     yaw: f32,
     pitch: f32,
     clip_scale: [f32; 2],
-    pan_clip: [f32; 2],
     depth_scale: f32,
+    /// 1.0 = perspective divide on, 0.0 = orthographic.
+    perspective: f32,
 }
+
+/// Perspective geometry, shared between the shader and the CPU-side marker
+/// projection. The eye sits at view-space `y = -d` with `d = 2 · depth_radius
+/// · scale`; the depth bound is `r = 1.05 · depth_radius · scale`, so `r/d`
+/// is this constant. From it: `w = 1 + view.y · depth_scale · (r/d)` (which
+/// is 1 exactly at the focus plane, keeping the framing identical to the
+/// orthographic view there and bounded ≥ 0.5 for all in-range geometry), and
+/// `z_clip = view.y · depth_scale + (r/d)` maps the depth bound onto NDC
+/// after the divide, monotonically because `d > r`.
+const PERSPECTIVE_R_OVER_D: f32 = 1.05 / 2.0;
 
 struct ModelGpuFrame {
     preview: Arc<RenderModelPreview>,
@@ -209,6 +271,7 @@ fn model_shader_sources(version_declaration: &str, modern: bool, precision: &str
         };
         // Position and normal are required; the rest are read only on the
         // shaded path and a driver may drop them from an unused program.
+        let persp_ratio = PERSPECTIVE_R_OVER_D;
         let vertex_source = format!(
             "{}{precision}\
              {attribute} vec3 a_position;\n\
@@ -220,8 +283,8 @@ fn model_shader_sources(version_declaration: &str, modern: bool, precision: &str
              uniform float u_scale;\n\
              uniform vec2 u_angles;\n\
              uniform vec2 u_clip_scale;\n\
-             uniform vec2 u_pan_clip;\n\
              uniform float u_depth_scale;\n\
+             uniform float u_perspective;\n\
              {varying_out} vec2 v_uv;\n\
              {varying_out} vec3 v_normal;\n\
              {varying_out} vec3 v_tangent;\n\
@@ -236,7 +299,13 @@ fn model_shader_sources(version_declaration: &str, modern: bool, precision: &str
              }}\n\
              void main() {{\n\
                  vec3 view = rotate_view((a_position - u_center) * u_scale);\n\
-                 gl_Position = vec4(view.x * u_clip_scale.x + u_pan_clip.x, view.z * u_clip_scale.y + u_pan_clip.y, view.y * u_depth_scale, 1.0);\n\
+                 // Perspective: the eye sits along -Y so w grows with depth;\n\
+                 // at the focus plane (view.y = 0) w is exactly 1 and the\n\
+                 // framing matches the orthographic view. See the derivation\n\
+                 // on PERSPECTIVE_R_OVER_D.\n\
+                 float w = mix(1.0, 1.0 + view.y * u_depth_scale * {persp_ratio}, u_perspective);\n\
+                 float z_clip = view.y * u_depth_scale + u_perspective * {persp_ratio};\n\
+                 gl_Position = vec4(view.x * u_clip_scale.x, view.z * u_clip_scale.y, z_clip, w);\n\
                  vec3 source_normal = length(a_normal) > 0.0001 ? normalize(a_normal) : vec3(0.0, 0.0, 1.0);\n\
                  v_normal = rotate_view(source_normal);\n\
                  v_tangent = rotate_view(a_tangent);\n\
@@ -316,6 +385,11 @@ fn model_shader_sources(version_declaration: &str, modern: bool, precision: &str
                              vec3 dn = {sample}(u_tex_bump_detail, v_uv * u_uv_scale_a.w).xyz * 2.0 - 1.0;\n\
                              tn = vec3(tn.xy + dn.xy, tn.z);\n\
                          }}\n\
+                         // Halo bump maps use the DirectX convention: green\n\
+                         // grows downward. This frame's binormal points the\n\
+                         // other way, so the sampled Y flips — once, after the\n\
+                         // detail sum, which flips both maps together.\n\
+                         tn.y = -tn.y;\n\
                          tn = normalize(tn);\n\
                          normal = normalize(t * tn.x + b * tn.y + normal * tn.z);\n\
                      }}\n\
@@ -350,8 +424,8 @@ struct ModelGlRenderer {
     scale: glow::NativeUniformLocation,
     angles: glow::NativeUniformLocation,
     clip_scale: glow::NativeUniformLocation,
-    pan_clip: glow::NativeUniformLocation,
     depth_scale: glow::NativeUniformLocation,
+    perspective: glow::NativeUniformLocation,
     base_color: glow::NativeUniformLocation,
     unlit: glow::NativeUniformLocation,
     shaded: Option<glow::NativeUniformLocation>,
@@ -464,8 +538,8 @@ impl ModelGlRenderer {
                 scale: uniform("u_scale")?,
                 angles: uniform("u_angles")?,
                 clip_scale: uniform("u_clip_scale")?,
-                pan_clip: uniform("u_pan_clip")?,
                 depth_scale: uniform("u_depth_scale")?,
+                perspective: uniform("u_perspective")?,
                 base_color: uniform("u_base_color")?,
                 unlit: uniform("u_unlit")?,
                 // Optional: a driver is free to drop a uniform the program does
@@ -538,12 +612,8 @@ impl ModelGlRenderer {
                 frame.camera.clip_scale[0],
                 frame.camera.clip_scale[1],
             );
-            gl.uniform_2_f32(
-                Some(&self.pan_clip),
-                frame.camera.pan_clip[0],
-                frame.camera.pan_clip[1],
-            );
             gl.uniform_1_f32(Some(&self.depth_scale), frame.camera.depth_scale);
+            gl.uniform_1_f32(Some(&self.perspective), frame.camera.perspective);
 
             if frame.render_mode.draws_shading() {
                 gl.polygon_mode(glow::FRONT_AND_BACK, glow::FILL);
@@ -660,7 +730,10 @@ impl ModelGlRenderer {
             let color = if wire {
                 Color32::from_rgb(38, 55, 65)
             } else {
-                material_color(batch.material_index)
+                batch
+                    .flat_color
+                    .map(|[r, g, b]| Color32::from_rgb(r, g, b))
+                    .unwrap_or_else(|| material_color(batch.material_index))
             };
             // The wireframe pass draws flat on purpose, so it never binds a
             // texture — and neither does a batch whose material did not resolve.
@@ -753,6 +826,26 @@ mod gpu_renderer_tests {
     /// renders but looks wrong.
     /// A malformed shader disables the whole preview and reports it only on
     /// stderr, so these check the structure no GPU is here to check.
+    /// The pan and zoom-to-cursor math turns screen deltas back into world
+    /// moves through `unrotate_view_vector`; if it drifts from the forward
+    /// rotation, panning smears diagonally and zoom-to-cursor orbits away
+    /// from the pointer instead of onto it.
+    #[test]
+    fn unrotate_inverts_rotate_for_any_view_angles() {
+        for (yaw, pitch) in [(0.0, 0.0), (-0.45, 0.25), (1.2, -1.4), (3.0, 0.9)] {
+            for vector in [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.3, -2.0, 5.0]] {
+                let there = rotate_view_vector(yaw, pitch, vector);
+                let back = unrotate_view_vector(yaw, pitch, there);
+                for axis in 0..3 {
+                    assert!(
+                        (back[axis] - vector[axis]).abs() < 1e-5,
+                        "round trip failed at yaw {yaw} pitch {pitch}: {vector:?} -> {back:?}"
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn both_shader_dialects_declare_what_the_renderer_binds() {
         for (declaration, modern, precision) in [
@@ -793,7 +886,27 @@ mod gpu_renderer_tests {
                 fragment.contains("u_have_a.z > 0.5 || u_have_a.w > 0.5"),
                 "a detail normal with no base bump map should still perturb"
             );
-            for name in ["u_center", "u_scale", "u_angles", "u_clip_scale", "u_pan_clip", "u_depth_scale"] {
+            // Halo normal maps are DirectX-convention (green grows downward),
+            // so the sampled Y must flip into this frame — and exactly once,
+            // after the detail sum, so base and detail flip together.
+            assert_eq!(
+                fragment.matches("tn.y = -tn.y;").count(),
+                1,
+                "the DirectX green-channel flip must happen exactly once"
+            );
+            assert!(
+                fragment.find("tn.xy + dn.xy").unwrap()
+                    < fragment.find("tn.y = -tn.y;").unwrap(),
+                "the flip must come after the detail sum or the detail map flips twice"
+            );
+            for name in [
+                "u_center",
+                "u_scale",
+                "u_angles",
+                "u_clip_scale",
+                "u_depth_scale",
+                "u_perspective",
+            ] {
                 assert!(vertex.contains(name), "{name} missing from vertex shader");
             }
             for name in ["u_base_color", "u_unlit"] {
@@ -997,7 +1110,7 @@ pub(super) fn screen_edge_length(a: egui::Pos2, b: egui::Pos2) -> f32 {
     (dx * dx + dy * dy).sqrt()
 }
 
-pub(super) fn material_color(index: u16) -> Color32 {
+pub(in crate::app) fn material_color(index: u16) -> Color32 {
     const COLORS: &[(u8, u8, u8)] = &[
         (132, 168, 188),
         (176, 166, 128),
@@ -1015,53 +1128,109 @@ struct ProjectedPoint {
     pos: egui::Pos2,
 }
 
+/// The camera's zoom bounds. Wide on purpose: 5× was plenty for a vehicle but
+/// nothing on a structure BSP, where inspecting a doorway on a whole level
+/// needs a couple hundred times the fitted view.
+pub(in crate::app) const MIN_PREVIEW_SCALE: f32 = 0.02;
+pub(in crate::app) const MAX_PREVIEW_SCALE: f32 = 500.0;
+
+/// A preview's bounds center and bounding-sphere radius — the fit every
+/// camera computation derives from.
+fn preview_center_radius(preview: &RenderModelPreview) -> ([f32; 3], f32) {
+    let (min, max) = (preview.bounds_min, preview.bounds_max);
+    let center = [
+        (min[0] + max[0]) * 0.5,
+        (min[1] + max[1]) * 0.5,
+        (min[2] + max[2]) * 0.5,
+    ];
+    let extent = [
+        (max[0] - min[0]).abs(),
+        (max[1] - min[1]).abs(),
+        (max[2] - min[2]).abs(),
+    ];
+    let radius =
+        ((extent[0] * extent[0] + extent[1] * extent[1] + extent[2] * extent[2]).sqrt() * 0.5)
+            .max(0.001);
+    (center, radius)
+}
+
+/// World → view: yaw about Z, then pitch about X — the one rotation this
+/// preview uses, mirrored in the vertex shader's `rotate_view`.
+fn rotate_view_vector(yaw: f32, pitch: f32, vector: [f32; 3]) -> [f32; 3] {
+    let (sy, cy) = yaw.sin_cos();
+    let x = vector[0] * cy - vector[1] * sy;
+    let y = vector[0] * sy + vector[1] * cy;
+    let (sp, cp) = pitch.sin_cos();
+    [x, y * cp - vector[2] * sp, y * sp + vector[2] * cp]
+}
+
+/// View → world: the exact inverse of [`rotate_view_vector`] (un-pitch, then
+/// un-yaw). What turns a screen-space pan or zoom-to-cursor offset back into
+/// the world-space focus move it stands for.
+pub(super) fn unrotate_view_vector(yaw: f32, pitch: f32, vector: [f32; 3]) -> [f32; 3] {
+    let (sp, cp) = pitch.sin_cos();
+    let y = vector[1] * cp + vector[2] * sp;
+    let z = -vector[1] * sp + vector[2] * cp;
+    let (sy, cy) = yaw.sin_cos();
+    [vector[0] * cy + y * sy, -vector[0] * sy + y * cy, z]
+}
+
 struct PreviewCamera {
     rect: egui::Rect,
+    /// Orbit point: bounds center plus the user's world-space focus offset.
     center: [f32; 3],
+    /// Fit radius — deliberately the *bounds* radius, unaffected by focus, so
+    /// the zoom slider keeps one meaning wherever the user pans.
     radius: f32,
+    /// Depth-normalization radius: the bounds radius grown by the focus
+    /// offset, so panned-to geometry can never fall outside the depth range.
+    depth_radius: f32,
     yaw: f32,
     pitch: f32,
     scale: f32,
-    pan: Vec2,
+    perspective: bool,
 }
 
 impl PreviewCamera {
     fn new(data: &ModelPreviewData, state: &ModelPreviewState, rect: egui::Rect) -> Self {
-        let min = data.preview.bounds_min;
-        let max = data.preview.bounds_max;
+        let (bounds_center, radius) = preview_center_radius(&data.preview);
         let center = [
-            (min[0] + max[0]) * 0.5,
-            (min[1] + max[1]) * 0.5,
-            (min[2] + max[2]) * 0.5,
+            bounds_center[0] + state.focus[0],
+            bounds_center[1] + state.focus[1],
+            bounds_center[2] + state.focus[2],
         ];
-        let extent = [
-            (max[0] - min[0]).abs(),
-            (max[1] - min[1]).abs(),
-            (max[2] - min[2]).abs(),
-        ];
-        let radius =
-            ((extent[0] * extent[0] + extent[1] * extent[1] + extent[2] * extent[2]).sqrt() * 0.5)
-                .max(0.001);
+        let focus_length = (state.focus[0] * state.focus[0]
+            + state.focus[1] * state.focus[1]
+            + state.focus[2] * state.focus[2])
+            .sqrt();
         Self {
             rect,
             center,
             radius,
+            depth_radius: radius + focus_length,
             yaw: state.yaw,
             pitch: state.pitch,
-            scale: state.scale,
-            pan: state.pan,
+            scale: state.scale.clamp(MIN_PREVIEW_SCALE, MAX_PREVIEW_SCALE),
+            perspective: state.perspective,
         }
     }
 
     fn project(&self, point: [f32; 3]) -> ProjectedPoint {
-        let mut x = (point[0] - self.center[0]) * self.scale;
+        let x = (point[0] - self.center[0]) * self.scale;
         let y = (point[1] - self.center[1]) * self.scale;
-        let mut z = (point[2] - self.center[2]) * self.scale;
+        let z = (point[2] - self.center[2]) * self.scale;
         let rotated = self.rotate_vector([x, y, z]);
-        x = rotated[0];
-        z = rotated[2];
         let fit = self.rect.width().min(self.rect.height()) / (self.radius * 2.2).max(0.001);
-        let screen = self.rect.center() + self.pan + Vec2::new(x * fit, -z * fit);
+        // The same divide the vertex shader applies, so markers stay glued to
+        // their geometry in either projection.
+        let w = if self.perspective {
+            let depth_scale = 1.0 / (self.depth_radius * self.scale * 1.05).max(0.001);
+            (1.0 + rotated[1] * depth_scale * PERSPECTIVE_R_OVER_D).max(0.05)
+        } else {
+            1.0
+        };
+        let screen =
+            self.rect.center() + Vec2::new(rotated[0] * fit / w, -rotated[2] * fit / w);
         ProjectedPoint { pos: screen }
     }
 
@@ -1075,28 +1244,16 @@ impl PreviewCamera {
             yaw: self.yaw,
             pitch: self.pitch,
             clip_scale: [2.0 * fit / width, 2.0 * fit / height],
-            pan_clip: [2.0 * self.pan.x / width, -2.0 * self.pan.y / height],
             // Orthographic projection: smaller view-space Y is nearer. The
-            // model's bounding-sphere radius safely maps all depths inside NDC.
-            depth_scale: 1.0 / (self.radius * self.scale * 1.05).max(0.001),
+            // focus-grown radius safely maps all depths inside NDC even when
+            // the orbit point sits far from the bounds center.
+            depth_scale: 1.0 / (self.depth_radius * self.scale * 1.05).max(0.001),
+            perspective: if self.perspective { 1.0 } else { 0.0 },
         }
     }
 
     fn rotate_vector(&self, vector: [f32; 3]) -> [f32; 3] {
-        let mut x = vector[0];
-        let mut y = vector[1];
-        let mut z = vector[2];
-        let (sy, cy) = self.yaw.sin_cos();
-        let yaw_x = x * cy - y * sy;
-        let yaw_y = x * sy + y * cy;
-        x = yaw_x;
-        y = yaw_y;
-        let (sp, cp) = self.pitch.sin_cos();
-        let pitch_y = y * cp - z * sp;
-        let pitch_z = y * sp + z * cp;
-        y = pitch_y;
-        z = pitch_z;
-        [x, y, z]
+        rotate_view_vector(self.yaw, self.pitch, vector)
     }
 }
 
@@ -1241,6 +1398,7 @@ fn append_render_mesh_to_preview(
                 material_index: part.material_index,
                 index_start,
                 index_count,
+                flat_color: None,
             });
         }
     }

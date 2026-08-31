@@ -7,15 +7,21 @@ use blam_tags::render_model::{Marker, Node, RenderMesh};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+pub(in crate::app) mod derived;
 pub(in crate::app) mod loading;
 pub(in crate::app) mod materials;
 mod renderer;
 mod variants;
 
+use derived::*;
 use loading::*;
 // Re-exported up to `crate::app`: the preview state and the worker message
 // both name these, and neither lives under this module.
 pub(in crate::app) use materials::*;
+// Re-exported for the Model Library (`model_browser`), whose worker rasterizes
+// the same geometry with the same flat palette into grid thumbnails.
+pub(in crate::app) use loading::build_render_preview;
+pub(in crate::app) use renderer::material_color;
 use renderer::*;
 use variants::*;
 
@@ -82,6 +88,10 @@ pub(crate) struct RenderModelPreviewBatch {
     pub material_index: u16,
     pub index_start: u32,
     pub index_count: u32,
+    /// A fixed color instead of the cycling per-material palette. Derived
+    /// geometry (collision, physics) sets it so an overlay keeps one
+    /// recognizable color no matter where its material lands in the list.
+    pub flat_color: Option<[u8; 3]>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -106,6 +116,7 @@ fn model_preview_data(
         geometry_id: NEXT_MODEL_GEOMETRY_ID.fetch_add(1, Ordering::Relaxed),
         textures: None,
         variants,
+        scenario_bsps: Vec::new(),
     }
 }
 
@@ -124,7 +135,8 @@ pub(super) fn draw_model_preview_panel(
         return;
     }
 
-    egui::CollapsingHeader::new(RichText::new("Render model").strong().color(text_dark()))
+    let title = preview_panel_title(entry.group_tag);
+    egui::CollapsingHeader::new(RichText::new(title).strong().color(text_dark()))
         .id_salt(("model_preview", &entry.key))
         .default_open(true)
         .show(ui, |ui| {
@@ -132,9 +144,7 @@ pub(super) fn draw_model_preview_panel(
             // spinner, kick the (blocking) parse, and repaint so the decoded
             // model appears next frame instead of a blank panel. (A future
             // change can move the parse to a worker thread — see plan 1.9.)
-            let needs_load = state.loaded_key.as_deref() != Some(entry.key.as_str())
-                || state.data.is_none()
-                || state.loaded_high_detail != state.high_detail;
+            let needs_load = state.needs_preview_load(&entry.key);
             if needs_load {
                 ui.horizontal(|ui| {
                     ui.spinner();
@@ -147,22 +157,26 @@ pub(super) fn draw_model_preview_panel(
 
             ui.horizontal(|ui| {
                 ui.label(RichText::new("Scale").color(subtle_dark()));
+                // Logarithmic across the whole range: linear made everything
+                // past a BSP-sized zoom live in the slider's last pixel.
                 ui.add(
-                    egui::Slider::new(&mut state.scale, 0.05..=5.0)
+                    egui::Slider::new(&mut state.scale, MIN_PREVIEW_SCALE..=MAX_PREVIEW_SCALE)
+                        .logarithmic(true)
                         .show_value(false)
                         .clamping(egui::SliderClamping::Always),
                 );
+                let drag_speed = (state.scale * 0.05).max(0.01) as f64;
                 ui.add(
                     egui::DragValue::new(&mut state.scale)
-                        .range(0.05..=5.0)
-                        .speed(0.01)
+                        .range(MIN_PREVIEW_SCALE..=MAX_PREVIEW_SCALE)
+                        .speed(drag_speed)
                         .max_decimals(2)
                         .suffix("×"),
                 );
                 if ui.button("Reset").clicked() {
                     state.yaw = -0.45;
                     state.pitch = 0.25;
-                    state.pan = Vec2::ZERO;
+                    state.focus = [0.0; 3];
                     state.scale = 1.0;
                 }
                 ui.checkbox(&mut state.show_markers, "Markers");
@@ -180,6 +194,12 @@ pub(super) fn draw_model_preview_panel(
                             ui.selectable_value(&mut state.render_mode, mode, mode.label());
                         }
                     });
+                ui.checkbox(&mut state.perspective, "Perspective")
+                    .on_hover_text(
+                        "Perspective projection instead of the flat orthographic view. \
+                         The framing at the orbit point stays identical, so toggling \
+                         never jumps.",
+                    );
                 ui.checkbox(&mut state.shaded, "Shaded")
                     .on_hover_text(
                         "Sample each part's own shader — diffuse, detail, normal, specular and                          self-illumination. Off draws the flat per-material colours, which stay                          useful for reading silhouette and topology.",
@@ -200,6 +220,30 @@ pub(super) fn draw_model_preview_panel(
                             "Decode full-resolution Nanite geometry instead of Unreal's coarse \
                              fallback. Disable this for a faster, lower-detail preview.",
                         );
+                }
+                // `.model` tags can layer their collision and physics geometry
+                // over the render model. Not on Campaign Evolved, whose preview
+                // goes through the Unreal path the overlays don't compose with.
+                if tag.header.group_tag.to_be_bytes() == *b"hlmt" && !is_campaign_evolved {
+                    ui.checkbox(&mut state.show_collision, "Collision")
+                        .on_hover_text(
+                            "Overlay the referenced collision_model's geometry, tinted orange.",
+                        );
+                    ui.checkbox(&mut state.show_physics, "Physics")
+                        .on_hover_text(
+                            "Overlay the referenced physics_model's shapes, tinted blue.",
+                        );
+                    // Only offered while an overlay is on: unchecking it with
+                    // nothing else to draw would blank the viewport with no
+                    // way to see why.
+                    if state.show_collision || state.show_physics {
+                        ui.checkbox(&mut state.show_render, "Render").on_hover_text(
+                            "Draw the render model under the overlays. Off shows the \
+                             collision/physics geometry alone.",
+                        );
+                    } else {
+                        state.show_render = true;
+                    }
                 }
                 ui.label(RichText::new("Viewport").color(subtle_dark()));
                 ui.add(
@@ -232,6 +276,39 @@ pub(super) fn draw_model_preview_panel(
                 }
             };
 
+            // A scenario's per-BSP toggle list. Region toggles cannot serve
+            // here: a region only exists once its BSP is loaded, and the point
+            // of this list is choosing what to load in the first place.
+            if !data.scenario_bsps.is_empty() {
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new("Structure BSPs").color(subtle_dark()));
+                    for (index, reference) in data.scenario_bsps.iter().enumerate() {
+                        let Some(reference) = reference else {
+                            continue;
+                        };
+                        let mut checked = state.scenario_bsp_selection.contains(&index);
+                        if ui
+                            .checkbox(&mut checked, bsp_display_name(reference))
+                            .on_hover_text(reference.as_str())
+                            .changed()
+                        {
+                            if checked {
+                                state.scenario_bsp_selection.insert(index);
+                            } else {
+                                state.scenario_bsp_selection.remove(&index);
+                            }
+                        }
+                    }
+                });
+                if state.scenario_bsp_selection.is_empty() {
+                    ui.label(
+                        RichText::new("Check a structure BSP to load its geometry.")
+                            .color(subtle_dark()),
+                    );
+                }
+            }
+
             let mut mutation_requested = false;
             let desired_viewport = model_viewport_size(ui.available_width(), *model_preview_size);
             let can_place_controls_beside = ui.available_width() >= desired_viewport.x + 360.0;
@@ -262,6 +339,19 @@ pub(super) fn draw_model_preview_panel(
             }
         });
     ui.add_space(8.0);
+}
+
+/// What the preview panel and its tab call themselves, by tag group. Only
+/// `.model`-family tags actually show a *render model*; the derived previews
+/// name what they draw.
+pub(in crate::app) fn preview_panel_title(group_tag: u32) -> &'static str {
+    match &group_tag.to_be_bytes() {
+        b"coll" => "Collision model",
+        b"phmo" => "Physics model",
+        b"sbsp" => "Structure BSP",
+        b"scnr" => "Scenario geometry",
+        _ => "Render model",
+    }
 }
 
 pub(in crate::app) fn draw_model_viewport_size_input(ui: &mut Ui, model_preview_size: &mut f32) {
@@ -354,21 +444,23 @@ pub(in crate::app) fn draw_standalone_mesh_preview(
     ui.horizontal(|ui| {
         ui.label(RichText::new("Scale").color(subtle_dark()));
         ui.add(
-            egui::Slider::new(&mut state.scale, 0.05..=5.0)
+            egui::Slider::new(&mut state.scale, MIN_PREVIEW_SCALE..=MAX_PREVIEW_SCALE)
+                .logarithmic(true)
                 .show_value(false)
                 .clamping(egui::SliderClamping::Always),
         );
+        let drag_speed = (state.scale * 0.05).max(0.01) as f64;
         ui.add(
             egui::DragValue::new(&mut state.scale)
-                .range(0.05..=5.0)
-                .speed(0.01)
+                .range(MIN_PREVIEW_SCALE..=MAX_PREVIEW_SCALE)
+                .speed(drag_speed)
                 .max_decimals(2)
                 .suffix("×"),
         );
         if ui.button("Reset view").clicked() {
             state.yaw = -0.45;
             state.pitch = 0.25;
-            state.pan = Vec2::ZERO;
+            state.focus = [0.0; 3];
             state.scale = 1.0;
         }
         egui::ComboBox::from_id_salt(("standalone_model_render_mode", &data.source_key))
@@ -378,6 +470,8 @@ pub(in crate::app) fn draw_standalone_mesh_preview(
                     ui.selectable_value(&mut state.render_mode, mode, mode.label());
                 }
             });
+        ui.checkbox(&mut state.perspective, "Perspective")
+            .on_hover_text("Perspective projection instead of the flat orthographic view.");
         ui.add_enabled(
             false,
             egui::Checkbox::new(&mut state.show_backfaces, "Backfaces"),

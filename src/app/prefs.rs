@@ -813,6 +813,10 @@ fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
         .get("bitmap_library")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    let model_library_open = value
+        .get("model_library")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     // Keep source-only workspaces. The source path is meaningful session state
     // even when no tag window or project was open in that workspace.
     Some(LastSessionKit {
@@ -828,6 +832,7 @@ fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
         chimp_packages,
         active_chimp_package,
         bitmap_library_open,
+        model_library_open,
         was_active,
     })
 }
@@ -882,6 +887,7 @@ fn session_value(session: &LastSessionState) -> Value {
                 "chimp_packages": kit.chimp_packages,
                 "active_chimp_package": kit.active_chimp_package,
                 "bitmap_library": kit.bitmap_library_open,
+                "model_library": kit.model_library_open,
                 // Which workspace the user was looking at. Written as a flag on
                 // the kit rather than an index beside the list: the restore
                 // prompt can drop kits, and an index would then point at
@@ -1300,6 +1306,7 @@ mod session_tests {
             chimp_packages: Vec::new(),
             active_chimp_package: None,
             bitmap_library_open: false,
+            model_library_open: false,
             was_active: false,
         }
     }
@@ -1320,6 +1327,7 @@ mod session_tests {
                 chimp_packages: vec!["/Game/Vehicles/Warthog".to_owned()],
                 active_chimp_package: Some("/Game/Vehicles/Warthog".to_owned()),
                 bitmap_library_open: false,
+                model_library_open: false,
                 was_active: true,
             }],
         };
@@ -1356,6 +1364,26 @@ mod session_tests {
         assert!(
             !restored.kits[1].bitmap_library_open,
             "the flag belongs to its own kit, not to the session"
+        );
+    }
+
+    /// The Model Library rides the same flag mechanism as the Bitmap Library,
+    /// and each library's flag comes back independently.
+    #[test]
+    fn the_model_library_round_trips_independently_of_the_bitmap_library() {
+        let mut only_models = kit("C:/halo3", Some(BrowserMode::Folders));
+        only_models.tags = Vec::new();
+        only_models.model_library_open = true;
+        let session = LastSessionState {
+            kits: vec![only_models],
+        };
+
+        let restored = parse_last_session(&session_value(&session)).expect("session parses");
+
+        assert!(restored.kits[0].model_library_open);
+        assert!(
+            !restored.kits[0].bitmap_library_open,
+            "one library's flag must not drag the other's along"
         );
     }
 

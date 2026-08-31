@@ -115,6 +115,12 @@ pub(in crate::app) enum WorkerMessage {
         key: String,
         result: Result<ThumbnailImage, String>,
     },
+    /// One Model Library thumbnail, rasterized off the UI thread.
+    ModelThumbnailRendered {
+        stamp: KitStamp,
+        key: String,
+        result: Result<ThumbnailImage, String>,
+    },
     /// One model's materials resolved to decoded textures, off the UI thread.
     ModelTexturesResolved {
         stamp: KitStamp,

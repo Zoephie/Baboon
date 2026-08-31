@@ -1862,6 +1862,26 @@ pub(in crate::app) fn is_bitmap_tag(entry: &TagEntry) -> bool {
         || entry.display_path.to_ascii_lowercase().ends_with(".bitmap")
 }
 
+/// The groups that *are* render geometry: `mode` (H2+ render_model, and H1's
+/// legacy `model`, which previews through the same dispatch) and `mod2`
+/// (H1 gbxmodel). Deliberately not `hlmt` — a model tag has no geometry of its
+/// own, only a reference to one of these.
+pub(in crate::app) fn is_render_model_group(group_tag: u32) -> bool {
+    matches!(&group_tag.to_be_bytes(), b"mode" | b"mod2")
+}
+
+pub(in crate::app) fn is_render_model_tag(entry: &TagEntry) -> bool {
+    is_render_model_group(entry.group_tag)
+        || matches!(
+            entry.group_name.as_deref(),
+            Some("render_model") | Some("gbxmodel")
+        )
+        || {
+            let path = entry.display_path.to_ascii_lowercase();
+            path.ends_with(".render_model") || path.ends_with(".gbxmodel")
+        }
+}
+
 pub(in crate::app) fn is_material_shader_group(group_tag: u32) -> bool {
     group_tag == u32::from_be_bytes(*b"mats")
 }

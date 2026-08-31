@@ -56,6 +56,16 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
                 .draw_bitmap_library(ui, &self.ctx, self.kit_index);
             return egui_tiles::UiResponse::None;
         }
+        if key == MODEL_LIBRARY_KEY {
+            if ui.input(|input| input.pointer.any_pressed())
+                && ui.rect_contains_pointer(ui.max_rect())
+            {
+                self.focused = Some(key.clone());
+            }
+            self.app
+                .draw_model_library(ui, &self.ctx, self.kit_index);
+            return egui_tiles::UiResponse::None;
+        }
         if key == BLAM_KEY {
             if ui.input(|input| input.pointer.any_pressed())
                 && ui.rect_contains_pointer(ui.max_rect())
@@ -123,6 +133,9 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
     fn tab_title_for_pane(&mut self, pane: &String) -> egui::WidgetText {
         if pane == BITMAP_LIBRARY_KEY {
             return RichText::new(BITMAP_LIBRARY_TITLE).color(text_dark()).into();
+        }
+        if pane == MODEL_LIBRARY_KEY {
+            return RichText::new(MODEL_LIBRARY_TITLE).color(text_dark()).into();
         }
         if pane == BLAM_KEY {
             return RichText::new(BLAM_TITLE).color(text_dark()).into();
@@ -361,10 +374,10 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
 
 impl TagPaneBehavior<'_> {
     fn group_tag_for_key(&self, key: &str) -> Option<u32> {
-        // The Bitmap Library and Blam! are not tags and have no group icon;
-        // `Some(0)` here would reserve icon space and paint whatever group zero
-        // resolves to.
-        if key == BITMAP_LIBRARY_KEY || key == BLAM_KEY {
+        // The Bitmap Library, Model Library, and Blam! are not tags and have no
+        // group icon; `Some(0)` here would reserve icon space and paint
+        // whatever group zero resolves to.
+        if key == BITMAP_LIBRARY_KEY || key == MODEL_LIBRARY_KEY || key == BLAM_KEY {
             return None;
         }
         self.tab_labels.get(key).map(|(_, group_tag)| *group_tag)
@@ -394,6 +407,10 @@ impl Baboon {
                 // No group, so no icon: `group_tag_for_key` reads this map, and
                 // the bitmap group's icon would claim this is a bitmap tag.
                 labels.insert(key.clone(), (BITMAP_LIBRARY_TITLE.to_owned(), 0));
+                continue;
+            }
+            if key == MODEL_LIBRARY_KEY {
+                labels.insert(key.clone(), (MODEL_LIBRARY_TITLE.to_owned(), 0));
                 continue;
             }
             if key == BLAM_KEY {
@@ -478,6 +495,19 @@ impl Baboon {
         if let Some(key) = self.kits[kit_index].bitmap_browser.pending_extract.take() {
             self.active = kit_index;
             self.begin_extract_bitmap(key, ctx.clone());
+        }
+        // A model double-clicked in the Model Library opens the `.model` that
+        // owns it — or the render model itself when the kit has none — and the
+        // right-click path opens the clicked tag with no resolution. Parked and
+        // drained for the same reason as the bitmaps above.
+        if let Some(key) = self.kits[kit_index].model_browser.pending_open.take() {
+            self.active = kit_index;
+            let open = self.resolve_model_browser_open(kit_index, &key);
+            self.select_entry(open, ctx.clone());
+        }
+        if let Some(key) = self.kits[kit_index].model_browser.pending_open_raw.take() {
+            self.active = kit_index;
+            self.select_entry(key, ctx.clone());
         }
 
         // The tree owns the layout, so a drag or split there is what changes

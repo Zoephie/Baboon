@@ -205,6 +205,9 @@ pub(in crate::app) struct LastSessionKit {
     /// document behind it, and nothing in the source resolves its pane key — the
     /// tag loop would drop it on the way out and again on the way back in.
     pub(in crate::app) bitmap_library_open: bool,
+    /// Whether this workspace had the Model Library tab open, carried the same
+    /// way for the same reason.
+    pub(in crate::app) model_library_open: bool,
     /// Whether this was the kit the user was looking at. Carried per kit rather
     /// than as an index into the list so that dropping a kit — which the
     /// restore prompt lets the user do — cannot silently re-point it at
@@ -236,6 +239,9 @@ pub(in crate::app) struct RestoreKit {
     /// document behind it, and nothing in the source resolves its pane key — the
     /// tag loop would drop it on the way out and again on the way back in.
     pub(in crate::app) bitmap_library_open: bool,
+    /// Whether this workspace had the Model Library tab open, carried the same
+    /// way for the same reason.
+    pub(in crate::app) model_library_open: bool,
     /// Whether this kit was the focused one when the session was saved.
     pub(in crate::app) was_active: bool,
 }
@@ -273,6 +279,9 @@ pub(in crate::app) struct LastOpenedWindowsKit {
     /// document behind it, and nothing in the source resolves its pane key — the
     /// tag loop would drop it on the way out and again on the way back in.
     pub(in crate::app) bitmap_library_open: bool,
+    /// Whether this workspace had the Model Library tab open, carried the same
+    /// way for the same reason.
+    pub(in crate::app) model_library_open: bool,
     pub(in crate::app) active_chimp_package: Option<String>,
     /// Whether this kit was the focused one when the session was saved.
     pub(in crate::app) was_active: bool,
@@ -348,6 +357,7 @@ impl LastOpenedWindowsKit {
             // like the browser view beside it: the library is a view onto the
             // kit, not a document that could be missing or unsaved.
             bitmap_library_open: saved.bitmap_library_open && source_available,
+            model_library_open: saved.model_library_open && source_available,
             was_active: saved.was_active,
         })
     }
@@ -410,6 +420,7 @@ impl LastOpenedWindowsPrompt {
                     chimp_packages,
                     active_chimp_package,
                     bitmap_library_open: kit.bitmap_library_open,
+                    model_library_open: kit.model_library_open,
                     was_active: kit.was_active,
                 }
             })

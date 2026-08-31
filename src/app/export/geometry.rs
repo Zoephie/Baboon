@@ -111,13 +111,13 @@ pub(in crate::app) fn extract_geometry_for_entry(
 /// The rest pose a collision or physics JMS is composed against, plus — on
 /// Campaign Evolved — the `skeleton model` whose Halo-style armature the
 /// finished file is reoriented onto.
-struct ModelSkeleton {
+pub(in crate::app) struct ModelSkeleton {
     nodes: Vec<blam_tags::JmsNode>,
     campaign_evolved: Option<TagFile>,
 }
 
 impl ModelSkeleton {
-    fn nodes(&self) -> &[blam_tags::JmsNode] {
+    pub(in crate::app) fn nodes(&self) -> &[blam_tags::JmsNode] {
         &self.nodes
     }
 
@@ -141,7 +141,10 @@ impl ModelSkeleton {
 /// fall through to the render_model at the same path. Anything still unresolved
 /// returns `None` and the export degrades to the old unposed output rather than
 /// to a wrong pose.
-fn owning_model_skeleton(source: &TagSource, entry: &TagEntry) -> Option<ModelSkeleton> {
+pub(in crate::app) fn owning_model_skeleton(
+    source: &TagSource,
+    entry: &TagEntry,
+) -> Option<ModelSkeleton> {
     let reference = entry_reference_path(source, entry)?;
     if let Ok(model) = load_referenced_tag_from_source(source, &reference, "model", b"hlmt") {
         if let Some(skeleton) = model_skeleton(source, &model) {
@@ -160,7 +163,7 @@ fn owning_model_skeleton(source: &TagSource, entry: &TagEntry) -> Option<ModelSk
 /// The rest pose a `.model` supplies to its collision and physics geometry:
 /// the render_model's bind pose, or the `skeleton model` on Campaign Evolved,
 /// which ships no render_model at all.
-fn model_skeleton(source: &TagSource, model: &TagFile) -> Option<ModelSkeleton> {
+pub(in crate::app) fn model_skeleton(source: &TagSource, model: &TagFile) -> Option<ModelSkeleton> {
     let root = model.root();
     if let Some(reference) = tag_ref_path(&root, "render model") {
         if let Ok(render) =
@@ -223,7 +226,7 @@ fn entry_reference_path(source: &TagSource, entry: &TagEntry) -> Option<String> 
 /// its BSPs per node with no region/permutation nesting; every later engine uses
 /// `collision_model`. Reading a Halo 1 tag with the later walker found no `bsps`
 /// under any permutation and wrote an empty file.
-fn collision_jms_for_game(
+pub(in crate::app) fn collision_jms_for_game(
     tag: &TagFile,
     skeleton: Option<&[blam_tags::JmsNode]>,
 ) -> anyhow::Result<JmsFile> {
@@ -240,7 +243,7 @@ fn collision_jms_for_game(
 
 /// Halo 2 physics models store their shapes flat; Halo 3 and later nest them
 /// behind rigid-body shape references.
-fn physics_jms_for_game(
+pub(in crate::app) fn physics_jms_for_game(
     tag: &TagFile,
     skeleton: Option<&[blam_tags::JmsNode]>,
 ) -> anyhow::Result<JmsFile> {

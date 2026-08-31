@@ -131,6 +131,8 @@ mod editor;
 use editor::*;
 mod bitmap_browser;
 use bitmap_browser::*;
+mod model_browser;
+use model_browser::*;
 mod audio;
 mod sound_extract;
 use sound_extract::*;

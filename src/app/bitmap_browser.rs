@@ -1,6 +1,8 @@
 //! The Bitmap Library: every bitmap in a kit as a searchable thumbnail grid.
 //! It owns the grid's state, its bounded thumbnail cache, and its presentation;
-//! bitmap decoding, tag reading, and the tab layout belong elsewhere.
+//! bitmap decoding, tag reading, and the tab layout belong elsewhere. The cache,
+//! cell metrics, and grid arithmetic are shared with the Model Library
+//! (`model_browser`), which lays out the same grid over different thumbnails.
 
 use super::*;
 
@@ -37,15 +39,15 @@ const THUMBNAIL_EVICT_BATCH: usize = 128;
 /// A fast scroll can want a hundred new thumbnails in a frame; without a bound
 /// that is a hundred threads, all reading tags off the same disk. Four keeps
 /// the queue moving without the frame ever waiting on it.
-const MAX_DECODES_IN_FLIGHT: usize = 4;
+pub(in crate::app) const MAX_DECODES_IN_FLIGHT: usize = 4;
 
-const MIN_CELL: f32 = 48.0;
-const MAX_CELL: f32 = 224.0;
-const DEFAULT_CELL: f32 = 96.0;
+pub(in crate::app) const MIN_CELL: f32 = 48.0;
+pub(in crate::app) const MAX_CELL: f32 = 224.0;
+pub(in crate::app) const DEFAULT_CELL: f32 = 96.0;
 
 /// Room under the image for the name and the group.
-const CELL_CAPTION: f32 = 30.0;
-const CELL_GAP: f32 = 8.0;
+pub(in crate::app) const CELL_CAPTION: f32 = 30.0;
+pub(in crate::app) const CELL_GAP: f32 = 8.0;
 
 /// One kit's Bitmap Library.
 #[derive(Default)]
@@ -100,7 +102,7 @@ impl BitmapBrowserState {
 /// visible, which is what made the shader editor's inline thumbnails cache
 /// their failures too.
 #[derive(Default)]
-struct ThumbnailCache {
+pub(in crate::app) struct ThumbnailCache {
     entries: HashMap<String, Thumbnail>,
     /// Monotonic draw counter; `Thumbnail::used` is a stamp from it.
     clock: u64,
@@ -112,7 +114,7 @@ struct Thumbnail {
 }
 
 impl ThumbnailCache {
-    fn get(&mut self, key: &str) -> Option<Option<egui::TextureHandle>> {
+    pub(in crate::app) fn get(&mut self, key: &str) -> Option<Option<egui::TextureHandle>> {
         self.clock += 1;
         let clock = self.clock;
         let thumbnail = self.entries.get_mut(key)?;
@@ -120,11 +122,11 @@ impl ThumbnailCache {
         Some(thumbnail.texture.clone())
     }
 
-    fn contains(&self, key: &str) -> bool {
+    pub(in crate::app) fn contains(&self, key: &str) -> bool {
         self.entries.contains_key(key)
     }
 
-    fn insert(&mut self, key: String, texture: Option<egui::TextureHandle>) {
+    pub(in crate::app) fn insert(&mut self, key: String, texture: Option<egui::TextureHandle>) {
         self.clock += 1;
         let used = self.clock;
         self.entries.insert(key, Thumbnail { texture, used });
@@ -145,7 +147,7 @@ impl ThumbnailCache {
         }
     }
 
-    fn clear(&mut self) {
+    pub(in crate::app) fn clear(&mut self) {
         self.entries.clear();
     }
 }
@@ -221,7 +223,7 @@ enum CellAction {
 /// Counting a trailing gap that is never drawn, or leaving out the scrollbar the
 /// caller subtracts before calling, both round this up by one and draw the
 /// rightmost thumbnail half off the edge of the pane.
-fn grid_columns(usable: f32, cell: f32) -> usize {
+pub(in crate::app) fn grid_columns(usable: f32, cell: f32) -> usize {
     (((usable + CELL_GAP) / (cell + CELL_GAP)).floor() as usize).max(1)
 }
 
@@ -711,7 +713,7 @@ impl Baboon {
 }
 
 /// Scale `size` down to fit a square of `edge` points, never up.
-fn fit_within(size: Vec2, edge: f32) -> Vec2 {
+pub(in crate::app) fn fit_within(size: Vec2, edge: f32) -> Vec2 {
     let longest = size.x.max(size.y);
     if longest <= 0.0 {
         return Vec2::splat(edge);
@@ -721,7 +723,7 @@ fn fit_within(size: Vec2, edge: f32) -> Vec2 {
 }
 
 /// The file name a display path ends in, without its group extension.
-fn tag_leaf_name(display_path: &str) -> String {
+pub(in crate::app) fn tag_leaf_name(display_path: &str) -> String {
     let leaf = display_path
         .rsplit(['/', '\\'])
         .next()

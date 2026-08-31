@@ -135,6 +135,21 @@ pub(in crate::app) struct ModelPreviewState {
     /// The `high_detail` value the cached `data` was built with, so toggling it
     /// invalidates the cache and reloads.
     pub(in crate::app) loaded_high_detail: bool,
+    /// `.model` tags only: overlay the referenced collision_model's geometry
+    /// on the render preview. Rebuilds the merged geometry when toggled.
+    pub(in crate::app) show_collision: bool,
+    /// `.model` tags only: overlay the referenced physics_model's shapes.
+    pub(in crate::app) show_physics: bool,
+    /// The overlay toggles the cached `data` was built with, so flipping one
+    /// invalidates the cache the same way `loaded_high_detail` does.
+    pub(in crate::app) loaded_show_collision: bool,
+    pub(in crate::app) loaded_show_physics: bool,
+    /// Scenario tags only: which entries of the `structure bsps` block are
+    /// loaded into the composite preview. Empty until the user picks some —
+    /// loading every BSP of a campaign scenario unasked would stall the pane.
+    pub(in crate::app) scenario_bsp_selection: std::collections::BTreeSet<usize>,
+    /// The selection the cached `data` was built for.
+    pub(in crate::app) loaded_scenario_selection: std::collections::BTreeSet<usize>,
     pub(in crate::app) render_mode: ModelRenderMode,
     pub(in crate::app) show_backfaces: bool,
     /// Sample the model's own shader textures rather than the flat per-material
@@ -143,10 +158,23 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) shaded: bool,
     /// A texture-resolve job is running for the loaded model.
     pub(in crate::app) textures_pending: bool,
+    /// `.model` overlays only: draw the render model itself. Off leaves just
+    /// the collision/physics layers on screen — a frame-level filter, so
+    /// toggling never rebuilds geometry.
+    pub(in crate::app) show_render: bool,
+    /// Perspective projection instead of the default orthographic one. The
+    /// eye sits two (focus-grown) radii out along the view axis, scaled so
+    /// the focus plane matches the orthographic framing exactly — toggling
+    /// never jumps, and the zoom slider keeps one meaning in both.
+    pub(in crate::app) perspective: bool,
     pub(in crate::app) scale: f32,
     pub(in crate::app) yaw: f32,
     pub(in crate::app) pitch: f32,
-    pub(in crate::app) pan: Vec2,
+    /// World-space offset of the orbit point from the geometry's bounds
+    /// center. Panning moves this, so the camera always orbits and zooms
+    /// around what the user framed — screen-space panning made orbiting a
+    /// BSP's far corner swing it offscreen.
+    pub(in crate::app) focus: [f32; 3],
 }
 
 impl Default for ModelPreviewState {
@@ -163,15 +191,38 @@ impl Default for ModelPreviewState {
             marker_filter: String::new(),
             high_detail: true,
             loaded_high_detail: false,
+            show_collision: false,
+            show_physics: false,
+            loaded_show_collision: false,
+            loaded_show_physics: false,
+            scenario_bsp_selection: std::collections::BTreeSet::new(),
+            loaded_scenario_selection: std::collections::BTreeSet::new(),
             render_mode: ModelRenderMode::Shaded,
             show_backfaces: false,
             shaded: true,
             textures_pending: false,
+            show_render: true,
+            perspective: false,
             scale: 1.0,
             yaw: -0.45,
             pitch: 0.25,
-            pan: Vec2::ZERO,
+            focus: [0.0; 3],
         }
+    }
+}
+
+impl ModelPreviewState {
+    /// Whether the cached preview no longer matches what the panel should
+    /// show — a different tag, or a load-affecting setting that changed.
+    /// One predicate for the panel's spinner gate and the loader's early
+    /// return, so the two can never disagree about what needs a rebuild.
+    pub(in crate::app) fn needs_preview_load(&self, entry_key: &str) -> bool {
+        self.loaded_key.as_deref() != Some(entry_key)
+            || self.data.is_none()
+            || self.loaded_high_detail != self.high_detail
+            || self.loaded_show_collision != self.show_collision
+            || self.loaded_show_physics != self.show_physics
+            || self.loaded_scenario_selection != self.scenario_bsp_selection
     }
 }
 
@@ -253,6 +304,10 @@ pub(in crate::app) struct ModelPreviewData {
     /// appears half-shaded and then changes under the cursor.
     pub(in crate::app) textures: Option<std::sync::Arc<Vec<MaterialTextures>>>,
     pub(in crate::app) variants: Vec<ModelVariantPreview>,
+    /// Scenario tags only: the `structure bsps` block's references (one per
+    /// element, `None` where the reference is empty), driving the per-BSP
+    /// checkbox list. Empty for every other tag group.
+    pub(in crate::app) scenario_bsps: Vec<Option<String>>,
 }
 
 #[derive(Clone)]

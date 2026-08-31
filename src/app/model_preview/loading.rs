@@ -21,6 +21,27 @@ use std::sync::{Arc, LazyLock, Mutex};
 const CE_CV: EIoStoreTocVersion = EIoStoreTocVersion::ReplaceIoChunkHashWithIoHash;
 const CE_HV: EIoContainerHeaderVersion = EIoContainerHeaderVersion::SoftPackageReferences;
 
+/// The load-affecting slice of [`ModelPreviewState`], snapshotted before the
+/// parse so the loader never holds the mutable state alongside it.
+#[derive(Default)]
+pub(super) struct PreviewLoadSettings {
+    pub(super) high_detail: bool,
+    pub(super) show_collision: bool,
+    pub(super) show_physics: bool,
+    pub(super) scenario_selection: std::collections::BTreeSet<usize>,
+}
+
+impl PreviewLoadSettings {
+    fn of(state: &ModelPreviewState) -> Self {
+        Self {
+            high_detail: state.high_detail,
+            show_collision: state.show_collision,
+            show_physics: state.show_physics,
+            scenario_selection: state.scenario_bsp_selection.clone(),
+        }
+    }
+}
+
 pub(super) fn ensure_model_preview_loaded(
     model_tag: &TagFile,
     entry: &TagEntry,
@@ -28,18 +49,18 @@ pub(super) fn ensure_model_preview_loaded(
     source: Option<&TagSource>,
     state: &mut ModelPreviewState,
 ) {
-    if state.loaded_key.as_deref() == Some(entry.key.as_str())
-        && state.data.is_some()
-        && state.loaded_high_detail == state.high_detail
-    {
+    if !state.needs_preview_load(&entry.key) {
         return;
     }
     state.loaded_key = Some(entry.key.clone());
     state.loaded_high_detail = state.high_detail;
-    let high_detail = state.high_detail;
+    state.loaded_show_collision = state.show_collision;
+    state.loaded_show_physics = state.show_physics;
+    state.loaded_scenario_selection = state.scenario_bsp_selection.clone();
+    let settings = PreviewLoadSettings::of(state);
     state.data = Some(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            load_model_preview(model_tag, entry, names, source, high_detail)
+            load_model_preview(model_tag, entry, names, source, &settings)
         }))
         .map_err(|_| "Render model preview crashed while parsing this tag.".to_owned())
         .and_then(|result| result)
@@ -59,8 +80,9 @@ pub(super) fn load_model_preview(
     entry: &TagEntry,
     names: &TagNameIndex,
     source: Option<&TagSource>,
-    high_detail: bool,
+    settings: &PreviewLoadSettings,
 ) -> Result<ModelPreviewData, String> {
+    let high_detail = settings.high_detail;
     // `particle_model` carries its geometry inline with no wrapper, but
     // it is not a render_model: no regions, no permutations, no
     // materials, no nodes. Its objects are the entries of the JMI the
@@ -95,6 +117,86 @@ pub(super) fn load_model_preview(
             preview,
             Vec::new(),
         ));
+    }
+
+    // Collision and physics tags carry no render geometry of their own —
+    // their preview is derived: collision BSPs walked into triangles, physics
+    // primitives tessellated. Posed on the owning `.model`'s skeleton when
+    // one is beside them, unposed otherwise.
+    if matches!(&group, b"coll" | b"phmo") {
+        let skeleton = source.and_then(|source| owning_model_skeleton(source, entry));
+        let nodes = skeleton.as_ref().map(|skeleton| skeleton.nodes());
+        let preview = if &group == b"coll" {
+            build_collision_preview(model_tag, nodes)?
+        } else {
+            build_physics_preview(model_tag, nodes)?
+        };
+        return Ok(model_preview_data(
+            entry.key.clone(),
+            entry.display_path.clone(),
+            preview,
+            Vec::new(),
+        ));
+    }
+
+    // A structure BSP previews its own geometry, layered into `render` /
+    // `collision` / `portals` / `weather` regions so each is a toggle.
+    if &group == b"sbsp" {
+        let preview = build_sbsp_preview(model_tag, false)?;
+        return Ok(model_preview_data(
+            entry.key.clone(),
+            entry.display_path.clone(),
+            preview,
+            Vec::new(),
+        ));
+    }
+
+    // A scenario previews a composite of the structure BSPs the user has
+    // checked — each selected BSP loads render-only and lands as one region,
+    // so the region list doubles as the per-BSP toggle. Nothing loads until
+    // something is checked: a campaign scenario's full BSP set is far too
+    // much to parse unasked on the UI thread.
+    if &group == b"scnr" {
+        let bsps = scenario_bsp_paths(model_tag);
+        if bsps.is_empty() {
+            return Err("This scenario lists no structure BSPs.".to_owned());
+        }
+        let mut preview = RenderModelPreview::default();
+        if !settings.scenario_selection.is_empty() {
+            let Some(source) = source else {
+                return Err("Scenario preview requires a loaded source.".to_owned());
+            };
+            preview.bounds_min = [f32::INFINITY; 3];
+            preview.bounds_max = [f32::NEG_INFINITY; 3];
+            for &index in &settings.scenario_selection {
+                let Some(Some(reference)) = bsps.get(index) else {
+                    continue;
+                };
+                let bsp_tag = load_referenced_tag_from_source(
+                    source,
+                    reference,
+                    "scenario_structure_bsp",
+                    b"sbsp",
+                )
+                .map_err(|error| format!("Could not load {reference}: {error}"))?;
+                let mut bsp_preview = build_sbsp_preview(&bsp_tag, true)
+                    .map_err(|error| format!("{reference}: {error}"))?;
+                rebrand_preview_region(&mut bsp_preview, &bsp_display_name(reference));
+                merge_preview_append(&mut preview, &bsp_preview);
+            }
+            if !preview.bounds_min.iter().all(|bound| bound.is_finite()) {
+                preview.bounds_min = [0.0; 3];
+                preview.bounds_max = [0.0; 3];
+            }
+        }
+        let mut data = model_preview_data(
+            entry.key.clone(),
+            entry.display_path.clone(),
+            preview,
+            Vec::new(),
+        );
+        data.scenario_bsps = bsps;
+        return Ok(data);
     }
 
     // Halo: Campaign Evolved — the `.model` (hlmt) has no `render model` ref;
@@ -138,9 +240,23 @@ pub(super) fn load_model_preview(
     };
     let render_tag =
         read_entry(source.unwrap(), &render_entry).map_err(|error| error.to_string())?;
-    let preview = build_render_preview(&render_tag)?;
+    let mut preview = build_render_preview(&render_tag)?;
     if preview.batches.is_empty() {
         return Err("Referenced render_model has no previewable draw batches.".to_owned());
+    }
+    // The overlay toggles merge the `.model`'s collision and physics layers
+    // into the same scene, posed on the same skeleton. A layer that fails to
+    // resolve appends nothing — an absent reference must not take the render
+    // preview down with it.
+    if settings.show_collision
+        && let Some(overlay) = hlmt_collision_overlay(model_tag, source.unwrap())
+    {
+        merge_preview_append(&mut preview, &overlay);
+    }
+    if settings.show_physics
+        && let Some(overlay) = hlmt_physics_overlay(model_tag, source.unwrap())
+    {
+        merge_preview_append(&mut preview, &overlay);
     }
     Ok(model_preview_data(
         render_entry.key,
@@ -243,6 +359,7 @@ pub(super) fn build_particle_model_preview(
             material_index: 0,
             index_start,
             index_count,
+            flat_color: None,
         });
     }
 
@@ -257,7 +374,9 @@ pub(super) fn build_particle_model_preview(
 /// selectable entry per region, so every object gets this single one.
 const PARTICLE_OBJECT_PERMUTATION: &str = "default";
 
-pub(super) fn build_render_preview(render_tag: &TagFile) -> Result<RenderModelPreview, String> {
+pub(in crate::app) fn build_render_preview(
+    render_tag: &TagFile,
+) -> Result<RenderModelPreview, String> {
     let render_model = RenderModel::from_tag(render_tag).map_err(|error| error.to_string())?;
     let render_meshes =
         RenderModel::derive_render_meshes(render_tag).map_err(|error| error.to_string())?;

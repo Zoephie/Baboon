@@ -75,6 +75,8 @@ pub(super) struct Kit {
     /// own bounded thumbnail cache — deliberately not `bitmap_previews`,
     /// which is unbounded and holds full-resolution images.
     pub(super) bitmap_browser: BitmapBrowserState,
+    /// The Model Library tab's state, the same shape for the same reasons.
+    pub(super) model_browser: ModelBrowserState,
     pub(super) model_previews: HashMap<String, ModelPreviewState>,
     /// Source-local render-method definition cache; `None` is a cached miss.
     pub(super) rmdf_cache: HashMap<String, Option<RenderMethodDefinition>>,
@@ -186,6 +188,8 @@ pub(super) struct Kit {
     /// the same way and for the same reason as the Chimp packages: the tab can
     /// only be opened once this kit's source has finished loading.
     pub(super) pending_restore_bitmap_library: bool,
+    /// Whether session restore should reopen the Model Library here, likewise.
+    pub(super) pending_restore_model_library: bool,
     /// Loose tag paths requested on the command line, drained after this kit's
     /// editing-kit source finishes loading.
     pub(super) pending_launch_tags: Option<Vec<PathBuf>>,
@@ -206,6 +210,7 @@ impl Kit {
             edit_buffers: EditDrafts::default(),
             bitmap_previews: HashMap::new(),
             bitmap_browser: BitmapBrowserState::default(),
+            model_browser: ModelBrowserState::default(),
             model_previews: HashMap::new(),
             rmdf_cache: HashMap::new(),
             rmop_cache: HashMap::new(),
@@ -240,6 +245,7 @@ impl Kit {
             pending_history: HashMap::new(),
             pending_restore_chimp_packages: Vec::new(),
             pending_restore_bitmap_library: false,
+            pending_restore_model_library: false,
             pending_restore_active_chimp_package: None,
             pending_launch_tags: None,
         }
@@ -296,6 +302,7 @@ impl Kit {
         self.pending_restore_tags.clear();
         self.pending_restore_chimp_packages.clear();
         self.pending_restore_bitmap_library = false;
+        self.pending_restore_model_library = false;
         self.pending_restore_active_chimp_package = None;
         self.pending_launch_tags = None;
         self.pending_campaign_project = None;
@@ -522,6 +529,8 @@ impl Baboon {
             self.kits[index].pending_restore_active_chimp_package.take();
         let pending_restore_bitmap_library =
             std::mem::take(&mut self.kits[index].pending_restore_bitmap_library);
+        let pending_restore_model_library =
+            std::mem::take(&mut self.kits[index].pending_restore_model_library);
         let pending_launch_tags = self.kits[index].pending_launch_tags.take();
         let pending_campaign_project =
             std::mem::take(&mut self.kits[index].pending_campaign_project);
@@ -541,6 +550,7 @@ impl Baboon {
             pending_restore_chimp_packages,
             pending_restore_active_chimp_package,
             pending_restore_bitmap_library,
+            pending_restore_model_library,
             pending_launch_tags,
             pending_campaign_project,
             ..Kit::empty(id, self.default_names.clone())

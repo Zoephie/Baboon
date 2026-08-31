@@ -128,6 +128,7 @@ mod tests {
             assert!(!BLAM_KEY.starts_with(prefix));
         }
         assert_ne!(BLAM_KEY, BITMAP_LIBRARY_KEY);
+        assert_ne!(BLAM_KEY, MODEL_LIBRARY_KEY);
     }
 
     #[test]
