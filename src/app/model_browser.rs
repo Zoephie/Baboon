@@ -536,6 +536,9 @@ impl Baboon {
         {
             egui::Area::new(ui.make_persistent_id(("model_library_drag_preview", &key)))
                 .order(egui::Order::Tooltip)
+                // Never in the hit-test: a fast drag can put the pointer
+                // inside the stale preview, which would block the drop target.
+                .interactable(false)
                 .fixed_pos(pointer + Vec2::new(12.0, 12.0))
                 .show(ui.ctx(), |ui| {
                     ui.label(RichText::new(&name).color(text_dark()));
@@ -563,10 +566,16 @@ impl Baboon {
             } else {
                 "Double-click to open the model that owns it"
             };
-            response.on_hover_text(format!(
-                "{display_path}\n\n{opens}, drag onto a model reference, \
-                 or right-click to open the render model tag itself"
-            ));
+            // Not `on_hover_text`: an egui tooltip would block the drag this
+            // cell offers (`hover_tooltip_beside_pointer`).
+            hover_tooltip_beside_pointer(
+                ui,
+                &response,
+                &format!(
+                    "{display_path}\n\n{opens}, drag onto a model reference, \
+                     or right-click to open the render model tag itself"
+                ),
+            );
         }
         action
     }

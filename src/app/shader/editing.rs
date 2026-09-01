@@ -1293,13 +1293,13 @@ pub(in crate::app) fn draw_shader_editable_value(
                 }
                 if let Some(payload) = drop.dnd_release_payload::<DraggedTagRef>() {
                     if is_bitmap(&payload) {
-                        draft.set_clean(payload.rel_path.clone());
-                        push_shader_value_edit(
-                            edit,
-                            row_edit,
-                            create.as_ref(),
-                            payload.rel_path.clone(),
-                        );
+                        // The cell's canonical form carries the `.bitmap`
+                        // suffix (see the row builders); the payload's
+                        // rel_path does not, and the edit applier refuses an
+                        // extension-less tag reference.
+                        let value = format!("{}.bitmap", payload.rel_path);
+                        draft.set_clean(value.clone());
+                        push_shader_value_edit(edit, row_edit, create.as_ref(), value);
                     }
                 }
             }
@@ -1580,7 +1580,10 @@ pub(in crate::app) fn draw_shader_editable_value(
                 && let Some(payload) = text_response.dnd_release_payload::<DraggedTagRef>()
                 && accepts(&payload)
             {
-                commit = Some(payload.rel_path.clone());
+                // `input` is the `GROUP:path` form, which the edit applier
+                // parses for any group; the bare rel_path would be refused as
+                // an extension-less tag reference.
+                commit = Some(payload.input.clone());
             }
 
             ui.painter().rect_filled(browse_rect, 0.0, material_input());

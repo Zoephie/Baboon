@@ -527,6 +527,9 @@ impl Baboon {
         {
             egui::Area::new(ui.make_persistent_id(("bitmap_library_drag_preview", &key)))
                 .order(egui::Order::Tooltip)
+                // Never in the hit-test: a fast drag can put the pointer
+                // inside the stale preview, which would block the drop target.
+                .interactable(false)
                 .fixed_pos(pointer + Vec2::new(12.0, 12.0))
                 .show(ui.ctx(), |ui| {
                     ui.label(RichText::new(&name).color(text_dark()));
@@ -550,12 +553,17 @@ impl Baboon {
         });
 
         // Suppressed while that menu is open: a tooltip would otherwise sit over
-        // the item the cursor is on.
+        // the item the cursor is on. Not `on_hover_text`: an egui tooltip would
+        // block the drag this cell offers (`hover_tooltip_beside_pointer`).
         if !response.context_menu_opened() {
-            response.on_hover_text(format!(
-                "{display_path}\n\nDouble-click to open, drag onto a bitmap reference, \
-                 or right-click to extract"
-            ));
+            hover_tooltip_beside_pointer(
+                ui,
+                &response,
+                &format!(
+                    "{display_path}\n\nDouble-click to open, drag onto a bitmap reference, \
+                     or right-click to extract"
+                ),
+            );
         }
         action
     }

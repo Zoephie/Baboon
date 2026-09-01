@@ -57,6 +57,61 @@ pub(in crate::app) fn entry_rel_path(entry: &TagEntry) -> String {
     without_ext.replace('\\', "/")
 }
 
+/// Hover text for a drag source, which egui's own tooltips cannot be.
+///
+/// An egui 0.29 tooltip is an `Area`, and once one has shown, the next
+/// pointer press is hit-tested against the frame that contained it — the
+/// press lands on the tooltip instead of the widget, so a drag source under
+/// it never starts its drag (`interactable(false)` does not save it: the
+/// area still enters the hit-test). "Aim at the row, then drag" is exactly
+/// how the browser rows and library cards are used, so they show this
+/// instead: pure painting on a Tooltip-order layer. A painter registers no
+/// widgets and no area, so nothing exists for a press to land on.
+pub(in crate::app) fn hover_tooltip_beside_pointer(
+    ui: &Ui,
+    response: &egui::Response,
+    text: &str,
+) {
+    if !response.hovered() || response.dragged() {
+        return;
+    }
+    let Some(pointer) = ui.ctx().pointer_latest_pos() else {
+        return;
+    };
+    let painter = ui.ctx().layer_painter(egui::LayerId::new(
+        egui::Order::Tooltip,
+        response.id.with("hover_tooltip"),
+    ));
+    let galley = painter.layout(
+        text.to_owned(),
+        FontId::proportional(12.5),
+        text_dark(),
+        360.0,
+    );
+    let padding = Vec2::new(7.0, 5.0);
+    let mut rect = egui::Rect::from_min_size(
+        pointer + Vec2::new(14.0, 18.0),
+        galley.size() + padding * 2.0,
+    );
+    // Keep it on screen; never under the pointer, so even egui's
+    // closest-widget search cannot be confused by it.
+    let screen = ui.ctx().screen_rect();
+    if rect.right() > screen.right() {
+        rect = rect.translate(Vec2::new(screen.right() - rect.right(), 0.0));
+    }
+    if rect.bottom() > screen.bottom() {
+        rect = rect.translate(Vec2::new(0.0, -rect.height() - 24.0));
+    }
+    let visuals = ui.visuals();
+    painter.rect(
+        rect,
+        4.0,
+        visuals.window_fill,
+        visuals.window_stroke,
+    );
+    painter.galley(rect.min + padding, galley, text_dark());
+}
+
 pub(in crate::app) fn context_menu_button(ui: &mut Ui, label: &str) -> egui::Response {
     let text = RichText::new(label).color(text_dark());
     let button = match context_menu_icon(label) {
@@ -1198,7 +1253,9 @@ pub(in crate::app) fn draw_entry(
     let selected = selected == Some(entry.key.as_str());
     let row_size = Vec2::new(ui.available_width(), ui.spacing().interact_size.y);
     let (row_rect, response) = ui.allocate_exact_size(row_size, Sense::click_and_drag());
-    let response = response.on_hover_text(&entry.display_path);
+    // Not `on_hover_text`: an egui tooltip would block the very drag this row
+    // exists to start. See `hover_tooltip_beside_pointer`.
+    hover_tooltip_beside_pointer(ui, &response, &entry.display_path);
     response.dnd_set_drag_payload(payload);
     if reveal_key == Some(entry.key.as_str()) {
         response.scroll_to_me(Some(egui::Align::Center));
@@ -1237,6 +1294,10 @@ pub(in crate::app) fn draw_entry(
     {
         egui::Area::new(ui.make_persistent_id(("tag_tree_drag_preview", &entry.key)))
             .order(egui::Order::Tooltip)
+            // A fast drag can outrun the preview's stale position and put the
+            // pointer inside it; interactable, it would then block the drop
+            // target's hit-test at release.
+            .interactable(false)
             .fixed_pos(pointer_pos + Vec2::new(12.0, 12.0))
             .show(ui.ctx(), |ui| {
                 ui.label(RichText::new(leaf_label).color(text_dark()));
@@ -1650,6 +1711,241 @@ mod tests {
         // node paths are group labels rather than folders.
         assert!(unused_height_after_tree(false, false) > 100.0);
         assert!(unused_height_after_tree(true, true) > 100.0);
+    }
+
+    /// Control for the regression test below: the same pointer script against
+    /// a bare egui drag source, no Baboon code. Proves the synthetic events
+    /// can start a drag at all, so the test below indicts `draw_entry` rather
+    /// than the script.
+    #[test]
+    fn control_a_bare_drag_source_sets_its_payload() {
+        let ctx = egui::Context::default();
+        let mut source_rect = egui::Rect::NOTHING;
+        let mut frame = |events: Vec<egui::Event>, source_rect: &mut egui::Rect| {
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(600.0, 400.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let (rect, response) = ui
+                            .allocate_exact_size(Vec2::new(240.0, 20.0), Sense::click_and_drag());
+                        *source_rect = rect;
+                        // The non-blocking tooltip the real rows use; the raw
+                        // `on_hover_text` here is what broke them (an egui
+                        // 0.29 tooltip is interactable and owns the pointer's
+                        // hit-test once shown, so the press never reaches the
+                        // row and no drag starts).
+                        hover_tooltip_beside_pointer(ui, &response, "objects/example.bitmap");
+                        response.dnd_set_drag_payload(DraggedTagRef {
+                            group_tag: 0,
+                            input: String::new(),
+                            rel_path: "control".to_owned(),
+                        });                    });
+                },
+            );
+        };
+        frame(Vec::new(), &mut source_rect);
+        let start = source_rect.center();
+        frame(vec![egui::Event::PointerMoved(start)], &mut source_rect);
+        frame(
+            vec![egui::Event::PointerButton {
+                pos: start,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            &mut source_rect,
+        );
+        frame(
+            vec![egui::Event::PointerMoved(start + Vec2::new(0.0, 40.0))],
+            &mut source_rect,
+        );
+        frame(
+            vec![egui::Event::PointerMoved(start + Vec2::new(0.0, 80.0))],
+            &mut source_rect,
+        );
+        assert!(
+            egui::DragAndDrop::has_any_payload(&ctx),
+            "even a bare egui drag source set no payload — the event script is wrong",
+        );
+    }
+
+    /// Regression (user report: dragging textures into shader image fields
+    /// stopped working): a browser row dragged onto a shader-style drop cell
+    /// must deliver its `DraggedTagRef`. Drives the real drag source —
+    /// `draw_entry` — with real pointer events, into the same
+    /// TextEdit-then-hover-interact structure the shader bitmap cell uses.
+    #[test]
+    fn a_dragged_row_delivers_its_payload_to_a_reference_cell() {
+        let bitm = TagEntry {
+            key: "objects/example.bitmap".to_owned(),
+            display_path: "objects/example.bitmap".to_owned(),
+            group_tag: u32::from_be_bytes(*b"bitm"),
+            group_name: Some("bitmap".to_owned()),
+            location: TagEntryLocation::LooseFile(PathBuf::from("C:/kit/tags/objects/example.bitmap")),
+        };
+        let ctx = egui::Context::default();
+        let mut row_rect = egui::Rect::NOTHING;
+        let mut target_rect = egui::Rect::NOTHING;
+        let mut hover_seen = false;
+        let mut dropped: Option<String> = None;
+
+        let mut frame = |events: Vec<egui::Event>,
+                         row_rect: &mut egui::Rect,
+                         target_rect: &mut egui::Rect,
+                         hover_seen: &mut bool,
+                         dropped: &mut Option<String>| {
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(600.0, 400.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let row_top = ui.cursor().min;
+                        draw_entry(ui, &bitm, None, false, false, None, None);
+                        *row_rect = egui::Rect::from_min_size(
+                            row_top,
+                            Vec2::new(240.0, ui.spacing().interact_size.y),
+                        );
+                        ui.add_space(120.0);
+                        // The shader bitmap cell's structure: a TextEdit in the
+                        // cell rect, then a hover interact over the same rect
+                        // asking for the payload.
+                        let (rect, _) =
+                            ui.allocate_exact_size(Vec2::new(220.0, 22.0), Sense::hover());
+                        *target_rect = rect;
+                        let mut text = String::new();
+                        ui.put(
+                            rect,
+                            egui::TextEdit::singleline(&mut text).hint_text("(no reference)"),
+                        );
+                        let drop =
+                            ui.interact(rect, ui.make_persistent_id("test_drop"), Sense::hover());
+                        if drop.dnd_hover_payload::<DraggedTagRef>().is_some() {
+                            *hover_seen = true;
+                        }
+                        if let Some(payload) = drop.dnd_release_payload::<DraggedTagRef>() {
+                            *dropped = Some(payload.rel_path.clone());
+                        }
+                    });
+                },
+            );
+        };
+
+        // Lay out once to learn the rects, then press on the row, drag past
+        // egui's drag threshold, cross onto the cell, and release there.
+        frame(Vec::new(), &mut row_rect, &mut target_rect, &mut hover_seen, &mut dropped);
+        let start = row_rect.center();
+        let end = target_rect.center();
+        frame(
+            vec![egui::Event::PointerMoved(start)],
+            &mut row_rect,
+            &mut target_rect,
+            &mut hover_seen,
+            &mut dropped,
+        );
+        frame(
+            vec![egui::Event::PointerButton {
+                pos: start,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            &mut row_rect,
+            &mut target_rect,
+            &mut hover_seen,
+            &mut dropped,
+        );
+        frame(
+            vec![egui::Event::PointerMoved(start + Vec2::new(0.0, 40.0))],
+            &mut row_rect,
+            &mut target_rect,
+            &mut hover_seen,
+            &mut dropped,
+        );
+        frame(
+            vec![egui::Event::PointerMoved(end)],
+            &mut row_rect,
+            &mut target_rect,
+            &mut hover_seen,
+            &mut dropped,
+        );
+        assert!(
+            egui::DragAndDrop::has_any_payload(&ctx),
+            "the row never set a drag payload — the drag itself is not starting",
+        );
+        frame(
+            vec![egui::Event::PointerButton {
+                pos: end,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            &mut row_rect,
+            &mut target_rect,
+            &mut hover_seen,
+            &mut dropped,
+        );
+
+        assert!(
+            hover_seen,
+            "the drop cell never saw the drag payload while hovered",
+        );
+        assert_eq!(
+            dropped.as_deref(),
+            Some(entry_rel_path(&bitm).as_str()),
+            "releasing over the cell must deliver the dragged bitmap's path",
+        );
+    }
+
+    /// The value a drop writes must be one the edit applier accepts. The
+    /// shader bitmap cell appends `.bitmap` to the payload's rel_path, and
+    /// structural cells use the payload's `GROUP:path` input form — the bare
+    /// rel_path is refused ("expected <path>.<group> or GROUP:<path>"), which
+    /// is exactly the error users hit dropping a bitmap onto base_map.
+    #[test]
+    fn drop_payload_forms_survive_the_reference_parser() {
+        use crate::app::editor::parse_tag_reference;
+        let bitm = TagEntry {
+            key: "objects/example.bitmap".to_owned(),
+            display_path: "objects/example.bitmap".to_owned(),
+            group_tag: u32::from_be_bytes(*b"bitm"),
+            group_name: Some("bitmap".to_owned()),
+            location: TagEntryLocation::LooseFile(PathBuf::from(
+                "C:/kit/tags/objects/example.bitmap",
+            )),
+        };
+        let expected = Some((u32::from_be_bytes(*b"bitm"), "objects\\example".to_owned()));
+
+        let bare = entry_rel_path(&bitm);
+        assert!(
+            parse_tag_reference(&bare).is_err(),
+            "a bare rel_path is not a valid reference, so no drop site may push it",
+        );
+        let suffixed = format!("{bare}.bitmap");
+        assert_eq!(
+            parse_tag_reference(&suffixed).expect("suffixed form parses").group_tag_and_name,
+            expected,
+            "the shader bitmap cell's dropped value",
+        );
+        assert_eq!(
+            parse_tag_reference(&entry_reference_input(&bitm))
+                .expect("GROUP:path form parses")
+                .group_tag_and_name,
+            expected,
+            "the structural cell's dropped value",
+        );
     }
 
     #[test]
