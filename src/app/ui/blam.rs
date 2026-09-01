@@ -1,5 +1,5 @@
 //! Blam! workspace surface: asset folder, per-pipeline tick boxes, and the import request.
-//! It owns immediate-mode presentation and request collection; folder detection lives in `app/blam.rs` and the pipelines themselves will live in `blam-tags`.
+//! It owns immediate-mode presentation and request collection; folder detection lives in `app/blam.rs`, the workflow in `controller/blam_import.rs`, and the importers in `blam-tags`.
 
 use super::*;
 
@@ -59,12 +59,53 @@ impl Baboon {
             .show_inside(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(RichText::new("Status:").color(subtle_dark()));
+                    if self.kits[kit_index].blam.running {
+                        ui.spinner();
+                    }
                     ui.label(
                         RichText::new(&self.kits[kit_index].blam.status)
                             .color(text_dark())
                             .monospace(),
                     );
                 });
+            });
+        // The log window sits between the content and the status bar: always
+        // visible while an import narrates itself, resizable by its top edge.
+        egui::TopBottomPanel::bottom(egui::Id::new(("blam_log", kit_id.0)))
+            .resizable(true)
+            .default_height(150.0)
+            .min_height(60.0)
+            .frame(Frame::none().fill(left_panel()).inner_margin(egui::Margin {
+                left: 10.0,
+                right: 10.0,
+                top: 6.0,
+                bottom: 6.0,
+            }))
+            .show_inside(ui, |ui| {
+                ui.label(RichText::new("Log").color(text_dark()).strong());
+                ui.separator();
+                egui::ScrollArea::vertical()
+                    .id_salt(("blam_log_scroll", kit_id.0))
+                    .auto_shrink([false, false])
+                    .stick_to_bottom(true)
+                    .show(ui, |ui| {
+                        let blam = &self.kits[kit_index].blam;
+                        if blam.log.is_empty() {
+                            ui.label(
+                                RichText::new("No import has run yet.")
+                                    .color(subtle_dark())
+                                    .small(),
+                            );
+                        }
+                        for line in &blam.log {
+                            let color = match line.kind {
+                                BlamLogKind::Info => subtle_dark(),
+                                BlamLogKind::Good => good_news(),
+                                BlamLogKind::Error => material_delete_text(),
+                            };
+                            ui.label(RichText::new(&line.text).color(color).monospace().small());
+                        }
+                    });
             });
 
         let mut browse_clicked = false;
@@ -89,14 +130,6 @@ impl Baboon {
                          folders, without the kit's tool.exe.",
                             )
                             .color(subtle_dark()),
-                        );
-                        ui.label(
-                            RichText::new(
-                                "Preview: the pipelines themselves have not landed yet, so the \
-                                 Import button does not import anything in this build.",
-                            )
-                            .color(ui.visuals().warn_fg_color)
-                            .strong(),
                         );
                         ui.add_space(10.0);
 
@@ -174,12 +207,14 @@ impl Baboon {
                         .on_disabled_hover_text("No structure folder in this asset's data folder");
                         ui.add_space(14.0);
 
-                        let importable = !trimmed.is_empty() && blam.anything_selected();
+                        let importable =
+                            !trimmed.is_empty() && blam.anything_selected() && !blam.running;
+                        let label = if blam.running { "Importing…" } else { "Import" };
                         if ui
                             .add_enabled(
                                 importable,
                                 egui::Button::new(
-                                    RichText::new("Import")
+                                    RichText::new(label)
                                         .color(Color32::WHITE)
                                         .strong()
                                         .size(16.0),
@@ -187,9 +222,11 @@ impl Baboon {
                                 .fill(blam_import_fill())
                                 .min_size(Vec2::new(340.0, 38.0)),
                             )
-                            .on_disabled_hover_text(
-                                "Pick an asset folder with at least one source folder ticked",
-                            )
+                            .on_disabled_hover_text(if blam.running {
+                                "An import is already running"
+                            } else {
+                                "Pick an asset folder with at least one source folder ticked"
+                            })
                             .clicked()
                         {
                             import_clicked = true;
@@ -207,35 +244,7 @@ impl Baboon {
             self.kits[kit_index].blam.scanned_path = None;
         }
         if import_clicked {
-            self.request_blam_import(kit_index);
+            self.begin_blam_import(kit_index, ui.ctx().clone());
         }
-    }
-
-    /// Collects the ticked pipelines into a status line. This is where the
-    /// blam-tags import pipeline gets called once it lands; until then the
-    /// surface's status bar just answers what would run.
-    fn request_blam_import(&mut self, kit_index: usize) {
-        let blam = &mut self.kits[kit_index].blam;
-        let mut pipelines = Vec::new();
-        if blam.import_render {
-            pipelines.push(if blam.import_prt {
-                "render + PRT"
-            } else {
-                "render"
-            });
-        }
-        if blam.import_collision {
-            pipelines.push("collision");
-        }
-        if blam.import_physics {
-            pipelines.push("physics");
-        }
-        if blam.import_structure {
-            pipelines.push("structure");
-        }
-        blam.status = format!(
-            "Import requested ({}) — the blam-tags pipeline is not hooked up yet.",
-            pipelines.join(", ")
-        );
     }
 }

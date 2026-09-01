@@ -797,10 +797,20 @@ data folder and it detects which tool source folders are there — `render`
 (render_model, with an optional PRT pass), `collision` (collision_model),
 `physics` (physics_model), and `structure` (structure_bsp) — ticking the
 pipelines it found and disabling the ones with no source folder. A single
-Import button runs everything ticked. **The pane is currently a preview: the
-pipelines themselves have not landed in `blam-tags` yet, so in current builds
-the Import button does not import anything** — the pane says so itself, and its
-status bar only reports what would run.
+Import button runs everything ticked on a worker thread: each JMS becomes its
+tag named after the asset folder (`tags\<asset>\<asset>.render_model`, …), and
+every `.ass` in `structure` becomes its own `scenario_structure_bsp` named
+after the file, since a level can carry several BSPs. Ticking **Calculate PRT
+data** solves ambient PRT (64 rays a vertex) during the render import; leaving
+it unticked writes every mesh as No PRT. Built tags are serialised and parsed
+back before they reach disk, appear in the browser immediately, and replace
+any open document so the editor shows what is now on disk. The status bar
+reports each pipeline's outcome — mesh/region/material counts, or the reason
+it failed — and a resizable **log window** narrates every step as it happens:
+which file is parsing, its vertex/triangle counts, the PRT solve, the write,
+and each pipeline's timing, with successes in green and failures in red.
+Merging several JMS files in one folder is not supported yet: the
+importer takes the folder's only JMS, or the one named after the asset.
 
 ### Preferences
 

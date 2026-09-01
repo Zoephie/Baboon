@@ -23,6 +23,7 @@ fn jms_vertex(x: f32, y: f32, z: f32) -> JmsVertex {
         binormal: None,
         node_sets: Vec::new(),
         uvs: Vec::new(),
+        color: None,
     }
 }
 

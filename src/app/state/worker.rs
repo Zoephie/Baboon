@@ -164,6 +164,22 @@ pub(in crate::app) enum WorkerMessage {
         key: String,
         result: Result<TagFile, String>,
     },
+    /// A progress line from a running Blam! import: appended to the pane's
+    /// log window, and (for Info lines) shown in its status bar as the
+    /// current step.
+    BlamImportProgress {
+        stamp: KitStamp,
+        kind: BlamLogKind,
+        message: String,
+    },
+    /// A finished Blam! import: one outcome per pipeline the user ticked
+    /// (label, then a summary or the reason it failed), plus every tag the
+    /// worker wrote to disk, parsed back and ready to register.
+    BlamImportFinished {
+        stamp: KitStamp,
+        outcomes: Vec<(String, Result<String, String>)>,
+        created: Vec<(crate::source::TagEntry, TagFile)>,
+    },
     ContainerDuplicateFinished {
         stamp: KitStamp,
         /// The container write this job holds. Round-tripped through the worker

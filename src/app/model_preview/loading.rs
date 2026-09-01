@@ -1990,6 +1990,7 @@ mod ce_repro_tests {
             binormal: None,
             node_sets: Vec::new(),
             uvs: vec![blam_tags::math::RealPoint2d { x: uv[0], y: uv[1] }],
+            color: None,
         }
     }
 

@@ -43,6 +43,7 @@ pub(in crate::app) use container_write::*;
 mod created_tags;
 use created_tags::package_id_for;
 pub(super) use created_tags::{CreatedTagLedger, CreatedTagOrigin, CreatedTagRecord};
+mod blam_import;
 mod container_folders;
 mod delete;
 mod duplicate;
@@ -904,6 +905,16 @@ impl Baboon {
                 WorkerMessage::BitmapReimportFinished { kit, key, result } => {
                     self.handle_bitmap_reimport_finished(kit, key, result)
                 }
+                WorkerMessage::BlamImportProgress {
+                    stamp,
+                    kind,
+                    message,
+                } => self.handle_blam_import_progress(stamp, kind, message),
+                WorkerMessage::BlamImportFinished {
+                    stamp,
+                    outcomes,
+                    created,
+                } => self.handle_blam_import_finished(stamp, outcomes, created),
                 WorkerMessage::ContainerDuplicateFinished {
                     stamp,
                     lease,

@@ -1,5 +1,5 @@
 //! Blam! import-pipeline panel state and asset-folder detection.
-//! It owns this focused support concern; the panel's presentation lives in `ui/blam.rs` and the import pipeline itself will live in `blam-tags`.
+//! It owns this focused support concern; the panel's presentation lives in `ui/blam.rs`, the workflow in `controller/blam_import.rs`, and the importers in `blam-tags`.
 
 use super::*;
 
@@ -34,6 +34,25 @@ pub(in crate::app) const BLAM_KEY: &str = "tool:blam";
 
 pub(in crate::app) const BLAM_TITLE: &str = "Blam!";
 
+/// How a Blam! log line is painted: plain progress, a pipeline that landed,
+/// or one that failed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app) enum BlamLogKind {
+    Info,
+    Good,
+    Error,
+}
+
+#[derive(Clone, Debug)]
+pub(in crate::app) struct BlamLogLine {
+    pub(in crate::app) kind: BlamLogKind,
+    pub(in crate::app) text: String,
+}
+
+/// Keeps a runaway log from growing without bound; imports emit a handful of
+/// lines each, so this is a backstop, not a working limit.
+const BLAM_LOG_CAP: usize = 1000;
+
 pub(super) struct BlamUiState {
     /// Asset folder relative to the kit's `data` folder, backslash form, the
     /// same shape tool commands take.
@@ -48,9 +67,15 @@ pub(super) struct BlamUiState {
     pub(super) import_physics: bool,
     pub(super) import_structure: bool,
     pub(super) import_prt: bool,
-    /// Shown in the panel's status bar. Display-only until the blam-tags
-    /// pipeline lands and reports real progress.
+    /// An import is running on a worker thread; the Import button is held
+    /// down until its result message lands.
+    pub(super) running: bool,
+    /// Shown in the panel's status bar: the current step while an import
+    /// runs, a short tally once it lands.
     pub(super) status: String,
+    /// The pane's log window: every step of the current (or last) import,
+    /// cleared when a new one starts.
+    pub(super) log: Vec<BlamLogLine>,
 }
 
 impl Default for BlamUiState {
@@ -65,7 +90,9 @@ impl Default for BlamUiState {
             import_structure: false,
             // PRT rides along with a render import whenever one runs.
             import_prt: true,
+            running: false,
             status: "Ready".to_owned(),
+            log: Vec::new(),
         }
     }
 }
@@ -85,6 +112,13 @@ impl BlamUiState {
 
     pub(super) fn anything_selected(&self) -> bool {
         self.import_render || self.import_collision || self.import_physics || self.import_structure
+    }
+
+    pub(super) fn push_log(&mut self, kind: BlamLogKind, text: String) {
+        if self.log.len() >= BLAM_LOG_CAP {
+            self.log.remove(0);
+        }
+        self.log.push(BlamLogLine { kind, text });
     }
 }
 
