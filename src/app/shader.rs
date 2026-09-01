@@ -296,7 +296,13 @@ pub(super) fn build_shader_editor_model(
     rmop_cache: &mut HashMap<String, Option<RenderMethodOption>>,
 ) -> Option<ShaderEditorModel> {
     let source = source?;
-    let render_method = RenderMethod::from_tag(tag).ok()?;
+    // Guarded: a recompiled shader can carry animated-parameter type names
+    // blam-tags' enum resolver panics on, and this runs mid-frame.
+    let render_method = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        RenderMethod::from_tag(tag).ok()
+    }))
+    .ok()
+    .flatten()?;
     if render_method.definition_path.is_empty() {
         return None;
     }

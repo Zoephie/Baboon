@@ -128,7 +128,21 @@ pub(crate) fn resolve_model_textures(
     let mut caches = ResolveCaches::default();
     materials
         .iter()
-        .map(|material| resolve_one_material(source, material, &mut caches))
+        .map(|material| {
+            // Guarded per material: blam-tags' enum resolver panics on names
+            // a custom kit's recompiled shader tags can carry, and a panic
+            // here kills the worker before it sends its message — leaving the
+            // viewport on "Loading shaders…" forever.
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                resolve_one_material(source, material, &mut caches)
+            }))
+            .unwrap_or_else(|_| {
+                MaterialTextures::failed(
+                    "this shader crashed the reader — its tags likely use names \
+                     this build of blam-tags does not know",
+                )
+            })
+        })
         .collect()
 }
 

@@ -35,6 +35,38 @@ impl Baboon {
         ctx: &egui::Context,
         kit_index: usize,
     ) {
+        // A load reserves the kit (`requested_path`) before its worker starts
+        // and installs the source only when it lands — that window is "this
+        // workspace is starting up". Replace the whole screen with a wait
+        // notice for its duration: a second click on H3EK while the first was
+        // still indexing queued a duplicate load, and nothing on this screen
+        // is safe to offer until the kit is in.
+        if self.kits[kit_index].source.is_none()
+            && let Some(path) = self.kits[kit_index].requested_path.clone()
+        {
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.display().to_string());
+            ui.centered_and_justified(|ui| {
+                ui.vertical_centered(|ui| {
+                    ui.spinner();
+                    ui.add_space(10.0);
+                    ui.label(
+                        RichText::new(format!("Please wait — {name} is starting up…"))
+                            .color(text_dark())
+                            .size(16.0),
+                    );
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new("Large editing kits can take a moment to index.")
+                            .color(subtle_dark()),
+                    );
+                });
+            });
+            return;
+        }
+
         let mut action = None;
         let recents = self.recent_folders.clone();
         let editing_kits = visible_editing_kit_menu_entries(

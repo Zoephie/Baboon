@@ -20,8 +20,8 @@ pub(super) fn draw_material_tag(
     edit: &mut FieldEditContext<'_>,
 ) {
     Frame::none()
-        .fill(MATERIAL_PANEL)
-        .stroke(Stroke::new(1.0, MATERIAL_PANEL_EDGE))
+        .fill(material_panel())
+        .stroke(Stroke::new(1.0, material_panel_edge()))
         .inner_margin(egui::Margin {
             left: 2.0,
             right: 2.0,
@@ -47,7 +47,17 @@ pub(super) fn draw_material_tag(
                 // Shader grid couldn't be built (rmdf/rmop chain didn't
                 // resolve). Fall back to the standard EDITABLE field view so
                 // the shader is still fully editable, rather than the
-                // read-only material struct view.
+                // read-only material struct view — and say so, because a
+                // silent downgrade reads as "the editor is broken" when the
+                // actual problem is the kit's render_method_definition.
+                ui.label(
+                    RichText::new(
+                        "Shader editor unavailable — the render method definition this shader \
+                         names did not load or parse. Showing raw fields.",
+                    )
+                    .color(subtle_dark()),
+                );
+                ui.add_space(4.0);
                 draw_struct_fields(ui, tag.root(), names, 0, expert_mode, "", edit);
                 return;
             }

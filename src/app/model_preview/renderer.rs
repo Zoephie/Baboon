@@ -371,25 +371,26 @@ fn model_shader_sources(version_declaration: &str, modern: bool, precision: &str
                      vec3 t = normalize(v_tangent);\n\
                      vec3 b = normalize(v_binormal);\n\
                      if (length(v_tangent) > 0.0001 && length(v_binormal) > 0.0001) {{\n\
+                         // The engine's own unpack, verbatim from the kit's\n\
+                         // source (rasterizer/hlsl/bump_mapping.fx): X and Y\n\
+                         // come off the texture through BUMP_CONVERT — byte\n\
+                         // 128 is exactly flat — Z is ALWAYS reconstructed\n\
+                         // rather than sampled (the compressed formats carry\n\
+                         // no trustworthy blue), and the components go into\n\
+                         // the authored tangent frame with no negation.\n\
                          vec3 tn = vec3(0.0, 0.0, 1.0);\n\
                          if (u_have_a.z > 0.5) {{\n\
-                             tn = {sample}(u_tex_bump, v_uv * u_uv_scale_a.z).xyz * 2.0 - 1.0;\n\
+                             vec2 sampled = {sample}(u_tex_bump, v_uv * u_uv_scale_a.z).xy * (255.0 / 127.0) - (128.0 / 127.0);\n\
+                             tn = vec3(sampled, sqrt(1.0 - min(dot(sampled, sampled), 1.0)));\n\
                          }}\n\
                          // A detail normal tiles far finer than the base one\n\
-                         // and adds to it rather than replacing it. Summing the\n\
-                         // tangent-plane components and keeping the base\n\
-                         // normal's z stays stable when either map is flat;\n\
-                         // sampling one over the other would erase whichever\n\
-                         // came second.\n\
+                         // and adds its tangent-plane components over it —\n\
+                         // the engine's stock combine — staying stable when\n\
+                         // either map is flat.\n\
                          if (u_have_a.w > 0.5) {{\n\
-                             vec3 dn = {sample}(u_tex_bump_detail, v_uv * u_uv_scale_a.w).xyz * 2.0 - 1.0;\n\
-                             tn = vec3(tn.xy + dn.xy, tn.z);\n\
+                             vec2 dn = {sample}(u_tex_bump_detail, v_uv * u_uv_scale_a.w).xy * (255.0 / 127.0) - (128.0 / 127.0);\n\
+                             tn = vec3(tn.xy + dn, tn.z);\n\
                          }}\n\
-                         // Halo bump maps use the DirectX convention: green\n\
-                         // grows downward. This frame's binormal points the\n\
-                         // other way, so the sampled Y flips — once, after the\n\
-                         // detail sum, which flips both maps together.\n\
-                         tn.y = -tn.y;\n\
                          tn = normalize(tn);\n\
                          normal = normalize(t * tn.x + b * tn.y + normal * tn.z);\n\
                      }}\n\
@@ -879,25 +880,33 @@ mod gpu_renderer_tests {
 
             // The detail normal adds to the base one rather than replacing it.
             assert!(
-                fragment.contains("tn = vec3(tn.xy + dn.xy, tn.z);"),
+                fragment.contains("tn = vec3(tn.xy + dn, tn.z);"),
                 "bump_detail_map should blend into the base normal"
             );
             assert!(
                 fragment.contains("u_have_a.z > 0.5 || u_have_a.w > 0.5"),
                 "a detail normal with no base bump map should still perturb"
             );
-            // Halo normal maps are DirectX-convention (green grows downward),
-            // so the sampled Y must flip into this frame — and exactly once,
-            // after the detail sum, so base and detail flip together.
+            // The unpack is the engine's own, verbatim from the kit's
+            // rasterizer/hlsl/bump_mapping.fx: BUMP_CONVERT on X and Y (byte
+            // 128 = exactly flat) for BOTH maps, Z always reconstructed, and
+            // NO channel negation — the authored tangent frame carries the
+            // convention. `*2-1` unpacks and green flips have both been tried
+            // and both bend the lighting; the engine source is the authority.
             assert_eq!(
-                fragment.matches("tn.y = -tn.y;").count(),
-                1,
-                "the DirectX green-channel flip must happen exactly once"
+                fragment
+                    .matches("* (255.0 / 127.0) - (128.0 / 127.0)")
+                    .count(),
+                2,
+                "base and detail bumps must both unpack through BUMP_CONVERT"
             );
             assert!(
-                fragment.find("tn.xy + dn.xy").unwrap()
-                    < fragment.find("tn.y = -tn.y;").unwrap(),
-                "the flip must come after the detail sum or the detail map flips twice"
+                fragment.contains("sqrt(1.0 - min(dot(sampled, sampled), 1.0))"),
+                "Z must be reconstructed from X/Y, never sampled"
+            );
+            assert!(
+                !fragment.contains("tn.y = -tn.y"),
+                "no green flip: the engine feeds sampled Y straight into the tangent frame"
             );
             for name in [
                 "u_center",

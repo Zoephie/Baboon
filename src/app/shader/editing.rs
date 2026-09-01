@@ -204,6 +204,29 @@ pub(super) fn shader_label_width(ui: &Ui) -> f32 {
         .clamp(120.0, 460.0)
 }
 
+/// Select the whole value when a numeric text field is double-clicked.
+///
+/// egui's native double-click selects a "word", and a decimal point splits
+/// `0.0` into two of them — so a double-click grabbed only the fraction and
+/// replacing a value took several clicks. Whole-value selection is what
+/// egui's own DragValue does on interaction, and what a small value cell
+/// wants; the path and reference fields keep word selection, which is useful
+/// for editing one segment.
+fn select_all_on_double_click(ui: &Ui, response: &egui::Response, text: &str) {
+    if !response.double_clicked() {
+        return;
+    }
+    if let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), response.id) {
+        state
+            .cursor
+            .set_char_range(Some(egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0),
+                egui::text::CCursor::new(text.chars().count()),
+            )));
+        state.store(ui.ctx(), response.id);
+    }
+}
+
 pub(in crate::app) fn draw_shader_grid_row(
     ui: &mut Ui,
     row: &ShaderGridRow,
@@ -467,6 +490,12 @@ pub(in crate::app) fn draw_shader_grid_row(
             .rect_stroke(f_rect, 0.0, Stroke::new(1.0, material_input_edge()));
         let icon_rect = egui::Rect::from_center_size(f_rect.center(), Vec2::splat(16.0));
         paint_button_icon_at(ui, ButtonIcon::Function, icon_rect, material_text());
+        // The f() button is the only way into the graph editor here, on
+        // purpose: these rows are plain numbers backed by a constant
+        // function, and the value cell hosts a text edit — a double-click
+        // interceptor over it stole the click that should select the text.
+        // Rows with real function data (the `row.function` branch above) have
+        // no text under the click and keep opening the viewer.
         if ui
             .interact(
                 f_rect,
@@ -475,14 +504,6 @@ pub(in crate::app) fn draw_shader_grid_row(
             )
             .on_hover_text("Open function graph editor")
             .clicked()
-            || ui
-                .interact(
-                    value_rect,
-                    ui.make_persistent_id(format!("shader_cfn_value_open:{}", row.label)),
-                    Sense::click(),
-                )
-                .on_hover_text("Double-click to open function graph editor")
-                .double_clicked()
         {
             *function_popup = Some(FunctionPopup::new(
                 tag_key.to_owned(),
@@ -846,6 +867,7 @@ fn draw_h2_function_range_control(
                 .font(egui::TextStyle::Monospace),
         );
         text_edit_cursor_to_start_on_tab_focus(ui, &resp);
+        select_all_on_double_click(ui, &resp, &draft.text);
         draft.note_response(&resp);
         if draft.should_commit(ui, &resp)
             && enabled
@@ -1071,6 +1093,7 @@ pub(in crate::app) fn draw_shader_editable_value(
                         .font(egui::TextStyle::Monospace),
                 );
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
+                select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
                 if draft.should_commit(ui, &resp) {
                     if let Ok(v) = draft.text.trim().parse::<f32>() {
@@ -1810,6 +1833,7 @@ pub(in crate::app) fn draw_shader_editable_value(
                         .font(egui::TextStyle::Monospace),
                 );
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
+                select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
                 if draft.should_commit(ui, &resp) {
                     if let Ok(v) = draft.text.trim().parse::<f32>() {
@@ -1934,6 +1958,7 @@ pub(in crate::app) fn draw_shader_editable_value(
                 let resp =
                     draw_h2_value_prefixed_text_edit(ui, id, &mut draft.text, rect.width());
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
+                select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
                 if draft.should_commit(ui, &resp) {
                     if let Ok(v) = draft.text.trim().parse::<f32>() {
@@ -1961,6 +1986,7 @@ pub(in crate::app) fn draw_shader_editable_value(
                 let resp =
                     draw_h2_value_prefixed_text_edit(ui, id, &mut draft.text, rect.width());
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
+                select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
                 if draft.should_commit(ui, &resp) {
                     if let Ok(v) = draft.text.trim().parse::<f32>() {
@@ -2003,6 +2029,7 @@ pub(in crate::app) fn draw_shader_editable_value(
                         .font(egui::TextStyle::Monospace),
                 );
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
+                select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
                 if draft.should_commit(ui, &resp) {
                     if let Ok(v) = draft.text.trim().parse::<f32>() {
@@ -2042,6 +2069,7 @@ pub(in crate::app) fn draw_shader_editable_value(
                 let resp =
                     draw_h2_value_prefixed_text_edit(ui, id, &mut draft.text, rect.width());
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
+                select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
                 if draft.should_commit(ui, &resp) {
                     commit = Some(draft.text.trim().to_owned());
@@ -2122,6 +2150,7 @@ pub(in crate::app) fn draw_shader_editable_value(
                         .font(egui::TextStyle::Monospace),
                 );
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
+                select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
                 if draft.should_commit(ui, &resp) {
                     commit = Some(draft.text.trim().to_owned());

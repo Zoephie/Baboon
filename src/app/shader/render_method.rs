@@ -31,7 +31,17 @@ pub(in crate::app) fn cached_render_method_definition(
     let parsed =
         load_referenced_tag_from_source(source, reference, "render_method_definition", b"rmdf")
             .ok()
-            .and_then(|tag| RenderMethodDefinition::from_tag(&tag).ok());
+            .and_then(|tag| {
+                // Custom kits recompile these tags, and blam-tags' enum
+                // resolver panics on a schema name it has no variant for. A
+                // definition that cannot be read must degrade to "none" — the
+                // raw-field fallback — not take the process down mid-frame.
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    RenderMethodDefinition::from_tag(&tag).ok()
+                }))
+                .ok()
+                .flatten()
+            });
     cache.insert(key, parsed.clone());
     parsed
 }
@@ -51,7 +61,16 @@ pub(in crate::app) fn cached_render_method_option(
     let parsed =
         load_referenced_tag_from_source(source, reference, "render_method_option", b"rmop")
             .ok()
-            .and_then(|tag| RenderMethodOption::from_tag(&tag).ok());
+            .and_then(|tag| {
+                // The likeliest panic in the whole shader chain: a custom
+                // rmop's `source extern` / `parameter type` naming something
+                // blam-tags has no variant for. Degrade to "section omitted".
+                std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    RenderMethodOption::from_tag(&tag).ok()
+                }))
+                .ok()
+                .flatten()
+            });
     cache.insert(key, parsed.clone());
     parsed
 }

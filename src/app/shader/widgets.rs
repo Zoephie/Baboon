@@ -109,31 +109,39 @@ pub(in crate::app) fn draw_shader_editor_model(
         }
     }
 
-    for section in &model.sections {
+    for (section_index, section) in model.sections.iter().enumerate() {
         draw_shader_grid_section_header(ui, &section.title);
-        if !section.option_name.is_empty() {
-            let option_row = ShaderGridRow {
-                label: "selected option".to_owned(),
-                default_cell: None,
-                value_cell: ShaderGridCell {
-                    text: section.option_name.clone(),
-                    value_kind: "value",
-                    color: None,
-                },
-                fill: material_data_row(),
-                parameter_type: Some("option".to_owned()),
-                is_overridden: true,
-                function: None,
-                edit: None,
-                context_menu: None,
-                create_anim_op: None,
-                constant_function_view: None,
-            };
-            draw_shader_grid_row(ui, &option_row, 0, color_popup, function_popup, edit);
-        }
-        for row in &section.rows {
-            draw_shader_grid_row(ui, row, 0, color_popup, function_popup, edit);
-        }
+        // Scoped per section: every row's widget ids key off its label, and
+        // labels repeat across sections — every section has a
+        // "selected option" row, and two rmops are free to declare the same
+        // parameter name. Without this scope those rows share egui ids and
+        // their hover/drag state cross-wires (the debug build paints the
+        // "first use of widget ID" clash warning right on the grid).
+        ui.push_id(("shader_section", section_index), |ui| {
+            if !section.option_name.is_empty() {
+                let option_row = ShaderGridRow {
+                    label: "selected option".to_owned(),
+                    default_cell: None,
+                    value_cell: ShaderGridCell {
+                        text: section.option_name.clone(),
+                        value_kind: "value",
+                        color: None,
+                    },
+                    fill: material_data_row(),
+                    parameter_type: Some("option".to_owned()),
+                    is_overridden: true,
+                    function: None,
+                    edit: None,
+                    context_menu: None,
+                    create_anim_op: None,
+                    constant_function_view: None,
+                };
+                draw_shader_grid_row(ui, &option_row, 0, color_popup, function_popup, edit);
+            }
+            for row in &section.rows {
+                draw_shader_grid_row(ui, row, 0, color_popup, function_popup, edit);
+            }
+        });
     }
 
     if !model.atmosphere_flags.options.is_empty()

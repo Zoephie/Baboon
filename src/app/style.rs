@@ -349,6 +349,26 @@ pub(super) fn foundation_checkbox_bg(enabled: bool) -> Color32 {
 
 pub(super) const MATERIAL_PANEL: Color32 = Color32::from_rgb(238, 238, 235);
 pub(super) const MATERIAL_PANEL_EDGE: Color32 = Color32::from_rgb(168, 168, 162);
+
+/// The material/shader pane's backing fill. The light constant above bled
+/// through every 1-2px gap between the dark grid's rows and cells in dark
+/// mode, outlining the whole editor in near-white; dark mode gets a soft grey
+/// in the same family as the grid lines instead.
+pub(super) fn material_panel() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(58, 60, 56)
+    } else {
+        MATERIAL_PANEL
+    }
+}
+
+pub(super) fn material_panel_edge() -> Color32 {
+    if is_dark_mode() {
+        Color32::from_rgb(72, 74, 70)
+    } else {
+        MATERIAL_PANEL_EDGE
+    }
+}
 pub(super) const MATERIAL_REF_ROW: Color32 = Color32::from_rgb(166, 205, 166);
 pub(super) const MATERIAL_NUMERIC_ROW: Color32 = Color32::from_rgb(232, 191, 171);
 pub(super) const MATERIAL_DATA_ROW: Color32 = Color32::from_rgb(216, 216, 216);
