@@ -227,12 +227,19 @@ pub(super) fn draw_model_preview_panel(
                 if tag.header.group_tag.to_be_bytes() == *b"hlmt" && !is_campaign_evolved {
                     ui.checkbox(&mut state.show_collision, "Collision")
                         .on_hover_text(
-                            "Overlay the referenced collision_model's geometry, tinted orange.",
+                            "Overlay the referenced collision_model's geometry, tinted orange. \
+                             Built once in the background when the preview loads, so toggling \
+                             is instant.",
                         );
                     ui.checkbox(&mut state.show_physics, "Physics")
                         .on_hover_text(
                             "Overlay the referenced physics_model's shapes, tinted blue.",
                         );
+                    // The one moment a toggle cannot answer instantly: the
+                    // worker is still building the layers it would show.
+                    if state.overlays_pending && (state.show_collision || state.show_physics) {
+                        ui.spinner();
+                    }
                     // Only offered while an overlay is on: unchecking it with
                     // nothing else to draw would blank the viewport with no
                     // way to see why.

@@ -83,12 +83,25 @@ pub(super) fn draw_model_viewport(
         .iter()
         .enumerate()
         .filter_map(|(index, batch)| {
-            // "Render off" leaves only the derived overlay layers on screen —
-            // a frame-level filter, so the toggle never rebuilds geometry.
-            if !state.show_render
-                && batch.region_name != COLLISION_REGION
-                && batch.region_name != PHYSICS_REGION
-            {
+            // The overlay toggles are draw-time filters: the collision and
+            // physics layers sit merged in the geometry from the moment the
+            // worker delivers them, and showing or hiding them costs one
+            // batch-list rebuild — not the tag re-reads that froze the frame
+            // when the toggles re-merged the preview. Gated on
+            // `overlays_loaded` so a standalone collision/physics tag — whose
+            // MAIN content uses these region names — is never filtered.
+            let region = batch.region_name.as_str();
+            let is_overlay = region == COLLISION_REGION || region == PHYSICS_REGION;
+            if state.overlays_loaded && is_overlay {
+                if region == COLLISION_REGION && !state.show_collision {
+                    return None;
+                }
+                if region == PHYSICS_REGION && !state.show_physics {
+                    return None;
+                }
+            }
+            // "Render off" leaves only the overlay layers on screen.
+            if !state.show_render && !is_overlay {
                 return None;
             }
             let selection = state.region_selections.get(&batch.region_name)?;

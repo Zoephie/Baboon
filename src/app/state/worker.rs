@@ -121,6 +121,18 @@ pub(in crate::app) enum WorkerMessage {
         key: String,
         result: Result<ThumbnailImage, String>,
     },
+    /// A `.model`'s collision/physics overlay geometry, built off the UI
+    /// thread so the preview's toggles can be instant draw-time filters.
+    ModelOverlaysBuilt {
+        stamp: KitStamp,
+        /// The tag whose `ModelPreviewState` asked for these.
+        key: String,
+        /// The base preview the overlays were built against; a reload in the
+        /// meantime orphans the build.
+        geometry_id: u64,
+        collision: Option<RenderModelPreview>,
+        physics: Option<RenderModelPreview>,
+    },
     /// One model's materials resolved to decoded textures, off the UI thread.
     ModelTexturesResolved {
         stamp: KitStamp,

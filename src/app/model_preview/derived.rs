@@ -1121,6 +1121,139 @@ pub(super) fn hlmt_physics_overlay(
     build_physics_preview(&physics, skeleton.as_ref().map(|s| s.nodes())).ok()
 }
 
+impl Baboon {
+    /// Start building a loaded `.model` preview's collision/physics overlays
+    /// on a worker, once per load.
+    ///
+    /// Building them inline froze the frame: every toggle re-read the
+    /// collision and physics tags, re-walked the collision BSP, and
+    /// re-tessellated the shapes — on the UI thread, in both directions.
+    /// Built here instead, the merged geometry sits in memory for the
+    /// document's lifetime and the toggles become draw-time filters.
+    /// Idempotent and cheap to call every frame, like the texture request
+    /// beside it.
+    pub(in crate::app) fn maybe_request_model_overlays(
+        &mut self,
+        kit_index: usize,
+        key: &str,
+        ctx: &egui::Context,
+    ) {
+        let kit = &self.kits[kit_index];
+        let Some(state) = kit.model_previews.get(key) else {
+            return;
+        };
+        if state.overlays_loaded || state.overlays_pending {
+            return;
+        }
+        let Some(Ok(data)) = state.data.as_ref() else {
+            return;
+        };
+        let geometry_id = data.geometry_id;
+        let Some(entry) = kit.entry_for_key(key).cloned() else {
+            return;
+        };
+        if entry.group_tag != u32::from_be_bytes(*b"hlmt") {
+            return;
+        }
+        let Some(source) = kit.source.as_ref().map(|source| source.source.clone()) else {
+            return;
+        };
+        let stamp = KitStamp {
+            kit: kit.id,
+            generation: kit.generation,
+        };
+        if let Some(state) = self.kits[kit_index].model_previews.get_mut(key) {
+            state.overlays_pending = true;
+        }
+
+        let (tx, ctx, key) = (self.tx.clone(), ctx.clone(), key.to_owned());
+        thread::spawn(move || {
+            // `catch_unwind` for the same reason every preview worker has one:
+            // a panicking tag must still send its message or the pending flag
+            // sticks and the overlays never arrive.
+            let overlays = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let model = crate::source::read_entry(&source, &entry).ok()?;
+                // Classic models only: a Campaign Evolved hlmt previews
+                // through Unreal geometry and hides the overlay toggles.
+                model.root().read_tag_ref_with_group("render model")?;
+                Some((
+                    hlmt_collision_overlay(&model, &source),
+                    hlmt_physics_overlay(&model, &source),
+                ))
+            }))
+            .ok()
+            .flatten();
+            let (collision, physics) = overlays.unwrap_or((None, None));
+            let _ = tx.send(WorkerMessage::ModelOverlaysBuilt {
+                stamp,
+                key,
+                geometry_id,
+                collision,
+                physics,
+            });
+            ctx.request_repaint();
+        });
+    }
+
+    /// Merge a worker's overlay geometry into the preview it was built for.
+    pub(in crate::app) fn handle_model_overlays_built(
+        &mut self,
+        stamp: KitStamp,
+        key: String,
+        geometry_id: u64,
+        collision: Option<RenderModelPreview>,
+        physics: Option<RenderModelPreview>,
+    ) -> bool {
+        let Some(kit_index) = self.resolve_stamp(stamp) else {
+            return true;
+        };
+        let Some(state) = self.kits[kit_index].model_previews.get_mut(&key) else {
+            return true;
+        };
+        state.overlays_pending = false;
+        {
+            let Some(Ok(data)) = state.data.as_mut() else {
+                return true;
+            };
+            if data.geometry_id != geometry_id {
+                // The preview reloaded while this built; the reload re-armed
+                // the request, so a fresh build is already on its way.
+                return true;
+            }
+            state.overlays_loaded = true;
+            if collision.is_none() && physics.is_none() {
+                return false;
+            }
+            let mut merged = (*data.preview).clone();
+            if let Some(overlay) = &collision {
+                merge_preview_append(&mut merged, overlay);
+            }
+            if let Some(overlay) = &physics {
+                merge_preview_append(&mut merged, overlay);
+            }
+            data.preview = Arc::new(merged);
+            data.geometry_id = NEXT_MODEL_GEOMETRY_ID.fetch_add(1, Ordering::Relaxed);
+        }
+        // The layer filter also consults the region selection, so the new
+        // regions need enabled entries — the variant reset ran before they
+        // existed.
+        for region in [COLLISION_REGION, PHYSICS_REGION] {
+            state
+                .region_selections
+                .entry(region.to_owned())
+                .or_insert(ModelRegionSelection {
+                    enabled: true,
+                    permutation: "default".to_owned(),
+                });
+        }
+        // A texture resolve in flight was keyed to the old geometry id and
+        // will be dropped on arrival; clearing the flag re-arms that request
+        // against the new id.
+        state.textures_pending = false;
+        false
+    }
+}
+
 /// The leaf name a BSP toggle shows: the last path segment of its reference.
 pub(super) fn bsp_display_name(reference: &str) -> String {
     reference

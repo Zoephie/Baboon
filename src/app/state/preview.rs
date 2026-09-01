@@ -135,15 +135,17 @@ pub(in crate::app) struct ModelPreviewState {
     /// The `high_detail` value the cached `data` was built with, so toggling it
     /// invalidates the cache and reloads.
     pub(in crate::app) loaded_high_detail: bool,
-    /// `.model` tags only: overlay the referenced collision_model's geometry
-    /// on the render preview. Rebuilds the merged geometry when toggled.
+    /// `.model` tags only: draw the collision overlay. A draw-time filter,
+    /// not a rebuild — the overlay geometry is built once on a worker when
+    /// the preview loads, so toggling is instant in both directions.
     pub(in crate::app) show_collision: bool,
-    /// `.model` tags only: overlay the referenced physics_model's shapes.
+    /// `.model` tags only: draw the physics overlay. Same contract.
     pub(in crate::app) show_physics: bool,
-    /// The overlay toggles the cached `data` was built with, so flipping one
-    /// invalidates the cache the same way `loaded_high_detail` does.
-    pub(in crate::app) loaded_show_collision: bool,
-    pub(in crate::app) loaded_show_physics: bool,
+    /// A worker is building this model's collision/physics overlays.
+    pub(in crate::app) overlays_pending: bool,
+    /// The overlays are merged into `data` (or were found absent), so no
+    /// further request is needed for this load.
+    pub(in crate::app) overlays_loaded: bool,
     /// Scenario tags only: which entries of the `structure bsps` block are
     /// loaded into the composite preview. Empty until the user picks some —
     /// loading every BSP of a campaign scenario unasked would stall the pane.
@@ -193,8 +195,8 @@ impl Default for ModelPreviewState {
             loaded_high_detail: false,
             show_collision: false,
             show_physics: false,
-            loaded_show_collision: false,
-            loaded_show_physics: false,
+            overlays_pending: false,
+            overlays_loaded: false,
             scenario_bsp_selection: std::collections::BTreeSet::new(),
             loaded_scenario_selection: std::collections::BTreeSet::new(),
             render_mode: ModelRenderMode::Shaded,
@@ -220,8 +222,6 @@ impl ModelPreviewState {
         self.loaded_key.as_deref() != Some(entry_key)
             || self.data.is_none()
             || self.loaded_high_detail != self.high_detail
-            || self.loaded_show_collision != self.show_collision
-            || self.loaded_show_physics != self.show_physics
             || self.loaded_scenario_selection != self.scenario_bsp_selection
     }
 }

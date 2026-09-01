@@ -991,6 +991,13 @@ impl Baboon {
                 WorkerMessage::ModelThumbnailRendered { stamp, key, result } => {
                     self.handle_model_thumbnail_rendered(stamp, key, result, ctx)
                 }
+                WorkerMessage::ModelOverlaysBuilt {
+                    stamp,
+                    key,
+                    geometry_id,
+                    collision,
+                    physics,
+                } => self.handle_model_overlays_built(stamp, key, geometry_id, collision, physics),
                 WorkerMessage::AllEntriesScanned { stamp, result } => {
                     self.handle_all_entries_scanned(stamp, result, ctx)
                 }

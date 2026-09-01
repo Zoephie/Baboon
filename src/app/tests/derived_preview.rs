@@ -472,11 +472,12 @@ fn a_bsp_toggle_shows_the_reference_leaf() {
     assert_eq!(bsp_display_name("010_jungle"), "010_jungle");
 }
 
-/// Flipping an overlay toggle or the BSP selection must invalidate the cached
-/// preview exactly like the CE high-detail toggle does — the panel's spinner
-/// gate and the loader's early return read the same predicate.
+/// The scenario BSP selection invalidates the cached preview; the overlay
+/// toggles must NOT — they are draw-time filters over geometry a worker
+/// merged in once, and re-parsing collision and physics tags on the UI
+/// thread for every tick is exactly the freeze this design removed.
 #[test]
-fn overlay_and_selection_changes_invalidate_the_cached_preview() {
+fn overlay_toggles_never_invalidate_but_the_bsp_selection_does() {
     let mut state = ModelPreviewState::default();
     state.loaded_key = Some("file:a.model".to_owned());
     state.data = Some(Err("placeholder".to_owned()));
@@ -484,9 +485,12 @@ fn overlay_and_selection_changes_invalidate_the_cached_preview() {
     assert!(!state.needs_preview_load("file:a.model"));
 
     state.show_collision = true;
-    assert!(state.needs_preview_load("file:a.model"));
-    state.loaded_show_collision = true;
-    assert!(!state.needs_preview_load("file:a.model"));
+    state.show_physics = true;
+    state.show_render = false;
+    assert!(
+        !state.needs_preview_load("file:a.model"),
+        "overlay toggles are frame-level filters, never rebuilds"
+    );
 
     state.scenario_bsp_selection.insert(2);
     assert!(state.needs_preview_load("file:a.model"));

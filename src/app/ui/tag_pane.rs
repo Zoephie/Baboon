@@ -325,7 +325,10 @@ impl Baboon {
         }
         // The model preview panel draws without `&mut Baboon`, so it cannot
         // start its own texture job. Started here instead, once the panel has
-        // had its frame to load the geometry the textures belong to.
+        // had its frame to load the geometry the textures belong to. The
+        // collision/physics overlay build rides the same hook for the same
+        // reason.
         self.maybe_request_model_textures(kit_index, &key, ctx);
+        self.maybe_request_model_overlays(kit_index, &key, ctx);
     }
 }

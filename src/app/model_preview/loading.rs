@@ -26,8 +26,6 @@ const CE_HV: EIoContainerHeaderVersion = EIoContainerHeaderVersion::SoftPackageR
 #[derive(Default)]
 pub(super) struct PreviewLoadSettings {
     pub(super) high_detail: bool,
-    pub(super) show_collision: bool,
-    pub(super) show_physics: bool,
     pub(super) scenario_selection: std::collections::BTreeSet<usize>,
 }
 
@@ -35,8 +33,6 @@ impl PreviewLoadSettings {
     fn of(state: &ModelPreviewState) -> Self {
         Self {
             high_detail: state.high_detail,
-            show_collision: state.show_collision,
-            show_physics: state.show_physics,
             scenario_selection: state.scenario_bsp_selection.clone(),
         }
     }
@@ -54,9 +50,11 @@ pub(super) fn ensure_model_preview_loaded(
     }
     state.loaded_key = Some(entry.key.clone());
     state.loaded_high_detail = state.high_detail;
-    state.loaded_show_collision = state.show_collision;
-    state.loaded_show_physics = state.show_physics;
     state.loaded_scenario_selection = state.scenario_bsp_selection.clone();
+    // A fresh base load orphans any overlay build in flight (its geometry id
+    // no longer matches) and re-arms the request for the new data.
+    state.overlays_pending = false;
+    state.overlays_loaded = false;
     let settings = PreviewLoadSettings::of(state);
     state.data = Some(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
@@ -240,24 +238,15 @@ pub(super) fn load_model_preview(
     };
     let render_tag =
         read_entry(source.unwrap(), &render_entry).map_err(|error| error.to_string())?;
-    let mut preview = build_render_preview(&render_tag)?;
+    let preview = build_render_preview(&render_tag)?;
     if preview.batches.is_empty() {
         return Err("Referenced render_model has no previewable draw batches.".to_owned());
     }
-    // The overlay toggles merge the `.model`'s collision and physics layers
-    // into the same scene, posed on the same skeleton. A layer that fails to
-    // resolve appends nothing — an absent reference must not take the render
-    // preview down with it.
-    if settings.show_collision
-        && let Some(overlay) = hlmt_collision_overlay(model_tag, source.unwrap())
-    {
-        merge_preview_append(&mut preview, &overlay);
-    }
-    if settings.show_physics
-        && let Some(overlay) = hlmt_physics_overlay(model_tag, source.unwrap())
-    {
-        merge_preview_append(&mut preview, &overlay);
-    }
+    // The collision/physics overlays are NOT built here: this parse runs on
+    // the UI thread, and walking the collision BSP plus tessellating the
+    // physics shapes froze the frame every time a toggle rebuilt the merge.
+    // `maybe_request_model_overlays` builds them once on a worker after this
+    // load lands, and the toggles are draw-time filters from then on.
     Ok(model_preview_data(
         render_entry.key,
         normalized,
