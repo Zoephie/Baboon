@@ -2,13 +2,10 @@
 # parent workspace. The blam-tags engine is pinned to a revision, not a
 # submodule.
 #
-# The engine lives at camden-smallwood/blam-tags and the pin points at its
-# `master`. Everything Baboon had been carrying on feature branches — Zoephie's
-# Chimp header-editing and in-place rename work, the cross-game conversion
-# fixes, the tag-build shape fixes the kits' tools require, and the Halo 2 LOD
-# fix — is merged there as of `312171d`, so the pin no longer needs a branch
-# that only exists to hold commits master is missing. Move it by merging into
-# `master` and bumping the rev; there is nothing else to reconcile.
+# The engine is upstream at camden-smallwood/blam-tags, but the pin points at
+# the Zoephie fork's `master`, which is ahead of it — see the note on the
+# dependency itself for what the fork carries that upstream does not. Move it
+# by merging into the fork's `master` and bumping the rev.
 [workspace]
 members = ["."]
 default-members = ["."]
@@ -27,11 +24,18 @@ path = "src/main.rs"
 [dependencies]
 anyhow = "1"
 atomic-write-file = "0.3"
-# On the fork until the stale-outer-chunk-size tolerance lands upstream
-# (camden-smallwood/blam-tags#8): MCC's current tool.exe writes recompiled
-# tags whose outer stream size is wrong in both directions, and camden's tree
-# still rejects them. Point this back at camden once that PR is merged.
-blam-tags = { git = "https://github.com/Zoephie/blam-tags", rev = "d31e912", features = ["audio", "iostore"] }
+# On the fork, for two reasons now.
+#
+# The stale-outer-chunk-size tolerance has not landed upstream
+# (camden-smallwood/blam-tags#8): MCC's current tool.exe writes recompiled tags
+# whose outer stream size is wrong in both directions, and camden's tree still
+# rejects them.
+#
+# The fork also carries the model importers — render_model, collision_model,
+# physics_model and scenario_structure_bsp built from JMS and ASS, with PRT —
+# which upstream does not have at all. So merging that PR is no longer enough
+# to move this back to camden: the importers would go with it.
+blam-tags = { git = "https://github.com/Zoephie/blam-tags", rev = "5d0509f", features = ["audio", "iostore"] }
 directories = "6"
 display-info = "0.5"
 eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }
