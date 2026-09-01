@@ -52,9 +52,11 @@ pub(super) fn ensure_model_preview_loaded(
     state.loaded_high_detail = state.high_detail;
     state.loaded_scenario_selection = state.scenario_bsp_selection.clone();
     // A fresh base load orphans any overlay build in flight (its geometry id
-    // no longer matches) and re-arms the request for the new data.
+    // no longer matches) and re-arms the request for the new data. Animation
+    // playback resets with it: the pose is mapped to the old node order.
     state.overlays_pending = false;
     state.overlays_loaded = false;
+    state.animation = PreviewAnimationPlayback::default();
     let settings = PreviewLoadSettings::of(state);
     state.data = Some(
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {

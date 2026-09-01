@@ -864,6 +864,8 @@ fn append_sbsp_mesh(
             texcoord: [vertex.texcoord.x, vertex.texcoord.y],
             tangent: placement.rotate(vector(&vertex.tangent)),
             binormal: placement.rotate(vector(&vertex.binormal)),
+            // BSPs are static; zero weights keep the skinning path inert.
+            ..Default::default()
         });
     }
     for part in &mesh.parts {

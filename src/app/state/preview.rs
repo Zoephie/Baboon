@@ -169,6 +169,11 @@ pub(in crate::app) struct ModelPreviewState {
     /// the focus plane matches the orthographic framing exactly — toggling
     /// never jumps, and the zoom slider keeps one meaning in both.
     pub(in crate::app) perspective: bool,
+    /// Animation playback (selection, clock, decoded pose) for `.model`
+    /// previews.
+    pub(in crate::app) animation: PreviewAnimationPlayback,
+    /// Draw the world-unit ground grid at z = 0 under the geometry.
+    pub(in crate::app) show_grid: bool,
     pub(in crate::app) scale: f32,
     pub(in crate::app) yaw: f32,
     pub(in crate::app) pitch: f32,
@@ -205,6 +210,8 @@ impl Default for ModelPreviewState {
             textures_pending: false,
             show_render: true,
             perspective: false,
+            animation: PreviewAnimationPlayback::default(),
+            show_grid: true,
             scale: 1.0,
             yaw: -0.45,
             pitch: 0.25,
@@ -308,6 +315,9 @@ pub(in crate::app) struct ModelPreviewData {
     /// element, `None` where the reference is empty), driving the per-BSP
     /// checkbox list. Empty for every other tag group.
     pub(in crate::app) scenario_bsps: Vec<Option<String>>,
+    /// `.model` tags only: the linked animation graph's animation list, once
+    /// the worker has read it. `None` elsewhere and before it lands.
+    pub(in crate::app) animations: Option<std::sync::Arc<Vec<PreviewAnimationEntry>>>,
 }
 
 #[derive(Clone)]

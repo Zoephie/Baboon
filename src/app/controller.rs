@@ -998,6 +998,15 @@ impl Baboon {
                     collision,
                     physics,
                 } => self.handle_model_overlays_built(stamp, key, geometry_id, collision, physics),
+                WorkerMessage::ModelAnimationsListed { stamp, key, result } => {
+                    self.handle_model_animations_listed(stamp, key, result)
+                }
+                WorkerMessage::ModelAnimationDecoded {
+                    stamp,
+                    key,
+                    animation_index,
+                    result,
+                } => self.handle_model_animation_decoded(stamp, key, animation_index, result),
                 WorkerMessage::AllEntriesScanned { stamp, result } => {
                     self.handle_all_entries_scanned(stamp, result, ctx)
                 }

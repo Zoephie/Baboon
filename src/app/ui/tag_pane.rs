@@ -330,5 +330,7 @@ impl Baboon {
         // reason.
         self.maybe_request_model_textures(kit_index, &key, ctx);
         self.maybe_request_model_overlays(kit_index, &key, ctx);
+        self.maybe_request_model_animations(kit_index, &key, ctx);
+        self.maybe_request_model_animation_decode(kit_index, &key, ctx);
     }
 }

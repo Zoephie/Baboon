@@ -115,10 +115,12 @@ pub(super) fn draw_model_viewport(
         camera: camera.gpu_uniforms(),
         render_mode: state.render_mode,
         show_backfaces: state.show_backfaces,
+        show_grid: state.show_grid,
         textures: state
             .shaded
             .then(|| data.textures.clone())
             .flatten(),
+        bones: animation_skinning_rows(data, state).map(Arc::new),
     };
     painter.add(egui::PaintCallback {
         rect,
@@ -176,6 +178,10 @@ struct ModelGpuCamera {
     pitch: f32,
     clip_scale: [f32; 2],
     depth_scale: f32,
+    /// Linear remap `z = t · x + y` (with `t = view.y · depth_scale`) that
+    /// spreads the extended render distance across NDC depth; see
+    /// `gpu_uniforms`.
+    depth_map: [f32; 2],
     /// 1.0 = perspective divide on, 0.0 = orthographic.
     perspective: f32,
 }
@@ -185,10 +191,42 @@ struct ModelGpuCamera {
 /// · scale`; the depth bound is `r = 1.05 · depth_radius · scale`, so `r/d`
 /// is this constant. From it: `w = 1 + view.y · depth_scale · (r/d)` (which
 /// is 1 exactly at the focus plane, keeping the framing identical to the
-/// orthographic view there and bounded ≥ 0.5 for all in-range geometry), and
-/// `z_clip = view.y · depth_scale + (r/d)` maps the depth bound onto NDC
-/// after the divide, monotonically because `d > r`.
+/// orthographic view there and bounded ≥ 0.5 for all in-range geometry).
 const PERSPECTIVE_R_OVER_D: f32 = 1.05 / 2.0;
+
+/// How many depth windows of render distance the clip range covers, beyond
+/// the one the framing math is built around. Depth clipping is remapped —
+/// not the eye — so a larger margin costs only depth-buffer precision and
+/// never flattens the perspective. See `depth_map` in `gpu_uniforms`.
+const PREVIEW_RENDER_DISTANCE: f32 = 8.0;
+
+/// GPU skinning bone budget: three vec4 uniform rows per bone. Halo node
+/// indices are bytes, so 256 covers every skeleton any graph can address
+/// (Reach's halsey alone has 163 nodes; the old budget of 96 silently
+/// refused her animations). 768 vec4 rows sit well inside desktop uniform
+/// limits — the practical floor is 1024 vec4.
+pub(in crate::app) const MAX_PREVIEW_BONES: usize = 256;
+
+/// How far a decoded pose can carry any node from the model origin, as the
+/// largest per-frame sum of local translation norms (rotations preserve
+/// norms, so a chain can never reach further than its links laid end to end),
+/// stretched by the frame's largest scale. Loose on purpose: it only sizes
+/// the depth window, where slack costs precision and a tight miss costs
+/// geometry.
+fn pose_reach_bound(pose: &PreviewAnimationPose) -> f32 {
+    let mut reach = 0.0f32;
+    for frame in &pose.frames {
+        let mut total = 0.0f32;
+        let mut max_scale = 1.0f32;
+        for transform in frame {
+            let [x, y, z] = transform.translation;
+            total += (x * x + y * y + z * z).sqrt();
+            max_scale = max_scale.max(transform.scale.abs());
+        }
+        reach = reach.max(total * max_scale);
+    }
+    if reach.is_finite() { reach } else { 0.0 }
+}
 
 struct ModelGpuFrame {
     preview: Arc<RenderModelPreview>,
@@ -197,8 +235,13 @@ struct ModelGpuFrame {
     camera: ModelGpuCamera,
     render_mode: ModelRenderMode,
     show_backfaces: bool,
+    /// Draw the world-unit ground grid on the z = 0 plane.
+    show_grid: bool,
     /// `None` until the worker has resolved them, or when shading is off.
     textures: Option<Arc<Vec<MaterialTextures>>>,
+    /// Skinning matrices for this frame — three vec4 rows per bone, in
+    /// `RenderModelPreview::nodes` order. `None` draws the bind pose.
+    bones: Option<Arc<Vec<[f32; 4]>>>,
 }
 
 thread_local! {
@@ -285,6 +328,7 @@ fn model_shader_sources(version_declaration: &str, modern: bool, precision: &str
         // Position and normal are required; the rest are read only on the
         // shaded path and a driver may drop them from an unused program.
         let persp_ratio = PERSPECTIVE_R_OVER_D;
+        let bone_rows = MAX_PREVIEW_BONES * 3;
         let vertex_source = format!(
             "{}{precision}\
              {attribute} vec3 a_position;\n\
@@ -292,12 +336,22 @@ fn model_shader_sources(version_declaration: &str, modern: bool, precision: &str
              {attribute} vec2 a_texcoord;\n\
              {attribute} vec3 a_tangent;\n\
              {attribute} vec3 a_binormal;\n\
+             {attribute} vec4 a_node_indices;\n\
+             {attribute} vec4 a_node_weights;\n\
              uniform vec3 u_center;\n\
              uniform float u_scale;\n\
              uniform vec2 u_angles;\n\
              uniform vec2 u_clip_scale;\n\
              uniform float u_depth_scale;\n\
+             // Depth remap `z = t * x + y`: extends the render distance\n\
+             // without moving the perspective eye. See PREVIEW_RENDER_DISTANCE.\n\
+             uniform vec2 u_depth_map;\n\
              uniform float u_perspective;\n\
+             // Skinning: three vec4 rows of an affine matrix per bone,\n\
+             // bind-relative (world * inverse_bind), so zero-weight vertices\n\
+             // and unanimated draws stay exactly where the tag put them.\n\
+             uniform float u_animated;\n\
+             uniform vec4 u_bones[{bone_rows}];\n\
              {varying_out} vec2 v_uv;\n\
              {varying_out} vec3 v_normal;\n\
              {varying_out} vec3 v_tangent;\n\
@@ -310,19 +364,52 @@ fn model_shader_sources(version_declaration: &str, modern: bool, precision: &str
                  vec3 yawed = vec3(value.x * cy - value.y * sy, value.x * sy + value.y * cy, value.z);\n\
                  return vec3(yawed.x, yawed.y * cp - yawed.z * sp, yawed.y * sp + yawed.z * cp);\n\
              }}\n\
+             void skin_influence(float index_f, float weight, vec4 point_h,\n\
+                                 inout vec3 skinned_pos, inout vec3 skinned_nrm,\n\
+                                 inout vec3 skinned_tan, inout vec3 skinned_bin) {{\n\
+                 if (weight <= 0.0) {{ return; }}\n\
+                 int base = int(index_f + 0.5) * 3;\n\
+                 vec4 r0 = u_bones[base];\n\
+                 vec4 r1 = u_bones[base + 1];\n\
+                 vec4 r2 = u_bones[base + 2];\n\
+                 skinned_pos += weight * vec3(dot(r0, point_h), dot(r1, point_h), dot(r2, point_h));\n\
+                 skinned_nrm += weight * vec3(dot(r0.xyz, a_normal), dot(r1.xyz, a_normal), dot(r2.xyz, a_normal));\n\
+                 skinned_tan += weight * vec3(dot(r0.xyz, a_tangent), dot(r1.xyz, a_tangent), dot(r2.xyz, a_tangent));\n\
+                 skinned_bin += weight * vec3(dot(r0.xyz, a_binormal), dot(r1.xyz, a_binormal), dot(r2.xyz, a_binormal));\n\
+             }}\n\
              void main() {{\n\
-                 vec3 view = rotate_view((a_position - u_center) * u_scale);\n\
+                 vec3 position = a_position;\n\
+                 vec3 normal_in = a_normal;\n\
+                 vec3 tangent_in = a_tangent;\n\
+                 vec3 binormal_in = a_binormal;\n\
+                 float weight_total = a_node_weights.x + a_node_weights.y + a_node_weights.z + a_node_weights.w;\n\
+                 if (u_animated > 0.5 && weight_total > 0.0001) {{\n\
+                     vec4 point_h = vec4(a_position, 1.0);\n\
+                     vec3 sp = vec3(0.0);\n\
+                     vec3 sn = vec3(0.0);\n\
+                     vec3 st = vec3(0.0);\n\
+                     vec3 sb = vec3(0.0);\n\
+                     skin_influence(a_node_indices.x, a_node_weights.x, point_h, sp, sn, st, sb);\n\
+                     skin_influence(a_node_indices.y, a_node_weights.y, point_h, sp, sn, st, sb);\n\
+                     skin_influence(a_node_indices.z, a_node_weights.z, point_h, sp, sn, st, sb);\n\
+                     skin_influence(a_node_indices.w, a_node_weights.w, point_h, sp, sn, st, sb);\n\
+                     position = sp / weight_total;\n\
+                     normal_in = sn;\n\
+                     tangent_in = st;\n\
+                     binormal_in = sb;\n\
+                 }}\n\
+                 vec3 view = rotate_view((position - u_center) * u_scale);\n\
                  // Perspective: the eye sits along -Y so w grows with depth;\n\
                  // at the focus plane (view.y = 0) w is exactly 1 and the\n\
                  // framing matches the orthographic view. See the derivation\n\
                  // on PERSPECTIVE_R_OVER_D.\n\
                  float w = mix(1.0, 1.0 + view.y * u_depth_scale * {persp_ratio}, u_perspective);\n\
-                 float z_clip = view.y * u_depth_scale + u_perspective * {persp_ratio};\n\
+                 float z_clip = view.y * u_depth_scale * u_depth_map.x + u_depth_map.y;\n\
                  gl_Position = vec4(view.x * u_clip_scale.x, view.z * u_clip_scale.y, z_clip, w);\n\
-                 vec3 source_normal = length(a_normal) > 0.0001 ? normalize(a_normal) : vec3(0.0, 0.0, 1.0);\n\
+                 vec3 source_normal = length(normal_in) > 0.0001 ? normalize(normal_in) : vec3(0.0, 0.0, 1.0);\n\
                  v_normal = rotate_view(source_normal);\n\
-                 v_tangent = rotate_view(a_tangent);\n\
-                 v_binormal = rotate_view(a_binormal);\n\
+                 v_tangent = rotate_view(tangent_in);\n\
+                 v_binormal = rotate_view(binormal_in);\n\
                  v_uv = a_texcoord;\n\
              }}\n",
             version_declaration
@@ -429,17 +516,118 @@ fn model_shader_sources(version_declaration: &str, modern: bool, precision: &str
         (vertex_source, fragment_source)
 }
 
+/// Ground-reference grid on the z = 0 plane (the world ground in Halo's
+/// Z-up space), Blender-style: minor lines at a spacing picked from the
+/// model's size, plus the world X and Y axes across the same extent. Returns
+/// the line-list vertices and the index where the axis vertices begin —
+/// minor lines first, then two vertices of the X axis, then two of the Y
+/// axis — so the axes can draw in their own colors.
+fn grid_line_vertices(preview: &RenderModelPreview) -> (Vec<RenderModelPreviewVertex>, usize) {
+    let (bounds_center, radius) = preview_center_radius(preview);
+    // One Halo world unit is ten feet; a biped is a third of one. Fine
+    // spacing for hand-held things, world units for vehicles, and coarser
+    // tiers so a BSP is not buried under thousands of lines.
+    let spacing = if radius <= 1.5 {
+        0.1
+    } else if radius <= 15.0 {
+        1.0
+    } else if radius <= 150.0 {
+        10.0
+    } else {
+        100.0
+    };
+    const HALF_CELLS: i32 = 16;
+    let snap = |value: f32| (value / spacing).round() * spacing;
+    let center = [snap(bounds_center[0]), snap(bounds_center[1])];
+    let extent = HALF_CELLS as f32 * spacing;
+    let (min_x, max_x) = (center[0] - extent, center[0] + extent);
+    let (min_y, max_y) = (center[1] - extent, center[1] + extent);
+    let line = |from: [f32; 2], to: [f32; 2]| {
+        [from, to].map(|[x, y]| RenderModelPreviewVertex {
+            position: [x, y, 0.0],
+            normal: [0.0, 0.0, 1.0],
+            ..Default::default()
+        })
+    };
+    let mut vertices = Vec::with_capacity((HALF_CELLS as usize * 2 + 1) * 4 + 4);
+    for step in -HALF_CELLS..=HALF_CELLS {
+        let offset = step as f32 * spacing;
+        vertices.extend(line([center[0] + offset, min_y], [center[0] + offset, max_y]));
+        vertices.extend(line([min_x, center[1] + offset], [max_x, center[1] + offset]));
+    }
+    let axis_start = vertices.len();
+    vertices.extend(line([min_x, 0.0], [max_x, 0.0]));
+    vertices.extend(line([0.0, min_y], [0.0, max_y]));
+    (vertices, axis_start)
+}
+
+/// Wire the full `RenderModelPreviewVertex` layout into the currently bound
+/// vertex array. Shared by the model and grid buffers so no attribute is
+/// ever left disabled and reading a stale constant (a disabled array reads
+/// `(0, 0, 0, 1)` — a phantom skinning weight on bone 1).
+unsafe fn bind_preview_vertex_layout(
+    gl: &glow::Context,
+    program: glow::NativeProgram,
+) -> Result<(), String> {
+    let stride = std::mem::size_of::<RenderModelPreviewVertex>() as i32;
+    unsafe {
+        let position = gl
+            .get_attrib_location(program, "a_position")
+            .ok_or_else(|| "model preview shader has no position attribute".to_owned())?;
+        let normal = gl
+            .get_attrib_location(program, "a_normal")
+            .ok_or_else(|| "model preview shader has no normal attribute".to_owned())?;
+        gl.enable_vertex_attrib_array(position);
+        gl.vertex_attrib_pointer_f32(position, 3, glow::FLOAT, false, stride, 0);
+        gl.enable_vertex_attrib_array(normal);
+        gl.vertex_attrib_pointer_f32(normal, 3, glow::FLOAT, false, stride, 12);
+        // Optional, unlike the two above: the untextured paths (particle
+        // models, Chimp's UE meshes) leave these at zero, and a driver is
+        // free to optimise an unread attribute out of the program entirely.
+        // A missing location is therefore not an error — offsets are pinned
+        // by `gpu_vertex_layout_matches_the_hand_written_attribute_offsets`.
+        for (name, size, offset) in [
+            ("a_texcoord", 2, 24),
+            ("a_tangent", 3, 32),
+            ("a_binormal", 3, 44),
+            // Skinning influences ride as floats: GLSL 100 has no integer
+            // vertex attributes, and the shader casts the indices.
+            ("a_node_indices", 4, 56),
+            ("a_node_weights", 4, 72),
+        ] {
+            if let Some(location) = gl.get_attrib_location(program, name) {
+                gl.enable_vertex_attrib_array(location);
+                gl.vertex_attrib_pointer_f32(location, size, glow::FLOAT, false, stride, offset);
+            }
+        }
+    }
+    Ok(())
+}
+
 struct ModelGlRenderer {
     program: glow::NativeProgram,
     vertex_array: glow::NativeVertexArray,
     vertex_buffer: glow::NativeBuffer,
     index_buffer: glow::NativeBuffer,
+    /// The ground grid's own vertex array and buffer, rebuilt per geometry
+    /// (its spacing and extent follow the model's bounds).
+    grid_vertex_array: glow::NativeVertexArray,
+    grid_vertex_buffer: glow::NativeBuffer,
+    grid_vertex_count: i32,
+    /// Vertex index where the world-axis lines begin; see `grid_line_vertices`.
+    grid_axis_start: i32,
+    grid_for_geometry: Option<u64>,
     center: glow::NativeUniformLocation,
     scale: glow::NativeUniformLocation,
     angles: glow::NativeUniformLocation,
     clip_scale: glow::NativeUniformLocation,
     depth_scale: glow::NativeUniformLocation,
+    depth_map: glow::NativeUniformLocation,
     perspective: glow::NativeUniformLocation,
+    /// Optional like the texture uniforms: a driver may strip the skinning
+    /// path from a program whose draws never enable it.
+    animated: Option<glow::NativeUniformLocation>,
+    bones: Option<glow::NativeUniformLocation>,
     base_color: glow::NativeUniformLocation,
     unlit: glow::NativeUniformLocation,
     shaded: Option<glow::NativeUniformLocation>,
@@ -511,33 +699,18 @@ impl ModelGlRenderer {
             gl.bind_vertex_array(Some(vertex_array));
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer));
             gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(index_buffer));
-            let stride = std::mem::size_of::<RenderModelPreviewVertex>() as i32;
-            let position = gl
-                .get_attrib_location(program, "a_position")
-                .ok_or_else(|| "model preview shader has no position attribute".to_owned())?;
-            let normal = gl
-                .get_attrib_location(program, "a_normal")
-                .ok_or_else(|| "model preview shader has no normal attribute".to_owned())?;
-            gl.enable_vertex_attrib_array(position);
-            gl.vertex_attrib_pointer_f32(position, 3, glow::FLOAT, false, stride, 0);
-            gl.enable_vertex_attrib_array(normal);
-            gl.vertex_attrib_pointer_f32(normal, 3, glow::FLOAT, false, stride, 12);
-            // Optional, unlike the two above: the untextured paths (particle
-            // models, Chimp's UE meshes) leave these at zero, and a driver is
-            // free to optimise an unread attribute out of the program entirely.
-            // A missing location is therefore not an error — offsets are pinned
-            // by `gpu_vertex_layout_matches_the_hand_written_attribute_offsets`.
-            for (name, size, offset) in [
-                ("a_texcoord", 2, 24),
-                ("a_tangent", 3, 32),
-                ("a_binormal", 3, 44),
-            ] {
-                if let Some(location) = gl.get_attrib_location(program, name) {
-                    gl.enable_vertex_attrib_array(location);
-                    gl.vertex_attrib_pointer_f32(location, size, glow::FLOAT, false, stride, offset);
-                }
-            }
+            bind_preview_vertex_layout(gl, program)?;
             gl.bind_vertex_array(None);
+
+            let grid_vertex_array = gl
+                .create_vertex_array()
+                .map_err(|error| error.to_string())?;
+            let grid_vertex_buffer = gl.create_buffer().map_err(|error| error.to_string())?;
+            gl.bind_vertex_array(Some(grid_vertex_array));
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(grid_vertex_buffer));
+            bind_preview_vertex_layout(gl, program)?;
+            gl.bind_vertex_array(None);
+            gl.bind_buffer(glow::ARRAY_BUFFER, None);
 
             let uniform = |name| {
                 gl.get_uniform_location(program, name)
@@ -548,12 +721,20 @@ impl ModelGlRenderer {
                 vertex_array,
                 vertex_buffer,
                 index_buffer,
+                grid_vertex_array,
+                grid_vertex_buffer,
+                grid_vertex_count: 0,
+                grid_axis_start: 0,
+                grid_for_geometry: None,
                 center: uniform("u_center")?,
                 scale: uniform("u_scale")?,
                 angles: uniform("u_angles")?,
                 clip_scale: uniform("u_clip_scale")?,
                 depth_scale: uniform("u_depth_scale")?,
+                depth_map: uniform("u_depth_map")?,
                 perspective: uniform("u_perspective")?,
+                animated: gl.get_uniform_location(program, "u_animated"),
+                bones: gl.get_uniform_location(program, "u_bones"),
                 base_color: uniform("u_base_color")?,
                 unlit: uniform("u_unlit")?,
                 // Optional: a driver is free to drop a uniform the program does
@@ -627,7 +808,60 @@ impl ModelGlRenderer {
                 frame.camera.clip_scale[1],
             );
             gl.uniform_1_f32(Some(&self.depth_scale), frame.camera.depth_scale);
+            gl.uniform_2_f32(
+                Some(&self.depth_map),
+                frame.camera.depth_map[0],
+                frame.camera.depth_map[1],
+            );
             gl.uniform_1_f32(Some(&self.perspective), frame.camera.perspective);
+            match (frame.bones.as_ref(), &self.animated) {
+                (Some(rows), Some(animated)) => {
+                    gl.uniform_1_f32(Some(animated), 1.0);
+                    if let Some(bones) = &self.bones {
+                        gl.uniform_4_f32_slice(Some(bones), rows.as_flattened());
+                    }
+                }
+                (None, Some(animated)) => gl.uniform_1_f32(Some(animated), 0.0),
+                _ => {}
+            }
+
+            // The ground grid draws first, depth-tested and depth-written, so
+            // the model correctly occludes the lines behind it and stands on
+            // the ones in front.
+            if frame.show_grid {
+                self.sync_grid(gl, frame);
+                if self.grid_vertex_count > 0 {
+                    gl.bind_vertex_array(Some(self.grid_vertex_array));
+                    if let Some(animated) = &self.animated {
+                        gl.uniform_1_f32(Some(animated), 0.0);
+                    }
+                    gl.uniform_1_f32(Some(&self.unlit), 1.0);
+                    self.bind_material(gl, None);
+                    gl.line_width(1.0);
+                    let flat = |gl: &glow::Context, location, [r, g, b]: [f32; 3]| unsafe {
+                        gl.uniform_3_f32(Some(location), r, g, b);
+                    };
+                    // Minor lines a step below the clear color; the world X
+                    // and Y axes in Blender's muted red and green.
+                    flat(gl, &self.base_color, [0.78, 0.82, 0.85]);
+                    gl.draw_arrays(glow::LINES, 0, self.grid_axis_start);
+                    let axis_verts = self.grid_vertex_count - self.grid_axis_start;
+                    if axis_verts >= 2 {
+                        flat(gl, &self.base_color, [0.72, 0.42, 0.42]);
+                        gl.draw_arrays(glow::LINES, self.grid_axis_start, 2);
+                    }
+                    if axis_verts >= 4 {
+                        flat(gl, &self.base_color, [0.42, 0.62, 0.42]);
+                        gl.draw_arrays(glow::LINES, self.grid_axis_start + 2, 2);
+                    }
+                    gl.bind_vertex_array(Some(self.vertex_array));
+                    if frame.bones.is_some()
+                        && let Some(animated) = &self.animated
+                    {
+                        gl.uniform_1_f32(Some(animated), 1.0);
+                    }
+                }
+            }
 
             if frame.render_mode.draws_shading() {
                 gl.polygon_mode(glow::FRONT_AND_BACK, glow::FILL);
@@ -649,6 +883,23 @@ impl ModelGlRenderer {
             gl.bind_buffer(glow::ARRAY_BUFFER, None);
             gl.use_program(None);
         }
+    }
+
+    /// Re-tessellate the ground grid when the geometry changes — its spacing
+    /// and extent are derived from the model's bounds.
+    unsafe fn sync_grid(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
+        if self.grid_for_geometry == Some(frame.geometry_id) {
+            return;
+        }
+        let (vertices, axis_start) = grid_line_vertices(&frame.preview);
+        unsafe {
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.grid_vertex_buffer));
+            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STATIC_DRAW);
+            gl.bind_buffer(glow::ARRAY_BUFFER, None);
+        }
+        self.grid_axis_start = axis_start as i32;
+        self.grid_vertex_count = vertices.len() as i32;
+        self.grid_for_geometry = Some(frame.geometry_id);
     }
 
     /// Bring the GPU's textures in line with the frame's, re-uploading only
@@ -828,6 +1079,106 @@ mod gpu_renderer_tests {
         );
     }
 
+    /// The grid is a flat z = 0 line list with no skinning influences (a
+    /// stray weight would let an animated draw warp it), snapped to world
+    /// spacing, with the two axis lines appended last for their own colors.
+    #[test]
+    fn ground_grid_lies_flat_unskinned_and_ends_with_the_axes() {
+        let preview = RenderModelPreview {
+            bounds_min: [-0.3, -0.25, 0.0],
+            bounds_max: [0.31, 0.25, 0.65],
+            ..Default::default()
+        };
+        let (vertices, axis_start) = grid_line_vertices(&preview);
+        assert_eq!(vertices.len(), axis_start + 4, "two axis lines at the end");
+        assert_eq!(vertices.len() % 2, 0, "a line list pairs up");
+        assert!(axis_start > 0, "no minor lines");
+        for vertex in &vertices {
+            assert_eq!(vertex.position[2], 0.0, "grid left the ground plane");
+            assert_eq!(vertex.normal, [0.0, 0.0, 1.0]);
+            assert_eq!(vertex.node_weights, [0.0; 4], "grid must not skin");
+        }
+        // Biped-sized bounds pick the 0.1-unit tier; every line then sits on
+        // a multiple of it.
+        for vertex in &vertices[..axis_start] {
+            for value in [vertex.position[0], vertex.position[1]] {
+                let snapped = (value / 0.1).round() * 0.1;
+                assert!(
+                    (value - snapped).abs() < 1e-4,
+                    "line off the 0.1 spacing: {value}"
+                );
+            }
+        }
+        // The axis lines really are the world axes.
+        assert_eq!(vertices[axis_start].position[1], 0.0);
+        assert_eq!(vertices[axis_start + 1].position[1], 0.0);
+        assert_eq!(vertices[axis_start + 2].position[0], 0.0);
+        assert_eq!(vertices[axis_start + 3].position[0], 0.0);
+    }
+
+    /// The depth window must cover an animation's travel: the reach bound is
+    /// at least the largest per-frame chain length, and an empty pose adds
+    /// nothing.
+    #[test]
+    fn pose_reach_covers_the_travelling_frame() {
+        let frame = |x: f32| {
+            vec![
+                PreviewNodeTransform {
+                    rotation: [0.0, 0.0, 0.0, 1.0],
+                    translation: [x, 0.0, 0.9],
+                    scale: 1.0,
+                },
+                PreviewNodeTransform {
+                    rotation: [0.0, 0.0, 0.0, 1.0],
+                    translation: [0.0, 0.0, 0.25],
+                    scale: 1.0,
+                },
+            ]
+        };
+        let pose = PreviewAnimationPose {
+            animation_index: 0,
+            frames: vec![frame(0.0), frame(3.0)],
+        };
+        let reach = pose_reach_bound(&pose);
+        let travelled = (3.0f32 * 3.0 + 0.9 * 0.9).sqrt() + 0.25;
+        assert!(
+            reach >= travelled - 1e-4,
+            "reach {reach} misses the travelled frame {travelled}"
+        );
+        let empty = PreviewAnimationPose {
+            animation_index: 0,
+            frames: Vec::new(),
+        };
+        assert_eq!(pose_reach_bound(&empty), 0.0);
+    }
+
+    /// The extended render distance must clip exactly at its declared bounds
+    /// and never bend the perspective: the near plane stays at t = -1, the
+    /// far plane reaches t = K, and post-divide depth stays monotone in t.
+    #[test]
+    fn depth_remap_extends_the_clip_range_without_moving_the_eye() {
+        let k = PREVIEW_RENDER_DISTANCE;
+        let rd = PERSPECTIVE_R_OVER_D;
+
+        // Orthographic: w = 1, so z = t·x + y must span NDC over t ∈ [-K, K].
+        let [x, y] = depth_map_coefficients(false);
+        assert!(((-k) * x + y - -1.0).abs() < 1e-5);
+        assert!((k * x + y - 1.0).abs() < 1e-5);
+
+        // Perspective: w = 1 + t·rd. Near plane pinned at t = -1, far at K.
+        let [x, y] = depth_map_coefficients(true);
+        let z = |t: f32| t * x + y;
+        let w = |t: f32| 1.0 + t * rd;
+        assert!((z(-1.0) - -w(-1.0)).abs() < 1e-5, "near plane moved");
+        assert!((z(k) - w(k)).abs() < 1e-5, "far plane short of K");
+        // z/w monotone in t ⇔ x − rd·y > 0.
+        assert!(x - rd * y > 0.0, "post-divide depth not monotone");
+        // The remap collapses to the pre-remap projection at K = 1: the same
+        // formulas with K = 1 give x = 1, y = rd.
+        let x1 = (2.0 + rd * (1.0 - 1.0)) / (1.0 + 1.0);
+        assert!((x1 - 1.0).abs() < 1e-6 && (x1 - (1.0 - rd) - rd).abs() < 1e-6);
+    }
+
     #[test]
     fn draw_range_clamps_to_complete_valid_triangles() {
         assert_eq!(model_draw_range(6, 10, 14), Some((24, 6)));
@@ -870,7 +1221,18 @@ mod gpu_renderer_tests {
 
             // Every attribute the vertex array points at, and every uniform the
             // renderer looks up, has to actually be declared.
-            for name in ["a_position", "a_normal", "a_texcoord", "a_tangent", "a_binormal"] {
+            for name in [
+                "a_position",
+                "a_normal",
+                "a_texcoord",
+                "a_tangent",
+                "a_binormal",
+                "a_node_indices",
+                "a_node_weights",
+            ] {
+                assert!(vertex.contains(name), "{name} missing from vertex shader");
+            }
+            for name in ["u_animated", "u_bones"] {
                 assert!(vertex.contains(name), "{name} missing from vertex shader");
             }
             for name in SAMPLER_UNIFORMS {
@@ -927,6 +1289,7 @@ mod gpu_renderer_tests {
                 "u_angles",
                 "u_clip_scale",
                 "u_depth_scale",
+                "u_depth_map",
                 "u_perspective",
             ] {
                 assert!(vertex.contains(name), "{name} missing from vertex shader");
@@ -988,7 +1351,7 @@ mod gpu_renderer_tests {
 
     #[test]
     fn gpu_vertex_layout_matches_the_hand_written_attribute_offsets() {
-        assert_eq!(std::mem::size_of::<RenderModelPreviewVertex>(), 56);
+        assert_eq!(std::mem::size_of::<RenderModelPreviewVertex>(), 88);
         let vertex = RenderModelPreviewVertex::default();
         let base = std::ptr::addr_of!(vertex) as usize;
         let offset = |field: usize| field - base;
@@ -996,6 +1359,8 @@ mod gpu_renderer_tests {
         assert_eq!(offset(std::ptr::addr_of!(vertex.texcoord) as usize), 24);
         assert_eq!(offset(std::ptr::addr_of!(vertex.tangent) as usize), 32);
         assert_eq!(offset(std::ptr::addr_of!(vertex.binormal) as usize), 44);
+        assert_eq!(offset(std::ptr::addr_of!(vertex.node_indices) as usize), 56);
+        assert_eq!(offset(std::ptr::addr_of!(vertex.node_weights) as usize), 72);
     }
 
     #[test]
@@ -1225,11 +1590,22 @@ impl PreviewCamera {
             + state.focus[1] * state.focus[1]
             + state.focus[2] * state.focus[2])
             .sqrt();
+        // An animation can carry the model well outside its bind-pose bounds
+        // (boarding and assassination clips travel several world units), and
+        // geometry past the depth window vanishes wholesale — sliced away
+        // plane-first as the pose travels. Grow the window by the pose's own
+        // reach; the cost is depth precision this preview has to spare.
+        let reach = state
+            .animation
+            .pose
+            .as_deref()
+            .map(pose_reach_bound)
+            .unwrap_or(0.0);
         Self {
             rect,
             center,
             radius,
-            depth_radius: radius + focus_length,
+            depth_radius: radius + focus_length + reach,
             yaw: state.yaw,
             pitch: state.pitch,
             scale: state.scale.clamp(MIN_PREVIEW_SCALE, MAX_PREVIEW_SCALE),
@@ -1270,12 +1646,33 @@ impl PreviewCamera {
             // focus-grown radius safely maps all depths inside NDC even when
             // the orbit point sits far from the bounds center.
             depth_scale: 1.0 / (self.depth_radius * self.scale * 1.05).max(0.001),
+            // Depth remap `z = t·x + y` with `t = view.y · depth_scale`. With
+            // K = PREVIEW_RENDER_DISTANCE and rd = PERSPECTIVE_R_OVER_D:
+            // orthographic keeps t ∈ [-K, K] inside NDC; perspective keeps
+            // its near plane at t = -1 (just short of the eye at t ≈ -1.9)
+            // and pushes the far plane out to t = K by solving the linear
+            // map through z(-1) = -w(-1) and z(K) = w(K). At K = 1 both
+            // collapse to the pre-remap projection, and z/w stays monotone
+            // in t because x - rd·y > 0 for every K ≥ 1.
+            depth_map: depth_map_coefficients(self.perspective),
             perspective: if self.perspective { 1.0 } else { 0.0 },
         }
     }
 
     fn rotate_vector(&self, vector: [f32; 3]) -> [f32; 3] {
         rotate_view_vector(self.yaw, self.pitch, vector)
+    }
+}
+
+/// The `[x, y]` of the shader's depth remap `z = t·x + y`, with `t = view.y ·
+/// depth_scale` (documented at the `depth_map` field of `ModelGpuCamera`).
+fn depth_map_coefficients(perspective: bool) -> [f32; 2] {
+    if perspective {
+        let x = (2.0 + PERSPECTIVE_R_OVER_D * (PREVIEW_RENDER_DISTANCE - 1.0))
+            / (PREVIEW_RENDER_DISTANCE + 1.0);
+        [x, x - (1.0 - PERSPECTIVE_R_OVER_D)]
+    } else {
+        [1.0 / PREVIEW_RENDER_DISTANCE, 0.0]
     }
 }
 
@@ -1310,6 +1707,7 @@ pub(super) fn render_model_to_preview(
                 shader_group: material.render_method_group,
             })
             .collect(),
+        nodes: preview_skeleton_nodes(&model.nodes),
         bounds_min: [f32::INFINITY; 3],
         bounds_max: [f32::NEG_INFINITY; 3],
         ..Default::default()
@@ -1381,6 +1779,11 @@ fn append_render_mesh_to_preview(
             texcoord: [vertex.texcoord.x, vertex.texcoord.y],
             tangent: vector3_to_array(vertex.tangent),
             binormal: vector3_to_array(vertex.binormal),
+            // Global skeleton indices — blam-tags resolves the per-mesh
+            // palettes, and rigid meshes arrive as a single full-weight
+            // influence, so animation needs no rigid special case.
+            node_indices: vertex.node_indices.map(|index| index as f32),
+            node_weights: vertex.node_weights,
         });
     }
 
@@ -1424,6 +1827,31 @@ fn append_render_mesh_to_preview(
             });
         }
     }
+}
+
+/// The preview's copy of the skeleton: parent-local bind pose plus the
+/// inverse of the accumulated bind world transform, ready for skinning.
+pub(super) fn preview_skeleton_nodes(nodes: &[Node]) -> Vec<RenderModelPreviewNode> {
+    let world = preview_node_world_transforms(nodes);
+    nodes
+        .iter()
+        .zip(&world)
+        .map(|(node, (world_rot, world_trans))| {
+            let bind_world = blam_tags::math::Matrix4::from_loc_rot_scale(
+                *world_trans,
+                *world_rot,
+                1.0,
+            );
+            let inverse = bind_world.inverse();
+            RenderModelPreviewNode {
+                name: node.name.clone(),
+                parent: node.parent_node,
+                bind_rotation: node.default_rotation.normalized().to_array(),
+                bind_translation: point3_to_array(node.default_translation),
+                inverse_bind: [inverse.m[0], inverse.m[1], inverse.m[2]],
+            }
+        })
+        .collect()
 }
 
 pub(super) fn preview_node_world_transforms(nodes: &[Node]) -> Vec<(RealQuaternion, RealPoint3d)> {

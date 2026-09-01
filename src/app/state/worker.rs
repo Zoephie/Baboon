@@ -121,6 +121,21 @@ pub(in crate::app) enum WorkerMessage {
         key: String,
         result: Result<ThumbnailImage, String>,
     },
+    /// A `.model`'s animation-graph listing, read off the UI thread.
+    ModelAnimationsListed {
+        stamp: KitStamp,
+        key: String,
+        result: Result<Vec<PreviewAnimationEntry>, String>,
+    },
+    /// One animation decoded into per-frame node transforms, off the UI
+    /// thread, in skeleton order — the handler maps it onto the preview's
+    /// nodes by name.
+    ModelAnimationDecoded {
+        stamp: KitStamp,
+        key: String,
+        animation_index: usize,
+        result: Result<DecodedAnimationPose, String>,
+    },
     /// A `.model`'s collision/physics overlay geometry, built off the UI
     /// thread so the preview's toggles can be instant draw-time filters.
     ModelOverlaysBuilt {

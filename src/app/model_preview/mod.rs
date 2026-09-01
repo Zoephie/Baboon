@@ -7,14 +7,21 @@ use blam_tags::render_model::{Marker, Node, RenderMesh};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+pub(in crate::app) mod animation;
 pub(in crate::app) mod derived;
 pub(in crate::app) mod loading;
 pub(in crate::app) mod materials;
 mod renderer;
 mod variants;
 
+use animation::*;
 use derived::*;
 use loading::*;
+// Re-exported up to `crate::app` for the worker messages and the playback
+// state that lives on `ModelPreviewState`.
+pub(in crate::app) use animation::{
+    DecodedAnimationPose, PreviewAnimationEntry, PreviewAnimationPlayback,
+};
 // Re-exported up to `crate::app`: the preview state and the worker message
 // both name these, and neither lives under this module.
 pub(in crate::app) use materials::*;
@@ -39,6 +46,9 @@ pub(crate) struct RenderModelPreview {
     /// a worker rather than in the geometry walk.
     pub materials: Vec<RenderModelPreviewMaterial>,
     pub markers: Vec<RenderModelPreviewMarker>,
+    /// The render model's skeleton, for animation playback. Empty on derived
+    /// previews (collision, physics, BSPs, particles), which cannot animate.
+    pub nodes: Vec<RenderModelPreviewNode>,
     pub bounds_min: [f32; 3],
     pub bounds_max: [f32; 3],
 }
@@ -66,6 +76,13 @@ pub(crate) struct RenderModelPreviewVertex {
     pub texcoord: [f32; 2],
     pub tangent: [f32; 3],
     pub binormal: [f32; 3],
+    /// Skeleton node influences, as FLOATS: GLSL 100 (the GLES fallback
+    /// dialect) has no integer vertex attributes, so the indices ride as
+    /// floats and the shader casts. All zeros — weights included — on
+    /// geometry that has no skeleton (derived previews, particles, chimp);
+    /// the shader's animated path treats zero total weight as rigid-to-bind.
+    pub node_indices: [f32; 4],
+    pub node_weights: [f32; 4],
 }
 
 /// The shader one material draws with, as named by the render_model.
@@ -101,6 +118,22 @@ pub(crate) struct RenderModelPreviewMarker {
     pub axes: [[f32; 3]; 3],
 }
 
+/// One skeleton node, carried so animation playback can run forward
+/// kinematics and skinning without going back to the tag. Parent-before-child
+/// order (the tag's own), which the FK pass relies on.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct RenderModelPreviewNode {
+    pub name: String,
+    pub parent: i16,
+    /// Parent-local bind pose.
+    pub bind_rotation: [f32; 4],
+    pub bind_translation: [f32; 3],
+    /// Inverse of the accumulated bind-pose world transform, as three rows of
+    /// an affine matrix — what turns a bind-space vertex into node-local
+    /// space before the animated world transform takes it back out.
+    pub inverse_bind: [[f32; 4]; 3],
+}
+
 static NEXT_MODEL_GEOMETRY_ID: AtomicU64 = AtomicU64::new(1);
 
 fn model_preview_data(
@@ -117,6 +150,7 @@ fn model_preview_data(
         textures: None,
         variants,
         scenario_bsps: Vec::new(),
+        animations: None,
     }
 }
 
@@ -200,6 +234,10 @@ pub(super) fn draw_model_preview_panel(
                          The framing at the orbit point stays identical, so toggling \
                          never jumps.",
                     );
+                ui.checkbox(&mut state.show_grid, "Grid").on_hover_text(
+                    "Ground-reference grid on the z = 0 plane, spaced to the \
+                     model's size, with the world X and Y axes picked out.",
+                );
                 ui.checkbox(&mut state.shaded, "Shaded")
                     .on_hover_text(
                         "Sample each part's own shader — diffuse, detail, normal, specular and                          self-illumination. Off draws the flat per-material colours, which stay                          useful for reading silhouette and topology.",
@@ -314,6 +352,161 @@ pub(super) fn draw_model_preview_panel(
                             .color(subtle_dark()),
                     );
                 }
+            }
+
+            // Animation playback strip: selection decodes on a worker (the
+            // per-frame hook in tag_pane sees `selected` change), sampling is
+            // per-draw-frame, and the clock advances here.
+            if data.animations.is_some() || state.animation.error.is_some() {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Animation").color(subtle_dark()));
+                    if let Some(animations) = data.animations.clone() {
+                        let selected_text = state
+                            .animation
+                            .selected
+                            .and_then(|index| animations.get(index))
+                            .map(|entry| entry.name.clone())
+                            .unwrap_or_else(|| "<none>".to_owned());
+                        // A graph can list a thousand animations. The search
+                        // box sits beside the picker (like the marker filter)
+                        // rather than inside its popup: egui's combo popup
+                        // hard-codes close-on-click, so a text field in there
+                        // closes the menu the moment it is clicked.
+                        ui.add(
+                            egui::TextEdit::singleline(&mut state.animation.filter)
+                                .hint_text("search animations…")
+                                .desired_width(140.0),
+                        );
+                        let filter = state.animation.filter.trim().to_ascii_lowercase();
+                        egui::ComboBox::from_id_salt(("model_animation", &entry.key))
+                            .selected_text(selected_text)
+                            .width(280.0)
+                            .show_ui(ui, |ui| {
+                                let mut shown = 0usize;
+                                for (index, row) in animations.iter().enumerate() {
+                                    if !filter.is_empty()
+                                        && !row.name.to_ascii_lowercase().contains(&filter)
+                                    {
+                                        continue;
+                                    }
+                                    shown += 1;
+                                    let label = if row.playable {
+                                        format!(
+                                            "{}  ({} · {} frames)",
+                                            row.name, row.kind, row.frame_count
+                                        )
+                                    } else {
+                                        format!("{}  (no data)", row.name)
+                                    };
+                                    if ui
+                                        .add_enabled(
+                                            row.playable,
+                                            egui::SelectableLabel::new(
+                                                state.animation.selected == Some(index),
+                                                label,
+                                            ),
+                                        )
+                                        .clicked()
+                                    {
+                                        state.animation.selected = Some(index);
+                                        state.animation.pose = None;
+                                        state.animation.time = 0.0;
+                                        state.animation.error = None;
+                                    }
+                                }
+                                if shown == 0 {
+                                    ui.label(
+                                        RichText::new("No animations match.")
+                                            .color(subtle_dark()),
+                                    );
+                                }
+                            });
+                        if state.animation.selected.is_some()
+                            && state.animation.pose.is_none()
+                            && state.animation.error.is_none()
+                        {
+                            ui.spinner();
+                        }
+                        let pose_frames = state
+                            .animation
+                            .pose
+                            .as_ref()
+                            .map(|pose| pose.frames.len())
+                            .unwrap_or(0);
+                        if pose_frames > 0 {
+                            let duration = pose_frames as f32 / ANIMATION_FRAME_RATE;
+                            let last_frame = (pose_frames - 1) as f32;
+                            if ui
+                                .button(if state.animation.playing { "Pause" } else { "Play" })
+                                .clicked()
+                            {
+                                state.animation.playing = !state.animation.playing;
+                                // Play at the end of a non-looping clip restarts it.
+                                if state.animation.playing
+                                    && !state.animation.looped
+                                    && state.animation.time * ANIMATION_FRAME_RATE >= last_frame
+                                {
+                                    state.animation.time = 0.0;
+                                }
+                            }
+                            ui.checkbox(&mut state.animation.looped, "Loop");
+                            ui.label(RichText::new("Speed").color(subtle_dark()));
+                            ui.add(
+                                egui::DragValue::new(&mut state.animation.speed)
+                                    .range(0.05..=4.0)
+                                    .speed(0.02)
+                                    .max_decimals(2)
+                                    .suffix("×"),
+                            );
+                            let mut frame_position =
+                                (state.animation.time * ANIMATION_FRAME_RATE).min(last_frame);
+                            if state.animation.looped && pose_frames > 1 {
+                                frame_position =
+                                    (state.animation.time * ANIMATION_FRAME_RATE) % pose_frames as f32;
+                            }
+                            let mut scrub = frame_position;
+                            if ui
+                                .add(
+                                    egui::Slider::new(&mut scrub, 0.0..=last_frame)
+                                        .show_value(false),
+                                )
+                                .changed()
+                            {
+                                state.animation.time = scrub / ANIMATION_FRAME_RATE;
+                                state.animation.playing = false;
+                                frame_position = scrub;
+                            }
+                            ui.label(
+                                RichText::new(format!(
+                                    "{:>3} / {}",
+                                    frame_position.floor() as usize + 1,
+                                    pose_frames
+                                ))
+                                .color(subtle_dark()),
+                            );
+                            if state.animation.playing {
+                                let dt = ui.input(|input| input.stable_dt).min(0.1);
+                                state.animation.time += dt * state.animation.speed.max(0.0);
+                                if state.animation.looped {
+                                    if duration > 0.0 {
+                                        state.animation.time %= duration;
+                                    }
+                                } else if state.animation.time * ANIMATION_FRAME_RATE >= last_frame
+                                {
+                                    state.animation.time = last_frame / ANIMATION_FRAME_RATE;
+                                    state.animation.playing = false;
+                                }
+                                ui.ctx().request_repaint();
+                            }
+                        }
+                    }
+                    if let Some(error) = state.animation.error.clone() {
+                        ui.label(
+                            RichText::new(error).color(Color32::from_rgb(150, 56, 44)),
+                        );
+                    }
+                });
             }
 
             let mut mutation_requested = false;
@@ -479,6 +672,8 @@ pub(in crate::app) fn draw_standalone_mesh_preview(
             });
         ui.checkbox(&mut state.perspective, "Perspective")
             .on_hover_text("Perspective projection instead of the flat orthographic view.");
+        ui.checkbox(&mut state.show_grid, "Grid")
+            .on_hover_text("Ground-reference grid on the z = 0 plane.");
         ui.add_enabled(
             false,
             egui::Checkbox::new(&mut state.show_backfaces, "Backfaces"),
