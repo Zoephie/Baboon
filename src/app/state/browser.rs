@@ -226,6 +226,39 @@ pub(in crate::app) struct DraggedTagRef {
     pub(in crate::app) input: String,
     /// Shader bitmap-row form: forward-slash relative path, no extension.
     pub(in crate::app) rel_path: String,
+    /// The tag's file on disk, when it has one. This is what leaves Baboon
+    /// when the drag ends over Sapien's window; a cache or container tag has
+    /// no file to hand over and stays `None`.
+    pub(in crate::app) file_path: Option<PathBuf>,
+}
+
+/// Cross-frame state of a tag drag that may end on a kit tool's window
+/// (Sapien, Guerilla) rather than inside Baboon. See `kit_tool_drop`.
+#[derive(Default)]
+pub(in crate::app) struct KitToolDragState {
+    /// The kit tool window the drag is over right now, if any. The hover
+    /// feedback is redone when this changes and undone when it goes away.
+    pub(in crate::app) hover: Option<KitToolDropTarget>,
+    /// The status line as it was before the hover feedback replaced it, and
+    /// when it was shown; put back when the drag leaves the tool's window
+    /// without dropping, unless it had already run its course.
+    pub(in crate::app) saved_status: Option<(String, f64)>,
+    /// Executables of the processes a drag has passed over, by process id,
+    /// so a drag hovering a window costs one process query rather than one
+    /// per frame. Emptied between drags: a process id can be reused.
+    pub(in crate::app) executables: HashMap<u32, Option<PathBuf>>,
+    /// Palette tables per game, read from the definitions on a worker.
+    pub(in crate::app) palettes: HashMap<String, PaletteTable>,
+}
+
+/// A game's scenario palette table on its way from the definitions.
+pub(in crate::app) enum PaletteTable {
+    /// Requested from a worker; a drop meanwhile goes through ungated.
+    Loading,
+    /// The definition could not be read. Remembered so a hover does not ask
+    /// again every frame.
+    Unreadable,
+    Ready(Vec<ScenarioPalette>),
 }
 
 /// A one-shot "reveal in browser tree" request: force-open the folder nodes in

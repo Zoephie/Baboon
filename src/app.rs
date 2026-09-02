@@ -138,6 +138,10 @@ mod sound_extract;
 use sound_extract::*;
 mod runtime_poke;
 use runtime_poke::*;
+mod kit_tool_drop;
+use kit_tool_drop::*;
+mod scenario_palettes;
+use scenario_palettes::*;
 mod chimp;
 use chimp::*;
 mod controller;
@@ -379,6 +383,8 @@ pub struct Baboon {
     rename_tag: Option<RenameTagState>,
     /// New/Rename Folder dialog for a container source, if one is open.
     container_folder_dialog: Option<ContainerFolderDialog>,
+    /// A browser drag hovering Sapien's or Guerilla's window, if one is.
+    kit_tool_drag: KitToolDragState,
     status: String,
     /// Mirror of `status` as of the last frame, and when it changed. `status`
     /// is assigned from well over a hundred places, so rather than route them
@@ -463,6 +469,23 @@ impl Baboon {
         cc.egui_ctx.set_fonts(foundation_fonts());
         cc.egui_ctx.set_style(foundation_style());
         egui_extras::install_image_loaders(&cc.egui_ctx);
+        // A drag hovering Sapien's window asks for a copy or not-allowed
+        // cursor (see `track_kit_tool_drop`). egui's own drag-and-drop hook
+        // forces the grabbing hand at the end of every pass, so the request
+        // has to be applied from a hook registered after it, which runs later.
+        cc.egui_ctx.on_end_pass(
+            "kit_tool_drop_cursor",
+            Arc::new(|ctx| {
+                let cursor = ctx.data(|data| {
+                    data.get_temp::<egui::CursorIcon>(egui::Id::new(
+                        controller::KIT_TOOL_DROP_CURSOR,
+                    ))
+                });
+                if let Some(cursor) = cursor {
+                    ctx.set_cursor_icon(cursor);
+                }
+            }),
+        );
         let prefs = load_gui_prefs();
         let terminal_open_games = load_terminal_open_games();
         let suppress_startup_popups = startup_arguments.suppresses_startup_popups();
@@ -636,6 +659,7 @@ impl Baboon {
             tsv_paste: None,
             rename_tag: None,
             container_folder_dialog: None,
+            kit_tool_drag: KitToolDragState::default(),
             status: "Ready".to_owned(),
             status_shown: String::new(),
             status_changed_at: 0.0,

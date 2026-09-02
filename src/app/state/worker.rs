@@ -83,6 +83,13 @@ pub(in crate::app) enum WorkerMessage {
         result: Result<LoadedSourceData, String>,
         recent_path: Option<PathBuf>,
     },
+    /// A game's scenario palette table, read from the definitions for a drag
+    /// heading for Sapien. Not kit-scoped: the definitions are shared.
+    /// `None` means the definition could not be read.
+    ScenarioPalettesRead {
+        game: String,
+        palettes: Option<Vec<ScenarioPalette>>,
+    },
     ChimpMounted {
         stamp: KitStamp,
         result: Result<Arc<blam_tags::iostore::world::World>, String>,

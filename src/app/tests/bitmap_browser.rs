@@ -356,6 +356,7 @@ fn a_dragged_thumbnail_carries_what_a_shader_bitmap_slot_expects() {
         group_tag: bitmap.group_tag,
         input: entry_reference_input(&bitmap),
         rel_path: entry_rel_path(&bitmap),
+        file_path: entry_loose_file(&bitmap),
     };
 
     // `src/app/shader/editing.rs` gates the drop on exactly this.

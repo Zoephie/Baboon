@@ -311,7 +311,8 @@ pageable resources — with inline editing for loose little-endian tags:
   the current pane)
   that resolves and opens the referenced tag — even if it isn't in the current
   index — an *Import* button on geometry references that re-imports the source
-  asset via `tool`, **drag-and-drop** from the browser to set a reference, and a
+  asset via `tool`, **drag-and-drop** from the browser to set a reference (the
+  same drag can leave Baboon and land on Sapien; see *Tool launchers*), and a
   red highlight when a referenced tag is missing on disk.
 - **Block-index fields** render as a dropdown of the target block's elements
   (with a leading `<none>`) plus a "go to" button to the referenced element.
@@ -783,6 +784,20 @@ tag_test button; every other kit keeps both. The tag_test
 launcher updates the kit's `init.txt` while preserving unrelated commands. The
 quick-access launchers remain generic, and quick-access tag_test removes stale
 active scenario-launch commands from `init.txt`.
+
+**Drag a tag into Sapien.** Drag an object tag (a weapon, vehicle, biped,
+crate, scenery, equipment, machine, and so on) out of the browser and let go
+over a running Sapien window. Baboon hands Sapien the file the same way Windows
+Explorer does, and Sapien adds it to the scenario's matching palette. While the
+drag hovers Sapien the cursor shows a copy or not-allowed sign and the status
+bar names the palette; after the drop it reports the hand-over. The same drop
+opens the tag in Guerilla. Only a tag on disk inside that Sapien's own editing
+kit can go, and only one whose group has a palette in that game's scenario (a
+bitmap from a loaded kit is refused before Sapien sees it). Drop on Sapien's
+main window: its Hierarchy, Properties and Output windows take no files, and
+Baboon says which window to use instead. Halo CE's and Halo 2's Sapien take no
+dropped files at all, so Baboon says so instead of pretending; use *Edit Types*
+in Sapien for those.
 
 A **Run Tool Command** window lists each game's `tool` commands (from per-game
 JSON), with a form for their parameters — enum dropdowns, file/path pickers, and

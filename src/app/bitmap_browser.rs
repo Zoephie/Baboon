@@ -470,6 +470,7 @@ impl Baboon {
             group_tag,
             input: reference_input,
             rel_path,
+            file_path: entry_loose_file(entry),
         });
         let image_rect = egui::Rect::from_min_size(rect.min, Vec2::splat(cell));
         ui.painter()

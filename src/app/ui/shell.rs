@@ -1415,6 +1415,8 @@ impl Baboon {
         if !dropped_paths.is_empty() {
             self.open_dropped_files(dropped_paths, ctx.clone());
         }
+        // The other direction: a browser drag that ends on Sapien's window.
+        self.track_kit_tool_drop(ctx);
     }
 
     fn draw_auxiliary_windows(&mut self, ctx: &egui::Context) {

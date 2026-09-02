@@ -57,6 +57,15 @@ pub(in crate::app) fn entry_rel_path(entry: &TagEntry) -> String {
     without_ext.replace('\\', "/")
 }
 
+/// The file an entry is on disk, for a drag that may leave Baboon and land
+/// on Sapien. Cache and container tags have none.
+pub(in crate::app) fn entry_loose_file(entry: &TagEntry) -> Option<PathBuf> {
+    match &entry.location {
+        TagEntryLocation::LooseFile(path) => Some(path.clone()),
+        _ => None,
+    }
+}
+
 /// Hover text for a drag source, which egui's own tooltips cannot be.
 ///
 /// An egui 0.29 tooltip is an `Area`, and once one has shown, the next
@@ -1249,6 +1258,7 @@ pub(in crate::app) fn draw_entry(
         group_tag: entry.group_tag,
         input: entry_reference_input(entry),
         rel_path: entry_rel_path(entry),
+        file_path: entry_loose_file(entry),
     };
     let selected = selected == Some(entry.key.as_str());
     let row_size = Vec2::new(ui.available_width(), ui.spacing().interact_size.y);
@@ -1746,6 +1756,7 @@ mod tests {
                             group_tag: 0,
                             input: String::new(),
                             rel_path: "control".to_owned(),
+                            file_path: None,
                         });                    });
                 },
             );

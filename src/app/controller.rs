@@ -17,6 +17,8 @@ use terminal::{
 mod tools;
 use tools::*;
 mod scenario_launch;
+mod tool_drop;
+pub(super) use tool_drop::KIT_TOOL_DROP_CURSOR;
 // Re-exported: the browser's row menus gate on this, and its drawing functions
 // reach it through egui memory rather than through `Baboon`.
 pub(super) use scenario_launch::{ScenarioLaunchAvailability, scenario_launch_availability};
@@ -840,6 +842,14 @@ impl Baboon {
                     query,
                     result,
                 } => self.handle_field_value_search_finished(stamp, query, result),
+                WorkerMessage::ScenarioPalettesRead { game, palettes } => {
+                    let table = palettes.map_or(PaletteTable::Unreadable, PaletteTable::Ready);
+                    self.kit_tool_drag.palettes.insert(game, table);
+                    // A drag hovering Sapien with the mouse held still gets
+                    // no event of its own to redraw the palette name with.
+                    ctx.request_repaint();
+                    false
+                }
                 WorkerMessage::FieldIndexBuilt { stamp, blobs } => {
                     self.handle_field_index_built(stamp, blobs)
                 }
