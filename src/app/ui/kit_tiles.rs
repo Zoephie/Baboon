@@ -210,7 +210,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
         state: &egui_tiles::TabState,
     ) -> Color32 {
         let base = if state.active {
-            menu_bar()
+            active_tab()
         } else {
             left_panel()
         };

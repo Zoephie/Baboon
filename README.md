@@ -324,8 +324,10 @@ pageable resources — with inline editing for loose little-endian tags:
 - **Guerilla-style "Search fields"** — type a block or field name to filter the
   editor down to just the matching fields and the blocks/structs/arrays that
   contain them; everything else is hidden. Available on every field-tree tag,
-  including sound tags. Blocks and structs keep their expand state as you page
-  through a block's elements, and structs are expanded by default.
+  including sound tags. Use the jump button or press Enter repeatedly to cycle
+  through matching rows; the search stays active until cleared. Blocks and
+  structs keep their expand state as you page through a block's elements, and
+  structs are expanded by default.
 - **Angle units** — `angle`, `angle_bounds` and both euler types hold radians on
   disk and are shown and typed in **degrees**, as Guerilla and the other Halo
   tools do. *View ▸ Angles in degrees* (also in *Settings ▸ Appearance*) turns

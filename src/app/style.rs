@@ -209,6 +209,21 @@ pub(super) fn menu_bar() -> Color32 {
     }
 }
 
+/// Fill for the selected tab in every tiled tab rack. In dark mode this must
+/// sit visibly above the surrounding 31-55 gray fills; the old menu-bar gray
+/// was actually darker than document tabs, which hid the active selection.
+pub(super) fn active_tab() -> Color32 {
+    active_tab_for(is_dark_mode())
+}
+
+fn active_tab_for(dark_mode: bool) -> Color32 {
+    if dark_mode {
+        Color32::from_rgb(72, 72, 72)
+    } else {
+        Color32::from_rgb(161, 161, 157)
+    }
+}
+
 pub(super) fn foundation_blue() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(134, 184, 213)

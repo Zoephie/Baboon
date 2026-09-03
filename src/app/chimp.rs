@@ -975,7 +975,7 @@ impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_> {
         tile_id: egui_tiles::TileId,
         state: &egui_tiles::TabState,
     ) -> Color32 {
-        let base = if state.active { menu_bar() } else { row_type() };
+        let base = if state.active { active_tab() } else { row_type() };
         let dirty = matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Pane(package))
             if self.app.kits[self.kit_index]
                 .chimp

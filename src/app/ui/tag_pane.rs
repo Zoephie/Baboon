@@ -38,7 +38,49 @@ impl Baboon {
         // Not offered for shader/sound tags (their own surfaces).
         let supports_field_search = supports_field_search(entry);
         if supports_field_search {
-            self.draw_field_search_bar(ui, kit_index, &key);
+            let jump_match_count = self.kits[kit_index]
+                .field_search
+                .get(&key)
+                .and_then(|query| {
+                    self.kits[kit_index]
+                        .parsed_tags
+                        .get(&key)
+                        .map(|doc| field_label_matches(&doc.tag, query).len())
+                })
+                .unwrap_or(0);
+            if self.draw_field_search_bar(ui, kit_index, &key, jump_match_count)
+            {
+                let query = self.kits[kit_index]
+                    .field_search
+                    .get(&key)
+                    .cloned()
+                    .unwrap_or_default();
+                let matches = self.kits[kit_index]
+                    .parsed_tags
+                    .get(&key)
+                    .map(|doc| field_label_matches(&doc.tag, &query))
+                    .unwrap_or_default();
+                let cursor_id = egui::Id::new((
+                    "field_search_cursor",
+                    self.kits[kit_index].id.0,
+                    key.as_str(),
+                ));
+                let selected = ctx.data_mut(|data| {
+                    let mut cursor = data
+                        .get_temp::<FieldSearchCursor>(cursor_id)
+                        .unwrap_or_default();
+                    let selected = cursor.advance(&query, matches.len());
+                    data.insert_temp(cursor_id, cursor);
+                    selected
+                });
+                if let Some(field_path) = selected.and_then(|index| matches.get(index)).cloned() {
+                    self.navigate_to_field(ctx, &key, &field_path);
+                    // Search matches labels, including container labels. The block
+                    // header path is consumed by container rendering; scalar rows
+                    // use the exact field target installed by navigate_to_field.
+                    ctx.data_mut(|data| data.insert_temp(jump_target_id(), field_path));
+                }
+            }
         }
 
         // Documentation overlay and the Campaign Evolved Wwise binding are both

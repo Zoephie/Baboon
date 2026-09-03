@@ -468,18 +468,48 @@ impl Baboon {
 
     /// "Search fields" bar (Guerilla-style): typing a block or field name
     /// collapses the editor to just the matching node(s) and their ancestors.
-    pub(super) fn draw_field_search_bar(&mut self, ui: &mut Ui, kit_index: usize, tag_key: &str) {
+    pub(super) fn draw_field_search_bar(
+        &mut self,
+        ui: &mut Ui,
+        kit_index: usize,
+        tag_key: &str,
+        jump_match_count: usize,
+    ) -> bool {
+        let mut jump = false;
         ui.horizontal(|ui| {
             ui.label(RichText::new("Search fields:").color(text_dark()));
             let query = self.kits[kit_index]
                 .field_search
                 .entry(tag_key.to_owned())
                 .or_default();
-            ui.add(
+            let response = ui.add(
                 egui::TextEdit::singleline(query)
                     .hint_text("block or field name")
                     .desired_width(220.0),
             );
+            let enter = ui.input(|input| input.key_pressed(egui::Key::Enter));
+            let submitted = enter && (response.has_focus() || response.lost_focus());
+            let jump_tooltip = match jump_match_count {
+                0 => "No matching field or block".to_owned(),
+                1 => "Jump to match (Enter)".to_owned(),
+                count => format!("Jump to next match (Enter)\n{count} matches"),
+            };
+            let jump_response = icon_button(
+                ui,
+                ButtonIcon::JumpTo,
+                &jump_tooltip,
+                jump_match_count > 0,
+                Vec2::new(22.0, 22.0),
+                text_dark(),
+            );
+            // Re-resolve matches after drawing when Enter is used: the TextEdit
+            // may have changed its query during this same frame.
+            jump = submitted || jump_response.clicked();
+            if jump {
+                // A single-line edit surrenders focus on Enter. Take it back so
+                // another Enter advances again without an intervening click.
+                response.request_focus();
+            }
             if icon_button(
                 ui,
                 ButtonIcon::Clear,
@@ -499,6 +529,7 @@ impl Baboon {
             );
         });
         ui.add_space(4.0);
+        jump
     }
 
     fn draw_tool_launcher_buttons(&mut self, ui: &mut Ui) {
