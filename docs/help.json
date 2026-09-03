@@ -143,7 +143,7 @@
                 "Block-index fields render as a dropdown of target elements plus a go-to control.",
                 "Field docs, units, ranges, and explanation blocks come from the JSON definitions.",
                 "Undo and redo cover field edits and structural block edits.",
-                "Search fields collapses the editor to matching fields and their ancestors. Use its jump button or press Enter repeatedly to cycle through matches; the search stays active until cleared.",
+                "Search fields collapses the editor to matching fields and their ancestors. Use its jump button or press Enter repeatedly to cycle through matches; use a matching block's jump button to clear the search and anchor that block in the full editor.",
                 "Expert mode reveals advanced fields that are normally hidden."
               ]
             }

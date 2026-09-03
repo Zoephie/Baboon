@@ -879,6 +879,7 @@ pub(in crate::app) fn draw_foundation_block(
         depth,
         block_default_open,
         open_override,
+        edit.is_active_filter(),
         paste_gate,
         block_size_label.as_deref(),
         |i| block_element_dropdown_label(block.element(i), names, i),
@@ -1329,6 +1330,7 @@ pub(in crate::app) fn draw_foundation_array(
         depth,
         depth == 0,
         open_override,
+        edit.is_active_filter(),
         paste_gate,
         None,
         |i| block_element_dropdown_label(array.element(i), names, i),
@@ -1472,6 +1474,8 @@ pub(in crate::app) fn draw_foundation_block_control(
     default_open: bool,
     // `Some(open)` forces the open-state this frame (Search-fields filter).
     open_override: Option<bool>,
+    // A filtered result can be used as an anchor into the unfiltered editor.
+    show_search_jump: bool,
     // Whether the clipboard can paste here — gates the paste / replace menu
     // items and explains a blocked cross-version paste.
     paste_gate: PasteGate,
@@ -1682,6 +1686,24 @@ pub(in crate::app) fn draw_foundation_block_control(
                             }
                         }
                     });
+                if show_search_jump
+                    && icon_button(
+                        ui,
+                        ButtonIcon::JumpTo,
+                        "Clear search and jump to this block",
+                        true,
+                        Vec2::new(24.0, 22.0),
+                        foundation_jump_cyan(),
+                    )
+                    .clicked()
+                {
+                    ui.data_mut(|data| {
+                        data.insert_temp(
+                            field_search_block_jump_id(view_scope, tag_key),
+                            path_salt.to_owned(),
+                        )
+                    });
+                }
                 // Keep the previous arrow directly beside the selected
                 // reference, with the next arrow following it.
                 if foundation_header_stepper_clicked(ui, "<", has_sel && selected_index > 0) {

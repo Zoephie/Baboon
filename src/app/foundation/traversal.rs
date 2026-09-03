@@ -90,6 +90,21 @@ pub(in crate::app) fn compute_field_filter(tag: &TagFile, query: &str) -> FieldF
     FieldFilter { visible_paths }
 }
 
+/// Per-pane temporary request emitted by a filtered block header. Kept under
+/// the field-edit scope so split views of the same tag cannot consume each
+/// other's jump.
+pub(in crate::app) fn field_search_block_jump_id(
+    view_scope: &str,
+    tag_key: &str,
+) -> egui::Id {
+    egui::Id::new((
+        "field_edit",
+        view_scope,
+        tag_key,
+        "field_search_block_jump",
+    ))
+}
+
 /// Return the exact renderer path of the first field/container label matching
 /// `query`, in the same document order and with the same case-insensitive
 /// substring semantics as "Search fields". Unlike the filter's canonical path

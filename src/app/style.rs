@@ -57,6 +57,35 @@ pub(super) fn foundation_visuals() -> egui::Visuals {
     visuals
 }
 
+/// Draw a single-line input with an unmistakable focused outline. Egui uses
+/// the selection stroke for a focused text edit; keep this stronger treatment
+/// scoped to the compact tag-header inputs so it does not change every widget.
+pub(super) fn foundation_header_text_edit(
+    ui: &mut Ui,
+    edit: egui::TextEdit<'_>,
+) -> egui::Response {
+    ui.scope(|ui| {
+        ui.visuals_mut().selection.stroke = foundation_input_focus_stroke();
+        ui.add(edit)
+    })
+    .inner
+}
+
+pub(super) fn foundation_input_focus_stroke() -> Stroke {
+    foundation_input_focus_stroke_for(is_dark_mode())
+}
+
+fn foundation_input_focus_stroke_for(dark_mode: bool) -> Stroke {
+    Stroke::new(
+        2.0,
+        if dark_mode {
+            Color32::from_rgb(80, 170, 220)
+        } else {
+            Color32::from_rgb(42, 91, 122)
+        },
+    )
+}
+
 /// Named family used for bold headers (egui has no font-weight API — bold is a
 /// separate font). Falls back to the regular family when no bold font is found.
 pub(super) const FOUNDATION_BOLD: &str = "foundation_bold";
@@ -298,6 +327,13 @@ pub(super) fn foundation_block_bar() -> Color32 {
 
 pub(super) fn foundation_block_text() -> Color32 {
     Color32::from_rgb(245, 245, 245)
+}
+
+/// High-visibility navigation accent used by the filtered block jump. Block
+/// headers are mid-gray in both themes, so one bright cyan works cleanly on
+/// each without colliding with the green structural-edit controls.
+pub(super) fn foundation_jump_cyan() -> Color32 {
+    Color32::from_rgb(77, 208, 225)
 }
 
 pub(super) fn foundation_input() -> Color32 {

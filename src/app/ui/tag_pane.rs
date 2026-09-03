@@ -240,6 +240,13 @@ impl Baboon {
             );
         }
 
+        let field_search_block_jump = ctx.data_mut(|data| {
+            let id = field_search_block_jump_id(scope, &key);
+            let request = data.get_temp::<String>(id);
+            data.remove::<String>(id);
+            request
+        });
+
         // Snapshot for undo before a mutating batch. Coalesces continuous edits
         // into one entry; closes the window on frames with no edits.
         // Every deferred op this pane collected, including the kinds the undo
@@ -347,6 +354,11 @@ impl Baboon {
             });
         }
 
+        if field_search_block_jump.is_some() {
+            // Preserve field_search_applied until the next render so clearing
+            // the query produces the normal one-shot restore-defaults pass.
+            kit.field_search.entry(key.clone()).or_default().clear();
+        }
         kit.parsed_tags.insert(key.clone(), doc);
         // These ops are applied *after* the pane has been drawn, so the frame
         // on screen still shows the tag as it was before the edit. egui only
@@ -355,6 +367,11 @@ impl Baboon {
         // element missing from that block's own instance selector, for one.
         if mutated {
             ctx.request_repaint();
+        }
+
+        if let Some(block_path) = field_search_block_jump {
+            self.navigate_to_field(ctx, &key, &block_path);
+            ctx.data_mut(|data| data.insert_temp(jump_target_id(), block_path));
         }
 
         if let Some(key) = bitmap_reimport {

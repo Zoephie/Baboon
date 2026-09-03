@@ -482,7 +482,8 @@ impl Baboon {
                 .field_search
                 .entry(tag_key.to_owned())
                 .or_default();
-            let response = ui.add(
+            let response = foundation_header_text_edit(
+                ui,
                 egui::TextEdit::singleline(query)
                     .hint_text("block or field name")
                     .desired_width(220.0),
@@ -673,7 +674,8 @@ impl Baboon {
             if let Some(keyword) = remove {
                 self.kits[kit_index].keywords.remove(tag_key, &keyword);
             }
-            let resp = ui.add(
+            let resp = foundation_header_text_edit(
+                ui,
                 egui::TextEdit::singleline(&mut self.keyword_input)
                     .hint_text("add keyword")
                     .desired_width(120.0),
