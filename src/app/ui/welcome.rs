@@ -432,7 +432,7 @@ impl Baboon {
                                                 }
                                                 if welcome_icon_button(
                                                     ui,
-                                                    ButtonIcon::Open,
+                                                    ButtonIcon::GitHub,
                                                     "Baboon GitHub",
                                                     text_dark(),
                                                 )
@@ -444,7 +444,7 @@ impl Baboon {
                                                 }
                                                 if welcome_icon_button(
                                                     ui,
-                                                    ButtonIcon::Group,
+                                                    ButtonIcon::HaloMods,
                                                     "Halo Mods Discord",
                                                     text_dark(),
                                                 )
