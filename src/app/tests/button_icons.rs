@@ -7,11 +7,14 @@ use super::*;
 fn button_icon_lookup_uses_expected_assets() {
     let icons = [
         ButtonIcon::Add,
+        ButtonIcon::About,
         ButtonIcon::Browse,
+        ButtonIcon::Cache,
         ButtonIcon::Clear,
         ButtonIcon::Closed,
         ButtonIcon::CopyPath,
         ButtonIcon::Copy,
+        ButtonIcon::Container,
         ButtonIcon::Doc,
         ButtonIcon::Duplicate,
         ButtonIcon::Export,
@@ -23,7 +26,9 @@ fn button_icon_lookup_uses_expected_assets() {
         ButtonIcon::FolderOpen,
         ButtonIcon::Function,
         ButtonIcon::Garbage,
+        ButtonIcon::GitHub,
         ButtonIcon::Group,
+        ButtonIcon::HaloMods,
         ButtonIcon::Import,
         ButtonIcon::InsertRow,
         ButtonIcon::Json,
@@ -42,6 +47,7 @@ fn button_icon_lookup_uses_expected_assets() {
         ButtonIcon::Search,
         ButtonIcon::Settings,
         ButtonIcon::Sort,
+        ButtonIcon::Tag,
         ButtonIcon::WindowMode,
     ];
     for icon in icons {

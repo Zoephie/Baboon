@@ -7,7 +7,9 @@ use super::*;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum ButtonIcon {
     Add,
+    About,
     Browse,
+    Cache,
     Open,
     Import,
     Export,
@@ -15,6 +17,7 @@ pub(super) enum ButtonIcon {
     Closed,
     CopyPath,
     Copy,
+    Container,
     Doc,
     Duplicate,
     Favourite,
@@ -25,7 +28,9 @@ pub(super) enum ButtonIcon {
     SearchBar,
     Function,
     Garbage,
+    GitHub,
     Group,
+    HaloMods,
     InsertRow,
     Json,
     JumpTo,
@@ -40,6 +45,7 @@ pub(super) enum ButtonIcon {
     Save,
     Settings,
     Sort,
+    Tag,
     WindowMode,
     FolderClosed,
     FolderOpen,
@@ -48,7 +54,9 @@ pub(super) enum ButtonIcon {
 pub(super) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
     match icon {
         ButtonIcon::Add => include_str!("../../assets/Button Icons/Add.svg"),
+        ButtonIcon::About => include_str!("../../assets/Button Icons/About.svg"),
         ButtonIcon::Browse => include_str!("../../assets/Button Icons/Browse.svg"),
+        ButtonIcon::Cache => include_str!("../../assets/Button Icons/Cache.svg"),
         ButtonIcon::Open => include_str!("../../assets/Button Icons/Open.svg"),
         ButtonIcon::Import => include_str!("../../assets/Button Icons/Import.svg"),
         ButtonIcon::Export => include_str!("../../assets/Button Icons/Export.svg"),
@@ -56,6 +64,7 @@ pub(super) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::Closed => include_str!("../../assets/Button Icons/Closed.svg"),
         ButtonIcon::CopyPath => include_str!("../../assets/Button Icons/Copy Path.svg"),
         ButtonIcon::Copy => include_str!("../../assets/Button Icons/Copy.svg"),
+        ButtonIcon::Container => include_str!("../../assets/Button Icons/Container.svg"),
         ButtonIcon::Doc => include_str!("../../assets/Button Icons/Doc.svg"),
         ButtonIcon::Duplicate => include_str!("../../assets/Button Icons/Duplicate.svg"),
         ButtonIcon::Favourite => include_str!("../../assets/Button Icons/Favourite.svg"),
@@ -66,7 +75,9 @@ pub(super) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::SearchBar => include_str!("../../assets/Button Icons/Search Bar Icon.svg"),
         ButtonIcon::Function => include_str!("../../assets/Button Icons/Function.svg"),
         ButtonIcon::Garbage => include_str!("../../assets/Button Icons/Garbage.svg"),
+        ButtonIcon::GitHub => include_str!("../../assets/Button Icons/GitHub.svg"),
         ButtonIcon::Group => include_str!("../../assets/Button Icons/Group.svg"),
+        ButtonIcon::HaloMods => include_str!("../../assets/Button Icons/Halo Mods.svg"),
         ButtonIcon::InsertRow => include_str!("../../assets/Button Icons/Insert Row.svg"),
         ButtonIcon::Json => include_str!("../../assets/Button Icons/JSON.svg"),
         ButtonIcon::JumpTo => include_str!("../../assets/Button Icons/Jump To.svg"),
@@ -81,6 +92,7 @@ pub(super) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::Save => include_str!("../../assets/Button Icons/Save.svg"),
         ButtonIcon::Settings => include_str!("../../assets/Button Icons/Settings.svg"),
         ButtonIcon::Sort => include_str!("../../assets/Button Icons/Sort.svg"),
+        ButtonIcon::Tag => include_str!("../../assets/Button Icons/Tag.svg"),
         ButtonIcon::WindowMode => include_str!("../../assets/Button Icons/Window Mode.svg"),
         ButtonIcon::FolderClosed => include_str!("../../assets/Button Icons/Folder - closed.svg"),
         ButtonIcon::FolderOpen => include_str!("../../assets/Button Icons/Folder - open.svg"),
@@ -116,8 +128,11 @@ pub(super) fn icon_text_button(
     label: impl Into<egui::WidgetText>,
     enabled: bool,
 ) -> egui::Response {
-    let image = button_icon_image(ui, icon, text_dark(), 16.0);
-    ui.add_enabled(enabled, egui::Button::image_and_text(image, label))
+    let image = button_icon_image(ui, icon, text_dark(), BUTTON_ICON_SIZE);
+    ui.add_enabled(
+        enabled,
+        egui::Button::image_and_text(image, label).min_size(Vec2::new(0.0, BUTTON_HEIGHT)),
+    )
 }
 
 pub(super) fn icon_button(
@@ -125,16 +140,17 @@ pub(super) fn icon_button(
     icon: ButtonIcon,
     tooltip: &str,
     enabled: bool,
-    size: Vec2,
+    _size: Vec2,
     color: Color32,
 ) -> egui::Response {
+    let size = ICON_BUTTON_SIZE;
     let response = ui.add_enabled(enabled, egui::Button::new("").min_size(size));
     let icon_color = if enabled {
         icon_color(icon, color)
     } else {
         ui.visuals().widgets.noninteractive.fg_stroke.color
     };
-    let icon_size = size.min_elem().min(16.0);
+    let icon_size = BUTTON_ICON_SIZE;
     let icon_rect = egui::Rect::from_center_size(response.rect.center(), Vec2::splat(icon_size));
     paint_button_icon_at(ui, icon, icon_rect, icon_color);
     response.on_hover_text(tooltip)

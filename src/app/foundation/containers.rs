@@ -652,9 +652,9 @@ pub(super) fn inline_mapping_function_from_struct(
             // creating one gives you. Matching creation keeps the two paths
             // showing the same thing. Nothing is written until the user edits.
             if field.is_function_data()
-                && let Ok(function) = TagFunction::parse(&blam_tags::default_function_definition_bytes(
-                    blam_tags::io::Endian::Le,
-                ))
+                && let Ok(function) = TagFunction::parse(
+                    &blam_tags::default_function_definition_bytes(blam_tags::io::Endian::Le),
+                )
             {
                 return Some((FunctionView::from_function(function), data_path));
             }
@@ -976,9 +976,9 @@ pub(in crate::app) fn draw_foundation_block(
         if actions.replace_block {
             // Destructive (clears the block) — route through the confirm modal.
             *edit.block_confirm = Some(BlockConfirm {
-            // Stamped by the pane once this render returns; the field
-            // renderers are shared and have no kit of their own.
-            kit: None,
+                // Stamped by the pane once this render returns; the field
+                // renderers are shared and have no kit of their own.
+                kit: None,
                 tag_key: edit.tag_key.to_owned(),
                 path: path_prefix.to_owned(),
                 kind: BlockOpKind::ReplaceBlock { elements },
@@ -1060,9 +1060,9 @@ pub(in crate::app) fn handle_block_actions(
             set_block_selected_index(ui, edit, path, sel.saturating_sub(1));
         } else {
             *edit.block_confirm = Some(BlockConfirm {
-            // Stamped by the pane once this render returns; the field
-            // renderers are shared and have no kit of their own.
-            kit: None,
+                // Stamped by the pane once this render returns; the field
+                // renderers are shared and have no kit of their own.
+                kit: None,
                 tag_key: edit.tag_key.to_owned(),
                 path: path.to_owned(),
                 kind: BlockOpKind::Delete(sel),
@@ -2070,7 +2070,10 @@ pub(in crate::app) fn end_wheel_gesture(ctx: &egui::Context) {
             if gesture.owner == WheelOwner::Undecided {
                 data.insert_temp(
                     wheel_gesture_id(),
-                    WheelGesture { owner: WheelOwner::Panel, ..gesture },
+                    WheelGesture {
+                        owner: WheelOwner::Panel,
+                        ..gesture
+                    },
                 );
             }
         }
@@ -2089,7 +2092,10 @@ fn claim_wheel_gesture(ctx: &egui::Context, id: egui::Id) -> bool {
             ctx.data_mut(|data| {
                 data.insert_temp(
                     wheel_gesture_id(),
-                    WheelGesture { owner: WheelOwner::Dropdown(id), ..gesture },
+                    WheelGesture {
+                        owner: WheelOwner::Dropdown(id),
+                        ..gesture
+                    },
                 );
             });
             true
@@ -2126,7 +2132,7 @@ pub(in crate::app) fn foundation_header_toggle_cell(
     open: bool,
     enabled: bool,
 ) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(24.0, 22.0), Sense::click());
+    let (rect, response) = ui.allocate_exact_size(ICON_BUTTON_SIZE, Sense::click());
     let fill = if enabled {
         foundation_disclosure_bg()
     } else if is_dark_mode() {
@@ -2195,15 +2201,7 @@ pub(in crate::app) fn foundation_header_stepper_clicked(
         ">" => (ButtonIcon::Right, "Next element"),
         _ => return false,
     };
-    icon_button(
-        ui,
-        icon,
-        tooltip,
-        enabled,
-        Vec2::new(24.0, 22.0),
-        text_dark(),
-    )
-    .clicked()
+    icon_button(ui, icon, tooltip, enabled, ICON_BUTTON_SIZE, text_dark()).clicked()
 }
 
 /// Like [`foundation_header_button_clicked`] but shows `disabled_hint` as a
@@ -2221,14 +2219,14 @@ pub(in crate::app) fn foundation_header_button_clicked_hint(
             icon,
             foundation_icon_button_tooltip(label),
             enabled,
-            Vec2::new(24.0, 22.0),
+            ICON_BUTTON_SIZE,
             text_dark(),
         )
     } else {
         ui.add_enabled(
             enabled,
             egui::Button::new(RichText::new(label).color(text_dark()))
-                .min_size(Vec2::new(54.0, 22.0)),
+                .min_size(Vec2::new(54.0, BUTTON_HEIGHT)),
         )
     };
     match disabled_hint {
@@ -2622,7 +2620,10 @@ mod palette_repro_tests {
         let cases = [
             ("halo3_mcc", "levels/multi/riverworld/riverworld.scenario"),
             ("haloreach_mcc", "levels/multi/35_island/35_island.scenario"),
-            ("halo2_mcc", "scenarios/solo/05a_deltaapproach/05a_deltaapproach.scenario",),
+            (
+                "halo2_mcc",
+                "scenarios/solo/05a_deltaapproach/05a_deltaapproach.scenario",
+            ),
             ("haloce_mcc", "levels/d40/d40.scenario"),
         ];
         let defs = std::path::Path::new("definitions");
@@ -2722,7 +2723,9 @@ mod palette_repro_tests {
             let last = labelled.last().cloned().unwrap_or_default();
             eprintln!("{game}: new label {last:?} ({:?})", applied.status);
             if !last.contains("warthog") {
-                failures.push(format!("{game}: label did not pick up the reference: {last:?}"));
+                failures.push(format!(
+                    "{game}: label did not pick up the reference: {last:?}"
+                ));
             }
         }
         assert!(failures.is_empty(), "{failures:#?}");
@@ -2764,8 +2767,16 @@ mod palette_repro_tests {
         let defs = std::path::Path::new("definitions");
         let names = crate::format::TagNameIndex::default();
         let cases = [
-            ("halo3_mcc", "levels/multi/riverworld/riverworld.scenario", *b"scnr",),
-            ("haloreach_mcc", "levels/multi/35_island/35_island.scenario", *b"scnr",),
+            (
+                "halo3_mcc",
+                "levels/multi/riverworld/riverworld.scenario",
+                *b"scnr",
+            ),
+            (
+                "haloreach_mcc",
+                "levels/multi/35_island/35_island.scenario",
+                *b"scnr",
+            ),
         ];
         let mut failures = Vec::new();
         let mut checked = 0usize;
@@ -2789,7 +2800,10 @@ mod palette_repro_tests {
             collect_block_index_fields(&tag.root(), "", &mut struct_paths, 0);
             struct_paths.sort();
             struct_paths.dedup();
-            eprintln!("{game}: {} struct(s) holding block-index fields", struct_paths.len());
+            eprintln!(
+                "{game}: {} struct(s) holding block-index fields",
+                struct_paths.len()
+            );
 
             for struct_path in struct_paths.iter().take(40) {
                 // Re-read per case: each one mutates the tag.
@@ -2859,9 +2873,21 @@ mod palette_repro_tests {
     fn adding_an_element_grows_the_blocks_own_length() {
         let defs = std::path::Path::new("definitions");
         let cases = [
-            ("halo3_mcc", "levels/multi/riverworld/riverworld.scenario", *b"scnr",),
-            ("haloreach_mcc", "levels/multi/35_island/35_island.scenario", *b"scnr",),
-            ("halo2_mcc", "scenarios/solo/05a_deltaapproach/05a_deltaapproach.scenario", *b"scnr",),
+            (
+                "halo3_mcc",
+                "levels/multi/riverworld/riverworld.scenario",
+                *b"scnr",
+            ),
+            (
+                "haloreach_mcc",
+                "levels/multi/35_island/35_island.scenario",
+                *b"scnr",
+            ),
+            (
+                "halo2_mcc",
+                "scenarios/solo/05a_deltaapproach/05a_deltaapproach.scenario",
+                *b"scnr",
+            ),
             ("haloce_mcc", "levels/d40/d40.scenario", *b"scnr"),
         ];
         let mut failures = Vec::new();
@@ -2932,7 +2958,11 @@ mod palette_repro_tests {
             }
             eprintln!("{game}: checked {checked} block(s), {stale} stale");
         }
-        assert!(failures.is_empty(), "{} failure(s):\n{failures:#?}", failures.len());
+        assert!(
+            failures.is_empty(),
+            "{} failure(s):\n{failures:#?}",
+            failures.len()
+        );
     }
 }
 

@@ -4,6 +4,17 @@
 use super::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// Shared dimensions for ordinary, single-line application buttons.
+pub(super) const BUTTON_HEIGHT: f32 = 24.0;
+pub(super) const BUTTON_ICON_SIZE: f32 = 16.0;
+pub(super) const ICON_BUTTON_SIZE: Vec2 = Vec2::new(24.0, 24.0);
+/// Horizontal inset for text-only buttons. Icon-only buttons use their fixed
+/// 24×24 frame, leaving four points around the 16×16 glyph.
+pub(super) const BUTTON_TEXT_PADDING_X: f32 = 8.0;
+/// Visual separation between an icon and its label: two points of spacing
+/// plus the label's four-point inner inset from the design specification.
+pub(super) const BUTTON_ICON_TEXT_GAP: f32 = 6.0;
+
 pub(super) fn foundation_visuals() -> egui::Visuals {
     let mut visuals = if is_dark_mode() {
         egui::Visuals::dark()
@@ -171,7 +182,12 @@ pub(super) fn foundation_style() -> egui::Style {
         .text_styles
         .insert(TextStyle::Monospace, FontId::proportional(12.0));
     style.spacing.item_spacing = Vec2::new(4.0, 3.0);
-    style.spacing.button_padding = Vec2::new(5.0, 2.0);
+    style.spacing.button_padding = Vec2::new(BUTTON_TEXT_PADDING_X, 2.0);
+    style.spacing.icon_spacing = BUTTON_ICON_TEXT_GAP;
+    // egui uses `interact_size` as the floor for ordinary controls. Keeping
+    // the vertical floor here makes text, icon, and image+text buttons align;
+    // dense custom-painted editor cells continue to use their explicit sizes.
+    style.spacing.interact_size.y = BUTTON_HEIGHT;
     style
 }
 
