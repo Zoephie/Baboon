@@ -546,19 +546,36 @@ fn welcome_icon_button(
 }
 
 fn welcome_recent_icon(ui: &Ui, path: &std::path::Path) -> egui::Image<'static> {
-    if path.is_dir() {
+    let Some(group) = recent_tag_icon_group(path) else {
         return button_icon_image(ui, ButtonIcon::FolderClosed, text_dark(), 16.0);
-    }
-    let group_tag = path
-        .extension()
-        .and_then(|extension| extension.to_str())
-        .and_then(extension_to_group_tag);
-    let group = group_tag
-        .map(format_group_tag)
-        .unwrap_or_else(|| "default".to_owned());
+    };
     egui::Image::from_bytes(
         tag_icon_uri(ui.ctx(), &group),
         get_icon_svg(&group).as_bytes(),
     )
     .fit_to_exact_size(Vec2::splat(16.0))
+}
+
+/// Classify a recent path without touching the filesystem. Welcome rendering
+/// runs every frame, and metadata checks can block on stale network paths or
+/// disconnected drives.
+fn recent_tag_icon_group(path: &std::path::Path) -> Option<String> {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .and_then(extension_to_group_tag)
+        .map(format_group_tag)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn recent_icon_classification_does_not_require_the_path_to_exist() {
+        let missing_tag = std::path::Path::new("Z:/missing/network/path/example.scenario");
+        let missing_folder = std::path::Path::new("Z:/missing/network/path/tags");
+
+        assert_eq!(recent_tag_icon_group(missing_tag).as_deref(), Some("scnr"));
+        assert_eq!(recent_tag_icon_group(missing_folder), None);
+    }
 }
