@@ -109,12 +109,27 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         {
             self.focused = Some(key.clone());
         }
-        egui::ScrollArea::vertical()
-            .id_salt(("tag_tile", tile_id.0))
-            .auto_shrink([false, false])
+        Frame::none()
+            .inner_margin(egui::Margin {
+                left: 10.0,
+                right: 10.0,
+                top: 8.0,
+                bottom: 8.0,
+            })
             .show(ui, |ui| {
-                self.app
-                    .draw_tag_pane(ui, &self.ctx, self.kit_index, &entry, &scope, true);
+                egui::ScrollArea::vertical()
+                    .id_salt(("tag_tile", tile_id.0))
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        self.app.draw_tag_pane(
+                            ui,
+                            &self.ctx,
+                            self.kit_index,
+                            &entry,
+                            &scope,
+                            true,
+                        );
+                    });
             });
         egui_tiles::UiResponse::None
     }

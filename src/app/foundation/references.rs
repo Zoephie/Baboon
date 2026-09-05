@@ -60,7 +60,7 @@ pub(in crate::app) fn draw_tag_reference_catalog_picker_contents(
 ) -> Option<String> {
     let search = ui.add(
         egui::TextEdit::singleline(filter)
-            .hint_text("Search tag names or groups")
+            .hint_text(placeholder_text("Search tag names or groups"))
             .desired_width(f32::INFINITY),
     );
     search.on_hover_text(

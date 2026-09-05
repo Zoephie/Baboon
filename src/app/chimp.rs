@@ -3341,7 +3341,7 @@ impl Baboon {
         ui.add_space(4.0);
         let response = ui.add(
             egui::TextEdit::singleline(&mut self.kits[kit_index].chimp.filter)
-                .hint_text("Search package or container…")
+                .hint_text(placeholder_text("Search package or container…"))
                 .desired_width(f32::INFINITY),
         );
         if response.changed() {
@@ -8905,7 +8905,7 @@ fn draw_chimp_header_sections(
                         ui.add(
                             egui::TextEdit::singleline(&mut document.header_name_filter)
                                 .desired_width(240.0)
-                                .hint_text("substring"),
+                                .hint_text(placeholder_text("substring")),
                         );
                     });
                     // The editor sits above the list rather than inside it: the

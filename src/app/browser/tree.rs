@@ -160,7 +160,7 @@ fn context_menu_icon(label: &str) -> Option<ButtonIcon> {
     }
 }
 
-fn context_menu_separator(ui: &mut Ui) {
+pub(in crate::app) fn context_menu_separator(ui: &mut Ui) {
     ui.add_space(3.0);
     ui.separator();
     ui.add_space(3.0);
@@ -1320,6 +1320,19 @@ pub(in crate::app) fn draw_entry(
     };
     let mut action = open_requested.then(|| BrowserAction::Select(entry.key.clone()));
     response.context_menu(|ui| {
+        if let Some(menu_action) = draw_tag_context_menu_contents(ui, entry, favorite_keys) {
+            action = Some(menu_action);
+        }
+    });
+    action
+}
+
+pub(in crate::app) fn draw_tag_context_menu_contents(
+    ui: &mut Ui,
+    entry: &TagEntry,
+    favorite_keys: Option<&HashSet<String>>,
+) -> Option<BrowserAction> {
+    let mut action = None;
         style_tag_context_menu(ui);
 
         // A cache tag's way out is a conversion, and one tag is the case where
@@ -1546,7 +1559,6 @@ pub(in crate::app) fn draw_entry(
             action = Some(BrowserAction::DumpReferences(entry.key.clone()));
             ui.close_menu();
         }
-    });
     action
 }
 
@@ -1839,7 +1851,8 @@ mod tests {
                         let mut text = String::new();
                         ui.put(
                             rect,
-                            egui::TextEdit::singleline(&mut text).hint_text("(no reference)"),
+                            egui::TextEdit::singleline(&mut text)
+                                .hint_text(placeholder_text("(no reference)")),
                         );
                         let drop =
                             ui.interact(rect, ui.make_persistent_id("test_drop"), Sense::hover());
@@ -2234,7 +2247,7 @@ pub(in crate::app) fn supports_tag_extract_menu(group_tag: u32) -> bool {
         || is_hlsl_include_group(group_tag)
 }
 
-fn supports_tag_geometry_extraction(group_tag: u32) -> bool {
+pub(in crate::app) fn supports_tag_geometry_extraction(group_tag: u32) -> bool {
     matches!(
         group_tag.to_be_bytes().as_slice(),
         b"hlmt" | b"mode" | b"phmo" | b"coll" | b"mod2"
@@ -2245,23 +2258,23 @@ fn supports_tag_geometry_extraction(group_tag: u32) -> bool {
 /// [`supports_tag_geometry_extraction`] because the menu wording differs
 /// — a BSP is level geometry, not a model — and because the two land in
 /// different arms of `extract_geometry_for_entry`.
-fn supports_bsp_geometry_extraction(group_tag: u32) -> bool {
+pub(in crate::app) fn supports_bsp_geometry_extraction(group_tag: u32) -> bool {
     group_tag.to_be_bytes().as_slice() == b"sbsp"
 }
 
 /// A scenario exports every BSP it references, one file each.
-fn supports_scenario_geometry_extraction(group_tag: u32) -> bool {
+pub(in crate::app) fn supports_scenario_geometry_extraction(group_tag: u32) -> bool {
     group_tag.to_be_bytes().as_slice() == b"scnr"
 }
 
 /// A particle_model exports to a `.jmi` manifest plus one JMS per object
 /// it was imported from — not a single file — so it gets its own wording
 /// rather than joining [`supports_tag_geometry_extraction`].
-fn supports_particle_geometry_extraction(group_tag: u32) -> bool {
+pub(in crate::app) fn supports_particle_geometry_extraction(group_tag: u32) -> bool {
     blam_tags::is_particle_model_group(group_tag)
 }
 
-fn supports_tag_import_info_extraction(group_tag: u32) -> bool {
+pub(in crate::app) fn supports_tag_import_info_extraction(group_tag: u32) -> bool {
     matches!(
         group_tag.to_be_bytes().as_slice(),
         b"hlmt" | b"mode" | b"phmo" | b"coll" | b"mod2"

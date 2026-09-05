@@ -727,7 +727,7 @@ impl Baboon {
                         let response = ui.add_enabled(
                             !busy,
                             egui::TextEdit::singleline(&mut dialog.source_input)
-                                .hint_text("Paste a path to a tag or a folder")
+                                .hint_text(placeholder_text("Paste a path to a tag or a folder"))
                                 .desired_width(400.0),
                         );
                         // On leaving the box — which Enter also does — never on
@@ -847,7 +847,7 @@ impl Baboon {
                         let response = ui.add_enabled(
                             !busy,
                             egui::TextEdit::singleline(&mut dialog.destination_rel)
-                                .hint_text("objects/characters/masterchief")
+                                .hint_text(placeholder_text("objects/characters/masterchief"))
                                 .desired_width(440.0),
                         );
                         if response.changed() {
@@ -3739,7 +3739,7 @@ impl Baboon {
                                     .desired_rows(12)
                                     .desired_width(f32::INFINITY)
                                     .font(egui::TextStyle::Monospace)
-                                    .hint_text("paste TSV here (Ctrl+V)"),
+                                    .hint_text(placeholder_text("paste TSV here (Ctrl+V)")),
                             );
                         });
                     ui.horizontal(|ui| {
@@ -3950,7 +3950,7 @@ impl Baboon {
                                 // filled field: the placeholder looked exactly
                                 // like a value someone had already typed, and
                                 // Create sat disabled with no explanation.
-                                .hint_text("e.g. objects/characters/foo/foo")
+                                .hint_text(placeholder_text("e.g. objects/characters/foo/foo"))
                                 .desired_width(440.0),
                         );
                     } else {
@@ -4095,7 +4095,7 @@ impl Baboon {
                     ui.label(RichText::new("Folder").color(subtle_dark()));
                     ui.add(
                         egui::TextEdit::singleline(&mut dialog.folder_rel)
-                            .hint_text("objects/characters/foo (blank = root)")
+                            .hint_text(placeholder_text("objects/characters/foo (blank = root)"))
                             .desired_width(440.0),
                     );
                 });

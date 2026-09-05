@@ -344,7 +344,7 @@ impl Baboon {
             let browser = &mut self.kits[kit_index].model_browser;
             ui.add(
                 egui::TextEdit::singleline(&mut browser.filter)
-                    .hint_text("warthog | ghost, ^objects, _lod$")
+                    .hint_text(placeholder_text("warthog | ghost, ^objects, _lod$"))
                     .desired_width(240.0),
             )
             .on_hover_text(

@@ -217,7 +217,7 @@ pub(super) fn draw_model_preview_panel(
                 if state.show_markers {
                     ui.add(
                         egui::TextEdit::singleline(&mut state.marker_filter)
-                            .hint_text("filter markers…")
+                            .hint_text(placeholder_text("filter markers…"))
                             .desired_width(110.0),
                     );
                 }
@@ -375,7 +375,7 @@ pub(super) fn draw_model_preview_panel(
                         // closes the menu the moment it is clicked.
                         ui.add(
                             egui::TextEdit::singleline(&mut state.animation.filter)
-                                .hint_text("search animations…")
+                                .hint_text(placeholder_text("search animations…"))
                                 .desired_width(140.0),
                         );
                         let filter = state.animation.filter.trim().to_ascii_lowercase();
@@ -546,11 +546,11 @@ pub(super) fn draw_model_preview_panel(
 /// name what they draw.
 pub(in crate::app) fn preview_panel_title(group_tag: u32) -> &'static str {
     match &group_tag.to_be_bytes() {
-        b"coll" => "Collision model",
-        b"phmo" => "Physics model",
+        b"coll" => "Collision Model",
+        b"phmo" => "Physics Model",
         b"sbsp" => "Structure BSP",
-        b"scnr" => "Scenario geometry",
-        _ => "Render model",
+        b"scnr" => "Scenario Geometry",
+        _ => "Render Model",
     }
 }
 

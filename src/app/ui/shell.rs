@@ -1067,7 +1067,7 @@ impl Baboon {
                                     egui::TextEdit::singleline(&mut self.terminal.input)
                                         .desired_width(text_w)
                                         .font(egui::TextStyle::Monospace)
-                                        .hint_text("tool <command> …"),
+                                        .hint_text(placeholder_text("tool <command> …")),
                                 );
                                 if self.terminal.refocus_input && !self.terminal.running {
                                     resp.request_focus();

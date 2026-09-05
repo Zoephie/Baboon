@@ -75,6 +75,12 @@ pub(super) fn foundation_input_focus_stroke() -> Stroke {
     foundation_input_focus_stroke_for(is_dark_mode())
 }
 
+/// Consistent styling for empty text-input prompts without changing egui's
+/// general weak-text color, which is also used by unrelated disabled UI.
+pub(super) fn placeholder_text(text: impl Into<String>) -> RichText {
+    RichText::new(text).color(text_dark().gamma_multiply(0.5))
+}
+
 fn foundation_input_focus_stroke_for(dark_mode: bool) -> Stroke {
     Stroke::new(
         2.0,

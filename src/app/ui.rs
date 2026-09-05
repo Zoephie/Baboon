@@ -443,27 +443,39 @@ impl Baboon {
         // user has misconfigured.
         let offers_sapien = self.kit_offers_scenario_sapien(kit_index);
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Open scenario in:").color(subtle_dark()));
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let tag_test_ready = self.can_launch_scenario_in_tag_test(kit_index, entry);
+            if scenario_launcher_button(
+                ui,
+                "bytes://baboon_app_icons/tag-test.png",
+                include_bytes!("../../assets/App Icons/Tag Test.png"),
+                "TagTest",
+                tag_test_ready,
+            )
+            .on_hover_text("Save if needed, then launch this scenario in tag_test")
+            .clicked()
+            {
+                self.active = kit_index;
+                self.launch_scenario_in_tag_test(&key);
+            }
             if offers_sapien {
                 let sapien_ready = self.can_launch_scenario_in_sapien(kit_index, entry);
-                if launcher_button(ui, self.sapien_icon.as_ref(), "S", sapien_ready)
-                    .on_hover_text("Save if needed, then launch this scenario in Sapien")
-                    .clicked()
+                if scenario_launcher_button(
+                    ui,
+                    "bytes://baboon_app_icons/sapien.png",
+                    include_bytes!("../../assets/App Icons/Sapien.png"),
+                    "Sapien",
+                    sapien_ready,
+                )
+                .on_hover_text("Save if needed, then launch this scenario in Sapien")
+                .clicked()
                 {
                     self.active = kit_index;
                     self.launch_scenario_in_sapien(&key);
                 }
             }
-            let tag_test_ready = self.can_launch_scenario_in_tag_test(kit_index, entry);
-            if launcher_button(ui, self.tag_test_icon.as_ref(), "T", tag_test_ready)
-                .on_hover_text("Save if needed, then launch this scenario in tag_test")
-                .clicked()
-            {
-                self.active = kit_index;
-                self.launch_scenario_in_tag_test(&key);
-            }
+            ui.label(RichText::new("Open scenario in:").color(subtle_dark()));
         });
-        ui.add_space(4.0);
     }
 
     /// "Search fields" bar (Guerilla-style): typing a block or field name
@@ -485,7 +497,7 @@ impl Baboon {
             let response = foundation_header_text_edit(
                 ui,
                 egui::TextEdit::singleline(query)
-                    .hint_text("block or field name")
+                    .hint_text(placeholder_text("block or field name"))
                     .desired_width(220.0),
             );
             let enter = ui.input(|input| input.key_pressed(egui::Key::Enter));
@@ -659,35 +671,139 @@ impl Baboon {
     /// Keywords live in an external sidecar, not the tag binary.
     fn draw_keyword_bar(&mut self, ui: &mut Ui, kit_index: usize, tag_key: &str) {
         ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
             ui.label(RichText::new("Keywords:").color(subtle_dark()));
             let existing = self.kits[kit_index].keywords.keywords(tag_key).to_vec();
             let mut remove: Option<String> = None;
             for keyword in &existing {
-                if ui
-                    .small_button(format!("{keyword}  ×"))
-                    .on_hover_text("Remove keyword")
-                    .clicked()
-                {
+                if keyword_pill(ui, tag_key, keyword) {
                     remove = Some(keyword.clone());
                 }
             }
             if let Some(keyword) = remove {
                 self.kits[kit_index].keywords.remove(tag_key, &keyword);
             }
-            let resp = foundation_header_text_edit(
-                ui,
-                egui::TextEdit::singleline(&mut self.keyword_input)
-                    .hint_text("add keyword")
-                    .desired_width(120.0),
-            );
+            let (resp, add_clicked) = Frame::none()
+                .fill(foundation_input())
+                .rounding(egui::Rounding::same(BUTTON_HEIGHT / 2.0))
+                .inner_margin(egui::Margin::same(2.0))
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.x = 0.0;
+                    ui.spacing_mut().interact_size.y = 20.0;
+                    ui.set_height(20.0);
+                    ui.horizontal(|ui| {
+                        let resp = foundation_header_text_edit(
+                            ui,
+                            egui::TextEdit::singleline(&mut self.keyword_input)
+                                .hint_text(placeholder_text("add keyword"))
+                                .desired_width(120.0)
+                                .frame(false),
+                        );
+                        let add_response = ui
+                            .scope(|ui| {
+                                ui.spacing_mut().interact_size = Vec2::splat(20.0);
+                                ui.add(
+                                    egui::Button::new("")
+                                        .min_size(Vec2::splat(20.0))
+                                        .rounding(egui::Rounding::same(10.0)),
+                                )
+                            })
+                            .inner;
+                        let add_icon_rect = egui::Rect::from_center_size(
+                            add_response.rect.center(),
+                            Vec2::splat(BUTTON_ICON_SIZE),
+                        );
+                        paint_button_icon_at(ui, ButtonIcon::Add, add_icon_rect, text_dark());
+                        let add_clicked = add_response.on_hover_text("Add keyword").clicked();
+                        (resp, add_clicked)
+                    })
+                    .inner
+                })
+                .inner;
             let submitted = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if (ui.button("Add").clicked() || submitted) && !self.keyword_input.trim().is_empty() {
+            if (add_clicked || submitted) && !self.keyword_input.trim().is_empty() {
                 self.kits[kit_index].keywords.add(tag_key, &self.keyword_input);
                 self.keyword_input.clear();
             }
         });
-        ui.add_space(4.0);
     }
+}
+
+/// Scenario-header launcher using Baboon's bundled application artwork rather
+/// than the executable icon discovered for the global tools toolbar.
+fn scenario_launcher_button(
+    ui: &mut Ui,
+    image_uri: &'static str,
+    image_bytes: &'static [u8],
+    label: &str,
+    enabled: bool,
+) -> egui::Response {
+    let image = egui::Image::from_bytes(image_uri, image_bytes)
+        .fit_to_exact_size(Vec2::splat(BUTTON_ICON_SIZE));
+    ui.add_enabled(
+        enabled,
+        egui::Button::image_and_text(image, label).min_size(Vec2::new(0.0, BUTTON_HEIGHT)),
+    )
+}
+
+fn keyword_pill(ui: &mut Ui, tag_key: &str, keyword: &str) -> bool {
+    const TEXT_PADDING: f32 = 8.0;
+    const REMOVE_WIDTH: f32 = 20.0;
+    let font_id = egui::TextStyle::Button.resolve(ui.style());
+    let galley = ui
+        .painter()
+        .layout_no_wrap(keyword.to_owned(), font_id, text_dark());
+    let width = TEXT_PADDING + galley.size().x + REMOVE_WIDTH + 4.0;
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(width, BUTTON_HEIGHT),
+        Sense::hover(),
+    );
+    let background = editor_bg();
+    let target = if is_dark_mode() {
+        Color32::WHITE
+    } else {
+        Color32::BLACK
+    };
+    let blend = |base: u8, overlay: u8| {
+        (base as f32 + (overlay as f32 - base as f32) * 0.05).round() as u8
+    };
+    let fill = Color32::from_rgb(
+        blend(background.r(), target.r()),
+        blend(background.g(), target.g()),
+        blend(background.b(), target.b()),
+    );
+    ui.painter().rect_filled(
+        rect,
+        egui::Rounding::same(BUTTON_HEIGHT / 2.0),
+        fill,
+    );
+    let text_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + TEXT_PADDING, rect.top()),
+        egui::pos2(rect.right() - REMOVE_WIDTH, rect.bottom()),
+    );
+    let text_pos = egui::Align2::LEFT_CENTER
+        .align_size_within_rect(galley.size(), text_rect)
+        .min;
+    ui.painter().galley(text_pos, galley, text_dark());
+
+    let remove_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.right() - REMOVE_WIDTH, rect.top()),
+        rect.right_bottom(),
+    );
+    let remove = ui
+        .interact(
+            remove_rect,
+            ui.make_persistent_id(("keyword_remove", tag_key, keyword)),
+            Sense::click(),
+        )
+        .on_hover_text("Remove keyword");
+    let stroke = ui.style().interact(&remove).fg_stroke;
+    let cross = egui::Rect::from_center_size(remove_rect.center(), Vec2::splat(7.0));
+    ui.painter()
+        .line_segment([cross.left_top(), cross.right_bottom()], stroke);
+    ui.painter()
+        .line_segment([cross.right_top(), cross.left_bottom()], stroke);
+    remove.clicked()
 }
 
 impl eframe::App for Baboon {

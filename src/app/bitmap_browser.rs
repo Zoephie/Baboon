@@ -313,7 +313,7 @@ impl Baboon {
             let browser = &mut self.kits[kit_index].bitmap_browser;
             ui.add(
                 egui::TextEdit::singleline(&mut browser.filter)
-                    .hint_text("grass | metal, ^ui, _bump$")
+                    .hint_text(placeholder_text("grass | metal, ^ui, _bump$"))
                     .desired_width(240.0),
             )
             .on_hover_text(

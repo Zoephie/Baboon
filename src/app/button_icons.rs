@@ -18,9 +18,11 @@ pub(super) enum ButtonIcon {
     CopyPath,
     Copy,
     Container,
+    DefaultTag,
     Doc,
     Duplicate,
     Favourite,
+    FavouriteFilled,
     FileExplorer,
     Filter,
     Find,
@@ -40,12 +42,14 @@ pub(super) enum ButtonIcon {
     Opened,
     Other,
     Remove,
+    RenderModel,
     Rename,
     Right,
     Save,
     Settings,
     Sort,
     Tag,
+    Bitmap,
     WindowMode,
     FolderClosed,
     FolderOpen,
@@ -65,9 +69,13 @@ pub(super) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::CopyPath => include_str!("../../assets/Button Icons/Copy Path.svg"),
         ButtonIcon::Copy => include_str!("../../assets/Button Icons/Copy.svg"),
         ButtonIcon::Container => include_str!("../../assets/Button Icons/Container.svg"),
+        ButtonIcon::DefaultTag => include_str!("../../assets/icons/default_tag.svg"),
         ButtonIcon::Doc => include_str!("../../assets/Button Icons/Doc.svg"),
         ButtonIcon::Duplicate => include_str!("../../assets/Button Icons/Duplicate.svg"),
         ButtonIcon::Favourite => include_str!("../../assets/Button Icons/Favourite.svg"),
+        ButtonIcon::FavouriteFilled => {
+            include_str!("../../assets/Button Icons/Favourite Filled.svg")
+        }
         ButtonIcon::FileExplorer => include_str!("../../assets/Button Icons/File Explorer.svg"),
         ButtonIcon::Filter => include_str!("../../assets/Button Icons/Filter.svg"),
         ButtonIcon::Find => include_str!("../../assets/Button Icons/Find.svg"),
@@ -87,12 +95,20 @@ pub(super) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::Opened => include_str!("../../assets/Button Icons/Opened.svg"),
         ButtonIcon::Other => include_str!("../../assets/Button Icons/Other.svg"),
         ButtonIcon::Remove => include_str!("../../assets/Button Icons/Remove.svg"),
+        ButtonIcon::RenderModel => include_str!("../../assets/icons/render_model.svg"),
         ButtonIcon::Rename => include_str!("../../assets/Button Icons/Rename.svg"),
         ButtonIcon::Right => include_str!("../../assets/Button Icons/Right.svg"),
         ButtonIcon::Save => include_str!("../../assets/Button Icons/Save.svg"),
         ButtonIcon::Settings => include_str!("../../assets/Button Icons/Settings.svg"),
         ButtonIcon::Sort => include_str!("../../assets/Button Icons/Sort.svg"),
         ButtonIcon::Tag => include_str!("../../assets/Button Icons/Tag.svg"),
+        ButtonIcon::Bitmap => {
+            if is_dark_mode() {
+                include_str!("../../assets/icons/bitmap.svg")
+            } else {
+                include_str!("../../assets/icons/bitmap_lightmode.svg")
+            }
+        }
         ButtonIcon::WindowMode => include_str!("../../assets/Button Icons/Window Mode.svg"),
         ButtonIcon::FolderClosed => include_str!("../../assets/Button Icons/Folder - closed.svg"),
         ButtonIcon::FolderOpen => include_str!("../../assets/Button Icons/Folder - open.svg"),
@@ -180,7 +196,13 @@ fn icon_color(icon: ButtonIcon, fallback: Color32) -> Color32 {
 }
 
 fn colorized_icon_svg(icon: ButtonIcon, color: Color32) -> String {
-    button_icon_svg(icon).replace("currentColor", &svg_color(color))
+    let color = svg_color(color);
+    button_icon_svg(icon)
+        .replace("currentColor", &color)
+        .replace("#A3C0C2", &color)
+        .replace("#5CCC33", &color)
+        .replace("white", &color)
+        .replace("black", &color)
 }
 
 fn button_icon_uri(ctx: &egui::Context, icon: ButtonIcon, color: Color32) -> String {
