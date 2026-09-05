@@ -145,7 +145,7 @@ impl Baboon {
                                 )
                                 .desired_width(320.0)
                                 .font(egui::TextStyle::Monospace)
-                                .hint_text("objects\\weapons\\rifle\\assault_rifle"),
+                                .hint_text(placeholder_text("objects\\weapons\\rifle\\assault_rifle")),
                             );
                             if ui.small_button("...").clicked() {
                                 browse_clicked = true;

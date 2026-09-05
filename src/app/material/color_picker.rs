@@ -948,7 +948,7 @@ pub(in crate::app) fn draw_editable_pc_hex(ui: &mut Ui, color: &mut MaterialColo
         let response = ui.add_sized(
             Vec2::new(118.0, 20.0),
             egui::TextEdit::singleline(&mut color.pc_hex_input)
-                .hint_text("#RRGGBB")
+                .hint_text(placeholder_text("#RRGGBB"))
                 .desired_width(118.0),
         );
         if !response.has_focus() && color.pc_hex_input != current_hex {

@@ -143,7 +143,7 @@ impl Baboon {
         let search_changed = ui
             .add(
                 egui::TextEdit::singleline(&mut self.script_docs.search)
-                    .hint_text("Search names, signatures, descriptions, types, or examples...")
+                    .hint_text(placeholder_text("Search names, signatures, descriptions, types, or examples..."))
                     .desired_width(f32::INFINITY),
             )
             .changed();
@@ -299,7 +299,7 @@ fn draw_tag_compat_body(ui: &mut Ui, state: &mut TagCompatUiState) -> Option<Tag
         ui.separator();
         ui.add(
             egui::TextEdit::singleline(&mut state.search)
-                .hint_text("Filter groups")
+                .hint_text(placeholder_text("Filter groups"))
                 .desired_width(180.0),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

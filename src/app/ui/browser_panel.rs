@@ -104,7 +104,7 @@ impl Baboon {
                     paint_button_icon_at(ui, ButtonIcon::SearchBar, icon_rect, text_dark());
                     ui.add(
                         egui::TextEdit::singleline(&mut kit.filter)
-                            .hint_text("search tags")
+                            .hint_text(placeholder_text("search tags"))
                             .desired_width(f32::INFINITY),
                     );
                 });

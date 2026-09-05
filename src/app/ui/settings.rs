@@ -383,7 +383,7 @@ impl Baboon {
                         changed = ui
                             .add(
                                 egui::TextEdit::singleline(&mut input)
-                                    .hint_text(hint)
+                                    .hint_text(placeholder_text(hint))
                                     .desired_width(304.0),
                             )
                             .changed();
@@ -523,7 +523,7 @@ impl Baboon {
                         ui.add(
                             egui::TextEdit::singleline(&mut draft.name)
                                 .desired_width(380.0)
-                                .hint_text("Project display name"),
+                                .hint_text(placeholder_text("Project display name")),
                         );
                         ui.end_row();
 
@@ -549,7 +549,7 @@ impl Baboon {
                             ui.add(
                                 egui::TextEdit::singleline(&mut draft.root_input)
                                     .desired_width(300.0)
-                                    .hint_text("Folder containing tags and data"),
+                                    .hint_text(placeholder_text("Folder containing tags and data")),
                             );
                             if ui.button("Browse...").clicked()
                                 && let Some(path) = rfd::FileDialog::new()
@@ -954,7 +954,7 @@ impl Baboon {
             let path_response = ui.add(
                 egui::TextEdit::singleline(&mut self.chimp_usmap_path_input)
                     .desired_width(360.0)
-                    .hint_text("Bundled Campaign Evolved USMAP"),
+                    .hint_text(placeholder_text("Bundled Campaign Evolved USMAP")),
             );
             if path_response.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
                 self.commit_chimp_usmap_path_input(ui.ctx().clone());

@@ -1255,7 +1255,7 @@ pub(in crate::app) fn draw_shader_editable_value(
                     egui::TextEdit::singleline(&mut draft.text)
                         .id(id)
                         .desired_width(text_rect.width())
-                        .hint_text("(no reference)")
+                        .hint_text(placeholder_text("(no reference)"))
                         .text_color(text_color)
                         .font(egui::TextStyle::Monospace),
                 );

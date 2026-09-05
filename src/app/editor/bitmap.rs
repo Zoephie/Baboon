@@ -14,7 +14,9 @@ pub(in crate::app) fn draw_bitmap_tag(
     expert_mode: bool,
     edit: &mut FieldEditContext<'_>,
 ) {
-    draw_tag_metadata(ui, tag, entry, names);
+    if expert_mode {
+        draw_tag_metadata(ui, tag, entry, names);
+    }
     ui.add_space(6.0);
     ui.horizontal(|ui| {
         let can_reimport = bitmap_reimport_data_path(entry, edit.tags_root).is_some();
@@ -26,11 +28,13 @@ pub(in crate::app) fn draw_bitmap_tag(
             *edit.bitmap_reimport = Some(entry.key.clone());
         }
         ui.separator();
-        ui.selectable_value(&mut preview.active_tab, BitmapPanelTab::Fields, "Fields");
-        ui.selectable_value(
+        draw_preview_panel_toggle(
+            ui,
             &mut preview.active_tab,
+            BitmapPanelTab::Fields,
             BitmapPanelTab::Texture,
-            "Texture preview",
+            "Texture Preview",
+            ButtonIcon::Bitmap,
         );
     });
     ui.separator();

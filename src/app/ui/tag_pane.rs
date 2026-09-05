@@ -3,6 +3,13 @@
 
 use super::*;
 
+const TAG_HEADER_ICON_SIZE: f32 = 32.0;
+const TAG_HEADER_WIDE_BREAKPOINT: f32 = 600.0;
+const TAG_HEADER_KEYWORDS_INLINE_BREAKPOINT: f32 = 1160.0;
+const TAG_HEADER_ACTIONS_SINGLE_ROW_BREAKPOINT: f32 = 1180.0;
+const TAG_HEADER_COMMON_ACTIONS_WIDTH: f32 = 205.0;
+const TAG_HEADER_DYNAMIC_ACTIONS_WIDTH: f32 = 285.0;
+
 impl Baboon {
     /// Renders one open tag as a self-contained pane.
     ///
@@ -28,11 +35,7 @@ impl Baboon {
         show_keyword_bar: bool,
     ) {
         let key = entry.key.clone();
-        draw_entry_header(ui, entry, &self.kits[kit_index].names);
-        self.draw_scenario_launcher_buttons(ui, kit_index, entry);
-        if show_keyword_bar {
-            self.draw_keyword_bar(ui, kit_index, &key);
-        }
+        self.draw_responsive_tag_header(ui, ctx, kit_index, entry, show_keyword_bar);
 
         // "Search fields" collapses the editor to matching blocks.
         // Not offered for shader/sound tags (their own surfaces).
@@ -391,5 +394,372 @@ impl Baboon {
         self.maybe_request_model_overlays(kit_index, &key, ctx);
         self.maybe_request_model_animations(kit_index, &key, ctx);
         self.maybe_request_model_animation_decode(kit_index, &key, ctx);
+    }
+
+    fn draw_responsive_tag_header(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &egui::Context,
+        kit_index: usize,
+        entry: &TagEntry,
+        show_keyword_bar: bool,
+    ) {
+        let available = ui.available_width();
+        let wide = available >= TAG_HEADER_WIDE_BREAKPOINT;
+        let keywords_inline = available >= TAG_HEADER_KEYWORDS_INLINE_BREAKPOINT;
+        let actions_single_row = available >= TAG_HEADER_ACTIONS_SINGLE_ROW_BREAKPOINT;
+        let has_dynamic_actions = entry.group_tag == u32::from_be_bytes(*b"scnr");
+        let actions_stacked = has_dynamic_actions && !actions_single_row;
+        let action_width = if has_dynamic_actions {
+            if actions_stacked {
+                TAG_HEADER_DYNAMIC_ACTIONS_WIDTH
+            } else {
+                TAG_HEADER_DYNAMIC_ACTIONS_WIDTH + 20.0 + TAG_HEADER_COMMON_ACTIONS_WIDTH
+            }
+        } else {
+            TAG_HEADER_COMMON_ACTIONS_WIDTH
+        };
+        let left_width = if wide {
+            (available - action_width - 20.0).max(200.0)
+        } else {
+            available
+        };
+        let title_height = if self.expert_mode { 48.0 } else { TAG_HEADER_ICON_SIZE };
+        let left_height = if !keywords_inline && show_keyword_bar {
+            title_height + 10.0 + BUTTON_HEIGHT
+        } else {
+            title_height.max(BUTTON_HEIGHT)
+        };
+        let key = entry.key.clone();
+        let (breadcrumbs, title) = tag_header_path_parts(&entry.display_path);
+
+        ui.add_space(10.0);
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 20.0;
+            ui.allocate_ui_with_layout(
+                Vec2::new(left_width, left_height),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                ui.spacing_mut().item_spacing.y = 10.0;
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 20.0;
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 10.0;
+                        let (icon_rect, _) = ui.allocate_exact_size(
+                            Vec2::splat(TAG_HEADER_ICON_SIZE),
+                            Sense::hover(),
+                        );
+                        paint_tag_icon_at(ui, Some(entry.group_tag), icon_rect);
+
+                        ui.vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 2.0;
+                            ui.label(
+                                RichText::new(breadcrumbs)
+                                    .size(12.0)
+                                    .color(subtle_dark()),
+                            );
+                            ui.label(
+                                RichText::new(title).size(16.0).strong().color(text_dark()),
+                            );
+                            if self.expert_mode {
+                                ui.label(
+                                    RichText::new(group_label(
+                                        &self.kits[kit_index].names,
+                                        entry.group_tag,
+                                    ))
+                                    .size(11.0)
+                                    .color(subtle_dark()),
+                                );
+                            }
+                        });
+                    });
+
+                    if keywords_inline && show_keyword_bar {
+                        self.draw_keyword_bar(ui, kit_index, &key);
+                    }
+                });
+                if !keywords_inline && show_keyword_bar {
+                    self.draw_keyword_bar(ui, kit_index, &key);
+                }
+                },
+            );
+
+            if wide {
+                let action_height = if actions_stacked {
+                    BUTTON_HEIGHT * 2.0 + 8.0
+                } else {
+                    BUTTON_HEIGHT
+                };
+                ui.allocate_ui_with_layout(
+                    Vec2::new(ui.available_width(), action_height),
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| {
+                        ui.set_height(action_height);
+                        if actions_stacked {
+                            ui.vertical(|ui| {
+                                ui.set_height(action_height);
+                                ui.spacing_mut().item_spacing.y = 8.0;
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| self.draw_scenario_launcher_buttons(ui, kit_index, entry),
+                                );
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        self.draw_tag_header_common_actions(
+                                            ui, ctx, kit_index, entry,
+                                        );
+                                    },
+                                );
+                            });
+                        } else {
+                            self.draw_tag_header_common_actions(ui, ctx, kit_index, entry);
+                            if has_dynamic_actions {
+                                self.draw_scenario_launcher_buttons(ui, kit_index, entry);
+                            }
+                        }
+                    },
+                );
+            }
+        });
+
+        if !wide {
+            if entry.group_tag == u32::from_be_bytes(*b"scnr") {
+                ui.allocate_ui_with_layout(
+                    Vec2::new(ui.available_width(), BUTTON_HEIGHT),
+                    egui::Layout::right_to_left(egui::Align::Center),
+                    |ui| self.draw_scenario_launcher_buttons(ui, kit_index, entry),
+                );
+                ui.add_space(8.0);
+            }
+            ui.allocate_ui_with_layout(
+                Vec2::new(ui.available_width(), BUTTON_HEIGHT),
+                egui::Layout::right_to_left(egui::Align::Center),
+                |ui| self.draw_tag_header_common_actions(ui, ctx, kit_index, entry),
+            );
+        }
+        ui.add_space(20.0);
+        ui.separator();
+    }
+
+    fn draw_tag_header_common_actions(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &egui::Context,
+        kit_index: usize,
+        entry: &TagEntry,
+    ) {
+        let key = entry.key.clone();
+        let is_favorite = self.kits[kit_index]
+            .active_favorite_entries
+            .iter()
+            .any(|favorite| favorite.key == key);
+        let favorite_enabled = matches!(entry.location, TagEntryLocation::LooseFile(_));
+        let mut action = None;
+
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            let menu = ui.menu_button("   ", |ui| {
+                style_tag_context_menu(ui);
+                if matches!(&entry.location, TagEntryLocation::Monolithic { .. })
+                    && context_menu_button(ui, "Import into editing kit...").clicked()
+                {
+                    action = Some(BrowserAction::ImportCacheTagIntoKit { key: key.clone() });
+                    ui.close_menu();
+                }
+                let can_rename = supports_rename_menu(entry);
+                if supports_rename_menu(entry)
+                    && context_menu_button(ui, "Rename").clicked()
+                {
+                    action = Some(BrowserAction::RenameTag(key.clone()));
+                    ui.close_menu();
+                }
+                if supports_duplicate_menu(entry)
+                    && context_menu_button(ui, "Duplicate").clicked()
+                {
+                    action = Some(BrowserAction::DuplicateTag(key.clone()));
+                    ui.close_menu();
+                }
+                let delete_enabled = supports_delete_menu(
+                    entry,
+                    browser_deletable_keys(ui).as_deref(),
+                );
+                if ui
+                    .add_enabled_ui(delete_enabled, |ui| context_menu_button(ui, "Delete"))
+                    .inner
+                    .clicked()
+                {
+                    action = Some(BrowserAction::DeleteTag(key.clone()));
+                    ui.close_menu();
+                }
+                if ui
+                    .add_enabled_ui(can_rename, |ui| context_menu_button(ui, "Move"))
+                    .inner
+                    .clicked()
+                {
+                    action = Some(BrowserAction::MoveTag(key.clone()));
+                    ui.close_menu();
+                }
+                if supports_tag_extract_menu(entry.group_tag) {
+                    ui.menu_button("Extract", |ui| {
+                        if supports_tag_geometry_extraction(entry.group_tag)
+                            && context_menu_button(ui, "Extract model geometry").clicked()
+                        {
+                            action = Some(BrowserAction::ExtractGeometry(key.clone()));
+                            ui.close_menu();
+                        }
+                        if supports_bsp_geometry_extraction(entry.group_tag)
+                            && context_menu_button(ui, "Extract BSP geometry").clicked()
+                        {
+                            action = Some(BrowserAction::ExtractGeometry(key.clone()));
+                            ui.close_menu();
+                        }
+                        if supports_scenario_geometry_extraction(entry.group_tag)
+                            && context_menu_button(
+                                ui,
+                                "Extract level geometry (one file per BSP)",
+                            )
+                            .clicked()
+                        {
+                            action = Some(BrowserAction::ExtractGeometry(key.clone()));
+                            ui.close_menu();
+                        }
+                        if supports_particle_geometry_extraction(entry.group_tag)
+                            && context_menu_button(
+                                ui,
+                                "Extract particle geometry (JMI + one JMS per object)",
+                            )
+                            .clicked()
+                        {
+                            action = Some(BrowserAction::ExtractGeometry(key.clone()));
+                            ui.close_menu();
+                        }
+                        if supports_animation_extraction(entry.group_tag)
+                            && context_menu_button(ui, "Extract animations").clicked()
+                        {
+                            action = Some(BrowserAction::ExtractAnimation(key.clone()));
+                            ui.close_menu();
+                        }
+                        if supports_tag_import_info_extraction(entry.group_tag)
+                            && context_menu_button(ui, "Extract import-info").clicked()
+                        {
+                            action = Some(BrowserAction::ExtractImportInfo(key.clone()));
+                            ui.close_menu();
+                        }
+                        if is_bitmap_group(entry.group_tag)
+                            && context_menu_button(ui, "Extract bitmap images...").clicked()
+                        {
+                            action = Some(BrowserAction::ExtractBitmap(key.clone()));
+                            ui.close_menu();
+                        }
+                        if is_material_shader_group(entry.group_tag)
+                            && context_menu_button(ui, "Extract source shaders...").clicked()
+                        {
+                            action = Some(BrowserAction::ExtractMaterialShaderSources(key.clone()));
+                            ui.close_menu();
+                        }
+                        if is_hlsl_include_group(entry.group_tag)
+                            && context_menu_button(ui, "Extract HLSL include...").clicked()
+                        {
+                            action = Some(BrowserAction::ExtractHlslIncludeSource(key.clone()));
+                            ui.close_menu();
+                        }
+                    });
+                }
+                let campaign_evolved = self.kits[kit_index]
+                    .source
+                    .as_ref()
+                    .and_then(|source| source.game.as_deref())
+                    == Some(CAMPAIGN_EVOLVED_GAME);
+                let scenario_scripts = is_scenario_group(entry.group_tag) && campaign_evolved;
+                if is_embedded_tag_entry(entry) || scenario_scripts {
+                    context_menu_separator(ui);
+                    if is_embedded_tag_entry(entry)
+                        && context_menu_button(ui, "Extract raw tag...").clicked()
+                    {
+                        action = Some(BrowserAction::ExtractRaw(key.clone()));
+                        ui.close_menu();
+                    }
+                    if scenario_scripts
+                        && context_menu_button(ui, "Extract scripts...").clicked()
+                    {
+                        action = Some(BrowserAction::ExtractScenarioScripts(key.clone()));
+                        ui.close_menu();
+                    }
+                    if scenario_scripts
+                        && context_menu_button(ui, "Import scripts...").clicked()
+                    {
+                        action = Some(BrowserAction::ImportScenarioScripts(key.clone()));
+                        ui.close_menu();
+                    }
+                }
+                context_menu_separator(ui);
+                if context_menu_button(ui, "Open with File Explorer").clicked() {
+                    action = Some(BrowserAction::OpenInExplorer(key.clone()));
+                    ui.close_menu();
+                }
+                if context_menu_button(ui, "Copy Tag Path").clicked() {
+                    action = Some(BrowserAction::CopyTagName(key.clone()));
+                    ui.close_menu();
+                }
+                if context_menu_button(ui, "Find Tag References...").clicked() {
+                    action = Some(BrowserAction::FindReferences(key.clone()));
+                    ui.close_menu();
+                }
+                if context_menu_button(ui, "Explore references...").clicked() {
+                    action = Some(BrowserAction::ExploreReferences(key.clone()));
+                    ui.close_menu();
+                }
+                context_menu_separator(ui);
+                if context_menu_button(ui, "Dump Tag to JSON...").clicked() {
+                    action = Some(BrowserAction::DumpJson(key.clone()));
+                    ui.close_menu();
+                }
+                if context_menu_button(ui, "Dump Tag References...").clicked() {
+                    action = Some(BrowserAction::DumpReferences(key.clone()));
+                    ui.close_menu();
+                }
+            });
+            let icon_rect = egui::Rect::from_center_size(
+                menu.response.rect.center(),
+                Vec2::splat(BUTTON_ICON_SIZE),
+            );
+            paint_button_icon_at(ui, ButtonIcon::Other, icon_rect, text_dark());
+            menu.response.on_hover_text("Other tag actions");
+
+            let favorite_label = if is_favorite { "Favorited" } else { "Favorite" };
+            let favorite_icon = if is_favorite {
+                ButtonIcon::FavouriteFilled
+            } else {
+                ButtonIcon::Favourite
+            };
+            if icon_text_button(ui, favorite_icon, favorite_label, favorite_enabled)
+                .on_disabled_hover_text("Only loose editing-kit tags can be favorited")
+                .clicked()
+            {
+                action = Some(BrowserAction::ToggleFavorite(key.clone()));
+            }
+            if icon_text_button(ui, ButtonIcon::Find, "Find", true).clicked() {
+                self.active = kit_index;
+                self.kits[kit_index].selected_key = Some(key.clone());
+                self.find.within = FindWithin::CurrentTag;
+                self.find.open = true;
+                self.find.focus_query = true;
+            }
+        });
+
+        if let Some(action) = action {
+            self.active = kit_index;
+            self.handle_browser_action(action, ctx.clone());
+        }
+    }
+
+}
+
+fn tag_header_path_parts(display_path: &str) -> (String, String) {
+    let normalized = display_path.replace('\\', "/");
+    match normalized.rsplit_once('/') {
+        Some((parent, title)) => (parent.replace('/', "  ›  "), title.to_owned()),
+        None => (String::new(), normalized),
     }
 }

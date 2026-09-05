@@ -20,18 +20,6 @@ use super::sound_extract::{
     ExtractItem, ExtractRequest, ExtractSource, reimport_base_dir_lang, sanitize_component,
 };
 
-pub(super) fn draw_entry_header(ui: &mut Ui, entry: &TagEntry, names: &TagNameIndex) {
-    ui.heading(RichText::new(&entry.display_path).color(text_dark()));
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("Group:").color(subtle_dark()));
-        ui.monospace(RichText::new(group_label(names, entry.group_tag)).color(text_dark()));
-        if let Some(name) = &entry.group_name {
-            ui.label(RichText::new(name).color(subtle_dark()));
-        }
-    });
-    ui.separator();
-}
-
 pub(super) fn draw_tag(
     ui: &mut Ui,
     tag: &TagFile,
@@ -52,7 +40,9 @@ pub(super) fn draw_tag(
         is_material_tag(entry) || is_material_shader_tag(entry) || is_shader_tag(entry);
     let is_model = is_previewable_geometry_group(entry.group_tag, names);
 
-    draw_tag_metadata(ui, tag, entry, names);
+    if expert_mode {
+        draw_tag_metadata(ui, tag, entry, names);
+    }
     if !is_object_family {
         draw_object_model_summary(ui, tag, entry, names, edit);
     }
@@ -109,18 +99,100 @@ pub(super) fn draw_tag(
 }
 
 fn draw_model_tag_panel_tabs(ui: &mut Ui, model_preview: &mut ModelPreviewState, group_tag: u32) {
+    draw_preview_panel_toggle(
+        ui,
+        &mut model_preview.active_tab,
+        ModelTagPanelTab::Fields,
+        ModelTagPanelTab::RenderModel,
+        preview_panel_title(group_tag),
+        ButtonIcon::RenderModel,
+    );
+}
+
+pub(in crate::app) fn draw_preview_panel_toggle<T: Copy + PartialEq>(
+    ui: &mut Ui,
+    active: &mut T,
+    fields: T,
+    preview: T,
+    preview_label: &str,
+    preview_icon: ButtonIcon,
+) {
     ui.horizontal(|ui| {
-        ui.selectable_value(
-            &mut model_preview.active_tab,
-            ModelTagPanelTab::Fields,
-            "Fields",
-        );
-        ui.selectable_value(
-            &mut model_preview.active_tab,
-            ModelTagPanelTab::RenderModel,
-            preview_panel_title(group_tag),
-        );
+        ui.spacing_mut().item_spacing.x = 0.0;
+        if view_tab_button(
+            ui,
+            ButtonIcon::DefaultTag,
+            "Tag Fields",
+            *active == fields,
+        )
+        .clicked()
+        {
+            *active = fields;
+        }
+        if view_tab_button(ui, preview_icon, preview_label, *active == preview).clicked() {
+            *active = preview;
+        }
     });
+}
+
+fn view_tab_button(
+    ui: &mut Ui,
+    icon: ButtonIcon,
+    label: &str,
+    selected: bool,
+) -> egui::Response {
+    const PADDING_X: f32 = 20.0;
+    const PADDING_Y: f32 = 10.0;
+    let font_id = egui::TextStyle::Button.resolve(ui.style());
+    let galley = ui
+        .painter()
+        .layout_no_wrap(label.to_owned(), font_id, text_dark());
+    let content_height = BUTTON_ICON_SIZE.max(galley.size().y);
+    let size = Vec2::new(
+        PADDING_X * 2.0 + BUTTON_ICON_SIZE + BUTTON_ICON_TEXT_GAP + galley.size().x,
+        PADDING_Y * 2.0 + content_height,
+    );
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    let emphasized = selected || response.hovered();
+    let color = if emphasized {
+        text_dark()
+    } else {
+        text_dark().gamma_multiply(0.75)
+    };
+
+    if response.hovered() {
+        let hover = ui.visuals().widgets.hovered.bg_fill;
+        ui.painter().rect_filled(
+            rect,
+            ui.visuals().widgets.hovered.rounding,
+            Color32::from_rgba_unmultiplied(hover.r(), hover.g(), hover.b(), 72),
+        );
+    }
+    if selected {
+        let stroke = Stroke::new(2.0, ui.visuals().selection.stroke.color);
+        ui.painter().hline(rect.x_range(), rect.bottom() - stroke.width / 2.0, stroke);
+    }
+
+    let content_width = BUTTON_ICON_SIZE + BUTTON_ICON_TEXT_GAP + galley.size().x;
+    let content_rect = egui::Align2::CENTER_CENTER
+        .align_size_within_rect(Vec2::new(content_width, content_height), rect);
+    let icon_rect = egui::Rect::from_min_size(
+        egui::pos2(
+            content_rect.left(),
+            content_rect.center().y - BUTTON_ICON_SIZE / 2.0,
+        ),
+        Vec2::splat(BUTTON_ICON_SIZE),
+    );
+    paint_button_icon_at(ui, icon, icon_rect, color);
+    let text_rect = egui::Rect::from_min_max(
+        egui::pos2(icon_rect.right() + BUTTON_ICON_TEXT_GAP, content_rect.top()),
+        content_rect.right_bottom(),
+    );
+    let text_pos = egui::Align2::LEFT_CENTER
+        .align_size_within_rect(galley.size(), text_rect)
+        .min;
+    ui.painter().galley(text_pos, galley, color);
+    response
 }
 
 fn draw_tag_fields_scroll(

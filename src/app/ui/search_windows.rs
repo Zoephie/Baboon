@@ -147,7 +147,7 @@ impl Baboon {
                         ui.separator();
                         ui.add(
                             egui::TextEdit::singleline(&mut filter)
-                                .hint_text("filter")
+                                .hint_text(placeholder_text("filter"))
                                 .desired_width(140.0),
                         );
                     });
@@ -705,7 +705,7 @@ impl Baboon {
                     let response = ui.add_enabled(
                         !self.field_value_searching,
                         egui::TextEdit::singleline(&mut self.field_value_query)
-                            .hint_text("value to find")
+                            .hint_text(placeholder_text("value to find"))
                             .desired_width(240.0),
                     );
                     let submitted =
@@ -723,7 +723,7 @@ impl Baboon {
                     ui.label(RichText::new("group").color(subtle_dark()).small());
                     ui.add(
                         egui::TextEdit::singleline(&mut self.field_value_group)
-                            .hint_text("any (e.g. weap / weapon)")
+                            .hint_text(placeholder_text("any (e.g. weap / weapon)"))
                             .desired_width(180.0),
                     )
                     .on_hover_text("Optional: limit the search to a tag group (four-CC or name).");

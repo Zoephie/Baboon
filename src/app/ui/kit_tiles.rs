@@ -101,12 +101,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
                 self.app.draw_kit_browser(ui, &self.ctx, kit_index);
             });
         egui::CentralPanel::default()
-            .frame(Frame::none().fill(editor_bg()).inner_margin(egui::Margin {
-                left: 10.0,
-                right: 10.0,
-                top: 8.0,
-                bottom: 8.0,
-            }))
+            .frame(Frame::none().fill(editor_bg()))
             .show_inside(ui, |ui| {
                 self.app.draw_tag_tiles(ui, &self.ctx, kit_index);
             });

@@ -57,7 +57,7 @@ pub(super) fn paint_tag_icon_at(ui: &Ui, group_tag: Option<u32>, rect: egui::Rec
     let group = group_tag
         .map(format_group_tag)
         .unwrap_or_else(|| "default".to_owned());
-    let uri = tag_icon_uri(ui.ctx(), &group);
+    let uri = tag_icon_uri_for_size(ui.ctx(), &group, rect.width());
     egui::Image::from_bytes(uri, get_icon_svg(&group).as_bytes())
         .fit_to_exact_size(rect.size())
         .paint_at(ui, rect);
@@ -65,7 +65,7 @@ pub(super) fn paint_tag_icon_at(ui: &Ui, group_tag: Option<u32>, rect: egui::Rec
 
 #[allow(dead_code)]
 fn draw_tag_icon_svg(ui: &mut Ui, group: &str, size: f32) {
-    let uri = tag_icon_uri(ui.ctx(), group);
+    let uri = tag_icon_uri_for_size(ui.ctx(), group, size);
     ui.add(
         egui::Image::from_bytes(uri, get_icon_svg(&group).as_bytes())
             .fit_to_exact_size(Vec2::splat(size))
@@ -74,12 +74,25 @@ fn draw_tag_icon_svg(ui: &mut Ui, group: &str, size: f32) {
 }
 
 pub(super) fn tag_icon_uri(ctx: &egui::Context, group: &str) -> String {
-    tag_icon_uri_for_pixels_per_point(group, ctx.pixels_per_point())
+    tag_icon_uri_for_pixels_per_point_and_size(group, ctx.pixels_per_point(), 16.0)
 }
 
 fn tag_icon_uri_for_pixels_per_point(group: &str, pixels_per_point: f32) -> String {
+    tag_icon_uri_for_pixels_per_point_and_size(group, pixels_per_point, 16.0)
+}
+
+fn tag_icon_uri_for_size(ctx: &egui::Context, group: &str, size: f32) -> String {
+    tag_icon_uri_for_pixels_per_point_and_size(group, ctx.pixels_per_point(), size)
+}
+
+fn tag_icon_uri_for_pixels_per_point_and_size(
+    group: &str,
+    pixels_per_point: f32,
+    size: f32,
+) -> String {
     let dpi = (pixels_per_point * 100.0).round().max(1.0) as u32;
-    format!("bytes://baboon_tag_icons/{group}-dpi{dpi}.svg")
+    let pixels = (size * pixels_per_point).round().max(1.0) as u32;
+    format!("bytes://baboon_tag_icons/{group}-dpi{dpi}-{pixels}px.svg")
 }
 
 #[cfg(test)]
