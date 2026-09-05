@@ -1320,6 +1320,19 @@ pub(in crate::app) fn draw_entry(
     };
     let mut action = open_requested.then(|| BrowserAction::Select(entry.key.clone()));
     response.context_menu(|ui| {
+        if let Some(menu_action) = draw_tag_context_menu_contents(ui, entry, favorite_keys) {
+            action = Some(menu_action);
+        }
+    });
+    action
+}
+
+pub(in crate::app) fn draw_tag_context_menu_contents(
+    ui: &mut Ui,
+    entry: &TagEntry,
+    favorite_keys: Option<&HashSet<String>>,
+) -> Option<BrowserAction> {
+    let mut action = None;
         style_tag_context_menu(ui);
 
         // A cache tag's way out is a conversion, and one tag is the case where
@@ -1546,7 +1559,6 @@ pub(in crate::app) fn draw_entry(
             action = Some(BrowserAction::DumpReferences(entry.key.clone()));
             ui.close_menu();
         }
-    });
     action
 }
 
