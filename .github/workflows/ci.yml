@@ -34,6 +34,10 @@ jobs:
       - name: Install Linux build deps
         if: runner.os == 'Linux'
         run: |
+          # Chrome is preinstalled on the runner and Baboon does not use its
+          # apt repository. Do not let desynchronized third-party metadata
+          # prevent installation of the Ubuntu libraries below.
+          sudo rm -f /etc/apt/sources.list.d/google-chrome.list
           sudo apt-get update
           # libasound2-dev: ALSA headers for rodio's Linux backend (cpal/alsa-sys).
           # libxcb1-dev: links the `xcb` crate, which window_state uses to read
