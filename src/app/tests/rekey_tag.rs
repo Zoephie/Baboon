@@ -226,6 +226,7 @@ fn every_field_of_a_kit_is_accounted_for() {
         // against the new key rather than carried across it.
         bitmap_browser: _,
         model_browser: _,
+        folder_browsers: _,
 
         // The source's own entries, tree and indices, which the rename moves
         // through `apply_container_rename_source_state` rather than here: it
@@ -245,6 +246,7 @@ fn every_field_of_a_kit_is_accounted_for() {
         // Re-derived by the caller once the source entries have moved, because
         // it needs the tag's new `display_path` and this function only has keys.
         active_favorite_entries: _,
+        active_favorite_folders: _,
 
         // Not addressed by a tag key at all.
         blam: _,
@@ -262,6 +264,7 @@ fn every_field_of_a_kit_is_accounted_for() {
         pending_campaign_project: _,
         pending_container_folders: _,
         // Staged session-restore state, consumed once the source lands.
+        pending_restore_folders: _,
         pending_restore_bitmap_library: _,
         pending_restore_model_library: _,
         pending_launch_tags: _,

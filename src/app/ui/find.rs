@@ -143,7 +143,6 @@ impl Baboon {
                             ButtonIcon::Right,
                             "Next match (Enter)",
                             can_navigate,
-                            Vec2::new(24.0, 22.0),
                             text_dark(),
                         )
                         .clicked()
@@ -155,7 +154,6 @@ impl Baboon {
                             ButtonIcon::Left,
                             "Previous match (Shift+Enter)",
                             can_navigate,
-                            Vec2::new(24.0, 22.0),
                             text_dark(),
                         )
                         .clicked()

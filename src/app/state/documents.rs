@@ -178,7 +178,7 @@ pub(in crate::app) struct LastSessionTag {
     pub(in crate::app) path: Option<PathBuf>,
 }
 
-/// One kit's worth of saved session: its source and the tags it had open.
+/// One kit's worth of saved session: its source and the tag/folder panes it had open.
 #[derive(Clone, Debug)]
 pub(in crate::app) struct LastSessionKit {
     pub(in crate::app) source_kind: LastSessionSourceKind,
@@ -197,6 +197,7 @@ pub(in crate::app) struct LastSessionKit {
     pub(in crate::app) browser_mode: Option<BrowserMode>,
     pub(in crate::app) browser_sort: Option<BrowserSort>,
     pub(in crate::app) tags: Vec<LastSessionTag>,
+    pub(in crate::app) folders: Vec<LastSessionFolder>,
     pub(in crate::app) chimp_packages: Vec<String>,
     pub(in crate::app) active_chimp_package: Option<String>,
     /// Whether this workspace had the Bitmap Library tab open.
@@ -216,6 +217,12 @@ pub(in crate::app) struct LastSessionKit {
 }
 
 #[derive(Clone, Debug)]
+pub(in crate::app) struct LastSessionFolder {
+    pub(in crate::app) rel_path: PathBuf,
+    pub(in crate::app) label: String,
+}
+
+#[derive(Clone, Debug)]
 pub(in crate::app) struct LastSessionState {
     pub(in crate::app) kits: Vec<LastSessionKit>,
 }
@@ -231,6 +238,7 @@ pub(in crate::app) struct RestoreKit {
     pub(in crate::app) browser_mode: Option<BrowserMode>,
     pub(in crate::app) browser_sort: Option<BrowserSort>,
     pub(in crate::app) tags: Vec<LastSessionTag>,
+    pub(in crate::app) folders: Vec<LastSessionFolder>,
     pub(in crate::app) chimp_packages: Vec<String>,
     pub(in crate::app) active_chimp_package: Option<String>,
     /// Whether this workspace had the Bitmap Library tab open.
@@ -258,12 +266,23 @@ pub(in crate::app) struct LastOpenedChimpEntry {
     pub(in crate::app) available: bool,
 }
 
+pub(in crate::app) struct LastOpenedFolderEntry {
+    pub(in crate::app) folder: LastSessionFolder,
+    pub(in crate::app) checked: bool,
+    pub(in crate::app) available: bool,
+}
+
 /// One kit's section of the restore prompt.
 pub(in crate::app) struct LastOpenedWindowsKit {
     pub(in crate::app) source_kind: LastSessionSourceKind,
     pub(in crate::app) source_path: PathBuf,
     pub(in crate::app) game: Option<String>,
     pub(in crate::app) profile_id: Option<String>,
+    /// Current display identity resolved from Editing Kits settings. Kept out
+    /// of the session file because the stable profile ID lets renames appear
+    /// here immediately without rewriting the saved session.
+    pub(in crate::app) profile_name: Option<String>,
+    pub(in crate::app) profile_root: Option<PathBuf>,
     pub(in crate::app) source_available: bool,
     pub(in crate::app) project_path: Option<PathBuf>,
     pub(in crate::app) has_project: bool,
@@ -272,6 +291,7 @@ pub(in crate::app) struct LastOpenedWindowsKit {
     pub(in crate::app) browser_mode: Option<BrowserMode>,
     pub(in crate::app) browser_sort: Option<BrowserSort>,
     pub(in crate::app) entries: Vec<LastOpenedWindowEntry>,
+    pub(in crate::app) folder_entries: Vec<LastOpenedFolderEntry>,
     pub(in crate::app) chimp_entries: Vec<LastOpenedChimpEntry>,
     /// Whether this workspace had the Bitmap Library tab open.
     ///
@@ -288,9 +308,9 @@ pub(in crate::app) struct LastOpenedWindowsKit {
 }
 
 /// Launch-time restore prompt backed by `last_session.json`. OK reloads each
-/// saved kit's source; as each async load completes, that kit's queued tag
-/// keys are reopened through the normal `select_entry` path. Restores are
-/// independent, so the kits can finish loading in any order.
+/// saved kit's source; as each async load completes, that kit's queued tag and
+/// folder panes are reopened through their normal paths. Restores are independent,
+/// so the kits can finish loading in any order.
 pub(in crate::app) struct LastOpenedWindowsPrompt {
     pub(in crate::app) visible: bool,
     pub(in crate::app) kits: Vec<LastOpenedWindowsKit>,
@@ -299,23 +319,28 @@ pub(in crate::app) struct LastOpenedWindowsPrompt {
 }
 
 impl LastOpenedWindowsKit {
-    fn from_saved(saved: LastSessionKit) -> Option<Self> {
+    fn from_saved(
+        saved: LastSessionKit,
+        profile: Option<&CustomEditingKitProfile>,
+    ) -> Option<Self> {
+        let availability_path = profile
+            .map(|profile| profile.root.as_path())
+            .unwrap_or(&saved.source_path);
         let source_available = match saved.source_kind {
-            LastSessionSourceKind::SingleFile => saved.source_path.is_file(),
-            LastSessionSourceKind::LooseFolder => saved.source_path.is_dir(),
+            LastSessionSourceKind::SingleFile => availability_path.is_file(),
+            LastSessionSourceKind::LooseFolder => availability_path.is_dir(),
             LastSessionSourceKind::MonolithicCache => {
-                if saved.source_path.is_dir() {
-                    saved.source_path.join("blob_index.dat").is_file()
+                if availability_path.is_dir() {
+                    availability_path.join("blob_index.dat").is_file()
                 } else {
-                    saved.source_path.is_file()
-                        && saved
-                            .source_path
+                    availability_path.is_file()
+                        && availability_path
                             .file_name()
                             .is_some_and(|name| name.eq_ignore_ascii_case("blob_index.dat"))
                 }
             }
             LastSessionSourceKind::IoStoreContainerSet => {
-                crate::source::find_paks_dir(&saved.source_path).is_some()
+                crate::source::find_paks_dir(availability_path).is_some()
             }
         };
         let entries = saved
@@ -340,17 +365,29 @@ impl LastOpenedWindowsKit {
                 available: source_available,
             })
             .collect::<Vec<_>>();
+        let folder_entries = saved
+            .folders
+            .into_iter()
+            .map(|folder| LastOpenedFolderEntry {
+                folder,
+                checked: source_available,
+                available: source_available,
+            })
+            .collect::<Vec<_>>();
         Some(Self {
             source_kind: saved.source_kind,
             source_path: saved.source_path,
             game: saved.game,
             profile_id: saved.profile_id,
+            profile_name: profile.map(|profile| profile.name.clone()),
+            profile_root: profile.map(|profile| profile.root.clone()),
             source_available,
             project_path: saved.project_path,
             has_project: saved.has_project,
             browser_mode: saved.browser_mode,
             browser_sort: saved.browser_sort,
             entries,
+            folder_entries,
             chimp_entries,
             active_chimp_package: saved.active_chimp_package,
             // Restored with the workspace rather than offered as a checkbox,
@@ -377,14 +414,31 @@ impl LastOpenedWindowsKit {
             .map(|entry| entry.package.clone())
             .collect()
     }
+
+    pub(in crate::app) fn checked_folders(&self) -> Vec<LastSessionFolder> {
+        self.folder_entries
+            .iter()
+            .filter(|entry| entry.available && entry.checked)
+            .map(|entry| entry.folder.clone())
+            .collect()
+    }
 }
 
 impl LastOpenedWindowsPrompt {
-    pub(in crate::app) fn from_session(session: LastSessionState) -> Option<Self> {
+    pub(in crate::app) fn from_session(
+        session: LastSessionState,
+        profiles: &[CustomEditingKitProfile],
+    ) -> Option<Self> {
         let kits = session
             .kits
             .into_iter()
-            .filter_map(LastOpenedWindowsKit::from_saved)
+            .filter_map(|saved| {
+                let profile = saved
+                    .profile_id
+                    .as_deref()
+                    .and_then(|id| profiles.iter().find(|profile| profile.id == id));
+                LastOpenedWindowsKit::from_saved(saved, profile)
+            })
             .collect::<Vec<_>>();
         if kits.is_empty() {
             return None;
@@ -405,6 +459,7 @@ impl LastOpenedWindowsPrompt {
             .map(|kit| {
                 let tags = kit.checked_tags();
                 let chimp_packages = kit.checked_chimp_packages();
+                let folders = kit.checked_folders();
                 let active_chimp_package = kit
                     .active_chimp_package
                     .clone()
@@ -417,6 +472,7 @@ impl LastOpenedWindowsPrompt {
                     browser_mode: kit.browser_mode,
                     browser_sort: kit.browser_sort,
                     tags,
+                    folders,
                     chimp_packages,
                     active_chimp_package,
                     bitmap_library_open: kit.bitmap_library_open,

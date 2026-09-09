@@ -3,11 +3,8 @@
 
 use super::*;
 
-const TAG_HEADER_ICON_SIZE: f32 = 32.0;
-const TAG_HEADER_WIDE_BREAKPOINT: f32 = 600.0;
 const TAG_HEADER_KEYWORDS_INLINE_BREAKPOINT: f32 = 1160.0;
 const TAG_HEADER_ACTIONS_SINGLE_ROW_BREAKPOINT: f32 = 1180.0;
-const TAG_HEADER_COMMON_ACTIONS_WIDTH: f32 = 205.0;
 const TAG_HEADER_DYNAMIC_ACTIONS_WIDTH: f32 = 285.0;
 
 impl Baboon {
@@ -33,9 +30,10 @@ impl Baboon {
         entry: &TagEntry,
         scope: &str,
         show_keyword_bar: bool,
-    ) {
+    ) -> Option<BrowserAction> {
         let key = entry.key.clone();
-        self.draw_responsive_tag_header(ui, ctx, kit_index, entry, show_keyword_bar);
+        let header_action =
+            self.draw_responsive_tag_header(ui, ctx, kit_index, entry, show_keyword_bar);
 
         // "Search fields" collapses the editor to matching blocks.
         // Not offered for shader/sound tags (their own surfaces).
@@ -99,7 +97,7 @@ impl Baboon {
             } else {
                 ui.label("Select the tag again to load it.");
             }
-            return;
+            return header_action;
         };
 
         let kit = &mut self.kits[kit_index];
@@ -394,6 +392,7 @@ impl Baboon {
         self.maybe_request_model_overlays(kit_index, &key, ctx);
         self.maybe_request_model_animations(kit_index, &key, ctx);
         self.maybe_request_model_animation_decode(kit_index, &key, ctx);
+        header_action
     }
 
     fn draw_responsive_tag_header(
@@ -403,9 +402,8 @@ impl Baboon {
         kit_index: usize,
         entry: &TagEntry,
         show_keyword_bar: bool,
-    ) {
+    ) -> Option<BrowserAction> {
         let available = ui.available_width();
-        let wide = available >= TAG_HEADER_WIDE_BREAKPOINT;
         let keywords_inline = available >= TAG_HEADER_KEYWORDS_INLINE_BREAKPOINT;
         let actions_single_row = available >= TAG_HEADER_ACTIONS_SINGLE_ROW_BREAKPOINT;
         let has_dynamic_actions = entry.group_tag == u32::from_be_bytes(*b"scnr");
@@ -414,52 +412,49 @@ impl Baboon {
             if actions_stacked {
                 TAG_HEADER_DYNAMIC_ACTIONS_WIDTH
             } else {
-                TAG_HEADER_DYNAMIC_ACTIONS_WIDTH + 20.0 + TAG_HEADER_COMMON_ACTIONS_WIDTH
+                TAG_HEADER_DYNAMIC_ACTIONS_WIDTH
+                    + PANE_HEADER_SECTION_GAP
+                    + PANE_HEADER_COMMON_ACTIONS_WIDTH
             }
         } else {
-            TAG_HEADER_COMMON_ACTIONS_WIDTH
+            PANE_HEADER_COMMON_ACTIONS_WIDTH
         };
-        let left_width = if wide {
-            (available - action_width - 20.0).max(200.0)
-        } else {
-            available
-        };
-        let title_height = if self.expert_mode { 48.0 } else { TAG_HEADER_ICON_SIZE };
+        let inline_left_width = pane_header_inline_left_width(available, action_width);
+        let wide = inline_left_width.is_some();
+        let left_width = inline_left_width.unwrap_or(available);
+        let title_height = if self.expert_mode { 48.0 } else { PANE_HEADER_ICON_SIZE };
         let left_height = if !keywords_inline && show_keyword_bar {
             title_height + 10.0 + BUTTON_HEIGHT
         } else {
             title_height.max(BUTTON_HEIGHT)
         };
         let key = entry.key.clone();
-        let (breadcrumbs, title) = tag_header_path_parts(&entry.display_path);
+        let (breadcrumbs, title) = pane_header_path_parts(&entry.display_path);
+        let mut breadcrumb_navigation = None;
 
         ui.add_space(10.0);
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 20.0;
+            ui.spacing_mut().item_spacing.x = PANE_HEADER_SECTION_GAP;
             ui.allocate_ui_with_layout(
                 Vec2::new(left_width, left_height),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
                 ui.spacing_mut().item_spacing.y = 10.0;
                 ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 20.0;
+                    ui.spacing_mut().item_spacing.x = PANE_HEADER_SECTION_GAP;
                     ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = 10.0;
+                        ui.spacing_mut().item_spacing.x = PANE_HEADER_ICON_TEXT_GAP;
                         let (icon_rect, _) = ui.allocate_exact_size(
-                            Vec2::splat(TAG_HEADER_ICON_SIZE),
+                            Vec2::splat(PANE_HEADER_ICON_SIZE),
                             Sense::hover(),
                         );
                         paint_tag_icon_at(ui, Some(entry.group_tag), icon_rect);
 
                         ui.vertical(|ui| {
-                            ui.spacing_mut().item_spacing.y = 2.0;
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            breadcrumb_navigation = pane_header_breadcrumbs(ui, &breadcrumbs);
                             ui.label(
-                                RichText::new(breadcrumbs)
-                                    .size(12.0)
-                                    .color(subtle_dark()),
-                            );
-                            ui.label(
-                                RichText::new(title).size(16.0).strong().color(text_dark()),
+                                RichText::new(title).size(15.0).strong().color(text_dark()),
                             );
                             if self.expert_mode {
                                 ui.label(
@@ -540,6 +535,11 @@ impl Baboon {
         }
         ui.add_space(20.0);
         ui.separator();
+        breadcrumb_navigation.map(|(rel_path, label)| BrowserAction::OpenFolderBrowser {
+            rel_path,
+            label,
+            open_in_new_tab: true,
+        })
     }
 
     fn draw_tag_header_common_actions(
@@ -558,18 +558,12 @@ impl Baboon {
         let mut action = None;
 
         ui.horizontal(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            let menu = ui.menu_button("   ", |ui| {
+            ui.spacing_mut().item_spacing.x = PANE_HEADER_ACTION_GAP;
+            icon_menu_button(ui, ButtonIcon::Other, "Other tag actions", |ui| {
                 if let Some(menu_action) = draw_tag_context_menu_contents(ui, entry, None) {
                     action = Some(menu_action);
                 }
             });
-            let icon_rect = egui::Rect::from_center_size(
-                menu.response.rect.center(),
-                Vec2::splat(BUTTON_ICON_SIZE),
-            );
-            paint_button_icon_at(ui, ButtonIcon::Other, icon_rect, text_dark());
-            menu.response.on_hover_text("Other tag actions");
 
             let favorite_label = if is_favorite { "Favorited" } else { "Favorite" };
             let favorite_icon = if is_favorite {
@@ -598,12 +592,4 @@ impl Baboon {
         }
     }
 
-}
-
-fn tag_header_path_parts(display_path: &str) -> (String, String) {
-    let normalized = display_path.replace('\\', "/");
-    match normalized.rsplit_once('/') {
-        Some((parent, title)) => (parent.replace('/', "  ›  "), title.to_owned()),
-        None => (String::new(), normalized),
-    }
 }

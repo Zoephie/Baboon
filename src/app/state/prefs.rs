@@ -108,6 +108,7 @@ pub(in crate::app) enum SettingsTab {
 pub(in crate::app) struct EditingKitFavorites {
     pub(in crate::app) tags_root: PathBuf,
     pub(in crate::app) tags: Vec<PathBuf>,
+    pub(in crate::app) folders: Vec<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

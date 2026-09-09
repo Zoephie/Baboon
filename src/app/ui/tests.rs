@@ -5,6 +5,150 @@ use super::*;
 use std::collections::{HashMap, HashSet};
 
 #[test]
+fn shared_browser_buttons_use_standard_point_sizes() {
+    for scale in [MIN_UI_SCALE, MAX_UI_SCALE] {
+        let ctx = egui::Context::default();
+        ctx.set_zoom_factor(scale);
+        let mut mode_rect = egui::Rect::NOTHING;
+        let mut menu_rect = egui::Rect::NOTHING;
+
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(320.0, 100.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    ui.horizontal(|ui| {
+                        mode_rect = selectable_icon_text_button(
+                            ui,
+                            ButtonIcon::FolderOpen,
+                            "Folders",
+                            true,
+                        )
+                        .rect;
+                        menu_rect = icon_menu_button(ui, ButtonIcon::Sort, "Sort", |_| {}).rect;
+                    });
+                });
+            },
+        );
+
+        assert_eq!(mode_rect.height(), BUTTON_HEIGHT);
+        assert_eq!(menu_rect.size(), ICON_BUTTON_SIZE);
+    }
+}
+
+#[test]
+fn pane_header_breadcrumbs_accumulate_clickable_folder_paths() {
+    let (breadcrumbs, title) =
+        pane_header_path_parts("objects\\characters/brute/brute.biped");
+
+    assert_eq!(title, "brute.biped");
+    assert_eq!(
+        breadcrumbs,
+        vec![
+            ("objects".to_owned(), PathBuf::from("objects")),
+            (
+                "characters".to_owned(),
+                PathBuf::from("objects").join("characters"),
+            ),
+            (
+                "brute".to_owned(),
+                PathBuf::from("objects").join("characters").join("brute"),
+            ),
+        ]
+    );
+}
+
+#[test]
+fn pane_header_two_line_title_is_centered_inside_the_icon_height() {
+    let ctx = egui::Context::default();
+    let mut icon_rect = egui::Rect::NOTHING;
+    let mut title_rect = egui::Rect::NOTHING;
+    let breadcrumbs = vec![
+        ("objects".to_owned(), PathBuf::from("objects")),
+        (
+            "characters".to_owned(),
+            PathBuf::from("objects").join("characters"),
+        ),
+        (
+            "brute".to_owned(),
+            PathBuf::from("objects").join("characters").join("brute"),
+        ),
+    ];
+
+    let _ = ctx.run(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(500.0, 100.0),
+            )),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    (icon_rect, _) =
+                        ui.allocate_exact_size(Vec2::splat(PANE_HEADER_ICON_SIZE), Sense::hover());
+                    title_rect = ui
+                        .vertical(|ui| {
+                            ui.spacing_mut().item_spacing.y = 0.0;
+                            pane_header_breadcrumbs(ui, &breadcrumbs);
+                            ui.label(
+                                RichText::new("brute.model")
+                                    .size(15.0)
+                                    .strong()
+                                    .color(text_dark()),
+                            );
+                        })
+                        .response
+                        .rect;
+                });
+            });
+        },
+    );
+
+    assert!(title_rect.height() <= PANE_HEADER_ICON_SIZE);
+    assert!((title_rect.center().y - icon_rect.center().y).abs() <= 0.5);
+}
+
+#[test]
+fn pane_headers_share_the_same_narrow_action_breakpoint() {
+    assert_eq!(
+        pane_header_inline_left_width(PANE_HEADER_WIDE_BREAKPOINT - 1.0, 205.0),
+        None
+    );
+    assert_eq!(
+        pane_header_inline_left_width(PANE_HEADER_WIDE_BREAKPOINT, 205.0),
+        Some(375.0)
+    );
+}
+
+#[test]
+fn custom_header_inputs_use_standard_hover_and_focus_strokes() {
+    let ctx = egui::Context::default();
+    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            assert_eq!(
+                pane_header_input_stroke(ui, false, false),
+                Stroke::new(1.0, foundation_input_edge())
+            );
+            assert_eq!(
+                pane_header_input_stroke(ui, true, false),
+                ui.visuals().widgets.hovered.bg_stroke
+            );
+            assert_eq!(
+                pane_header_input_stroke(ui, true, true),
+                ui.visuals().selection.stroke
+            );
+        });
+    });
+}
+
+#[test]
 fn editing_kit_menu_uses_each_shortcut_once_in_reverse_engine_order() {
     let games: Vec<&str> = editing_kit_menu_shortcuts()
         .map(|shortcut| shortcut.game)

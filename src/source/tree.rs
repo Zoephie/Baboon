@@ -8,6 +8,68 @@ pub fn build_tree(entries: &[TagEntry]) -> TagTree {
     build_tree_with_folders(entries, &[])
 }
 
+/// Build a folder tree rooted beneath `folder` while keeping indices pointed
+/// at the original, full-path entries. Node paths remain source-relative so
+/// opening a nested folder or invoking a folder action needs no rebasing.
+pub fn build_tree_beneath(entries: &[TagEntry], folder: &Path) -> TagTree {
+    let prefix = split_display_path(&path_to_display(folder));
+    let mut root = TreeBuildNode::default();
+    for (index, entry) in entries.iter().enumerate() {
+        let parts = split_display_path(&entry.display_path);
+        if !display_path_is_beneath(&parts, &prefix) {
+            continue;
+        }
+        let beneath = &parts[prefix.len()..];
+        if beneath.len() == 1 {
+            root.entries.push(index);
+            continue;
+        }
+        let mut node = &mut root;
+        for part in &beneath[..beneath.len() - 1] {
+            node = node.children.entry(part.clone()).or_default();
+        }
+        node.entries.push(index);
+    }
+    let parent = prefix.join("/");
+    TagTree {
+        children: root
+            .children
+            .into_iter()
+            .map(|(label, node)| finish_node(label, node, &parent))
+            .collect(),
+        entries: root.entries,
+    }
+}
+
+/// Build a group tree containing only entries beneath `folder`, while keeping
+/// every stored index pointed at the original `entries` slice.
+pub fn build_group_tree_beneath(entries: &[TagEntry], folder: &Path) -> TagTree {
+    let prefix = split_display_path(&path_to_display(folder));
+    build_group_tree_from_indices(
+        entries,
+        entries.iter().enumerate().filter_map(|(index, entry)| {
+            display_path_is_beneath(&split_display_path(&entry.display_path), &prefix)
+                .then_some(index)
+        }),
+    )
+}
+
+/// Whether an entry lives below `folder` rather than being the folder itself.
+/// Paths are source-relative and compared case-insensitively to match Windows
+/// editing-kit behavior.
+pub fn entry_is_beneath_folder(entry: &TagEntry, folder: &Path) -> bool {
+    let prefix = split_display_path(&path_to_display(folder));
+    display_path_is_beneath(&split_display_path(&entry.display_path), &prefix)
+}
+
+fn display_path_is_beneath(parts: &[String], prefix: &[String]) -> bool {
+    parts.len() > prefix.len()
+        && parts[..prefix.len()]
+            .iter()
+            .zip(prefix)
+            .all(|(part, expected)| part.eq_ignore_ascii_case(expected))
+}
+
 /// [`build_tree`], plus folders that exist only because the user asked for them.
 ///
 /// A container folder has no independent existence on either side: this tree is
@@ -68,8 +130,16 @@ pub fn rebuild_folder_tree(source: &mut LoadedSourceData, pending_folders: &[Str
 
 /// Groups entries by friendly tag group while preserving entry-vector indices.
 pub fn build_group_tree(entries: &[TagEntry]) -> TagTree {
+    build_group_tree_from_indices(entries, 0..entries.len())
+}
+
+fn build_group_tree_from_indices(
+    entries: &[TagEntry],
+    indices: impl IntoIterator<Item = usize>,
+) -> TagTree {
     let mut root = TreeBuildNode::default();
-    for (index, entry) in entries.iter().enumerate() {
+    for index in indices {
+        let entry = &entries[index];
         let fourcc = format_group_tag(entry.group_tag);
         let group = friendly_group_name(entry.group_tag, entry.group_name.as_deref(), &fourcc);
         let label = if group == fourcc {
@@ -1197,6 +1267,47 @@ mod tests {
         assert_eq!(tree.children[0].label, "objects");
         assert_eq!(tree.children[0].children[0].label, "test");
         assert_eq!(tree.children[0].children[0].entries, vec![0, 1]);
+    }
+
+    #[test]
+    fn folder_tree_starts_beneath_the_opened_folder_and_keeps_full_paths() {
+        let entries = vec![
+            folder_entry("direct", "objects/characters/brute/brute.biped"),
+            folder_entry("nested", "objects/characters/brute/bitmaps/brute.bitmap"),
+            folder_entry("outside", "objects/characters/elite/elite.biped"),
+        ];
+
+        let tree = build_tree_beneath(&entries, Path::new("objects/characters/brute"));
+
+        assert_eq!(tree.entries, vec![0]);
+        assert_eq!(tree.children.len(), 1);
+        assert_eq!(tree.children[0].label, "bitmaps");
+        assert_eq!(
+            tree.children[0].rel_path,
+            PathBuf::from("objects/characters/brute/bitmaps")
+        );
+        assert_eq!(tree.children[0].entries, vec![1]);
+    }
+
+    #[test]
+    fn folder_group_tree_keeps_indices_into_the_shared_entry_set() {
+        let entries = vec![
+            folder_entry("outside", "objects/characters/elite/elite.model"),
+            folder_entry("inside", "objects/characters/brute/brute.model"),
+        ];
+
+        let tree = build_group_tree_beneath(&entries, Path::new("objects/characters/brute"));
+
+        assert_eq!(tree.children.len(), 1);
+        assert_eq!(tree.children[0].entries, vec![1]);
+        assert!(entry_is_beneath_folder(
+            &entries[1],
+            Path::new("OBJECTS/CHARACTERS/BRUTE")
+        ));
+        assert!(!entry_is_beneath_folder(
+            &entries[0],
+            Path::new("objects/characters/brute")
+        ));
     }
 
     fn folder_entry(key: &str, display_path: &str) -> TagEntry {

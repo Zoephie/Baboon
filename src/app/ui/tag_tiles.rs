@@ -18,7 +18,7 @@ struct TagPaneBehavior<'a> {
     /// and each answer used to be a linear scan of the source's entry lists --
     /// two scans per tab, ~0.4 ms a frame across six tabs of a 12,291-tag
     /// Campaign Evolved source, and worse the more tabs are open.
-    tab_labels: HashMap<String, (String, u32)>,
+    tab_labels: HashMap<String, (String, Option<u32>)>,
     ctx: egui::Context,
     close_requests: Vec<String>,
     focused: Option<String>,
@@ -34,6 +34,7 @@ struct TagPaneBehavior<'a> {
     expand: Option<(String, bool)>,
     close_all: bool,
     close_all_but: Option<String>,
+    pending_browser_action: Option<BrowserAction>,
 }
 
 impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
@@ -46,6 +47,20 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         let key = pane.clone();
         // The panes that are not tags. Handled before the entry lookup,
         // because nothing in the source answers to their keys by design.
+        if is_folder_pane_key(&key) {
+            if ui.input(|input| input.pointer.any_pressed())
+                && ui.rect_contains_pointer(ui.max_rect())
+            {
+                self.focused = Some(key.clone());
+            }
+            let action = self
+                .app
+                .draw_folder_browser_pane(ui, &self.ctx, self.kit_index, &key);
+            if self.pending_browser_action.is_none() {
+                self.pending_browser_action = action;
+            }
+            return egui_tiles::UiResponse::None;
+        }
         if key == BITMAP_LIBRARY_KEY {
             if ui.input(|input| input.pointer.any_pressed())
                 && ui.rect_contains_pointer(ui.max_rect())
@@ -121,7 +136,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
                     .id_salt(("tag_tile", tile_id.0))
                     .auto_shrink([false, false])
                     .show(ui, |ui| {
-                        self.app.draw_tag_pane(
+                        let action = self.app.draw_tag_pane(
                             ui,
                             &self.ctx,
                             self.kit_index,
@@ -129,6 +144,9 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
                             &scope,
                             true,
                         );
+                        if self.pending_browser_action.is_none() {
+                            self.pending_browser_action = action;
+                        }
                     });
             });
         egui_tiles::UiResponse::None
@@ -154,6 +172,14 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         }
         if pane == BLAM_KEY {
             return RichText::new(BLAM_TITLE).color(text_dark()).into();
+        }
+        if is_folder_pane_key(pane) {
+            let label = self.app.kits[self.kit_index]
+                .folder_browsers
+                .get(pane)
+                .map(|folder| folder.label.clone())
+                .unwrap_or_else(|| "Folder".to_owned());
+            return RichText::new(label).color(text_dark()).into();
         }
         let dirty = self.app.kits[self.kit_index]
             .parsed_tags
@@ -207,6 +233,23 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         // them. `tiles` is shared here, so the removal happens after the walk.
         if button_response.middle_clicked() {
             self.close_requests.push(key.clone());
+        }
+        if is_folder_pane_key(&key) {
+            button_response.context_menu(|ui| {
+                if ui.button("Close").clicked() {
+                    self.close_requests.push(key.clone());
+                    ui.close_menu();
+                }
+                if ui.button("Close all").clicked() {
+                    self.close_all = true;
+                    ui.close_menu();
+                }
+                if ui.button("Close all but this").clicked() {
+                    self.close_all_but = Some(key.clone());
+                    ui.close_menu();
+                }
+            });
+            return button_response;
         }
         let discardable = self.app.tag_has_discardable_changes(self.kit_index, &key);
         button_response.context_menu(|ui| {
@@ -270,16 +313,21 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         const ICON: f32 = 14.0;
         const ICON_GAP: f32 = 4.0;
 
-        let group_tag = match tiles.get(tile_id) {
-            Some(egui_tiles::Tile::Pane(key)) => self.group_tag_for_key(key),
+        let pane_key = match tiles.get(tile_id) {
+            Some(egui_tiles::Tile::Pane(key)) => Some(key),
             _ => None,
         };
+        let group_tag = match pane_key {
+            Some(key) => self.group_tag_for_key(key),
+            _ => None,
+        };
+        let folder_icon = pane_key.is_some_and(|key| is_folder_pane_key(key));
         let text = self.tab_title_for_tile(tiles, tile_id);
         let close_size = Vec2::splat(self.close_button_outer_size());
         let font_id = egui::TextStyle::Button.resolve(ui.style());
         let galley = text.into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, font_id);
         let x_margin = self.tab_title_spacing(ui.visuals());
-        let icon_width = if group_tag.is_some() {
+        let icon_width = if group_tag.is_some() || folder_icon {
             ICON + ICON_GAP
         } else {
             0.0
@@ -311,6 +359,12 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
                     Vec2::splat(ICON),
                 );
                 paint_tag_icon_at(ui, group_tag, icon_rect);
+            } else if folder_icon {
+                let icon_rect = egui::Rect::from_center_size(
+                    egui::pos2(inner.left() + ICON / 2.0, inner.center().y),
+                    Vec2::splat(ICON),
+                );
+                paint_button_icon_at(ui, ButtonIcon::FolderOpen, icon_rect, text_dark());
             }
             let text_color = self.tab_text_color(ui.visuals(), tiles, tile_id, state);
             let text_pos = egui::Align2::LEFT_CENTER
@@ -395,7 +449,7 @@ impl TagPaneBehavior<'_> {
         if key == BITMAP_LIBRARY_KEY || key == MODEL_LIBRARY_KEY || key == BLAM_KEY {
             return None;
         }
-        self.tab_labels.get(key).map(|(_, group_tag)| *group_tag)
+        self.tab_labels.get(key).and_then(|(_, group_tag)| *group_tag)
     }
 }
 
@@ -406,7 +460,7 @@ impl Baboon {
         &self,
         kit_index: usize,
         tree: &egui_tiles::Tree<String>,
-    ) -> HashMap<String, (String, u32)> {
+    ) -> HashMap<String, (String, Option<u32>)> {
         let mut labels = HashMap::new();
         let kit = &self.kits[kit_index];
         // One targeted scan per open pane. Iterating the entries instead and
@@ -421,15 +475,24 @@ impl Baboon {
             if key == BITMAP_LIBRARY_KEY {
                 // No group, so no icon: `group_tag_for_key` reads this map, and
                 // the bitmap group's icon would claim this is a bitmap tag.
-                labels.insert(key.clone(), (BITMAP_LIBRARY_TITLE.to_owned(), 0));
+                labels.insert(key.clone(), (BITMAP_LIBRARY_TITLE.to_owned(), None));
                 continue;
             }
             if key == MODEL_LIBRARY_KEY {
-                labels.insert(key.clone(), (MODEL_LIBRARY_TITLE.to_owned(), 0));
+                labels.insert(key.clone(), (MODEL_LIBRARY_TITLE.to_owned(), None));
                 continue;
             }
             if key == BLAM_KEY {
-                labels.insert(key.clone(), (BLAM_TITLE.to_owned(), 0));
+                labels.insert(key.clone(), (BLAM_TITLE.to_owned(), None));
+                continue;
+            }
+            if is_folder_pane_key(key) {
+                let label = kit
+                    .folder_browsers
+                    .get(key)
+                    .map(|folder| folder.label.clone())
+                    .unwrap_or_else(|| "Folder".to_owned());
+                labels.insert(key.clone(), (label, None));
                 continue;
             }
             let found = kit
@@ -448,7 +511,7 @@ impl Baboon {
                         .find(|entry| &entry.key == key)
                 });
             if let Some(entry) = found {
-                labels.insert(key.clone(), (tag_tab_label(entry), entry.group_tag));
+                labels.insert(key.clone(), (tag_tab_label(entry), Some(entry.group_tag)));
             }
         }
         labels
@@ -484,6 +547,7 @@ impl Baboon {
             expand: None,
             close_all: false,
             close_all_but: None,
+            pending_browser_action: None,
         };
         tree.ui(&mut behavior, ui);
         let close_requests = std::mem::take(&mut behavior.close_requests);
@@ -494,6 +558,7 @@ impl Baboon {
         let expand = behavior.expand.take();
         let close_all = behavior.close_all;
         let close_all_but = behavior.close_all_but.take();
+        let pending_browser_action = behavior.pending_browser_action.take();
         self.kits[kit_index].tag_tree = tree;
 
         // A bitmap double-clicked in the Bitmap Library. Applied here, with the
@@ -529,7 +594,16 @@ impl Baboon {
         // the open set — re-derive it rather than the other way round.
         self.kits[kit_index].sync_open_tabs();
         if let Some(key) = focused {
-            self.kits[kit_index].selected_key = Some(key);
+            if !is_folder_pane_key(&key) {
+                self.kits[kit_index].selected_key = Some(key);
+            }
+        }
+        // Pane contents are drawn while `tag_tree` is temporarily moved out.
+        // Opening from a breadcrumb or folder browser before this point would
+        // add the new tab to the discarded placeholder tree.
+        if let Some(action) = pending_browser_action {
+            self.active = kit_index;
+            self.handle_browser_action(action, ctx.clone());
         }
         // Everything below addresses the *active* kit: the close prompt and the
         // save paths under it resolve documents there, and `reveal_in_browser`

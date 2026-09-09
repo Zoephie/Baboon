@@ -117,7 +117,7 @@ pub(super) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
 
 pub(super) fn paint_button_icon_at(ui: &Ui, icon: ButtonIcon, rect: egui::Rect, color: Color32) {
     let svg = colorized_icon_svg(icon, color);
-    let uri = button_icon_uri(ui.ctx(), icon, color);
+    let uri = button_icon_uri(ui.ctx(), icon, color, rect.width());
     egui::Image::from_bytes(uri, svg.into_bytes())
         .fit_to_exact_size(rect.size())
         .tint(Color32::WHITE)
@@ -132,7 +132,7 @@ pub(super) fn button_icon_image(
 ) -> egui::Image<'static> {
     let color = icon_color(icon, color);
     let svg = colorized_icon_svg(icon, color);
-    let uri = button_icon_uri(ui.ctx(), icon, color);
+    let uri = button_icon_uri(ui.ctx(), icon, color, size);
     egui::Image::from_bytes(uri, svg.into_bytes())
         .fit_to_exact_size(Vec2::splat(size))
         .tint(Color32::WHITE)
@@ -156,7 +156,6 @@ pub(super) fn icon_button(
     icon: ButtonIcon,
     tooltip: &str,
     enabled: bool,
-    _size: Vec2,
     color: Color32,
 ) -> egui::Response {
     let size = ICON_BUTTON_SIZE;
@@ -205,8 +204,42 @@ fn colorized_icon_svg(icon: ButtonIcon, color: Color32) -> String {
         .replace("black", &color)
 }
 
-fn button_icon_uri(ctx: &egui::Context, icon: ButtonIcon, color: Color32) -> String {
-    button_icon_uri_for_pixels_per_point(icon, color, ctx.pixels_per_point())
+fn button_icon_uri(ctx: &egui::Context, icon: ButtonIcon, color: Color32, size: f32) -> String {
+    button_icon_uri_for_pixels_per_point_and_size(icon, color, ctx.pixels_per_point(), size)
+}
+
+pub(super) fn selectable_icon_text_button(
+    ui: &mut Ui,
+    icon: ButtonIcon,
+    label: impl Into<egui::WidgetText>,
+    selected: bool,
+) -> egui::Response {
+    let image = button_icon_image(ui, icon, text_dark(), BUTTON_ICON_SIZE);
+    ui.add(
+        egui::Button::image_and_text(image, label)
+            .selected(selected)
+            .min_size(Vec2::new(0.0, BUTTON_HEIGHT)),
+    )
+}
+
+/// A menu trigger with the same fixed square geometry as the app's other
+/// icon-only buttons. `Ui::menu_image_button` derives its size from theme
+/// padding, which allowed these controls to drift away from 24×24.
+pub(super) fn icon_menu_button<R>(
+    ui: &mut Ui,
+    icon: ButtonIcon,
+    tooltip: &str,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> egui::Response {
+    let menu = egui::menu::menu_custom_button(
+        ui,
+        egui::Button::new("").min_size(ICON_BUTTON_SIZE),
+        add_contents,
+    );
+    let icon_rect =
+        egui::Rect::from_center_size(menu.response.rect.center(), Vec2::splat(BUTTON_ICON_SIZE));
+    paint_button_icon_at(ui, icon, icon_rect, text_dark());
+    menu.response.on_hover_text(tooltip)
 }
 
 fn button_icon_uri_for_pixels_per_point(
@@ -214,9 +247,19 @@ fn button_icon_uri_for_pixels_per_point(
     color: Color32,
     pixels_per_point: f32,
 ) -> String {
+    button_icon_uri_for_pixels_per_point_and_size(icon, color, pixels_per_point, BUTTON_ICON_SIZE)
+}
+
+fn button_icon_uri_for_pixels_per_point_and_size(
+    icon: ButtonIcon,
+    color: Color32,
+    pixels_per_point: f32,
+    size: f32,
+) -> String {
     let dpi = icon_dpi_bucket(pixels_per_point);
+    let pixels = (size * pixels_per_point).round().max(1.0) as u32;
     format!(
-        "bytes://baboon_button_icons/{:?}-{:02x}{:02x}{:02x}{:02x}-dpi{dpi}.svg",
+        "bytes://baboon_button_icons/{:?}-{:02x}{:02x}{:02x}{:02x}-dpi{dpi}-{pixels}px.svg",
         icon,
         color.r(),
         color.g(),

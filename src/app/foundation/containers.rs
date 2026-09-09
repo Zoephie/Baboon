@@ -1557,7 +1557,6 @@ pub(in crate::app) fn draw_foundation_block_control(
                         ButtonIcon::JumpUp,
                         "Jump to parent block",
                         true,
-                        Vec2::new(24.0, 22.0),
                         foundation_block_text(),
                     )
                     .on_hover_text(format!(
@@ -1692,7 +1691,6 @@ pub(in crate::app) fn draw_foundation_block_control(
                         ButtonIcon::JumpTo,
                         "Clear search and jump to this block",
                         true,
-                        Vec2::new(24.0, 22.0),
                         foundation_jump_cyan(),
                     )
                     .clicked()
@@ -2223,7 +2221,7 @@ pub(in crate::app) fn foundation_header_stepper_clicked(
         ">" => (ButtonIcon::Right, "Next element"),
         _ => return false,
     };
-    icon_button(ui, icon, tooltip, enabled, ICON_BUTTON_SIZE, text_dark()).clicked()
+    icon_button(ui, icon, tooltip, enabled, text_dark()).clicked()
 }
 
 /// Like [`foundation_header_button_clicked`] but shows `disabled_hint` as a
@@ -2241,7 +2239,6 @@ pub(in crate::app) fn foundation_header_button_clicked_hint(
             icon,
             foundation_icon_button_tooltip(label),
             enabled,
-            ICON_BUTTON_SIZE,
             text_dark(),
         )
     } else {

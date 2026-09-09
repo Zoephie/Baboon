@@ -499,7 +499,9 @@ impl Baboon {
         let last_session = (!suppress_startup_popups && first_run_wizard.is_none())
             .then(load_last_session)
             .flatten()
-            .and_then(LastOpenedWindowsPrompt::from_session);
+            .and_then(|session| {
+                LastOpenedWindowsPrompt::from_session(session, &prefs.custom_editing_kit_profiles)
+            });
         let (last_opened_windows, auto_restore_session) = match prefs.session_restore {
             SessionRestore::Always => match last_session {
                 Some(prompt) if prompt.has_reopenable_kits() => (None, Some(prompt.checked_kits())),

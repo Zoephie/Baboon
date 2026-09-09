@@ -4,21 +4,237 @@
 use super::controller::open_terminal_log;
 use super::*;
 
+mod blam;
 mod browser_panel;
 mod dialogs;
 mod find;
 mod first_run;
 pub(super) mod help;
-mod search_windows;
+mod kit_tiles;
 mod recents;
+mod search_windows;
 mod settings;
 mod shell;
-mod kit_tiles;
 mod tag_pane;
-mod welcome;
 mod tag_tiles;
 mod tool_commands;
-mod blam;
+mod welcome;
+
+const PANE_HEADER_ICON_SIZE: f32 = 32.0;
+const PANE_HEADER_SECTION_GAP: f32 = 20.0;
+const PANE_HEADER_ICON_TEXT_GAP: f32 = 10.0;
+const PANE_HEADER_ACTION_GAP: f32 = 4.0;
+const PANE_HEADER_WIDE_BREAKPOINT: f32 = 600.0;
+const PANE_HEADER_MIN_LEFT_WIDTH: f32 = 200.0;
+const PANE_HEADER_COMMON_ACTIONS_WIDTH: f32 = 205.0;
+const BROWSER_SEARCH_HEIGHT: f32 = 24.0;
+const BROWSER_SEARCH_RADIUS: f32 = BROWSER_SEARCH_HEIGHT * 0.5;
+const BROWSER_SEARCH_ICON_SIZE: f32 = 16.0;
+const BROWSER_SEARCH_LEFT_PADDING: f32 = 4.0;
+const BROWSER_SEARCH_ICON_TEXT_GAP: f32 = 8.0;
+const BROWSER_SEARCH_RIGHT_PADDING: f32 = 8.0;
+
+/// Width of the title column when pane actions can remain beside it. Returning
+/// `None` is the shared signal for tag and folder headers to put actions below
+/// the title instead, preventing either header from overlapping at narrow
+/// docked or window sizes.
+fn pane_header_inline_left_width(available: f32, action_width: f32) -> Option<f32> {
+    (available >= PANE_HEADER_WIDE_BREAKPOINT).then(|| {
+        (available - action_width - PANE_HEADER_SECTION_GAP).max(PANE_HEADER_MIN_LEFT_WIDTH)
+    })
+}
+
+/// Border states shared by the custom search and keyword pills. Their fill is
+/// intentionally stable; hover and keyboard focus use the same strokes as an
+/// ordinary application text edit so the custom pill geometry does not create
+/// a second input style.
+fn pane_header_input_stroke(ui: &Ui, hovered: bool, focused: bool) -> Stroke {
+    if focused {
+        ui.visuals().selection.stroke
+    } else if hovered {
+        ui.visuals().widgets.hovered.bg_stroke
+    } else {
+        Stroke::new(1.0, foundation_input_edge())
+    }
+}
+
+/// The shared browser search field. Its icon lives inside the 24-point pill so
+/// the compact sidebar and a wide folder pane use exactly the same geometry.
+fn browser_search_field(ui: &mut Ui, value: &mut String, hint: &str) -> egui::Response {
+    let width = ui.available_width().max(BROWSER_SEARCH_HEIGHT);
+    let (rect, background_response) =
+        ui.allocate_exact_size(Vec2::new(width, BROWSER_SEARCH_HEIGHT), Sense::hover());
+    ui.painter()
+        .rect_filled(rect, BROWSER_SEARCH_RADIUS, browser_search_bg());
+
+    let icon_rect = egui::Rect::from_min_size(
+        egui::pos2(
+            rect.left() + BROWSER_SEARCH_LEFT_PADDING,
+            rect.center().y - BROWSER_SEARCH_ICON_SIZE * 0.5,
+        ),
+        Vec2::splat(BROWSER_SEARCH_ICON_SIZE),
+    );
+    paint_button_icon_at(ui, ButtonIcon::SearchBar, icon_rect, text_dark());
+    let icon_response = ui.interact(
+        icon_rect,
+        background_response.id.with("search_icon"),
+        Sense::click(),
+    );
+
+    let edit_rect = egui::Rect::from_min_max(
+        egui::pos2(icon_rect.right() + BROWSER_SEARCH_ICON_TEXT_GAP, rect.top()),
+        egui::pos2(rect.right() - BROWSER_SEARCH_RIGHT_PADDING, rect.bottom()),
+    );
+    let edit_response = ui.put(
+        edit_rect,
+        egui::TextEdit::singleline(value)
+            .hint_text(placeholder_text(hint))
+            .text_color(text_dark())
+            .frame(false)
+            .margin(egui::Margin::same(0.0))
+            .vertical_align(egui::Align::Center)
+            .min_size(edit_rect.size()),
+    );
+    if icon_response.clicked() {
+        edit_response.request_focus();
+    }
+    let response = background_response
+        .union(icon_response)
+        .union(edit_response.clone());
+    ui.painter().rect_stroke(
+        rect,
+        BROWSER_SEARCH_RADIUS,
+        pane_header_input_stroke(ui, response.hovered(), edit_response.has_focus()),
+    );
+    response
+}
+
+fn browser_favorites_divider(ui: &mut Ui, favorites_visible: bool) {
+    if favorites_visible {
+        ui.add_space(4.0);
+        ui.separator();
+        ui.add_space(4.0);
+    }
+}
+
+fn pane_header_path_parts(display_path: &str) -> (Vec<(String, PathBuf)>, String) {
+    let normalized = display_path.replace('\\', "/");
+    let mut components: Vec<&str> = normalized
+        .split('/')
+        .filter(|component| !component.is_empty())
+        .collect();
+    let title = components.pop().unwrap_or_default().to_owned();
+    let mut path = PathBuf::new();
+    let breadcrumbs = components
+        .into_iter()
+        .map(|component| {
+            path.push(component);
+            (component.to_owned(), path.clone())
+        })
+        .collect();
+    (breadcrumbs, title)
+}
+
+/// Draw clickable path segments above a pane title. A placeholder-free custom
+/// row keeps the hover fill behind the text while preserving the compact tag
+/// header typography.
+fn pane_header_breadcrumbs(
+    ui: &mut Ui,
+    breadcrumbs: &[(String, PathBuf)],
+) -> Option<(PathBuf, String)> {
+    if breadcrumbs.is_empty() {
+        return None;
+    }
+
+    const ITEM_GAP: f32 = 2.0;
+    const SEGMENT_HORIZONTAL_PADDING: f32 = 8.0;
+    let mut clicked = None;
+    let breadcrumb_font = FontId::proportional(11.0);
+    let chevron =
+        ui.painter()
+            .layout_no_wrap("›".to_owned(), FontId::proportional(12.0), subtle_dark());
+    let segments: Vec<_> = breadcrumbs
+        .iter()
+        .map(|(label, _)| {
+            ui.painter()
+                .layout_no_wrap(label.clone(), breadcrumb_font.clone(), subtle_dark())
+        })
+        .collect();
+    let row_height = segments
+        .iter()
+        .map(|galley| galley.size().y)
+        .fold(chevron.size().y, f32::max);
+    let row_width = segments
+        .iter()
+        .map(|galley| galley.size().x + SEGMENT_HORIZONTAL_PADDING + chevron.size().x)
+        .sum::<f32>()
+        + ITEM_GAP * (breadcrumbs.len() * 2 - 1) as f32
+        - SEGMENT_HORIZONTAL_PADDING * 0.5;
+    let (row_rect, row_response) =
+        ui.allocate_exact_size(Vec2::new(row_width, row_height), Sense::hover());
+    // Let the first segment's hover target extend into the icon/text gap. Its
+    // glyph then begins at the row origin, exactly where the title begins,
+    // while retaining four points of clickable padding on either side.
+    let mut x = row_rect.left() - SEGMENT_HORIZONTAL_PADDING * 0.5;
+
+    for (index, ((label, path), galley)) in breadcrumbs.iter().zip(segments).enumerate() {
+        let segment_size = Vec2::new(galley.size().x + SEGMENT_HORIZONTAL_PADDING, row_height);
+        let rect = egui::Rect::from_min_size(egui::pos2(x, row_rect.top()), segment_size);
+        let response = ui
+            .interact(rect, row_response.id.with(index), Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        if response.hovered() {
+            ui.painter().rect_filled(
+                rect,
+                egui::Rounding::same(4.0),
+                if is_dark_mode() {
+                    Color32::from_white_alpha(26)
+                } else {
+                    Color32::from_black_alpha(26)
+                },
+            );
+        }
+        let text_position = egui::Align2::CENTER_CENTER
+            .align_size_within_rect(galley.size(), rect)
+            .min;
+        ui.painter().galley_with_override_text_color(
+            text_position,
+            galley,
+            if response.hovered() {
+                text_dark()
+            } else {
+                subtle_dark()
+            },
+        );
+        if response.clicked() {
+            clicked = Some((path.clone(), label.clone()));
+        }
+
+        x = rect.right() + ITEM_GAP;
+        let chevron_rect = egui::Rect::from_min_size(
+            egui::pos2(x, row_rect.center().y - chevron.size().y * 0.5),
+            chevron.size(),
+        );
+        ui.painter()
+            .galley(chevron_rect.min, chevron.clone(), subtle_dark());
+        x = chevron_rect.right() + ITEM_GAP;
+    }
+    clicked
+}
+
+fn navigate_folder_browser(pane: &mut FolderBrowserState, path: PathBuf, label: String) {
+    if pane.rel_path == path {
+        return;
+    }
+    pane.rel_path = path;
+    pane.label = label;
+    pane.filter.clear();
+    pane.cached_generation = u64::MAX;
+    pane.cached_source_len = usize::MAX;
+    pane.tree = TagTree::default();
+    pane.group_tree = TagTree::default();
+    pane.filter_cache = FilterCache::default();
+}
 
 /// Mouse wheel over a tile tab bar scrolls it sideways.
 ///
@@ -120,10 +336,7 @@ fn editing_kit_menu_row_layout(row_rect: egui::Rect) -> EditingKitMenuRowLayout 
     );
     let label_rect = egui::Rect::from_min_max(
         content.min,
-        egui::pos2(
-            icon_rect.left() - EDITING_KIT_MENU_ICON_GAP,
-            content.max.y,
-        ),
+        egui::pos2(icon_rect.left() - EDITING_KIT_MENU_ICON_GAP, content.max.y),
     );
     EditingKitMenuRowLayout {
         label_rect,
@@ -153,15 +366,13 @@ fn editing_kit_menu_row(
     });
     let layout = editing_kit_menu_row_layout(response.rect);
     let text_color = text_dark();
-    ui.painter()
-        .with_clip_rect(layout.label_rect)
-        .text(
-            layout.label_rect.left_center(),
-            egui::Align2::LEFT_CENTER,
-            label,
-            egui::TextStyle::Button.resolve(ui.style()),
-            text_color,
-        );
+    ui.painter().with_clip_rect(layout.label_rect).text(
+        layout.label_rect.left_center(),
+        egui::Align2::LEFT_CENTER,
+        label,
+        egui::TextStyle::Button.resolve(ui.style()),
+        text_color,
+    );
     if let Some(texture) = texture {
         ui.painter().image(
             texture.id(),
@@ -172,15 +383,13 @@ fn editing_kit_menu_row(
     } else if default_project_icon {
         paint_button_icon_at(ui, ButtonIcon::FolderOpen, layout.icon_rect, text_dark());
     } else {
-        ui.painter()
-            .with_clip_rect(layout.icon_rect)
-            .text(
-                layout.icon_rect.center(),
-                egui::Align2::CENTER_CENTER,
-                fallback,
-                egui::FontId::proportional(8.0),
-                text_color,
-            );
+        ui.painter().with_clip_rect(layout.icon_rect).text(
+            layout.icon_rect.center(),
+            egui::Align2::CENTER_CENTER,
+            fallback,
+            egui::FontId::proportional(8.0),
+            text_color,
+        );
     }
     response
 }
@@ -239,15 +448,9 @@ fn draw_index_progress_bar(ui: &mut Ui, width: f32, fraction: Option<f32>, text:
 
 /// The kit's game card: emblem, game name, and source path.
 ///
-/// Sized to its own text and nothing else. The path used to wrap, and a
-/// wrapping label claims the full available width, so the card grew, shrank,
-/// and reflowed as the sidebar was dragged.
-///
-/// It also has to stay out of the panel's minimum width, or the sidebar would
-/// refuse to shrink past whichever game had the longest path. A panel is at
-/// least as wide as its content's minimum, so the card *allocates* only what
-/// is available and *draws* at its natural size into a clipped painter: the
-/// layout never sees the overflow, and the card keeps one shape.
+/// Fills the sidebar width and allows long source paths to reflow as the pane
+/// narrows. Zero-width break opportunities after path separators keep Windows
+/// paths readable without changing the text the user sees.
 fn draw_game_banner_header(
     ui: &mut Ui,
     app: &mut Baboon,
@@ -257,10 +460,12 @@ fn draw_game_banner_header(
 ) {
     const EMBLEM: f32 = 72.0;
     const MARGIN: f32 = 8.0;
-    const GAP: f32 = 4.0;
+    const GAP: f32 = 8.0;
     const TITLE_TOP: f32 = 8.0;
 
     let texture = app.workspace_banner_texture(ui.ctx(), game, profile_id);
+    let card_width = ui.available_width();
+    let text_width = (card_width - MARGIN * 2.0 - EMBLEM - GAP).max(1.0);
     let title = egui::WidgetText::from(
         RichText::new(format!(
             "Tags - {} ({})",
@@ -272,30 +477,24 @@ fn draw_game_banner_header(
     )
     .into_galley(
         ui,
-        Some(egui::TextWrapMode::Extend),
-        f32::INFINITY,
+        Some(egui::TextWrapMode::Wrap),
+        text_width,
         TextStyle::Body,
     );
-    let path = egui::WidgetText::from(RichText::new(path_label).color(subtle_dark()).small())
+    let wrappable_path = sidebar_wrappable_path_label(path_label);
+    let path = egui::WidgetText::from(RichText::new(wrappable_path).color(subtle_dark()).small())
         .into_galley(
             ui,
-            Some(egui::TextWrapMode::Extend),
-            f32::INFINITY,
+            Some(egui::TextWrapMode::Wrap),
+            text_width,
             TextStyle::Small,
         );
 
-    let text_width = title.size().x.max(path.size().x);
-    let card = Vec2::new(
-        MARGIN * 2.0 + EMBLEM + GAP + text_width,
-        MARGIN * 2.0 + EMBLEM,
-    );
-    let (visible, _) = ui.allocate_exact_size(
-        Vec2::new(card.x.min(ui.available_width()), card.y),
-        Sense::hover(),
-    );
-    let full = egui::Rect::from_min_size(visible.min, card);
+    let text_height = TITLE_TOP + title.size().y + path.size().y;
+    let card_height = MARGIN * 2.0 + EMBLEM.max(text_height);
+    let (full, _) = ui.allocate_exact_size(Vec2::new(card_width, card_height), Sense::hover());
 
-    let painter = ui.painter_at(visible);
+    let painter = ui.painter_at(full);
     painter.rect_filled(
         full,
         0.0,
@@ -308,10 +507,7 @@ fn draw_game_banner_header(
     if let Some(texture) = texture {
         painter.image(
             texture.id(),
-            egui::Rect::from_min_size(
-                full.min + Vec2::splat(MARGIN),
-                Vec2::splat(EMBLEM),
-            ),
+            egui::Rect::from_min_size(full.min + Vec2::splat(MARGIN), Vec2::splat(EMBLEM)),
             egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
             Color32::WHITE,
         );
@@ -324,6 +520,17 @@ fn draw_game_banner_header(
         path,
         subtle_dark(),
     );
+}
+
+fn sidebar_wrappable_path_label(path: &str) -> String {
+    let mut wrappable = String::with_capacity(path.len());
+    for character in path.chars() {
+        wrappable.push(character);
+        if matches!(character, '\\' | '/') {
+            wrappable.push('\u{200b}');
+        }
+    }
+    wrappable
 }
 
 fn sidebar_source_path_label(source: &TagSource) -> String {
@@ -421,7 +628,6 @@ fn tint_toward(base: Color32, accent: Color32, t: f32) -> Color32 {
     )
 }
 
-
 impl Baboon {
     /// `kit_index` is the workspace whose pane is drawing this. Readiness is
     /// resolved against that workspace's editing kit rather than the focused
@@ -494,8 +700,7 @@ impl Baboon {
                 .field_search
                 .entry(tag_key.to_owned())
                 .or_default();
-            let response = foundation_header_text_edit(
-                ui,
+            let response = ui.add(
                 egui::TextEdit::singleline(query)
                     .hint_text(placeholder_text("block or field name"))
                     .desired_width(220.0),
@@ -512,7 +717,6 @@ impl Baboon {
                 ButtonIcon::JumpTo,
                 &jump_tooltip,
                 jump_match_count > 0,
-                Vec2::new(22.0, 22.0),
                 text_dark(),
             );
             // Re-resolve matches after drawing when Enter is used: the TextEdit
@@ -523,16 +727,7 @@ impl Baboon {
                 // another Enter advances again without an intervening click.
                 response.request_focus();
             }
-            if icon_button(
-                ui,
-                ButtonIcon::Clear,
-                "Clear search",
-                true,
-                Vec2::new(22.0, 22.0),
-                text_dark(),
-            )
-            .clicked()
-            {
+            if icon_button(ui, ButtonIcon::Clear, "Clear search", true, text_dark()).clicked() {
                 query.clear();
             }
             ui.label(
@@ -683,7 +878,7 @@ impl Baboon {
             if let Some(keyword) = remove {
                 self.kits[kit_index].keywords.remove(tag_key, &keyword);
             }
-            let (resp, add_clicked) = Frame::none()
+            let keyword_field = Frame::none()
                 .fill(foundation_input())
                 .rounding(egui::Rounding::same(BUTTON_HEIGHT / 2.0))
                 .inner_margin(egui::Margin::same(2.0))
@@ -692,8 +887,7 @@ impl Baboon {
                     ui.spacing_mut().interact_size.y = 20.0;
                     ui.set_height(20.0);
                     ui.horizontal(|ui| {
-                        let resp = foundation_header_text_edit(
-                            ui,
+                        let resp = ui.add(
                             egui::TextEdit::singleline(&mut self.keyword_input)
                                 .hint_text(placeholder_text("add keyword"))
                                 .desired_width(120.0)
@@ -718,11 +912,22 @@ impl Baboon {
                         (resp, add_clicked)
                     })
                     .inner
-                })
-                .inner;
+                });
+            let (resp, add_clicked) = keyword_field.inner;
+            ui.painter().rect_stroke(
+                keyword_field.response.rect,
+                egui::Rounding::same(BUTTON_HEIGHT / 2.0),
+                pane_header_input_stroke(
+                    ui,
+                    keyword_field.response.hovered() || resp.hovered(),
+                    resp.has_focus(),
+                ),
+            );
             let submitted = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             if (add_clicked || submitted) && !self.keyword_input.trim().is_empty() {
-                self.kits[kit_index].keywords.add(tag_key, &self.keyword_input);
+                self.kits[kit_index]
+                    .keywords
+                    .add(tag_key, &self.keyword_input);
                 self.keyword_input.clear();
             }
         });
@@ -754,29 +959,22 @@ fn keyword_pill(ui: &mut Ui, tag_key: &str, keyword: &str) -> bool {
         .painter()
         .layout_no_wrap(keyword.to_owned(), font_id, text_dark());
     let width = TEXT_PADDING + galley.size().x + REMOVE_WIDTH + 4.0;
-    let (rect, _) = ui.allocate_exact_size(
-        Vec2::new(width, BUTTON_HEIGHT),
-        Sense::hover(),
-    );
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, BUTTON_HEIGHT), Sense::hover());
     let background = editor_bg();
     let target = if is_dark_mode() {
         Color32::WHITE
     } else {
         Color32::BLACK
     };
-    let blend = |base: u8, overlay: u8| {
-        (base as f32 + (overlay as f32 - base as f32) * 0.05).round() as u8
-    };
+    let blend =
+        |base: u8, overlay: u8| (base as f32 + (overlay as f32 - base as f32) * 0.05).round() as u8;
     let fill = Color32::from_rgb(
         blend(background.r(), target.r()),
         blend(background.g(), target.g()),
         blend(background.b(), target.b()),
     );
-    ui.painter().rect_filled(
-        rect,
-        egui::Rounding::same(BUTTON_HEIGHT / 2.0),
-        fill,
-    );
+    ui.painter()
+        .rect_filled(rect, egui::Rounding::same(BUTTON_HEIGHT / 2.0), fill);
     let text_rect = egui::Rect::from_min_max(
         egui::pos2(rect.left() + TEXT_PADDING, rect.top()),
         egui::pos2(rect.right() - REMOVE_WIDTH, rect.bottom()),

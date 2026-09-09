@@ -158,7 +158,9 @@ impl Baboon {
                             .color(text_dark()),
                     );
                     if explorer.index_unavailable {
-                        let note = if self.building_reverse_dependencies || self.kits[explorer_kit_index].scanning_entries {
+                        let note = if self.building_reverse_dependencies
+                            || self.kits[explorer_kit_index].scanning_entries
+                        {
                             "Reference index is building — reopen this in a moment."
                         } else {
                             "Reference index unavailable — run Tools → Build Reference Index."
@@ -256,26 +258,23 @@ impl Baboon {
     /// Floating window listing the results of a tag query (find-references /
     /// unreferenced). Clicking an entry opens it.
     pub(in crate::app) fn source_game(&self) -> Option<&str> {
-        self.source()
-            .and_then(|source| source.game.as_deref())
+        self.source().and_then(|source| source.game.as_deref())
     }
 
     pub(in crate::app) fn source_tags_root(&self) -> Option<&std::path::Path> {
-        self.source()
-            .and_then(|source| match &source.source {
-                TagSource::LooseFolder { root, .. } => Some(root.as_path()),
-                _ => None,
-            })
+        self.source().and_then(|source| match &source.source {
+            TagSource::LooseFolder { root, .. } => Some(root.as_path()),
+            _ => None,
+        })
     }
 
     pub(in crate::app) fn source_definitions_root(&self) -> Option<&std::path::Path> {
-        self.source()
-            .and_then(|source| match &source.source {
-                TagSource::LooseFolder {
-                    definitions_root, ..
-                } => Some(definitions_root.as_path()),
-                _ => None,
-            })
+        self.source().and_then(|source| match &source.source {
+            TagSource::LooseFolder {
+                definitions_root, ..
+            } => Some(definitions_root.as_path()),
+            _ => None,
+        })
     }
 
     pub(super) fn draw_tag_diff_window(&mut self, ctx: &egui::Context) {
@@ -313,7 +312,11 @@ impl Baboon {
                         .keys()
                         .filter(|k| {
                             **k != state.a_key
-                                && self.kits[diff_kit].parsed_tags.get(*k).map(|d| d.tag.group().tag) == a_group
+                                && self.kits[diff_kit]
+                                    .parsed_tags
+                                    .get(*k)
+                                    .map(|d| d.tag.group().tag)
+                                    == a_group
                         })
                         .cloned()
                         .collect();
@@ -585,7 +588,6 @@ impl Baboon {
                                                         ButtonIcon::JumpTo,
                                                         "Jump to this field",
                                                         true,
-                                                        Vec2::new(22.0, 22.0),
                                                         text_dark(),
                                                     );
                                                     let label = ui
@@ -729,7 +731,9 @@ impl Baboon {
                     .on_hover_text("Optional: limit the search to a tag group (four-CC or name).");
                 });
                 ui.add_space(4.0);
-                let indexed = self.kits[self.active].field_index.is_ready_for(self.kits[self.active].generation);
+                let indexed = self.kits[self.active]
+                    .field_index
+                    .is_ready_for(self.kits[self.active].generation);
                 ui.horizontal(|ui| {
                     if indexed {
                         ui.label(

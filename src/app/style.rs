@@ -57,39 +57,10 @@ pub(super) fn foundation_visuals() -> egui::Visuals {
     visuals
 }
 
-/// Draw a single-line input with an unmistakable focused outline. Egui uses
-/// the selection stroke for a focused text edit; keep this stronger treatment
-/// scoped to the compact tag-header inputs so it does not change every widget.
-pub(super) fn foundation_header_text_edit(
-    ui: &mut Ui,
-    edit: egui::TextEdit<'_>,
-) -> egui::Response {
-    ui.scope(|ui| {
-        ui.visuals_mut().selection.stroke = foundation_input_focus_stroke();
-        ui.add(edit)
-    })
-    .inner
-}
-
-pub(super) fn foundation_input_focus_stroke() -> Stroke {
-    foundation_input_focus_stroke_for(is_dark_mode())
-}
-
 /// Consistent styling for empty text-input prompts without changing egui's
 /// general weak-text color, which is also used by unrelated disabled UI.
 pub(super) fn placeholder_text(text: impl Into<String>) -> RichText {
     RichText::new(text).color(text_dark().gamma_multiply(0.5))
-}
-
-fn foundation_input_focus_stroke_for(dark_mode: bool) -> Stroke {
-    Stroke::new(
-        2.0,
-        if dark_mode {
-            Color32::from_rgb(80, 170, 220)
-        } else {
-            Color32::from_rgb(42, 91, 122)
-        },
-    )
 }
 
 /// Named family used for bold headers (egui has no font-weight API — bold is a
@@ -487,14 +458,6 @@ pub(super) fn browser_search_bg() -> Color32 {
         Color32::from_rgb(23, 23, 23)
     } else {
         Color32::from_rgb(246, 246, 244)
-    }
-}
-
-pub(super) fn browser_search_hover() -> Color32 {
-    if is_dark_mode() {
-        Color32::from_rgb(35, 35, 35)
-    } else {
-        Color32::from_rgb(255, 255, 252)
     }
 }
 

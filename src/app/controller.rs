@@ -21,8 +21,8 @@ mod tool_drop;
 pub(super) use tool_drop::KIT_TOOL_DROP_CURSOR;
 // Re-exported: the browser's row menus gate on this, and its drawing functions
 // reach it through egui memory rather than through `Baboon`.
-pub(super) use scenario_launch::{ScenarioLaunchAvailability, scenario_launch_availability};
 use scenario_launch::*;
+pub(super) use scenario_launch::{ScenarioLaunchAvailability, scenario_launch_availability};
 mod queries;
 use queries::*;
 mod saving;
@@ -1301,7 +1301,7 @@ impl Baboon {
             groups: Vec::new(),
             selected_group: 0,
             error: None,
-                    authorability: None,
+            authorability: None,
         };
         self.refresh_new_tag_groups();
         self.new_tag_open = true;
@@ -2135,6 +2135,7 @@ impl Baboon {
     /// the workspace it belonged to, which need not be the focused one.
     fn refresh_favorite_entries_for(&mut self, kit: usize) {
         self.kits[kit].active_favorite_entries.clear();
+        self.kits[kit].active_favorite_folders.clear();
         let Some(root) = self.loaded_tags_root_for(kit) else {
             return;
         };
@@ -2147,6 +2148,7 @@ impl Baboon {
             .map(|source| source.names.clone())
             .unwrap_or_else(|| self.kits[kit].names.clone());
         let saved_paths = self.editing_kit_favorites[index].tags.clone();
+        let saved_folders = self.editing_kit_favorites[index].folders.clone();
         let mut missing = Vec::new();
         for relative_path in saved_paths {
             let path = root.join(&relative_path);
@@ -2158,13 +2160,27 @@ impl Baboon {
                 self.kits[kit].active_favorite_entries.push(entry);
             }
         }
-        if !missing.is_empty() {
-            self.editing_kit_favorites[index].tags.retain(|path| {
+        let mut missing_folders = Vec::new();
+        for relative_path in saved_folders {
+            if root.join(&relative_path).is_dir() {
+                self.kits[kit].active_favorite_folders.push(relative_path);
+            } else {
+                missing_folders.push(relative_path);
+            }
+        }
+        if !missing.is_empty() || !missing_folders.is_empty() {
+            let favorites = &mut self.editing_kit_favorites[index];
+            favorites.tags.retain(|path| {
                 !missing
                     .iter()
                     .any(|missing| same_recent_path(missing, path))
             });
-            if self.editing_kit_favorites[index].tags.is_empty() {
+            favorites.folders.retain(|path| {
+                !missing_folders
+                    .iter()
+                    .any(|missing| same_recent_path(missing, path))
+            });
+            if favorites.tags.is_empty() && favorites.folders.is_empty() {
                 self.editing_kit_favorites.remove(index);
             }
         }
@@ -2196,6 +2212,7 @@ impl Baboon {
             self.editing_kit_favorites.push(EditingKitFavorites {
                 tags_root: clean_recent_path(root.clone()),
                 tags: Vec::new(),
+                folders: Vec::new(),
             });
             self.editing_kit_favorites.len() - 1
         });
@@ -2209,7 +2226,7 @@ impl Baboon {
             self.kits[self.active]
                 .active_favorite_entries
                 .retain(|favorite| favorite.key != entry.key);
-            if kit.tags.is_empty() {
+            if kit.tags.is_empty() && kit.folders.is_empty() {
                 self.editing_kit_favorites.remove(index);
             }
             self.status = format!("Removed {} from Favorites", entry.display_path);
@@ -2219,6 +2236,50 @@ impl Baboon {
                 .active_favorite_entries
                 .push(entry.clone());
             self.status = format!("Added {} to Favorites", entry.display_path);
+        }
+    }
+
+    fn toggle_folder_favorite(&mut self, rel_path: &Path) {
+        let Some(root) = self.loaded_tags_root() else {
+            self.status = "Only loose editing-kit folders can be favorited".to_owned();
+            return;
+        };
+        let Some(relative_path) = clean_favorite_relative_path(rel_path.to_path_buf()) else {
+            self.status = "Could not resolve the folder inside the loaded tags folder".to_owned();
+            return;
+        };
+        if !root.join(&relative_path).is_dir() {
+            self.status = format!("Folder no longer exists: {}", relative_path.display());
+            return;
+        }
+        let index = self.favorite_kit_index(&root).unwrap_or_else(|| {
+            self.editing_kit_favorites.push(EditingKitFavorites {
+                tags_root: clean_recent_path(root.clone()),
+                tags: Vec::new(),
+                folders: Vec::new(),
+            });
+            self.editing_kit_favorites.len() - 1
+        });
+        let favorites = &mut self.editing_kit_favorites[index];
+        if let Some(position) = favorites
+            .folders
+            .iter()
+            .position(|current| same_recent_path(current, &relative_path))
+        {
+            favorites.folders.remove(position);
+            self.kits[self.active]
+                .active_favorite_folders
+                .retain(|current| !same_recent_path(current, &relative_path));
+            if favorites.tags.is_empty() && favorites.folders.is_empty() {
+                self.editing_kit_favorites.remove(index);
+            }
+            self.status = format!("Removed {} from Favorites", relative_path.display());
+        } else {
+            favorites.folders.push(relative_path.clone());
+            self.kits[self.active]
+                .active_favorite_folders
+                .push(relative_path.clone());
+            self.status = format!("Added {} to Favorites", relative_path.display());
         }
     }
 
@@ -3240,7 +3301,7 @@ impl Baboon {
         }
     }
 
-    /// Snapshot every kit's source and open tags for the restore prompt.
+    /// Snapshot every kit's source and open tag/folder panes for the restore prompt.
     pub(super) fn current_session_state(&self) -> Option<LastSessionState> {
         let kits = (0..self.kits.len())
             .filter_map(|index| self.session_kit_state(index))
@@ -3300,6 +3361,14 @@ impl Baboon {
                 path,
             });
         }
+        let folders = ordered_unique_keys(kit.open_tabs.iter())
+            .into_iter()
+            .filter_map(|key| kit.folder_browsers.get(&key))
+            .map(|folder| LastSessionFolder {
+                rel_path: folder.rel_path.clone(),
+                label: folder.label.clone(),
+            })
+            .collect();
         let chimp_packages = ordered_unique_keys(kit.chimp.open_packages.iter());
         let active_chimp_package = kit
             .chimp
@@ -3325,25 +3394,20 @@ impl Baboon {
             browser_mode: Some(kit.browser_mode),
             browser_sort: Some(kit.browser_sort),
             tags,
+            folders,
             chimp_packages,
             active_chimp_package,
             // Read off the open tabs rather than the tag list: the libraries'
             // pane keys resolve to no entry, so the loop above skipped them.
-            bitmap_library_open: kit
-                .open_tabs
-                .iter()
-                .any(|key| key == BITMAP_LIBRARY_KEY),
-            model_library_open: kit
-                .open_tabs
-                .iter()
-                .any(|key| key == MODEL_LIBRARY_KEY),
+            bitmap_library_open: kit.open_tabs.iter().any(|key| key == BITMAP_LIBRARY_KEY),
+            model_library_open: kit.open_tabs.iter().any(|key| key == MODEL_LIBRARY_KEY),
             was_active,
         })
     }
 
-    /// Reopen each saved kit. Every kit gets its own load, and its tags are
+    /// Reopen each saved kit. Every kit gets its own load, and its panes are
     /// staged on the kit itself rather than in one shared slot, so the loads
-    /// can finish in any order without stealing each other's tags.
+    /// can finish in any order without stealing each other's restore state.
     pub(super) fn begin_last_session_restore(&mut self, kits: Vec<RestoreKit>, ctx: egui::Context) {
         for RestoreKit {
             source_kind,
@@ -3353,6 +3417,7 @@ impl Baboon {
             browser_mode,
             browser_sort,
             tags,
+            folders,
             chimp_packages,
             active_chimp_package,
             bitmap_library_open,
@@ -3410,6 +3475,7 @@ impl Baboon {
                 self.restored_active_kit = Some(restoring);
             }
             self.kits[self.active].pending_restore_tags = tags;
+            self.kits[self.active].pending_restore_folders = folders;
             self.kits[self.active].pending_restore_chimp_packages = chimp_packages;
             self.kits[self.active].pending_restore_bitmap_library = bitmap_library_open;
             self.kits[self.active].pending_restore_model_library = model_library_open;
@@ -3469,11 +3535,9 @@ impl Baboon {
     /// still loaded; a kit the user unchecked in the restore prompt, or whose
     /// source has since moved, leaves the focus wherever the loads put it.
     pub(super) fn settle_restored_kit(&mut self, kit: KitId) {
-        let Some(active) = focus_after_restore(
-            &mut self.restoring_kits,
-            &mut self.restored_active_kit,
-            kit,
-        ) else {
+        let Some(active) =
+            focus_after_restore(&mut self.restoring_kits, &mut self.restored_active_kit, kit)
+        else {
             return;
         };
         if let Some(index) = self.kit_index(active) {
@@ -3481,7 +3545,7 @@ impl Baboon {
         }
     }
 
-    /// Reopen the tags staged for the kit that just finished loading.
+    /// Reopen the panes staged for the kit that just finished loading.
     fn finish_pending_session_restore(&mut self, ctx: egui::Context) {
         // Ahead of the early return below: a workspace whose only open tab was
         // the Bitmap Library has no tags staged, and would otherwise come back
@@ -3492,11 +3556,22 @@ impl Baboon {
         if std::mem::take(&mut self.kits[self.active].pending_restore_model_library) {
             self.open_model_library();
         }
+        let restore_folders = std::mem::take(&mut self.kits[self.active].pending_restore_folders);
+        for folder in &restore_folders {
+            self.handle_browser_action(
+                BrowserAction::OpenFolderBrowser {
+                    rel_path: folder.rel_path.clone(),
+                    label: folder.label.clone(),
+                    open_in_new_tab: true,
+                },
+                ctx.clone(),
+            );
+        }
         let restore = std::mem::take(&mut self.kits[self.active].pending_restore_tags);
-        if restore.is_empty() {
+        if restore.is_empty() && restore_folders.is_empty() {
             return;
         }
-        let mut opened = 0usize;
+        let mut opened = restore_folders.len();
         let mut missing = 0usize;
         for tag in restore {
             if self.ensure_restored_tag_entry(&tag) {
@@ -3573,6 +3648,7 @@ impl Baboon {
         self.kits[self.active].parsed_tags.clear();
         self.kits[self.active].loading_tags.clear();
         self.kits[self.active].bitmap_previews.clear();
+        self.kits[self.active].folder_browsers.clear();
         self.kits[self.active].edit_buffers.clear();
         self.kits[self.active].selected_key = None;
         self.color_popup = None;
@@ -3596,7 +3672,7 @@ impl Baboon {
         self.kits[self.active]
             .edit_buffers
             .retain(|buffer_key, _| buffer_key.starts_with(&edit_prefix));
-        self.kits[self.active].selected_key = Some(key.to_owned());
+        self.kits[self.active].selected_key = (!is_folder_pane_key(key)).then(|| key.to_owned());
         self.color_popup = None;
         self.function_popup = None;
     }
@@ -3613,6 +3689,87 @@ impl Baboon {
 
     pub(super) fn handle_browser_action(&mut self, action: BrowserAction, ctx: egui::Context) {
         match action {
+            BrowserAction::OpenFolderBrowser {
+                rel_path,
+                label,
+                open_in_new_tab,
+            } => {
+                let needs_scan = self.kits[self.active]
+                    .source
+                    .as_ref()
+                    .is_some_and(|source| {
+                        matches!(source.source, TagSource::LooseFolder { .. })
+                            && source.all_entries.is_empty()
+                    })
+                    && !self.kits[self.active].scanning_entries;
+                let matching_key = if open_in_new_tab {
+                    None
+                } else {
+                    let normalized = rel_path.to_string_lossy().replace('\\', "/");
+                    let base = folder_pane_key(&rel_path);
+                    let panes = &self.kits[self.active].folder_browsers;
+                    panes
+                        .get(&base)
+                        .filter(|pane| {
+                            pane.rel_path
+                                .to_string_lossy()
+                                .replace('\\', "/")
+                                .eq_ignore_ascii_case(&normalized)
+                        })
+                        .map(|_| base)
+                        .or_else(|| {
+                            let mut matches = panes
+                                .iter()
+                                .filter(|(_, pane)| {
+                                    pane.rel_path
+                                        .to_string_lossy()
+                                        .replace('\\', "/")
+                                        .eq_ignore_ascii_case(&normalized)
+                                })
+                                .map(|(key, _)| key.clone())
+                                .collect::<Vec<_>>();
+                            matches.sort();
+                            matches.into_iter().next()
+                        })
+                };
+                let key = matching_key.unwrap_or_else(|| {
+                    let base = folder_pane_key(&rel_path);
+                    if !self.kits[self.active].folder_browsers.contains_key(&base) {
+                        return base;
+                    }
+                    (2..)
+                        .map(|suffix| format!("{base}#{suffix}"))
+                        .find(|candidate| {
+                            !self.kits[self.active]
+                                .folder_browsers
+                                .contains_key(candidate)
+                        })
+                        .expect("folder pane suffix space is unbounded")
+                });
+                self.kits[self.active]
+                    .folder_browsers
+                    .entry(key.clone())
+                    .or_insert_with(|| FolderBrowserState {
+                        rel_path,
+                        label,
+                        filter: String::new(),
+                        focus_search: false,
+                        mode: BrowserMode::Folders,
+                        sort: self.default_browser_sort,
+                        cached_generation: u64::MAX,
+                        cached_source_len: usize::MAX,
+                        tree: TagTree::default(),
+                        group_tree: TagTree::default(),
+                        filter_cache: FilterCache::default(),
+                    });
+                let selected = self.kits[self.active].selected_key.clone();
+                self.kits[self.active].open_tag_pane(&key);
+                self.kits[self.active].selected_key = selected;
+                if needs_scan {
+                    self.begin_scan_all_entries(ctx);
+                }
+            }
+            BrowserAction::ToggleFolderFavorite(rel_path) => self.toggle_folder_favorite(&rel_path),
             BrowserAction::Select(key) => self.select_entry(key, ctx),
             BrowserAction::ToggleFavorite(key) => self.toggle_favorite(&key),
             BrowserAction::CopyTagName(key) => self.copy_tag_name(&key, &ctx),
@@ -3895,8 +4052,8 @@ impl Baboon {
             return;
         };
         let Some(index) = source.reverse_dependencies.as_ref() else {
-            self.status =
-                "Build the reference index first — Tools ▸ Build/Rebuild Reference Index".to_owned();
+            self.status = "Build the reference index first — Tools ▸ Build/Rebuild Reference Index"
+                .to_owned();
             return;
         };
         let Some(root) = self.entry_for_key(key).cloned() else {
@@ -4232,10 +4389,7 @@ impl Baboon {
             };
             return;
         }
-        let Some(output) = rfd::FileDialog::new()
-            .set_title(dialog_title)
-            .pick_folder()
-        else {
+        let Some(output) = rfd::FileDialog::new().set_title(dialog_title).pick_folder() else {
             return;
         };
         // Files landing in the game's own Paks folder would be found by the next
@@ -5749,7 +5903,9 @@ impl Baboon {
                 let sidecar = output.with_extension("baboon");
                 // A sidecar written next to an exported mod may be replacing an
                 // older one, and nothing here knows what is in it.
-                if let Err(error) = save_campaign_project(&sidecar, snapshot, None, ProjectScope::ModSidecar) {
+                if let Err(error) =
+                    save_campaign_project(&sidecar, snapshot, None, ProjectScope::ModSidecar)
+                {
                     self.status = format!(
                         "Exported {count} tag(s), but the .baboon sidecar failed: {}",
                         ContainerWriteFailure::at(LeasePhase::Commit, &sidecar, error)
@@ -8746,6 +8902,33 @@ enum LastOpenedWindowsAction {
     },
 }
 
+fn last_opened_workspace_heading(
+    profile: Option<(&str, &Path)>,
+    game: Option<&str>,
+    source_path: &Path,
+    project_path: Option<&Path>,
+) -> (String, Option<String>) {
+    if let Some((name, root)) = profile {
+        return (name.to_owned(), Some(root.display().to_string()));
+    }
+    if let Some(project_path) = project_path {
+        let name = project_path
+            .file_stem()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .or_else(|| project_path.file_name().and_then(|name| name.to_str()))
+            .map(str::to_owned)
+            .unwrap_or_else(|| project_path.display().to_string());
+        return (name, Some(project_path.display().to_string()));
+    }
+
+    let heading = match game {
+        Some(game) => game_display_name(game).to_owned(),
+        None => source_path.display().to_string(),
+    };
+    (heading, None)
+}
+
 fn render_last_opened_windows_prompt(
     ctx: &egui::Context,
     prompt: Option<&mut LastOpenedWindowsPrompt>,
@@ -8776,16 +8959,29 @@ fn render_last_opened_windows_prompt(
                     if index > 0 {
                         ui.add_space(10.0);
                     }
-                    let heading = match kit.game.as_deref() {
-                        Some(game) => game_display_name(game).to_owned(),
-                        None => kit.source_path.display().to_string(),
-                    };
-                    ui.label(RichText::new(heading).color(text_dark()).strong())
-                        .on_hover_text(kit.source_path.display().to_string());
+                    let displayed_source_path =
+                        kit.profile_root.as_deref().unwrap_or(&kit.source_path);
+                    let (heading, project_path) = last_opened_workspace_heading(
+                        kit.profile_name.as_deref().zip(kit.profile_root.as_deref()),
+                        kit.game.as_deref(),
+                        &kit.source_path,
+                        kit.project_path.as_deref(),
+                    );
+                    let heading_response =
+                        ui.label(RichText::new(heading).color(text_dark()).strong());
+                    if let Some(project_path) = project_path {
+                        heading_response.on_hover_text(&project_path);
+                        ui.label(RichText::new(project_path).color(subtle_dark()).small());
+                    } else {
+                        heading_response.on_hover_text(kit.source_path.display().to_string());
+                    }
                     if !kit.source_available {
                         ui.label(
-                            RichText::new(format!("Missing source: {}", kit.source_path.display()))
-                                .color(Color32::from_rgb(180, 48, 40)),
+                            RichText::new(format!(
+                                "Missing source: {}",
+                                displayed_source_path.display()
+                            ))
+                            .color(Color32::from_rgb(180, 48, 40)),
                         );
                     }
                     // Why a workspace is listed with nothing under it: its
@@ -8816,6 +9012,26 @@ fn render_last_opened_windows_prompt(
                                     entry.tag.label.clone()
                                 } else {
                                     format!("{} (missing)", entry.tag.label)
+                                };
+                                ui.label(RichText::new(label).color(text_dark()));
+                            });
+                        });
+                    }
+                    if !kit.folder_entries.is_empty() {
+                        ui.horizontal(|ui| {
+                            ui.add_space(10.0);
+                            ui.label(RichText::new("Folders").color(subtle_dark()).strong());
+                        });
+                    }
+                    for entry in &mut kit.folder_entries {
+                        ui.add_enabled_ui(entry.available, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.add_space(10.0);
+                                ui.checkbox(&mut entry.checked, "");
+                                let label = if entry.available {
+                                    entry.folder.rel_path.display().to_string()
+                                } else {
+                                    format!("{} (missing source)", entry.folder.rel_path.display())
                                 };
                                 ui.label(RichText::new(label).color(text_dark()));
                             });
@@ -8887,7 +9103,54 @@ fn render_last_opened_windows_prompt(
 #[cfg(test)]
 mod tests {
     use super::ensure_priority_suffix;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn last_opened_workspace_heading_prefers_the_named_project() {
+        let source = Path::new(r"C:\Games\Halo Infinite");
+        let project = Path::new(r"D:\Baboon Projects\Campaign Overhaul.baboon");
+
+        assert_eq!(
+            super::last_opened_workspace_heading(
+                None,
+                Some("halo_infinite"),
+                source,
+                Some(project)
+            ),
+            (
+                "Campaign Overhaul".to_owned(),
+                Some(project.display().to_string())
+            )
+        );
+    }
+
+    #[test]
+    fn last_opened_workspace_heading_keeps_the_source_fallback() {
+        let source = Path::new(r"C:\Editing Kits\Custom Kit");
+
+        assert_eq!(
+            super::last_opened_workspace_heading(None, None, source, None),
+            (source.display().to_string(), None)
+        );
+    }
+
+    #[test]
+    fn last_opened_workspace_heading_prefers_the_custom_editing_kit_profile() {
+        let source = Path::new(r"C:\Editing Kits\H2EK");
+
+        assert_eq!(
+            super::last_opened_workspace_heading(
+                Some(("Halo 2 Rebalance", source)),
+                Some("halo2_mcc"),
+                source,
+                None
+            ),
+            (
+                "Halo 2 Rebalance".to_owned(),
+                Some(source.display().to_string())
+            )
+        );
+    }
 
     #[test]
     fn only_workspace_close_actions_wait_for_chimp_documents() {
@@ -9627,7 +9890,10 @@ fn collect_tag_references(
 /// Indexing walks every element of every block across the whole tag set, where
 /// building a path string per visited field dominates the cost — and the
 /// dependency index discards those paths.
-pub(in crate::app) fn collect_tag_dependency_refs(tag_struct: TagStruct<'_>, refs: &mut Vec<DependencyRef>) {
+pub(in crate::app) fn collect_tag_dependency_refs(
+    tag_struct: TagStruct<'_>,
+    refs: &mut Vec<DependencyRef>,
+) {
     for field in tag_struct.fields() {
         match field.value() {
             Some(TagFieldData::TagReference(reference)) => {
@@ -10869,7 +11135,11 @@ mod restore_focus_tests {
                 .into_iter()
                 .filter_map(|kit| focus_after_restore(&mut restoring, &mut active, kit))
                 .collect();
-            assert_eq!(settled, [halo3], "landing order {order:?} changed the focus");
+            assert_eq!(
+                settled,
+                [halo3],
+                "landing order {order:?} changed the focus"
+            );
         }
     }
 

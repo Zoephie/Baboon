@@ -1000,7 +1000,6 @@ impl Baboon {
                                             ButtonIcon::Clear,
                                             "Clear terminal",
                                             true,
-                                            Vec2::new(22.0, 20.0),
                                             text_dark(),
                                         )
                                         .clicked()

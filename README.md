@@ -95,7 +95,10 @@ core, which is roughly a 3× saving on the reconciliation for a full MCC kit
 ### Tag browser
 
 - **Folder view** — the on-disk directory hierarchy, with a **per-group icon**
-  beside each tag (and on its editor tab) for quick visual scanning.
+  beside each tag (and on its editor tab) for quick visual scanning. Double-click
+  a folder to open a docked browser tab rooted at that folder, with its own
+  search, folder/group view, sorting and filtering. Favorite loose folders for
+  direct access from the browser's Favorites section.
 - **Groups view** — tags regrouped by tag group (e.g. *biped*, *weapon*,
   *render_model*), with friendly names resolved from the definition tables.
 - **Recent folders** — a quick-open list in the File menu, on the workspace

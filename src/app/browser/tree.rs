@@ -76,11 +76,7 @@ pub(in crate::app) fn entry_loose_file(entry: &TagEntry) -> Option<PathBuf> {
 /// how the browser rows and library cards are used, so they show this
 /// instead: pure painting on a Tooltip-order layer. A painter registers no
 /// widgets and no area, so nothing exists for a press to land on.
-pub(in crate::app) fn hover_tooltip_beside_pointer(
-    ui: &Ui,
-    response: &egui::Response,
-    text: &str,
-) {
+pub(in crate::app) fn hover_tooltip_beside_pointer(ui: &Ui, response: &egui::Response, text: &str) {
     if !response.hovered() || response.dragged() {
         return;
     }
@@ -112,12 +108,7 @@ pub(in crate::app) fn hover_tooltip_beside_pointer(
         rect = rect.translate(Vec2::new(0.0, -rect.height() - 24.0));
     }
     let visuals = ui.visuals();
-    painter.rect(
-        rect,
-        4.0,
-        visuals.window_fill,
-        visuals.window_stroke,
-    );
+    painter.rect(rect, 4.0, visuals.window_fill, visuals.window_stroke);
     painter.galley(rect.min + padding, galley, text_dark());
 }
 
@@ -226,6 +217,68 @@ fn ordered_child_indices(children: &[TagTreeNode], sort: BrowserSort) -> Vec<usi
     indices
 }
 
+type FolderChevronCutouts = std::sync::Arc<std::sync::Mutex<Vec<egui::Rect>>>;
+
+fn folder_chevron_cutouts_id() -> egui::Id {
+    egui::Id::new("browser_folder_chevron_cutouts")
+}
+
+/// Start a fresh collection for this tree. Descendant chevrons register their
+/// rectangles here so an ancestor guide can be drawn as real line segments
+/// around them instead of covering the guide with a background-colored patch.
+fn begin_folder_chevron_collection(ui: &Ui) {
+    ui.data_mut(|data| {
+        data.insert_temp(
+            folder_chevron_cutouts_id(),
+            std::sync::Arc::new(std::sync::Mutex::new(Vec::<egui::Rect>::new())),
+        )
+    });
+}
+
+fn folder_chevron_cutouts(ui: &Ui) -> Option<FolderChevronCutouts> {
+    ui.data(|data| data.get_temp::<FolderChevronCutouts>(folder_chevron_cutouts_id()))
+}
+
+fn guide_segments_around_cutouts(
+    x: f32,
+    top: f32,
+    bottom: f32,
+    cutouts: &[egui::Rect],
+    stroke: Stroke,
+) -> Vec<egui::Shape> {
+    let mut gaps: Vec<(f32, f32)> = cutouts
+        .iter()
+        .filter(|rect| rect.left() <= x && x <= rect.right())
+        .map(|rect| {
+            (
+                (rect.top() - 1.0).max(top),
+                (rect.bottom() + 1.0).min(bottom),
+            )
+        })
+        .filter(|(gap_top, gap_bottom)| gap_top < gap_bottom)
+        .collect();
+    gaps.sort_by(|a, b| a.0.total_cmp(&b.0));
+
+    let mut shapes = Vec::with_capacity(gaps.len() + 1);
+    let mut cursor = top;
+    for (gap_top, gap_bottom) in gaps {
+        if cursor < gap_top {
+            shapes.push(egui::Shape::line_segment(
+                [egui::pos2(x, cursor), egui::pos2(x, gap_top)],
+                stroke,
+            ));
+        }
+        cursor = cursor.max(gap_bottom);
+    }
+    if cursor < bottom {
+        shapes.push(egui::Shape::line_segment(
+            [egui::pos2(x, cursor), egui::pos2(x, bottom)],
+            stroke,
+        ));
+    }
+    shapes
+}
+
 /// Folder-label ancestors of a tag's display path (filename removed).
 pub(in crate::app) fn ancestor_labels(display_path: &str) -> Vec<String> {
     let mut segments: Vec<String> = display_path
@@ -252,6 +305,7 @@ pub(in crate::app) fn draw_tree(
     favorite_keys: Option<&HashSet<String>>,
     is_container: bool,
 ) -> Option<BrowserAction> {
+    begin_folder_chevron_collection(ui);
     let mut clicked = None;
     if !folders_before_tags {
         clicked = clicked.or_else(|| {
@@ -336,6 +390,7 @@ pub(in crate::app) fn draw_tree_lazy(
     folders_before_tags: bool,
     favorite_keys: Option<&HashSet<String>>,
 ) -> Option<BrowserAction> {
+    begin_folder_chevron_collection(ui);
     let mut clicked = None;
     if !folders_before_tags {
         clicked = clicked.or_else(|| {
@@ -423,13 +478,13 @@ pub(in crate::app) fn draw_tree_node_lazy(
     } else {
         node.label.clone()
     };
-    let response = egui::CollapsingHeader::new(
-        RichText::new(folder_label).color(folder_label_color(ui, node, entries)),
-    )
-        .icon(folder_arrow_icon)
-        .default_open(!filter.is_empty())
-        .open(on_path.then_some(true))
-        .show(ui, |ui| {
+    let response = show_folder_tree_header(
+        ui,
+        &folder_label,
+        folder_label_color(ui, node, entries),
+        !filter.is_empty(),
+        on_path,
+        |ui| {
             if !node.entries_loaded {
                 match load_folder_node_entries(root, node, entries, names) {
                     Ok(()) => {
@@ -529,36 +584,19 @@ pub(in crate::app) fn draw_tree_node_lazy(
                     );
                 }
             }
+        },
+    );
+    response.context_menu(|ui| {
+        let favorited = browser_favorite_folders(ui).map(|folders| {
+            folders
+                .iter()
+                .any(|path| paths_match_case_insensitive(path, &node.rel_path))
         });
-    response.header_response.context_menu(|ui| {
-        if ui.button("Move to...").clicked() {
-            clicked = Some(BrowserAction::MoveLooseFolder {
-                rel_path: node.rel_path.clone(),
-                label: node.label.clone(),
-            });
-            ui.close_menu();
-        }
-        if ui.button("Copy to...").clicked() {
-            clicked = Some(BrowserAction::CopyLooseFolder {
-                rel_path: node.rel_path.clone(),
-                label: node.label.clone(),
-            });
-            ui.close_menu();
-        }
-        // Not Expert-gated, unlike the "save this folder for another game"
-        // action it replaces: bringing another game's tags in is the headline
-        // feature now, and the write is confirmed by the dialog either way.
-        if ui
-            .button("Import tags here...")
-            .on_hover_text("Convert a tag, or a whole folder of them, from another game into this folder")
-            .clicked()
+        if let Some(action) =
+            loose_folder_primary_menu_items(ui, &node.rel_path, &node.label, favorited, false)
         {
-            clicked = Some(BrowserAction::ImportTagsIntoLooseFolder {
-                rel_path: node.rel_path.clone(),
-            });
-            ui.close_menu();
+            clicked = Some(action);
         }
-        context_menu_separator(ui);
         // The same action the tag menu offers, aimed at the folder rather than a
         // file in it. A browser folder maps straight onto a directory under the
         // tags root, so there is nothing to resolve beyond joining the two.
@@ -617,6 +655,13 @@ pub(in crate::app) fn draw_tree_node_lazy(
             ui.close_menu();
         }
     });
+    if response.double_clicked() {
+        clicked = Some(BrowserAction::OpenFolderBrowser {
+            rel_path: node.rel_path.clone(),
+            label: node.label.clone(),
+            open_in_new_tab: false,
+        });
+    }
     clicked
 }
 
@@ -738,16 +783,32 @@ pub(in crate::app) fn draw_tree_node(
         } else {
             node.label.clone()
         };
-        egui::CollapsingHeader::new(
-            RichText::new(folder_label).color(folder_label_color(ui, node, entries)),
+        show_folder_tree_header(
+            ui,
+            &folder_label,
+            folder_label_color(ui, node, entries),
+            !filter.is_empty(),
+            on_path,
+            body,
         )
-            .icon(folder_arrow_icon)
-            .default_open(!filter.is_empty())
-            .open(on_path.then_some(true))
-            .show(ui, body)
-            .header_response
     };
     header_response.context_menu(|ui| {
+        if !groups_mode && favorite_keys.is_some() {
+            let favorited = browser_favorite_folders(ui).map(|folders| {
+                folders
+                    .iter()
+                    .any(|path| paths_match_case_insensitive(path, &node.rel_path))
+            });
+            if let Some(action) = loose_folder_primary_menu_items(
+                ui,
+                &node.rel_path,
+                &node.label,
+                favorited,
+                browser_is_folder_pane(ui),
+            ) {
+                clicked = Some(action);
+            }
+        }
         // Campaign Evolved folder authoring (Folders mode only — in Groups mode
         // the node path is a group label, not a folder).
         if is_container && !groups_mode {
@@ -794,7 +855,10 @@ pub(in crate::app) fn draw_tree_node(
             if container_keys.is_empty() {
                 ui.label(RichText::new("No shipped tags in this folder").color(subtle_dark()));
             } else if ui
-                .button(format!("Extract tags to folder... ({})", container_keys.len()))
+                .button(format!(
+                    "Extract tags to folder... ({})",
+                    container_keys.len()
+                ))
                 .on_hover_text(
                     "Write every tag this folder ships to a folder on disk, laid out like an \
                      editing kit",
@@ -872,7 +936,101 @@ pub(in crate::app) fn draw_tree_node(
             ui.close_menu();
         }
     });
+    if !groups_mode && header_response.double_clicked() {
+        clicked = Some(BrowserAction::OpenFolderBrowser {
+            rel_path: node.rel_path.clone(),
+            label: node.label.clone(),
+            open_in_new_tab: false,
+        });
+    }
     clicked
+}
+
+fn paths_match_case_insensitive(a: &Path, b: &Path) -> bool {
+    a.to_string_lossy()
+        .replace('\\', "/")
+        .eq_ignore_ascii_case(&b.to_string_lossy().replace('\\', "/"))
+}
+
+/// The leading actions shared by loose folders wherever they appear. Keeping
+/// this sequence in one place prevents Favorites, the sidebar, and folder tabs
+/// from silently losing different commands as the menu evolves.
+fn loose_folder_primary_menu_items(
+    ui: &mut Ui,
+    rel_path: &Path,
+    label: &str,
+    favorited: Option<bool>,
+    open_in_new_tab: bool,
+) -> Option<BrowserAction> {
+    let mut action = None;
+    if let Some(favorited) = favorited {
+        if ui
+            .button(if favorited {
+                "Remove from Favorites"
+            } else {
+                "Add to Favorites"
+            })
+            .clicked()
+        {
+            action = Some(BrowserAction::ToggleFolderFavorite(rel_path.to_path_buf()));
+            ui.close_menu();
+        }
+        context_menu_separator(ui);
+    }
+    if let Some(transfer) = loose_folder_transfer_menu_items(ui, rel_path, label) {
+        action = Some(transfer);
+    }
+    context_menu_separator(ui);
+    if open_in_new_tab {
+        if ui.button("Open in new tab").clicked() {
+            action = Some(BrowserAction::OpenFolderBrowser {
+                rel_path: rel_path.to_path_buf(),
+                label: label.to_owned(),
+                open_in_new_tab: true,
+            });
+            ui.close_menu();
+        }
+        context_menu_separator(ui);
+    }
+    action
+}
+
+/// The destination-changing actions shared by every loose-folder menu: the
+/// sidebar, a docked folder browser, and that browser's header.
+pub(in crate::app) fn loose_folder_transfer_menu_items(
+    ui: &mut Ui,
+    rel_path: &Path,
+    label: &str,
+) -> Option<BrowserAction> {
+    if ui.button("Move to...").clicked() {
+        ui.close_menu();
+        return Some(BrowserAction::MoveLooseFolder {
+            rel_path: rel_path.to_path_buf(),
+            label: label.to_owned(),
+        });
+    }
+    if ui.button("Copy to...").clicked() {
+        ui.close_menu();
+        return Some(BrowserAction::CopyLooseFolder {
+            rel_path: rel_path.to_path_buf(),
+            label: label.to_owned(),
+        });
+    }
+    // Import is intentionally not Expert-gated: converting content from
+    // another game is a primary folder operation and confirms before writing.
+    if ui
+        .button("Import tags here...")
+        .on_hover_text(
+            "Convert a tag, or a whole folder of them, from another game into this folder",
+        )
+        .clicked()
+    {
+        ui.close_menu();
+        return Some(BrowserAction::ImportTagsIntoLooseFolder {
+            rel_path: rel_path.to_path_buf(),
+        });
+    }
+    None
 }
 
 /// Colour for a folder row: marked when anything beneath it carries edits that
@@ -983,42 +1141,204 @@ fn show_group_tree_header<R>(
     }
 
     let (name, fourcc) = group_tree_label_parts(label);
-    let row = ui.horizontal(|ui| {
-        let toggle = state.show_toggle_button(ui, folder_arrow_icon);
-        let mut content = toggle.clone();
-        let display_name = if show_prefixes && !name.is_empty() {
-            format!("[folder] {name}")
-        } else if show_prefixes {
-            "[folder]".to_owned()
-        } else {
-            name.to_owned()
-        };
-        if !display_name.is_empty() {
-            content = content.union(ui.label(RichText::new(display_name).color(label_color)));
-        }
-        let badge = Frame::none()
-            .fill(Color32::from_rgb(48, 58, 66))
-            .stroke(Stroke::new(1.0, Color32::from_rgb(76, 89, 98)))
-            .rounding(egui::Rounding::same(4.0))
-            .inner_margin(egui::Margin::symmetric(6.0, 1.0))
-            .show(ui, |ui| {
-                ui.label(
-                    RichText::new(fourcc)
-                        .monospace()
-                        .color(Color32::from_rgb(226, 235, 240)),
-                )
-            })
-            .response;
-        (toggle, content.union(badge))
-    });
-    let (toggle, content) = row.inner;
-    let header = ui.interact(row.response.rect, id.with("header"), Sense::click());
-    if header.clicked() && !toggle.clicked() {
+    let (response, toggle_clicked) =
+        show_full_width_browser_row(ui, id.with("header"), Sense::click(), |ui| {
+            let toggle = state.show_toggle_button(ui, folder_chevron_icon);
+            let toggle_clicked = toggle.clicked();
+            let mut content = toggle.clone();
+            let display_name = if show_prefixes && !name.is_empty() {
+                format!("[folder] {name}")
+            } else if show_prefixes {
+                "[folder]".to_owned()
+            } else {
+                name.to_owned()
+            };
+            if !display_name.is_empty() {
+                content = content.union(ui.label(RichText::new(display_name).color(label_color)));
+            }
+            let badge = Frame::none()
+                .fill(Color32::from_rgb(48, 58, 66))
+                .stroke(Stroke::new(1.0, Color32::from_rgb(76, 89, 98)))
+                .rounding(egui::Rounding::same(4.0))
+                .inner_margin(egui::Margin::symmetric(6.0, 1.0))
+                .show(ui, |ui| {
+                    ui.label(
+                        RichText::new(fourcc)
+                            .monospace()
+                            .color(Color32::from_rgb(226, 235, 240)),
+                    )
+                })
+                .response;
+            (content.union(badge), toggle_clicked)
+        });
+    if response.clicked() && !toggle_clicked {
         state.toggle(ui);
     }
-    let response = header.union(content);
     state.show_body_indented(&response, ui, add_body);
     response
+}
+
+const BROWSER_TREE_ICON_SIZE: f32 = 16.0;
+const BROWSER_GUIDE_ICON_OFFSET: f32 = -2.0;
+
+/// The chevron lives in egui's disclosure column, while its parent guide lives
+/// beneath the semantic icon that follows that column. Shift the chevron's
+/// standardized icon slot so those two centers coincide at the next depth.
+fn browser_chevron_center_offset(ui: &Ui) -> f32 {
+    ui.spacing().item_spacing.x + BROWSER_TREE_ICON_SIZE * 0.5 + BROWSER_GUIDE_ICON_OFFSET
+        - ui.spacing().indent * 0.5
+}
+
+fn browser_chevron_slot(ui: &Ui, response: &egui::Response) -> egui::Rect {
+    egui::Rect::from_center_size(
+        response.rect.center() + Vec2::new(browser_chevron_center_offset(ui), 0.0),
+        Vec2::splat(BROWSER_TREE_ICON_SIZE),
+    )
+}
+
+/// Draw an expanded header body with its guide beneath the header's semantic
+/// icon rather than beneath the disclosure chevron. Descendant chevrons become
+/// real gaps in the line, keeping this independent of the panel background.
+fn show_relocated_browser_tree_body<R>(
+    ui: &mut Ui,
+    state: &mut egui::collapsing_header::CollapsingState,
+    response: &egui::Response,
+    icon_center_x: f32,
+    add_body: impl FnOnce(&mut Ui) -> R,
+) {
+    let guide_x = icon_center_x + BROWSER_GUIDE_ICON_OFFSET;
+    let guide_shape = ui.painter().add(egui::Shape::Noop);
+    let draw_guide = ui.visuals().indent_has_left_vline;
+    let cutouts = folder_chevron_cutouts(ui);
+    let cutout_start = cutouts
+        .as_ref()
+        .and_then(|cutouts| cutouts.lock().ok().map(|cutouts| cutouts.len()))
+        .unwrap_or(0);
+
+    // Suppress only this indentation's stock guide. Restore the preference on
+    // its child UI before drawing the body so deeper folders still draw theirs.
+    ui.visuals_mut().indent_has_left_vline = false;
+    let body = state.show_body_indented(response, ui, |ui| {
+        ui.visuals_mut().indent_has_left_vline = draw_guide;
+        add_body(ui)
+    });
+    ui.visuals_mut().indent_has_left_vline = draw_guide;
+    if draw_guide && let Some(body) = body {
+        let painter = ui.painter();
+        let rounded_top =
+            painter.round_pos_to_pixel_center(egui::pos2(guide_x, body.response.rect.top()));
+        let rounded_bottom = painter
+            .round_pos_to_pixel_center(egui::pos2(guide_x, body.response.rect.bottom() - 2.0));
+        let descendant_cutouts = cutouts
+            .and_then(|cutouts| {
+                cutouts
+                    .lock()
+                    .ok()
+                    .map(|cutouts| cutouts.get(cutout_start..).unwrap_or_default().to_vec())
+            })
+            .unwrap_or_default();
+        let segments = guide_segments_around_cutouts(
+            rounded_top.x,
+            rounded_top.y,
+            rounded_bottom.y,
+            &descendant_cutouts,
+            ui.visuals().widgets.noninteractive.bg_stroke,
+        );
+        painter.set(guide_shape, egui::Shape::Vec(segments));
+    }
+}
+
+fn show_folder_tree_header<R>(
+    ui: &mut Ui,
+    label: &str,
+    label_color: Color32,
+    default_open: bool,
+    force_open: bool,
+    add_body: impl FnOnce(&mut Ui) -> R,
+) -> egui::Response {
+    let id = ui.make_persistent_id(label);
+    let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
+        ui.ctx(),
+        id,
+        default_open,
+    );
+    if force_open {
+        state.set_open(true);
+    }
+
+    let (response, (toggle_clicked, guide_x)) =
+        show_full_width_browser_row(ui, id.with("header"), Sense::click(), |ui| {
+            let toggle = state.show_toggle_button(ui, folder_chevron_icon);
+            let toggle_clicked = toggle.clicked();
+            let (icon_rect, icon_response) =
+                ui.allocate_exact_size(Vec2::splat(BROWSER_TREE_ICON_SIZE), Sense::hover());
+            let (icon, color) = if state.is_open() {
+                (ButtonIcon::FolderOpen, disclosure_triangle_green())
+            } else {
+                (ButtonIcon::FolderClosed, disclosure_triangle_blue())
+            };
+            paint_button_icon_at(ui, icon, icon_rect, color);
+            let content = icon_response.union(ui.label(RichText::new(label).color(label_color)));
+            (
+                toggle.union(content),
+                (toggle_clicked, icon_rect.center().x),
+            )
+        });
+    if response.clicked() && !toggle_clicked {
+        state.toggle(ui);
+    }
+    show_relocated_browser_tree_body(ui, &mut state, &response, guide_x, add_body);
+    response
+}
+
+/// Tags and folders share one transient, borderless row highlight. Selection
+/// is deliberately absent: opening a tag should not leave a blue marker behind
+/// in a browser whose primary job is navigation.
+fn browser_row_hover_shape(
+    ui: &Ui,
+    response: &egui::Response,
+    row_rect: egui::Rect,
+) -> Option<egui::Shape> {
+    if !(response.hovered() || response.highlighted() || response.has_focus()) {
+        return None;
+    }
+    let visuals = ui.style().interact_selectable(response, false);
+    Some(egui::Shape::rect_filled(
+        row_rect.expand(visuals.expansion),
+        visuals.rounding,
+        visuals.weak_bg_fill,
+    ))
+}
+
+/// Allocate one browser row whose interaction and hover fill span all
+/// available horizontal space. `add_content` returns the response for the
+/// visible controls plus any state the caller needs after drawing.
+fn show_full_width_browser_row<R>(
+    ui: &mut Ui,
+    id: egui::Id,
+    sense: Sense,
+    add_content: impl FnOnce(&mut Ui) -> (egui::Response, R),
+) -> (egui::Response, R) {
+    let available_row = ui.available_rect_before_wrap();
+    let background = ui.painter().add(egui::Shape::Noop);
+    let row = ui.allocate_ui_with_layout(
+        Vec2::new(ui.available_width(), ui.spacing().interact_size.y),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_min_height(ui.spacing().interact_size.y);
+            add_content(ui)
+        },
+    );
+    let (content, inner) = row.inner;
+    let row_rect = egui::Rect::from_min_max(
+        egui::pos2(available_row.left(), row.response.rect.top()),
+        egui::pos2(available_row.right(), row.response.rect.bottom()),
+    );
+    let response = ui.interact(row_rect, id, sense).union(content);
+    if let Some(shape) = browser_row_hover_shape(ui, &response, row_rect) {
+        ui.painter().set(background, shape);
+    }
+    (response, inner)
 }
 
 #[cfg(test)]
@@ -1029,6 +1349,116 @@ mod group_header_tests {
     fn group_tree_label_splits_friendly_name_and_fourcc() {
         assert_eq!(group_tree_label_parts("control cntl"), ("control", "cntl"));
         assert_eq!(group_tree_label_parts("bloc"), ("", "bloc"));
+    }
+
+    #[test]
+    fn folder_header_hover_target_spans_the_available_row() {
+        let ctx = egui::Context::default();
+        let mut expected = egui::Rect::NOTHING;
+        let mut actual = egui::Rect::NOTHING;
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(360.0, 100.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    expected = ui.available_rect_before_wrap();
+                    actual = show_folder_tree_header(
+                        ui,
+                        "characters",
+                        text_dark(),
+                        false,
+                        false,
+                        |_| {},
+                    )
+                    .rect;
+                });
+            },
+        );
+
+        assert_eq!(actual.left(), expected.left());
+        assert_eq!(actual.right(), expected.right());
+    }
+
+    #[test]
+    fn favorites_header_hover_target_spans_the_available_row() {
+        let ctx = egui::Context::default();
+        let mut expected = egui::Rect::NOTHING;
+        let mut actual = egui::Rect::NOTHING;
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(360.0, 100.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    expected = ui.available_rect_before_wrap();
+                    actual = show_favorites_section(ui, |_| {}).rect;
+                });
+            },
+        );
+
+        assert_eq!(actual.left(), expected.left());
+        assert_eq!(actual.right(), expected.right());
+    }
+
+    #[test]
+    fn nested_folder_headers_keep_their_own_guides_enabled() {
+        let ctx = egui::Context::default();
+        let mut nested_guide_enabled = false;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                begin_folder_chevron_collection(ui);
+                show_folder_tree_header(ui, "outer", text_dark(), true, true, |ui| {
+                    nested_guide_enabled = ui.visuals().indent_has_left_vline;
+                    show_folder_tree_header(ui, "inner", text_dark(), true, true, |_| {});
+                });
+            });
+        });
+
+        assert!(nested_guide_enabled);
+    }
+
+    #[test]
+    fn folder_guide_is_split_instead_of_painted_over() {
+        let shapes = guide_segments_around_cutouts(
+            10.0,
+            0.0,
+            40.0,
+            &[egui::Rect::from_min_max(
+                egui::pos2(5.0, 14.0),
+                egui::pos2(15.0, 26.0),
+            )],
+            Stroke::new(1.0, Color32::WHITE),
+        );
+
+        assert_eq!(shapes.len(), 2);
+    }
+
+    #[test]
+    fn nested_chevron_center_matches_parent_icon_guide() {
+        let ctx = egui::Context::default();
+        let mut delta = f32::INFINITY;
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let parent_icon_center = ui.spacing().indent
+                    + ui.spacing().item_spacing.x
+                    + BROWSER_TREE_ICON_SIZE * 0.5;
+                let nested_chevron_center = ui.spacing().indent
+                    + ui.spacing().indent * 0.5
+                    + browser_chevron_center_offset(ui);
+                delta = nested_chevron_center - (parent_icon_center + BROWSER_GUIDE_ICON_OFFSET);
+            });
+        });
+
+        assert!(delta.abs() < f32::EPSILON);
     }
 }
 
@@ -1058,7 +1488,11 @@ pub(in crate::app) fn collect_tag_keys_into(
 /// relative path, so the root still names itself in a confirmation.
 fn folder_display_path(node: &TagTreeNode) -> String {
     let rel = node.rel_path.to_string_lossy().replace('\\', "/");
-    if rel.is_empty() { node.label.clone() } else { rel }
+    if rel.is_empty() {
+        node.label.clone()
+    } else {
+        rel
+    }
 }
 
 /// Keys beneath `node` for tags the container actually ships.
@@ -1216,6 +1650,7 @@ pub(in crate::app) fn draw_entry_list(
                 double_click_to_open,
                 reveal_key,
                 favorite_keys,
+                true,
             );
         } else {
             let _ = draw_entry(
@@ -1226,20 +1661,30 @@ pub(in crate::app) fn draw_entry_list(
                 double_click_to_open,
                 reveal_key,
                 favorite_keys,
+                true,
             );
         }
     }
     clicked
 }
 
+/// Horizontal space occupied by a folder row's disclosure control and the
+/// following item gap. Leaf rows reserve this same column whenever they share
+/// a hierarchy with expandable folders, keeping every icon aligned even when
+/// that particular row has no chevron.
+fn browser_disclosure_reservation(ui: &Ui) -> f32 {
+    ui.spacing().indent + ui.spacing().item_spacing.x
+}
+
 pub(in crate::app) fn draw_entry(
     ui: &mut Ui,
     entry: &TagEntry,
-    selected: Option<&str>,
+    _selected: Option<&str>,
     show_prefixes: bool,
     double_click_to_open: bool,
     reveal_key: Option<&str>,
     favorite_keys: Option<&HashSet<String>>,
+    reserve_disclosure: bool,
 ) -> Option<BrowserAction> {
     let leaf_label = entry
         .display_path
@@ -1260,7 +1705,6 @@ pub(in crate::app) fn draw_entry(
         rel_path: entry_rel_path(entry),
         file_path: entry_loose_file(entry),
     };
-    let selected = selected == Some(entry.key.as_str());
     let row_size = Vec2::new(ui.available_width(), ui.spacing().interact_size.y);
     let (row_rect, response) = ui.allocate_exact_size(row_size, Sense::click_and_drag());
     // Not `on_hover_text`: an egui tooltip would block the very drag this row
@@ -1271,23 +1715,28 @@ pub(in crate::app) fn draw_entry(
         response.scroll_to_me(Some(egui::Align::Center));
     }
     if ui.is_rect_visible(row_rect) {
-        let visuals = ui.style().interact_selectable(&response, selected);
-        if selected || response.hovered() || response.highlighted() || response.has_focus() {
-            ui.painter().rect(
-                row_rect.expand(visuals.expansion),
-                visuals.rounding,
-                visuals.weak_bg_fill,
-                visuals.bg_stroke,
-            );
+        if let Some(shape) = browser_row_hover_shape(ui, &response, row_rect) {
+            ui.painter().add(shape);
         }
         let icon_size = 16.0;
+        // Folder headers begin with egui's disclosure column followed by the
+        // normal horizontal item gap. Reserve the same blank space for leaves
+        // so folder and tag icons form one clean vertical column.
+        let disclosure_offset = if reserve_disclosure {
+            browser_disclosure_reservation(ui)
+        } else {
+            0.0
+        };
         let icon_rect = egui::Rect::from_center_size(
-            egui::pos2(row_rect.left() + icon_size * 0.5, row_rect.center().y),
+            egui::pos2(
+                row_rect.left() + disclosure_offset + icon_size * 0.5,
+                row_rect.center().y,
+            ),
             Vec2::splat(icon_size),
         );
         paint_tag_icon_at(ui, entry.group_tag, icon_rect);
         ui.painter().text(
-            row_rect.left_center() + Vec2::new(icon_size + 5.0, 0.0),
+            row_rect.left_center() + Vec2::new(disclosure_offset + icon_size + 5.0, 0.0),
             Align2::LEFT_CENTER,
             label,
             FontId::proportional(12.5),
@@ -1333,11 +1782,11 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
     favorite_keys: Option<&HashSet<String>>,
 ) -> Option<BrowserAction> {
     let mut action = None;
-        style_tag_context_menu(ui);
+    style_tag_context_menu(ui);
 
-        // A cache tag's way out is a conversion, and one tag is the case where
-        // the user may want it somewhere other than the path the build gave it.
-        if matches!(entry.location, TagEntryLocation::Monolithic { .. })
+    // A cache tag's way out is a conversion, and one tag is the case where
+    // the user may want it somewhere other than the path the build gave it.
+    if matches!(entry.location, TagEntryLocation::Monolithic { .. })
             && context_menu_button(ui, "Import into editing kit...")
                 .on_hover_text(
                     "Convert this tag to a little-endian tag in an open editing kit, at a                      folder you choose",
@@ -1350,215 +1799,212 @@ pub(in crate::app) fn draw_tag_context_menu_contents(
             ui.close_menu();
         }
 
-        let rename_enabled = supports_rename_menu(entry);
-        let duplicate_enabled = supports_duplicate_menu(entry);
-        let deletable = browser_deletable_keys(ui);
-        let delete_enabled = supports_delete_menu(entry, deletable.as_deref());
-        let extract_enabled = supports_tag_extract_menu(entry.group_tag);
-        ui.horizontal(|ui| {
-            if context_menu_primary_button(ui, "Rename", rename_enabled).clicked() {
-                action = Some(BrowserAction::RenameTag(entry.key.clone()));
-                ui.close_menu();
-            }
-            if context_menu_primary_button(ui, "Duplicate", duplicate_enabled).clicked() {
-                action = Some(BrowserAction::DuplicateTag(entry.key.clone()));
-                ui.close_menu();
-            }
-            if context_menu_primary_button(ui, "Delete", delete_enabled)
-                .on_disabled_hover_text(
-                    "Only loose tags and Campaign Evolved tags duplicated by Baboon can be deleted",
-                )
-                .clicked()
-            {
-                action = Some(BrowserAction::DeleteTag(entry.key.clone()));
-                ui.close_menu();
-            }
-            if context_menu_primary_button(ui, "Move", rename_enabled).clicked() {
-                action = Some(BrowserAction::MoveTag(entry.key.clone()));
-                ui.close_menu();
-            }
-            ui.add_enabled_ui(extract_enabled, |ui| {
-                ui.allocate_ui(Vec2::new(92.0, 44.0), |ui| {
-                    ui.set_min_width(92.0);
-                    let extract_menu = ui.menu_button("     Extract", |ui| {
-                        ui.set_min_width(280.0);
-                        if supports_tag_geometry_extraction(entry.group_tag)
-                            && context_menu_button(ui, "Extract model geometry").clicked()
-                        {
-                            action = Some(BrowserAction::ExtractGeometry(entry.key.clone()));
-                            ui.close_menu();
-                        }
-                        if supports_bsp_geometry_extraction(entry.group_tag)
-                            && context_menu_button(ui, "Extract BSP geometry").clicked()
-                        {
-                            action = Some(BrowserAction::ExtractGeometry(entry.key.clone()));
-                            ui.close_menu();
-                        }
-                        if supports_scenario_geometry_extraction(entry.group_tag)
-                            && context_menu_button(ui, "Extract level geometry (one file per BSP)")
-                                .clicked()
-                        {
-                            action = Some(BrowserAction::ExtractGeometry(entry.key.clone()));
-                            ui.close_menu();
-                        }
-                        if supports_particle_geometry_extraction(entry.group_tag)
-                            && context_menu_button(
-                                ui,
-                                "Extract particle geometry (JMI + one JMS per object)",
-                            )
+    let rename_enabled = supports_rename_menu(entry);
+    let duplicate_enabled = supports_duplicate_menu(entry);
+    let deletable = browser_deletable_keys(ui);
+    let delete_enabled = supports_delete_menu(entry, deletable.as_deref());
+    let extract_enabled = supports_tag_extract_menu(entry.group_tag);
+    ui.horizontal(|ui| {
+        if context_menu_primary_button(ui, "Rename", rename_enabled).clicked() {
+            action = Some(BrowserAction::RenameTag(entry.key.clone()));
+            ui.close_menu();
+        }
+        if context_menu_primary_button(ui, "Duplicate", duplicate_enabled).clicked() {
+            action = Some(BrowserAction::DuplicateTag(entry.key.clone()));
+            ui.close_menu();
+        }
+        if context_menu_primary_button(ui, "Delete", delete_enabled)
+            .on_disabled_hover_text(
+                "Only loose tags and Campaign Evolved tags duplicated by Baboon can be deleted",
+            )
+            .clicked()
+        {
+            action = Some(BrowserAction::DeleteTag(entry.key.clone()));
+            ui.close_menu();
+        }
+        if context_menu_primary_button(ui, "Move", rename_enabled).clicked() {
+            action = Some(BrowserAction::MoveTag(entry.key.clone()));
+            ui.close_menu();
+        }
+        ui.add_enabled_ui(extract_enabled, |ui| {
+            ui.allocate_ui(Vec2::new(92.0, 44.0), |ui| {
+                ui.set_min_width(92.0);
+                let extract_menu = ui.menu_button("     Extract", |ui| {
+                    ui.set_min_width(280.0);
+                    if supports_tag_geometry_extraction(entry.group_tag)
+                        && context_menu_button(ui, "Extract model geometry").clicked()
+                    {
+                        action = Some(BrowserAction::ExtractGeometry(entry.key.clone()));
+                        ui.close_menu();
+                    }
+                    if supports_bsp_geometry_extraction(entry.group_tag)
+                        && context_menu_button(ui, "Extract BSP geometry").clicked()
+                    {
+                        action = Some(BrowserAction::ExtractGeometry(entry.key.clone()));
+                        ui.close_menu();
+                    }
+                    if supports_scenario_geometry_extraction(entry.group_tag)
+                        && context_menu_button(ui, "Extract level geometry (one file per BSP)")
                             .clicked()
-                        {
-                            action = Some(BrowserAction::ExtractGeometry(entry.key.clone()));
-                            ui.close_menu();
-                        }
-                        if supports_animation_extraction(entry.group_tag)
-                            && context_menu_button(ui, "Extract animations").clicked()
-                        {
-                            action = Some(BrowserAction::ExtractAnimation(entry.key.clone()));
-                            ui.close_menu();
-                        }
-                        if supports_tag_import_info_extraction(entry.group_tag)
-                            && context_menu_button(ui, "Extract import-info").clicked()
-                        {
-                            action = Some(BrowserAction::ExtractImportInfo(entry.key.clone()));
-                            ui.close_menu();
-                        }
-                        if is_bitmap_group(entry.group_tag)
-                            && context_menu_button(ui, "Extract bitmap images...").clicked()
-                        {
-                            action = Some(BrowserAction::ExtractBitmap(entry.key.clone()));
-                            ui.close_menu();
-                        }
-                        if is_material_shader_group(entry.group_tag)
-                            && context_menu_button(ui, "Extract source shaders...").clicked()
-                        {
-                            action = Some(BrowserAction::ExtractMaterialShaderSources(
-                                entry.key.clone(),
-                            ));
-                            ui.close_menu();
-                        }
-                        if is_hlsl_include_group(entry.group_tag)
-                            && context_menu_button(ui, "Extract HLSL include...").clicked()
-                        {
-                            action =
-                                Some(BrowserAction::ExtractHlslIncludeSource(entry.key.clone()));
-                            ui.close_menu();
-                        }
-                    });
-                    let icon_rect = egui::Rect::from_center_size(
-                        egui::pos2(
-                            extract_menu.response.rect.left() + 17.0,
-                            extract_menu.response.rect.center().y,
-                        ),
-                        Vec2::splat(16.0),
-                    );
-                    paint_button_icon_at(ui, ButtonIcon::Export, icon_rect, text_dark());
+                    {
+                        action = Some(BrowserAction::ExtractGeometry(entry.key.clone()));
+                        ui.close_menu();
+                    }
+                    if supports_particle_geometry_extraction(entry.group_tag)
+                        && context_menu_button(
+                            ui,
+                            "Extract particle geometry (JMI + one JMS per object)",
+                        )
+                        .clicked()
+                    {
+                        action = Some(BrowserAction::ExtractGeometry(entry.key.clone()));
+                        ui.close_menu();
+                    }
+                    if supports_animation_extraction(entry.group_tag)
+                        && context_menu_button(ui, "Extract animations").clicked()
+                    {
+                        action = Some(BrowserAction::ExtractAnimation(entry.key.clone()));
+                        ui.close_menu();
+                    }
+                    if supports_tag_import_info_extraction(entry.group_tag)
+                        && context_menu_button(ui, "Extract import-info").clicked()
+                    {
+                        action = Some(BrowserAction::ExtractImportInfo(entry.key.clone()));
+                        ui.close_menu();
+                    }
+                    if is_bitmap_group(entry.group_tag)
+                        && context_menu_button(ui, "Extract bitmap images...").clicked()
+                    {
+                        action = Some(BrowserAction::ExtractBitmap(entry.key.clone()));
+                        ui.close_menu();
+                    }
+                    if is_material_shader_group(entry.group_tag)
+                        && context_menu_button(ui, "Extract source shaders...").clicked()
+                    {
+                        action = Some(BrowserAction::ExtractMaterialShaderSources(
+                            entry.key.clone(),
+                        ));
+                        ui.close_menu();
+                    }
+                    if is_hlsl_include_group(entry.group_tag)
+                        && context_menu_button(ui, "Extract HLSL include...").clicked()
+                    {
+                        action = Some(BrowserAction::ExtractHlslIncludeSource(entry.key.clone()));
+                        ui.close_menu();
+                    }
                 });
+                let icon_rect = egui::Rect::from_center_size(
+                    egui::pos2(
+                        extract_menu.response.rect.left() + 17.0,
+                        extract_menu.response.rect.center().y,
+                    ),
+                    Vec2::splat(16.0),
+                );
+                paint_button_icon_at(ui, ButtonIcon::Export, icon_rect, text_dark());
             });
         });
+    });
 
-        // Whole-tag operations, inline: the raw payload, and the scenario's
-        // script source. Per-asset extraction lives in the Extract submenu
-        // above instead.
-        // Campaign Evolved only for the script pair: the scenario keeps its
-        // original `.hsc` source, and replacing it is only meaningful where that
-        // round-trip is known to hold.
-        let scenario_scripts =
-            is_scenario_group(entry.group_tag) && browser_game_is_campaign_evolved(ui);
-        if is_embedded_tag_entry(entry) || scenario_scripts {
-            context_menu_separator(ui);
-            if is_embedded_tag_entry(entry)
-                && context_menu_button(ui, "Extract raw tag...").clicked()
-            {
-                action = Some(BrowserAction::ExtractRaw(entry.key.clone()));
+    // Whole-tag operations, inline: the raw payload, and the scenario's
+    // script source. Per-asset extraction lives in the Extract submenu
+    // above instead.
+    // Campaign Evolved only for the script pair: the scenario keeps its
+    // original `.hsc` source, and replacing it is only meaningful where that
+    // round-trip is known to hold.
+    let scenario_scripts =
+        is_scenario_group(entry.group_tag) && browser_game_is_campaign_evolved(ui);
+    if is_embedded_tag_entry(entry) || scenario_scripts {
+        context_menu_separator(ui);
+        if is_embedded_tag_entry(entry) && context_menu_button(ui, "Extract raw tag...").clicked() {
+            action = Some(BrowserAction::ExtractRaw(entry.key.clone()));
+            ui.close_menu();
+        }
+        if scenario_scripts {
+            if context_menu_button(ui, "Extract scripts...").clicked() {
+                action = Some(BrowserAction::ExtractScenarioScripts(entry.key.clone()));
                 ui.close_menu();
             }
-            if scenario_scripts {
-                if context_menu_button(ui, "Extract scripts...").clicked() {
-                    action = Some(BrowserAction::ExtractScenarioScripts(entry.key.clone()));
-                    ui.close_menu();
-                }
-                if context_menu_button(ui, "Import scripts...").clicked() {
-                    action = Some(BrowserAction::ImportScenarioScripts(entry.key.clone()));
-                    ui.close_menu();
-                }
+            if context_menu_button(ui, "Import scripts...").clicked() {
+                action = Some(BrowserAction::ImportScenarioScripts(entry.key.clone()));
+                ui.close_menu();
             }
         }
+    }
 
-        // The same two launches the tag pane's header offers, so a scenario can
-        // be opened in the kit's tools without opening the tag first. Shown only
-        // where the kit can launch at all; Sapien is *hidden* rather than
-        // disabled where it takes no scenario argument, matching the toolbar —
-        // a control that can never work is not offered greyed out.
-        let launch = browser_scenario_launch(ui);
-        if launch.supported && is_scenario_group(entry.group_tag) {
-            context_menu_separator(ui);
-            if launch.offers_sapien {
-                let response = ui
-                    .add_enabled_ui(launch.sapien_present, |ui| {
-                        context_menu_button(ui, "Open in Sapien")
-                    })
-                    .inner;
-                if response.clicked() {
-                    action = Some(BrowserAction::LaunchScenarioInSapien(entry.key.clone()));
-                    ui.close_menu();
-                }
-                if !launch.sapien_present {
-                    response.on_disabled_hover_text("sapien.exe was not found in this editing kit");
-                }
-            }
+    // The same two launches the tag pane's header offers, so a scenario can
+    // be opened in the kit's tools without opening the tag first. Shown only
+    // where the kit can launch at all; Sapien is *hidden* rather than
+    // disabled where it takes no scenario argument, matching the toolbar —
+    // a control that can never work is not offered greyed out.
+    let launch = browser_scenario_launch(ui);
+    if launch.supported && is_scenario_group(entry.group_tag) {
+        context_menu_separator(ui);
+        if launch.offers_sapien {
             let response = ui
-                .add_enabled_ui(launch.tag_test_present, |ui| {
-                    context_menu_button(ui, "Open in tag_test")
+                .add_enabled_ui(launch.sapien_present, |ui| {
+                    context_menu_button(ui, "Open in Sapien")
                 })
                 .inner;
             if response.clicked() {
-                action = Some(BrowserAction::LaunchScenarioInTagTest(entry.key.clone()));
+                action = Some(BrowserAction::LaunchScenarioInSapien(entry.key.clone()));
                 ui.close_menu();
             }
-            if !launch.tag_test_present {
-                response.on_disabled_hover_text("This kit's tag_test was not found in it");
+            if !launch.sapien_present {
+                response.on_disabled_hover_text("sapien.exe was not found in this editing kit");
             }
         }
+        let response = ui
+            .add_enabled_ui(launch.tag_test_present, |ui| {
+                context_menu_button(ui, "Open in tag_test")
+            })
+            .inner;
+        if response.clicked() {
+            action = Some(BrowserAction::LaunchScenarioInTagTest(entry.key.clone()));
+            ui.close_menu();
+        }
+        if !launch.tag_test_present {
+            response.on_disabled_hover_text("This kit's tag_test was not found in it");
+        }
+    }
 
-        context_menu_separator(ui);
-        if context_menu_button(ui, "Open with File Explorer").clicked() {
-            action = Some(BrowserAction::OpenInExplorer(entry.key.clone()));
+    context_menu_separator(ui);
+    if context_menu_button(ui, "Open with File Explorer").clicked() {
+        action = Some(BrowserAction::OpenInExplorer(entry.key.clone()));
+        ui.close_menu();
+    }
+    if let Some(favorite_keys) = favorite_keys {
+        let label = if favorite_keys.contains(&entry.key) {
+            "Remove from Favorites"
+        } else {
+            "Add to Favorites"
+        };
+        if context_menu_button(ui, label).clicked() {
+            action = Some(BrowserAction::ToggleFavorite(entry.key.clone()));
             ui.close_menu();
         }
-        if let Some(favorite_keys) = favorite_keys {
-            let label = if favorite_keys.contains(&entry.key) {
-                "Remove from Favorites"
-            } else {
-                "Add to Favorites"
-            };
-            if context_menu_button(ui, label).clicked() {
-                action = Some(BrowserAction::ToggleFavorite(entry.key.clone()));
-                ui.close_menu();
-            }
-        }
-        if context_menu_button(ui, "Copy Tag Path").clicked() {
-            action = Some(BrowserAction::CopyTagName(entry.key.clone()));
-            ui.close_menu();
-        }
-        if context_menu_button(ui, "Find Tag References...").clicked() {
-            action = Some(BrowserAction::FindReferences(entry.key.clone()));
-            ui.close_menu();
-        }
-        if context_menu_button(ui, "Explore references...").clicked() {
-            action = Some(BrowserAction::ExploreReferences(entry.key.clone()));
-            ui.close_menu();
-        }
+    }
+    if context_menu_button(ui, "Copy Tag Path").clicked() {
+        action = Some(BrowserAction::CopyTagName(entry.key.clone()));
+        ui.close_menu();
+    }
+    if context_menu_button(ui, "Find Tag References...").clicked() {
+        action = Some(BrowserAction::FindReferences(entry.key.clone()));
+        ui.close_menu();
+    }
+    if context_menu_button(ui, "Explore references...").clicked() {
+        action = Some(BrowserAction::ExploreReferences(entry.key.clone()));
+        ui.close_menu();
+    }
 
-        context_menu_separator(ui);
-        if context_menu_button(ui, "Dump Tag to JSON...").clicked() {
-            action = Some(BrowserAction::DumpJson(entry.key.clone()));
-            ui.close_menu();
-        }
-        if context_menu_button(ui, "Dump Tag References...").clicked() {
-            action = Some(BrowserAction::DumpReferences(entry.key.clone()));
-            ui.close_menu();
-        }
+    context_menu_separator(ui);
+    if context_menu_button(ui, "Dump Tag to JSON...").clicked() {
+        action = Some(BrowserAction::DumpJson(entry.key.clone()));
+        ui.close_menu();
+    }
+    if context_menu_button(ui, "Dump Tag References...").clicked() {
+        action = Some(BrowserAction::DumpReferences(entry.key.clone()));
+        ui.close_menu();
+    }
     action
 }
 
@@ -1570,16 +2016,78 @@ pub(in crate::app) fn draw_favorites(
     show_prefixes: bool,
     double_click_to_open: bool,
     favorite_keys: &HashSet<String>,
-) -> Option<BrowserAction> {
-    if entries.is_empty() || !entries.iter().any(|entry| entry_matches(entry, filter)) {
-        return None;
+) -> (Option<BrowserAction>, bool) {
+    let favorite_folders = browser_favorite_folders(ui).unwrap_or_default();
+    let folder_matches = |path: &Path| {
+        filter.is_empty()
+            || path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| {
+                    name.to_ascii_lowercase()
+                        .contains(&filter.to_ascii_lowercase())
+                })
+    };
+    if !entries.iter().any(|entry| entry_matches(entry, filter))
+        && !favorite_folders.iter().any(|path| folder_matches(path))
+    {
+        return (None, false);
     }
     let mut action = None;
-    egui::CollapsingHeader::new(
-        RichText::new("★ Favorites").color(Color32::from_rgb(242, 196, 48)),
-    )
-    .default_open(true)
-    .show(ui, |ui| {
+    show_favorites_section(ui, |ui| {
+        for folder in favorite_folders.iter().filter(|path| folder_matches(path)) {
+            let label = folder
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(str::to_owned)
+                .unwrap_or_else(|| folder.to_string_lossy().into_owned());
+            let (response, ()) = show_full_width_browser_row(
+                ui,
+                ui.make_persistent_id(("favorite_folder", folder)),
+                Sense::click(),
+                |ui| {
+                    ui.add_space(browser_disclosure_reservation(ui));
+                    let (rect, _) =
+                        ui.allocate_exact_size(Vec2::splat(BROWSER_TREE_ICON_SIZE), Sense::hover());
+                    paint_button_icon_at(ui, ButtonIcon::FolderOpen, rect, text_dark());
+                    (ui.label(RichText::new(&label).color(text_dark())), ())
+                },
+            );
+            let tooltip = folder.to_string_lossy().replace('\\', "/");
+            hover_tooltip_beside_pointer(ui, &response, &tooltip);
+            if response.clicked() && action.is_none() {
+                action = Some(BrowserAction::OpenFolderBrowser {
+                    rel_path: folder.clone(),
+                    label: label.clone(),
+                    open_in_new_tab: false,
+                });
+            }
+            response.context_menu(|ui| {
+                if let Some(folder_action) = loose_folder_primary_menu_items(
+                    ui,
+                    folder,
+                    &label,
+                    Some(true),
+                    browser_is_folder_pane(ui),
+                ) {
+                    action = Some(folder_action);
+                }
+                if context_menu_button(ui, "Open with File Explorer").clicked() {
+                    action = Some(BrowserAction::OpenLooseFolderInExplorer {
+                        rel_path: folder.clone(),
+                    });
+                    ui.close_menu();
+                }
+                ui.separator();
+                if ui.button("Dump folder to JSON...").clicked() {
+                    action = Some(BrowserAction::DumpLooseFolderJson {
+                        rel_path: folder.clone(),
+                        label: label.clone(),
+                    });
+                    ui.close_menu();
+                }
+            });
+        }
         for entry in entries {
             if !entry_matches(entry, filter) {
                 continue;
@@ -1592,13 +2100,43 @@ pub(in crate::app) fn draw_favorites(
                 double_click_to_open,
                 None,
                 Some(favorite_keys),
+                true,
             );
             if action.is_none() {
                 action = row_action;
             }
         }
     });
-    action
+    (action, true)
+}
+
+fn show_favorites_section<R>(ui: &mut Ui, add_body: impl FnOnce(&mut Ui) -> R) -> egui::Response {
+    let id = ui.make_persistent_id("browser_favorites");
+    let mut state =
+        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, true);
+    let (response, (toggle_clicked, guide_x)) =
+        show_full_width_browser_row(ui, id.with("header"), Sense::click(), |ui| {
+            let toggle = state.show_toggle_button(ui, folder_chevron_icon);
+            let toggle_clicked = toggle.clicked();
+            let (icon_rect, icon_response) =
+                ui.allocate_exact_size(Vec2::splat(BROWSER_TREE_ICON_SIZE), Sense::hover());
+            paint_button_icon_at(
+                ui,
+                ButtonIcon::FavouriteFilled,
+                icon_rect,
+                Color32::from_rgb(242, 196, 48),
+            );
+            let label = ui.label(RichText::new("Favorites").color(Color32::from_rgb(242, 196, 48)));
+            (
+                toggle.union(icon_response).union(label),
+                (toggle_clicked, icon_rect.center().x),
+            )
+        });
+    if response.clicked() && !toggle_clicked {
+        state.toggle(ui);
+    }
+    show_relocated_browser_tree_body(ui, &mut state, &response, guide_x, add_body);
+    response
 }
 
 fn paint_tag_icon_at(ui: &Ui, group_tag: u32, rect: egui::Rect) {
@@ -1755,8 +2293,8 @@ mod tests {
                 },
                 |ctx| {
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        let (rect, response) = ui
-                            .allocate_exact_size(Vec2::new(240.0, 20.0), Sense::click_and_drag());
+                        let (rect, response) =
+                            ui.allocate_exact_size(Vec2::new(240.0, 20.0), Sense::click_and_drag());
                         *source_rect = rect;
                         // The non-blocking tooltip the real rows use; the raw
                         // `on_hover_text` here is what broke them (an egui
@@ -1769,7 +2307,8 @@ mod tests {
                             input: String::new(),
                             rel_path: "control".to_owned(),
                             file_path: None,
-                        });                    });
+                        });
+                    });
                 },
             );
         };
@@ -1811,7 +2350,9 @@ mod tests {
             display_path: "objects/example.bitmap".to_owned(),
             group_tag: u32::from_be_bytes(*b"bitm"),
             group_name: Some("bitmap".to_owned()),
-            location: TagEntryLocation::LooseFile(PathBuf::from("C:/kit/tags/objects/example.bitmap")),
+            location: TagEntryLocation::LooseFile(PathBuf::from(
+                "C:/kit/tags/objects/example.bitmap",
+            )),
         };
         let ctx = egui::Context::default();
         let mut row_rect = egui::Rect::NOTHING;
@@ -1836,7 +2377,7 @@ mod tests {
                 |ctx| {
                     egui::CentralPanel::default().show(ctx, |ui| {
                         let row_top = ui.cursor().min;
-                        draw_entry(ui, &bitm, None, false, false, None, None);
+                        draw_entry(ui, &bitm, None, false, false, None, None, true);
                         *row_rect = egui::Rect::from_min_size(
                             row_top,
                             Vec2::new(240.0, ui.spacing().interact_size.y),
@@ -1869,7 +2410,13 @@ mod tests {
 
         // Lay out once to learn the rects, then press on the row, drag past
         // egui's drag threshold, cross onto the cell, and release there.
-        frame(Vec::new(), &mut row_rect, &mut target_rect, &mut hover_seen, &mut dropped);
+        frame(
+            Vec::new(),
+            &mut row_rect,
+            &mut target_rect,
+            &mut hover_seen,
+            &mut dropped,
+        );
         let start = row_rect.center();
         let end = target_rect.center();
         frame(
@@ -1959,7 +2506,9 @@ mod tests {
         );
         let suffixed = format!("{bare}.bitmap");
         assert_eq!(
-            parse_tag_reference(&suffixed).expect("suffixed form parses").group_tag_and_name,
+            parse_tag_reference(&suffixed)
+                .expect("suffixed form parses")
+                .group_tag_and_name,
             expected,
             "the shader bitmap cell's dropped value",
         );
@@ -1974,30 +2523,37 @@ mod tests {
 
     #[test]
     fn duplicate_menu_is_limited_to_writable_on_disk_entries() {
-        assert!(supports_duplicate_menu(&entry(TagEntryLocation::LooseFile(
-            PathBuf::from("objects/example.model")
-        ))));
-        assert!(supports_duplicate_menu(&entry(TagEntryLocation::Container {
-            container: 0,
-            rel_path: "Tags/objects/example-hlmt.ubulk".to_owned(),
-        })));
-        assert!(!supports_duplicate_menu(&entry(TagEntryLocation::Monolithic {
-            name: "objects/example".to_owned(),
-            group_tag: 0,
-        })));
-        assert!(!supports_duplicate_menu(&entry(TagEntryLocation::NewContainer {
-            template: NewContainerTemplate::Donor {
+        assert!(supports_duplicate_menu(&entry(
+            TagEntryLocation::LooseFile(PathBuf::from("objects/example.model"))
+        )));
+        assert!(supports_duplicate_menu(&entry(
+            TagEntryLocation::Container {
                 container: 0,
-                rel_path: "Tags/template-hlmt.uasset".to_owned(),
-            },
-            package: "/Game/Tags/example-hlmt".to_owned(),
-            group_tag: 0,
-        })));
+                rel_path: "Tags/objects/example-hlmt.ubulk".to_owned(),
+            }
+        )));
+        assert!(!supports_duplicate_menu(&entry(
+            TagEntryLocation::Monolithic {
+                name: "objects/example".to_owned(),
+                group_tag: 0,
+            }
+        )));
+        assert!(!supports_duplicate_menu(&entry(
+            TagEntryLocation::NewContainer {
+                template: NewContainerTemplate::Donor {
+                    container: 0,
+                    rel_path: "Tags/template-hlmt.uasset".to_owned(),
+                },
+                package: "/Game/Tags/example-hlmt".to_owned(),
+                group_tag: 0,
+            }
+        )));
     }
 
     #[test]
     fn delete_menu_is_offered_for_loose_tags_and_recorded_container_copies_only() {
-        let recorded = HashSet::from(["ublock:pakchunk240-WinGDK:Tags/copy-biped.ubulk".to_owned()]);
+        let recorded =
+            HashSet::from(["ublock:pakchunk240-WinGDK:Tags/copy-biped.ubulk".to_owned()]);
         let copy = TagEntry {
             key: "ublock:pakchunk240-WinGDK:Tags/copy-biped.ubulk".to_owned(),
             ..entry(TagEntryLocation::Container {
@@ -2048,10 +2604,7 @@ mod tests {
 
     #[test]
     fn duplicate_context_button_uses_duplicate_asset_icon() {
-        assert_eq!(
-            context_menu_icon("Duplicate"),
-            Some(ButtonIcon::Duplicate)
-        );
+        assert_eq!(context_menu_icon("Duplicate"), Some(ButtonIcon::Duplicate));
     }
 
     /// The count that decides whether a folder offers the cache import at all.
@@ -2084,8 +2637,13 @@ mod tests {
             pending: false,
         };
         let mut tree = node("objects/weapons/rifle", vec![0, 2]);
-        assert_eq!(count_cache_tags(&tree, &entries), 1, "the loose tag was counted");
-        tree.children.push(node("objects/weapons/rifle/scope", vec![1]));
+        assert_eq!(
+            count_cache_tags(&tree, &entries),
+            1,
+            "the loose tag was counted"
+        );
+        tree.children
+            .push(node("objects/weapons/rifle/scope", vec![1]));
         assert_eq!(
             count_cache_tags(&tree, &entries),
             2,
@@ -2094,15 +2652,30 @@ mod tests {
     }
 }
 
-pub(in crate::app) fn folder_arrow_icon(ui: &mut Ui, openness: f32, response: &egui::Response) {
-    let open = openness > 0.5;
-    let (icon, color) = if open {
-        (ButtonIcon::FolderOpen, disclosure_triangle_green())
+pub(in crate::app) fn folder_chevron_icon(ui: &mut Ui, openness: f32, response: &egui::Response) {
+    let slot = browser_chevron_slot(ui, response);
+    let center = slot.center();
+    if let Some(cutouts) = folder_chevron_cutouts(ui)
+        && let Ok(mut cutouts) = cutouts.lock()
+    {
+        cutouts.push(slot);
+    }
+    let half = 3.5;
+    let stroke = Stroke::new(1.5, ui.visuals().text_color());
+    let points = if openness > 0.5 {
+        [
+            egui::pos2(center.x - half, center.y - half * 0.5),
+            egui::pos2(center.x, center.y + half * 0.5),
+            egui::pos2(center.x + half, center.y - half * 0.5),
+        ]
     } else {
-        (ButtonIcon::FolderClosed, disclosure_triangle_blue())
+        [
+            egui::pos2(center.x - half * 0.5, center.y - half),
+            egui::pos2(center.x + half * 0.5, center.y),
+            egui::pos2(center.x - half * 0.5, center.y + half),
+        ]
     };
-    let rect = egui::Rect::from_center_size(response.rect.center(), Vec2::splat(16.0));
-    paint_button_icon_at(ui, icon, rect, color);
+    ui.painter().add(egui::Shape::line(points.to_vec(), stroke));
 }
 
 pub(in crate::app) fn disclosure_triangle_icon(

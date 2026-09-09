@@ -4,32 +4,57 @@
 use super::*;
 
 pub(in crate::app) enum BrowserAction {
+    /// Open a docked browser pane rooted at one real folder.
+    OpenFolderBrowser {
+        rel_path: PathBuf,
+        label: String,
+        /// Explicit new-tab requests never reuse an existing folder pane.
+        open_in_new_tab: bool,
+    },
+    ToggleFolderFavorite(PathBuf),
     Select(String),
     ToggleFavorite(String),
     CopyTagName(String),
     DumpJson(String),
     OpenInExplorer(String),
     DumpLoadedFolderJson(Vec<String>),
-    DumpLooseFolderJson { rel_path: PathBuf, label: String, },
-    MoveLooseFolder { rel_path: PathBuf, label: String, },
-    CopyLooseFolder { rel_path: PathBuf, label: String, },
+    DumpLooseFolderJson {
+        rel_path: PathBuf,
+        label: String,
+    },
+    MoveLooseFolder {
+        rel_path: PathBuf,
+        label: String,
+    },
+    CopyLooseFolder {
+        rel_path: PathBuf,
+        label: String,
+    },
     /// Open Import Tags aimed at this loose folder, so a tag or a whole tree
     /// from another game's kit lands here. Carries no label: the destination is
     /// the folder's path, and the source's own name supplies the leaf.
-    ImportTagsIntoLooseFolder { rel_path: PathBuf, },
+    ImportTagsIntoLooseFolder {
+        rel_path: PathBuf,
+    },
     /// Show this loose folder in File Explorer. Loose only: a container folder
     /// is a path inside a pak, with no directory to open.
-    OpenLooseFolderInExplorer { rel_path: PathBuf, },
+    OpenLooseFolderInExplorer {
+        rel_path: PathBuf,
+    },
     /// Convert this monolithic-cache folder into an open editing kit.
     ///
     /// Carries the folder's path as a tag-name prefix rather than a list of
     /// keys: the run follows references out of the folder, so the set it ends up
     /// converting is not knowable from the browser — and filtering by prefix is
     /// the worker's job either way.
-    ImportCacheFolderIntoKit { prefix: String, },
+    ImportCacheFolderIntoKit {
+        prefix: String,
+    },
     /// One cache tag, landing somewhere the user picks rather than at its
     /// own path.
-    ImportCacheTagIntoKit { key: String },
+    ImportCacheTagIntoKit {
+        key: String,
+    },
     ExtractRaw(String),
     ExtractBitmap(String),
     ExtractBitmapFolder(Vec<String>),
@@ -44,7 +69,10 @@ pub(in crate::app) enum BrowserAction {
     /// laid out like an editing kit. The narrow-scope twin of File → Extract All
     /// Tags to Folder, and it shares that action's worker, progress and cancel.
     /// `label` is the folder's display path, carried for the confirmation only.
-    ExtractContainerFolderTags { label: String, keys: Vec<String>, },
+    ExtractContainerFolderTags {
+        label: String,
+        keys: Vec<String>,
+    },
     /// Write a scenario's `source files` block out as a folder of `.hsc` files.
     ExtractScenarioScripts(String),
     /// Replace a scenario's `source files` block from a folder of `.hsc` files.
@@ -65,18 +93,56 @@ pub(in crate::app) enum BrowserAction {
     MoveTag(String),
     /// Import a tag file into a Campaign Evolved container, at `folder_rel`
     /// (`None` = root).
-    ImportTagInFolder { folder_rel: Option<String>, },
+    ImportTagInFolder {
+        folder_rel: Option<String>,
+    },
     /// Create a new Campaign Evolved tag at `folder_rel` (`None` = root).
-    NewTagInFolder { folder_rel: Option<String>, },
+    NewTagInFolder {
+        folder_rel: Option<String>,
+    },
     /// Make a folder inside `parent_rel` (`None` = container root). Nothing is
     /// written to any pak: a folder only reaches the container's directory
     /// index once a tag lands in it.
-    NewContainerFolder { parent_rel: Option<String>, },
+    NewContainerFolder {
+        parent_rel: Option<String>,
+    },
     /// Rename a pending folder — one no tag has landed in yet, so this moves
     /// nothing on disk.
-    RenameContainerFolder { rel: String, },
+    RenameContainerFolder {
+        rel: String,
+    },
     /// Retire a pending folder. Offered only for one drawn as empty.
-    DeleteContainerFolder { rel: String, },
+    DeleteContainerFolder {
+        rel: String,
+    },
+}
+
+/// Per-tab state for a docked browser rooted at one folder.
+pub(in crate::app) struct FolderBrowserState {
+    pub(in crate::app) rel_path: PathBuf,
+    pub(in crate::app) label: String,
+    pub(in crate::app) filter: String,
+    pub(in crate::app) focus_search: bool,
+    pub(in crate::app) mode: BrowserMode,
+    pub(in crate::app) sort: BrowserSort,
+    pub(in crate::app) cached_generation: u64,
+    pub(in crate::app) cached_source_len: usize,
+    pub(in crate::app) tree: TagTree,
+    pub(in crate::app) group_tree: TagTree,
+    pub(in crate::app) filter_cache: FilterCache,
+}
+
+pub(in crate::app) const FOLDER_PANE_PREFIX: &str = "\u{1f}folder:";
+
+pub(in crate::app) fn folder_pane_key(rel_path: &Path) -> String {
+    format!(
+        "{FOLDER_PANE_PREFIX}{}",
+        rel_path.to_string_lossy().replace('\\', "/")
+    )
+}
+
+pub(in crate::app) fn is_folder_pane_key(key: &str) -> bool {
+    key.starts_with(FOLDER_PANE_PREFIX)
 }
 
 /// The New/Rename Folder dialog for a container source.
@@ -367,6 +433,39 @@ impl FilterCache {
             crate::source::build_group_tree(&self.entries)
         } else {
             crate::source::build_tree(&self.entries)
+        };
+    }
+
+    /// Folder-pane variant: matching entries keep their full source paths, but
+    /// the hierarchy begins directly beneath `folder`.
+    pub(in crate::app) fn refresh_beneath(
+        &mut self,
+        generation: u64,
+        query: &str,
+        entries: &[TagEntry],
+        groups: bool,
+        folder: &Path,
+    ) {
+        if self.generation == generation
+            && self.query == query
+            && self.used_all
+            && self.groups == groups
+        {
+            return;
+        }
+        self.generation = generation;
+        self.query = query.to_owned();
+        self.used_all = true;
+        self.groups = groups;
+        self.entries = compute_filter_matches(entries, query)
+            .into_iter()
+            .filter(|&index| crate::source::entry_is_beneath_folder(&entries[index], folder))
+            .map(|index| entries[index].clone())
+            .collect();
+        self.tree = if groups {
+            crate::source::build_group_tree(&self.entries)
+        } else {
+            crate::source::build_tree_beneath(&self.entries, folder)
         };
     }
 }

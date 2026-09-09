@@ -69,6 +69,36 @@ pub(in crate::app) fn browser_modified_tags(ui: &Ui) -> Option<std::sync::Arc<Mo
     ui.data(|data| data.get_temp::<std::sync::Arc<ModifiedTags>>(modified_tags_id()))
 }
 
+fn favorite_folders_id() -> egui::Id {
+    egui::Id::new("browser_favorite_folders")
+}
+
+pub(in crate::app) fn set_browser_favorite_folders(
+    ui: &Ui,
+    folders: Option<std::sync::Arc<Vec<PathBuf>>>,
+) {
+    ui.data_mut(|data| data.insert_temp(favorite_folders_id(), folders));
+}
+
+pub(in crate::app) fn browser_favorite_folders(
+    ui: &Ui,
+) -> Option<std::sync::Arc<Vec<PathBuf>>> {
+    ui.data(|data| data.get_temp::<Option<std::sync::Arc<Vec<PathBuf>>>>(favorite_folders_id()))
+        .flatten()
+}
+
+fn folder_pane_browser_id() -> egui::Id {
+    egui::Id::new("browser_is_folder_pane")
+}
+
+pub(in crate::app) fn set_browser_is_folder_pane(ui: &Ui, is_folder_pane: bool) {
+    ui.data_mut(|data| data.insert_temp(folder_pane_browser_id(), is_folder_pane));
+}
+
+pub(in crate::app) fn browser_is_folder_pane(ui: &Ui) -> bool {
+    ui.data(|data| data.get_temp(folder_pane_browser_id()).unwrap_or(false))
+}
+
 /// Browser keys of the container tags this installation created by duplicating,
 /// published the same way and for the same reason as the modified set.
 ///

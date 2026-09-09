@@ -286,11 +286,13 @@ fn load_editing_kit_favorites(value: &Value) -> Vec<EditingKitFavorites> {
             continue;
         };
         let root = clean_recent_path(PathBuf::from(root));
-        let Some(tags) = kit.get("tags").and_then(Value::as_array) else {
-            continue;
-        };
         let mut relative_paths: Vec<PathBuf> = Vec::new();
-        for tag in tags {
+        for tag in kit
+            .get("tags")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
             let Some(path) = tag
                 .as_str()
                 .map(str::trim)
@@ -306,7 +308,29 @@ fn load_editing_kit_favorites(value: &Value) -> Vec<EditingKitFavorites> {
                 relative_paths.push(path);
             }
         }
-        if relative_paths.is_empty() {
+        let mut folder_paths: Vec<PathBuf> = Vec::new();
+        for folder in kit
+            .get("folders")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let Some(path) = folder
+                .as_str()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())
+                .and_then(|path| clean_favorite_relative_path(PathBuf::from(path)))
+            else {
+                continue;
+            };
+            if !folder_paths
+                .iter()
+                .any(|existing| same_recent_path(existing, &path))
+            {
+                folder_paths.push(path);
+            }
+        }
+        if relative_paths.is_empty() && folder_paths.is_empty() {
             continue;
         }
         if let Some(existing) = favorites
@@ -322,10 +346,20 @@ fn load_editing_kit_favorites(value: &Value) -> Vec<EditingKitFavorites> {
                     existing.tags.push(path);
                 }
             }
+            for path in folder_paths {
+                if !existing
+                    .folders
+                    .iter()
+                    .any(|current| same_recent_path(current, &path))
+                {
+                    existing.folders.push(path);
+                }
+            }
         } else {
             favorites.push(EditingKitFavorites {
                 tags_root: root,
                 tags: relative_paths,
+                folders: folder_paths,
             });
         }
     }
@@ -575,10 +609,11 @@ fn prefs_to_value(
         "tool_commands_left_width": prefs.tool_commands_left_width,
         "tool_commands_collapsed_categories": collapsed_tool_categories,
         "recent_folders": prefs.recent_folders.iter().map(|path| path.display().to_string()).collect::<Vec<_>>(),
-        "editing_kit_favorites": prefs.editing_kit_favorites.iter().filter(|kit| !kit.tags.is_empty()).map(|kit| {
+        "editing_kit_favorites": prefs.editing_kit_favorites.iter().filter(|kit| !kit.tags.is_empty() || !kit.folders.is_empty()).map(|kit| {
             json!({
                 "tags_root": kit.tags_root.display().to_string(),
                 "tags": kit.tags.iter().map(|path| path.display().to_string()).collect::<Vec<_>>(),
+                "folders": kit.folders.iter().map(|path| path.display().to_string()).collect::<Vec<_>>(),
             })
         }).collect::<Vec<_>>(),
         "custom_color_swatches": prefs.custom_color_swatches.iter().map(|swatch| {
@@ -690,11 +725,12 @@ fn parse_last_session(value: &Value) -> Option<LastSessionState> {
         // kit. They are both accepted because they were both written: v1 by
         // released Baboon, v2 by the build that added `.baboon` projects.
         1 | 2 => vec![parse_session_kit(value)?],
-        // Versions 3 to 5 are that same per-kit object, once per open kit.
+        // Versions 3 to 6 are that same per-kit object, once per open kit.
         // Version 4 adds optional Chimp package tabs, version 5 the Bitmap
-        // Library flag. Each field is optional on the way in, so the older
-        // files still load and only lack what they never recorded.
-        3 | 4 | 5 => value
+        // Library flag, and version 6 folder panes. Each field is optional on
+        // the way in, so older files still load and only lack what they never
+        // recorded.
+        3 | 4 | 5 | 6 => value
             .get("kits")?
             .as_array()?
             .iter()
@@ -791,6 +827,29 @@ fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
             path,
         });
     }
+    let folders = value
+        .get("folders")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let rel_path = item
+                .get("path")?
+                .as_str()
+                .map(str::trim)
+                .filter(|path| !path.is_empty())?;
+            let label = item
+                .get("label")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|label| !label.is_empty())
+                .or_else(|| rel_path.rsplit(['/', '\\']).next())?;
+            Some(LastSessionFolder {
+                rel_path: PathBuf::from(rel_path),
+                label: label.to_owned(),
+            })
+        })
+        .collect::<Vec<_>>();
     let chimp_packages = value
         .get("chimp_packages")
         .and_then(Value::as_array)
@@ -829,6 +888,7 @@ fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
         browser_mode,
         browser_sort,
         tags,
+        folders,
         chimp_packages,
         active_chimp_package,
         bitmap_library_open,
@@ -837,7 +897,7 @@ fn parse_session_kit(value: &Value) -> Option<LastSessionKit> {
     })
 }
 
-/// Persist every kit's source and open tag keys for the launch-time restore
+/// Persist every kit's source and open tag/folder panes for the launch-time restore
 /// prompt, along with which of them was focused. Written from the confirmed
 /// app-exit path and again as the event loop tears down, so a quit that never
 /// asks the window to close — macOS Cmd+Q — still records the session; a crash
@@ -872,6 +932,16 @@ fn session_value(session: &LastSessionState) -> Value {
                     })
                 })
                 .collect::<Vec<_>>();
+            let folders = kit
+                .folders
+                .iter()
+                .map(|folder| {
+                    json!({
+                        "path": folder.rel_path.to_string_lossy().replace('\\', "/"),
+                        "label": folder.label,
+                    })
+                })
+                .collect::<Vec<_>>();
             json!({
                 "source": {
                     "kind": kit.source_kind.as_str(),
@@ -884,6 +954,7 @@ fn session_value(session: &LastSessionState) -> Value {
                 "browser_mode": kit.browser_mode.map(browser_mode_str),
                 "browser_sort": kit.browser_sort.map(browser_sort_str),
                 "tags": tags,
+                "folders": folders,
                 "chimp_packages": kit.chimp_packages,
                 "active_chimp_package": kit.active_chimp_package,
                 "bitmap_library": kit.bitmap_library_open,
@@ -899,7 +970,7 @@ fn session_value(session: &LastSessionState) -> Value {
         })
         .collect::<Vec<_>>();
     json!({
-        "version": 5,
+        "version": 6,
         "kits": kits,
     })
 }
@@ -1088,6 +1159,11 @@ mod tests {
                         "objects/brute.model",
                         "objects/brute.model",
                         "../outside.model"
+                    ],
+                    "folders": [
+                        "objects/characters/brute",
+                        "objects/characters/brute",
+                        "../outside"
                     ]
                 },
                 {
@@ -1105,11 +1181,16 @@ mod tests {
             favorites[0].tags,
             vec![PathBuf::from("objects/brute.model")]
         );
+        assert_eq!(
+            favorites[0].folders,
+            vec![PathBuf::from("objects/characters/brute")]
+        );
         assert_eq!(favorites[1].tags_root, PathBuf::from("C:/Games/H3EK/tags"));
         assert_eq!(
             favorites[1].tags,
             vec![PathBuf::from("objects/brute.model")]
         );
+        assert!(favorites[1].folders.is_empty());
     }
 
     #[test]
@@ -1303,12 +1384,84 @@ mod session_tests {
                 group_tag: 1,
                 path: None,
             }],
+            folders: Vec::new(),
             chimp_packages: Vec::new(),
             active_chimp_package: None,
             bitmap_library_open: false,
             model_library_open: false,
             was_active: false,
         }
+    }
+
+    #[test]
+    fn folder_windows_round_trip_and_can_be_unchecked_for_restore() {
+        let source_path = std::env::temp_dir();
+        let mut saved = kit(
+            &source_path.display().to_string(),
+            Some(BrowserMode::Folders),
+        );
+        saved.tags.clear();
+        saved.folders.push(LastSessionFolder {
+            rel_path: PathBuf::from(r"objects\characters\brute"),
+            label: "brute".to_owned(),
+        });
+
+        let value = session_value(&LastSessionState { kits: vec![saved] });
+        assert_eq!(value["version"], 6);
+        assert_eq!(
+            value["kits"][0]["folders"][0]["path"],
+            "objects/characters/brute"
+        );
+
+        let restored = parse_last_session(&value).expect("folder session parses");
+        assert_eq!(restored.kits[0].folders.len(), 1);
+        assert_eq!(restored.kits[0].folders[0].label, "brute");
+
+        let mut prompt =
+            LastOpenedWindowsPrompt::from_session(restored, &[]).expect("restore prompt exists");
+        assert!(prompt.kits[0].folder_entries[0].checked);
+        assert_eq!(prompt.checked_kits()[0].folders.len(), 1);
+        prompt.kits[0].folder_entries[0].checked = false;
+        assert!(prompt.checked_kits()[0].folders.is_empty());
+    }
+
+    #[test]
+    fn restore_prompt_resolves_the_current_custom_project_name_and_root() {
+        let root = std::env::temp_dir();
+        let mut saved = kit(&root.display().to_string(), Some(BrowserMode::Folders));
+        saved.profile_id = Some("custom-h2-project".to_owned());
+        let profile = CustomEditingKitProfile {
+            id: "custom-h2-project".to_owned(),
+            name: "Halo 2 Rebalance".to_owned(),
+            game: "halo2_mcc".to_owned(),
+            root: root.clone(),
+            icon: None,
+        };
+
+        let prompt = LastOpenedWindowsPrompt::from_session(
+            LastSessionState { kits: vec![saved] },
+            &[profile],
+        )
+        .expect("restore prompt exists");
+
+        assert_eq!(
+            prompt.kits[0].profile_name.as_deref(),
+            Some("Halo 2 Rebalance")
+        );
+        assert_eq!(prompt.kits[0].profile_root.as_deref(), Some(root.as_path()));
+    }
+
+    #[test]
+    fn sessions_from_before_folder_windows_restore_with_none() {
+        let value = serde_json::json!({
+            "version": 5,
+            "kits": [{
+                "source": { "kind": "loose_folder", "path": "/h3" },
+                "tags": [],
+            }],
+        });
+        let restored = parse_last_session(&value).expect("version 5 session parses");
+        assert!(restored.kits[0].folders.is_empty());
     }
 
     #[test]
@@ -1324,6 +1477,7 @@ mod session_tests {
                 browser_mode: Some(BrowserMode::Folders),
                 browser_sort: Some(BrowserSort::Name),
                 tags: Vec::new(),
+                folders: Vec::new(),
                 chimp_packages: vec!["/Game/Vehicles/Warthog".to_owned()],
                 active_chimp_package: Some("/Game/Vehicles/Warthog".to_owned()),
                 bitmap_library_open: false,
@@ -1332,7 +1486,7 @@ mod session_tests {
             }],
         };
         let value = session_value(&session);
-        assert_eq!(value["version"], 5);
+        assert_eq!(value["version"], 6);
         let restored = parse_last_session(&value).expect("session parses");
         assert_eq!(restored.kits.len(), 1);
         assert_eq!(restored.kits[0].chimp_packages, ["/Game/Vehicles/Warthog"]);

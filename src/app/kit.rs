@@ -107,6 +107,8 @@ pub(super) struct Kit {
     pub(super) browser_sort: BrowserSort,
     pub(super) filter: String,
     pub(super) filter_cache: FilterCache,
+    /// Docked folder browsers, keyed by their synthetic tag-tree pane key.
+    pub(super) folder_browsers: HashMap<String, FolderBrowserState>,
     /// Which tags the browser should mark as modified, and the signature the
     /// set was built from. Rebuilt only when that signature changes: resolving
     /// a tag key to its entry is a linear scan of the source, so doing it for
@@ -127,6 +129,7 @@ pub(super) struct Kit {
     pub(super) deletable_keys_generation: Option<u64>,
     pub(super) keywords: KeywordStore,
     pub(super) active_favorite_entries: Vec<TagEntry>,
+    pub(super) active_favorite_folders: Vec<PathBuf>,
     /// True while a background full-scan of this loose-folder source is running.
     pub(super) scanning_entries: bool,
 
@@ -174,6 +177,7 @@ pub(super) struct Kit {
     /// finishes loading. Held per kit rather than in one shared slot so
     /// several kits can restore concurrently and finish in any order.
     pub(super) pending_restore_tags: Vec<LastSessionTag>,
+    pub(super) pending_restore_folders: Vec<LastSessionFolder>,
     /// Undo/redo stacks a restored project brought back, by document key, held
     /// until the document they belong to exists. A restored tab is loaded
     /// asynchronously, so the history almost always arrives before the tag it
@@ -222,6 +226,7 @@ impl Kit {
             browser_sort: BrowserSort::default(),
             filter: String::new(),
             filter_cache: FilterCache::default(),
+            folder_browsers: HashMap::new(),
             modified_tags: std::sync::Arc::new(ModifiedTags::default()),
             modified_signature: Vec::new(),
             generation: 0,
@@ -230,6 +235,7 @@ impl Kit {
             deletable_keys_generation: None,
             keywords: KeywordStore::default(),
             active_favorite_entries: Vec::new(),
+            active_favorite_folders: Vec::new(),
             scanning_entries: false,
             terminal_open: false,
             terminal_work_dir: None,
@@ -242,6 +248,7 @@ impl Kit {
             chimp: ChimpState::default(),
             blam: BlamUiState::default(),
             pending_restore_tags: Vec::new(),
+            pending_restore_folders: Vec::new(),
             pending_history: HashMap::new(),
             pending_restore_chimp_packages: Vec::new(),
             pending_restore_bitmap_library: false,
@@ -300,6 +307,7 @@ impl Kit {
         self.requested_path = None;
         self.profile = None;
         self.pending_restore_tags.clear();
+        self.pending_restore_folders.clear();
         self.pending_restore_chimp_packages.clear();
         self.pending_restore_bitmap_library = false;
         self.pending_restore_model_library = false;
@@ -523,6 +531,7 @@ impl Baboon {
         let requested_path = self.kits[index].requested_path.clone();
         let profile = self.kits[index].profile.clone();
         let pending_restore_tags = std::mem::take(&mut self.kits[index].pending_restore_tags);
+        let pending_restore_folders = std::mem::take(&mut self.kits[index].pending_restore_folders);
         let pending_restore_chimp_packages =
             std::mem::take(&mut self.kits[index].pending_restore_chimp_packages);
         let pending_restore_active_chimp_package =
@@ -547,6 +556,7 @@ impl Baboon {
             browser_mode,
             browser_sort,
             pending_restore_tags,
+            pending_restore_folders,
             pending_restore_chimp_packages,
             pending_restore_active_chimp_package,
             pending_restore_bitmap_library,
@@ -851,7 +861,11 @@ impl Kit {
             .as_ref()
             .is_some_and(|key| !self.open_tabs.contains(key))
         {
-            self.selected_key = self.open_tabs.first().cloned();
+            self.selected_key = self
+                .open_tabs
+                .iter()
+                .find(|key| !is_folder_pane_key(key))
+                .cloned();
         }
     }
 
@@ -909,6 +923,7 @@ impl Kit {
         if let Some(tile_id) = self.tile_for_key(key) {
             self.tag_tree.remove_recursively(tile_id);
         }
+        self.folder_browsers.remove(key);
         self.sync_open_tabs();
     }
 

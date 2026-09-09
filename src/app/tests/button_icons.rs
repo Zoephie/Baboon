@@ -70,3 +70,21 @@ fn button_icon_uri_changes_with_pixels_per_point() {
     assert!(low.contains("dpi100"));
     assert!(high.contains("dpi200"));
 }
+
+#[test]
+fn button_icon_uri_changes_with_rendered_size() {
+    let small = button_icon_uri_for_pixels_per_point_and_size(
+        ButtonIcon::FolderOpen,
+        Color32::WHITE,
+        1.0,
+        16.0,
+    );
+    let large = button_icon_uri_for_pixels_per_point_and_size(
+        ButtonIcon::FolderOpen,
+        Color32::WHITE,
+        1.0,
+        32.0,
+    );
+    assert_ne!(small, large);
+    assert!(large.contains("32px"));
+}
