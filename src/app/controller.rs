@@ -9107,15 +9107,15 @@ mod tests {
 
     #[test]
     fn last_opened_workspace_heading_prefers_the_named_project() {
-        let source = Path::new(r"C:\Games\Halo Infinite");
-        let project = Path::new(r"D:\Baboon Projects\Campaign Overhaul.baboon");
+        let source = PathBuf::from("Games").join("Halo Infinite");
+        let project = PathBuf::from("Baboon Projects").join("Campaign Overhaul.baboon");
 
         assert_eq!(
             super::last_opened_workspace_heading(
                 None,
                 Some("halo_infinite"),
-                source,
-                Some(project)
+                &source,
+                Some(&project)
             ),
             (
                 "Campaign Overhaul".to_owned(),
