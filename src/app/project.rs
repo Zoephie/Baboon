@@ -1438,8 +1438,7 @@ impl Baboon {
             kit_state.loading_tags.clear();
             kit_state.bitmap_previews.clear();
             kit_state.model_previews.clear();
-            kit_state.field_search.clear();
-            kit_state.field_search_applied.clear();
+            kit_state.find_filter_applied.clear();
             kit_state.edit_buffers.clear();
         }
         let now = ctx.input(|input| input.time);

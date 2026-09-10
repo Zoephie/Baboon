@@ -20,33 +20,56 @@ impl FindWithin {
     }
 }
 
-/// Which parts of a schema-backed field participate in Find.
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(in crate::app) enum FindLookIn {
-    #[default]
-    FieldValues,
-    Labels,
-    Both,
+/// Which parts of a schema-backed tag participate in Find.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::app) struct FindLookIn {
+    pub(in crate::app) field_names: bool,
+    pub(in crate::app) field_values: bool,
+    pub(in crate::app) blocks: bool,
+}
+
+impl Default for FindLookIn {
+    fn default() -> Self {
+        Self {
+            field_names: true,
+            field_values: true,
+            blocks: false,
+        }
+    }
 }
 
 impl FindLookIn {
-    /// User-facing target name shown in the Find dialog.
+    /// Compact summary shown on the multi-select menu button.
     pub(in crate::app) fn label(self) -> &'static str {
-        match self {
-            Self::FieldValues => "Field Values",
-            Self::Labels => "Labels",
-            Self::Both => "Both",
+        match (self.field_names, self.field_values, self.blocks) {
+            (true, true, false) => "Fields",
+            (true, true, true) => "Fields + Blocks",
+            (true, false, false) => "Field Names",
+            (false, true, false) => "Field Values",
+            (false, false, true) => "Blocks",
+            (true, false, true) => "Names + Blocks",
+            (false, true, true) => "Values + Blocks",
+            (false, false, false) => "Nothing",
         }
     }
 
     /// Whether scalar field values participate in this target mode.
     pub(in crate::app) fn includes_values(self) -> bool {
-        matches!(self, Self::FieldValues | Self::Both)
+        self.field_values
     }
 
-    /// Whether field and container labels participate in this target mode.
-    pub(in crate::app) fn includes_labels(self) -> bool {
-        matches!(self, Self::Labels | Self::Both)
+    /// Whether non-block field labels participate in this target mode.
+    pub(in crate::app) fn includes_field_names(self) -> bool {
+        self.field_names
+    }
+
+    /// Whether block and fixed-array labels participate in this target mode.
+    pub(in crate::app) fn includes_blocks(self) -> bool {
+        self.blocks
+    }
+
+    pub(in crate::app) fn is_empty(self) -> bool {
+        !self.field_names && !self.field_values && !self.blocks
     }
 }
 
@@ -55,6 +78,8 @@ impl FindLookIn {
 pub(in crate::app) enum FindTargetKind {
     Label,
     Value,
+    Block,
+    Documentation,
 }
 
 /// One exact substring occurrence in one indexed tag field.
@@ -77,6 +102,7 @@ pub(in crate::app) struct FindDialogState {
     pub(in crate::app) look_in: FindLookIn,
     pub(in crate::app) match_case: bool,
     pub(in crate::app) whole_word: bool,
+    pub(in crate::app) filter_results: bool,
     pub(in crate::app) occurrences: Vec<FindOccurrence>,
     pub(in crate::app) active: Option<usize>,
     pub(in crate::app) all_request_id: u64,
@@ -101,6 +127,7 @@ impl FindDialogState {
         self.occurrences.clear();
         self.searching = false;
         self.progress = None;
+        self.filter_results = false;
     }
 }
 

@@ -2939,8 +2939,7 @@ impl Baboon {
         kit_state.loading_tags.remove(key);
         kit_state.bitmap_previews.remove(key);
         kit_state.model_previews.remove(key);
-        kit_state.field_search.remove(key);
-        kit_state.field_search_applied.remove(key);
+        kit_state.find_filter_applied.remove(key);
         kit_state.edit_buffers.forget_tag(key);
         // Persist the removal. The document is gone by now, so the capture
         // below cannot put the overlay straight back.
@@ -2988,8 +2987,7 @@ impl Baboon {
         kit_state.loading_tags.remove(key);
         kit_state.bitmap_previews.remove(key);
         kit_state.model_previews.remove(key);
-        kit_state.field_search.remove(key);
-        kit_state.field_search_applied.remove(key);
+        kit_state.find_filter_applied.remove(key);
         kit_state.edit_buffers.forget_tag(key);
         if kit_state.selected_key.as_deref() == Some(key) {
             kit_state.selected_key = None;

@@ -147,9 +147,6 @@ pub(in crate::app) fn draw_fields_with_docs(
     let entries: &[DefEntry] = edit.docs.map(|docs| docs.entries_for(&guid)).unwrap_or(&[]);
     let parent_raw = tag_struct.raw();
     let reference_value_width = shared_tag_reference_value_width(ui, depth);
-    // In active filter mode, injected explanation/section headers are suppressed
-    // so a filtered view shows only matches and their containers (no orphans).
-    let show_explanations = !edit.is_active_filter();
     let mut cursor = 0usize;
     for field in tag_struct.fields_all() {
         if skip_field == Some(field.name()) {
@@ -166,15 +163,15 @@ pub(in crate::app) fn draw_fields_with_docs(
             }) {
                 for (offset, entry) in entries[cursor..match_idx].iter().enumerate() {
                     if let DefEntry::Explanation { title, body } = entry {
-                        if show_explanations {
-                            draw_foundation_explanation_row(
-                                ui,
-                                title,
-                                Some(body),
-                                depth,
-                                (path_prefix, cursor + offset),
-                            );
-                        }
+                        draw_injected_explanation_row(
+                            ui,
+                            title,
+                            body,
+                            depth,
+                            path_prefix,
+                            cursor + offset,
+                            edit,
+                        );
                     }
                 }
                 if let DefEntry::Field {
@@ -228,15 +225,15 @@ pub(in crate::app) fn draw_fields_with_docs(
     // Any explanations after the last matched field.
     for (offset, entry) in entries[cursor..].iter().enumerate() {
         if let DefEntry::Explanation { title, body } = entry {
-            if show_explanations {
-                draw_foundation_explanation_row(
-                    ui,
-                    title,
-                    Some(body),
-                    depth,
-                    (path_prefix, cursor + offset),
-                );
-            }
+            draw_injected_explanation_row(
+                ui,
+                title,
+                body,
+                depth,
+                path_prefix,
+                cursor + offset,
+                edit,
+            );
         }
     }
 }
@@ -319,6 +316,7 @@ pub(in crate::app) fn draw_field(
                 field.explanation(),
                 depth,
                 &field_path,
+                edit.resolve_open(&field_path, true),
             );
             return;
         }
@@ -496,6 +494,7 @@ pub(in crate::app) fn draw_foundation_explanation_row(
     body: Option<&str>,
     depth: usize,
     id_salt: impl std::hash::Hash,
+    open_override: Option<bool>,
 ) {
     // `name` is the explanation's title (often a section header like
     // "$$$ WEAPON $$$", sometimes empty); `body` is its text, read straight
@@ -520,7 +519,6 @@ pub(in crate::app) fn draw_foundation_explanation_row(
     };
 
     ui.scope(|ui| {
-        ui.add_space(2.0);
         // Full-width header bar (see draw_foundation_group), matching Foundation.
         draw_foundation_collapsing_header(
             ui,
@@ -528,19 +526,17 @@ pub(in crate::app) fn draw_foundation_explanation_row(
             ("foundation_explanation", id_salt),
             depth,
             true,
-            None,
+            open_override,
             foundation_section_bar(),
+            FindTargetKind::Documentation,
+            has_body,
+            has_body.then_some(ButtonIcon::Doc),
             |ui| {
                 if has_body {
                     Frame::none()
-                        .fill(foundation_group_bg())
-                        .stroke(Stroke::new(1.0, foundation_group_edge()))
-                        .inner_margin(egui::Margin {
-                            left: 8.0 + depth as f32 * 4.0,
-                            right: 8.0,
-                            top: 6.0,
-                            bottom: 6.0,
-                        })
+                        .fill(foundation_documentation_bg())
+                        .rounding(foundation_body_rounding())
+                        .inner_margin(egui::Margin::same(20.0))
                         .show(ui, |ui| {
                             // The box spans the full parent width (Foundation's
                             // border is Width=Auto in a stretch StackPanel); only the
@@ -549,18 +545,81 @@ pub(in crate::app) fn draw_foundation_explanation_row(
                             let text_width = ui.available_width().min(650.0);
                             ui.scope(|ui| {
                                 ui.set_max_width(text_width);
-                                ui.label(
-                                    RichText::new(body.trim_end())
-                                        .color(text_dark())
-                                        .monospace()
-                                        .size(12.0),
-                                );
+                                let body = body.trim_end();
+                                if let Some(text) = highlighted_italic_widget_text(
+                                    ui,
+                                    body,
+                                    TextStyle::Monospace,
+                                    text_dark(),
+                                    FindTargetKind::Documentation,
+                                ) {
+                                    ui.label(text);
+                                } else {
+                                    ui.label(
+                                        RichText::new(body)
+                                            .color(text_dark())
+                                            .monospace()
+                                            .italics()
+                                            .size(12.0),
+                                    );
+                                }
                             });
                         });
                 }
             },
         );
     });
+}
+
+fn draw_injected_explanation_row(
+    ui: &mut Ui,
+    title: &str,
+    body: &str,
+    depth: usize,
+    path_prefix: &str,
+    entry_index: usize,
+    edit: &FieldEditContext<'_>,
+) {
+    let path = documentation_path(path_prefix, entry_index);
+    if !edit.field_visible(&path) {
+        return;
+    }
+    let scroll_here = edit.field_nav.is_some()
+        && ui
+            .data(|data| data.get_temp::<String>(field_jump_target_id()))
+            .as_deref()
+            == Some(path.as_str());
+    if scroll_here {
+        let target = egui::Rect::from_min_size(
+            ui.cursor().min,
+            Vec2::new(ui.available_width().max(1.0), 28.0),
+        );
+        ui.scroll_to_rect(target, Some(egui::Align::Center));
+        ui.data_mut(|data| {
+            data.remove::<String>(field_jump_target_id());
+            if data.get_temp::<String>(jump_target_id()).as_deref() == Some(path.as_str()) {
+                data.remove::<String>(jump_target_id());
+            }
+        });
+        ui.ctx().request_repaint();
+    }
+    ui.data_mut(|data| {
+        data.insert_temp(
+            find_render_cell_id(),
+            FindRenderCell {
+                tag_key: edit.tag_key.to_owned(),
+                field_path: path.clone(),
+            },
+        )
+    });
+    draw_foundation_explanation_row(
+        ui,
+        title,
+        Some(body),
+        depth,
+        &path,
+        edit.resolve_open(&path, true),
+    );
 }
 
 pub(super) fn known_explanation_text(name: &str) -> Option<String> {
@@ -581,6 +640,19 @@ pub(super) fn visible_container_title(name: &str, path_prefix: &str) -> String {
     } else {
         clean_field_name(name)
     }
+}
+
+pub(in crate::app) fn foundation_block_title(name: &str) -> String {
+    clean_field_name(name)
+        .split_whitespace()
+        .map(|word| {
+            let mut chars = word.chars();
+            chars.next().map_or_else(String::new, |first| {
+                first.to_uppercase().chain(chars).collect()
+            })
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 pub(super) fn inline_function_label(name: &str, path_prefix: &str) -> String {
@@ -713,7 +785,6 @@ pub(in crate::app) fn draw_foundation_group(
     add_contents: impl FnOnce(&mut Ui),
 ) {
     ui.scope(|ui| {
-        ui.add_space(2.0);
         draw_foundation_collapsing_header(
             ui,
             title,
@@ -722,10 +793,13 @@ pub(in crate::app) fn draw_foundation_group(
             default_open,
             open_override,
             foundation_section_bar(),
+            FindTargetKind::Label,
+            true,
+            None,
             |ui| {
                 Frame::none()
                     .fill(foundation_group_bg())
-                    .stroke(Stroke::new(1.0, foundation_group_edge()))
+                    .rounding(foundation_body_rounding())
                     .inner_margin(egui::Margin {
                         left: 8.0 + depth as f32 * 4.0,
                         right: 8.0,
@@ -742,6 +816,36 @@ pub(in crate::app) fn draw_foundation_group(
 /// Draw a full-width modern collapsing header with the same rounded chevron
 /// control used by block headers. Keeping this in one helper ensures groups,
 /// explanations, and section bars share the same affordance.
+fn add_foundation_header_spacing(ui: &mut Ui) {
+    // egui has already advanced by `item_spacing.y` after the previous item.
+    // Add only the remainder so adjacent header bars have an 8pt visual gap.
+    ui.add_space((8.0 - ui.spacing().item_spacing.y).max(0.0));
+}
+
+const FOUNDATION_CONTAINER_RADIUS: f32 = 5.0;
+
+fn foundation_header_rounding(joined_to_body: bool) -> egui::Rounding {
+    if joined_to_body {
+        egui::Rounding {
+            nw: FOUNDATION_CONTAINER_RADIUS,
+            ne: FOUNDATION_CONTAINER_RADIUS,
+            sw: 0.0,
+            se: 0.0,
+        }
+    } else {
+        egui::Rounding::same(FOUNDATION_CONTAINER_RADIUS)
+    }
+}
+
+fn foundation_body_rounding() -> egui::Rounding {
+    egui::Rounding {
+        nw: 0.0,
+        ne: 0.0,
+        sw: FOUNDATION_CONTAINER_RADIUS,
+        se: FOUNDATION_CONTAINER_RADIUS,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn draw_foundation_collapsing_header(
     ui: &mut Ui,
@@ -751,6 +855,9 @@ fn draw_foundation_collapsing_header(
     default_open: bool,
     open_override: Option<bool>,
     bar_fill: Color32,
+    find_kind: FindTargetKind,
+    collapsible: bool,
+    leading_icon: Option<ButtonIcon>,
     add_contents: impl FnOnce(&mut Ui),
 ) -> bool {
     let id = ui.make_persistent_id(("foundation_collapsing_header", id_salt));
@@ -763,58 +870,95 @@ fn draw_foundation_collapsing_header(
         state.set_open(open);
     }
 
+    add_foundation_header_spacing(ui);
     let row_width = ui.available_width();
-    let (row_rect, _) = ui.allocate_exact_size(Vec2::new(row_width, 28.0), Sense::hover());
-    ui.painter().rect_filled(row_rect, 5.0, bar_fill);
-    ui.painter()
-        .rect_stroke(row_rect, 5.0, Stroke::new(1.0, foundation_block_edge()));
-    ui.allocate_new_ui(
-        egui::UiBuilder::new().max_rect(row_rect.shrink2(Vec2::new(6.0, 3.0))),
-        |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
-            ui.horizontal_centered(|ui| {
-                ui.add_space(depth as f32 * 4.0);
-                let toggle = foundation_header_toggle_cell(ui, state.is_open(), true);
-                if toggle.clicked() {
-                    state.toggle(ui);
-                }
-                let label = if findable_text_has_match(ui, &title, FindTargetKind::Label) {
-                    let (label_rect, label) = ui.allocate_exact_size(
-                        Vec2::new(ui.available_width().max(80.0), 20.0),
-                        Sense::click(),
-                    );
-                    paint_findable_text(
-                        ui,
-                        label_rect.left_center(),
-                        Align2::LEFT_CENTER,
-                        &title,
-                        bold_font(12.5),
-                        foundation_block_text(),
-                        FindTargetKind::Label,
-                    );
-                    label
+    let (row_rect, _) = ui.allocate_exact_size(Vec2::new(row_width, 40.0), Sense::hover());
+    let header_background = ui.painter().add(egui::Shape::Noop);
+    // This child paints into the reserved row without advancing the parent
+    // cursor. `allocate_new_ui` would advance it to the child's 24pt content
+    // boundary, effectively discarding the row's bottom padding.
+    let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(row_rect.shrink(8.0)));
+    header_ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
+    header_ui.horizontal_centered(|ui| {
+        ui.add_space(depth as f32 * 4.0);
+        if collapsible {
+            let toggle = foundation_header_toggle_cell(ui, state.is_open(), true);
+            if toggle.clicked() {
+                state.toggle(ui);
+            }
+        }
+        if let Some(icon) = leading_icon {
+            let (icon_rect, _) =
+                ui.allocate_exact_size(Vec2::splat(BUTTON_ICON_SIZE), Sense::hover());
+            paint_button_icon_at(ui, icon, icon_rect, foundation_block_text());
+        }
+        let label = if findable_text_has_match(ui, &title, find_kind) {
+            let (label_rect, label) = ui.allocate_exact_size(
+                Vec2::new(ui.available_width().max(80.0), 20.0),
+                if collapsible {
+                    Sense::click()
                 } else {
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(&title)
-                                .color(foundation_block_text())
-                                .font(bold_font(12.5)),
-                        )
-                        .sense(Sense::click()),
-                    )
-                };
-                if label.clicked() {
-                    state.toggle(ui);
-                }
-            });
-        },
-    );
+                    Sense::hover()
+                },
+            );
+            paint_findable_text(
+                ui,
+                label_rect.left_center(),
+                Align2::LEFT_CENTER,
+                &title,
+                bold_font(12.5),
+                foundation_block_text(),
+                find_kind,
+            );
+            label
+        } else {
+            ui.add(
+                egui::Label::new(
+                    RichText::new(&title)
+                        .color(foundation_block_text())
+                        .font(bold_font(12.5)),
+                )
+                .sense(if collapsible {
+                    Sense::click()
+                } else {
+                    Sense::hover()
+                }),
+            )
+        };
+        if collapsible && label.clicked() {
+            state.toggle(ui);
+        }
+    });
     state.store(ui.ctx());
-    let open = state.is_open();
-    if open {
-        state.show_body_unindented(ui, add_contents);
-        ui.add_space(3.0);
-    }
+    let open = collapsible && state.is_open();
+    let body_response = if open {
+        // Widget allocation leaves the normal inter-item gap after the header.
+        // Retract it so the body begins flush against the header bar.
+        ui.add_space(-ui.spacing().item_spacing.y);
+        state.show_body_unindented(ui, add_contents)
+    } else {
+        None
+    };
+    let joined_to_body = body_response.is_some();
+    ui.painter().set(
+        header_background,
+        egui::Shape::rect_filled(
+            row_rect,
+            foundation_header_rounding(joined_to_body),
+            bar_fill,
+        ),
+    );
+    let container_rect = body_response.map_or(row_rect, |body| {
+        egui::Rect::from_min_max(
+            row_rect.min,
+            egui::pos2(row_rect.max.x, body.response.rect.max.y),
+        )
+    });
+    ui.painter().rect_stroke(
+        container_rect,
+        FOUNDATION_CONTAINER_RADIUS,
+        Stroke::new(1.0, foundation_block_edge()),
+    );
     open
 }
 
@@ -1512,21 +1656,12 @@ pub(in crate::app) fn draw_foundation_block_control(
         state.set_open(false);
     }
 
+    add_foundation_header_spacing(ui);
     let row_width = ui.available_width();
-    let row_height = 30.0;
+    let row_height = 40.0;
     let (row_rect, _) = ui.allocate_exact_size(Vec2::new(row_width, row_height), Sense::hover());
-    let row_hovered = ui.rect_contains_pointer(row_rect);
-    ui.painter().rect_filled(
-        row_rect,
-        5.0,
-        if row_hovered {
-            foundation_block_bar_hover()
-        } else {
-            foundation_block_bar()
-        },
-    );
-    ui.painter()
-        .rect_stroke(row_rect, 5.0, Stroke::new(1.0, foundation_block_edge()));
+    let header_fill = foundation_block_bar();
+    let header_background = ui.painter().add(egui::Shape::Noop);
 
     // 3.4 jump-to-parent: if a child's "↑" targeted this block last frame, bring
     // its header into view (and clear the pending target).
@@ -1544,293 +1679,266 @@ pub(in crate::app) fn draw_foundation_block_control(
         prepare_block_control_availability(editable, allow_structural, count, max_count);
     let mut selector_active = false;
 
-    ui.allocate_new_ui(
-        egui::UiBuilder::new().max_rect(row_rect.shrink2(Vec2::new(6.0, 4.0))),
-        |ui| {
-            ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
-            ui.horizontal_centered(|ui| {
-                ui.add_space(depth as f32 * 5.0);
-                // Jump-to-parent (nested blocks only); hover shows the breadcrumb.
-                if depth > 0 {
-                    let jump = icon_button(
-                        ui,
-                        ButtonIcon::JumpUp,
-                        "Jump to parent block",
-                        true,
-                        foundation_block_text(),
-                    )
-                    .on_hover_text(format!(
-                        "Jump to parent block\n{}",
-                        breadcrumb_for_path(path_salt)
-                    ));
-                    if jump.clicked() {
-                        if let Some(parent) = parent_block_path(path_salt) {
-                            ui.data_mut(|d| d.insert_temp(jump_target_id(), parent));
-                        }
-                    }
+    // Paint controls inside the already-reserved row without changing the
+    // parent's cursor; otherwise the 8pt bottom padding is lost.
+    let mut header_ui = ui.new_child(egui::UiBuilder::new().max_rect(row_rect.shrink(8.0)));
+    header_ui.spacing_mut().item_spacing = Vec2::new(4.0, 0.0);
+    header_ui.horizontal_centered(|ui| {
+        ui.add_space(depth as f32 * 5.0);
+        let toggle = foundation_header_toggle_cell(ui, state.is_open(), count > 0);
+        if toggle.clicked() && count > 0 {
+            state.toggle(ui);
+        }
+        // Jump-to-parent follows the disclosure control for nested blocks;
+        // hover shows the breadcrumb.
+        if depth > 0 {
+            let jump = icon_button(
+                ui,
+                ButtonIcon::JumpUp,
+                "Jump to parent block",
+                true,
+                foundation_block_text(),
+            )
+            .on_hover_text(format!(
+                "Jump to parent block\n{}",
+                breadcrumb_for_path(path_salt)
+            ));
+            if jump.clicked() {
+                if let Some(parent) = parent_block_path(path_salt) {
+                    ui.data_mut(|d| d.insert_temp(jump_target_id(), parent));
                 }
-                let toggle = foundation_header_toggle_cell(ui, state.is_open(), count > 0);
-                if toggle.clicked() && count > 0 {
-                    state.toggle(ui);
-                }
-                let clean_name = clean_field_name(name);
-                let name_label = if findable_text_has_match(ui, &clean_name, FindTargetKind::Label)
+            }
+        }
+        let block_title = foundation_block_title(name);
+        let (name_rect, name_label) =
+            ui.allocate_exact_size(Vec2::new(190.0, 20.0), Sense::click());
+        paint_findable_text(
+            ui,
+            name_rect.left_center(),
+            Align2::LEFT_CENTER,
+            &block_title,
+            bold_font(12.5),
+            foundation_block_text(),
+            FindTargetKind::Block,
+        );
+        // Right-click the block name → copy / paste menu. Copy actions are
+        // read-only and available for any element collection (including
+        // fixed-size arrays); the size/content-changing paste & replace
+        // actions are gated behind `allow_structural`.
+        name_label
+            .on_hover_text("Right-click for copy / paste options")
+            .context_menu(|ui| {
+                // Copy + in-place replace are valid for blocks AND fixed-size
+                // arrays (no element-count change). The size-changing actions
+                // (paste/insert, replace-all, add/delete) are blocks only.
+                if ui
+                    .add_enabled(count > 0, egui::Button::new("Copy element"))
+                    .clicked()
                 {
-                    let (name_rect, name_label) =
-                        ui.allocate_exact_size(Vec2::new(190.0, 20.0), Sense::click());
-                    paint_findable_text(
-                        ui,
-                        name_rect.left_center(),
-                        Align2::LEFT_CENTER,
-                        &clean_name,
-                        bold_font(12.5),
-                        foundation_block_text(),
-                        FindTargetKind::Label,
-                    );
-                    name_label
-                } else {
-                    ui.add_sized(
-                        [190.0, 20.0],
-                        egui::Label::new(
-                            RichText::new(clean_name)
-                                .color(foundation_block_text())
-                                .font(bold_font(12.5)),
-                        )
-                        .sense(Sense::click()),
-                    )
-                };
-                // Right-click the block name → copy / paste menu. Copy actions are
-                // read-only and available for any element collection (including
-                // fixed-size arrays); the size/content-changing paste & replace
-                // actions are gated behind `allow_structural`.
-                name_label
-                    .on_hover_text("Right-click for copy / paste options")
-                    .context_menu(|ui| {
-                        // Copy + in-place replace are valid for blocks AND fixed-size
-                        // arrays (no element-count change). The size-changing actions
-                        // (paste/insert, replace-all, add/delete) are blocks only.
-                        if ui
-                            .add_enabled(count > 0, egui::Button::new("Copy element"))
-                            .clicked()
-                        {
-                            actions.copy = true;
-                            ui.close_menu();
-                        }
-                        if ui
-                            .add_enabled(count > 0, egui::Button::new("Copy entire block"))
-                            .clicked()
-                        {
-                            actions.copy_block = true;
-                            ui.close_menu();
-                        }
-                        if ui
-                            .add_enabled(count > 0, egui::Button::new("Copy block as TSV"))
-                            .on_hover_text("Copy all elements as tab-separated rows (Excel)")
-                            .clicked()
-                        {
-                            actions.copy_block_tsv = true;
-                            ui.close_menu();
-                        }
-                        // In-place replace of the selected element — never changes
-                        // the count, so it works for arrays too.
-                        if matches!(paste_gate, PasteGate::Ready(_))
-                            && ui
-                                .add_enabled(
-                                    count > 0,
-                                    egui::Button::new("Replace selected element"),
-                                )
-                                .on_hover_text("Overwrite the selected element with the clipboard")
-                                .clicked()
-                        {
-                            actions.replace_element = true;
-                            ui.close_menu();
-                        }
-                        if allow_structural {
-                            if ui
-                                .add_enabled(count > 0, egui::Button::new("Paste TSV…"))
-                                .on_hover_text(
-                                    "Paste tab-separated rows back onto this block's elements",
-                                )
-                                .clicked()
-                            {
-                                actions.paste_tsv = true;
+                    actions.copy = true;
+                    ui.close_menu();
+                }
+                if ui
+                    .add_enabled(count > 0, egui::Button::new("Copy entire block"))
+                    .clicked()
+                {
+                    actions.copy_block = true;
+                    ui.close_menu();
+                }
+                if ui
+                    .add_enabled(count > 0, egui::Button::new("Copy block as TSV"))
+                    .on_hover_text("Copy all elements as tab-separated rows (Excel)")
+                    .clicked()
+                {
+                    actions.copy_block_tsv = true;
+                    ui.close_menu();
+                }
+                // In-place replace of the selected element — never changes
+                // the count, so it works for arrays too.
+                if matches!(paste_gate, PasteGate::Ready(_))
+                    && ui
+                        .add_enabled(count > 0, egui::Button::new("Replace selected element"))
+                        .on_hover_text("Overwrite the selected element with the clipboard")
+                        .clicked()
+                {
+                    actions.replace_element = true;
+                    ui.close_menu();
+                }
+                if allow_structural {
+                    if ui
+                        .add_enabled(count > 0, egui::Button::new("Paste TSV…"))
+                        .on_hover_text("Paste tab-separated rows back onto this block's elements")
+                        .clicked()
+                    {
+                        actions.paste_tsv = true;
 
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    match paste_gate {
+                        PasteGate::Ready(n) => {
+                            let noun = if n == 1 { "element" } else { "elements" };
+                            if ui.button(format!("Paste {n} {noun}")).clicked() {
+                                actions.paste = true;
                                 ui.close_menu();
                             }
-                            ui.separator();
-                            match paste_gate {
-                                PasteGate::Ready(n) => {
-                                    let noun = if n == 1 { "element" } else { "elements" };
-                                    if ui.button(format!("Paste {n} {noun}")).clicked() {
-                                        actions.paste = true;
-                                        ui.close_menu();
-                                    }
-                                    if ui.button("Replace entire block").clicked() {
-                                        actions.replace_block = true;
-                                        ui.close_menu();
-                                    }
-                                }
-                                PasteGate::VersionMismatch => {
-                                    ui.add_enabled(false, egui::Button::new("Paste"))
-                                        .on_disabled_hover_text(
-                                            "Clipboard element is a different struct version \
+                            if ui.button("Replace entire block").clicked() {
+                                actions.replace_block = true;
+                                ui.close_menu();
+                            }
+                        }
+                        PasteGate::VersionMismatch => {
+                            ui.add_enabled(false, egui::Button::new("Paste"))
+                                .on_disabled_hover_text(
+                                    "Clipboard element is a different struct version \
                                              (different on-disk size) — pasting across versions \
                                              would corrupt the tag. Upgrade/downgrade between \
                                              versions isn't supported yet.",
-                                        );
-                                }
-                                PasteGate::Empty => {
-                                    ui.add_enabled(false, egui::Button::new("Paste"));
-                                }
-                            }
+                                );
                         }
-                    });
-                if show_search_jump
-                    && icon_button(
-                        ui,
-                        ButtonIcon::JumpTo,
-                        "Clear search and jump to this block",
-                        true,
-                        foundation_jump_cyan(),
-                    )
-                    .clicked()
-                {
-                    ui.data_mut(|data| {
-                        data.insert_temp(
-                            field_search_block_jump_id(view_scope, tag_key),
-                            path_salt.to_owned(),
-                        )
-                    });
-                }
-                // Keep the previous arrow directly beside the selected
-                // reference, with the next arrow following it.
-                if foundation_header_stepper_clicked(ui, "<", has_sel && selected_index > 0) {
-                    actions.new_selection = Some(selected_index.saturating_sub(1));
-                }
-
-                // Instance selector dropdown — built lazily (only when open).
-                let combo_width = foundation_selected_width(row_width);
-                if has_sel {
-                    let (combo_response, wheel_delta) = combo_box_with_scroll(
-                        ui,
-                        // The element count is part of the id on purpose. A
-                        // popup's `Area` and `ScrollArea` remember their size
-                        // in egui memory under this id, and the remembered
-                        // size becomes the space the content is laid out in --
-                        // so once the list grew past the size the popup had
-                        // when it was last open, it stayed at the old size and
-                        // scrolled instead of growing. Keying on the count
-                        // retires that memory the moment the list changes.
-                        //
-                        // This is also why closing and reopening the tag
-                        // "fixed" it: a reopened tag lands in a new tile, whose
-                        // `view_scope` is already part of this id.
-                        egui::ComboBox::from_id_salt((
-                            "block_instance",
-                            view_scope,
-                            tag_key,
-                            path_salt,
-                            depth,
-                            count,
-                        ))
-                        .selected_text(truncate_for_cell(selected_label, combo_width - 24.0))
-                        .width(combo_width),
-                        |ui| {
-                            selector_active |= ui.rect_contains_pointer(ui.max_rect());
-                            // Adding an element selects it, so opening the list
-                            // scrolled to the top hid the very entry that was
-                            // just added when the list outgrew the popup.
-                            let just_opened = combo_popup_just_opened(ui);
-                            for i in 0..count {
-                                let row =
-                                    ui.selectable_label(i == selected_index, element_label(i));
-                                if just_opened && i == selected_index {
-                                    row.scroll_to_me(Some(egui::Align::Center));
-                                }
-                                if row.clicked() {
-                                    actions.new_selection = Some(i);
-                                }
-                            }
-                        },
-                    );
-                    selector_active |=
-                        combo_response.response.hovered() || combo_response.response.has_focus();
-                    if let Some(delta) = wheel_delta {
-                        if let Some(next) = combo_scroll_next_index(selected_index, count, delta) {
-                            actions.new_selection = Some(next);
+                        PasteGate::Empty => {
+                            ui.add_enabled(false, egui::Button::new("Paste"));
                         }
-                    }
-                } else {
-                    foundation_header_value_cell(ui, "NONE", combo_width);
-                }
-
-                // Next stepper follows the selected reference string.
-                if foundation_header_stepper_clicked(ui, ">", has_sel && selected_index + 1 < count)
-                {
-                    actions.new_selection = Some(selected_index + 1);
-                }
-
-                // Index readout.
-                ui.label(
-                    RichText::new(if has_sel {
-                        format!("[{selected_index}]")
-                    } else {
-                        "[--]".to_owned()
-                    })
-                    .color(foundation_block_text())
-                    .small(),
-                );
-
-                if let Some(size_label) = block_size_label {
-                    ui.label(
-                        RichText::new(size_label)
-                            .color(subtle_dark())
-                            .monospace()
-                            .small(),
-                    )
-                    .on_hover_text("Block memory usage: elements × element byte size");
-                }
-
-                // Structural edit buttons — only for variable-count blocks. Arrays
-                // are fixed-size, so the count-changing actions don't apply and the
-                // buttons are omitted entirely. The grow actions (Add / Insert /
-                // Duplicate) are disabled once the block hits its schema cap.
-                if allow_structural {
-                    let hint = capacity_hint.as_deref();
-                    if foundation_header_button_clicked_hint(
-                        ui,
-                        "Add",
-                        can_edit && !at_capacity,
-                        hint,
-                    ) {
-                        actions.add = true;
-                    }
-                    if foundation_header_button_clicked_hint(
-                        ui,
-                        "Insert",
-                        can_edit && has_sel && !at_capacity,
-                        hint,
-                    ) {
-                        actions.insert = true;
-                    }
-                    if foundation_header_button_clicked_hint(
-                        ui,
-                        "Duplicate",
-                        can_edit && has_sel && !at_capacity,
-                        hint,
-                    ) {
-                        actions.duplicate = true;
-                    }
-                    if foundation_header_button_clicked(ui, "Delete", can_edit && has_sel) {
-                        actions.delete = true;
-                    }
-                    if foundation_header_button_clicked(ui, "Delete all", can_edit && has_sel) {
-                        actions.delete_all = true;
                     }
                 }
             });
-        },
-    );
+        if show_search_jump
+            && icon_button(
+                ui,
+                ButtonIcon::JumpTo,
+                "Clear search and jump to this block",
+                true,
+                foundation_jump_cyan(),
+            )
+            .clicked()
+        {
+            ui.data_mut(|data| {
+                data.insert_temp(
+                    find_filter_block_jump_id(view_scope, tag_key),
+                    path_salt.to_owned(),
+                )
+            });
+        }
+        // Keep the previous arrow directly beside the selected
+        // reference, with the next arrow following it.
+        if foundation_header_stepper_clicked(ui, "<", has_sel && selected_index > 0) {
+            actions.new_selection = Some(selected_index.saturating_sub(1));
+        }
+
+        // Instance selector dropdown — built lazily (only when open).
+        let combo_width = foundation_selected_width(row_width);
+        if has_sel {
+            let (combo_response, wheel_delta) = combo_box_with_scroll(
+                ui,
+                // The element count is part of the id on purpose. A
+                // popup's `Area` and `ScrollArea` remember their size
+                // in egui memory under this id, and the remembered
+                // size becomes the space the content is laid out in --
+                // so once the list grew past the size the popup had
+                // when it was last open, it stayed at the old size and
+                // scrolled instead of growing. Keying on the count
+                // retires that memory the moment the list changes.
+                //
+                // This is also why closing and reopening the tag
+                // "fixed" it: a reopened tag lands in a new tile, whose
+                // `view_scope` is already part of this id.
+                egui::ComboBox::from_id_salt((
+                    "block_instance",
+                    view_scope,
+                    tag_key,
+                    path_salt,
+                    depth,
+                    count,
+                ))
+                .selected_text(truncate_for_cell(selected_label, combo_width - 24.0))
+                .width(combo_width),
+                |ui| {
+                    selector_active |= ui.rect_contains_pointer(ui.max_rect());
+                    // Adding an element selects it, so opening the list
+                    // scrolled to the top hid the very entry that was
+                    // just added when the list outgrew the popup.
+                    let just_opened = combo_popup_just_opened(ui);
+                    for i in 0..count {
+                        let row = ui.selectable_label(i == selected_index, element_label(i));
+                        if just_opened && i == selected_index {
+                            row.scroll_to_me(Some(egui::Align::Center));
+                        }
+                        if row.clicked() {
+                            actions.new_selection = Some(i);
+                        }
+                    }
+                },
+            );
+            selector_active |=
+                combo_response.response.hovered() || combo_response.response.has_focus();
+            if let Some(delta) = wheel_delta {
+                if let Some(next) = combo_scroll_next_index(selected_index, count, delta) {
+                    actions.new_selection = Some(next);
+                }
+            }
+        } else {
+            foundation_header_value_cell(ui, "NONE", combo_width);
+        }
+
+        // Next stepper follows the selected reference string.
+        if foundation_header_stepper_clicked(ui, ">", has_sel && selected_index + 1 < count) {
+            actions.new_selection = Some(selected_index + 1);
+        }
+
+        // Index readout.
+        ui.label(
+            RichText::new(if has_sel {
+                format!("[{selected_index}]")
+            } else {
+                "[--]".to_owned()
+            })
+            .color(foundation_block_text())
+            .small(),
+        );
+
+        if let Some(size_label) = block_size_label {
+            ui.label(
+                RichText::new(size_label)
+                    .color(subtle_dark())
+                    .monospace()
+                    .small(),
+            )
+            .on_hover_text("Block memory usage: elements × element byte size");
+        }
+
+        // Structural edit buttons — only for variable-count blocks. Arrays
+        // are fixed-size, so the count-changing actions don't apply and the
+        // buttons are omitted entirely. The grow actions (Add / Insert /
+        // Duplicate) are disabled once the block hits its schema cap.
+        if allow_structural {
+            let hint = capacity_hint.as_deref();
+            if foundation_header_button_clicked_hint(ui, "Add", can_edit && !at_capacity, hint) {
+                actions.add = true;
+            }
+            if foundation_header_button_clicked_hint(
+                ui,
+                "Insert",
+                can_edit && has_sel && !at_capacity,
+                hint,
+            ) {
+                actions.insert = true;
+            }
+            if foundation_header_button_clicked_hint(
+                ui,
+                "Duplicate",
+                can_edit && has_sel && !at_capacity,
+                hint,
+            ) {
+                actions.duplicate = true;
+            }
+            if foundation_header_button_clicked(ui, "Delete", can_edit && has_sel) {
+                actions.delete = true;
+            }
+            if foundation_header_button_clicked(ui, "Delete all", can_edit && has_sel) {
+                actions.delete_all = true;
+            }
+        }
+    });
 
     if has_sel && selector_active {
         let navigation_delta = ui.input(|input| {
@@ -1852,27 +1960,47 @@ pub(in crate::app) fn draw_foundation_block_control(
     }
 
     state.store(ui.ctx());
-
-    if count == 0 {
-        return actions;
-    }
-
-    state.show_body_unindented(ui, |ui| {
-        Frame::none()
-            .fill(foundation_group_bg())
-            .stroke(Stroke::new(1.0, foundation_group_edge()))
-            .inner_margin(egui::Margin {
-                left: 14.0 + depth as f32 * 5.0,
-                right: 8.0,
-                top: 8.0,
-                bottom: 8.0,
-            })
-            // Render the body inline — no nested ScrollArea. The single outer
-            // ScrollArea in `draw_tag_fields_scroll` owns all scrolling, so a
-            // block element expands to its full height instead of growing an
-            // inner scrollbar (which also let cross-boundary scroll-to fail).
-            .show(ui, add_contents);
+    let body_response = if count > 0 && state.openness(ui.ctx()) > 0.0 {
+        ui.add_space(-ui.spacing().item_spacing.y);
+        state.show_body_unindented(ui, |ui| {
+            Frame::none()
+                .fill(foundation_group_bg())
+                .rounding(foundation_body_rounding())
+                .inner_margin(egui::Margin {
+                    left: 14.0 + depth as f32 * 5.0,
+                    right: 8.0,
+                    top: 8.0,
+                    bottom: 8.0,
+                })
+                // Render the body inline — no nested ScrollArea. The single outer
+                // ScrollArea in `draw_tag_fields_scroll` owns all scrolling, so a
+                // block element expands to its full height instead of growing an
+                // inner scrollbar (which also let cross-boundary scroll-to fail).
+                .show(ui, add_contents);
+        })
+    } else {
+        None
+    };
+    let joined_to_body = body_response.is_some();
+    ui.painter().set(
+        header_background,
+        egui::Shape::rect_filled(
+            row_rect,
+            foundation_header_rounding(joined_to_body),
+            header_fill,
+        ),
+    );
+    let container_rect = body_response.map_or(row_rect, |body| {
+        egui::Rect::from_min_max(
+            row_rect.min,
+            egui::pos2(row_rect.max.x, body.response.rect.max.y),
+        )
     });
+    ui.painter().rect_stroke(
+        container_rect,
+        FOUNDATION_CONTAINER_RADIUS,
+        Stroke::new(1.0, foundation_block_edge()),
+    );
 
     actions
 }
@@ -2152,32 +2280,18 @@ pub(in crate::app) fn foundation_header_toggle_cell(
     open: bool,
     enabled: bool,
 ) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(ICON_BUTTON_SIZE, Sense::click());
-    let fill = if enabled {
-        foundation_disclosure_bg()
-    } else if is_dark_mode() {
-        Color32::from_rgb(52, 52, 52)
-    } else {
-        Color32::from_rgb(222, 222, 220)
-    };
-    ui.painter().rect_filled(rect, 4.0, fill);
-    ui.painter()
-        .rect_stroke(rect, 4.0, Stroke::new(1.0, foundation_input_edge()));
-    let icon_color = if enabled {
-        text_dark()
-    } else {
-        // Empty blocks cannot expand, but the disabled disclosure icon must
-        // remain distinguishable from an unlabelled placeholder cell.
-        Color32::from_rgb(176, 176, 176)
-    };
     let icon = if open {
         ButtonIcon::Opened
     } else {
         ButtonIcon::Closed
     };
-    let icon_rect = egui::Rect::from_center_size(rect.center(), Vec2::splat(16.0));
-    paint_button_icon_at(ui, icon, icon_rect, icon_color);
-    response
+    icon_button(
+        ui,
+        icon,
+        if open { "Collapse" } else { "Expand" },
+        enabled,
+        foundation_block_text(),
+    )
 }
 
 pub(in crate::app) fn foundation_selected_width(row_width: f32) -> f32 {
@@ -2307,9 +2421,13 @@ pub(in crate::app) fn draw_foundation_bar(
             default_open,
             None,
             foundation_section_bar(),
+            FindTargetKind::Label,
+            true,
+            None,
             |ui| {
                 Frame::none()
                     .fill(foundation_group_bg())
+                    .rounding(foundation_body_rounding())
                     .inner_margin(egui::Margin {
                         left: 8.0 + depth as f32 * 6.0,
                         right: 6.0,

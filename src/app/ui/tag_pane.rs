@@ -35,54 +35,7 @@ impl Baboon {
         let header_action =
             self.draw_responsive_tag_header(ui, ctx, kit_index, entry, show_keyword_bar);
 
-        // "Search fields" collapses the editor to matching blocks.
-        // Not offered for shader/sound tags (their own surfaces).
         let supports_field_search = supports_field_search(entry);
-        if supports_field_search {
-            let jump_match_count = self.kits[kit_index]
-                .field_search
-                .get(&key)
-                .and_then(|query| {
-                    self.kits[kit_index]
-                        .parsed_tags
-                        .get(&key)
-                        .map(|doc| field_label_matches(&doc.tag, query).len())
-                })
-                .unwrap_or(0);
-            if self.draw_field_search_bar(ui, kit_index, &key, jump_match_count)
-            {
-                let query = self.kits[kit_index]
-                    .field_search
-                    .get(&key)
-                    .cloned()
-                    .unwrap_or_default();
-                let matches = self.kits[kit_index]
-                    .parsed_tags
-                    .get(&key)
-                    .map(|doc| field_label_matches(&doc.tag, &query))
-                    .unwrap_or_default();
-                let cursor_id = egui::Id::new((
-                    "field_search_cursor",
-                    self.kits[kit_index].id.0,
-                    key.as_str(),
-                ));
-                let selected = ctx.data_mut(|data| {
-                    let mut cursor = data
-                        .get_temp::<FieldSearchCursor>(cursor_id)
-                        .unwrap_or_default();
-                    let selected = cursor.advance(&query, matches.len());
-                    data.insert_temp(cursor_id, cursor);
-                    selected
-                });
-                if let Some(field_path) = selected.and_then(|index| matches.get(index)).cloned() {
-                    self.navigate_to_field(ctx, &key, &field_path);
-                    // Search matches labels, including container labels. The block
-                    // header path is consumed by container rendering; scalar rows
-                    // use the exact field target installed by navigate_to_field.
-                    ctx.data_mut(|data| data.insert_temp(jump_target_id(), field_path));
-                }
-            }
-        }
 
         // Documentation overlay and the Campaign Evolved Wwise binding are both
         // resolved through `&mut self` methods, so they must be taken before any
@@ -98,6 +51,44 @@ impl Baboon {
                 ui.label("Select the tag again to load it.");
             }
             return header_action;
+        };
+
+        let filter_in_scope = match self.find.within {
+            FindWithin::CurrentTag => {
+                self.kits[kit_index].selected_key.as_deref() == Some(key.as_str())
+            }
+            FindWithin::OpenTags | FindWithin::AllTags => {
+                self.kits[kit_index].open_tabs.contains(&key)
+            }
+        };
+        let apply_find_filter = supports_field_search
+            && self.find.open
+            && self.find.filter_results
+            && !self.find.query.is_empty()
+            && !self.find.look_in.is_empty()
+            && filter_in_scope;
+        let field_filter = if apply_find_filter {
+            let signature = format!(
+                "{}|{:?}|{}|{}",
+                self.find.query, self.find.look_in, self.find.match_case, self.find.whole_word
+            );
+            self.kits[kit_index]
+                .find_filter_applied
+                .insert(key.clone(), signature);
+            Some(FieldFilterAction::Apply(compute_find_field_filter(
+                &doc.tag,
+                self.names(),
+                def_docs.as_deref(),
+                &self.find.query,
+                self.find.look_in,
+                self.find.match_case,
+                self.find.whole_word,
+            )))
+        } else {
+            self.kits[kit_index]
+                .find_filter_applied
+                .remove(&key)
+                .map(|_| FieldFilterAction::RestoreDefaults)
         };
 
         let kit = &mut self.kits[kit_index];
@@ -123,13 +114,6 @@ impl Baboon {
         // state each container lands in, so forcing it for a single frame is
         // what makes it stick.
         let expand_all = kit.pending_expand.remove(&key);
-        let field_filter = compute_pending_field_filter(
-            &doc.tag,
-            supports_field_search,
-            &key,
-            &kit.field_search,
-            &mut kit.field_search_applied,
-        );
         let sound_volume = self.audio.volume();
         let expert_mode = self.expert_mode;
         // Borrow the kit's source as a plain field rather than through
@@ -241,8 +225,8 @@ impl Baboon {
             );
         }
 
-        let field_search_block_jump = ctx.data_mut(|data| {
-            let id = field_search_block_jump_id(scope, &key);
+        let find_filter_block_jump = ctx.data_mut(|data| {
+            let id = find_filter_block_jump_id(scope, &key);
             let request = data.get_temp::<String>(id);
             data.remove::<String>(id);
             request
@@ -355,10 +339,10 @@ impl Baboon {
             });
         }
 
-        if field_search_block_jump.is_some() {
-            // Preserve field_search_applied until the next render so clearing
-            // the query produces the normal one-shot restore-defaults pass.
-            kit.field_search.entry(key.clone()).or_default().clear();
+        if find_filter_block_jump.is_some() {
+            // Preserve find_filter_applied until the next render so disabling
+            // the filter produces the normal one-shot restore-defaults pass.
+            self.find.filter_results = false;
         }
         kit.parsed_tags.insert(key.clone(), doc);
         // These ops are applied *after* the pane has been drawn, so the frame
@@ -370,7 +354,7 @@ impl Baboon {
             ctx.request_repaint();
         }
 
-        if let Some(block_path) = field_search_block_jump {
+        if let Some(block_path) = find_filter_block_jump {
             self.navigate_to_field(ctx, &key, &block_path);
             ctx.data_mut(|data| data.insert_temp(jump_target_id(), block_path));
         }

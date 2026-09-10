@@ -56,8 +56,7 @@ fn forget_tag_in_kit(kit: &mut Kit, key: &str) {
     kit.loading_tags.remove(key);
     kit.bitmap_previews.remove(key);
     kit.model_previews.remove(key);
-    kit.field_search.remove(key);
-    kit.field_search_applied.remove(key);
+    kit.find_filter_applied.remove(key);
     kit.edit_buffers.forget_tag(key);
     if kit.selected_key.as_deref() == Some(key) {
         kit.selected_key = None;

@@ -509,10 +509,9 @@ pub(in crate::app) struct FieldEditContext<'a> {
     /// Set when the user clicks "Copy element"; the caller hoists it into
     /// `self.block_clipboard` after rendering.
     pub(in crate::app) block_clip_request: &'a mut Option<BlockClipboard>,
-    /// Present only on the single frame a "Search fields" query changes. It
-    /// forces every collapsible node's open-state once (matched nodes open /
-    /// rest closed, or restored to defaults when the query is cleared), then
-    /// later frames leave `None` so the user can expand/collapse freely again.
+    /// Find's current visual filter action. While filtering, it keeps matching
+    /// paths visible and their containers open; disabling the filter emits one
+    /// restore-defaults pass.
     pub(in crate::app) field_filter: Option<&'a FieldFilterAction>,
     /// Active reference-jump navigation. When set for this tag, its target
     /// field's ancestor blocks are force-opened and the field is glowed.
@@ -581,7 +580,7 @@ impl FieldEditContext<'_> {
         }
     }
 
-    /// Whether a "Search fields" filter is applied this frame — i.e. the editor
+    /// Whether a Find filter is applied this frame — i.e. the editor
     /// is hiding non-matches. Used to also suppress injected section/explanation
     /// rows so no orphan headers remain.
     pub(in crate::app) fn is_active_filter(&self) -> bool {
@@ -650,8 +649,7 @@ fn path_is_ancestor(ancestor: &str, target: &str) -> bool {
             && target.starts_with(ancestor))
 }
 
-/// What a "Search fields" change should do to the editor's collapse state on
-/// the frame it is applied.
+/// What Find filtering should do to the editor's collapse state this frame.
 pub(in crate::app) enum FieldFilterAction {
     /// Hide everything except matches and their ancestor containers; expand the
     /// containers that remain.
@@ -660,7 +658,7 @@ pub(in crate::app) enum FieldFilterAction {
     RestoreDefaults,
 }
 
-/// Which collapsible nodes a "Search fields" query wants open. Paths are the
+/// Which collapsible nodes a Find query wants open. Paths are the
 /// canonical field paths with element indices (`[3]`) stripped, so they're
 /// independent of which block element happens to be selected.
 #[derive(Clone)]

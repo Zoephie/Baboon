@@ -42,8 +42,7 @@ fn kit_with_state() -> Kit {
             std::sync::Arc::new(crate::source::ce_audio::CeSoundBinding::default()),
         );
         kit.pending_expand.insert(key.to_owned(), true);
-        kit.field_search.insert(key.to_owned(), "shield".to_owned());
-        kit.field_search_applied
+        kit.find_filter_applied
             .insert(key.to_owned(), "shield".to_owned());
         kit.loading_tags.insert(key.to_owned());
         kit.keywords.add(key, "vehicle");
@@ -98,11 +97,7 @@ fn a_rekey_carries_every_map_the_old_key_addressed() {
     assert!(kit.ce_sound_bindings.contains_key(NEW));
     assert_eq!(kit.pending_expand.get(NEW), Some(&true));
     assert_eq!(
-        kit.field_search.get(NEW).map(String::as_str),
-        Some("shield")
-    );
-    assert_eq!(
-        kit.field_search_applied.get(NEW).map(String::as_str),
+        kit.find_filter_applied.get(NEW).map(String::as_str),
         Some("shield")
     );
     assert!(!kit.loading_tags.contains(OLD) && kit.loading_tags.contains(NEW));
@@ -199,8 +194,7 @@ fn every_field_of_a_kit_is_accounted_for() {
         model_previews: _,
         ce_sound_bindings: _,
         pending_expand: _,
-        field_search: _,
-        field_search_applied: _,
+        find_filter_applied: _,
         loading_tags: _,
         selected_key: _,
         open_tabs: _,

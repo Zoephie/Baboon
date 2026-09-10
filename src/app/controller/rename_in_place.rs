@@ -245,8 +245,7 @@ pub(in crate::app) fn rekey_tag_in_kit(kit: &mut Kit, old: &str, new: &str) {
     move_key(&mut kit.model_previews, old, new);
     move_key(&mut kit.ce_sound_bindings, old, new);
     move_key(&mut kit.pending_expand, old, new);
-    move_key(&mut kit.field_search, old, new);
-    move_key(&mut kit.field_search_applied, old, new);
+    move_key(&mut kit.find_filter_applied, old, new);
 
     if kit.loading_tags.remove(old) {
         kit.loading_tags.insert(new.to_owned());

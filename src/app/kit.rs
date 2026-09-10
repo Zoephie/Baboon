@@ -90,11 +90,10 @@ pub(super) struct Kit {
     /// tab's menu and consumed by the next draw of that tag's pane.
     pub(super) pending_expand: HashMap<String, bool>,
 
-    // --- Per-tag "Search fields" state ---
-    pub(super) field_search: HashMap<String, String>,
-    /// The last query actually applied per tag, so the collapse is a one-shot
-    /// on change rather than a per-frame override the user can't fight.
-    pub(super) field_search_applied: HashMap<String, String>,
+    // --- Per-tag Find filter state ---
+    /// Tracks panes that need their normal collapse defaults restored after
+    /// Find's visual filter stops applying to them.
+    pub(super) find_filter_applied: HashMap<String, String>,
 
     // --- Browser and index state ---
     /// How this kit's browser lists tags, and in what order. Per kit because
@@ -220,8 +219,7 @@ impl Kit {
             rmop_cache: HashMap::new(),
             ce_sound_bindings: HashMap::new(),
             pending_expand: HashMap::new(),
-            field_search: HashMap::new(),
-            field_search_applied: HashMap::new(),
+            find_filter_applied: HashMap::new(),
             browser_mode: BrowserMode::default(),
             browser_sort: BrowserSort::default(),
             filter: String::new(),

@@ -136,8 +136,7 @@ impl Baboon {
         kit.bitmap_previews.clear();
         kit.model_previews.clear();
         kit.edit_buffers.clear();
-        kit.field_search.clear();
-        kit.field_search_applied.clear();
+        kit.find_filter_applied.clear();
         kit.generation = kit.generation.wrapping_add(1);
         self.terminal
             .lines

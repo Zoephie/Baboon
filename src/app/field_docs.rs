@@ -39,6 +39,18 @@ impl DefDocs {
     }
 }
 
+/// Stable renderer/Find identity for an injected explanation row. Keep the
+/// numeric suffix free of `#`/`[]`: those are stripped from canonical field
+/// paths because they normally identify schema ordinals and block elements.
+pub(super) fn documentation_path(path_prefix: &str, entry_index: usize) -> String {
+    let segment = format!("@documentation {entry_index}");
+    if path_prefix.is_empty() {
+        segment
+    } else {
+        format!("{path_prefix}/{segment}")
+    }
+}
+
 /// Build a group's documentation, following the `parent_tag` inheritance chain
 /// and merging every file's structs by GUID. Object-family tags (biped → unit →
 /// object) inherit fields whose struct definitions live in the parent files, so

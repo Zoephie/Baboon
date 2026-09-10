@@ -63,6 +63,7 @@ pub(in crate::app) fn collect_find_occurrences(
     tag: &TagFile,
     tag_key: &str,
     names: &TagNameIndex,
+    docs: Option<&DefDocs>,
     query: &str,
     look_in: FindLookIn,
     match_case: bool,
@@ -73,6 +74,7 @@ pub(in crate::app) fn collect_find_occurrences(
         tag.root(),
         tag_key,
         names,
+        docs,
         query,
         look_in,
         match_case,
@@ -89,6 +91,7 @@ fn collect_find_struct(
     tag_struct: TagStruct<'_>,
     tag_key: &str,
     names: &TagNameIndex,
+    docs: Option<&DefDocs>,
     query: &str,
     look_in: FindLookIn,
     match_case: bool,
@@ -97,8 +100,28 @@ fn collect_find_struct(
     prefix: &str,
     out: &mut Vec<FindOccurrence>,
 ) {
+    let entries = docs
+        .map(|docs| docs.entries_for(&tag_struct.definition().guid()))
+        .unwrap_or(&[]);
+    let mut doc_cursor = 0usize;
     for field in tag_struct.fields() {
-        let label = clean_field_name(field.name());
+        if let Some(match_idx) = (doc_cursor..entries.len()).find(|&index| {
+            matches!(&entries[index], DefEntry::Field { clean_name, .. } if clean_name == field.name())
+        }) {
+            append_documentation_occurrences(
+                out,
+                tag_key,
+                prefix,
+                entries,
+                doc_cursor..match_idx,
+                query,
+                look_in,
+                match_case,
+                whole_word,
+            );
+            doc_cursor = match_idx + 1;
+        }
+        let clean_label = clean_field_name(field.name());
         let inherited_wrapper = following_inherited_chain
             && field.as_struct().is_some()
             && is_inherited_parent_name(field.name());
@@ -112,17 +135,43 @@ fn collect_find_struct(
         // parent wrapper labels skipped by Foundation, advanced/internal fields
         // hidden by the editor, and inline function structures rendered as one
         // consolidated row.
-        if look_in.includes_labels() {
+        let is_block = field.as_block().is_some() || field.as_array().is_some();
+        let is_documentation = field.field_type() == TagFieldType::Explanation;
+        let label = if is_block {
+            foundation_block_title(field.name())
+        } else {
+            clean_label
+        };
+        let label_kind = if is_documentation {
+            FindTargetKind::Documentation
+        } else if is_block {
+            FindTargetKind::Block
+        } else {
+            FindTargetKind::Label
+        };
+        let include_label = if is_block || is_documentation {
+            look_in.includes_blocks()
+        } else {
+            look_in.includes_field_names()
+        };
+        if include_label {
             append_find_occurrences(
-                out,
-                tag_key,
-                &path,
-                FindTargetKind::Label,
-                &label,
-                query,
-                match_case,
-                whole_word,
+                out, tag_key, &path, label_kind, &label, query, match_case, whole_word,
             );
+            if is_documentation {
+                if let Some(body) = field.explanation() {
+                    append_find_occurrences(
+                        out,
+                        tag_key,
+                        &path,
+                        FindTargetKind::Documentation,
+                        body.trim_end(),
+                        query,
+                        match_case,
+                        whole_word,
+                    );
+                }
+            }
         }
         if let Some(block) = field.as_block() {
             for index in 0..block.len() {
@@ -131,6 +180,7 @@ fn collect_find_struct(
                         child,
                         tag_key,
                         names,
+                        docs,
                         query,
                         look_in,
                         match_case,
@@ -148,6 +198,7 @@ fn collect_find_struct(
                         child,
                         tag_key,
                         names,
+                        docs,
                         query,
                         look_in,
                         match_case,
@@ -163,6 +214,7 @@ fn collect_find_struct(
                 child,
                 tag_key,
                 names,
+                docs,
                 query,
                 look_in,
                 match_case,
@@ -186,6 +238,61 @@ fn collect_find_struct(
                 );
             }
         }
+    }
+    append_documentation_occurrences(
+        out,
+        tag_key,
+        prefix,
+        entries,
+        doc_cursor..entries.len(),
+        query,
+        look_in,
+        match_case,
+        whole_word,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_documentation_occurrences(
+    out: &mut Vec<FindOccurrence>,
+    tag_key: &str,
+    path_prefix: &str,
+    entries: &[DefEntry],
+    range: std::ops::Range<usize>,
+    query: &str,
+    look_in: FindLookIn,
+    match_case: bool,
+    whole_word: bool,
+) {
+    if !look_in.includes_blocks() {
+        return;
+    }
+    for index in range {
+        let DefEntry::Explanation { title, body } = &entries[index] else {
+            continue;
+        };
+        let path = documentation_path(path_prefix, index);
+        let title = clean_field_name(title);
+        append_find_occurrences(
+            out,
+            tag_key,
+            &path,
+            FindTargetKind::Documentation,
+            &title,
+            query,
+            match_case,
+            whole_word,
+        );
+        append_find_occurrences(
+            out,
+            tag_key,
+            &path,
+            FindTargetKind::Documentation,
+            body.trim_end(),
+            query,
+            match_case,
+            whole_word,
+        );
     }
 }
 
@@ -216,7 +323,7 @@ fn append_find_occurrences(
 impl Baboon {
     /// Refresh synchronous Current/Open Tag results and publish render highlights.
     pub(super) fn refresh_find(&mut self, ctx: &egui::Context) {
-        if !self.find.open || self.find.query.is_empty() {
+        if !self.find.open || self.find.query.is_empty() || self.find.look_in.is_empty() {
             self.find.occurrences.clear();
             self.find.active = None;
             ctx.data_mut(|data| data.remove::<FindRenderSnapshot>(find_render_snapshot_id()));
@@ -229,18 +336,23 @@ impl Baboon {
             return;
         }
         let keys = match self.find.within {
-            FindWithin::CurrentTag => self.kits[self.active].selected_key.iter().cloned().collect::<Vec<_>>(),
+            FindWithin::CurrentTag => self.kits[self.active]
+                .selected_key
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>(),
             FindWithin::OpenTags => self.kits[self.active].open_tabs.clone(),
             FindWithin::AllTags => unreachable!(),
         };
         let mut occurrences = Vec::new();
         for key in keys {
-            let Some(entry) = self.entry_for_key(&key) else {
+            let Some(entry) = self.entry_for_key(&key).cloned() else {
                 continue;
             };
             if !supports_field_search(&entry) {
                 continue;
             }
+            let docs = self.def_docs_for_entry(self.active, &entry);
             let Some(doc) = self.kits[self.active].parsed_tags.get(&key) else {
                 continue;
             };
@@ -248,6 +360,7 @@ impl Baboon {
                 &doc.tag,
                 &key,
                 self.names(),
+                docs.as_deref(),
                 &self.find.query,
                 self.find.look_in,
                 self.find.match_case,
@@ -267,7 +380,10 @@ impl Baboon {
                 .find
                 .occurrences
                 .iter()
-                .filter(|hit| { self.kits[self.active].parsed_tags.contains_key(&hit.tag_key)
+                .filter(|hit| {
+                    self.kits[self.active]
+                        .parsed_tags
+                        .contains_key(&hit.tag_key)
                 })
                 .map(|hit| (hit.tag_key.clone(), hit.field_path.clone(), hit.kind))
                 .collect();
@@ -309,7 +425,11 @@ impl Baboon {
         } else {
             source.all_entries.clone()
         };
-        let mut open_keys = self.kits[self.active].parsed_tags.keys().cloned().collect::<Vec<_>>();
+        let mut open_keys = self.kits[self.active]
+            .parsed_tags
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
         open_keys.sort();
         let signature = format!(
             "{}|{:?}|{}|{}|{}|{}|{}|{}",
@@ -338,7 +458,10 @@ impl Baboon {
 
         let mut by_key: HashMap<String, Vec<FindOccurrence>> = HashMap::new();
         for hit in &self.find.all_closed_occurrences {
-            if !self.kits[self.active].parsed_tags.contains_key(&hit.tag_key) {
+            if !self.kits[self.active]
+                .parsed_tags
+                .contains_key(&hit.tag_key)
+            {
                 by_key
                     .entry(hit.tag_key.clone())
                     .or_default()
@@ -346,12 +469,13 @@ impl Baboon {
             }
         }
         for key in open_keys {
-            let Some(entry) = self.entry_for_key(&key) else {
+            let Some(entry) = self.entry_for_key(&key).cloned() else {
                 continue;
             };
-            if !supports_field_search(entry) {
+            if !supports_field_search(&entry) {
                 continue;
             }
+            let docs = self.def_docs_for_entry(self.active, &entry);
             let Some(doc) = self.kits[self.active].parsed_tags.get(&key) else {
                 continue;
             };
@@ -361,6 +485,7 @@ impl Baboon {
                     &doc.tag,
                     &key,
                     self.names(),
+                    docs.as_deref(),
                     &self.find.query,
                     self.find.look_in,
                     self.find.match_case,
@@ -379,6 +504,15 @@ impl Baboon {
         let request_id = self.find.all_request_id;
         let stamp = self.kit_stamp();
         let tag_source = source.source.clone();
+        let documentation_source = match (&source.source, source.game.clone()) {
+            (
+                TagSource::LooseFolder {
+                    definitions_root, ..
+                },
+                Some(game),
+            ) => Some((definitions_root.clone(), game)),
+            _ => None,
+        };
         let names = self.names().clone();
         let query = self.find.query.clone();
         let look_in = self.find.look_in;
@@ -393,11 +527,29 @@ impl Baboon {
         thread::spawn(move || {
             let mut occurrences = Vec::new();
             let mut unreadable = 0;
+            let mut docs_by_group = HashMap::new();
             for (index, entry) in entries.into_iter().enumerate() {
                 if supports_field_search(&entry) {
+                    let docs = documentation_source.as_ref().and_then(|(root, game)| {
+                        let group = names
+                            .name_for(entry.group_tag)
+                            .or_else(|| group_tag_to_extension(entry.group_tag))?;
+                        Some(
+                            docs_by_group
+                                .entry(entry.group_tag)
+                                .or_insert_with(|| build_def_docs(root, game, group)),
+                        )
+                    });
                     match crate::source::read_entry(&tag_source, &entry) {
                         Ok(tag) => occurrences.extend(collect_find_occurrences(
-                            &tag, &entry.key, &names, &query, look_in, match_case, whole_word,
+                            &tag,
+                            &entry.key,
+                            &names,
+                            docs.map(|docs| &*docs),
+                            &query,
+                            look_in,
+                            match_case,
+                            whole_word,
                         )),
                         Err(_) => unreadable += 1,
                     }
@@ -443,13 +595,17 @@ impl Baboon {
         if self.kits[self.active].selected_key.as_deref() != Some(hit.tag_key.as_str()) {
             self.select_entry(hit.tag_key.clone(), ctx.clone());
         }
-        if !self.kits[self.active].parsed_tags.contains_key(&hit.tag_key) {
+        if !self.kits[self.active]
+            .parsed_tags
+            .contains_key(&hit.tag_key)
+        {
             self.pending_find_jump = Some(hit);
             return;
         }
         if let Some(entry) = self.entry_for_key(&hit.tag_key) {
             if is_previewable_geometry_group(entry.group_tag, self.names()) {
-                self.kits[self.active].model_previews
+                self.kits[self.active]
+                    .model_previews
                     .entry(hit.tag_key.clone())
                     .or_default()
                     .active_tab = ModelTagPanelTab::Fields;
@@ -457,7 +613,7 @@ impl Baboon {
         }
         self.pending_find_jump = None;
         self.navigate_to_field(ctx, &hit.tag_key, &hit.field_path);
-        if hit.kind == FindTargetKind::Label {
+        if hit.kind != FindTargetKind::Value {
             ctx.data_mut(|data| data.insert_temp(jump_target_id(), hit.field_path));
         }
     }
@@ -477,6 +633,14 @@ fn order_find_occurrences(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn field_names_only() -> FindLookIn {
+        FindLookIn {
+            field_names: true,
+            field_values: false,
+            blocks: false,
+        }
+    }
 
     fn tag_with_one_ai_properties_element() -> TagFile {
         let mut tag = TagFile::new(test_definition_path("halo2_mcc/object.json")).unwrap();
@@ -563,8 +727,9 @@ mod tests {
             &tag,
             "test.object",
             &TagNameIndex::default(),
+            None,
             "ai type name",
-            FindLookIn::Labels,
+            field_names_only(),
             false,
             false,
         );
@@ -583,8 +748,9 @@ mod tests {
             &tag,
             "test.object",
             &TagNameIndex::default(),
+            None,
             "ai type name",
-            FindLookIn::Labels,
+            field_names_only(),
             false,
             false,
         );
@@ -599,6 +765,91 @@ mod tests {
         )));
     }
 
+    #[test]
+    fn block_targets_are_independent_from_field_names() {
+        let tag = tag_with_one_ai_properties_element();
+        let blocks_only = FindLookIn {
+            field_names: false,
+            field_values: false,
+            blocks: true,
+        };
+        let block_hits = collect_find_occurrences(
+            &tag,
+            "test.object",
+            &TagNameIndex::default(),
+            None,
+            "ai properties",
+            blocks_only,
+            false,
+            false,
+        );
+        assert!(
+            block_hits
+                .iter()
+                .any(|hit| hit.kind == FindTargetKind::Block)
+        );
+
+        let field_hits = collect_find_occurrences(
+            &tag,
+            "test.object",
+            &TagNameIndex::default(),
+            None,
+            "ai properties",
+            field_names_only(),
+            false,
+            false,
+        );
+        assert!(
+            field_hits
+                .iter()
+                .all(|hit| hit.kind != FindTargetKind::Block)
+        );
+    }
+
+    #[test]
+    fn block_search_includes_injected_documentation_titles_and_bodies() {
+        let tag = TagFile::new(test_definition_path("halo3_mcc/model.json"))
+            .expect("model test definition");
+        let docs = build_def_docs(std::path::Path::new("definitions"), "halo3_mcc", "model");
+        let blocks_only = FindLookIn {
+            field_names: false,
+            field_values: false,
+            blocks: true,
+        };
+
+        let title_hits = collect_find_occurrences(
+            &tag,
+            "test.model",
+            &TagNameIndex::default(),
+            Some(&docs),
+            "level of detail",
+            blocks_only,
+            false,
+            false,
+        );
+        assert!(
+            title_hits
+                .iter()
+                .any(|hit| hit.kind == FindTargetKind::Documentation)
+        );
+
+        let body_hits = collect_find_occurrences(
+            &tag,
+            "test.model",
+            &TagNameIndex::default(),
+            Some(&docs),
+            "descending order",
+            blocks_only,
+            false,
+            false,
+        );
+        assert!(
+            body_hits
+                .iter()
+                .any(|hit| hit.kind == FindTargetKind::Documentation)
+        );
+    }
+
     /// Inheritance wrappers are presentation-only path segments: unlike ordinary
     /// fields, `unit/object` intentionally carry no `#ordinal` in Foundation.
     #[test]
@@ -609,8 +860,9 @@ mod tests {
             &tag,
             "test.biped",
             &TagNameIndex::default(),
+            None,
             "ai type name",
-            FindLookIn::Labels,
+            field_names_only(),
             false,
             false,
         );

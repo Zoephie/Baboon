@@ -278,6 +278,17 @@ pub(super) fn foundation_group_bg() -> Color32 {
     }
 }
 
+pub(super) fn foundation_documentation_bg() -> Color32 {
+    if is_dark_mode() {
+        // Use an explicitly premultiplied sRGB overlay. `from_white_alpha`
+        // gamma-expands this value, which makes a nominal 5% white look much
+        // brighter than the equivalent design-tool/CSS overlay.
+        Color32::from_rgba_premultiplied(13, 13, 13, 13)
+    } else {
+        Color32::from_black_alpha(13)
+    }
+}
+
 pub(super) fn foundation_group_edge() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(82, 82, 82)
@@ -429,27 +440,11 @@ pub(super) fn disclosure_triangle_green() -> Color32 {
     Color32::from_rgb(34, 205, 84)
 }
 
-pub(super) fn foundation_block_bar_hover() -> Color32 {
-    if is_dark_mode() {
-        Color32::from_rgb(82, 82, 82)
-    } else {
-        Color32::from_rgb(112, 112, 108)
-    }
-}
-
 pub(super) fn foundation_block_edge() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(94, 94, 94)
     } else {
         Color32::from_rgb(154, 154, 149)
-    }
-}
-
-pub(super) fn foundation_disclosure_bg() -> Color32 {
-    if is_dark_mode() {
-        Color32::from_rgb(84, 84, 84)
-    } else {
-        Color32::from_rgb(232, 232, 228)
     }
 }
 

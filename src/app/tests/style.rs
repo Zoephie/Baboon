@@ -30,8 +30,5 @@ fn light_active_tab_keeps_the_existing_menu_bar_color() {
 
 #[test]
 fn filtered_block_jump_uses_the_cyan_navigation_accent() {
-    assert_eq!(
-        foundation_jump_cyan(),
-        Color32::from_rgb(77, 208, 225)
-    );
+    assert_eq!(foundation_jump_cyan(), Color32::from_rgb(77, 208, 225));
 }

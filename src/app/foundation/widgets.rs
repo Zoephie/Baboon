@@ -52,6 +52,24 @@ pub(in crate::app) fn highlighted_widget_text(
     })
 }
 
+/// Build highlighted italic widget text while preserving Find match styling.
+pub(in crate::app) fn highlighted_italic_widget_text(
+    ui: &Ui,
+    text: &str,
+    text_style: TextStyle,
+    color: Color32,
+    kind: FindTargetKind,
+) -> Option<egui::WidgetText> {
+    findable_text_has_match(ui, text, kind).then(|| {
+        let font_id = ui.style().text_styles[&text_style].clone();
+        let mut job = findable_layout_job(ui, text, font_id, color, kind);
+        for section in &mut job.sections {
+            section.format.italics = true;
+        }
+        job.into()
+    })
+}
+
 fn findable_highlight_data(
     ui: &Ui,
     text: &str,
@@ -79,7 +97,9 @@ fn findable_highlight_data(
         (active.tag_key == cell.tag_key
             && active.field_path == cell.field_path
             && active.kind == kind)
-            .then_some(active.range.clone())
+            .then_some(active)
+            .filter(|active| active.text == text)
+            .map(|active| active.range.clone())
     });
     Some((ranges, active))
 }
@@ -476,9 +496,7 @@ pub(in crate::app) fn foundation_value_parts(
         TagFieldData::ShortIntegerBounds(b) => {
             pair("low", b.lower.to_string(), "high", b.upper.to_string())
         }
-        TagFieldData::AngleBounds(b) => {
-            pair("low", fmt_angle(b.lower), "high", fmt_angle(b.upper))
-        }
+        TagFieldData::AngleBounds(b) => pair("low", fmt_angle(b.lower), "high", fmt_angle(b.upper)),
         TagFieldData::RealBounds(b) | TagFieldData::FractionBounds(b) => {
             pair("low", fmt_real(b.lower), "high", fmt_real(b.upper))
         }

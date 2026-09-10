@@ -11,16 +11,19 @@ impl Baboon {
         let mut open = true;
         let mut step = 0;
         let mut changed = false;
+        let mut filter_changed = false;
         let default_pos = ctx.screen_rect().right_top() + egui::vec2(-488.0, 72.0);
-        egui::Window::new("🔍 Find")
+        egui::Window::new("Find")
             .id(egui::Id::new("find_in_tag"))
-            .open(&mut open)
+            .title_bar(false)
             .collapsible(false)
             .movable(true)
             .resizable(false)
             .default_width(470.0)
             .default_pos(default_pos)
             .show(ctx, |ui| {
+                draw_find_window_header(ui, &mut open);
+                ui.separator();
                 egui::Grid::new("find_options")
                     .num_columns(3)
                     .spacing([12.0, 8.0])
@@ -29,7 +32,8 @@ impl Baboon {
                         let response = ui.add_sized(
                             [290.0, 25.0],
                             egui::TextEdit::singleline(&mut self.find.query)
-                                .id(egui::Id::new("find_query")),
+                                .id(egui::Id::new("find_query"))
+                                .vertical_align(egui::Align::Center),
                         );
                         if self.find.focus_query {
                             response.request_focus();
@@ -85,25 +89,13 @@ impl Baboon {
                             .width(190.0)
                             .show_ui(ui, |ui| {
                                 changed |= ui
-                                    .selectable_value(
-                                        &mut self.find.look_in,
-                                        FindLookIn::FieldValues,
-                                        FindLookIn::FieldValues.label(),
-                                    )
+                                    .checkbox(&mut self.find.look_in.field_names, "Field names")
                                     .changed();
                                 changed |= ui
-                                    .selectable_value(
-                                        &mut self.find.look_in,
-                                        FindLookIn::Labels,
-                                        FindLookIn::Labels.label(),
-                                    )
+                                    .checkbox(&mut self.find.look_in.field_values, "Field values")
                                     .changed();
                                 changed |= ui
-                                    .selectable_value(
-                                        &mut self.find.look_in,
-                                        FindLookIn::Both,
-                                        FindLookIn::Both.label(),
-                                    )
+                                    .checkbox(&mut self.find.look_in.blocks, "Blocks")
                                     .changed();
                             });
                         changed |= ui
@@ -131,6 +123,18 @@ impl Baboon {
                 }
                 ui.separator();
                 ui.horizontal(|ui| {
+                    if selectable_icon_text_button(
+                        ui,
+                        ButtonIcon::Filter,
+                        "Filter Results",
+                        self.find.filter_results,
+                    )
+                    .on_hover_text("Show only matching fields and blocks in the selected scope")
+                    .clicked()
+                    {
+                        self.find.filter_results = !self.find.filter_results;
+                        filter_changed = true;
+                    }
                     let can_navigate = !self.find.occurrences.is_empty() && !self.find.searching;
                     let counter = self
                         .find
@@ -179,6 +183,9 @@ impl Baboon {
                 self.activate_find_occurrence(ctx, hit);
             }
         }
+        if filter_changed {
+            ctx.request_repaint();
+        }
         if step != 0 {
             self.step_find(ctx, step);
         }
@@ -186,5 +193,58 @@ impl Baboon {
             self.find.close();
             ctx.data_mut(|data| data.remove::<FindRenderSnapshot>(find_render_snapshot_id()));
         }
+    }
+}
+
+fn draw_find_window_header(ui: &mut Ui, open: &mut bool) {
+    const HEADER_HEIGHT: f32 = 28.0;
+    const TITLE_ICON_SIZE: f32 = 18.0;
+    const TITLE_GAP: f32 = 7.0;
+
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), HEADER_HEIGHT),
+        Sense::hover(),
+    );
+    let font = TextStyle::Heading.resolve(ui.style());
+    let galley = ui
+        .painter()
+        .layout_no_wrap("Find".to_owned(), font, text_dark());
+    let group_width = TITLE_ICON_SIZE + TITLE_GAP + galley.size().x;
+    let icon_rect = egui::Rect::from_min_size(
+        egui::pos2(
+            rect.center().x - group_width * 0.5,
+            rect.center().y - TITLE_ICON_SIZE * 0.5,
+        ),
+        Vec2::splat(TITLE_ICON_SIZE),
+    );
+    paint_button_icon_at(ui, ButtonIcon::Find, icon_rect, text_dark());
+    ui.painter().galley(
+        egui::pos2(
+            icon_rect.right() + TITLE_GAP,
+            rect.center().y - galley.size().y * 0.5,
+        ),
+        galley,
+        text_dark(),
+    );
+
+    let close_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.right() - 10.0, rect.center().y),
+        Vec2::splat(20.0),
+    );
+    let close = ui
+        .interact(close_rect, ui.id().with("find_close"), Sense::click())
+        .on_hover_text("Close Find");
+    let color = ui.style().interact(&close).fg_stroke.color;
+    let cross = close_rect.shrink(5.0);
+    ui.painter().line_segment(
+        [cross.left_top(), cross.right_bottom()],
+        Stroke::new(1.5, color),
+    );
+    ui.painter().line_segment(
+        [cross.right_top(), cross.left_bottom()],
+        Stroke::new(1.5, color),
+    );
+    if close.clicked() {
+        *open = false;
     }
 }

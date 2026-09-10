@@ -522,10 +522,30 @@ impl Baboon {
         if self.kits[kit_index].tag_tree.is_empty() {
             // An unloaded workspace never reaches here — it shows the welcome
             // screen instead — so this is only ever "loaded, nothing open yet".
-            ui.heading(RichText::new("No tag open").color(text_dark()));
-            ui.label(
-                RichText::new("Select a tag in the browser to open it here.").color(subtle_dark()),
-            );
+            const EMPTY_STATE_IMAGE_SIZE: f32 = 256.0;
+            const EMPTY_STATE_CONTENT_HEIGHT: f32 = EMPTY_STATE_IMAGE_SIZE + 64.0;
+
+            ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+                ui.add_space(((ui.available_height() - EMPTY_STATE_CONTENT_HEIGHT) * 0.5).max(0.0));
+
+                ui.add(
+                    egui::Image::from_bytes(
+                        "bytes://baboon_branding/empty-state.svg",
+                        include_bytes!("../../../assets/branding/empty-state.svg").as_slice(),
+                    )
+                    .fit_to_exact_size(Vec2::splat(EMPTY_STATE_IMAGE_SIZE)),
+                );
+                ui.heading(
+                    RichText::new("Nothing’s Open!")
+                        .color(text_dark())
+                        .strong()
+                        .italics(),
+                );
+                ui.label(
+                    RichText::new("Select a Tag (or Folder) from the browser to open it here.")
+                        .color(subtle_dark()),
+                );
+            });
             return;
         }
 
