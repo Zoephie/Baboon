@@ -1,4 +1,4 @@
-//! Editing-kit profile validation and executable-relative custom icon storage.
+//! Editing-kit profile validation and storage-mode-aware custom icon storage.
 
 use super::*;
 use sha2::{Digest, Sha256};
@@ -60,17 +60,13 @@ impl EditingKitValidationCache {
             .map(|profile| {
                 (
                     profile.id.clone(),
-                    validate_custom_editing_kit_layout(&profile.root),
+                    validate_editing_kit_profile_layout(&profile.root, &profile.game),
                 )
             })
             .collect();
         self.custom_icon_errors = profiles
             .iter()
-            .map(|profile|
-                (
-                    profile.id.clone(),
-                    custom_profile_icon_error(profile)
-                ))
+            .map(|profile| (profile.id.clone(), custom_profile_icon_error(profile)))
             .collect();
     }
 
@@ -89,7 +85,7 @@ impl EditingKitValidationCache {
         &mut self,
         profile: &CustomEditingKitProfile,
     ) -> Result<EditingKitLayout, String> {
-        let status = validate_custom_editing_kit_layout(&profile.root);
+        let status = validate_editing_kit_profile_layout(&profile.root, &profile.game);
         self.custom_layouts
             .insert(profile.id.clone(), status.clone());
         self.custom_icon_errors
@@ -184,6 +180,20 @@ pub(super) fn validate_custom_editing_kit_layout(path: &Path) -> Result<EditingK
     validate_loose_editing_kit_layout(path, true)
 }
 
+pub(super) fn validate_editing_kit_profile_layout(
+    path: &Path,
+    game: &str,
+) -> Result<EditingKitLayout, String> {
+    let shortcut = EDITING_KIT_SHORTCUTS
+        .into_iter()
+        .find(|shortcut| shortcut.game == game)
+        .ok_or_else(|| "Choose a supported editing-kit engine".to_owned())?;
+    match validate_builtin_editing_kit(shortcut, Some(path)) {
+        EditingKitPathStatus::Ready(layout) => Ok(layout),
+        status => Err(status.message()),
+    }
+}
+
 fn validate_loose_editing_kit_layout(
     selected: &Path,
     require_data: bool,
@@ -273,11 +283,7 @@ fn find_first_named_directory(root: &Path, expected: &str) -> Option<PathBuf> {
     })
 }
 
-fn push_layout_candidate(
-    candidates: &mut Vec<EditingKitLayout>,
-    root: &Path,
-    require_data: bool
-) {
+fn push_layout_candidate(candidates: &mut Vec<EditingKitLayout>, root: &Path, require_data: bool) {
     let Some(tags) = find_named_child(root, "tags") else {
         return;
     };
@@ -323,7 +329,7 @@ pub(super) fn custom_profile_root_conflicts(
 ) -> bool {
     profiles.iter().any(|profile| {
         Some(profile.id.as_str()) != editing_profile_id
-            && validate_custom_editing_kit_layout(&profile.root)
+            && validate_editing_kit_profile_layout(&profile.root, &profile.game)
                 .is_ok_and(|layout| same_recent_path(&layout.root, resolved_root))
     })
 }
@@ -338,19 +344,42 @@ pub(super) fn executable_directory() -> Result<PathBuf, String> {
 }
 
 pub(super) fn resolve_custom_icon_path(relative: &Path) -> Result<PathBuf, String> {
-    resolve_custom_icon_path_at(&executable_directory()?, relative)
+    let legacy = legacy_custom_icon_base();
+    resolve_custom_icon_path_in_roots(&crate::storage::data_path(""), legacy.as_deref(), relative)
 }
 
 fn resolve_custom_icon_path_at(base: &Path, relative: &Path) -> Result<PathBuf, String> {
+    resolve_custom_icon_path_in_roots(base, None, relative)
+}
+
+fn legacy_custom_icon_base() -> Option<PathBuf> {
+    if crate::storage::active_mode() == Some(crate::storage::StorageMode::Portable) {
+        None
+    } else {
+        executable_directory().ok()
+    }
+}
+
+fn resolve_custom_icon_path_in_roots(
+    base: &Path,
+    legacy: Option<&Path>,
+    relative: &Path,
+) -> Result<PathBuf, String> {
     if !safe_custom_icon_relative_path(relative) {
         return Err("Saved custom icon path is unsafe".to_owned());
     }
-    Ok(base.join(relative))
+    let current = base.join(relative);
+    if !current.is_file()
+        && let Some(old) = legacy
+            .map(|root| root.join(relative))
+            .filter(|path| path.is_file())
+    {
+        return Ok(old);
+    }
+    Ok(current)
 }
 
-pub(super) fn custom_profile_icon_error(
-    profile: &CustomEditingKitProfile
-) -> Option<String> {
+pub(super) fn custom_profile_icon_error(profile: &CustomEditingKitProfile) -> Option<String> {
     let relative = profile.icon.as_deref()?;
     let absolute = match resolve_custom_icon_path(relative) {
         Ok(path) => path,
@@ -367,10 +396,10 @@ pub(super) fn validate_custom_icon_source(path: &Path) -> Result<(u32, u32), Str
         .and_then(|extension| extension.to_str())
         .is_some_and(|extension| extension.eq_ignore_ascii_case("png"));
     if !png_extension {
-        return Err("Custom project icons must be PNG files".to_owned());
+        return Err("Editing kit icons must be PNG files".to_owned());
     }
-    let bytes = fs::read(path)
-        .map_err(|error| format!("Could not read custom project icon: {error}"))?;
+    let bytes =
+        fs::read(path).map_err(|error| format!("Could not read editing kit icon: {error}"))?;
     let image = image::load_from_memory_with_format(&bytes, image::ImageFormat::Png)
         .map_err(|error| format!("Selected file is not a readable PNG: {error}"))?;
     Ok((image.width(), image.height()))
@@ -383,7 +412,7 @@ pub(super) fn copy_custom_icon(
     existing_icon: Option<&Path>,
 ) -> Result<PathBuf, String> {
     copy_custom_icon_at(
-        &executable_directory()?,
+        &crate::storage::data_path(""),
         source,
         project_name,
         profile_id,
@@ -399,10 +428,14 @@ fn copy_custom_icon_at(
     existing_icon: Option<&Path>,
 ) -> Result<PathBuf, String> {
     validate_custom_icon_source(source)?;
-    let bytes = fs::read(source)
-        .map_err(|error| format!("Could not read custom project icon: {error}"))?;
+    let bytes =
+        fs::read(source).map_err(|error| format!("Could not read editing kit icon: {error}"))?;
     let hash = format!("{:x}", Sha256::digest(&bytes));
-    let short_id = profile_id.chars().filter(|ch| *ch != '-').take(8).collect::<String>();
+    let short_id = profile_id
+        .chars()
+        .filter(|ch| *ch != '-')
+        .take(8)
+        .collect::<String>();
     let existing_folder = existing_icon
         .filter(|path| safe_custom_icon_relative_path(path))
         .and_then(Path::parent)
@@ -421,16 +454,12 @@ fn copy_custom_icon_at(
     let parent = destination
         .parent()
         .ok_or_else(|| "Custom icon destination has no parent directory".to_owned())?;
-    fs::create_dir_all(parent).map_err(|error| {
-        format!(
-            "Could not create custom icon folder beside the executable: {error}"
-        )
-    })?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("Could not create editing kit icon folder: {error}"))?;
     if !destination.is_file() {
         let temporary = parent.join(format!(".icon-{}.tmp", &hash[..12]));
         fs::write(&temporary, &bytes)
-            .map_err(|error| { format!("Could not write custom icon beside the executable: {error}")
-        })?;
+            .map_err(|error| format!("Could not write editing kit icon: {error}"))?;
         fs::rename(&temporary, &destination).map_err(|error| {
             let _ = fs::remove_file(&temporary);
             format!("Could not finish writing the custom icon: {error}")
@@ -443,15 +472,26 @@ pub(super) fn remove_unreferenced_custom_icon(
     relative: &Path,
     profiles: &[CustomEditingKitProfile],
 ) -> Result<(), String> {
-    remove_unreferenced_custom_icon_at(
-        &executable_directory()?,
+    let legacy = legacy_custom_icon_base();
+    remove_unreferenced_custom_icon_in_roots(
+        &crate::storage::data_path(""),
+        legacy.as_deref(),
         relative,
-        profiles
+        profiles,
     )
 }
 
 fn remove_unreferenced_custom_icon_at(
     base: &Path,
+    relative: &Path,
+    profiles: &[CustomEditingKitProfile],
+) -> Result<(), String> {
+    remove_unreferenced_custom_icon_in_roots(base, None, relative, profiles)
+}
+
+fn remove_unreferenced_custom_icon_in_roots(
+    base: &Path,
+    legacy: Option<&Path>,
     relative: &Path,
     profiles: &[CustomEditingKitProfile],
 ) -> Result<(), String> {
@@ -461,10 +501,10 @@ fn remove_unreferenced_custom_icon_at(
     {
         return Ok(());
     }
-    let absolute = resolve_custom_icon_path_at(base, relative)?;
+    let absolute = resolve_custom_icon_path_in_roots(base, legacy, relative)?;
     if absolute.is_file() {
-        fs::remove_file(&absolute)
-            .map_err(|error| { format!("Profile was saved, but its old icon could not be deleted: {error}")
+        fs::remove_file(&absolute).map_err(|error| {
+            format!("Profile was saved, but its old icon could not be deleted: {error}")
         })?;
     }
     if let Some(parent) = absolute.parent()
@@ -496,8 +536,13 @@ pub(super) fn sanitise_project_name(name: &str) -> String {
     let mut output = String::new();
     let mut previous_separator = false;
     for ch in name.trim().chars() {
-        let invalid = ch.is_control() || matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*');
-        let mapped = if invalid || ch.is_whitespace() { '-' } else { ch };
+        let invalid =
+            ch.is_control() || matches!(ch, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*');
+        let mapped = if invalid || ch.is_whitespace() {
+            '-'
+        } else {
+            ch
+        };
         if mapped == '-' {
             if !previous_separator && !output.is_empty() {
                 output.push('-');
@@ -513,11 +558,14 @@ pub(super) fn sanitise_project_name(name: &str) -> String {
     }
     let output = output.trim_matches([' ', '.', '-']).to_owned();
     let reserved = [
-        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6",
-        "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6",
-        "LPT7", "LPT8", "LPT9",
+        "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
+        "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
     ];
-    if output.is_empty() || reserved.iter().any(|item| item.eq_ignore_ascii_case(&output)) {
+    if output.is_empty()
+        || reserved
+            .iter()
+            .any(|item| item.eq_ignore_ascii_case(&output))
+    {
         "project".to_owned()
     } else {
         output
@@ -534,10 +582,64 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root =
-            std::env::temp_dir().join(format!("baboon-editing-kits-{label}-{}-{stamp}", std::process::id()));
+        let root = std::env::temp_dir().join(format!(
+            "baboon-editing-kits-{label}-{}-{stamp}",
+            std::process::id()
+        ));
         fs::create_dir_all(&root).unwrap();
         root
+    }
+
+    #[test]
+    fn icon_storage_uses_active_data_root_and_preserves_legacy_icons() {
+        let root = temp_dir("icon-storage-modes");
+        let installed = root.join("AppData").join("Baboon");
+        let portable = root.join("PortableBaboon");
+        let source = root.join("source.png");
+        image::RgbaImage::new(32, 32).save(&source).unwrap();
+        // The old behaviour, and portable mode, use the executable directory.
+        let relative = copy_custom_icon_at(&portable, &source, "My Kit", "12345678", None).unwrap();
+        let legacy = portable.join(&relative);
+        assert!(legacy.is_file());
+        assert_eq!(
+            resolve_custom_icon_path_in_roots(&installed, Some(&portable), &relative).unwrap(),
+            legacy,
+        );
+        assert_eq!(
+            resolve_custom_icon_path_at(&portable, &relative).unwrap(),
+            legacy
+        );
+
+        // Newly saved installed-mode copies go beneath the data directory.
+        let saved = copy_custom_icon_at(&installed, &source, "My Kit", "12345678", Some(&relative))
+            .unwrap();
+        assert_eq!(saved, relative);
+        assert!(installed.join(&saved).is_file());
+        assert!(
+            legacy.is_file(),
+            "saving a new copy must not move the existing icon"
+        );
+        assert_eq!(
+            resolve_custom_icon_path_in_roots(&installed, Some(&portable), &saved).unwrap(),
+            installed.join(&saved),
+        );
+        // Cleanup targets the same location as lookup, not the old executable copy.
+        remove_unreferenced_custom_icon_in_roots(&installed, Some(&portable), &saved, &[]).unwrap();
+        assert!(!installed.join(&saved).exists());
+        assert!(legacy.is_file());
+        assert_eq!(
+            resolve_custom_icon_path_in_roots(&installed, Some(&portable), &relative).unwrap(),
+            legacy,
+        );
+        assert!(
+            resolve_custom_icon_path_in_roots(
+                &installed,
+                Some(&portable),
+                Path::new("../outside.png"),
+            )
+            .is_err()
+        );
+        let _ = fs::remove_dir_all(root);
     }
 
     #[test]
@@ -617,6 +719,7 @@ mod tests {
             .find(|shortcut| shortcut.game == "halo3_mcc")
             .unwrap();
         let status = validate_builtin_editing_kit(shortcut, Some(&root));
+        assert!(validate_editing_kit_profile_layout(&root, shortcut.game).is_ok());
         let layout = status.layout().expect("built-in layout should be ready");
         #[cfg(windows)]
         assert!(
@@ -645,6 +748,7 @@ mod tests {
             validate_builtin_editing_kit(shortcut, Some(&root)),
             EditingKitPathStatus::Ready(_)
         ));
+        assert!(validate_editing_kit_profile_layout(&root, shortcut.game).is_ok());
         let _ = fs::remove_dir_all(root);
     }
 
@@ -655,6 +759,7 @@ mod tests {
         fs::create_dir_all(root.join("tags")).unwrap();
         fs::create_dir_all(root.join("data")).unwrap();
         let profiles = vec![CustomEditingKitProfile {
+            read_only: false,
             id: "existing".to_owned(),
             name: "Existing".to_owned(),
             game: "halo3_mcc".to_owned(),
@@ -699,9 +804,14 @@ mod tests {
         )
         .unwrap();
         assert!(relative.starts_with(CUSTOM_ICON_FOLDER));
-        assert!(resolve_custom_icon_path_at(&base, &relative).unwrap().is_file());
+        assert!(
+            resolve_custom_icon_path_at(&base, &relative)
+                .unwrap()
+                .is_file()
+        );
 
         let referencing_profile = CustomEditingKitProfile {
+            read_only: false,
             id: "profile".to_owned(),
             name: "Profile".to_owned(),
             game: "halo3_mcc".to_owned(),
@@ -714,9 +824,17 @@ mod tests {
             std::slice::from_ref(&referencing_profile),
         )
         .unwrap();
-        assert!(resolve_custom_icon_path_at(&base, &relative).unwrap().is_file());
+        assert!(
+            resolve_custom_icon_path_at(&base, &relative)
+                .unwrap()
+                .is_file()
+        );
         remove_unreferenced_custom_icon_at(&base, &relative, &[]).unwrap();
-        assert!(!resolve_custom_icon_path_at(&base, &relative).unwrap().exists());
+        assert!(
+            !resolve_custom_icon_path_at(&base, &relative)
+                .unwrap()
+                .exists()
+        );
 
         let renamed_relative = copy_custom_icon_at(
             &base,

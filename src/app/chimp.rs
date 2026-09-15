@@ -14,8 +14,8 @@ mod level_blend;
 mod level_export;
 mod level_segment;
 mod mesh_weld;
-pub(in crate::app) use level_export::{scene_to_usd, write_blend_export, write_segmented_usd};
 use level_export::{ExportStage, MeshDetail};
+pub(in crate::app) use level_export::{scene_to_usd, write_blend_export, write_segmented_usd};
 use level_segment::SegmentBudget;
 use std::io::{Cursor, Write};
 
@@ -42,9 +42,7 @@ use blam_tags::iostore::package::imports::{
 };
 use blam_tags::iostore::package::name_map::FMappedName;
 use blam_tags::iostore::package::ue_types::{FPackageObjectIndex, FPackageObjectIndexType};
-use blam_tags::iostore::package::zen::{
-    EExportFilterFlags, EZenPackageVersion, FZenPackageHeader,
-};
+use blam_tags::iostore::package::zen::{EExportFilterFlags, EZenPackageVersion, FZenPackageHeader};
 use blam_tags::iostore::skeletal_mesh::SkeletalMesh;
 use blam_tags::iostore::static_mesh::StaticMesh;
 use blam_tags::iostore::usmap::Usmap;
@@ -430,7 +428,13 @@ impl ChimpLevelExportPrompt {
 fn prim_safe_name(raw: &str) -> String {
     let name: String = raw
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     if name.is_empty() {
         "level".to_owned()
@@ -964,7 +968,11 @@ impl egui_tiles::Behavior<String> for ChimpPaneBehavior<'_> {
         tile_id: egui_tiles::TileId,
         state: &egui_tiles::TabState,
     ) -> Color32 {
-        let base = if state.active { active_tab() } else { row_type() };
+        let base = if state.active {
+            active_tab()
+        } else {
+            row_type()
+        };
         let dirty = matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Pane(package))
             if self.app.kits[self.kit_index]
                 .chimp
@@ -1510,15 +1518,13 @@ fn chimp_mesh_preview_base(
             preview.bounds_min[axis] = preview.bounds_min[axis].min(position[axis]);
             preview.bounds_max[axis] = preview.bounds_max[axis].max(position[axis]);
         }
-        preview
-            .vertices
-            .push(RenderModelPreviewVertex {
-                position,
-                normal,
-                // UE meshes reach the preview without a resolved tangent frame;
-                // they render with the untextured path.
-                ..Default::default()
-            });
+        preview.vertices.push(RenderModelPreviewVertex {
+            position,
+            normal,
+            // UE meshes reach the preview without a resolved tangent frame;
+            // they render with the untextured path.
+            ..Default::default()
+        });
     }
     if preview.vertices.is_empty() {
         preview.bounds_min = [-1.0; 3];
@@ -1593,14 +1599,9 @@ fn decode_chimp_texture_previews(
             if let Ok(surfaces) = &decoded {
                 preview.mip_index = first_displayable_mip(surfaces, 0);
             }
-            preview.decoded = Some(
-                decoded
-                    .as_ref()
-                    .map_err(Clone::clone)
-                    .and_then(|surfaces| {
-                        chimp_texture_mip_data(surfaces, preview.image_index, preview.mip_index)
-                    }),
-            );
+            preview.decoded = Some(decoded.as_ref().map_err(Clone::clone).and_then(|surfaces| {
+                chimp_texture_mip_data(surfaces, preview.image_index, preview.mip_index)
+            }));
             ChimpTexturePreview {
                 export_index,
                 preview,
@@ -2146,7 +2147,9 @@ fn chimp_header_survives_reopen(
     let mut drift: Vec<String> = Vec::new();
     let mut check = |field: &str, intended: String, got: String| {
         if intended != got {
-            drift.push(format!("{field} was written as {intended} and read back as {got}"));
+            drift.push(format!(
+                "{field} was written as {intended} and read back as {got}"
+            ));
         }
     };
     check(
@@ -2241,7 +2244,10 @@ fn apply_chimp_identity_edit(
     edit: &ChimpIdentityEdit,
 ) -> Result<(), String> {
     let text = edit.package_flags.trim();
-    let text = text.strip_prefix("0x").or_else(|| text.strip_prefix("0X")).unwrap_or(text);
+    let text = text
+        .strip_prefix("0x")
+        .or_else(|| text.strip_prefix("0X"))
+        .unwrap_or(text);
     let package_flags = u32::from_str_radix(text, 16)
         .map_err(|_| format!("{:?} is not a 32-bit hex value", edit.package_flags))?;
 
@@ -2253,8 +2259,14 @@ fn apply_chimp_identity_edit(
     candidate.summary.has_versioning_info = u32::from(!edit.is_unversioned);
     candidate.versioning_info.zen_version = edit.zen_version;
     candidate.versioning_info.licensee_version = edit.licensee_version;
-    candidate.versioning_info.package_file_version.file_version_ue4 = edit.file_version_ue4;
-    candidate.versioning_info.package_file_version.file_version_ue5 = edit.file_version_ue5;
+    candidate
+        .versioning_info
+        .package_file_version
+        .file_version_ue4 = edit.file_version_ue4;
+    candidate
+        .versioning_info
+        .package_file_version
+        .file_version_ue5 = edit.file_version_ue5;
 
     chimp_header_survives_reopen(&candidate, &document.payloads)?;
     document.header = candidate;
@@ -2419,11 +2431,7 @@ fn chimp_public_exports_of(world: &World, package: &str) -> Result<Vec<(String, 
 /// The hash is how *other* packages address an export. Renaming the object it
 /// names does not update theirs, so the two drift apart — recoverable, but only
 /// if someone knows it happened.
-fn chimp_export_hash_desyncs(
-    header: &FZenPackageHeader,
-    index: usize,
-    text: &str,
-) -> Vec<usize> {
+fn chimp_export_hash_desyncs(header: &FZenPackageHeader, index: usize, text: &str) -> Vec<usize> {
     header
         .export_map
         .iter()
@@ -3270,16 +3278,14 @@ impl Baboon {
                 });
                 ui.add_space(3.0);
                 ui.add(
-                    egui::ProgressBar::new(fraction)
-                        .desired_height(10.0)
-                        .text(
-                            RichText::new(format!(
-                                "{} ({}/3) — {done}/{total}",
-                                phase.label(),
-                                phase.step()
-                            ))
-                            .small(),
-                        ),
+                    egui::ProgressBar::new(fraction).desired_height(10.0).text(
+                        RichText::new(format!(
+                            "{} ({}/3) — {done}/{total}",
+                            phase.label(),
+                            phase.step()
+                        ))
+                        .small(),
+                    ),
                 );
             });
         ui.add_space(2.0);
@@ -3407,11 +3413,7 @@ impl Baboon {
                     if actions.any() {
                         response.context_menu(|ui| {
                             if actions.texture {
-                                chimp_texture_export_menu(
-                                    ui,
-                                    &package.name,
-                                    &mut extract_texture,
-                                );
+                                chimp_texture_export_menu(ui, &package.name, &mut extract_texture);
                             }
                             if actions.mesh {
                                 chimp_mesh_export_menu(ui, &package.name, &mut extract_mesh);
@@ -5215,7 +5217,11 @@ impl Baboon {
         ctx: egui::Context,
     ) {
         let Some(directory) = rfd::FileDialog::new()
-            .set_title(format!("Export {} as {}", prompt.name(), prompt.format_label()))
+            .set_title(format!(
+                "Export {} as {}",
+                prompt.name(),
+                prompt.format_label()
+            ))
             .pick_folder()
         else {
             return;
@@ -5475,10 +5481,7 @@ fn write_chimp_mesh_textures(
         }
         if !created {
             if let Err(error) = fs::create_dir_all(directory) {
-                failures.push(format!(
-                    "Could not create {}: {error}",
-                    directory.display()
-                ));
+                failures.push(format!("Could not create {}: {error}", directory.display()));
                 return (written, failures);
             }
             created = true;
@@ -5558,7 +5561,10 @@ fn write_chimp_texture(
     // texture is one file either way.
     let split = split_udim && surfaces.is_udim();
     let (blocks_x, blocks_y) = if split {
-        (surfaces.width_in_blocks.max(1), surfaces.height_in_blocks.max(1))
+        (
+            surfaces.width_in_blocks.max(1),
+            surfaces.height_in_blocks.max(1),
+        )
     } else {
         (1, 1)
     };
@@ -5765,15 +5771,13 @@ fn write_flat_image(
     let mut file = fs::File::create(path)
         .map_err(|error| format!("Could not create {}: {error}", path.display()))?;
     match format {
-        ChimpTextureFormat::Png => {
-            image::RgbaImage::from_raw(width, height, rgba.to_vec())
-                .ok_or_else(|| "image does not match its dimensions".to_owned())?
-                .write_to(
-                    &mut std::io::BufWriter::new(&mut file),
-                    image::ImageFormat::Png,
-                )
-                .map_err(|error| format!("Could not encode {}: {error}", path.display()))
-        }
+        ChimpTextureFormat::Png => image::RgbaImage::from_raw(width, height, rgba.to_vec())
+            .ok_or_else(|| "image does not match its dimensions".to_owned())?
+            .write_to(
+                &mut std::io::BufWriter::new(&mut file),
+                image::ImageFormat::Png,
+            )
+            .map_err(|error| format!("Could not encode {}: {error}", path.display())),
         _ => blam_tags::bitmap::tiff::write_rgba8_tiff(&mut file, width, height, rgba)
             .map_err(|error| format!("Could not encode {}: {error}", path.display())),
     }
@@ -5819,7 +5823,8 @@ fn write_dds_block(
         }
         // Every mip in one file must share a format; a fallback mip that came
         // out RGBA8 cannot sit in a BC7 chain.
-        if format_name.get_or_insert_with(|| surface.pixel_format.clone()) != &surface.pixel_format {
+        if format_name.get_or_insert_with(|| surface.pixel_format.clone()) != &surface.pixel_format
+        {
             break;
         }
         let (unit_x, unit_y, unit_bytes) =
@@ -8699,20 +8704,23 @@ fn draw_chimp_header_view(
         document.header_name_edit = None;
         document.header_import_edit = None;
         document.header_identity_edit = None;
-        document.header_export_edit = document.header.export_map.get(index).map(|entry| {
-            ChimpExportEdit {
-                index,
-                object_name: document
-                    .header
-                    .name_map
-                    .try_get(entry.object_name)
-                    .map(|name| name.to_string())
-                    .unwrap_or_default(),
-                object_flags: entry.object_flags,
-                filter_flags: entry.filter_flags,
-                recompute_hash: false,
-            }
-        });
+        document.header_export_edit =
+            document
+                .header
+                .export_map
+                .get(index)
+                .map(|entry| ChimpExportEdit {
+                    index,
+                    object_name: document
+                        .header
+                        .name_map
+                        .try_get(entry.object_name)
+                        .map(|name| name.to_string())
+                        .unwrap_or_default(),
+                    object_flags: entry.object_flags,
+                    filter_flags: entry.filter_flags,
+                    recompute_hash: false,
+                });
         document.header_error = None;
     }
     if edits.commit_export
@@ -8805,7 +8813,10 @@ fn chimp_import_edit_for(slot: usize, current: &ImportSlot, world: &World) -> Ch
             edit.kind = ChimpImportKind::Script;
             // Only the mount can name a script hash; an unknown one is left
             // blank rather than filled with something invented.
-            edit.script_path = world.class_path(index.raw_index()).unwrap_or_default().to_owned();
+            edit.script_path = world
+                .class_path(index.raw_index())
+                .unwrap_or_default()
+                .to_owned();
         }
         ImportSlot::Package(target) => {
             edit.kind = ChimpImportKind::Package;
@@ -9027,11 +9038,8 @@ fn draw_chimp_header_sections(
                                 .spacing([14.0, 2.0])
                                 .show(ui, |ui| {
                                     for &index in &rows[range] {
-                                        let usage = usage
-                                            .names
-                                            .get(index)
-                                            .cloned()
-                                            .unwrap_or_default();
+                                        let usage =
+                                            usage.names.get(index).cloned().unwrap_or_default();
                                         ui.label(
                                             RichText::new(format!("{index}"))
                                                 .color(subtle_dark())
@@ -9052,8 +9060,7 @@ fn draw_chimp_header_sections(
                                                 .on_hover_text(name_usage_tooltip(&usage));
                                         } else if ui
                                             .add(
-                                                egui::Label::new(label)
-                                                    .sense(egui::Sense::click()),
+                                                egui::Label::new(label).sense(egui::Sense::click()),
                                             )
                                             .on_hover_text(name_usage_tooltip(&usage))
                                             .clicked()
@@ -9359,7 +9366,11 @@ fn draw_chimp_identity_panel(
 
         ui.add_space(4.0);
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Licensee version").color(subtle_dark()).small());
+            ui.label(
+                RichText::new("Licensee version")
+                    .color(subtle_dark())
+                    .small(),
+            );
             ui.add(egui::DragValue::new(&mut edit.licensee_version));
         });
 
@@ -9399,7 +9410,11 @@ fn draw_chimp_identity_panel(
                 }
             });
             ui.horizontal(|ui| {
-                ui.label(RichText::new("File version UE4").color(subtle_dark()).small());
+                ui.label(
+                    RichText::new("File version UE4")
+                        .color(subtle_dark())
+                        .small(),
+                );
                 ui.add(egui::DragValue::new(&mut edit.file_version_ue4));
                 ui.label(RichText::new("UE5").color(subtle_dark()).small());
                 ui.add(egui::DragValue::new(&mut edit.file_version_ue5));
@@ -9704,9 +9719,11 @@ fn draw_chimp_import_editor(
             }
             ChimpImportKind::Null => {
                 ui.label(
-                    RichText::new("The slot resolves to nothing. Properties naming it read as None.")
-                        .color(subtle_dark())
-                        .small(),
+                    RichText::new(
+                        "The slot resolves to nothing. Properties naming it read as None.",
+                    )
+                    .color(subtle_dark())
+                    .small(),
                 );
             }
         }
@@ -10080,7 +10097,9 @@ mod tests {
     fn retargeting_one_import_slot_leaves_the_others_in_place() {
         let mut document = rename_fixture();
         let slots = vec![
-            ImportSlot::Script(FPackageObjectIndex::create_script_import("/Script/Engine.Actor")),
+            ImportSlot::Script(FPackageObjectIndex::create_script_import(
+                "/Script/Engine.Actor",
+            )),
             ImportSlot::Package(ImportTarget {
                 package: "/Game/One".to_owned(),
                 object_hash: public_export_hash("One"),
@@ -10153,7 +10172,11 @@ mod tests {
         // nothing unnamed left over: 0xb is Public + Standalone + Transactional.
         let all: u32 = CHIMP_OBJECT_FLAG_BITS.iter().map(|(bit, _)| bit).sum();
         assert_eq!(0xb_u32 & !all, 0, "0xb is fully named");
-        assert_eq!(0x1_u32 & !all, 0, "the generated-group value is fully named");
+        assert_eq!(
+            0x1_u32 & !all,
+            0,
+            "the generated-group value is fully named"
+        );
     }
 
     /// Interning rather than renaming is the difference between "this export is
@@ -10181,7 +10204,10 @@ mod tests {
         apply_chimp_export_metadata(&mut document, &edit);
 
         // `Material` is still entry 1, untouched, and `Surface` was appended.
-        assert_eq!(&document.header.name_map.names()[..before.len()], &before[..]);
+        assert_eq!(
+            &document.header.name_map.names()[..before.len()],
+            &before[..]
+        );
         assert_eq!(document.header.name_map.names().last().unwrap(), "Surface");
         assert_eq!(document.exports[0].object, "Surface");
     }
@@ -10263,14 +10289,16 @@ mod tests {
 
         let mut candidate = document.header.clone();
         candidate.versioning_info.licensee_version = 7;
-        candidate.versioning_info.package_file_version.file_version_ue5 = 1;
+        candidate
+            .versioning_info
+            .package_file_version
+            .file_version_ue5 = 1;
 
         // The gate passes, because those fields are simply not written...
         chimp_header_survives_reopen(&candidate, &document.payloads).unwrap();
 
         // ...and this is what actually comes back.
-        let (bytes, _) =
-            write_package(&candidate, &document.payloads, CE_HEADER_VERSION).unwrap();
+        let (bytes, _) = write_package(&candidate, &document.payloads, CE_HEADER_VERSION).unwrap();
         let reopened = FZenPackageHeader::deserialize(
             &mut Cursor::new(&bytes),
             None,
@@ -10281,7 +10309,10 @@ mod tests {
         .unwrap();
         assert_eq!(reopened.versioning_info.licensee_version, 0);
         assert_ne!(
-            reopened.versioning_info.package_file_version.file_version_ue5,
+            reopened
+                .versioning_info
+                .package_file_version
+                .file_version_ue5,
             1
         );
     }
@@ -10380,7 +10411,10 @@ mod tests {
             write_package(&document.header, &document.payloads, CE_HEADER_VERSION).unwrap();
         let (second, _) =
             write_package(&reopen(&first), &document.payloads, CE_HEADER_VERSION).unwrap();
-        assert_eq!(first, second, "an unedited package must rebuild identically");
+        assert_eq!(
+            first, second,
+            "an unedited package must rebuild identically"
+        );
     }
 
     /// A rename has to survive the writer, not just the in-memory table.
@@ -10414,7 +10448,9 @@ mod tests {
     fn a_retargeted_import_survives_a_write_and_reopen() {
         let mut document = normalized_fixture();
         let slots = vec![
-            ImportSlot::Script(FPackageObjectIndex::create_script_import("/Script/Engine.Actor")),
+            ImportSlot::Script(FPackageObjectIndex::create_script_import(
+                "/Script/Engine.Actor",
+            )),
             ImportSlot::Package(ImportTarget {
                 package: "/Game/One".to_owned(),
                 object_hash: public_export_hash("One"),
@@ -10491,7 +10527,9 @@ mod tests {
 
     #[test]
     fn a_mesh_import_is_a_material_by_the_prefix_the_game_uses() {
-        assert!(is_chimp_material_package("/Game/Art/Materials/MI_Brute_Body"));
+        assert!(is_chimp_material_package(
+            "/Game/Art/Materials/MI_Brute_Body"
+        ));
         assert!(is_chimp_material_package("/Game/Art/Materials/M_Master"));
         // Everything else a mesh imports - skeletons, physics, engine content,
         // and the textures themselves - is not a material.
@@ -10714,10 +10752,22 @@ mod tests {
     fn a_progress_estimate_waits_until_it_has_something_to_go_on() {
         // A rate from the first few items swings by minutes and teaches the
         // user to ignore the number, so there is no number until then.
-        assert!(job_at(0, 2334, Duration::from_secs(10)).remaining().is_none());
-        assert!(job_at(3, 2334, Duration::from_millis(200)).remaining().is_none());
+        assert!(
+            job_at(0, 2334, Duration::from_secs(10))
+                .remaining()
+                .is_none()
+        );
+        assert!(
+            job_at(3, 2334, Duration::from_millis(200))
+                .remaining()
+                .is_none()
+        );
         // Finished is not "0s left", it is nothing to say.
-        assert!(job_at(2334, 2334, Duration::from_secs(60)).remaining().is_none());
+        assert!(
+            job_at(2334, 2334, Duration::from_secs(60))
+                .remaining()
+                .is_none()
+        );
     }
 
     #[test]
@@ -10772,7 +10822,10 @@ mod tests {
             ("/Game/Meshes/SM_Rock", Some("StaticMesh")),
             ("/Game/Characters/SK_Elite", Some("SkeletalMesh")),
             ("/Game/Textures/T_Bark", Some("Texture2D")),
-            ("/Game/Levels/Halo1/Solo/C10/_Generated_/043ATWPYEEJ", Some("World")),
+            (
+                "/Game/Levels/Halo1/Solo/C10/_Generated_/043ATWPYEEJ",
+                Some("World"),
+            ),
             ("/Game/Blueprints/BP_Door", Some("Blueprint")),
             ("/Game/Misc/Thing", None),
         ] {
@@ -11278,7 +11331,10 @@ mod tests {
             &world,
             &package,
             &directory.join("texture.tif"),
-            ChimpTextureExport { format: ChimpTextureFormat::Tiff, ..Default::default() },
+            ChimpTextureExport {
+                format: ChimpTextureFormat::Tiff,
+                ..Default::default()
+            },
         )
         .unwrap();
         let written: Vec<_> = std::fs::read_dir(&directory)
@@ -11314,7 +11370,10 @@ mod tests {
             .expect("elite minor armour normal");
         let document = load_chimp_document(&world, &package).unwrap();
         let surfaces = chimp_selected_surfaces(&document, &package).unwrap();
-        assert_eq!((surfaces.width_in_blocks, surfaces.height_in_blocks), (3, 2));
+        assert_eq!(
+            (surfaces.width_in_blocks, surfaces.height_in_blocks),
+            (3, 2)
+        );
 
         // In the middle column this set is full size on the top row and half
         // size on the bottom, so the pair (1002, 1012) fixes the direction.
@@ -11332,7 +11391,10 @@ mod tests {
             &world,
             &package,
             &directory.join("t.png"),
-            ChimpTextureExport { format: ChimpTextureFormat::Png, ..Default::default() },
+            ChimpTextureExport {
+                format: ChimpTextureFormat::Png,
+                ..Default::default()
+            },
         )
         .unwrap();
         let side = |name: &str| {
@@ -11395,7 +11457,10 @@ mod tests {
             (surfaces.width_in_blocks * surfaces.height_in_blocks) as usize,
             "one DDS per UDIM block: {written:?}"
         );
-        assert!(written.contains(&"texture.1001.dds".to_owned()), "{written:?}");
+        assert!(
+            written.contains(&"texture.1001.dds".to_owned()),
+            "{written:?}"
+        );
 
         let bytes = std::fs::read(directory.join("texture.1001.dds")).unwrap();
         assert_eq!(&bytes[0..4], b"DDS ");
@@ -11427,7 +11492,10 @@ mod tests {
                 &world,
                 &package,
                 &directory.join(format!("texture.{extension}")),
-                ChimpTextureExport { format, ..Default::default() },
+                ChimpTextureExport {
+                    format,
+                    ..Default::default()
+                },
             )
             .unwrap();
             let mut flat: Vec<String> = std::fs::read_dir(&directory)
@@ -11525,7 +11593,10 @@ mod tests {
                 &directory.join("mesh.pskx"),
                 ChimpMeshFormat::Pskx,
                 ChimpTextureScope::All,
-                ChimpTextureExport { format, ..Default::default() },
+                ChimpTextureExport {
+                    format,
+                    ..Default::default()
+                },
             )
             .unwrap();
             let textures: Vec<_> = std::fs::read_dir(directory.join(CHIMP_TEXTURE_DIR))
@@ -11560,9 +11631,28 @@ mod tests {
             .map(|package| package.name.clone())
             .find(|name| name.to_ascii_lowercase().ends_with(&target))
             .unwrap_or_else(|| panic!("no package ending in {target:?}"));
-        let fmt = match std::env::var("CE_TEXTURE_FORMAT").unwrap_or_default().as_str() { "png" => ChimpTextureFormat::Png, "tif" => ChimpTextureFormat::Tiff, _ => ChimpTextureFormat::Dds };
+        let fmt = match std::env::var("CE_TEXTURE_FORMAT")
+            .unwrap_or_default()
+            .as_str()
+        {
+            "png" => ChimpTextureFormat::Png,
+            "tif" => ChimpTextureFormat::Tiff,
+            _ => ChimpTextureFormat::Dds,
+        };
         let split = std::env::var("CE_TEXTURE_SPLIT").unwrap_or_default() != "0";
-        println!("{}", write_chimp_texture(&world, &package, &directory.join(format!("t.{}", fmt.extension())), ChimpTextureExport { format: fmt, split_udim: split }).unwrap());
+        println!(
+            "{}",
+            write_chimp_texture(
+                &world,
+                &package,
+                &directory.join(format!("t.{}", fmt.extension())),
+                ChimpTextureExport {
+                    format: fmt,
+                    split_udim: split
+                }
+            )
+            .unwrap()
+        );
         let mut names: Vec<_> = std::fs::read_dir(&directory)
             .unwrap()
             .map(|entry| entry.unwrap().path())
@@ -11570,9 +11660,8 @@ mod tests {
         names.sort();
         for path in names {
             let bytes = std::fs::read(&path).unwrap();
-            let at = |offset: usize| {
-                u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
-            };
+            let at =
+                |offset: usize| u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
             println!(
                 "  {}: {}x{} mips={} dxgi={} bytes={}",
                 path.file_name().unwrap().to_string_lossy(),
@@ -11695,7 +11784,15 @@ mod tests {
                     uuid::Uuid::new_v4(),
                     format.extension()
                 ));
-                write_chimp_mesh(&world, &package, &output, format, ChimpTextureScope::None, ChimpTextureExport::default()).unwrap();
+                write_chimp_mesh(
+                    &world,
+                    &package,
+                    &output,
+                    format,
+                    ChimpTextureScope::None,
+                    ChimpTextureExport::default(),
+                )
+                .unwrap();
                 let bytes = std::fs::read(&output).unwrap();
                 match format {
                     ChimpMeshFormat::Jms => assert!(bytes.starts_with(b";### VERSION ###")),

@@ -101,7 +101,11 @@ impl CeSoundMedia {
             .next()
             .unwrap_or(&self.source_name)
             .trim_end_matches(".wav");
-        if stem.is_empty() { self.media_id.to_string() } else { stem.to_string() }
+        if stem.is_empty() {
+            self.media_id.to_string()
+        } else {
+            stem.to_string()
+        }
     }
 }
 
@@ -134,13 +138,19 @@ impl CeSoundBinding {
     /// everything. Never returns empty while the binding holds media — a tag
     /// that resolved audio must show rows for it.
     pub fn media_for_language(&self, language: &str) -> Vec<&CeSoundMedia> {
-        let exact: Vec<&CeSoundMedia> =
-            self.media.iter().filter(|m| m.language.eq_ignore_ascii_case(language)).collect();
+        let exact: Vec<&CeSoundMedia> = self
+            .media
+            .iter()
+            .filter(|m| m.language.eq_ignore_ascii_case(language))
+            .collect();
         if !exact.is_empty() {
             return exact;
         }
-        let sfx: Vec<&CeSoundMedia> =
-            self.media.iter().filter(|m| m.language.eq_ignore_ascii_case("SFX")).collect();
+        let sfx: Vec<&CeSoundMedia> = self
+            .media
+            .iter()
+            .filter(|m| m.language.eq_ignore_ascii_case("SFX"))
+            .collect();
         if !sfx.is_empty() {
             return sfx;
         }
@@ -157,7 +167,11 @@ impl CeSoundBinding {
     /// arbitrarily land on Chinese).
     pub fn language_to_show(&self, preferred: Option<&str>) -> String {
         let languages = self.languages();
-        let has = |name: &str| { languages.iter().find(|l| l.eq_ignore_ascii_case(name)).cloned()
+        let has = |name: &str| {
+            languages
+                .iter()
+                .find(|l| l.eq_ignore_ascii_case(name))
+                .cloned()
         };
 
         preferred
@@ -175,7 +189,9 @@ impl CeSoundBinding {
 /// import graph lives in the sibling `.uasset` wrapper, so swap the extension
 /// before looking the package up.
 pub fn tag_package_for_rel_path(rel_path: &str) -> Option<String> {
-    let base = rel_path.strip_suffix(".ubulk").or_else(|| rel_path.strip_suffix(".uasset"))?;
+    let base = rel_path
+        .strip_suffix(".ubulk")
+        .or_else(|| rel_path.strip_suffix(".uasset"))?;
     super::container_package_name(&format!("{base}.uasset"))
 }
 
@@ -188,9 +204,14 @@ fn read_package(
     let (container, rel) = packages.lookup(package)?;
     let archive = &containers.get(container)?.archive;
     let bytes = archive.read(rel).ok()?;
-    let header =
-        FZenPackageHeader::deserialize(&mut Cursor::new(&bytes), None, TOC_VERSION, HEADER_VERSION, None,)
-            .ok()?;
+    let header = FZenPackageHeader::deserialize(
+        &mut Cursor::new(&bytes),
+        None,
+        TOC_VERSION,
+        HEADER_VERSION,
+        None,
+    )
+    .ok()?;
     Some((header, bytes))
 }
 
@@ -203,7 +224,9 @@ fn read_package(
 /// unbinds every tag that reaches through it. The export class is the thing
 /// that actually defines an event.
 fn exports_ak_audio_event(header: &FZenPackageHeader) -> bool {
-    header.exports_class(FPackageObjectIndex::create_script_import(AK_AUDIO_EVENT_CLASS,))
+    header.exports_class(FPackageObjectIndex::create_script_import(
+        AK_AUDIO_EVENT_CLASS,
+    ))
 }
 
 /// The native `AkAudioEvent` UClass, as it appears in a cooked package's
@@ -250,7 +273,9 @@ pub fn resolve_sound_binding(
         if visits > MAX_PACKAGE_VISITS {
             break;
         }
-        let Some((header, bytes)) = read_package(containers, packages, &package) else { continue; };
+        let Some((header, bytes)) = read_package(containers, packages, &package) else {
+            continue;
+        };
         // An event is a leaf: it holds the media, and nothing further to walk.
         if exports_ak_audio_event(&header) {
             event_packages.push((header, bytes));
@@ -269,16 +294,20 @@ pub fn resolve_sound_binding(
 
     let mut banks = banks;
     for (header, bytes) in &event_packages {
-        let Some(export) = header
-            .find_export_of_class(FPackageObjectIndex::create_script_import(AK_AUDIO_EVENT_CLASS,))
-        else {
+        let Some(export) = header.find_export_of_class(FPackageObjectIndex::create_script_import(
+            AK_AUDIO_EVENT_CLASS,
+        )) else {
             continue;
         };
         let start = header.summary.header_size as usize + export.cooked_serial_offset as usize;
         let end = start + export.cooked_serial_size as usize;
-        let Some(body) = bytes.get(start..end) else { continue; };
+        let Some(body) = bytes.get(start..end) else {
+            continue;
+        };
         let names = header.name_map.copy_raw_names();
-        let Ok(cooked) = read_event_cooked_data(body, &names, usmap) else { continue; };
+        let Ok(cooked) = read_event_cooked_data(body, &names, usmap) else {
+            continue;
+        };
 
         for m in &cooked.media {
             binding.media.push(CeSoundMedia {
@@ -294,7 +323,9 @@ pub fn resolve_sound_binding(
         if cooked.media.is_empty()
             && let Some((paks_root, store)) = banks.as_mut()
         {
-            binding.media.extend(bank_embedded_media(paks_root, store, &cooked));
+            binding
+                .media
+                .extend(bank_embedded_media(paks_root, store, &cooked));
         }
         binding.events.push(cooked);
     }
@@ -372,7 +403,10 @@ impl CeMediaStore {
             let set = PakSet::open_dir(paks_root)
                 .with_context(|| format!("opening pak set at {}", paks_root.display()))?;
             if set.is_empty() {
-                return Err(anyhow!("no readable .pak containers in {}", paks_root.display()));
+                return Err(anyhow!(
+                    "no readable .pak containers in {}",
+                    paks_root.display()
+                ));
             }
             self.paks = Some((paks_root.to_path_buf(), set));
             self.hirc.clear(); // the cache is only valid for the open set
@@ -434,8 +468,7 @@ impl CeMediaStore {
             CeMediaLocation::Bank(bank_path) => {
                 let bnk = self.read_bank(paks_root, bank_path)?;
                 bnk.embedded_wem(media.media_id)
-                    .ok_or_else(||
-                        anyhow!("{} holds no media {}", bank_path, media.media_id))?
+                    .ok_or_else(|| anyhow!("{} holds no media {}", bank_path, media.media_id))?
                     .to_vec()
             }
         };
@@ -457,7 +490,10 @@ mod tests {
             location: CeMediaLocation::Loose("Media/43/43030714.wem".into()),
             source_name: String::new(),
         };
-        assert_eq!(m.mounted_path(), "Meteorite/Content/WwiseAudio/Media/43/43030714.wem");
+        assert_eq!(
+            m.mounted_path(),
+            "Meteorite/Content/WwiseAudio/Media/43/43030714.wem"
+        );
         // With no source name, fall back to the id rather than an empty label.
         assert_eq!(m.display_name(), "43030714");
     }
@@ -483,7 +519,10 @@ mod tests {
             location: CeMediaLocation::Loose("Media/1/1.wem".into()),
             source_name: String::new(),
         };
-        let binding = CeSoundBinding { events: Vec::new(), media: vec![sfx], };
+        let binding = CeSoundBinding {
+            events: Vec::new(),
+            media: vec![sfx],
+        };
         // A non-localized event has no English(US) entry; asking for one must
         // still play rather than silently returning nothing.
         assert_eq!(binding.media_for_language("English(US)").len(), 1);
@@ -523,7 +562,10 @@ mod tests {
 
         // A selection it does not carry must still show something.
         let shown = binding.language_to_show(Some("Korean"));
-        assert!(binding.languages().contains(&shown), "fell back to an absent language");
+        assert!(
+            binding.languages().contains(&shown),
+            "fell back to an absent language"
+        );
         assert!(!binding.media_for_language(&shown).is_empty());
     }
 
@@ -531,7 +573,10 @@ mod tests {
     /// language, which must not blank it either.
     #[test]
     fn sfx_only_binding_ignores_a_localized_selection() {
-        let binding = CeSoundBinding { events: Vec::new(), media: vec![media("SFX", 1)], };
+        let binding = CeSoundBinding {
+            events: Vec::new(),
+            media: vec![media("SFX", 1)],
+        };
         assert_eq!(binding.language_to_show(Some("German")), "SFX");
         assert_eq!(binding.media_for_language("German").len(), 1);
     }
@@ -540,10 +585,16 @@ mod tests {
     /// themselves are found by class, but the walk still needs to *get* to them.
     #[test]
     fn every_audio_root_is_walkable() {
-        assert!(is_audio_package("/game/audio/characters/elite/shield_pop_elite"));
-        assert!(is_audio_package("/game/audio/audio_fi/character/elites/shield/play_x"));
+        assert!(is_audio_package(
+            "/game/audio/characters/elite/shield_pop_elite"
+        ));
+        assert!(is_audio_package(
+            "/game/audio/audio_fi/character/elites/shield/play_x"
+        ));
         assert!(is_audio_package("/game/wwise/events/play_foo"));
-        assert!(is_audio_package("/game/wwiseaudio/events/systemic/vo/play_bar"));
+        assert!(is_audio_package(
+            "/game/wwiseaudio/events/systemic/vo/play_bar"
+        ));
         assert!(!is_audio_package("/game/tags/sound/x-sound"));
     }
 
@@ -567,9 +618,13 @@ mod tests {
         let mut utocs: Vec<PathBuf> = std::fs::read_dir(&root)
             .expect("read paks dir")
             .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| { p.extension().is_some_and(|x| x.eq_ignore_ascii_case("utoc"))
+            .filter(|p| {
+                p.extension()
+                    .is_some_and(|x| x.eq_ignore_ascii_case("utoc"))
             })
-            .filter(|p| { !p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("global.utoc"))
+            .filter(|p| {
+                !p.file_name()
+                    .is_some_and(|n| n.eq_ignore_ascii_case("global.utoc"))
             })
             .collect();
         utocs.sort();
@@ -577,7 +632,9 @@ mod tests {
         let mut containers = Vec::new();
         let mut packages = ContainerPackageIndex::default();
         for utoc in utocs {
-            let Ok(archive) = IoStoreArchive::open(&utoc) else { continue; };
+            let Ok(archive) = IoStoreArchive::open(&utoc) else {
+                continue;
+            };
             let idx = containers.len();
             for e in archive.entries() {
                 if let Some(pkg) = super::super::container_package_name(&e.path) {
@@ -594,7 +651,11 @@ mod tests {
             });
         }
         assert!(!packages.is_empty(), "no cooked packages indexed");
-        println!("indexed {} packages across {} containers", packages.len(), containers.len());
+        println!(
+            "indexed {} packages across {} containers",
+            packages.len(),
+            containers.len()
+        );
 
         // The controller reaches a tag by its browser entry, which points at the
         // `.ubulk` payload — so the `.ubulk` → package mapping must land on a
@@ -616,7 +677,10 @@ mod tests {
         }
         println!("sound tags: {sound_tags}, package mapping resolved: {resolved}");
         assert!(sound_tags > 0, "no sound tags mounted");
-        assert_eq!(sound_tags, resolved, "some sound tags had no cooked package");
+        assert_eq!(
+            sound_tags, resolved,
+            "some sound tags had no cooked package"
+        );
 
         let usmap = Usmap::meteorite().expect("bundled usmap");
         let mut store = CeMediaStore::default();
@@ -678,8 +742,17 @@ mod tests {
             // And the media has to actually decode to non-silent audio.
             for m in binding.media_for_language(&shown) {
                 let pcm = store.decode(&root, m).expect("decode media");
-                assert!(!pcm.samples.is_empty(), "{} decoded to nothing", m.location_label());
-                let peak = pcm.samples.iter().map(|s| s.unsigned_abs()).max().unwrap_or(0);
+                assert!(
+                    !pcm.samples.is_empty(),
+                    "{} decoded to nothing",
+                    m.location_label()
+                );
+                let peak = pcm
+                    .samples
+                    .iter()
+                    .map(|s| s.unsigned_abs())
+                    .max()
+                    .unwrap_or(0);
                 assert!(peak > 0, "{} decoded to silence", m.location_label());
                 println!(
                     "  {} [{}] {} ch {} Hz peak {peak}  ({})",
@@ -707,14 +780,19 @@ mod tests {
         use std::path::PathBuf;
         use std::sync::Arc;
 
-        let root =
-            PathBuf::from(std::env::var("CE_PAKS").expect("set CE_PAKS to the game's Content/Paks"),);
+        let root = PathBuf::from(
+            std::env::var("CE_PAKS").expect("set CE_PAKS to the game's Content/Paks"),
+        );
         let mut utocs: Vec<PathBuf> = std::fs::read_dir(&root)
             .expect("read paks dir")
             .filter_map(|e| e.ok().map(|e| e.path()))
-            .filter(|p| { p.extension().is_some_and(|x| x.eq_ignore_ascii_case("utoc"))
+            .filter(|p| {
+                p.extension()
+                    .is_some_and(|x| x.eq_ignore_ascii_case("utoc"))
             })
-            .filter(|p| { !p.file_name().is_some_and(|n| n.eq_ignore_ascii_case("global.utoc"))
+            .filter(|p| {
+                !p.file_name()
+                    .is_some_and(|n| n.eq_ignore_ascii_case("global.utoc"))
             })
             .collect();
         utocs.sort();
@@ -723,7 +801,9 @@ mod tests {
         let mut packages = ContainerPackageIndex::default();
         let mut tag_packages: Vec<String> = Vec::new();
         for utoc in utocs {
-            let Ok(archive) = IoStoreArchive::open(&utoc) else { continue; };
+            let Ok(archive) = IoStoreArchive::open(&utoc) else {
+                continue;
+            };
             let idx = containers.len();
             for e in archive.entries() {
                 if let Some(pkg) = super::super::container_package_name(&e.path) {
@@ -754,13 +834,22 @@ mod tests {
         let mut bound = 0usize;
         let mut from_banks = 0usize;
         for pkg in &tag_packages {
-            let binding =
-                resolve_sound_binding(&containers, &packages, &usmap, pkg, Some((root.as_path(), &mut store)),);
+            let binding = resolve_sound_binding(
+                &containers,
+                &packages,
+                &usmap,
+                pkg,
+                Some((root.as_path(), &mut store)),
+            );
             if binding.is_empty() {
                 continue;
             }
             bound += 1;
-            if binding.media.iter().any(|m| matches!(m.location, CeMediaLocation::Bank(_))) {
+            if binding
+                .media
+                .iter()
+                .any(|m| matches!(m.location, CeMediaLocation::Bank(_)))
+            {
                 from_banks += 1;
             }
         }
@@ -768,7 +857,13 @@ mod tests {
         println!("{bound}/{total} sound tags resolved media ({from_banks} out of SoundBanks)");
         // Measured 5332/5895 on the 2026.06.26 build; the rest are stubs with
         // no audio asset behind them at all.
-        assert!(bound * 100 / total >= 88, "only {bound}/{total} sound tags resolved");
-        assert!(from_banks > 400, "bank-embedded media stopped resolving ({from_banks})");
+        assert!(
+            bound * 100 / total >= 88,
+            "only {bound}/{total} sound tags resolved"
+        );
+        assert!(
+            from_banks > 400,
+            "bank-embedded media stopped resolving ({from_banks})"
+        );
     }
 }

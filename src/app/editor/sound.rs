@@ -905,20 +905,18 @@ fn draw_wwise_event_player(
 /// for the simulation with no audio asset behind them. Saying so is the whole
 /// point: the alternative is a player that looks playable and never is.
 fn draw_ce_unbound_note(ui: &mut Ui) {
-    egui::CollapsingHeader::new(
-        RichText::new("Sound \u{2014} no audio bound").color(text_dark())
-    )
-    .default_open(true)
-    .show(ui, |ui| {
-        ui.label(
-            RichText::new(
-                "This tag's permutation table is inherited Reach metadata. Campaign \
+    egui::CollapsingHeader::new(RichText::new("Sound \u{2014} no audio bound").color(text_dark()))
+        .default_open(true)
+        .show(ui, |ui| {
+            ui.label(
+                RichText::new(
+                    "This tag's permutation table is inherited Reach metadata. Campaign \
                  Evolved plays audio through Wwise, and no event is wired to this tag, \
                  so there is nothing to audition or extract.",
-            )
-            .color(subtle_dark()),
-        );
-    });
+                )
+                .color(subtle_dark()),
+            );
+        });
     ui.add_space(6.0);
 }
 
@@ -1033,8 +1031,7 @@ fn draw_ce_wwise_player(
                             // that says why.
                             None => {
                                 if let Some(status) = edit.status.as_deref_mut() {
-                                    "no container source for Wwise media"
-                                        .clone_into(status);
+                                    "no container source for Wwise media".clone_into(status);
                                 }
                             }
                         }
@@ -1046,10 +1043,7 @@ fn draw_ce_wwise_player(
                         && let Some(root) = edit.ce_paks_root
                         && let Some(path) = rfd::FileDialog::new()
                             .set_title("Extract Wwise media")
-                            .set_file_name(format!(
-                                "{}.wav",
-                                sanitize_component(&m.display_name())
-                            ))
+                            .set_file_name(format!("{}.wav", sanitize_component(&m.display_name())))
                             .save_file()
                     {
                         *edit.sound_extract_request = Some(ExtractRequest {

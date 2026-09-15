@@ -145,7 +145,9 @@ impl Baboon {
                                 )
                                 .desired_width(320.0)
                                 .font(egui::TextStyle::Monospace)
-                                .hint_text(placeholder_text("objects\\weapons\\rifle\\assault_rifle")),
+                                .hint_text(placeholder_text(
+                                    "objects\\weapons\\rifle\\assault_rifle",
+                                )),
                             );
                             if ui.small_button("...").clicked() {
                                 browse_clicked = true;
@@ -209,7 +211,11 @@ impl Baboon {
 
                         let importable =
                             !trimmed.is_empty() && blam.anything_selected() && !blam.running;
-                        let label = if blam.running { "Importing…" } else { "Import" };
+                        let label = if blam.running {
+                            "Importing…"
+                        } else {
+                            "Import"
+                        };
                         if ui
                             .add_enabled(
                                 importable,

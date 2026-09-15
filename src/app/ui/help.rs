@@ -48,13 +48,12 @@ impl Baboon {
                 match self.help_panel_tab {
                     HelpPanelTab::About => draw_about_tab(ui),
                     HelpPanelTab::Doc => draw_doc_tab(ui, &self.help_docs),
-                    HelpPanelTab::Tutorials =>
-                        draw_tutorials_tab(
-                            ui,
-                            &self.tutorials,
-                            &mut self.tutorials_game,
-                            &mut self.tutorials_category,
-                        ),
+                    HelpPanelTab::Tutorials => draw_tutorials_tab(
+                        ui,
+                        &self.tutorials,
+                        &mut self.tutorials_game,
+                        &mut self.tutorials_category,
+                    ),
                     HelpPanelTab::ScriptDoc => self.draw_script_doc_tab(ui),
                     HelpPanelTab::TagCompat => self.draw_tag_compat_tab(ui),
                     HelpPanelTab::MapNames => draw_map_names_tab(ui, &mut self.map_names_game_tab),
@@ -143,7 +142,9 @@ impl Baboon {
         let search_changed = ui
             .add(
                 egui::TextEdit::singleline(&mut self.script_docs.search)
-                    .hint_text(placeholder_text("Search names, signatures, descriptions, types, or examples..."))
+                    .hint_text(placeholder_text(
+                        "Search names, signatures, descriptions, types, or examples...",
+                    ))
                     .desired_width(f32::INFINITY),
             )
             .changed();
@@ -270,7 +271,10 @@ enum TagCompatRequest {
 /// without a whole `Baboon`.
 fn draw_tag_compat_body(ui: &mut Ui, state: &mut TagCompatUiState) -> Option<TagCompatRequest> {
     if let Some(error) = state.error() {
-        doc_load_error(ui, &format!("Tag compatibility data failed to load: {error}"));
+        doc_load_error(
+            ui,
+            &format!("Tag compatibility data failed to load: {error}"),
+        );
         return None;
     }
     if state.pairs.is_empty() {

@@ -32,8 +32,16 @@ impl Baboon {
         show_keyword_bar: bool,
     ) -> Option<BrowserAction> {
         let key = entry.key.clone();
+        let kit_read_only = self.editing_kit_is_read_only(kit_index);
         let header_action =
             self.draw_responsive_tag_header(ui, ctx, kit_index, entry, show_keyword_bar);
+        if kit_read_only {
+            ui.label(
+                RichText::new("Read-Only Editing Kit")
+                    .small()
+                    .color(subtle_dark()),
+            );
+        }
 
         let supports_field_search = supports_field_search(entry);
 
@@ -145,7 +153,7 @@ impl Baboon {
                 .and_then(|source| tag_reference_catalog_for_source(source, expert_mode)),
             tag_reference_picker: &mut self.tag_reference_picker,
             status: Some(&mut self.status),
-            editable: is_editable_tag(entry, &doc.tag),
+            editable: !kit_read_only && is_editable_tag(entry, &doc.tag),
             show_block_sizes: self.show_block_sizes,
             buffers: &mut kit.edit_buffers,
             pending: &mut pending,
@@ -237,6 +245,15 @@ impl Baboon {
         // Every deferred op this pane collected, including the kinds the undo
         // window below deliberately ignores. Used only to decide whether the
         // frame needs redrawing.
+        if kit_read_only {
+            pending.clear();
+            block_ops.clear();
+            shader_ops.clear();
+            shader_param_ops.clear();
+            h2_shader_param_ops.clear();
+            function_data_ops.clear();
+            model_variant_ops.clear();
+        }
         let mutated = !pending.is_empty()
             || !block_ops.is_empty()
             || !shader_ops.is_empty()
@@ -278,11 +295,13 @@ impl Baboon {
         {
             self.status = status;
         }
-        if let Some(status) = apply_function_data_ops(&mut doc.tag, function_data_ops, &mut doc.dirty)
+        if let Some(status) =
+            apply_function_data_ops(&mut doc.tag, function_data_ops, &mut doc.dirty)
         {
             self.status = status;
         }
-        if let Some(status) = apply_model_variant_ops(&mut doc.tag, model_variant_ops, &mut doc.dirty)
+        if let Some(status) =
+            apply_model_variant_ops(&mut doc.tag, model_variant_ops, &mut doc.dirty)
         {
             self.status = status;
             if let Some(preview) = kit.model_previews.get_mut(&key) {
@@ -319,11 +338,7 @@ impl Baboon {
         }
         // Element(s) were copied: stash them on the clipboard.
         if let Some(clip) = block_clip_request {
-            self.status = format!(
-                "Copied {} '{}' element(s)",
-                clip.elements.len(),
-                clip.label
-            );
+            self.status = format!("Copied {} '{}' element(s)", clip.elements.len(), clip.label);
             self.block_clipboard = Some(clip);
         }
         // "Paste TSV…" was chosen: open the import window.
@@ -406,7 +421,11 @@ impl Baboon {
         let inline_left_width = pane_header_inline_left_width(available, action_width);
         let wide = inline_left_width.is_some();
         let left_width = inline_left_width.unwrap_or(available);
-        let title_height = if self.expert_mode { 48.0 } else { PANE_HEADER_ICON_SIZE };
+        let title_height = if self.expert_mode {
+            48.0
+        } else {
+            PANE_HEADER_ICON_SIZE
+        };
         let left_height = if !keywords_inline && show_keyword_bar {
             title_height + 10.0 + BUTTON_HEIGHT
         } else {
@@ -423,43 +442,43 @@ impl Baboon {
                 Vec2::new(left_width, left_height),
                 egui::Layout::top_down(egui::Align::Min),
                 |ui| {
-                ui.spacing_mut().item_spacing.y = 10.0;
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = PANE_HEADER_SECTION_GAP;
+                    ui.spacing_mut().item_spacing.y = 10.0;
                     ui.horizontal(|ui| {
-                        ui.spacing_mut().item_spacing.x = PANE_HEADER_ICON_TEXT_GAP;
-                        let (icon_rect, _) = ui.allocate_exact_size(
-                            Vec2::splat(PANE_HEADER_ICON_SIZE),
-                            Sense::hover(),
-                        );
-                        paint_tag_icon_at(ui, Some(entry.group_tag), icon_rect);
-
-                        ui.vertical(|ui| {
-                            ui.spacing_mut().item_spacing.y = 0.0;
-                            breadcrumb_navigation = pane_header_breadcrumbs(ui, &breadcrumbs);
-                            ui.label(
-                                RichText::new(title).size(15.0).strong().color(text_dark()),
+                        ui.spacing_mut().item_spacing.x = PANE_HEADER_SECTION_GAP;
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = PANE_HEADER_ICON_TEXT_GAP;
+                            let (icon_rect, _) = ui.allocate_exact_size(
+                                Vec2::splat(PANE_HEADER_ICON_SIZE),
+                                Sense::hover(),
                             );
-                            if self.expert_mode {
-                                ui.label(
-                                    RichText::new(group_label(
-                                        &self.kits[kit_index].names,
-                                        entry.group_tag,
-                                    ))
-                                    .size(11.0)
-                                    .color(subtle_dark()),
-                                );
-                            }
-                        });
-                    });
+                            paint_tag_icon_at(ui, Some(entry.group_tag), icon_rect);
 
-                    if keywords_inline && show_keyword_bar {
+                            ui.vertical(|ui| {
+                                ui.spacing_mut().item_spacing.y = 0.0;
+                                breadcrumb_navigation = pane_header_breadcrumbs(ui, &breadcrumbs);
+                                ui.label(
+                                    RichText::new(title).size(15.0).strong().color(text_dark()),
+                                );
+                                if self.expert_mode {
+                                    ui.label(
+                                        RichText::new(group_label(
+                                            &self.kits[kit_index].names,
+                                            entry.group_tag,
+                                        ))
+                                        .size(11.0)
+                                        .color(subtle_dark()),
+                                    );
+                                }
+                            });
+                        });
+
+                        if keywords_inline && show_keyword_bar {
+                            self.draw_keyword_bar(ui, kit_index, &key);
+                        }
+                    });
+                    if !keywords_inline && show_keyword_bar {
                         self.draw_keyword_bar(ui, kit_index, &key);
                     }
-                });
-                if !keywords_inline && show_keyword_bar {
-                    self.draw_keyword_bar(ui, kit_index, &key);
-                }
                 },
             );
 
@@ -582,5 +601,4 @@ impl Baboon {
             self.handle_browser_action(action, ctx.clone());
         }
     }
-
 }

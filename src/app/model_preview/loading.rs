@@ -1140,7 +1140,12 @@ fn ce_decode_metahuman_table(
 
 /// A non-empty soft-object path as `(package, asset)`.
 fn ce_soft(sp: &blam_tags::iostore::unversioned::SoftObjectPath) -> Option<(String, String)> {
-    (!sp.is_empty()).then(|| (sp.package.as_str().to_string(), sp.asset.as_str().to_string()))
+    (!sp.is_empty()).then(|| {
+        (
+            sp.package.as_str().to_string(),
+            sp.asset.as_str().to_string(),
+        )
+    })
 }
 
 /// Decode `DT_MetaHumanHeads` → per-row face + facial-hair mesh references.

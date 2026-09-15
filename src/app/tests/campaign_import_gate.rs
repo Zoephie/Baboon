@@ -69,7 +69,10 @@ fn a_reach_animation_graph_is_indistinguishable_from_campaign_evolved_at_the_roo
         cmp.expected_root_size, 440,
         "if this number moves the whole premise wants rechecking",
     );
-    assert!(cmp.root_size_match, "the root struct is 440 bytes on both sides");
+    assert!(
+        cmp.root_size_match,
+        "the root struct is 440 bytes on both sides"
+    );
     assert_eq!(
         cmp.severity,
         blam_tags::LayoutSeverity::Match,
@@ -145,7 +148,10 @@ fn a_reach_animation_graph_is_classified_as_needing_conversion() {
             .map(|(_, fit)| fit)
             .unwrap_or_else(|| panic!("{game} defines model_animation_graph"))
     };
-    assert!(fit("haloreach_mcc").is_identical(), "Reach claims it outright");
+    assert!(
+        fit("haloreach_mcc").is_identical(),
+        "Reach claims it outright"
+    );
     match fit(CAMPAIGN_EVOLVED_GAME) {
         // The walk reports the *first* divergence in declaration order, which is
         // `animation_graph_node_block` under `definitions/skeleton nodes` --
@@ -170,7 +176,10 @@ fn a_campaign_evolved_tag_still_imports_natively() {
     let (_, mode) = classify_import_source_for(CAMPAIGN_EVOLVED_GAME, group_tag, &evolved);
 
     match mode {
-        ImportMode::Native { comparison, import_anyway } => {
+        ImportMode::Native {
+            comparison,
+            import_anyway,
+        } => {
             assert_eq!(
                 comparison.map(|cmp| cmp.severity),
                 Some(blam_tags::LayoutSeverity::Match),
@@ -449,7 +458,9 @@ fn the_hrek_objects_tree_converts() {
     let mut skipped_group = 0usize;
     let mut failures: std::collections::BTreeMap<String, Vec<String>> = Default::default();
     for path in &files {
-        let Ok(source) = TagFile::read(path) else { continue };
+        let Ok(source) = TagFile::read(path) else {
+            continue;
+        };
         let extension = path
             .extension()
             .and_then(|e| e.to_str())
@@ -471,7 +482,9 @@ fn the_hrek_objects_tree_converts() {
             Ok(_) => converted += 1,
             Err(error) => failures.entry(extension).or_default().push(format!(
                 "{}: {error}",
-                path.file_name().and_then(|n| n.to_str()).unwrap_or_default(),
+                path.file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or_default(),
             )),
         }
     }
@@ -483,7 +496,11 @@ fn the_hrek_objects_tree_converts() {
     for (group, cases) in &failures {
         eprintln!("  {group}: {} failure(s), e.g. {}", cases.len(), cases[0]);
     }
-    assert!(failures.is_empty(), "{} group(s) failed to convert", failures.len());
+    assert!(
+        failures.is_empty(),
+        "{} group(s) failed to convert",
+        failures.len()
+    );
 }
 
 fn collect_all(directory: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {

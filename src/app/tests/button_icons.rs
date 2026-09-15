@@ -39,6 +39,7 @@ fn button_icon_lookup_uses_expected_assets() {
         ButtonIcon::ListDropdownRight,
         ButtonIcon::Move,
         ButtonIcon::Open,
+        ButtonIcon::Edit,
         ButtonIcon::Opened,
         ButtonIcon::Other,
         ButtonIcon::Remove,

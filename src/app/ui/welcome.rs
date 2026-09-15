@@ -3,6 +3,80 @@
 
 use super::*;
 
+/// Paint the left pane to the taller column's bottom, not just its own content.
+fn draw_welcome_columns(ui: &mut Ui, contents: impl FnOnce(&mut [Ui])) {
+    let painter = ui.painter().clone();
+    let background = painter.add(egui::Shape::Noop);
+    let mut left = egui::Rect::NOTHING;
+    ui.columns(2, |columns| {
+        let bounds = columns[0].max_rect();
+        contents(columns);
+        let bottom = columns
+            .iter()
+            .map(|column| column.min_rect().bottom())
+            .fold(bounds.top(), f32::max);
+        left = egui::Rect::from_min_max(bounds.min, egui::pos2(bounds.right(), bottom));
+    });
+    painter.set(
+        background,
+        egui::Shape::rect_filled(left, 0.0, Color32::from_black_alpha(51)),
+    );
+}
+
+#[cfg(test)]
+mod welcome_column_tests {
+    use super::*;
+
+    #[test]
+    fn welcome_left_background_reaches_taller_column_bottom() {
+        for taller_left in [false, true] {
+            let ctx = egui::Context::default();
+            let mut bottom = 0.0;
+            let output = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(820.0, 600.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        draw_welcome_columns(ui, |columns| {
+                            for (index, column) in columns.iter_mut().enumerate() {
+                                let height = if (index == 0) == taller_left {
+                                    400.0
+                                } else {
+                                    120.0
+                                };
+                                column.allocate_exact_size(
+                                    Vec2::new(column.available_width(), height),
+                                    Sense::hover(),
+                                );
+                            }
+                            bottom = columns
+                                .iter()
+                                .map(|column| column.min_rect().bottom())
+                                .fold(0.0, f32::max);
+                        });
+                    });
+                },
+            );
+            let background = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect) if rect.fill == Color32::from_black_alpha(51) => {
+                        Some(rect.rect)
+                    }
+                    _ => None,
+                })
+                .expect("missing left pane background");
+            assert_eq!(background.bottom(), bottom);
+        }
+    }
+}
+
 /// What the welcome screen asks the app to do once the frame is drawn.
 ///
 /// Collected rather than acted on inline: every one of these borrows `self`
@@ -124,11 +198,10 @@ impl Baboon {
                                 })
                                 .show(ui, |ui| {
                                     ui.spacing_mut().item_spacing.y = content_item_spacing_y;
-                                    ui.columns(2, |columns| {
-                                        Frame::none()
-                                            .fill(Color32::from_black_alpha(51))
-                                            .inner_margin(egui::Margin::same(28.0))
-                                            .show(&mut columns[0], |ui| {
+                                    draw_welcome_columns(ui, |columns| {
+                                        Frame::none().inner_margin(egui::Margin::same(28.0)).show(
+                                            &mut columns[0],
+                                            |ui| {
                                                 section_heading(ui, "Start", text_dark());
                                                 if welcome_icon_button(
                                                     ui,
@@ -173,7 +246,11 @@ impl Baboon {
 
                                                 if !editing_kits.is_empty() {
                                                     ui.add_space(24.0);
-                                                    section_heading(ui, "Projects", text_dark());
+                                                    section_heading(
+                                                        ui,
+                                                        "Editing Kits",
+                                                        text_dark(),
+                                                    );
                                                     for entry in &editing_kits {
                                                         match entry {
                                                             EditingKitMenuEntry::Custom(
@@ -195,10 +272,11 @@ impl Baboon {
                                                                 )
                                                             });
                                                                 let texture = self
-                                                                    .custom_editing_kit_texture(
-                                                                        ctx, profile,
-                                                                    )
-                                                                    .cloned();
+                                                                    .workspace_banner_texture(
+                                                                        ctx,
+                                                                        &profile.game,
+                                                                        Some(&profile.id),
+                                                                    );
                                                                 let image = match texture {
                                                             Some(texture) => egui::Image::new(
                                                                 egui::load::SizedTexture::new(
@@ -213,10 +291,21 @@ impl Baboon {
                                                                 16.0,
                                                             ),
                                                         };
+                                                                let title = editing_kit_title_text(
+                                                                    ui,
+                                                                    &profile.name,
+                                                                    profile.read_only
+                                                                        && profile.game
+                                                                            != "haloce_evolved",
+                                                                    TextStyle::Button
+                                                                        .resolve(ui.style())
+                                                                        .size,
+                                                                    false,
+                                                                );
                                                                 let response = welcome_image_button(
                                                                     ui,
                                                                     image,
-                                                                    &profile.name,
+                                                                    title,
                                                                     text_dark(),
                                                                     enabled,
                                                                 );
@@ -295,7 +384,8 @@ impl Baboon {
                                                         }
                                                     }
                                                 }
-                                            });
+                                            },
+                                        );
 
                                         Frame::none().inner_margin(egui::Margin::same(28.0)).show(
                                             &mut columns[1],
@@ -518,7 +608,7 @@ fn section_heading(ui: &mut Ui, text: &str, color: Color32) {
 fn welcome_image_button(
     ui: &mut Ui,
     image: egui::Image<'static>,
-    text: &str,
+    text: impl Into<egui::WidgetText>,
     color: Color32,
     enabled: bool,
 ) -> egui::Response {
@@ -526,9 +616,15 @@ fn welcome_image_button(
         ui.visuals_mut().widgets.inactive.bg_fill = Color32::TRANSPARENT;
         ui.visuals_mut().widgets.inactive.weak_bg_fill = Color32::TRANSPARENT;
         ui.visuals_mut().widgets.inactive.bg_stroke = Stroke::NONE;
+        let text = text.into();
+        let text = if matches!(&text, egui::WidgetText::LayoutJob(_)) {
+            text
+        } else {
+            text.color(color)
+        };
         ui.add_enabled(
             enabled,
-            egui::Button::image_and_text(image, RichText::new(text).color(color))
+            egui::Button::image_and_text(image, text)
                 .min_size(Vec2::new(ui.available_width(), BUTTON_HEIGHT)),
         )
     })

@@ -27,12 +27,17 @@ fn every_shipped_h3_shader_option_decodes() {
     let mut decoded = 0usize;
     let mut failed: Vec<String> = Vec::new();
     let mut covered: Vec<String> = Vec::new();
-    for entry in walkdir::WalkDir::new(root).into_iter().filter_map(|e| e.ok()) {
+    for entry in walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
         let path = entry.path();
         if path.extension().and_then(|e| e.to_str()) != Some("render_method_option") {
             continue;
         }
-        let Ok(bytes) = std::fs::read(path) else { continue };
+        let Ok(bytes) = std::fs::read(path) else {
+            continue;
+        };
         let Ok(tag) = blam_tags::TagFile::read_from_bytes(&bytes) else {
             continue;
         };
@@ -52,8 +57,15 @@ fn every_shipped_h3_shader_option_decodes() {
         }
     }
 
-    assert!(decoded > 100, "only {decoded} option tag(s) decoded — kit incomplete?");
-    assert!(failed.is_empty(), "{} option tag(s) failed: {failed:?}", failed.len());
+    assert!(
+        decoded > 100,
+        "only {decoded} option tag(s) decoded — kit incomplete?"
+    );
+    assert!(
+        failed.is_empty(),
+        "{} option tag(s) failed: {failed:?}",
+        failed.len()
+    );
     assert_eq!(
         covered.len(),
         PREVIOUSLY_PANICKING.len(),

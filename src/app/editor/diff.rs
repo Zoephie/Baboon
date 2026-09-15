@@ -349,16 +349,20 @@ fn diff_structs(
             // elements have. Position is the last resort.
             let pairs = align_by_identity(&ids_a, &ids_b)
                 .or_else(|| {
-                    let fps_a: Vec<u64> =
-                        (0..ba.len()).map(|i| element_fingerprint(ba.element(i))).collect();
-                    let fps_b: Vec<u64> =
-                        (0..bb.len()).map(|i| element_fingerprint(bb.element(i))).collect();
+                    let fps_a: Vec<u64> = (0..ba.len())
+                        .map(|i| element_fingerprint(ba.element(i)))
+                        .collect();
+                    let fps_b: Vec<u64> = (0..bb.len())
+                        .map(|i| element_fingerprint(bb.element(i)))
+                        .collect();
                     // The same elements by their fixed fields alone, which
                     // survive an edit to anything nested inside them.
-                    let shallow_a: Vec<u64> =
-                        (0..ba.len()).map(|i| shallow_fingerprint(ba.element(i))).collect();
-                    let shallow_b: Vec<u64> =
-                        (0..bb.len()).map(|i| shallow_fingerprint(bb.element(i))).collect();
+                    let shallow_a: Vec<u64> = (0..ba.len())
+                        .map(|i| shallow_fingerprint(ba.element(i)))
+                        .collect();
+                    let shallow_b: Vec<u64> = (0..bb.len())
+                        .map(|i| shallow_fingerprint(bb.element(i)))
+                        .collect();
                     align_by_content(&fps_a, &fps_b, &shallow_a, &shallow_b)
                 })
                 .unwrap_or_else(|| {
@@ -558,13 +562,27 @@ fn dump_struct(
         if let Some(block) = field.as_block() {
             for i in 0..block.len() {
                 if let Some(element) = block.element(i) {
-                    dump_struct(&element, &format!("{field_path}[{i}]"), names, out, limit, added,);
+                    dump_struct(
+                        &element,
+                        &format!("{field_path}[{i}]"),
+                        names,
+                        out,
+                        limit,
+                        added,
+                    );
                 }
             }
         } else if let Some(array) = field.as_array() {
             for i in 0..array.len() {
                 if let Some(element) = array.element(i) {
-                    dump_struct(&element, &format!("{field_path}[{i}]"), names, out, limit, added,);
+                    dump_struct(
+                        &element,
+                        &format!("{field_path}[{i}]"),
+                        names,
+                        out,
+                        limit,
+                        added,
+                    );
                 }
             }
         } else if let Some(inner) = field.as_struct() {
@@ -654,7 +672,10 @@ mod alignment_tests {
         assert!(align_by_identity(&ids(&["a", "a"]), &ids(&["a", "b"])).is_none());
         assert!(align_by_identity(&ids(&["a", "b"]), &ids(&["a", "a"])).is_none());
         assert!(align_by_identity(&[None, Some("a".into())], &ids(&["a", "b"])).is_none());
-        assert!(align_by_identity(&[], &[]).is_some(), "two empty blocks align trivially");
+        assert!(
+            align_by_identity(&[], &[]).is_some(),
+            "two empty blocks align trivially"
+        );
     }
 
     /// An insertion shifts everything below it without reordering anything.
@@ -696,7 +717,9 @@ mod alignment_tests {
     fn deleting_one_anonymous_element_is_one_deletion() {
         let a = [10, 20, 30, 40, 50];
         let b = [10, 20, 40, 50];
-        let pairs = super::align_by_content(&a, &b, &distinct(a.len()), &distinct_from(a.len(), b.len())).expect("aligns");
+        let pairs =
+            super::align_by_content(&a, &b, &distinct(a.len()), &distinct_from(a.len(), b.len()))
+                .expect("aligns");
         assert_eq!(
             pairs,
             vec![
@@ -716,7 +739,9 @@ mod alignment_tests {
     fn editing_an_anonymous_element_reads_as_a_modification() {
         let a = [10, 20, 30];
         let b = [10, 99, 30];
-        let pairs = super::align_by_content(&a, &b, &distinct(a.len()), &distinct_from(a.len(), b.len())).expect("aligns");
+        let pairs =
+            super::align_by_content(&a, &b, &distinct(a.len()), &distinct_from(a.len(), b.len()))
+                .expect("aligns");
         assert_eq!(
             pairs,
             vec![(Some(0), Some(0)), (Some(1), Some(1)), (Some(2), Some(2))]
@@ -729,7 +754,9 @@ mod alignment_tests {
     fn repeated_content_still_aligns() {
         let a = [0, 0, 0, 7];
         let b = [0, 0, 0, 0, 7];
-        let pairs = super::align_by_content(&a, &b, &distinct(a.len()), &distinct_from(a.len(), b.len())).expect("aligns");
+        let pairs =
+            super::align_by_content(&a, &b, &distinct(a.len()), &distinct_from(a.len(), b.len()))
+                .expect("aligns");
         let added: Vec<_> = pairs.iter().filter(|(x, _)| x.is_none()).collect();
         assert_eq!(added.len(), 1, "one element gained: {pairs:?}");
         assert!(

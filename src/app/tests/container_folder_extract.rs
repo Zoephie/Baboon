@@ -180,7 +180,11 @@ fn the_menu_count_descends_into_subfolders() {
     let tree = node(
         "objects",
         &[0],
-        vec![node("objects/characters", &[], vec![node("objects/characters/elite", &[1, 2], Vec::new())])],
+        vec![node(
+            "objects/characters",
+            &[],
+            vec![node("objects/characters/elite", &[1, 2], Vec::new())],
+        )],
     );
 
     assert_eq!(

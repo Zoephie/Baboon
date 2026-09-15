@@ -101,10 +101,21 @@ mod slashed_field_names {
         );
         // Ordinary names are untouched, and markup is cleaned exactly as the
         // engine's own addressing does.
-        assert_eq!(escape_field_path_segment("parameter type"), "parameter type");
-        assert_eq!(escape_field_path_segment("parameter name^"), "parameter name");
+        assert_eq!(
+            escape_field_path_segment("parameter type"),
+            "parameter type"
+        );
+        assert_eq!(
+            escape_field_path_segment("parameter name^"),
+            "parameter name"
+        );
         // Whatever the engine says a clean name is, this has to agree with it.
-        for raw in ["int/bool", "aiming/looking", "max nodes/vertex", "Densities (g/mL)"] {
+        for raw in [
+            "int/bool",
+            "aiming/looking",
+            "max nodes/vertex",
+            "Densities (g/mL)",
+        ] {
             assert_eq!(
                 escape_field_path_segment(raw),
                 blam_tags::field_name::clean_field_name(raw).into_owned(),
@@ -129,7 +140,11 @@ mod slashed_field_names {
         let prefix = render_method_edit_prefix(&tag);
         let block = append_field_path(&prefix, "parameters");
 
-        for name in ["no_dynamic_lights", "use_material_texture", "order3_area_specular"] {
+        for name in [
+            "no_dynamic_lights",
+            "use_material_texture",
+            "order3_area_specular",
+        ] {
             let op = ShaderParamOp {
                 parameters_block_path: block.clone(),
                 parameter_name: name.to_owned(),
@@ -161,7 +176,9 @@ mod slashed_field_names {
             .expect("parameters block");
         let mut enabled = Vec::new();
         for index in 0..parameters.len() {
-            let Some(element) = parameters.element(index) else { continue };
+            let Some(element) = parameters.element(index) else {
+                continue;
+            };
             let name = element
                 .field("parameter name")
                 .and_then(|field| field.value())
@@ -182,7 +199,11 @@ mod slashed_field_names {
                 enabled.push(name);
             }
         }
-        for expected in ["no_dynamic_lights", "use_material_texture", "order3_area_specular"] {
+        for expected in [
+            "no_dynamic_lights",
+            "use_material_texture",
+            "order3_area_specular",
+        ] {
             assert!(
                 enabled.iter().any(|name| name == expected),
                 "{expected} is not enabled in the saved tag; enabled: {enabled:?}"
@@ -223,7 +244,9 @@ fn structural_shader_references_resolve_to_editable_reference_fields() {
     let mut rmop_cache = std::collections::HashMap::new();
     let mut checked = 0usize;
     for entry in walkdir_shaders(&root).into_iter().take(400) {
-        let Ok(tag) = blam_tags::TagFile::read(&entry) else { continue };
+        let Ok(tag) = blam_tags::TagFile::read(&entry) else {
+            continue;
+        };
         let Some(model) = super::build_shader_editor_model(
             &tag,
             u32::from_be_bytes(*b"rmsh"),
@@ -267,7 +290,10 @@ fn structural_shader_references_resolve_to_editable_reference_fields() {
                     panic!("{}: shader template path does not resolve", entry.display())
                 });
             let Some(blam_tags::TagFieldData::TagReference(reference)) = field.value() else {
-                panic!("{}: `shader template` is not a tag reference", entry.display());
+                panic!(
+                    "{}: `shader template` is not a tag reference",
+                    entry.display()
+                );
             };
             assert_eq!(
                 reference.group_tag_and_name.map(|(_, name)| name),
@@ -281,7 +307,10 @@ fn structural_shader_references_resolve_to_editable_reference_fields() {
             break;
         }
     }
-    assert!(checked > 0, "no shader in this tag tree built a grid to check");
+    assert!(
+        checked > 0,
+        "no shader in this tag tree built a grid to check"
+    );
     println!("checked {checked} shader(s)");
 }
 
@@ -289,7 +318,9 @@ fn walkdir_shaders(root: &std::path::Path) -> Vec<std::path::PathBuf> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
-        let Ok(rd) = std::fs::read_dir(&dir) else { continue };
+        let Ok(rd) = std::fs::read_dir(&dir) else {
+            continue;
+        };
         for entry in rd.flatten() {
             let path = entry.path();
             if path.is_dir() {
@@ -331,7 +362,9 @@ fn committing_a_structural_reference_rewrites_the_tag() {
     let mut rmop_cache = std::collections::HashMap::new();
 
     for entry in walkdir_shaders(&root).into_iter().take(400) {
-        let Ok(mut tag) = blam_tags::TagFile::read(&entry) else { continue };
+        let Ok(mut tag) = blam_tags::TagFile::read(&entry) else {
+            continue;
+        };
         let Some(model) = super::build_shader_editor_model(
             &tag,
             u32::from_be_bytes(*b"rmsh"),
@@ -359,7 +392,10 @@ fn committing_a_structural_reference_rewrites_the_tag() {
             &mut dirty,
         );
         assert!(
-            applied.outcomes.iter().all(|outcome| outcome.result.is_ok()),
+            applied
+                .outcomes
+                .iter()
+                .all(|outcome| outcome.result.is_ok()),
             "{}: commit failed: {:?}",
             entry.display(),
             applied.status
@@ -374,7 +410,10 @@ fn committing_a_structural_reference_rewrites_the_tag() {
             panic!("definition stopped being a tag reference");
         };
         assert_eq!(
-            reference.group_tag_and_name.map(|(_, name)| name).as_deref(),
+            reference
+                .group_tag_and_name
+                .map(|(_, name)| name)
+                .as_deref(),
             Some(after),
             "{}: the reference did not take the committed value",
             entry.display()
@@ -393,9 +432,8 @@ fn committing_a_structural_reference_rewrites_the_tag() {
 /// something it can parse a reference to.
 #[test]
 fn reference_extensions_resolve_from_the_games_own_metadata() {
-    let names = crate::format::TagNameIndex::load_from_definitions(
-        &crate::app::locate_definitions_root(),
-    );
+    let names =
+        crate::format::TagNameIndex::load_from_definitions(&crate::app::locate_definitions_root());
     names.publish_as_process_group_names();
     for (extension, fourcc) in [
         ("render_method_definition", b"rmdf"),
@@ -409,7 +447,7 @@ fn reference_extensions_resolve_from_the_games_own_metadata() {
         );
         // And the parser that the field editor commits through agrees.
         let parsed = crate::app::parse_tag_reference(&format!("shaders\\example.{extension}"))
-        .unwrap_or_else(|error| panic!("{extension}: {error}"));
+            .unwrap_or_else(|error| panic!("{extension}: {error}"));
         assert_eq!(
             parsed.group_tag_and_name,
             Some((u32::from_be_bytes(*fourcc), "shaders\\example".to_owned()))

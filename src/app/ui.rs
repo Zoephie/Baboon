@@ -329,19 +329,61 @@ fn editing_kit_menu_row_layout(row_rect: egui::Rect) -> EditingKitMenuRowLayout 
     let content = row_rect.shrink2(Vec2::new(EDITING_KIT_MENU_HORIZONTAL_PADDING, 2.0));
     let icon_rect = egui::Rect::from_center_size(
         egui::pos2(
-            content.right() - EDITING_KIT_MENU_ICON_SIZE * 0.5,
+            content.left() + EDITING_KIT_MENU_ICON_SIZE * 0.5,
             content.center().y,
         ),
         Vec2::splat(EDITING_KIT_MENU_ICON_SIZE),
     );
     let label_rect = egui::Rect::from_min_max(
-        content.min,
-        egui::pos2(icon_rect.left() - EDITING_KIT_MENU_ICON_GAP, content.max.y),
+        egui::pos2(icon_rect.right() + EDITING_KIT_MENU_ICON_GAP, content.min.y),
+        content.max,
     );
     EditingKitMenuRowLayout {
         label_rect,
         icon_rect,
     }
+}
+
+fn editing_kit_title_text(
+    ui: &Ui,
+    name: &str,
+    read_only: bool,
+    size: f32,
+    bold: bool,
+) -> egui::WidgetText {
+    editing_kit_title_text_with_style(ui.style(), name, read_only, size, bold)
+}
+
+fn editing_kit_title_text_with_style(
+    style: &egui::Style,
+    name: &str,
+    read_only: bool,
+    size: f32,
+    bold: bool,
+) -> egui::WidgetText {
+    let mut job = egui::text::LayoutJob::default();
+    let mut title = RichText::new(name).size(size).color(text_dark());
+    if bold {
+        title = title.strong();
+    }
+    title.append_to(
+        &mut job,
+        style,
+        egui::FontSelection::Default,
+        egui::Align::Center,
+    );
+    if read_only {
+        RichText::new(" (read-only)")
+            .size(size)
+            .color(text_dark().gamma_multiply(0.5))
+            .append_to(
+                &mut job,
+                style,
+                egui::FontSelection::Default,
+                egui::Align::Center,
+            );
+    }
+    job.into()
 }
 
 fn editing_kit_menu_row(
@@ -351,6 +393,26 @@ fn editing_kit_menu_row(
     texture: Option<&egui::TextureHandle>,
     default_project_icon: bool,
     enabled: bool,
+) -> egui::Response {
+    editing_kit_menu_row_with_read_only(
+        ui,
+        label,
+        fallback,
+        texture,
+        default_project_icon,
+        enabled,
+        false,
+    )
+}
+
+fn editing_kit_menu_row_with_read_only(
+    ui: &mut Ui,
+    label: &str,
+    fallback: &str,
+    texture: Option<&egui::TextureHandle>,
+    default_project_icon: bool,
+    enabled: bool,
+    read_only: bool,
 ) -> egui::Response {
     let row_height = ui
         .spacing()
@@ -366,11 +428,22 @@ fn editing_kit_menu_row(
     });
     let layout = editing_kit_menu_row_layout(response.rect);
     let text_color = text_dark();
-    ui.painter().with_clip_rect(layout.label_rect).text(
-        layout.label_rect.left_center(),
-        egui::Align2::LEFT_CENTER,
+    let title = editing_kit_title_text(
+        ui,
         label,
-        egui::TextStyle::Button.resolve(ui.style()),
+        read_only,
+        TextStyle::Button.resolve(ui.style()).size,
+        false,
+    )
+    .into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        TextStyle::Button,
+    );
+    ui.painter().with_clip_rect(layout.label_rect).galley(
+        layout.label_rect.left_center() - Vec2::new(0.0, title.size().y * 0.5),
+        title,
         text_color,
     );
     if let Some(texture) = texture {
@@ -458,24 +531,45 @@ fn draw_game_banner_header(
     path_label: &str,
     profile_id: Option<&str>,
 ) {
+    let texture = app.workspace_banner_texture(ui.ctx(), game, profile_id);
+    let title = profile_id
+        .and_then(|id| {
+            app.custom_editing_kit_profiles
+                .iter()
+                .find(|profile| profile.id == id)
+                .map(|profile| profile.name.clone())
+        })
+        .unwrap_or_else(|| {
+            format!(
+                "Tags - {} ({})",
+                game_display_name(game),
+                game_platform_label(game)
+            )
+        });
+    let read_only = app.custom_editing_kit_profiles.iter().any(|profile| {
+        profile.read_only
+            && profile.game != "haloce_evolved"
+            && (profile_id == Some(profile.id.as_str())
+                || profile.is_read_only_for(None, Some(Path::new(path_label))))
+    });
+    draw_kit_banner_tile(ui, &title, path_label, texture.as_ref(), read_only);
+}
+
+/// Used by the kit browser and the live editing-kit form preview.
+fn draw_kit_banner_tile(
+    ui: &mut Ui,
+    title_label: &str,
+    path_label: &str,
+    texture: Option<&egui::TextureHandle>,
+    read_only: bool,
+) {
     const EMBLEM: f32 = 72.0;
     const MARGIN: f32 = 8.0;
     const GAP: f32 = 8.0;
     const TITLE_TOP: f32 = 8.0;
-
-    let texture = app.workspace_banner_texture(ui.ctx(), game, profile_id);
     let card_width = ui.available_width();
     let text_width = (card_width - MARGIN * 2.0 - EMBLEM - GAP).max(1.0);
-    let title = egui::WidgetText::from(
-        RichText::new(format!(
-            "Tags - {} ({})",
-            game_display_name(game),
-            game_platform_label(game)
-        ))
-        .color(text_dark())
-        .strong(),
-    )
-    .into_galley(
+    let title = editing_kit_title_text(ui, title_label, read_only, 14.0, true).into_galley(
         ui,
         Some(egui::TextWrapMode::Wrap),
         text_width,
@@ -495,15 +589,7 @@ fn draw_game_banner_header(
     let (full, _) = ui.allocate_exact_size(Vec2::new(card_width, card_height), Sense::hover());
 
     let painter = ui.painter_at(full);
-    painter.rect_filled(
-        full,
-        0.0,
-        if is_dark_mode() {
-            Color32::from_rgb(43, 43, 41)
-        } else {
-            Color32::from_rgb(235, 235, 230)
-        },
-    );
+    painter.rect_filled(full, 0.0, foundation_documentation_bg());
     if let Some(texture) = texture {
         painter.image(
             texture.id(),

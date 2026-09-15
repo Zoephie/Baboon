@@ -88,8 +88,7 @@ pub(in crate::app) struct CreatedTagRecord {
 
 impl CreatedTagRecord {
     fn addresses(&self, utoc_path: &Path, ubulk_path: &str) -> bool {
-        Path::new(&self.utoc_path) == utoc_path
-            && self.ubulk_path.eq_ignore_ascii_case(ubulk_path)
+        Path::new(&self.utoc_path) == utoc_path && self.ubulk_path.eq_ignore_ascii_case(ubulk_path)
     }
 }
 
@@ -445,7 +444,10 @@ mod tests {
 
         assert_eq!(ledger.tags.len(), 1);
         assert_eq!(
-            ledger.find(Path::new(utoc), ubulk).unwrap().created_unix_secs,
+            ledger
+                .find(Path::new(utoc), ubulk)
+                .unwrap()
+                .created_unix_secs,
             99
         );
         assert!(ledger.forget(Path::new(utoc), ubulk));
@@ -498,8 +500,11 @@ mod tests {
         write_test_toc(&root.join("pakchunk1-Windows.utoc"), 5);
         assert_eq!(container_original_entry_count(&utoc), Some(122_804));
 
-        fs::write(root.join("pakchunk0-Windows.utoc.baboon-duplicate-backup-2"), b"not a toc")
-            .unwrap();
+        fs::write(
+            root.join("pakchunk0-Windows.utoc.baboon-duplicate-backup-2"),
+            b"not a toc",
+        )
+        .unwrap();
         assert_eq!(container_original_entry_count(&utoc), Some(122_804));
 
         let _ = fs::remove_dir_all(&root);
@@ -507,8 +512,10 @@ mod tests {
 
     #[test]
     fn an_unreadable_ledger_reads_as_empty_rather_than_failing_startup() {
-        assert!(serde_json::from_slice::<CreatedTagLedger>(b"{ not json")
-            .unwrap_or_default()
-            .is_empty());
+        assert!(
+            serde_json::from_slice::<CreatedTagLedger>(b"{ not json")
+                .unwrap_or_default()
+                .is_empty()
+        );
     }
 }

@@ -164,7 +164,12 @@ impl EditJournal {
     }
 }
 
-fn push_capped_into(stack: &mut Vec<Snapshot>, limit: usize, byte_limit: usize, snapshot: Snapshot,) {
+fn push_capped_into(
+    stack: &mut Vec<Snapshot>,
+    limit: usize,
+    byte_limit: usize,
+    snapshot: Snapshot,
+) {
     stack.push(snapshot);
     // Always keep the newest entry, even on its own over budget: dropping it
     // would mean an edit that cannot be undone at all.
@@ -211,7 +216,10 @@ mod tests {
                 &mut stack,
                 64,
                 budget,
-                Snapshot { bytes: Arc::new(vec![0; 400]), label: format!("edit {i}"), },
+                Snapshot {
+                    bytes: Arc::new(vec![0; 400]),
+                    label: format!("edit {i}"),
+                },
             );
         }
         assert_eq!(stack.len(), 2, "400 x 2 fits in 1000, 400 x 3 does not");
@@ -224,7 +232,10 @@ mod tests {
             &mut lone,
             64,
             budget,
-            Snapshot { bytes: Arc::new(vec![0; budget * 4]), label: "huge".to_owned(), },
+            Snapshot {
+                bytes: Arc::new(vec![0; budget * 4]),
+                label: "huge".to_owned(),
+            },
         );
         assert_eq!(lone.len(), 1);
     }

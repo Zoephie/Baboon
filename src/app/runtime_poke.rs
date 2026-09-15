@@ -135,7 +135,6 @@ const CU2_PROFILE: RuntimeBuildProfile = RuntimeBuildProfile {
     string_id_builtin_table_rva: 0x0083_0060,
 };
 
-
 impl RuntimeBuildProfile {
     fn rvas(&self) -> [u64; 8] {
         [
@@ -2062,7 +2061,10 @@ mod platform {
                     .find(|module| module.name.eq_ignore_ascii_case(PROCESS_NAME))
                     .and_then(|module| sha256(&module.path).ok());
                 let dll_sha256 = sha256(&dll.path)?;
-                println!("Game executable SHA256: {}", host_sha256.as_deref().unwrap_or("unknown"));
+                println!(
+                    "Game executable SHA256: {}",
+                    host_sha256.as_deref().unwrap_or("unknown")
+                );
                 println!("Tag module SHA256: {}", dll_sha256);
                 let profile = *PROFILES
                     .iter()

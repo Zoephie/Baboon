@@ -193,11 +193,20 @@ fn write_mesh(usd: &mut impl std::io::Write, prototype: &Prototype) {
 /// copy in a shared library.
 fn write_mesh_body(usd: &mut impl std::io::Write, mesh: &StaticMesh, material_path: &str) {
     let _ = writeln!(usd, "            def Mesh \"Mesh\" (");
-    let _ = writeln!(usd, "                prepend apiSchemas = [\"MaterialBindingAPI\"]");
+    let _ = writeln!(
+        usd,
+        "                prepend apiSchemas = [\"MaterialBindingAPI\"]"
+    );
     let _ = writeln!(usd, "                )");
     let _ = writeln!(usd, "            {{");
-    let _ = writeln!(usd, "                rel material:binding = {material_path}");
-    let _ = writeln!(usd, "                uniform token subdivisionScheme = \"none\"");
+    let _ = writeln!(
+        usd,
+        "                rel material:binding = {material_path}"
+    );
+    let _ = writeln!(
+        usd,
+        "                uniform token subdivisionScheme = \"none\""
+    );
     // Unreal winds its triangles clockwise; USD reads counter-clockwise as
     // front-facing unless told otherwise, which imports every surface
     // back-facing and reads as broken normals. The single-mesh exporters
@@ -205,7 +214,10 @@ fn write_mesh_body(usd: &mut impl std::io::Write, mesh: &StaticMesh, material_pa
     // level cannot: mirroring the geometry would mean mirroring every world
     // placement with it. Declaring the convention says the same thing and
     // leaves the world coordinates alone.
-    let _ = writeln!(usd, "                uniform token orientation = \"leftHanded\"");
+    let _ = writeln!(
+        usd,
+        "                uniform token orientation = \"leftHanded\""
+    );
 
     let _ = write!(usd, "                point3f[] points = [");
     for (index, vertex) in mesh.vertices.iter().enumerate() {
@@ -267,12 +279,7 @@ fn write_mesh_body(usd: &mut impl std::io::Write, mesh: &StaticMesh, material_pa
         }
         // Unreal's V runs down the image and USD's runs up.
         let [u, v] = vertex.uv;
-        let _ = write!(
-            usd,
-            "({}, {})",
-            number_f32(u),
-            number_f32(1.0 - v)
-        );
+        let _ = write!(usd, "({}, {})", number_f32(u), number_f32(1.0 - v));
     }
     let _ = writeln!(usd, "] (");
     let _ = writeln!(usd, "                    interpolation = \"vertex\"");
@@ -286,7 +293,12 @@ fn write_instance(
     prototype: &str,
     world: &WorldMatrix,
 ) {
-    write_instance_referencing(usd, index, &format!("</World/Prototypes/{prototype}>"), world);
+    write_instance_referencing(
+        usd,
+        index,
+        &format!("</World/Prototypes/{prototype}>"),
+        world,
+    );
 }
 
 /// A placement whose reference target is written out in full, so it can name a
@@ -423,9 +435,7 @@ pub(in crate::app) fn write_segmented_usd(
         .placements
         .iter()
         .enumerate()
-        .filter(|(_, placement)| {
-            matches!(prototypes.get(placement.mesh), Some(Some(_)))
-        })
+        .filter(|(_, placement)| matches!(prototypes.get(placement.mesh), Some(Some(_))))
         .map(|(index, placement)| {
             (
                 index,
@@ -600,11 +610,7 @@ fn write_library_prototype(usd: &mut impl std::io::Write, prototype: &Prototype)
     let _ = writeln!(usd, "                    token outputs:surface");
     let _ = writeln!(usd, "                }}");
     let _ = writeln!(usd, "            }}");
-    write_mesh_body(
-        usd,
-        mesh,
-        &format!("</World/Prototypes/{prim}/{material}>"),
-    );
+    write_mesh_body(usd, mesh, &format!("</World/Prototypes/{prim}/{material}>"));
     let _ = writeln!(usd, "        }}");
 }
 
@@ -878,7 +884,12 @@ pub(in crate::app) fn scene_to_usd(
             report.dropped_placements += 1;
             continue;
         };
-        write_instance(&mut usd, report.instances, &prototype.prim, &placement.world);
+        write_instance(
+            &mut usd,
+            report.instances,
+            &prototype.prim,
+            &placement.world,
+        );
         report.instances += 1;
     }
     let _ = writeln!(usd, "}}");
@@ -886,7 +897,10 @@ pub(in crate::app) fn scene_to_usd(
     report.prototypes = prototypes.iter().flatten().count();
     report.materials = materials.len();
     // Every byte written above is ASCII, so this cannot fail.
-    (String::from_utf8(usd).expect("the writer emits ASCII"), report)
+    (
+        String::from_utf8(usd).expect("the writer emits ASCII"),
+        report,
+    )
 }
 
 #[cfg(test)]
@@ -952,11 +966,7 @@ mod tests {
         // The reason for USD over a quaternion-and-one-scale format: a
         // reflection is just a matrix, so no placement needs baked geometry and
         // the instancing survives.
-        let usd = instance_text(
-            0,
-            "SM_Rock",
-            &compose([0.0; 3], [0.0; 3], [-1.3, 1.3, 1.3]),
-        );
+        let usd = instance_text(0, "SM_Rock", &compose([0.0; 3], [0.0; 3], [-1.3, 1.3, 1.3]));
         assert!(usd.contains("(-1.3, 0, 0, 0)"), "{usd}");
         assert!(usd.contains("instanceable = true"));
     }
@@ -1068,8 +1078,8 @@ mod real_data_tests {
         let (in_memory, memory_report) = scene_to_usd(&world, &scene, MeshDetail::Fallback);
 
         let path = std::env::temp_dir().join("baboon-streaming-parity.usda");
-        let stream_report =
-            write_scene_usd(&world, &scene, MeshDetail::Fallback, &path).expect("stream the export");
+        let stream_report = write_scene_usd(&world, &scene, MeshDetail::Fallback, &path)
+            .expect("stream the export");
         let streamed = std::fs::read_to_string(&path).expect("read back the export");
         let _ = std::fs::remove_file(&path);
 
@@ -1155,10 +1165,15 @@ mod segmented_tests {
             let path = directory.join(format!("c10_seg_{number:02}.usda"));
             let text = std::fs::read_to_string(&path).expect("a segment per count");
             // Placements only: geometry belongs to the library.
-            assert!(!text.contains("def Mesh "), "segment {number} carries geometry");
+            assert!(
+                !text.contains("def Mesh "),
+                "segment {number} carries geometry"
+            );
             assert!(text.starts_with("#usda 1.0"));
             assert!(text.contains("metersPerUnit = 0.01"));
-            let referencing = text.matches("@./c10_prototypes.usda@</World/Prototypes/").count();
+            let referencing = text
+                .matches("@./c10_prototypes.usda@</World/Prototypes/")
+                .count();
             let placed = text.matches("instanceable = true").count();
             assert_eq!(referencing, placed, "a placement referenced nothing");
             instances += placed;
@@ -1450,9 +1465,10 @@ mod sample_export {
         }
 
         let out_path = std::path::PathBuf::from(&out);
-        let report =
-            write_scene_usd(&world, &scene, detail, &out_path).expect("write the sample");
-        let written = std::fs::metadata(&out_path).map(|meta| meta.len()).unwrap_or(0);
+        let report = write_scene_usd(&world, &scene, detail, &out_path).expect("write the sample");
+        let written = std::fs::metadata(&out_path)
+            .map(|meta| meta.len())
+            .unwrap_or(0);
 
         let extent = scene.placements.iter().fold(
             ([f64::MAX; 3], [f64::MIN; 3]),
@@ -1532,9 +1548,16 @@ mod sample_export {
                 read_cell_into(&document, &mut scene);
             }
         }
-        let report =
-            write_segmented_usd(&world, &scene, detail, &directory, "c10", budget, &|_, _, _| {})
-                .expect("write");
+        let report = write_segmented_usd(
+            &world,
+            &scene,
+            detail,
+            &directory,
+            "c10",
+            budget,
+            &|_, _, _| {},
+        )
+        .expect("write");
         eprintln!(
             "wrote {} ({detail:?})\n\
              \x20 {} cells -> {} segments ({} over budget)\n\
@@ -1608,9 +1631,16 @@ mod sample_export {
             started.elapsed().as_secs_f64()
         );
         let started = std::time::Instant::now();
-        let report =
-            write_blend_export(&world, &scene, detail, &directory, "c10", budget, &|_, _, _| {})
-                .expect("write");
+        let report = write_blend_export(
+            &world,
+            &scene,
+            detail,
+            &directory,
+            "c10",
+            budget,
+            &|_, _, _| {},
+        )
+        .expect("write");
         eprintln!("wrote geometry in {:.1}s", started.elapsed().as_secs_f64());
         eprintln!(
             "wrote {} ({detail:?})\n\

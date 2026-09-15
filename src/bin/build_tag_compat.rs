@@ -75,7 +75,10 @@ fn main() {
     };
 
     if let Some(group) = suggest {
-        print!("{}", tag_compat_build::suggest_drops(&reports, group.as_deref()));
+        print!(
+            "{}",
+            tag_compat_build::suggest_drops(&reports, group.as_deref())
+        );
         return;
     }
 

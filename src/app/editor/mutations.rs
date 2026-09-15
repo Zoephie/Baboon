@@ -787,9 +787,7 @@ mod campaign_evolved_field_paths {
         if depth > 6 {
             return;
         }
-        for (chain_struct, chain_prefix) in
-            crate::app::foundation::inherited_struct_chain(st)
-        {
+        for (chain_struct, chain_prefix) in crate::app::foundation::inherited_struct_chain(st) {
             let base = if chain_prefix.is_empty() {
                 prefix.to_string()
             } else if prefix.is_empty() {

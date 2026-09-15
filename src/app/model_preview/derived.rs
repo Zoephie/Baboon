@@ -88,7 +88,9 @@ fn push_derived_batch(
         .indices
         .extend((0..triples.len() as u32).map(|offset| vertex_base + offset));
     let material_index = preview.materials.len().min(u16::MAX as usize) as u16;
-    preview.materials.push(RenderModelPreviewMaterial::default());
+    preview
+        .materials
+        .push(RenderModelPreviewMaterial::default());
     preview.batches.push(RenderModelPreviewBatch {
         region_name: region_name.to_owned(),
         permutation_name: "default".to_owned(),
@@ -101,7 +103,11 @@ fn push_derived_batch(
 }
 
 fn ensure_preview_region(preview: &mut RenderModelPreview, region_name: &str) {
-    if !preview.regions.iter().any(|region| region.name == region_name) {
+    if !preview
+        .regions
+        .iter()
+        .any(|region| region.name == region_name)
+    {
         preview.regions.push(RenderModelPreviewRegion {
             name: region_name.to_owned(),
             permutations: vec!["default".to_owned()],
@@ -117,7 +123,10 @@ fn empty_preview() -> RenderModelPreview {
     }
 }
 
-fn finish_preview(mut preview: RenderModelPreview, what: &str) -> Result<RenderModelPreview, String> {
+fn finish_preview(
+    mut preview: RenderModelPreview,
+    what: &str,
+) -> Result<RenderModelPreview, String> {
     if preview.vertices.is_empty() {
         return Err(format!("This {what} has no previewable geometry."));
     }
@@ -292,11 +301,26 @@ fn push_box(triples: &mut Vec<([f32; 3], [f32; 3])>, shape: &blam_tags::JmsBox) 
     // Six faces, two triangles each, wound outward.
     let faces: [[[f32; 3]; 4]; 6] = [
         [[-1., -1., 1.], [1., -1., 1.], [1., 1., 1.], [-1., 1., 1.]], // +z
-        [[-1., 1., -1.], [1., 1., -1.], [1., -1., -1.], [-1., -1., -1.]], // -z
+        [
+            [-1., 1., -1.],
+            [1., 1., -1.],
+            [1., -1., -1.],
+            [-1., -1., -1.],
+        ], // -z
         [[1., -1., -1.], [1., 1., -1.], [1., 1., 1.], [1., -1., 1.]], // +x
-        [[-1., -1., 1.], [-1., 1., 1.], [-1., 1., -1.], [-1., -1., -1.]], // -x
+        [
+            [-1., -1., 1.],
+            [-1., 1., 1.],
+            [-1., 1., -1.],
+            [-1., -1., -1.],
+        ], // -x
         [[-1., 1., -1.], [-1., 1., 1.], [1., 1., 1.], [1., 1., -1.]], // +y
-        [[1., -1., -1.], [1., -1., 1.], [-1., -1., 1.], [-1., -1., -1.]], // -y
+        [
+            [1., -1., -1.],
+            [1., -1., 1.],
+            [-1., -1., 1.],
+            [-1., -1., -1.],
+        ], // -y
     ];
     for face in faces {
         let quad = face.map(|[x, y, z]| corner(x, y, z));
@@ -314,7 +338,11 @@ fn push_capsule(triples: &mut Vec<([f32; 3], [f32; 3])>, capsule: &blam_tags::Jm
     // center, so the cylinder spans z ∈ [0, height] with hemispheres beyond.
     let place = |z: f32, ring_radius: f32, segment: usize, z_offset: f32| -> [f32; 3] {
         let phi = std::f32::consts::TAU * segment as f32 / SPHERE_SEGMENTS as f32;
-        let local = [ring_radius * phi.cos(), ring_radius * phi.sin(), z + z_offset];
+        let local = [
+            ring_radius * phi.cos(),
+            ring_radius * phi.sin(),
+            z + z_offset,
+        ];
         let r = rotate(&capsule.rotation, local);
         [r[0] + center[0], r[1] + center[1], r[2] + center[2]]
     };
@@ -487,7 +515,9 @@ fn ass_to_preview(ass: &AssFile, render_only: bool) -> RenderModelPreview {
         .map(|_| RenderModelPreviewMaterial::default())
         .collect();
     if preview.materials.is_empty() {
-        preview.materials.push(RenderModelPreviewMaterial::default());
+        preview
+            .materials
+            .push(RenderModelPreviewMaterial::default());
     }
 
     for instance in &ass.instances {
@@ -597,8 +627,7 @@ pub(super) fn build_sbsp_preview(
                 Ok(jms) => append_jms_triangles(&mut preview, &jms, "render", None, true),
                 Err(error) => return Err(error.to_string()),
             }
-            if !render_only
-                && let Ok(jms) = JmsFile::from_scenario_structure_bsp_ce_collision(tag)
+            if !render_only && let Ok(jms) = JmsFile::from_scenario_structure_bsp_ce_collision(tag)
             {
                 append_jms_triangles(
                     &mut preview,
@@ -648,7 +677,9 @@ fn build_sbsp_preview_h3(tag: &TagFile, render_only: bool) -> Result<RenderModel
     let mut preview = empty_preview();
     preview.materials = sbsp_preview_materials(&root);
     if preview.materials.is_empty() {
-        preview.materials.push(RenderModelPreviewMaterial::default());
+        preview
+            .materials
+            .push(RenderModelPreviewMaterial::default());
     }
 
     let clusters = root
@@ -656,7 +687,9 @@ fn build_sbsp_preview_h3(tag: &TagFile, render_only: bool) -> Result<RenderModel
         .and_then(|field| field.as_block())
         .ok_or("This structure BSP has no clusters block.")?;
     let defs = root
-        .field_path("resource interface/raw_resources[0]/raw_items/instanced geometries definitions")
+        .field_path(
+            "resource interface/raw_resources[0]/raw_items/instanced geometries definitions",
+        )
         .and_then(|field| field.as_block());
     let instances = root
         .field_path("instanced geometry instances")
@@ -702,9 +735,10 @@ fn build_sbsp_preview_h3(tag: &TagFile, render_only: bool) -> Result<RenderModel
         for index in 0..instances.len() {
             let instance = instances.element(index).unwrap();
             let def_index = instance.read_int_any("instance definition").unwrap_or(-1);
-            let Some(def) = usize::try_from(def_index).ok().and_then(|i| {
-                (i < defs.len()).then(|| defs.element(i).unwrap())
-            }) else {
+            let Some(def) = usize::try_from(def_index)
+                .ok()
+                .and_then(|i| (i < defs.len()).then(|| defs.element(i).unwrap()))
+            else {
                 continue;
             };
             let mesh_index = def.read_int_any("mesh index").unwrap_or(-1);
@@ -713,7 +747,9 @@ fn build_sbsp_preview_h3(tag: &TagFile, render_only: bool) -> Result<RenderModel
             };
             let flip = mesh_compression
                 .get(&(mesh_index as usize))
-                .map(|&compression| bounds_axis_flip(&read_compression_bounds_at(&root, compression)))
+                .map(|&compression| {
+                    bounds_axis_flip(&read_compression_bounds_at(&root, compression))
+                })
                 .unwrap_or(false);
             let placement = InstancePlacement {
                 forward: vector(&instance.read_vec3("forward")),
@@ -756,7 +792,10 @@ fn build_sbsp_preview_h3(tag: &TagFile, render_only: bool) -> Result<RenderModel
 /// mesh parts' `material_index` — the same contract the render_model preview
 /// keeps, so `resolve_model_textures` needs nothing new.
 fn sbsp_preview_materials(root: &TagStruct<'_>) -> Vec<RenderModelPreviewMaterial> {
-    let Some(block) = root.field_path("materials").and_then(|field| field.as_block()) else {
+    let Some(block) = root
+        .field_path("materials")
+        .and_then(|field| field.as_block())
+    else {
         return Vec::new();
     };
     (0..block.len())
@@ -801,9 +840,12 @@ impl InstancePlacement {
             1.0
         };
         [
-            self.position[0] + s * (self.forward[0] * p[0] + self.left[0] * p[1] + self.up[0] * p[2]),
-            self.position[1] + s * (self.forward[1] * p[0] + self.left[1] * p[1] + self.up[1] * p[2]),
-            self.position[2] + s * (self.forward[2] * p[0] + self.left[2] * p[1] + self.up[2] * p[2]),
+            self.position[0]
+                + s * (self.forward[0] * p[0] + self.left[0] * p[1] + self.up[0] * p[2]),
+            self.position[1]
+                + s * (self.forward[1] * p[0] + self.left[1] * p[1] + self.up[1] * p[2]),
+            self.position[2]
+                + s * (self.forward[2] * p[0] + self.left[2] * p[1] + self.up[2] * p[2]),
         ]
     }
 
@@ -946,14 +988,13 @@ fn append_sbsp_collision(root: &TagStruct<'_>, preview: &mut RenderModelPreview)
 /// Walk one collision BSP's surfaces: each surface rings its edges (an edge
 /// belongs to two surfaces; which side it is on decides start-vs-end vertex
 /// and forward-vs-reverse continuation), then fan-triangulates the ring.
-fn append_collision_bsp_triangles(
-    bsp: &TagStruct<'_>,
-    triples: &mut Vec<([f32; 3], [f32; 3])>,
-) {
+fn append_collision_bsp_triangles(bsp: &TagStruct<'_>, triples: &mut Vec<([f32; 3], [f32; 3])>) {
     let (Some(surfaces), Some(edges), Some(vertices)) = (
-        bsp.field_path("surfaces").and_then(|field| field.as_block()),
+        bsp.field_path("surfaces")
+            .and_then(|field| field.as_block()),
         bsp.field_path("edges").and_then(|field| field.as_block()),
-        bsp.field_path("vertices").and_then(|field| field.as_block()),
+        bsp.field_path("vertices")
+            .and_then(|field| field.as_block()),
     ) else {
         return;
     };
@@ -1060,20 +1101,27 @@ pub(super) fn merge_preview_append(dst: &mut RenderModelPreview, src: &RenderMod
             continue;
         }
         let index_start = dst.indices.len() as u32;
-        dst.indices
-            .extend(src.indices[start..end].iter().map(|index| index + vertex_base));
+        dst.indices.extend(
+            src.indices[start..end]
+                .iter()
+                .map(|index| index + vertex_base),
+        );
         dst.batches.push(RenderModelPreviewBatch {
             region_name: batch.region_name.clone(),
             permutation_name: batch.permutation_name.clone(),
-            material_index: (batch.material_index as usize + material_base)
-                .min(u16::MAX as usize) as u16,
+            material_index: (batch.material_index as usize + material_base).min(u16::MAX as usize)
+                as u16,
             index_start,
             index_count: (end - start) as u32,
             flat_color: batch.flat_color,
         });
     }
     for region in &src.regions {
-        if !dst.regions.iter().any(|existing| existing.name == region.name) {
+        if !dst
+            .regions
+            .iter()
+            .any(|existing| existing.name == region.name)
+        {
             dst.regions.push(region.clone());
         }
     }

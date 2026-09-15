@@ -8,7 +8,6 @@ pub fn index_path(game: &str) -> PathBuf {
     app_cache_path(&format!("{game}_index.json"), "Baboon", "baboon")
 }
 
-
 /// Legacy JSON reverse-dependency path. New saves use [`index_db_path`].
 pub fn reverse_dependency_index_path(game: &str) -> PathBuf {
     app_cache_path(
@@ -231,58 +230,56 @@ fn refresh_entry_index_from_cache(
     // is deterministic before the sort below rather than dependent on which
     // thread finished first.
     let chunks: Vec<ResolvedFiles> = std::thread::scope(|scope| -> Result<Vec<ResolvedFiles>> {
-            let mut handles = Vec::new();
-            for chunk in paths.chunks(chunk_size) {
-                let cached_by_rel = &cached_by_rel;
-                let added = &added;
-                let updated = &updated;
-                handles.push(scope.spawn(move || -> Result<ResolvedFiles> {
-                        let mut resolved = Vec::with_capacity(chunk.len());
-                        for path in chunk {
-                            let rel = path.strip_prefix(root).unwrap_or(path.as_path());
-                            let rel_key = normalize_rel_path(rel);
-                            let fingerprint = file_fingerprint(path)?;
-                            if let (Some(cached), Some(current)) =
-                                (cached_by_rel.get(&rel_key), fingerprint.as_ref())
-                                && cached_fingerprints
-                                    .get(&rel_key)
-                                    .is_some_and(|cached_fp| cached_fp == current)
-                            {
-                                resolved.push((rel_key, Some(cached.clone())));
-                                continue;
+        let mut handles = Vec::new();
+        for chunk in paths.chunks(chunk_size) {
+            let cached_by_rel = &cached_by_rel;
+            let added = &added;
+            let updated = &updated;
+            handles.push(scope.spawn(move || -> Result<ResolvedFiles> {
+                let mut resolved = Vec::with_capacity(chunk.len());
+                for path in chunk {
+                    let rel = path.strip_prefix(root).unwrap_or(path.as_path());
+                    let rel_key = normalize_rel_path(rel);
+                    let fingerprint = file_fingerprint(path)?;
+                    if let (Some(cached), Some(current)) =
+                        (cached_by_rel.get(&rel_key), fingerprint.as_ref())
+                        && cached_fingerprints
+                            .get(&rel_key)
+                            .is_some_and(|cached_fp| cached_fp == current)
+                    {
+                        resolved.push((rel_key, Some(cached.clone())));
+                        continue;
+                    }
+                    let known = cached_by_rel.contains_key(&rel_key);
+                    match loose_file_entry(root, path, names)? {
+                        Some(entry) => {
+                            if known {
+                                updated.fetch_add(1, Ordering::Relaxed);
+                            } else {
+                                added.fetch_add(1, Ordering::Relaxed);
                             }
-                            let known = cached_by_rel.contains_key(&rel_key);
-                            match loose_file_entry(root, path, names)? {
-                                Some(entry) => {
-                                    if known {
-                                        updated.fetch_add(1, Ordering::Relaxed);
-                                    } else {
-                                        added.fetch_add(1, Ordering::Relaxed);
-                                    }
-                                    resolved.push((rel_key, Some(entry)));
-                                }
-                                None => {
-                                    if known {
-                                        updated.fetch_add(1, Ordering::Relaxed);
-                                    }
-                                    resolved.push((rel_key, None));
-                                }
-                            }
+                            resolved.push((rel_key, Some(entry)));
                         }
-                        Ok(resolved)
-                    },
-                ));
-            }
-            handles
-                .into_iter()
-                .map(|handle| {
-                    handle
-                        .join()
-                        .map_err(|_| anyhow!("entry index refresh worker panicked"))?
-                })
-                .collect()
-        },
-    )?;
+                        None => {
+                            if known {
+                                updated.fetch_add(1, Ordering::Relaxed);
+                            }
+                            resolved.push((rel_key, None));
+                        }
+                    }
+                }
+                Ok(resolved)
+            }));
+        }
+        handles
+            .into_iter()
+            .map(|handle| {
+                handle
+                    .join()
+                    .map_err(|_| anyhow!("entry index refresh worker panicked"))?
+            })
+            .collect()
+    })?;
 
     let mut seen = HashSet::with_capacity(paths.len());
     let mut entries = Vec::with_capacity(paths.len());

@@ -5,6 +5,50 @@ use super::*;
 use std::collections::{HashMap, HashSet};
 
 #[test]
+fn editing_kit_read_only_titles_use_a_muted_suffix_without_changing_the_name() {
+    let style = foundation_style();
+    for read_only in [false, true] {
+        let egui::WidgetText::LayoutJob(job) =
+            editing_kit_title_text_with_style(&style, "Protected kit", read_only, 14.0, true)
+        else {
+            panic!("expected styled title");
+        };
+        assert_eq!(
+            job.text,
+            if read_only {
+                "Protected kit (read-only)"
+            } else {
+                "Protected kit"
+            }
+        );
+        assert_eq!(job.sections[0].format.color, text_dark());
+        if read_only {
+            assert_eq!(
+                job.sections[1].format.color,
+                text_dark().gamma_multiply(0.5)
+            );
+        }
+    }
+    let ctx = egui::Context::default();
+    ctx.set_style(style);
+    let output = ctx.run(Default::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            editing_kit_menu_row_with_read_only(ui, "Protected kit", "EK", None, true, true, true);
+            draw_kit_banner_tile(ui, "Protected kit", "C:/Kits/Protected", None, true);
+        });
+    });
+    assert_eq!(
+        output
+            .shapes
+            .iter()
+            .filter(|shape| matches!(&shape.shape,
+        egui::Shape::Text(text) if text.galley.text() == "Protected kit (read-only)"))
+            .count(),
+        2
+    );
+}
+
+#[test]
 fn shared_browser_buttons_use_standard_point_sizes() {
     for scale in [MIN_UI_SCALE, MAX_UI_SCALE] {
         let ctx = egui::Context::default();
@@ -43,8 +87,7 @@ fn shared_browser_buttons_use_standard_point_sizes() {
 
 #[test]
 fn pane_header_breadcrumbs_accumulate_clickable_folder_paths() {
-    let (breadcrumbs, title) =
-        pane_header_path_parts("objects\\characters/brute/brute.biped");
+    let (breadcrumbs, title) = pane_header_path_parts("objects\\characters/brute/brute.biped");
 
     assert_eq!(title, "brute.biped");
     assert_eq!(
@@ -235,6 +278,7 @@ fn shared_menu_entries_put_custom_profiles_first_in_creation_order() {
     std::fs::create_dir_all(h2.join("tags")).unwrap();
     let profiles = vec![
         CustomEditingKitProfile {
+            read_only: false,
             id: "one".to_owned(),
             name: "First".to_owned(),
             game: "halo3_mcc".to_owned(),
@@ -242,6 +286,7 @@ fn shared_menu_entries_put_custom_profiles_first_in_creation_order() {
             icon: None,
         },
         CustomEditingKitProfile {
+            read_only: false,
             id: "two".to_owned(),
             name: "Second".to_owned(),
             game: "haloreach_mcc".to_owned(),
@@ -318,8 +363,7 @@ fn editing_kit_menu_rows_keep_icons_aligned_and_separators_outside_click_targets
             |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     ui.set_min_width(EDITING_KIT_MENU_MIN_WIDTH);
-                    first_row =
-                        editing_kit_menu_row(ui, "Halo 4", "H4", None, false, true).rect;
+                    first_row = editing_kit_menu_row(ui, "Halo 4", "H4", None, false, true).rect;
                     separator = ui.separator().rect;
                     second_row = editing_kit_menu_row(
                         ui,
@@ -345,8 +389,8 @@ fn editing_kit_menu_rows_keep_icons_aligned_and_separators_outside_click_targets
         assert!(first_row.contains(first_layout.icon_rect.min));
         assert!(first_row.contains(first_layout.icon_rect.max));
         assert!(
-            first_layout.label_rect.right() + EDITING_KIT_MENU_ICON_GAP
-                <= first_layout.icon_rect.left()
+            first_layout.icon_rect.right() + EDITING_KIT_MENU_ICON_GAP
+                <= first_layout.label_rect.left()
         );
         assert!(first_row.max.y <= separator.min.y);
         assert!(separator.max.y <= second_row.min.y);

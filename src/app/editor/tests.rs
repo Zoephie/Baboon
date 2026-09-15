@@ -1425,8 +1425,7 @@ mod tests {
         );
 
         let bounds = root.field("angle bounds").unwrap();
-        let TagFieldData::AngleBounds(stored) =
-            parse_gui_field_value(&bounds, "0.25..2").unwrap()
+        let TagFieldData::AngleBounds(stored) = parse_gui_field_value(&bounds, "0.25..2").unwrap()
         else {
             panic!("expected angle bounds");
         };
@@ -2065,11 +2064,11 @@ mod tag_diff_tests {
         // The same tag out of a loose folder is refused for the other reason —
         // the MCC writer emits a little-endian header, so there is no
         // round-trip for these bytes wherever they came from.
-        let loose_be = camera_track_entry(TagEntryLocation::LooseFile("example.camera_track".into()));
+        let loose_be =
+            camera_track_entry(TagEntryLocation::LooseFile("example.camera_track".into()));
         assert!(is_editable_tag(&loose_be, &tag));
         assert!(
-            unsaveable_reason(&loose_be, &tag)
-                .is_some_and(|reason| reason.contains("big-endian"))
+            unsaveable_reason(&loose_be, &tag).is_some_and(|reason| reason.contains("big-endian"))
         );
 
         // And the gate can still say yes: an ordinary little-endian loose tag
@@ -2182,11 +2181,15 @@ mod tag_diff_tests {
             };
 
             if let Err(error) = apply_field_edit(&mut tag, &path, &value.to_string()) {
-                failures.push(format!("{} / {path}: edit failed: {error}", entry.display_path));
+                failures.push(format!(
+                    "{} / {path}: edit failed: {error}",
+                    entry.display_path
+                ));
                 continue;
             }
             let read_back = tag.root().field_path(&path).and_then(|field| field.value());
-            if !matches!(read_back, Some(TagFieldData::Real(back)) if (back - value).abs() < 0.001) {
+            if !matches!(read_back, Some(TagFieldData::Real(back)) if (back - value).abs() < 0.001)
+            {
                 failures.push(format!(
                     "{} / {path}: read back as {read_back:?}, not the value typed",
                     entry.display_path

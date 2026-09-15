@@ -52,7 +52,11 @@ fn the_checked_in_database_matches_the_definitions_it_was_built_from() {
 
     let connection = rusqlite::Connection::open(&output).expect("open the checked-in database");
     let stored: String = connection
-        .query_row("SELECT value FROM meta WHERE key='content_digest'", [], |row| row.get(0))
+        .query_row(
+            "SELECT value FROM meta WHERE key='content_digest'",
+            [],
+            |row| row.get(0),
+        )
         .expect("the database records a content digest");
     assert_eq!(
         stored,
@@ -81,8 +85,14 @@ fn the_animation_graph_reports_its_four_size_changed_structs() {
         CompatVerdict::SourceOnly,
         "Reach carries node flags Campaign Evolved does not, so the group is lossy",
     );
-    assert!(jmad.blocked_reason.is_none(), "it converts, it is not refused");
-    assert!(jmad.source_only_fields >= 2, "at least the two node-flag bytes");
+    assert!(
+        jmad.blocked_reason.is_none(),
+        "it converts, it is not refused"
+    );
+    assert!(
+        jmad.source_only_fields >= 2,
+        "at least the two node-flag bytes"
+    );
 }
 
 /// The alias rescue has to survive the trip into the database, or the sheet
@@ -103,7 +113,10 @@ fn the_blend_screen_rename_reaches_the_database_as_a_rename() {
         .find(|row| row.source_name.as_deref() == Some("weight source"))
         .expect("Reach declares a blend-screen weight source");
     assert_eq!(renamed.verdict, CompatVerdict::RenamedProvable);
-    assert_eq!(renamed.target_name.as_deref(), Some("primary weight source"));
+    assert_eq!(
+        renamed.target_name.as_deref(),
+        Some("primary weight source")
+    );
     assert_eq!(renamed.rule, "schema_alias");
 }
 
@@ -139,7 +152,10 @@ fn a_group_only_one_game_defines_is_listed_with_a_reason() {
         .expect("skull_globals must be listed even though Reach lacks it");
     assert_eq!(ce_only.verdict, CompatVerdict::HardBlocked);
     assert!(
-        ce_only.blocked_reason.as_deref().is_some_and(|r| r.contains("haloreach_mcc")),
+        ce_only
+            .blocked_reason
+            .as_deref()
+            .is_some_and(|r| r.contains("haloreach_mcc")),
         "the reason must name the game that lacks it: {:?}",
         ce_only.blocked_reason,
     );
@@ -156,7 +172,10 @@ fn the_two_games_share_the_expected_number_of_groups() {
         .iter()
         .filter(|group| group.blocked_reason.is_none())
         .count();
-    assert_eq!(shared, 131, "Reach and Campaign Evolved share 131 tag groups");
+    assert_eq!(
+        shared, 131,
+        "Reach and Campaign Evolved share 131 tag groups"
+    );
 }
 
 /// Every reviewed rename scoped to this pair has to actually fire. A rule
@@ -184,7 +203,10 @@ fn every_reviewed_rename_for_this_pair_matches_a_field() {
             }
         }
     }
-    assert!(stale.is_empty(), "reviewed renames that match nothing: {stale:?}");
+    assert!(
+        stale.is_empty(),
+        "reviewed renames that match nothing: {stale:?}"
+    );
 }
 
 /// `--suggest-drops` has to emit something a reviewer can paste, for the group
@@ -205,12 +227,17 @@ fn suggested_drops_name_the_animation_graph_losses() {
         .filter_map(|entry| entry["source_path"].as_str())
         .collect();
     for expected in ["node joint flags", "additional flags"] {
-        assert!(paths.contains(&expected), "{expected} should be suggested: {paths:?}");
+        assert!(
+            paths.contains(&expected),
+            "{expected} should be suggested: {paths:?}"
+        );
     }
     for entry in entries {
         assert_eq!(entry["group"], "model_animation_graph");
         assert!(
-            entry["reason"].as_str().is_some_and(|r| r.contains("REVIEW")),
+            entry["reason"]
+                .as_str()
+                .is_some_and(|r| r.contains("REVIEW")),
             "a suggestion is a prompt to review, not a decision",
         );
     }
@@ -228,7 +255,11 @@ fn the_csv_leads_with_losses_and_quotes_correctly() {
     let _ = std::fs::remove_dir_all(&directory);
 
     let mut lines = text.lines();
-    assert!(lines.next().is_some_and(|header| header.starts_with("source_game,")));
+    assert!(
+        lines
+            .next()
+            .is_some_and(|header| header.starts_with("source_game,"))
+    );
     let first = lines.next().expect("at least one row");
     assert!(
         first.contains("hard_blocked") || first.contains("source_only"),

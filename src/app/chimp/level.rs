@@ -137,9 +137,7 @@ pub(in crate::app) fn multiply(a: &WorldMatrix, b: &WorldMatrix) -> WorldMatrix 
     let mut out = [0f64; 16];
     for row in 0..4 {
         for column in 0..4 {
-            out[row * 4 + column] = (0..4)
-                .map(|k| a[row * 4 + k] * b[k * 4 + column])
-                .sum();
+            out[row * 4 + column] = (0..4).map(|k| a[row * 4 + k] * b[k * 4 + column]).sum();
         }
     }
     out
@@ -185,9 +183,7 @@ pub(in crate::app) fn compose(
 fn vec3(value: &PropValue) -> Option<[f64; 3]> {
     match value {
         PropValue::Native(NativeStruct::Vec3d(v)) => Some(*v),
-        PropValue::Native(NativeStruct::Vec3f(v)) => {
-            Some([v[0] as f64, v[1] as f64, v[2] as f64])
-        }
+        PropValue::Native(NativeStruct::Vec3f(v)) => Some([v[0] as f64, v[1] as f64, v[2] as f64]),
         _ => None,
     }
 }
@@ -446,7 +442,10 @@ mod tests {
         let mut scene = LevelScene::default();
         scene.place("/Game/SM_Tree", IDENTITY);
         scene.place("/Game/SM_Rock", IDENTITY);
-        scene.place("/Game/SM_Tree", compose([5.0, 0.0, 0.0], [0.0; 3], [1.0; 3]));
+        scene.place(
+            "/Game/SM_Tree",
+            compose([5.0, 0.0, 0.0], [0.0; 3], [1.0; 3]),
+        );
         assert_eq!(scene.meshes, ["/Game/SM_Tree", "/Game/SM_Rock"]);
         assert_eq!(scene.placements.len(), 3);
         assert_eq!(scene.placements[2].mesh, 0);
@@ -549,8 +548,7 @@ mod scaling_probe {
                 bulk_data: &bulk,
                 resolver: Some(&resolver),
             };
-            for ((entry, payload), class) in
-                header.export_map.iter().zip(&payloads).zip(&resolved)
+            for ((entry, payload), class) in header.export_map.iter().zip(&payloads).zip(&resolved)
             {
                 exports_seen += 1;
                 if let Some(class) = class.as_deref() {

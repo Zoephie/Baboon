@@ -31,9 +31,8 @@ fn frame(
         },
         |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                let response = ui.add(
-                    egui::Slider::new(pending, MIN_UI_SCALE..=MAX_UI_SCALE).show_value(false),
-                );
+                let response = ui
+                    .add(egui::Slider::new(pending, MIN_UI_SCALE..=MAX_UI_SCALE).show_value(false));
                 rect = response.rect;
                 if crate::app::ui::first_run::commit_ui_scale_now(&response, *pending, *live) {
                     *live = *pending;
@@ -120,8 +119,20 @@ fn a_click_on_the_track_is_not_swallowed() {
     let rect = frame(&ctx, &mut pending, &mut live, Vec::new(), None);
     let at = egui::pos2(rect.left() + rect.width() * 0.85, rect.center().y);
 
-    frame(&ctx, &mut pending, &mut live, vec![button(at, true)], Some(at));
-    frame(&ctx, &mut pending, &mut live, vec![button(at, false)], Some(at));
+    frame(
+        &ctx,
+        &mut pending,
+        &mut live,
+        vec![button(at, true)],
+        Some(at),
+    );
+    frame(
+        &ctx,
+        &mut pending,
+        &mut live,
+        vec![button(at, false)],
+        Some(at),
+    );
 
     assert_ne!(pending, DEFAULT_UI_SCALE, "the click moved the slider");
     assert_eq!(live, pending, "and the window followed it");

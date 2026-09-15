@@ -62,7 +62,8 @@ fn report_where_a_single_bitmap_conversion_spends_its_time() {
     );
 
     let clock = Instant::now();
-    let target_groups = blam_tags::convert::GameTagIndex::load(&definitions, "haloreach_mcc").unwrap();
+    let target_groups =
+        blam_tags::convert::GameTagIndex::load(&definitions, "haloreach_mcc").unwrap();
     eprintln!(
         "GameTagIndex::load:              {:>8.0} ms",
         clock.elapsed().as_secs_f64() * 1000.0
@@ -168,7 +169,9 @@ fn report_how_deep_the_template_hunt_has_to_dig() {
             if first_accepted.is_none() {
                 bytes_to_first += size;
             }
-            let Ok(tag) = TagFile::read(path) else { continue };
+            let Ok(tag) = TagFile::read(path) else {
+                continue;
+            };
             if tag.header.version != u32::MAX {
                 accepted += 1;
                 if first_accepted.is_none() {
@@ -218,7 +221,9 @@ fn report_whether_smallest_first_finds_a_template_sooner() {
         for (size, path) in &sized {
             opened += 1;
             read_bytes += size;
-            let Ok(tag) = TagFile::read(path) else { continue };
+            let Ok(tag) = TagFile::read(path) else {
+                continue;
+            };
             if tag.header.version != u32::MAX {
                 found = Some(path.clone());
                 break;

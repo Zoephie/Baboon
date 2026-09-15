@@ -280,7 +280,9 @@ mod tests {
 
     #[test]
     fn tag_extract_menu_covers_every_group_with_an_asset_extractor() {
-        for group in [b"hlmt", b"mode", b"mod2", b"coll", b"phmo", b"jmad", b"antr"] {
+        for group in [
+            b"hlmt", b"mode", b"mod2", b"coll", b"phmo", b"jmad", b"antr",
+        ] {
             assert!(supports_tag_extract_menu(u32::from_be_bytes(*group)));
         }
         // Per-asset extraction moved into this menu, so the button has to enable

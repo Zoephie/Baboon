@@ -37,7 +37,6 @@ struct TagPaneBehavior<'a> {
     pending_browser_action: Option<BrowserAction>,
 }
 
-
 impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
     fn pane_ui(
         &mut self,
@@ -68,8 +67,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             {
                 self.focused = Some(key.clone());
             }
-            self.app
-                .draw_bitmap_library(ui, &self.ctx, self.kit_index);
+            self.app.draw_bitmap_library(ui, &self.ctx, self.kit_index);
             return egui_tiles::UiResponse::None;
         }
         if key == MODEL_LIBRARY_KEY {
@@ -78,8 +76,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             {
                 self.focused = Some(key.clone());
             }
-            self.app
-                .draw_model_library(ui, &self.ctx, self.kit_index);
+            self.app.draw_model_library(ui, &self.ctx, self.kit_index);
             return egui_tiles::UiResponse::None;
         }
         if key == BLAM_KEY {
@@ -166,7 +163,9 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
 
     fn tab_title_for_pane(&mut self, pane: &String) -> egui::WidgetText {
         if pane == BITMAP_LIBRARY_KEY {
-            return RichText::new(BITMAP_LIBRARY_TITLE).color(text_dark()).into();
+            return RichText::new(BITMAP_LIBRARY_TITLE)
+                .color(text_dark())
+                .into();
         }
         if pane == MODEL_LIBRARY_KEY {
             return RichText::new(MODEL_LIBRARY_TITLE).color(text_dark()).into();
@@ -191,15 +190,15 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             .get(pane)
             .map(|(label, _)| label.clone())
             .unwrap_or_else(|| pane.clone());
-        let text = if dirty {
-            format!("• {label}")
-        } else {
-            label
-        };
+        let text = if dirty { format!("• {label}") } else { label };
         RichText::new(text).color(text_dark()).into()
     }
 
-    fn is_tab_closable(&self, _tiles: &egui_tiles::Tiles<String>, _tile_id: egui_tiles::TileId,) -> bool {
+    fn is_tab_closable(
+        &self,
+        _tiles: &egui_tiles::Tiles<String>,
+        _tile_id: egui_tiles::TileId,
+    ) -> bool {
         true
     }
 
@@ -418,7 +417,11 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         tile_id: egui_tiles::TileId,
         state: &egui_tiles::TabState,
     ) -> Color32 {
-        let base = if state.active { active_tab() } else { row_type() };
+        let base = if state.active {
+            active_tab()
+        } else {
+            row_type()
+        };
         let dirty = matches!(tiles.get(tile_id), Some(egui_tiles::Tile::Pane(key))
             if self.app.kits[self.kit_index]
                 .parsed_tags
@@ -450,7 +453,9 @@ impl TagPaneBehavior<'_> {
         if key == BITMAP_LIBRARY_KEY || key == MODEL_LIBRARY_KEY || key == BLAM_KEY {
             return None;
         }
-        self.tab_labels.get(key).and_then(|(_, group_tag)| *group_tag)
+        self.tab_labels
+            .get(key)
+            .and_then(|(_, group_tag)| *group_tag)
     }
 }
 
@@ -469,7 +474,9 @@ impl Baboon {
         // it hashes all 24,000 keys rather than comparing a few thousand that
         // mostly differ early.
         for tile in tree.tiles.tiles() {
-            let egui_tiles::Tile::Pane(key) = tile else { continue; };
+            let egui_tiles::Tile::Pane(key) = tile else {
+                continue;
+            };
             if labels.contains_key(key) {
                 continue;
             }

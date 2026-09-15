@@ -80,7 +80,10 @@ fn extracting_a_gen3_particle_model_writes_a_resolvable_jmi() {
         &out,
     )
     .expect("extract particle geometry");
-    assert!(summary.contains("8 objects"), "unexpected summary: {summary}");
+    assert!(
+        summary.contains("8 objects"),
+        "unexpected summary: {summary}"
+    );
 
     // The manifest must sit where `import particle model` expects, and
     // every line it names must resolve to a real JMS beside it. A
@@ -103,9 +106,16 @@ fn extracting_a_gen3_particle_model_writes_a_resolvable_jmi() {
             .join(name)
             .join("render")
             .join(format!("{name}.JMS"));
-        assert!(jms.is_file(), "manifest names `{name}` but {} is missing", jms.display());
+        assert!(
+            jms.is_file(),
+            "manifest names `{name}` but {} is missing",
+            jms.display()
+        );
         let body = std::fs::read_to_string(&jms).expect("read JMS");
-        assert!(body.contains(";### VERTICES ###"), "`{name}` JMS has no vertices section");
+        assert!(
+            body.contains(";### VERTICES ###"),
+            "`{name}` JMS has no vertices section"
+        );
     }
 
     // Lowercase, because tool.exe's manifest-vs-directory check is a
@@ -140,7 +150,10 @@ fn extracting_a_halo2_particle_model_keeps_its_object_names() {
         &out,
     )
     .expect("extract particle geometry");
-    assert!(summary.contains("10 objects"), "unexpected summary: {summary}");
+    assert!(
+        summary.contains("10 objects"),
+        "unexpected summary: {summary}"
+    );
     assert!(
         !summary.contains("numbered from the tag name"),
         "Halo 2 stores its object names — the summary must not say otherwise: {summary}",

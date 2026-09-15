@@ -1,8 +1,8 @@
 //! The recent-folders menu, shared by the File menu and the kit tab bar.
 //! It owns presentation and choice collection; opening and forgetting belong to the controller.
 
-use super::*;
 use super::shell::recent_folder_menu_label;
+use super::*;
 
 /// What the user picked from a recents menu.
 pub(super) enum RecentAction {
@@ -82,10 +82,7 @@ pub(super) fn draw_recent_folders_menu(ui: &mut Ui, recents: &[PathBuf]) -> Opti
                 ui.close_menu();
             }
             if ui
-                .add_sized(
-                    [clear_width, row_height],
-                    egui::Button::new("×"),
-                )
+                .add_sized([clear_width, row_height], egui::Button::new("×"))
                 .on_hover_text("Remove from recent folders")
                 .clicked()
             {

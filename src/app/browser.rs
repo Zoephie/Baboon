@@ -80,9 +80,7 @@ pub(in crate::app) fn set_browser_favorite_folders(
     ui.data_mut(|data| data.insert_temp(favorite_folders_id(), folders));
 }
 
-pub(in crate::app) fn browser_favorite_folders(
-    ui: &Ui,
-) -> Option<std::sync::Arc<Vec<PathBuf>>> {
+pub(in crate::app) fn browser_favorite_folders(ui: &Ui) -> Option<std::sync::Arc<Vec<PathBuf>>> {
     ui.data(|data| data.get_temp::<Option<std::sync::Arc<Vec<PathBuf>>>>(favorite_folders_id()))
         .flatten()
 }

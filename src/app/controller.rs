@@ -15,6 +15,7 @@ use terminal::{
     stream_terminal_output, trim_terminal_lines,
 };
 mod tools;
+pub(super) use tools::add_standard_editing_kit_profiles;
 use tools::*;
 mod scenario_launch;
 mod tool_drop;
@@ -618,9 +619,8 @@ fn looks_like_absolute_windows_path(path: &Path) -> bool {
         && bytes[0].is_ascii_alphabetic()
         && bytes[1] == b':'
         && matches!(bytes[2], b'\\' | b'/');
-    let network_or_device_absolute = bytes.len() >= 2
-        && matches!(bytes[0], b'\\' | b'/')
-        && matches!(bytes[1], b'\\' | b'/');
+    let network_or_device_absolute =
+        bytes.len() >= 2 && matches!(bytes[0], b'\\' | b'/') && matches!(bytes[1], b'\\' | b'/');
     drive_absolute || network_or_device_absolute
 }
 
@@ -1219,8 +1219,10 @@ impl Baboon {
             }
         });
         mounted.or_else(|| {
-            let configured = self.editing_kit_paths.get("haloce_evolved")?;
-            crate::source::find_paks_dir(configured)
+            self.custom_editing_kit_profiles
+                .iter()
+                .filter(|profile| profile.game == "haloce_evolved")
+                .find_map(|profile| crate::source::find_paks_dir(&profile.root))
         })
     }
 
@@ -1435,6 +1437,9 @@ impl Baboon {
             return;
         }
         // Campaign Evolved containers have no loose tags folder to write into —
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
         // create the tag purely in memory and let Save / Export Mod write it.
         if self.current_source_is_container() {
             self.create_new_container_tag();
@@ -1724,6 +1729,9 @@ impl Baboon {
     /// parse it, validate its schema against our JSON, and seed the dialog.
     /// `folder_rel` pre-fills the destination folder (from a right-clicked node).
     pub(super) fn begin_import_tag(&mut self, folder_rel: Option<String>) {
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
         if !self.current_source_is_container() {
             self.status = "Import tag is only for Campaign Evolved containers".to_owned();
             return;
@@ -1840,6 +1848,9 @@ impl Baboon {
         if !self.focus_navigation_kit(kit) {
             self.import_tag_dialog = None;
             self.status = "The workspace this import came from is closed".to_owned();
+            return;
+        }
+        if self.refuse_read_only_edit(self.active) {
             return;
         }
         let Some(dialog) = self.import_tag_dialog.as_mut() else {
@@ -1977,6 +1988,9 @@ impl Baboon {
     /// Replace an existing container tag's document with imported bytes, marked
     /// dirty (no pak write). Opens/selects the tab.
     fn apply_import_over_existing(&mut self, key: &str, tag: TagFile) {
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
         self.kits[self.active].open_tag_pane(key);
         self.kits[self.active].selected_key = Some(key.to_owned());
         self.kits[self.active]
@@ -2738,6 +2752,9 @@ impl Baboon {
     /// Starts the configured command without blocking frame rendering.
     /// Output and completion return through ordered worker messages for the active run id.
     pub(super) fn spawn_terminal_command(&mut self, command: String, ctx: egui::Context) {
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
         if self.terminal.running {
             self.status = "A command is already running".to_owned();
             return;
@@ -4672,6 +4689,9 @@ impl Baboon {
     /// first — synchronously, since the result has to be mutated in the same
     /// step rather than handed to a worker.
     pub(super) fn import_scenario_scripts(&mut self, key: &str) {
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
         if !self.active_game_is_campaign_evolved() {
             self.status = "Script import is only available for Campaign Evolved".to_owned();
             return;
@@ -4794,6 +4814,9 @@ impl Baboon {
     }
 
     pub(super) fn save_current_tag(&mut self) {
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
         let Some(key) = self.kits[self.active].selected_key.clone() else {
             self.status = "No tag selected".to_owned();
             return;
@@ -4836,6 +4859,9 @@ impl Baboon {
     }
 
     pub(super) fn save_tag_by_key(&mut self, key: &str) -> Result<PathBuf, String> {
+        if self.refuse_read_only_edit(self.active) {
+            return Err(self.status.clone());
+        }
         let Some(entry) = self.entry_for_key(key).cloned() else {
             return Err("Selected tag is no longer in the source".to_owned());
         };
@@ -4983,6 +5009,9 @@ impl Baboon {
     /// **Destructive** — modifies the shipped game files. Only reached after the
     /// user confirms the overwrite dialog.
     pub(super) fn overwrite_current_tag_in_place(&mut self, key: &str) {
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
         let Some(entry) = self.entry_for_key(key).cloned() else {
             self.status = "Tag is no longer in the source".to_owned();
             return;
@@ -6005,6 +6034,9 @@ impl Baboon {
     }
 
     pub(super) fn save_current_tag_as(&mut self) {
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
         let Some(key) = self.kits[self.active].selected_key.clone() else {
             self.status = "No tag selected".to_owned();
             return;
@@ -6062,6 +6094,9 @@ impl Baboon {
     }
 
     pub(super) fn fix_current_tag_dependencies(&mut self) {
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
         let Some(key) = self.kits[self.active].selected_key.clone() else {
             self.status = "No tag selected".to_owned();
             return;
@@ -6137,14 +6172,23 @@ impl Baboon {
     /// Open the rename/move dialog for a tag, pre-listing the tags that
     /// reference it (which will be rewritten on apply).
     pub(super) fn open_rename_tag(&mut self, key: &str) {
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
         self.open_name_operation(key, TagNameOperation::Rename);
     }
 
     pub(super) fn open_container_duplicate(&mut self, key: &str) {
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
         self.open_name_operation(key, TagNameOperation::SaveAsOverlay);
     }
 
     pub(super) fn open_duplicate_tag(&mut self, key: &str) {
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
         self.open_name_operation(key, TagNameOperation::Duplicate);
     }
 
@@ -6286,6 +6330,9 @@ impl Baboon {
         if !self.focus_navigation_kit(kit) {
             self.rename_tag = None;
             self.status = "The workspace this rename came from is closed".to_owned();
+            return;
+        }
+        if self.refuse_read_only_edit(self.active) {
             return;
         }
         let Some((
@@ -7407,6 +7454,9 @@ impl Baboon {
             self.set_tsv_paste_status("The workspace this paste came from is closed.");
             return;
         }
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
         let Some(paste) = self.tsv_paste.as_ref() else {
             return;
         };
@@ -7566,6 +7616,9 @@ impl Baboon {
     }
 
     pub(super) fn undo_current_tag(&mut self) {
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
         let Some(key) = self.kits[self.active].selected_key.clone() else {
             self.status = "Nothing to undo".to_owned();
             return;
@@ -7578,6 +7631,9 @@ impl Baboon {
     }
 
     pub(super) fn redo_current_tag(&mut self) {
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
         let Some(key) = self.kits[self.active].selected_key.clone() else {
             self.status = "Nothing to redo".to_owned();
             return;
@@ -7638,6 +7694,9 @@ impl Baboon {
     }
 
     pub(super) fn can_undo_current(&self) -> bool {
+        if self.editing_kit_is_read_only(self.active) {
+            return false;
+        }
         self.kits[self.active]
             .selected_key
             .as_ref()
@@ -7646,6 +7705,9 @@ impl Baboon {
     }
 
     pub(super) fn can_redo_current(&self) -> bool {
+        if self.editing_kit_is_read_only(self.active) {
+            return false;
+        }
         self.kits[self.active]
             .selected_key
             .as_ref()
@@ -7695,6 +7757,32 @@ impl Baboon {
 
     pub(super) fn editing_kit_root(&self) -> Option<PathBuf> {
         self.editing_kit_root_for(self.active)
+    }
+
+    pub(in crate::app) fn editing_kit_is_read_only(&self, kit_index: usize) -> bool {
+        let Some(kit) = self.kits.get(kit_index) else {
+            return false;
+        };
+        let root =
+            self.editing_kit_root_for(kit_index)
+                .or_else(|| match &kit.source.as_ref()?.source {
+                    TagSource::SingleFile { path } => Some(path.clone()),
+                    _ => None,
+                });
+        self.custom_editing_kit_profiles
+            .iter()
+            .any(|profile| profile.is_read_only_for(kit.profile.as_ref(), root.as_deref()))
+    }
+
+    pub(in crate::app) fn refuse_read_only_edit(&mut self, kit_index: usize) -> bool {
+        if self.editing_kit_is_read_only(kit_index) {
+            self.status =
+                "This editing kit is read-only. Change its Editing Kit settings to enable editing."
+                    .to_owned();
+            true
+        } else {
+            false
+        }
     }
 
     pub(super) fn editing_kit_root_for(&self, kit_index: usize) -> Option<PathBuf> {
@@ -7922,6 +8010,15 @@ impl Baboon {
         ctx: egui::Context,
     ) {
         let Some(path) = self.editing_kit_paths.get(shortcut.game).cloned() else {
+            if let Some(profile) = self
+                .custom_editing_kit_profiles
+                .iter()
+                .find(|profile| profile.game == shortcut.game)
+                .cloned()
+            {
+                self.load_custom_editing_kit_profile(profile, ctx);
+                return;
+            }
             self.prompt_for_editing_kit_path(
                 shortcut,
                 format!("Set the {} path in Settings first", shortcut.label),
@@ -7964,7 +8061,13 @@ impl Baboon {
             );
             return;
         };
-        let Some(path) = self.editing_kit_paths.get(shortcut.game).cloned() else {
+        let Some(path) = self
+            .custom_editing_kit_profiles
+            .iter()
+            .find(|profile| profile.game == shortcut.game)
+            .map(|profile| profile.root.clone())
+            .or_else(|| self.editing_kit_paths.get(shortcut.game).cloned())
+        else {
             self.status = format!(
                 "Command line: set the {} path in Settings before launching tags",
                 launch.kit_label
@@ -8063,6 +8166,14 @@ impl Baboon {
                 return false;
             }
         };
+        if profile.game == "haloce_evolved" {
+            self.begin_load_folder_path(profile.root.clone(), ctx);
+            self.kits[self.active].profile = Some(EditingKitProfileIdentity {
+                id: profile.id,
+                name: profile.name,
+            });
+            return true;
+        }
         self.begin_load_editing_kit_layout(
             layout,
             profile.game.clone(),
@@ -8165,12 +8276,23 @@ impl Baboon {
 
     pub(super) fn auto_detect_editing_kit_paths(&mut self) {
         let detected = detect_editing_kit_paths();
-        let added = apply_detected_editing_kit_paths(
-            &mut self.editing_kit_paths,
-            &mut self.editing_kit_path_inputs,
-            &mut self.editing_kit_path_attention,
-            &detected,
-        );
+        let previous = self.custom_editing_kit_profiles.clone();
+        let added =
+            add_standard_editing_kit_profiles(&mut self.custom_editing_kit_profiles, &detected);
+        if added > 0 {
+            let prefs = self.current_prefs();
+            if let Err(error) = save_gui_prefs(
+                &prefs,
+                &self.terminal_open_games,
+                self.first_run_wizard.is_none(),
+            ) {
+                self.custom_editing_kit_profiles = previous;
+                self.status = error;
+                return;
+            }
+            self.saved_prefs = prefs;
+            self.saved_terminal_open_games = self.terminal_open_games.clone();
+        }
         self.refresh_editing_kit_validation();
         self.status = if added == 0 {
             "No new editing kit paths detected".to_owned()
@@ -8351,6 +8473,11 @@ impl Baboon {
     /// Run a geometry Import request (`tool render/collision/physics/...`)
     /// streamed to the terminal panel.
     pub(super) fn process_pending_tool_import(&mut self, ctx: &egui::Context) {
+        if self.editing_kit_is_read_only(self.active) {
+            self.pending_tool_import = None;
+            self.refuse_read_only_edit(self.active);
+            return;
+        }
         let Some(req) = self.pending_tool_import.take() else {
             return;
         };
@@ -8365,6 +8492,9 @@ impl Baboon {
     /// Queue the same editing-kit geometry import that a compatible tag
     /// reference offers, deriving the tool source folder from the clicked tag.
     pub(super) fn begin_reimport_geometry(&mut self, key: &str) {
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
         let Some(entry) = self.entry_for_key(key).cloned() else {
             self.status = "The tag is no longer in the browser".to_owned();
             return;
@@ -8386,6 +8516,9 @@ impl Baboon {
     /// Starts potentially expensive source or export work off the UI thread.
     /// The worker owns cloned inputs and reports status without mutating UI state.
     pub(super) fn begin_reimport_bitmap(&mut self, key: String, ctx: egui::Context) {
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
         if self.terminal.running {
             self.status = "A command is already running".to_owned();
             return;
@@ -8493,6 +8626,10 @@ impl Baboon {
             });
         if do_apply {
             let routed = confirm_kit.is_some_and(|kit| self.focus_navigation_kit(kit));
+            if routed && self.refuse_read_only_edit(self.active) {
+                self.block_confirm = None;
+                return;
+            }
             if let Some(confirm) = self.block_confirm.take()
                 && routed
             {

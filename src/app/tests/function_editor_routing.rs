@@ -102,7 +102,10 @@ fn a_new_functions_bytes_match_what_the_engine_writes() {
     assert_eq!(function.function_type(), FunctionType::Identity);
     assert!(function.flags().is_clamped(), "CLAMPED");
     assert!(function.flags().is_gpu(), "GPU");
-    assert!(!function.flags().is_optimized(), "postprocess clears OPTIMIZED");
+    assert!(
+        !function.flags().is_optimized(),
+        "postprocess clears OPTIMIZED"
+    );
 }
 
 /// Halo 2 models a function as a typed `MAPP` struct rather than a `data` blob,
@@ -126,7 +129,9 @@ fn halo2_functions_are_left_to_the_legacy_path() {
         let mut field = root
             .field_path_mut("parameters[0]/animation properties")
             .expect("animation properties field resolves");
-        let mut anim = field.as_block_mut().expect("animation properties is a block");
+        let mut anim = field
+            .as_block_mut()
+            .expect("animation properties is a block");
         anim.add_element();
     }
 

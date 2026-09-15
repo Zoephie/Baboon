@@ -119,14 +119,7 @@ pub(in crate::app) fn draw_preview_panel_toggle<T: Copy + PartialEq>(
 ) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
-        if view_tab_button(
-            ui,
-            ButtonIcon::DefaultTag,
-            "Tag Fields",
-            *active == fields,
-        )
-        .clicked()
-        {
+        if view_tab_button(ui, ButtonIcon::DefaultTag, "Tag Fields", *active == fields).clicked() {
             *active = fields;
         }
         if view_tab_button(ui, preview_icon, preview_label, *active == preview).clicked() {
@@ -135,9 +128,26 @@ pub(in crate::app) fn draw_preview_panel_toggle<T: Copy + PartialEq>(
     });
 }
 
-fn view_tab_button(
+pub(in crate::app) fn view_tab_button(
     ui: &mut Ui,
     icon: ButtonIcon,
+    label: &str,
+    selected: bool,
+) -> egui::Response {
+    view_tab_button_optional_icon(ui, Some(icon), label, selected)
+}
+
+pub(in crate::app) fn view_text_tab_button(
+    ui: &mut Ui,
+    label: &str,
+    selected: bool,
+) -> egui::Response {
+    view_tab_button_optional_icon(ui, None, label, selected)
+}
+
+fn view_tab_button_optional_icon(
+    ui: &mut Ui,
+    icon: Option<ButtonIcon>,
     label: &str,
     selected: bool,
 ) -> egui::Response {
@@ -148,8 +158,13 @@ fn view_tab_button(
         .painter()
         .layout_no_wrap(label.to_owned(), font_id, text_dark());
     let content_height = BUTTON_ICON_SIZE.max(galley.size().y);
+    let icon_width = if icon.is_some() {
+        BUTTON_ICON_SIZE + BUTTON_ICON_TEXT_GAP
+    } else {
+        0.0
+    };
     let size = Vec2::new(
-        PADDING_X * 2.0 + BUTTON_ICON_SIZE + BUTTON_ICON_TEXT_GAP + galley.size().x,
+        PADDING_X * 2.0 + icon_width + galley.size().x,
         PADDING_Y * 2.0 + content_height,
     );
     let (rect, response) = ui.allocate_exact_size(size, Sense::click());
@@ -170,10 +185,11 @@ fn view_tab_button(
     }
     if selected {
         let stroke = Stroke::new(2.0, ui.visuals().selection.stroke.color);
-        ui.painter().hline(rect.x_range(), rect.bottom() - stroke.width / 2.0, stroke);
+        ui.painter()
+            .hline(rect.x_range(), rect.bottom() - stroke.width / 2.0, stroke);
     }
 
-    let content_width = BUTTON_ICON_SIZE + BUTTON_ICON_TEXT_GAP + galley.size().x;
+    let content_width = icon_width + galley.size().x;
     let content_rect = egui::Align2::CENTER_CENTER
         .align_size_within_rect(Vec2::new(content_width, content_height), rect);
     let icon_rect = egui::Rect::from_min_size(
@@ -183,9 +199,11 @@ fn view_tab_button(
         ),
         Vec2::splat(BUTTON_ICON_SIZE),
     );
-    paint_button_icon_at(ui, icon, icon_rect, color);
+    if let Some(icon) = icon {
+        paint_button_icon_at(ui, icon, icon_rect, color);
+    }
     let text_rect = egui::Rect::from_min_max(
-        egui::pos2(icon_rect.right() + BUTTON_ICON_TEXT_GAP, content_rect.top()),
+        egui::pos2(content_rect.left() + icon_width, content_rect.top()),
         content_rect.right_bottom(),
     );
     let text_pos = egui::Align2::LEFT_CENTER

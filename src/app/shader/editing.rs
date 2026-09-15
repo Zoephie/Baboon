@@ -1493,7 +1493,10 @@ pub(in crate::app) fn draw_shader_editable_value(
         // field-edit path. Nothing is reconciled afterwards, which matches
         // Foundation — it carries no shader-aware code to reconcile with, and
         // its expert mode is a blanket field-panel switch.
-        ShaderRowEditKind::StructuralRef { group_tag, extension } => {
+        ShaderRowEditKind::StructuralRef {
+            group_tag,
+            extension,
+        } => {
             let (group_tag, extension) = (*group_tag, *extension);
             let current = row_edit.current.clone();
             let browse_rect = egui::Rect::from_min_size(
@@ -1517,7 +1520,11 @@ pub(in crate::app) fn draw_shader_editable_value(
             ui.painter().rect_filled(
                 open_rect,
                 0.0,
-                if open_enabled { material_input() } else { material_disabled_input() },
+                if open_enabled {
+                    material_input()
+                } else {
+                    material_disabled_input()
+                },
             );
             ui.painter()
                 .rect_stroke(open_rect, 0.0, Stroke::new(1.0, material_input_edge()));
@@ -1526,7 +1533,11 @@ pub(in crate::app) fn draw_shader_editable_value(
                 ui,
                 ButtonIcon::Open,
                 icon_rect,
-                if open_enabled { material_text() } else { material_muted_text() },
+                if open_enabled {
+                    material_text()
+                } else {
+                    material_muted_text()
+                },
             );
             if open_enabled
                 && ui
@@ -1626,8 +1637,10 @@ pub(in crate::app) fn draw_shader_editable_value(
                 }
             }
             if let Some(input) = commit {
-                edit.pending
-                    .push(PendingFieldEdit { path: row_edit.path.clone(), input });
+                edit.pending.push(PendingFieldEdit {
+                    path: row_edit.path.clone(),
+                    input,
+                });
             }
             edit.buffers.put(buffer_key, draft);
         }
@@ -1958,8 +1971,7 @@ pub(in crate::app) fn draw_shader_editable_value(
             let mut commit_val: Option<f32> = None;
             ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                 ui.visuals_mut().extreme_bg_color = material_input();
-                let resp =
-                    draw_h2_value_prefixed_text_edit(ui, id, &mut draft.text, rect.width());
+                let resp = draw_h2_value_prefixed_text_edit(ui, id, &mut draft.text, rect.width());
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
                 select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
@@ -1986,8 +1998,7 @@ pub(in crate::app) fn draw_shader_editable_value(
             let mut commit_val: Option<f32> = None;
             ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                 ui.visuals_mut().extreme_bg_color = material_pending_input();
-                let resp =
-                    draw_h2_value_prefixed_text_edit(ui, id, &mut draft.text, rect.width());
+                let resp = draw_h2_value_prefixed_text_edit(ui, id, &mut draft.text, rect.width());
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
                 select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);
@@ -2069,8 +2080,7 @@ pub(in crate::app) fn draw_shader_editable_value(
             let mut commit = None;
             ui.scope_builder(egui::UiBuilder::new().max_rect(rect), |ui| {
                 ui.visuals_mut().extreme_bg_color = material_pending_input();
-                let resp =
-                    draw_h2_value_prefixed_text_edit(ui, id, &mut draft.text, rect.width());
+                let resp = draw_h2_value_prefixed_text_edit(ui, id, &mut draft.text, rect.width());
                 text_edit_cursor_to_start_on_tab_focus(ui, &resp);
                 select_all_on_double_click(ui, &resp, &draft.text);
                 draft.note_response(&resp);

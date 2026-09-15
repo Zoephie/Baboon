@@ -304,10 +304,7 @@ fn context_menu_submenu_button(
 ) -> Option<BrowserAction> {
     let response = context_menu_button(ui, label);
     let icon_rect = egui::Rect::from_center_size(
-        egui::pos2(
-            response.rect.left() + 16.0,
-            response.rect.center().y,
-        ),
+        egui::pos2(response.rect.left() + 16.0, response.rect.center().y),
         Vec2::splat(16.0),
     );
     paint_button_icon_at(ui, icon, icon_rect, text_dark());

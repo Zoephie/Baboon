@@ -38,7 +38,6 @@ pub fn load_single_file(path: PathBuf, names: &TagNameIndex) -> Result<LoadedSou
     })
 }
 
-
 /// Resolves an editing-kit tags root and prepares lazy folder browsing.
 /// A saved full index may populate `all_entries`, but `entries` remains lazy and
 /// is filled only as browser folders are expanded.
@@ -1301,7 +1300,12 @@ mod paks_dir_tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    fn container_entry(key: &str, display_path: &str, container: usize, rel_path: &str) -> TagEntry {
+    fn container_entry(
+        key: &str,
+        display_path: &str,
+        container: usize,
+        rel_path: &str,
+    ) -> TagEntry {
         TagEntry {
             key: key.to_owned(),
             display_path: display_path.to_owned(),
@@ -1342,7 +1346,8 @@ mod paks_dir_tests {
 
         assert_eq!(entries.len(), 1, "the mod replaces rather than duplicates");
         assert_eq!(
-            entries[0].key, "ublock:pakchunk0-Windows:Meteorite/Content/Tags/objects/brute-biped.ubulk",
+            entries[0].key,
+            "ublock:pakchunk0-Windows:Meteorite/Content/Tags/objects/brute-biped.ubulk",
             "the tag keeps the identity its open tab is filed under"
         );
         // What did change is where it is read from.

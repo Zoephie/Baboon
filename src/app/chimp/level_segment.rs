@@ -103,7 +103,8 @@ fn divide(
     out: &mut Vec<Segment>,
 ) {
     let segment = weigh(placements, mesh_triangles, indices);
-    let fits = segment.placements.len() <= budget.placements && segment.triangles <= budget.triangles;
+    let fits =
+        segment.placements.len() <= budget.placements && segment.triangles <= budget.triangles;
     if fits || segment.placements.len() <= 1 || depth >= MAX_SPLIT_DEPTH {
         out.push(Segment {
             over_budget: !fits,
@@ -165,9 +166,7 @@ fn halve(placements: &[PlacedMesh], indices: &[usize]) -> Option<(Vec<usize>, Ve
     }
 
     let mut sorted = indices.to_vec();
-    sorted.sort_by(|&a, &b| {
-        placements[a].position[axis].total_cmp(&placements[b].position[axis])
-    });
+    sorted.sort_by(|&a, &b| placements[a].position[axis].total_cmp(&placements[b].position[axis]));
     let middle = sorted.len() / 2;
     let right = sorted.split_off(middle);
     // A median that lands on a run of identical coordinates can leave one side
@@ -211,9 +210,7 @@ mod tests {
     fn too_many_placements_split_even_when_the_geometry_is_tiny() {
         // The failure that took the whole level down: one mesh, reused, with an
         // object count no geometry budget can see.
-        let placements: Vec<PlacedMesh> = (0..100)
-            .map(|i| placed(0, i as f64, 0.0))
-            .collect();
+        let placements: Vec<PlacedMesh> = (0..100).map(|i| placed(0, i as f64, 0.0)).collect();
         let segments = segment(&placements, &[10], budget(1_000_000, 10));
         assert!(segments.len() >= 10, "{} segments", segments.len());
         for piece in &segments {

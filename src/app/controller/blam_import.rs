@@ -29,6 +29,9 @@ impl Baboon {
     /// Start the Blam! import for one kit's ticked pipelines. Runs on a worker
     /// thread; progress and the result come back through [`WorkerMessage`].
     pub(in crate::app) fn begin_blam_import(&mut self, kit_index: usize, ctx: egui::Context) {
+        if self.refuse_read_only_edit(kit_index) {
+            return;
+        }
         if self.kits[kit_index].blam.running {
             return;
         }
@@ -225,7 +228,10 @@ fn run_blam_import(
     tx: &Sender<WorkerMessage>,
     stamp: KitStamp,
     ctx: &egui::Context,
-) -> (Vec<(String, Result<String, String>)>, Vec<(TagEntry, TagFile)>) {
+) -> (
+    Vec<(String, Result<String, String>)>,
+    Vec<(TagEntry, TagFile)>,
+) {
     let mut outcomes = Vec::new();
     let mut created = Vec::new();
 
@@ -432,7 +438,10 @@ fn import_jms_pipeline(
         tx,
         stamp,
         ctx,
-        format!("{group}: verifying and writing {}/{}.{group}…", job.asset_rel, job.asset_name),
+        format!(
+            "{group}: verifying and writing {}/{}.{group}…",
+            job.asset_rel, job.asset_name
+        ),
     );
     let (entry, tag) = file_tag(job, tag, &job.asset_name, group)?;
     Ok((summary, entry, tag))
@@ -476,13 +485,15 @@ fn import_structures(
         );
         let text = std::fs::read_to_string(&source)
             .map_err(|error| format!("could not read {}: {error}", source.display()))?;
-        let (ass, version) = blam_tags::ass_parse::parse(&text)
-            .map_err(|error| format!("{file_name}: {error}"))?;
+        let (ass, version) =
+            blam_tags::ass_parse::parse(&text).map_err(|error| format!("{file_name}: {error}"))?;
         progress(
             tx,
             stamp,
             ctx,
-            format!("scenario_structure_bsp: {file_name} is ASS v{version}, building the sealed world…"),
+            format!(
+                "scenario_structure_bsp: {file_name} is ASS v{version}, building the sealed world…"
+            ),
         );
         let (tag, report) = blam_tags::sbsp_import::structure_bsp_from_ass(&ass, &schema)
             .map_err(|error| format!("{file_name}: {error}"))?;
@@ -528,7 +539,10 @@ fn file_tag(
     let reread = TagFile::read_from_bytes(&bytes)
         .map_err(|error| format!("the built {group} would not parse back: {error}"))?;
     let display_path = format!("{}/{stem}.{group}", job.asset_rel);
-    let output = job.tags_root.join(&job.asset_rel).join(format!("{stem}.{group}"));
+    let output = job
+        .tags_root
+        .join(&job.asset_rel)
+        .join(format!("{stem}.{group}"));
     if let Some(parent) = output.parent() {
         std::fs::create_dir_all(parent)
             .map_err(|error| format!("could not create {}: {error}", parent.display()))?;
@@ -567,7 +581,12 @@ mod tests {
         dir
     }
 
-    fn run_job(job: &BlamImportJob) -> (Vec<(String, Result<String, String>)>, Vec<(TagEntry, TagFile)>) {
+    fn run_job(
+        job: &BlamImportJob,
+    ) -> (
+        Vec<(String, Result<String, String>)>,
+        Vec<(TagEntry, TagFile)>,
+    ) {
         let (tx, _rx) = std::sync::mpsc::channel();
         let stamp = KitStamp {
             kit: KitId(0),

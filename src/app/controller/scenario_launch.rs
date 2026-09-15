@@ -437,12 +437,12 @@ mod tests {
     /// takes no scenario must offer only tag_test.
     #[test]
     fn availability_refuses_unsupported_kits_and_hides_halo_ce_sapien() {
-        let tags_root = std::env::temp_dir().join("baboon-availability").join("tags");
+        let tags_root = std::env::temp_dir()
+            .join("baboon-availability")
+            .join("tags");
 
-        let unsupported = scenario_launch_availability(&loaded_source(
-            tags_root.clone(),
-            "haloce_evolved",
-        ));
+        let unsupported =
+            scenario_launch_availability(&loaded_source(tags_root.clone(), "haloce_evolved"));
         assert!(
             !unsupported.supported,
             "Campaign Evolved launches no scenarios"

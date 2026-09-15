@@ -187,8 +187,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
             foundation_label_cell(ui, &meta.label, meta.help.as_deref());
             let editable = edit.editable && !meta.read_only;
             let has_ref = target.is_some();
-            let icon_group =
-                tag_reference_value_icon_group(meta, target.as_ref(), &draft.text);
+            let icon_group = tag_reference_value_icon_group(meta, target.as_ref(), &draft.text);
             // A non-empty reference whose target file is absent on disk.
             let missing = target.as_ref().is_some_and(|(group, rel)| {
                 reference_target_missing(edit.names, edit.tags_root, *group, rel)

@@ -95,11 +95,8 @@ fn draw_outside_folder(
     let id = ui.make_persistent_id(("cache_import_outside_folder", folder));
     // Open at the top so the first level is readable without a click, closed
     // below it so a folder of two thousand tags does not arrive expanded.
-    let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
-        ui.ctx(),
-        id,
-        depth == 0,
-    );
+    let mut state =
+        egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, depth == 0);
     state
         .show_header(ui, |ui| {
             if ui.checkbox(&mut all, "").changed() {
@@ -133,7 +130,10 @@ fn draw_outside_folder(
             if let Some(tags) = tree.tags.get(folder) {
                 for (key, name) in tags {
                     let mut wanted = picked.get(key).copied().unwrap_or(false);
-                    if ui.checkbox(&mut wanted, RichText::new(name).monospace()).changed() {
+                    if ui
+                        .checkbox(&mut wanted, RichText::new(name).monospace())
+                        .changed()
+                    {
                         picked.insert(key.clone(), wanted);
                     }
                 }
@@ -220,10 +220,8 @@ fn draw_cache_import_body(
                 {
                     // Inside the kit or not at all: a tag written outside the
                     // tags root is not in the kit, whatever the path says.
-                    dialog.destination = picked
-                        .strip_prefix(&tags_root)
-                        .ok()
-                        .map(Path::to_path_buf);
+                    dialog.destination =
+                        picked.strip_prefix(&tags_root).ok().map(Path::to_path_buf);
                     dialog.conflicts_stale = true;
                 }
             });
@@ -339,7 +337,6 @@ fn draw_cache_import_body(
         }
     }
 
-
     ui.add_space(10.0);
     ui.horizontal(|ui| {
         if dialog.running {
@@ -349,10 +346,7 @@ fn draw_cache_import_body(
             ui.label(RichText::new("Importing...").color(subtle_dark()));
         } else {
             if ui
-                .add_enabled(
-                    dialog.target().is_some(),
-                    egui::Button::new("Import"),
-                )
+                .add_enabled(dialog.target().is_some(), egui::Button::new("Import"))
                 .clicked()
             {
                 action = Some(CacheImportAction::Start);
@@ -389,10 +383,7 @@ fn draw_cache_import_body(
                 .animate(progress.total == 0)
                 .text(format!(
                     "{} / {} — {} imported, {} failed",
-                    progress.processed,
-                    progress.total,
-                    progress.converted,
-                    progress.failed
+                    progress.processed, progress.total, progress.converted, progress.failed
                 )),
         );
         if !progress.current.is_empty() {
@@ -645,9 +636,7 @@ impl Baboon {
                     self.start_cache_import(ctx.clone(), Some(picked));
                 }
             }
-            Some(CacheImportAction::ScanConflicts) => {
-                self.scan_cache_import_conflicts(ctx.clone())
-            }
+            Some(CacheImportAction::ScanConflicts) => self.scan_cache_import_conflicts(ctx.clone()),
             Some(CacheImportAction::Cancel) => {
                 if let Some(dialog) = self.cache_import_dialog.as_ref() {
                     dialog.cancel.store(true, Ordering::Relaxed);
@@ -668,7 +657,6 @@ impl Baboon {
         }
     }
 }
-
 
 impl Baboon {
     /// Import Tags: bring a tag, or a whole folder of them, in from another
@@ -1196,7 +1184,11 @@ impl Baboon {
                 .as_deref()
                 .map(|path| Self::split_element_path(path).0.to_owned());
             let label = if Self::split_element_path(&row.path).1.is_empty() {
-                if row.b.is_empty() { row.a.clone() } else { row.b.clone() }
+                if row.b.is_empty() {
+                    row.a.clone()
+                } else {
+                    row.b.clone()
+                }
             } else {
                 String::new()
             };
@@ -1221,7 +1213,10 @@ impl Baboon {
             // shifted into their place, inventing changes the diff never
             // reported.
             if let Some(last) = sections.last_mut()
-                && matches!(last.kind, ModExportChange::New | ModExportChange::Unresolved)
+                && matches!(
+                    last.kind,
+                    ModExportChange::New | ModExportChange::Unresolved
+                )
                 && row.path.starts_with(last.element.as_str())
             {
                 last.rows.push(row.clone());
@@ -1308,7 +1303,10 @@ impl Baboon {
     fn diff_field_filter(rows: &[TagFieldDiff]) -> FieldFilter {
         let mut visible_paths = HashSet::new();
         for row in rows {
-            for path in [Some(&row.path), row.base_path.as_ref()].into_iter().flatten() {
+            for path in [Some(&row.path), row.base_path.as_ref()]
+                .into_iter()
+                .flatten()
+            {
                 let canonical = strip_node_indices(path);
                 // Ancestors too: a container has to render for what is inside
                 // it to be reachable.
@@ -1481,7 +1479,6 @@ impl Baboon {
         }
     }
 
-
     /// How many elements a block has on one side, for the block a change sits
     /// in.
     ///
@@ -1599,7 +1596,8 @@ impl Baboon {
             kind,
             rows: section_rows,
         } = section;
-        let (kind, element, base_element, label) = (*kind, element.clone(), base_element.clone(), label.clone());
+        let (kind, element, base_element, label) =
+            (*kind, element.clone(), base_element.clone(), label.clone());
         let filter = Self::diff_field_filter(section_rows);
         ui.add_space(6.0);
         if !element.is_empty() {
@@ -1630,88 +1628,88 @@ impl Baboon {
                 }
             });
         }
-            // Only a modified element has two sides worth comparing. An
-            // element that was added or removed exists on one side only, and a
-            // half-width pane beside an empty twin says less than one full
-            // pane in the colour of what happened.
-            let available = ui.available_width();
-            let half = ((available - 16.0) / 2.0).max(160.0);
-            let pane = |ui: &mut Ui, width: f32, before: bool, title: &str| {
-                let (wash, accent) = if before {
-                    (removed_wash(), removed_text())
-                } else {
-                    (added_wash(), added_text())
-                };
-                ui.allocate_ui_with_layout(
-                    Vec2::new(width, 0.0),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        ui.set_width(width);
-                        Frame::none()
-                            .fill(wash)
-                            .stroke(Stroke::new(1.0, accent.gamma_multiply(0.5)))
-                            .inner_margin(egui::Margin::symmetric(6.0, 6.0))
-                            .show(ui, |ui| {
-                                ui.label(RichText::new(title).color(accent).small());
-                                // Scrolled within its own pane: an editor row is
-                                // wider than half a dialog, and without this the
-                                // window grows to fit it every frame.
-                                egui::ScrollArea::horizontal()
-                                    .id_salt((title, &element))
-                                    // Fill the pane's width, but only as tall as
-                                    // what is in it.
-                                    .auto_shrink([false, true])
-                                    .show(ui, |ui| {
-                                        let (tag, path, side) = if before {
-                                            (
-                                                diff.base.as_ref(),
-                                                base_element.as_deref().unwrap_or(&element),
-                                                "before",
-                                            )
-                                        } else {
-                                            (diff.edited.as_ref(), element.as_str(), "after")
-                                        };
-                                        match tag {
-                                            Some(tag) => Self::draw_diff_side(
-                                                ui,
-                                                tag,
-                                                path,
-                                                &filter,
-                                                names,
-                                                group_tag,
-                                                game,
-                                                definitions_root,
-                                                expert_mode,
-                                                &format!("{scope}|{side}"),
-                                            ),
-                                            None => {
-                                                ui.label(
-                                                    RichText::new("not present")
-                                                        .color(subtle_dark())
-                                                        .small(),
-                                                );
-                                            }
-                                        }
-                                    });
-                            });
-                    },
-                );
+        // Only a modified element has two sides worth comparing. An
+        // element that was added or removed exists on one side only, and a
+        // half-width pane beside an empty twin says less than one full
+        // pane in the colour of what happened.
+        let available = ui.available_width();
+        let half = ((available - 16.0) / 2.0).max(160.0);
+        let pane = |ui: &mut Ui, width: f32, before: bool, title: &str| {
+            let (wash, accent) = if before {
+                (removed_wash(), removed_text())
+            } else {
+                (added_wash(), added_text())
             };
-            match kind {
-                ModExportChange::New => pane(ui, available, false, "added"),
-                ModExportChange::Unresolved => pane(ui, available, true, "removed"),
-                ModExportChange::Modified | ModExportChange::Unchanged => {
-                    ui.horizontal_top(|ui| {
-                        pane(ui, half, true, "before");
-                        // Not a separator: in a horizontal layout it stretches
-                        // to the panel's whole remaining height, which left a
-                        // screen of empty space under two short panes. The two
-                        // washes already read as two panes.
-                        ui.add_space(4.0);
-                        pane(ui, half, false, "after");
-                    });
-                }
+            ui.allocate_ui_with_layout(
+                Vec2::new(width, 0.0),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| {
+                    ui.set_width(width);
+                    Frame::none()
+                        .fill(wash)
+                        .stroke(Stroke::new(1.0, accent.gamma_multiply(0.5)))
+                        .inner_margin(egui::Margin::symmetric(6.0, 6.0))
+                        .show(ui, |ui| {
+                            ui.label(RichText::new(title).color(accent).small());
+                            // Scrolled within its own pane: an editor row is
+                            // wider than half a dialog, and without this the
+                            // window grows to fit it every frame.
+                            egui::ScrollArea::horizontal()
+                                .id_salt((title, &element))
+                                // Fill the pane's width, but only as tall as
+                                // what is in it.
+                                .auto_shrink([false, true])
+                                .show(ui, |ui| {
+                                    let (tag, path, side) = if before {
+                                        (
+                                            diff.base.as_ref(),
+                                            base_element.as_deref().unwrap_or(&element),
+                                            "before",
+                                        )
+                                    } else {
+                                        (diff.edited.as_ref(), element.as_str(), "after")
+                                    };
+                                    match tag {
+                                        Some(tag) => Self::draw_diff_side(
+                                            ui,
+                                            tag,
+                                            path,
+                                            &filter,
+                                            names,
+                                            group_tag,
+                                            game,
+                                            definitions_root,
+                                            expert_mode,
+                                            &format!("{scope}|{side}"),
+                                        ),
+                                        None => {
+                                            ui.label(
+                                                RichText::new("not present")
+                                                    .color(subtle_dark())
+                                                    .small(),
+                                            );
+                                        }
+                                    }
+                                });
+                        });
+                },
+            );
+        };
+        match kind {
+            ModExportChange::New => pane(ui, available, false, "added"),
+            ModExportChange::Unresolved => pane(ui, available, true, "removed"),
+            ModExportChange::Modified | ModExportChange::Unchanged => {
+                ui.horizontal_top(|ui| {
+                    pane(ui, half, true, "before");
+                    // Not a separator: in a horizontal layout it stretches
+                    // to the panel's whole remaining height, which left a
+                    // screen of empty space under two short panes. The two
+                    // washes already read as two panes.
+                    ui.add_space(4.0);
+                    pane(ui, half, false, "after");
+                });
             }
+        }
     }
 
     /// Review what Export Mod is about to write, and where.
@@ -2209,7 +2207,10 @@ impl Baboon {
         {
             self.status = match self.save_review_diagnostic(folder.clone()) {
                 Ok(count) => {
-                    format!("Wrote a diagnostic for {count} tag(s) to {}", folder.display())
+                    format!(
+                        "Wrote a diagnostic for {count} tag(s) to {}",
+                        folder.display()
+                    )
                 }
                 Err(error) => error,
             };
@@ -2235,13 +2236,9 @@ impl Baboon {
             let Some(dialog) = self.mod_export.as_ref() else {
                 return;
             };
-            let included: HashSet<String> = dialog
-                .included()
-                .map(|row| row.identity.clone())
-                .collect();
-            let output = dialog
-                .destination()
-                .join(format!("{}.utoc", dialog.stem()));
+            let included: HashSet<String> =
+                dialog.included().map(|row| row.identity.clone()).collect();
+            let output = dialog.destination().join(format!("{}.utoc", dialog.stem()));
             // Kept for the next export in this session, so replacing a mod's
             // files does not mean typing its name again.
             let remembered = dialog.name.clone();
@@ -2287,8 +2284,10 @@ impl Baboon {
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
                 ui.label(
-                    RichText::new(format!("{count} tag(s) exported. The base game is unchanged."))
-                        .color(text_dark()),
+                    RichText::new(format!(
+                        "{count} tag(s) exported. The base game is unchanged."
+                    ))
+                    .color(text_dark()),
                 );
                 if skipped > 0 {
                     ui.add_space(4.0);
@@ -2411,7 +2410,9 @@ impl Baboon {
                         .max_height(160.0)
                         .show(ui, |ui| {
                             for path in &stashed {
-                                ui.label(RichText::new(path).color(text_dark()).monospace().small(),);
+                                ui.label(
+                                    RichText::new(path).color(text_dark()).monospace().small(),
+                                );
                             }
                         });
                 }
@@ -2587,7 +2588,9 @@ impl Baboon {
                             format!("This writes the {total} shipped tag(s) in {label} into:")
                         }
                         None => {
-                            format!("This writes all {total} tags from the mounted containers into:")
+                            format!(
+                                "This writes all {total} tags from the mounted containers into:"
+                            )
                         }
                     })
                     .color(text_dark()),
@@ -2667,7 +2670,10 @@ impl Baboon {
         } else if do_extract {
             // Taken rather than cleared: the scope captured at right-click is
             // what the run covers, and it moves into the job here.
-            let scope = self.container_dump_confirm.take().map(|confirm| confirm.scope);
+            let scope = self
+                .container_dump_confirm
+                .take()
+                .map(|confirm| confirm.scope);
             // The extraction reads the active kit's source, so return to the
             // workspace this was raised from and drop it if that workspace has
             // since closed.
@@ -2680,10 +2686,14 @@ impl Baboon {
     }
 
     pub(super) fn draw_container_duplicate_confirm_window(&mut self, ctx: &egui::Context) {
-        let Some((kit, key, destination_leaf)) = self
-            .container_duplicate_confirm
-            .as_ref()
-            .map(|confirm| (confirm.kit, confirm.key.clone(), confirm.destination_leaf.clone()))
+        let Some((kit, key, destination_leaf)) =
+            self.container_duplicate_confirm.as_ref().map(|confirm| {
+                (
+                    confirm.kit,
+                    confirm.key.clone(),
+                    confirm.destination_leaf.clone(),
+                )
+            })
         else {
             return;
         };
@@ -2699,7 +2709,10 @@ impl Baboon {
                     .rsplit_once('.')
                     .map(|(stem, extension)| (stem, extension))
                     .unwrap_or((&entry.display_path, ""));
-                let parent = stem.rsplit_once('/').map(|(parent, _)| parent).unwrap_or("");
+                let parent = stem
+                    .rsplit_once('/')
+                    .map(|(parent, _)| parent)
+                    .unwrap_or("");
                 let destination_display = if extension.is_empty() {
                     destination_leaf.clone()
                 } else {
@@ -2811,9 +2824,7 @@ impl Baboon {
             .default_width(600.0)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
-                ui.label(
-                    RichText::new(format!("{package} as {format_label}")).color(text_dark()),
-                );
+                ui.label(RichText::new(format!("{package} as {format_label}")).color(text_dark()));
                 ui.add_space(4.0);
                 ui.label(
                     RichText::new(&mesh_path)
@@ -2900,7 +2911,9 @@ impl Baboon {
                     }
                     if ui
                         .button("Mesh and all textures")
-                        .on_hover_text("Every texture the materials reference, shared ones included")
+                        .on_hover_text(
+                            "Every texture the materials reference, shared ones included",
+                        )
                         .clicked()
                     {
                         with_textures = Some(ChimpTextureScope::All);
@@ -2962,7 +2975,10 @@ impl Baboon {
                 ui.add_space(6.0);
                 ui.separator();
                 ui.add_space(6.0);
-                ui.checkbox(&mut export.split_udim, "Split UDIM blocks into separate files");
+                ui.checkbox(
+                    &mut export.split_udim,
+                    "Split UDIM blocks into separate files",
+                );
                 ui.add_space(4.0);
                 ui.label(
                     RichText::new(if export.split_udim {
@@ -3079,11 +3095,7 @@ impl Baboon {
                                 .speed(1_000.0)
                                 .range(100..=usize::MAX),
                         );
-                        ui.label(
-                            RichText::new("placements")
-                                .color(subtle_dark())
-                                .small(),
-                        );
+                        ui.label(RichText::new("placements").color(subtle_dark()).small());
                     });
                     ui.add_space(6.0);
                     ui.label(
@@ -3135,7 +3147,9 @@ impl Baboon {
                 ui.horizontal(|ui| {
                     if ui
                         .button("Choose folder and export…")
-                        .on_hover_text("Reading a level takes minutes; progress shows in the status bar")
+                        .on_hover_text(
+                            "Reading a level takes minutes; progress shows in the status bar",
+                        )
                         .clicked()
                     {
                         go = true;
@@ -3340,7 +3354,11 @@ impl Baboon {
                 .as_mut()
                 .expect("checked above");
             let renaming = state.renaming.is_some();
-            let title = if renaming { "Rename Folder" } else { "New Folder" };
+            let title = if renaming {
+                "Rename Folder"
+            } else {
+                "New Folder"
+            };
             egui::Window::new(title)
                 .id(egui::Id::new("container_folder"))
                 .open(&mut open)
@@ -3435,9 +3453,7 @@ impl Baboon {
                 // it had opened the wrong window.
                 TagNameOperation::Rename if state.whole_path_editable => "Rename / Move Tag",
                 TagNameOperation::SaveAsOverlay if state.is_new_container => "Copy New Tag",
-                TagNameOperation::SaveAsOverlay if state.is_container => {
-                    "Save Tag As (New Copy)"
-                }
+                TagNameOperation::SaveAsOverlay if state.is_container => "Save Tag As (New Copy)",
                 _ => "Rename Tag",
             };
             egui::Window::new(title)
@@ -3844,38 +3860,39 @@ impl Baboon {
                         ui.label("Halo: Campaign Evolved");
                     });
                 } else {
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Game").color(subtle_dark()));
-                    let before = self.new_tag_dialog.game.clone();
-                    let games = crate::app::controller::available_definition_games();
-                    let (_, wheel_delta) = combo_box_with_scroll(
-                        ui,
-                        egui::ComboBox::from_id_salt("new_tag_game")
-                            .selected_text(&self.new_tag_dialog.game)
-                            .width(220.0),
-                        |ui| {
-                            for game in &games {
-                                ui.selectable_value(
-                                    &mut self.new_tag_dialog.game,
-                                    game.clone(),
-                                    game,
-                                );
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new("Game").color(subtle_dark()));
+                        let before = self.new_tag_dialog.game.clone();
+                        let games = crate::app::controller::available_definition_games();
+                        let (_, wheel_delta) = combo_box_with_scroll(
+                            ui,
+                            egui::ComboBox::from_id_salt("new_tag_game")
+                                .selected_text(&self.new_tag_dialog.game)
+                                .width(220.0),
+                            |ui| {
+                                for game in &games {
+                                    ui.selectable_value(
+                                        &mut self.new_tag_dialog.game,
+                                        game.clone(),
+                                        game,
+                                    );
+                                }
+                            },
+                        );
+                        if let Some(delta) = wheel_delta {
+                            let current = games
+                                .iter()
+                                .position(|game| game == &self.new_tag_dialog.game)
+                                .unwrap_or(0);
+                            if let Some(next) = combo_scroll_next_index(current, games.len(), delta)
+                            {
+                                self.new_tag_dialog.game = games[next].clone();
                             }
-                        },
-                    );
-                    if let Some(delta) = wheel_delta {
-                        let current = games
-                            .iter()
-                            .position(|game| game == &self.new_tag_dialog.game)
-                            .unwrap_or(0);
-                        if let Some(next) = combo_scroll_next_index(current, games.len(), delta) {
-                            self.new_tag_dialog.game = games[next].clone();
                         }
-                    }
-                    if self.new_tag_dialog.game != before {
-                        refresh_groups = true;
-                    }
-                });
+                        if self.new_tag_dialog.game != before {
+                            refresh_groups = true;
+                        }
+                    });
                 }
 
                 let selected_group_before = self.new_tag_dialog.selected_group;
@@ -4052,7 +4069,11 @@ impl Baboon {
         // dialog mutably for rendering (the banner lags edits by one frame).
         let (folder_snapshot, name_snapshot, group_tag) = {
             let dialog = self.import_tag_dialog.as_ref().unwrap();
-            (dialog.folder_rel.clone(), dialog.name.clone(), dialog.group_tag,)
+            (
+                dialog.folder_rel.clone(),
+                dialog.name.clone(),
+                dialog.group_tag,
+            )
         };
         let overwrite_logical =
             self.import_overwrite_target(&folder_snapshot, &name_snapshot, group_tag);
@@ -4154,9 +4175,7 @@ impl Baboon {
                                 .selected_text(source_game.as_str())
                                 .show_ui(ui, |ui| {
                                     for game in &identical_profiles {
-                                        if ui
-                                            .selectable_label(game == source_game, game)
-                                            .clicked()
+                                        if ui.selectable_label(game == source_game, game).clicked()
                                         {
                                             source_game.clone_from(game);
                                             // The draft belongs to the profile
@@ -4166,7 +4185,11 @@ impl Baboon {
                                     }
                                 });
                             if ui
-                                .button(if draft.is_some() { "Re-analyze" } else { "Analyze conversion" })
+                                .button(if draft.is_some() {
+                                    "Re-analyze"
+                                } else {
+                                    "Analyze conversion"
+                                })
                                 .clicked()
                             {
                                 do_analyze = true;
@@ -4251,7 +4274,9 @@ impl Baboon {
                                     }
                                 };
                                 ui.label(
-                                    RichText::new(format!("{game}  {mark}")).color(color).small(),
+                                    RichText::new(format!("{game}  {mark}"))
+                                        .color(color)
+                                        .small(),
                                 );
                                 if let ProfileFit::Diverges(where_) = fit {
                                     ui.label(
@@ -4301,7 +4326,8 @@ impl Baboon {
                 .map(|dialog| dialog.group_name.clone())
                 .unwrap_or_default();
             self.tag_compat.ensure_loaded(&locate_help_docs_root());
-            self.tag_compat.focus(&source_game, CAMPAIGN_EVOLVED_GAME, &group);
+            self.tag_compat
+                .focus(&source_game, CAMPAIGN_EVOLVED_GAME, &group);
             self.help_panel_tab = HelpPanelTab::TagCompat;
             self.about_open = true;
         }
@@ -4511,10 +4537,7 @@ mod mod_export_tests {
             ("vehicle palette[3]", "")
         );
         // A field at the top level of the tag belongs to no element.
-        assert_eq!(
-            Baboon::split_element_path("flags"),
-            ("", "flags")
-        );
+        assert_eq!(Baboon::split_element_path("flags"), ("", "flags"));
     }
 
     /// The name becomes three file names in a folder the user never types, so
@@ -4600,10 +4623,9 @@ fn draw_folder_import_report(ui: &mut Ui, report: &FolderConversionReport) {
                     FolderConversionFileStatus::GeneratedLayout => {
                         ("Built from the target's own definitions", text_dark())
                     }
-                    FolderConversionFileStatus::Kept => (
-                        "Already in the kit — left as it was",
-                        subtle_dark(),
-                    ),
+                    FolderConversionFileStatus::Kept => {
+                        ("Already in the kit — left as it was", subtle_dark())
+                    }
                     FolderConversionFileStatus::Failed => {
                         ("Failed / skipped", material_delete_text())
                     }
@@ -4664,7 +4686,10 @@ fn draw_conversion_report(ui: &mut Ui, report: &TagConversionReport, salt: &str)
             for (label, value) in [
                 ("Copied exactly", report.copied_exact),
                 ("Converted semantically", report.converted_semantic),
-                ("Mapped through schema/catalog aliases", report.mapped_aliases),
+                (
+                    "Mapped through schema/catalog aliases",
+                    report.mapped_aliases,
+                ),
                 ("Target fields left at defaults", report.defaulted_target),
                 ("Unsupported source values", report.unsupported_source),
                 ("Truncated elements", report.truncated),
@@ -4693,7 +4718,11 @@ fn draw_conversion_report(ui: &mut Ui, report: &TagConversionReport, salt: &str)
         return;
     }
     ui.add_space(6.0);
-    ui.label(RichText::new("Conversion details").color(subtle_dark()).small());
+    ui.label(
+        RichText::new("Conversion details")
+            .color(subtle_dark())
+            .small(),
+    );
     egui::ScrollArea::vertical()
         .id_salt(format!("{salt}_issues"))
         .max_height(230.0)

@@ -176,7 +176,10 @@ fn read_hsc_folder(folder: &Path) -> anyhow::Result<Vec<(String, Vec<u8>)>> {
 /// trailing run) is both what the engine reads and the only rule that
 /// guarantees no NUL is ever written into a text file.
 fn source_text(body: &[u8]) -> &[u8] {
-    let end = body.iter().position(|byte| *byte == 0).unwrap_or(body.len());
+    let end = body
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(body.len());
     &body[..end]
 }
 
@@ -304,8 +307,14 @@ mod tests {
         let source = scratch(
             "in",
             &[
-                ("a30.hsc", b"(script static void foo\r\n\t(print \"hi\")\r\n)\r\n".as_slice()),
-                ("b_globals.hsc", b";* commented\nout *;\n(global short g 1)\n".as_slice()),
+                (
+                    "a30.hsc",
+                    b"(script static void foo\r\n\t(print \"hi\")\r\n)\r\n".as_slice(),
+                ),
+                (
+                    "b_globals.hsc",
+                    b";* commented\nout *;\n(global short g 1)\n".as_slice(),
+                ),
                 ("c_empty_ish.hsc", b"; only a comment\n".as_slice()),
                 ("ignored.txt", b"not haloscript".as_slice()),
             ],
@@ -317,7 +326,10 @@ mod tests {
         assert_eq!(imported.len(), 3, "the .txt must not be imported");
         // Sorted by name, and each body carries exactly one terminator.
         assert_eq!(
-            imported.iter().map(|(name, _)| name.as_str()).collect::<Vec<_>>(),
+            imported
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>(),
             ["a30", "b_globals", "c_empty_ish"]
         );
         for (name, body) in &imported {
@@ -343,7 +355,11 @@ mod tests {
 
         // Re-importing the extracted folder must land on the same block.
         replace_scenario_scripts(&mut tag, &out).expect("re-import");
-        assert_eq!(read_source_files(&tag).unwrap(), imported, "second pass diverged");
+        assert_eq!(
+            read_source_files(&tag).unwrap(),
+            imported,
+            "second pass diverged"
+        );
 
         // Negative control: the comparison above has to be capable of failing.
         fs::write(out.join("a30.hsc"), b"(script static void changed)\n").unwrap();

@@ -874,7 +874,11 @@ pub(in crate::app) fn run_folder_conversion_job(
     let _ = tx.send(WorkerMessage::TerminalLine(format!(
         "Folder conversion {}: {} converted, {} failed, {} held back, {} ignored, {} tag(s) \
          reached outside the {selected} selected, {} reference(s) missing from the source",
-        if report.cancelled { "cancelled" } else { "complete" },
+        if report.cancelled {
+            "cancelled"
+        } else {
+            "complete"
+        },
         report.converted_count(),
         report.failed_count(),
         report.held_back.len(),
@@ -1898,6 +1902,9 @@ mod tests {
             );
         }
         // The group is part of the identity: two classes can share a path.
-        assert_ne!(folded_cache_key(u32::from_be_bytes(*b"hlmt"), name), canonical);
+        assert_ne!(
+            folded_cache_key(u32::from_be_bytes(*b"hlmt"), name),
+            canonical
+        );
     }
 }

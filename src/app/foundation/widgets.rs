@@ -224,21 +224,103 @@ pub(in crate::app) fn foundation_input_cell_colored(
     hover: Option<&str>,
 ) {
     let height = 24.0;
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     ui.painter().rect_filled(rect, 0.0, foundation_input());
     ui.painter()
         .rect_stroke(rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
-    paint_findable_text(
-        ui,
-        rect.left_center() + Vec2::new(5.0, 0.0),
-        Align2::LEFT_CENTER,
-        &truncate_for_cell(text, width - 10.0),
-        FontId::proportional(12.5),
-        color,
-        FindTargetKind::Value,
-    );
+    let response = foundation_read_only_text_cell(ui, rect, text, color, 5.0);
     if response.hovered() {
         response.on_hover_text(hover.unwrap_or(text));
+    }
+}
+
+/// An immutable TextBuffer keeps selection, focus and copying enabled without
+/// permitting typing, paste, cut or deletion to alter the displayed value.
+fn foundation_read_only_text_cell(
+    ui: &mut Ui,
+    rect: egui::Rect,
+    text: &str,
+    color: Color32,
+    left_padding: f32,
+) -> egui::Response {
+    let mut text = text;
+    let font_id = FontId::proportional(12.5);
+    let mut layouter = |ui: &Ui, text: &str, _wrap_width: f32| {
+        findable_galley(ui, text, font_id.clone(), color, FindTargetKind::Value)
+    };
+    let response = ui.put(
+        rect,
+        egui::TextEdit::singleline(&mut text)
+            .frame(false)
+            .font(FontId::proportional(12.5))
+            .text_color(color)
+            .vertical_align(egui::Align::Center)
+            .margin(egui::Margin {
+                left: left_padding,
+                right: 5.0,
+                top: 2.0,
+                bottom: 2.0,
+            })
+            .clip_text(true)
+            .layouter(&mut layouter),
+    );
+    text_edit_cursor_to_start_on_tab_focus(ui, &response);
+    response
+}
+
+#[cfg(test)]
+mod read_only_input_tests {
+    use super::*;
+
+    #[test]
+    fn read_only_inputs_allow_selection_and_copy_but_reject_mutations() {
+        let ctx = egui::Context::default();
+        ctx.set_style(foundation_style());
+        let value = "A long editing kit value that must be copied in full";
+        let mut id = egui::Id::NULL;
+        let mut frame = |events| {
+            ctx.run(
+                egui::RawInput {
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let (rect, _) =
+                            ui.allocate_exact_size(Vec2::new(120.0, 24.0), Sense::hover());
+                        let response =
+                            foundation_read_only_text_cell(ui, rect, value, text_dark(), 5.0);
+                        id = response.id;
+                        response.request_focus();
+                        let mut state = egui::TextEdit::load_state(ctx, id).unwrap();
+                        state
+                            .cursor
+                            .set_char_range(Some(egui::text::CCursorRange::two(
+                                egui::text::CCursor::new(0),
+                                egui::text::CCursor::new(value.chars().count()),
+                            )));
+                        state.store(ctx, id);
+                    });
+                },
+            )
+        };
+        let _ = frame(vec![]);
+        let copy = frame(vec![egui::Event::Copy]);
+        assert_eq!(copy.platform_output.copied_text, value);
+        let _ = frame(vec![
+            egui::Event::Text("modified".to_owned()),
+            egui::Event::Paste("pasted".to_owned()),
+            egui::Event::Cut,
+            egui::Event::Key {
+                key: egui::Key::Delete,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            },
+        ]);
+        let copy = frame(vec![egui::Event::Copy]);
+        assert_eq!(copy.platform_output.copied_text, value);
     }
 }
 
@@ -255,10 +337,6 @@ pub(in crate::app) fn shared_tag_reference_value_width(ui: &Ui, depth: usize) ->
 
 fn tag_reference_icon_footprint() -> f32 {
     3.0 + 16.0 + 3.0
-}
-
-fn tag_reference_text_x(rect: egui::Rect) -> f32 {
-    rect.left() + tag_reference_icon_footprint()
 }
 
 fn paint_tag_reference_value_cell(ui: &Ui, rect: egui::Rect, icon_group: Option<u32>) {
@@ -285,19 +363,10 @@ pub(super) fn foundation_tag_reference_input_cell_colored(
     icon_group: Option<u32>,
 ) {
     let height = 24.0;
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     paint_tag_reference_value_cell(ui, rect, icon_group);
-    let text_left = tag_reference_text_x(rect);
-    let text_width = (rect.right() - text_left - 5.0).max(12.0);
-    paint_findable_text(
-        ui,
-        egui::pos2(text_left, rect.center().y),
-        Align2::LEFT_CENTER,
-        &truncate_for_cell(text, text_width),
-        FontId::proportional(12.5),
-        color,
-        FindTargetKind::Value,
-    );
+    let response =
+        foundation_read_only_text_cell(ui, rect, text, color, tag_reference_icon_footprint());
     if response.hovered() {
         response.on_hover_text(hover.unwrap_or(text));
     }

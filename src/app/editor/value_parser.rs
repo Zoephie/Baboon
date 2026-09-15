@@ -169,9 +169,8 @@ pub(in crate::app) fn parse_gui_field_value(
         // Typed in the selected unit, always stored in radians. The display side
         // (`foundation::fmt_angle`) is the other half of this; the two are kept
         // honest by `angle_fields_round_trip_through_degrees`.
-        TagFieldType::Angle => {
-            parse_value(trimmed, "f32").map(|typed: f32| TagFieldData::Angle(angle_to_radians(typed)))
-        }
+        TagFieldType::Angle => parse_value(trimmed, "f32")
+            .map(|typed: f32| TagFieldData::Angle(angle_to_radians(typed))),
         TagFieldType::ShortIntegerBounds => {
             let (lower, upper) = parse_short_bounds(trimmed, "short bounds")?;
             Ok(TagFieldData::ShortIntegerBounds(

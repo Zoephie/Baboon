@@ -7,12 +7,7 @@ use super::*;
 use blam_tags::math::{RealPoint3d, RealQuaternion, RealVector3d};
 use blam_tags::render_model::Node;
 
-fn raw_node(
-    name: &str,
-    parent: i16,
-    translation: RealPoint3d,
-    rotation: RealQuaternion,
-) -> Node {
+fn raw_node(name: &str, parent: i16, translation: RealPoint3d, rotation: RealQuaternion) -> Node {
     Node {
         name: name.to_owned(),
         parent_node: parent,
@@ -152,7 +147,11 @@ fn a_node_missing_from_the_pose_stays_at_bind() {
     }));
 
     let rows = animation_skinning_rows(&data, &state).expect("skinning rows");
-    assert!((rows[3][0] - 1.0).abs() < 1e-4, "child rotation row: {:?}", &rows[3]);
+    assert!(
+        (rows[3][0] - 1.0).abs() < 1e-4,
+        "child rotation row: {:?}",
+        &rows[3]
+    );
     assert!(rows[3][3].abs() < 1e-4, "child translation: {:?}", &rows[3]);
 }
 
@@ -162,8 +161,7 @@ fn a_node_missing_from_the_pose_stays_at_bind() {
 /// self-skips.
 #[test]
 fn a_reach_skeleton_past_the_old_bone_budget_lists_and_decodes() {
-    let Some(tags_root) = std::env::var_os("BABOON_REACH_KIT").map(std::path::PathBuf::from)
-    else {
+    let Some(tags_root) = std::env::var_os("BABOON_REACH_KIT").map(std::path::PathBuf::from) else {
         eprintln!("skipping: set BABOON_REACH_KIT to a Reach editing kit's tags folder");
         return;
     };
@@ -194,10 +192,11 @@ fn a_reach_skeleton_past_the_old_bone_budget_lists_and_decodes() {
             .root()
             .read_tag_ref_with_group("render model")
             .expect("render model ref");
-        let preview = load_referenced_tag_from_source(&source, &render_rel, "render_model", b"mode")
-            .map_err(|error| error.to_string())
-            .and_then(|tag| build_render_preview(&tag))
-            .expect("render preview");
+        let preview =
+            load_referenced_tag_from_source(&source, &render_rel, "render_model", b"mode")
+                .map_err(|error| error.to_string())
+                .and_then(|tag| build_render_preview(&tag))
+                .expect("render preview");
         assert!(
             !preview.nodes.is_empty() && preview.nodes.len() <= MAX_PREVIEW_BONES,
             "{rel}: {} nodes outside the bone budget of {MAX_PREVIEW_BONES}",
@@ -247,14 +246,16 @@ fn a_reach_skeleton_past_the_old_bone_budget_lists_and_decodes() {
 /// real animation end to end; absent, this self-skips.
 #[test]
 fn a_real_kits_animation_decodes_into_frames() {
-    let Some(tags_root) = std::env::var_os("BABOON_MODEL_KIT").map(std::path::PathBuf::from)
-    else {
+    let Some(tags_root) = std::env::var_os("BABOON_MODEL_KIT").map(std::path::PathBuf::from) else {
         eprintln!("skipping: set BABOON_MODEL_KIT to an editing kit's tags folder");
         return;
     };
     let model_path = tags_root.join("objects/characters/masterchief/masterchief.model");
     if !model_path.is_file() {
-        eprintln!("skipping: no masterchief.model under {}", tags_root.display());
+        eprintln!(
+            "skipping: no masterchief.model under {}",
+            tags_root.display()
+        );
         return;
     }
     let source = TagSource::LooseFolder {

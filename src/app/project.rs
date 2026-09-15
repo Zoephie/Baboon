@@ -784,9 +784,9 @@ pub(super) fn load_campaign_project(path: &Path) -> Result<CampaignProjectSnapsh
     // A project written before history existed simply has no table. That is a
     // session with nothing to undo, not a project that fails to open.
     let mut history: BTreeMap<String, TagHistory> = BTreeMap::new();
-    if let Ok(mut statement) = connection
-        .prepare("SELECT identity, stack, label, bytes FROM history ORDER BY identity, stack, position")
-    {
+    if let Ok(mut statement) = connection.prepare(
+        "SELECT identity, stack, label, bytes FROM history ORDER BY identity, stack, position",
+    ) {
         let rows = statement
             .query_map([], |row| {
                 Ok((
@@ -1570,7 +1570,12 @@ impl Baboon {
                             if latest_write_revision.load(Ordering::SeqCst) != revision {
                                 Ok(())
                             } else {
-                                save_campaign_project(&path, &snapshot, on_disk.as_ref(), ProjectScope::Session)
+                                save_campaign_project(
+                                    &path,
+                                    &snapshot,
+                                    on_disk.as_ref(),
+                                    ProjectScope::Session,
+                                )
                             }
                         });
                     let _ = tx.send(WorkerMessage::CampaignProjectSaved {
@@ -2053,7 +2058,10 @@ mod tests {
         // What survives is the newest of each tag, not one tag's whole stack.
         for identity in ["a", "b"] {
             assert_eq!(
-                history[identity].undo.last().map(|step| step.label.as_str()),
+                history[identity]
+                    .undo
+                    .last()
+                    .map(|step| step.label.as_str()),
                 Some("edit 2"),
                 "{identity} kept its most recent step"
             );
@@ -2104,7 +2112,8 @@ mod tests {
         // A journal that did move is written again.
         let mut moved = later.clone();
         moved.history.get_mut("a").unwrap().revision = 8;
-        save_campaign_project(&path, &moved, Some(&later.digests()), ProjectScope::Session).unwrap();
+        save_campaign_project(&path, &moved, Some(&later.digests()), ProjectScope::Session)
+            .unwrap();
         let loaded = load_campaign_project(&path).unwrap();
         assert_eq!(loaded.history["a"].undo[0].label, "Edit color");
 
@@ -2155,7 +2164,13 @@ mod tests {
         let mut stale = overlay("a", b"REWRITTEN");
         stale.digest = overlay_digest(b"one");
         let second = snapshot_of(vec![stale, overlay("c", b"three")]);
-        save_campaign_project(&path, &second, Some(&first.digests()), ProjectScope::Session).unwrap();
+        save_campaign_project(
+            &path,
+            &second,
+            Some(&first.digests()),
+            ProjectScope::Session,
+        )
+        .unwrap();
 
         let loaded = load_campaign_project(&path).unwrap();
         let mut identities: Vec<&String> = loaded.overlays.keys().collect();

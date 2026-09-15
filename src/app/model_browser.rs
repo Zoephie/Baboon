@@ -294,7 +294,12 @@ impl Baboon {
     }
 
     /// Draw one kit's Model Library pane.
-    pub(super) fn draw_model_library(&mut self, ui: &mut Ui, ctx: &egui::Context, kit_index: usize) {
+    pub(super) fn draw_model_library(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &egui::Context,
+        kit_index: usize,
+    ) {
         self.refresh_model_library(kit_index, ctx);
 
         let cell = self.kits[kit_index].model_browser.cell_size();
@@ -526,7 +531,11 @@ impl Baboon {
         ui.painter().text(
             egui::Pos2::new(rect.center().x, image_rect.bottom() + 21.0),
             Align2::CENTER_CENTER,
-            if is_gbxmodel { "Gbxmodel" } else { "Render Model" },
+            if is_gbxmodel {
+                "Gbxmodel"
+            } else {
+                "Render Model"
+            },
             FontId::proportional(10.0),
             subtle_dark(),
         );

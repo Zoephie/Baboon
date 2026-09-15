@@ -30,11 +30,7 @@ pub(super) fn draw_model_viewport(
         let moved = unrotate_view_vector(
             state.yaw,
             state.pitch,
-            [
-                -delta.x * world_per_pixel,
-                0.0,
-                delta.y * world_per_pixel,
-            ],
+            [-delta.x * world_per_pixel, 0.0, delta.y * world_per_pixel],
         );
         state.focus[0] += moved[0];
         state.focus[1] += moved[1];
@@ -116,10 +112,7 @@ pub(super) fn draw_model_viewport(
         render_mode: state.render_mode,
         show_backfaces: state.show_backfaces,
         show_grid: state.show_grid,
-        textures: state
-            .shaded
-            .then(|| data.textures.clone())
-            .flatten(),
+        textures: state.shaded.then(|| data.textures.clone()).flatten(),
         bones: animation_skinning_rows(data, state).map(Arc::new),
     };
     painter.add(egui::PaintCallback {
@@ -318,19 +311,36 @@ const SAMPLER_UNIFORMS: [&str; SLOT_COUNT] = [
 /// Split out of `ModelGlRenderer::new` so the shaders can be checked
 /// without a GL context: a compile failure here disables the whole preview
 /// and the only signal is a line on stderr, which no test would see.
-fn model_shader_sources(version_declaration: &str, modern: bool, precision: &str) -> (String, String) {
-        let (attribute, varying_out, varying_in, fragment_output, output_name, sample) = if modern
-        {
-            ("in", "out", "in", "out vec4 out_color;", "out_color", "texture")
-        } else {
-            ("attribute", "varying", "varying", "", "gl_FragColor", "texture2D")
-        };
-        // Position and normal are required; the rest are read only on the
-        // shaded path and a driver may drop them from an unused program.
-        let persp_ratio = PERSPECTIVE_R_OVER_D;
-        let bone_rows = MAX_PREVIEW_BONES * 3;
-        let vertex_source = format!(
-            "{}{precision}\
+fn model_shader_sources(
+    version_declaration: &str,
+    modern: bool,
+    precision: &str,
+) -> (String, String) {
+    let (attribute, varying_out, varying_in, fragment_output, output_name, sample) = if modern {
+        (
+            "in",
+            "out",
+            "in",
+            "out vec4 out_color;",
+            "out_color",
+            "texture",
+        )
+    } else {
+        (
+            "attribute",
+            "varying",
+            "varying",
+            "",
+            "gl_FragColor",
+            "texture2D",
+        )
+    };
+    // Position and normal are required; the rest are read only on the
+    // shaded path and a driver may drop them from an unused program.
+    let persp_ratio = PERSPECTIVE_R_OVER_D;
+    let bone_rows = MAX_PREVIEW_BONES * 3;
+    let vertex_source = format!(
+        "{}{precision}\
              {attribute} vec3 a_position;\n\
              {attribute} vec3 a_normal;\n\
              {attribute} vec2 a_texcoord;\n\
@@ -412,15 +422,15 @@ fn model_shader_sources(version_declaration: &str, modern: bool, precision: &str
                  v_binormal = rotate_view(binormal_in);\n\
                  v_uv = a_texcoord;\n\
              }}\n",
-            version_declaration
-        );
-        // The lighting rig is the one this preview has always used — a key, a
-        // fill, a rim and an overhead term, all in view space so they follow the
-        // camera. It moved from the vertex shader to here so a normal map has
-        // something to perturb: per-vertex lighting would sample the map and
-        // then throw the result away between vertices.
-        let fragment_source = format!(
-            "{}{precision}\
+        version_declaration
+    );
+    // The lighting rig is the one this preview has always used — a key, a
+    // fill, a rim and an overhead term, all in view space so they follow the
+    // camera. It moved from the vertex shader to here so a normal map has
+    // something to perturb: per-vertex lighting would sample the map and
+    // then throw the result away between vertices.
+    let fragment_source = format!(
+        "{}{precision}\
              {varying_in} vec2 v_uv;\n\
              {varying_in} vec3 v_normal;\n\
              {varying_in} vec3 v_tangent;\n\
@@ -510,10 +520,10 @@ fn model_shader_sources(version_declaration: &str, modern: bool, precision: &str
                  vec3 result = mix(to_srgb(lit), flat_color, u_unlit);\n\
                  {output_name} = vec4(result, 1.0);\n\
              }}\n",
-            version_declaration
-        );
+        version_declaration
+    );
 
-        (vertex_source, fragment_source)
+    (vertex_source, fragment_source)
 }
 
 /// Ground-reference grid on the z = 0 plane (the world ground in Halo's
@@ -552,8 +562,14 @@ fn grid_line_vertices(preview: &RenderModelPreview) -> (Vec<RenderModelPreviewVe
     let mut vertices = Vec::with_capacity((HALF_CELLS as usize * 2 + 1) * 4 + 4);
     for step in -HALF_CELLS..=HALF_CELLS {
         let offset = step as f32 * spacing;
-        vertices.extend(line([center[0] + offset, min_y], [center[0] + offset, max_y]));
-        vertices.extend(line([min_x, center[1] + offset], [max_x, center[1] + offset]));
+        vertices.extend(line(
+            [center[0] + offset, min_y],
+            [center[0] + offset, max_y],
+        ));
+        vertices.extend(line(
+            [min_x, center[1] + offset],
+            [max_x, center[1] + offset],
+        ));
     }
     let axis_start = vertices.len();
     vertices.extend(line([min_x, 0.0], [max_x, 0.0]));
@@ -668,11 +684,8 @@ impl ModelGlRenderer {
             .is_embedded()
             .then_some("precision mediump float;\n")
             .unwrap_or("");
-        let (vertex_source, fragment_source) = model_shader_sources(
-            shader_version.version_declaration(),
-            modern,
-            precision,
-        );
+        let (vertex_source, fragment_source) =
+            model_shader_sources(shader_version.version_declaration(), modern, precision);
 
         unsafe {
             let vertex = compile_model_shader(gl, glow::VERTEX_SHADER, &vertex_source)?;
@@ -745,8 +758,7 @@ impl ModelGlRenderer {
                 have_b: gl.get_uniform_location(program, "u_have_b"),
                 uv_scale_a: gl.get_uniform_location(program, "u_uv_scale_a"),
                 uv_scale_b: gl.get_uniform_location(program, "u_uv_scale_b"),
-                samplers: SAMPLER_UNIFORMS
-                    .map(|name| gl.get_uniform_location(program, name)),
+                samplers: SAMPLER_UNIFORMS.map(|name| gl.get_uniform_location(program, name)),
                 uploaded_geometry: None,
                 materials: Vec::new(),
                 uploaded_textures: None,
@@ -894,7 +906,11 @@ impl ModelGlRenderer {
         let (vertices, axis_start) = grid_line_vertices(&frame.preview);
         unsafe {
             gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.grid_vertex_buffer));
-            gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, slice_bytes(&vertices), glow::STATIC_DRAW);
+            gl.buffer_data_u8_slice(
+                glow::ARRAY_BUFFER,
+                slice_bytes(&vertices),
+                glow::STATIC_DRAW,
+            );
             gl.bind_buffer(glow::ARRAY_BUFFER, None);
         }
         self.grid_axis_start = axis_start as i32;
@@ -1236,10 +1252,22 @@ mod gpu_renderer_tests {
                 assert!(vertex.contains(name), "{name} missing from vertex shader");
             }
             for name in SAMPLER_UNIFORMS {
-                assert!(fragment.contains(name), "{name} missing from fragment shader");
+                assert!(
+                    fragment.contains(name),
+                    "{name} missing from fragment shader"
+                );
             }
-            for name in ["u_have_a", "u_have_b", "u_uv_scale_a", "u_uv_scale_b", "u_shaded"] {
-                assert!(fragment.contains(name), "{name} missing from fragment shader");
+            for name in [
+                "u_have_a",
+                "u_have_b",
+                "u_uv_scale_a",
+                "u_uv_scale_b",
+                "u_shaded",
+            ] {
+                assert!(
+                    fragment.contains(name),
+                    "{name} missing from fragment shader"
+                );
             }
             assert!(fragment.contains("uniform vec4 u_have_b;"));
             assert!(fragment.contains("uniform vec4 u_uv_scale_b;"));
@@ -1250,8 +1278,6 @@ mod gpu_renderer_tests {
             // A surface with no specular mask must reflect LESS, not more.
             // Having that backwards buried dervish's bare skin — which carries
             // no mask — under a flat wash of environment tint.
-
-
 
             // The detail normal adds to the base one rather than replacing it.
             assert!(
@@ -1295,12 +1321,18 @@ mod gpu_renderer_tests {
                 assert!(vertex.contains(name), "{name} missing from vertex shader");
             }
             for name in ["u_base_color", "u_unlit"] {
-                assert!(fragment.contains(name), "{name} missing from fragment shader");
+                assert!(
+                    fragment.contains(name),
+                    "{name} missing from fragment shader"
+                );
             }
 
             // The varyings must be declared on both sides or the link fails.
             for name in ["v_uv", "v_normal", "v_tangent", "v_binormal"] {
-                assert!(vertex.contains(name) && fragment.contains(name), "{name} not on both sides");
+                assert!(
+                    vertex.contains(name) && fragment.contains(name),
+                    "{name} not on both sides"
+                );
             }
 
             // Dialect: `texture` vs `texture2D`, and the output keyword pair.
@@ -1535,9 +1567,9 @@ fn preview_center_radius(preview: &RenderModelPreview) -> ([f32; 3], f32) {
         (max[1] - min[1]).abs(),
         (max[2] - min[2]).abs(),
     ];
-    let radius =
-        ((extent[0] * extent[0] + extent[1] * extent[1] + extent[2] * extent[2]).sqrt() * 0.5)
-            .max(0.001);
+    let radius = ((extent[0] * extent[0] + extent[1] * extent[1] + extent[2] * extent[2]).sqrt()
+        * 0.5)
+        .max(0.001);
     (center, radius)
 }
 
@@ -1627,8 +1659,7 @@ impl PreviewCamera {
         } else {
             1.0
         };
-        let screen =
-            self.rect.center() + Vec2::new(rotated[0] * fit / w, -rotated[2] * fit / w);
+        let screen = self.rect.center() + Vec2::new(rotated[0] * fit / w, -rotated[2] * fit / w);
         ProjectedPoint { pos: screen }
     }
 
@@ -1837,11 +1868,8 @@ pub(super) fn preview_skeleton_nodes(nodes: &[Node]) -> Vec<RenderModelPreviewNo
         .iter()
         .zip(&world)
         .map(|(node, (world_rot, world_trans))| {
-            let bind_world = blam_tags::math::Matrix4::from_loc_rot_scale(
-                *world_trans,
-                *world_rot,
-                1.0,
-            );
+            let bind_world =
+                blam_tags::math::Matrix4::from_loc_rot_scale(*world_trans, *world_rot, 1.0);
             let inverse = bind_world.inverse();
             RenderModelPreviewNode {
                 name: node.name.clone(),
@@ -1936,7 +1964,6 @@ pub(super) fn point3_to_array(p: RealPoint3d) -> [f32; 3] {
 pub(super) fn vector3_to_array(v: RealVector3d) -> [f32; 3] {
     [v.i, v.j, v.k]
 }
-
 
 /// Upload one decoded texture, with mipmaps and the wrap modes the shader
 /// authored.

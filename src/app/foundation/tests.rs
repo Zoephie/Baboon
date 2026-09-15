@@ -591,33 +591,33 @@ mod tests {
             assert!(!edit.default_open(false));
 
             edit.nested_default = NestedDefault::Collapsed;
-            assert!(!edit.default_open(true), "collapsed must close a section the schema opens");
+            assert!(
+                !edit.default_open(true),
+                "collapsed must close a section the schema opens"
+            );
 
             edit.nested_default = NestedDefault::Expanded;
-            assert!(edit.default_open(false), "expanded must open a section the schema closes");
+            assert!(
+                edit.default_open(false),
+                "expanded must open a section the schema closes"
+            );
 
             // And it stays a default: nothing here forces an open state.
             assert_eq!(edit.resolve_open("some/block", true), None);
         });
     }
 
-    /// The reported complaint, at the layer that causes it: a value the editor
-    /// considers uneditable is *painted text* — there is no cursor to place in
-    /// it, nothing to drag a selection across, and nothing to copy. A value in
-    /// an editable context is a text box, which is what makes retyping a tag
-    /// build's numbers somewhere else possible at all.
-    ///
-    /// Driven through real pointer input rather than by asking which branch was
-    /// taken: what matters is whether clicking the cell puts a caret in it.
+    /// Both editable and read-only values must accept focus for selection/copy.
+    /// Drive real pointer input through component rows, not just the cell helper.
     #[test]
-    fn only_an_editable_value_row_can_be_clicked_into() {
+    fn editable_and_read_only_value_rows_can_be_clicked_into() {
         assert!(
             click_across_value_row(true),
             "an editable value row must take a caret, or its text cannot be selected or copied"
         );
         assert!(
-            !click_across_value_row(false),
-            "a read-only row is painted text — nothing there can take focus"
+            click_across_value_row(false),
+            "a read-only row must accept focus so its value can be selected and copied"
         );
     }
 
@@ -626,8 +626,10 @@ mod tests {
     /// Returns whether anything ever did.
     fn click_across_value_row(editable: bool) -> bool {
         let ctx = egui::Context::default();
-        let mut tag =
-            TagFile::new(crate::app::test_definition_path("halo4_mcc/camera_track.json")).unwrap();
+        let mut tag = TagFile::new(crate::app::test_definition_path(
+            "halo4_mcc/camera_track.json",
+        ))
+        .unwrap();
         crate::app::add_block_element(&mut tag, "control points").unwrap();
         let mut focused = false;
 

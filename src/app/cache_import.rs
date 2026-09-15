@@ -237,10 +237,9 @@ impl Baboon {
         }
         let targets = self.cache_import_targets();
         if targets.is_empty() {
-            self.status =
-                "Open the editing kit these tags should land in first — File › Load \
+            self.status = "Open the editing kit these tags should land in first — File › Load \
                  Folder"
-                    .to_owned();
+                .to_owned();
             return;
         }
         self.cache_import_dialog = Some(CacheImportDialog {
@@ -293,9 +292,8 @@ impl Baboon {
         let display_path = entry.display_path.clone();
         let targets = self.cache_import_targets();
         if targets.is_empty() {
-            self.status =
-                "Open the editing kit this tag should land in first — File › Load Folder"
-                    .to_owned();
+            self.status = "Open the editing kit this tag should land in first — File › Load Folder"
+                .to_owned();
             return;
         }
         self.cache_import_dialog = Some(CacheImportDialog {
@@ -365,11 +363,15 @@ impl Baboon {
     /// `only` names the tags to convert instead of the folder — the second run,
     /// after the user has seen what the folder reached for and ticked which of
     /// it to bring.
-    pub(super) fn start_cache_import(
-        &mut self,
-        ctx: egui::Context,
-        only: Option<HashSet<String>>,
-    ) {
+    pub(super) fn start_cache_import(&mut self, ctx: egui::Context, only: Option<HashSet<String>>) {
+        if let Some(index) = self
+            .cache_import_dialog
+            .as_ref()
+            .and_then(|dialog| self.kit_index(dialog.kit))
+            && self.refuse_read_only_edit(index)
+        {
+            return;
+        }
         let Some(dialog) = self.cache_import_dialog.as_ref() else {
             return;
         };
@@ -690,9 +692,15 @@ mod outside_tree_tests {
             reference("fx/decals/scorch.bitmap"),
         ]);
 
-        assert_eq!(tree.roots.iter().cloned().collect::<Vec<_>>(), ["fx", "objects"]);
+        assert_eq!(
+            tree.roots.iter().cloned().collect::<Vec<_>>(),
+            ["fx", "objects"]
+        );
         assert_eq!(tree.totals.get("objects").copied(), Some(3));
-        assert_eq!(tree.totals.get("objects/characters/elite").copied(), Some(2));
+        assert_eq!(
+            tree.totals.get("objects/characters/elite").copied(),
+            Some(2)
+        );
         assert_eq!(tree.keys_under("objects").len(), 3);
         assert_eq!(tree.keys_under("objects/weapons").len(), 1);
         // The leaves hang off the folder that actually holds them, not off the

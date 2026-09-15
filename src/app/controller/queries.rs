@@ -46,7 +46,9 @@ impl Baboon {
         blobs: Vec<(String, String)>,
     ) -> bool {
         if let Some(kit_index) = self.resolve_stamp(stamp) {
-            self.kits[kit_index].field_index.install(stamp.generation, blobs);
+            self.kits[kit_index]
+                .field_index
+                .install(stamp.generation, blobs);
         }
         false
     }

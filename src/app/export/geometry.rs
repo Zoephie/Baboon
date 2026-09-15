@@ -84,7 +84,11 @@ pub(in crate::app) fn extract_geometry_for_entry(
             let stem = tag_file_stem(entry);
             let summary =
                 blam_tags::extract::particle_model::particle_model_to_dir(&tag, output, &stem)?;
-            let objects = summary.emitted.iter().filter(|e| e.object.is_some()).count();
+            let objects = summary
+                .emitted
+                .iter()
+                .filter(|e| e.object.is_some())
+                .count();
             let manifest = summary
                 .emitted
                 .first()
@@ -153,7 +157,8 @@ pub(in crate::app) fn owning_model_skeleton(
     }
     // No `.model` beside the tag (or it named no usable skeleton) — a
     // render_model at the same path is the next-best owner.
-    let render = load_referenced_tag_from_source(source, &reference, "render_model", b"mode").ok()?;
+    let render =
+        load_referenced_tag_from_source(source, &reference, "render_model", b"mode").ok()?;
     Some(ModelSkeleton {
         nodes: render_jms_for_game(&render).ok()?.nodes,
         campaign_evolved: None,
@@ -178,8 +183,8 @@ pub(in crate::app) fn model_skeleton(source: &TagSource, model: &TagFile) -> Opt
         }
     }
     let reference = tag_ref_path(&root, "skeleton model")?;
-    let skeleton = load_referenced_tag_from_source(source, &reference, "skeleton_model", b"skel")
-        .ok()?;
+    let skeleton =
+        load_referenced_tag_from_source(source, &reference, "skeleton_model", b"skel").ok()?;
     // Deliberately the raw rest pose — see the note in `extract_model_geometry`
     // on why the reorientation is applied after the geometry is placed.
     let nodes = JmsFile::skeleton_rest_pose(&skeleton).ok()?;
@@ -537,11 +542,7 @@ impl blam_tags::extract::TagResolver for SourceResolver<'_> {
 /// cinematic object graphs among them); the other 34 have no model beside them
 /// and keep today's behaviour. Halo 3's 50 short graphs have no sibling model
 /// at all, so nothing there changes.
-fn animation_graph_owner(
-    source: &TagSource,
-    entry: &TagEntry,
-    jmad: &TagFile,
-) -> Option<TagFile> {
+fn animation_graph_owner(source: &TagSource, entry: &TagEntry, jmad: &TagFile) -> Option<TagFile> {
     if entry.group_tag != u32::from_be_bytes(*b"jmad") {
         return None;
     }
@@ -709,10 +710,7 @@ mod tests {
         // A rigged character: its collision hulls and physics shapes are stored
         // per-bone, so an unposed export piles all of them on the origin.
         let stem = "objects/characters/flood_tank/flood_tank";
-        let cases = [
-            ("collision_model", *b"coll"),
-            ("physics_model", *b"phmo"),
-        ];
+        let cases = [("collision_model", *b"coll"), ("physics_model", *b"phmo")];
         for (extension, group_tag) in cases {
             let path = root.join(format!("{stem}.{extension}"));
             assert!(path.is_file(), "{} is not in this tag tree", path.display());
@@ -868,11 +866,11 @@ mod tests {
 
         let owner = animation_graph_owner(&source, &entry, &jmad)
             .expect("the magnum's .model should be found and should name this graph");
-        let resolved =
-            blam_tags::extract::animation::resolve_animation_inputs(&owner, &SourceResolver {
-                source: &source,
-            })
-            .expect("resolve through the owning model");
+        let resolved = blam_tags::extract::animation::resolve_animation_inputs(
+            &owner,
+            &SourceResolver { source: &source },
+        )
+        .expect("resolve through the owning model");
         let render = resolved
             .render_model
             .as_ref()
@@ -951,7 +949,10 @@ mod tests {
                 .chain(loaded.entries.iter())
                 .find(|e| {
                     e.group_tag == want
-                        && e.display_path.replace('\\', "/").to_ascii_lowercase().contains(suffix)
+                        && e.display_path
+                            .replace('\\', "/")
+                            .to_ascii_lowercase()
+                            .contains(suffix)
                 })
                 .cloned()
         };

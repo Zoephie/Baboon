@@ -144,10 +144,7 @@ pub(in crate::app) fn is_model_group(group_tag: u32, names: &TagNameIndex) -> bo
 /// (`find_model_reference`), and a `particle`'s `Model` → `pmdf` field
 /// would be misread as one, putting a bogus model summary on every
 /// particle tag.
-pub(in crate::app) fn is_previewable_geometry_group(
-    group_tag: u32,
-    names: &TagNameIndex,
-) -> bool {
+pub(in crate::app) fn is_previewable_geometry_group(group_tag: u32, names: &TagNameIndex) -> bool {
     is_model_group(group_tag, names)
         || blam_tags::is_particle_model_group(group_tag)
         // A bare `render_model` (mode) IS the render geometry — the preview

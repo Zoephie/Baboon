@@ -271,7 +271,10 @@ fn real_kit_render_models_rasterize_at_thumbnail_size() {
         .take(25)
         .collect();
     if models.is_empty() {
-        eprintln!("skipping: no .render_model tags under {}", tags_root.display());
+        eprintln!(
+            "skipping: no .render_model tags under {}",
+            tags_root.display()
+        );
         return;
     }
 
@@ -307,5 +310,8 @@ fn real_kit_render_models_rasterize_at_thumbnail_size() {
         models.len(),
         tags_root.display()
     );
-    eprintln!("rasterized {rendered} of {} real render models", models.len());
+    eprintln!(
+        "rasterized {rendered} of {} real render models",
+        models.len()
+    );
 }

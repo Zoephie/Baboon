@@ -65,7 +65,10 @@ impl CompatVerdict {
     /// reader opening the window wants the losses, not the 30,000 rows that
     /// transfer fine.
     pub(in crate::app) fn is_loss(self) -> bool {
-        matches!(self, Self::HardBlocked | Self::SourceOnly | Self::OptionLoss)
+        matches!(
+            self,
+            Self::HardBlocked | Self::SourceOnly | Self::OptionLoss
+        )
     }
 
     /// Every verdict, so callers can derive a set rather than restate one.
@@ -205,15 +208,13 @@ impl TagCompatUiState {
         }
         let path = docs_root.join(TAG_COMPAT_FILE);
         self.database = match open_database(&path) {
-            Ok(connection) => {
-                match query_pairs(&connection) {
-                    Ok(pairs) => {
-                        self.pairs = pairs;
-                        CompatDatabase::Loaded(connection)
-                    }
-                    Err(error) => CompatDatabase::Failed(error),
+            Ok(connection) => match query_pairs(&connection) {
+                Ok(pairs) => {
+                    self.pairs = pairs;
+                    CompatDatabase::Loaded(connection)
                 }
-            }
+                Err(error) => CompatDatabase::Failed(error),
+            },
             Err(error) => CompatDatabase::Failed(error),
         };
     }
@@ -354,10 +355,16 @@ fn open_database(path: &Path) -> Result<Connection, String> {
     )
     .map_err(|error| format!("Could not open {}: {error}", path.display()))?;
     let version: Option<String> = connection
-        .query_row("SELECT value FROM meta WHERE key='schema_version'", [], |row| row.get(0))
+        .query_row(
+            "SELECT value FROM meta WHERE key='schema_version'",
+            [],
+            |row| row.get(0),
+        )
         .optional()
         .map_err(|error| format!("Could not read the tag compatibility schema: {error}"))?;
-    if version.as_deref().and_then(|value| value.parse::<i64>().ok())
+    if version
+        .as_deref()
+        .and_then(|value| value.parse::<i64>().ok())
         != Some(TAG_COMPAT_SCHEMA_VERSION)
     {
         return Err(format!(
@@ -402,7 +409,9 @@ fn query_groups(
          ORDER BY group_name",
         loss_verdict_sql(),
     );
-    let mut statement = connection.prepare(&sql).map_err(|error| error.to_string())?;
+    let mut statement = connection
+        .prepare(&sql)
+        .map_err(|error| error.to_string())?;
     let rows = statement
         .query_map(params![pair, losses_only as i64, search.trim()], |row| {
             Ok(CompatGroupRow {
@@ -437,7 +446,9 @@ fn query_fields(
          ORDER BY s.first_path,f.ordinal",
         loss_verdict_sql(),
     );
-    let mut statement = connection.prepare(&sql).map_err(|error| error.to_string())?;
+    let mut statement = connection
+        .prepare(&sql)
+        .map_err(|error| error.to_string())?;
     let rows = statement
         .query_map(params![pair, group, losses_only as i64], |row| {
             Ok(CompatFieldRow {

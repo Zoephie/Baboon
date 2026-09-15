@@ -6,6 +6,51 @@ use super::*;
 const CAMPAIGN_EVOLVED_GAME: &str = "haloce_evolved";
 const CAMPAIGN_EVOLVED_INSTALL_FOLDER: &str = "Halo Campaign Evolved";
 
+/// Converts legacy game-keyed entries and discovered installs to ordinary profiles.
+/// Missing installs are retained during migration; validation is a separate concern.
+pub(in crate::app) fn add_standard_editing_kit_profiles(
+    profiles: &mut Vec<CustomEditingKitProfile>,
+    paths: &HashMap<String, PathBuf>,
+) -> usize {
+    let mut added = 0;
+    for (index, shortcut) in EDITING_KIT_SHORTCUTS.into_iter().enumerate() {
+        let Some(path) = paths
+            .get(shortcut.game)
+            .filter(|path| !path.as_os_str().is_empty())
+        else {
+            continue;
+        };
+        let root = validate_builtin_editing_kit(shortcut, Some(path))
+            .layout()
+            .map(|layout| layout.root.clone())
+            .unwrap_or_else(|| canonical_or_clean(path));
+        if profiles.iter().any(|profile| {
+            let existing = validate_editing_kit_profile_layout(&profile.root, &profile.game)
+                .map(|layout| layout.root)
+                .unwrap_or_else(|_| canonical_or_clean(&profile.root));
+            same_recent_path(&existing, &root)
+        }) {
+            continue;
+        }
+        // Stable IDs prevent identity churn if legacy preferences are read again.
+        let mut id =
+            uuid::Uuid::from_u128(0xbab00000000040008000000000000000 + index as u128).to_string();
+        if profiles.iter().any(|profile| profile.id == id) {
+            id = uuid::Uuid::new_v4().to_string();
+        }
+        profiles.push(CustomEditingKitProfile {
+            read_only: false,
+            id,
+            name: shortcut.label.to_owned(),
+            game: shortcut.game.to_owned(),
+            root,
+            icon: None,
+        });
+        added += 1;
+    }
+    added
+}
+
 pub(super) fn detect_editing_kit_paths() -> HashMap<String, PathBuf> {
     detect_editing_kit_paths_in_common_roots(steam_common_roots())
 }

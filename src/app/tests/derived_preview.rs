@@ -48,7 +48,13 @@ fn a_jms_collision_mesh_scales_down_and_recomputes_its_normals() {
         ..Default::default()
     };
     let mut preview = empty_preview();
-    append_jms_triangles(&mut preview, &jms, COLLISION_REGION, Some(COLLISION_COLOR), false);
+    append_jms_triangles(
+        &mut preview,
+        &jms,
+        COLLISION_REGION,
+        Some(COLLISION_COLOR),
+        false,
+    );
 
     assert_eq!(preview.vertices.len(), 3);
     assert_eq!(preview.vertices[1].position, [1.0, 0.0, 0.0], "÷100");
@@ -99,7 +105,10 @@ fn a_sphere_tessellates_onto_its_own_surface() {
     for (position, normal) in &triples {
         // Centered at 1.0 world units, radius 0.5.
         let d = ((position[0] - 1.0).powi(2) + position[1].powi(2) + position[2].powi(2)).sqrt();
-        assert!((d - 0.5).abs() < 0.01, "vertex off the sphere: {position:?}");
+        assert!(
+            (d - 0.5).abs() < 0.01,
+            "vertex off the sphere: {position:?}"
+        );
         let len = (normal[0].powi(2) + normal[1].powi(2) + normal[2].powi(2)).sqrt();
         assert!((len - 1.0).abs() < 0.01, "non-unit normal");
     }
@@ -298,7 +307,10 @@ fn ass_scenes_split_into_layer_regions_and_apply_instance_transforms() {
         .iter()
         .find(|batch| batch.region_name == "portals")
         .expect("portal layer batch");
-    assert!(portal_batch.flat_color.is_some(), "layers keep fixed colors");
+    assert!(
+        portal_batch.flat_color.is_some(),
+        "layers keep fixed colors"
+    );
     let render_batch = preview
         .batches
         .iter()
@@ -572,6 +584,10 @@ fn real_kit_collision_physics_and_bsp_tags_build_previews() {
             built += 1;
         }
     }
-    assert!(built > 0, "nothing under {} built a preview", tags_root.display());
+    assert!(
+        built > 0,
+        "nothing under {} built a preview",
+        tags_root.display()
+    );
     eprintln!("built {built} derived previews from the real kit");
 }

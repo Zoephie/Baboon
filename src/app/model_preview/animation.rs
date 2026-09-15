@@ -138,12 +138,7 @@ pub(super) fn animation_skinning_rows(
     let mut world: Vec<(RealQuaternion, RealVector3d, f32)> = Vec::with_capacity(nodes.len());
     let mut rows: Vec<[f32; 4]> = Vec::with_capacity(nodes.len() * 3);
     for (index, node) in nodes.iter().enumerate() {
-        let local = blend_transforms(
-            frame_a.get(index),
-            frame_b.get(index),
-            blend,
-            node,
-        );
+        let local = blend_transforms(frame_a.get(index), frame_b.get(index), blend, node);
         let (rotation, translation, scale) = if node.parent >= 0 {
             let (parent_rotation, parent_translation, parent_scale) = world
                 .get(node.parent as usize)
@@ -460,9 +455,8 @@ fn list_model_animations(
     }
     let jmad_ref = tag_ref_path(&model.root(), "animation")
         .ok_or("This model references no animation graph.")?;
-    let jmad =
-        load_referenced_tag_from_source(source, &jmad_ref, "model_animation_graph", b"jmad")
-            .map_err(|error| error.to_string())?;
+    let jmad = load_referenced_tag_from_source(source, &jmad_ref, "model_animation_graph", b"jmad")
+        .map_err(|error| error.to_string())?;
     let animation = Animation::new(&jmad).map_err(|error| error.to_string())?;
     Ok(animation
         .iter()
@@ -489,9 +483,8 @@ fn decode_model_animation(
     let root = model.root();
     let jmad_ref =
         tag_ref_path(&root, "animation").ok_or("This model references no animation graph.")?;
-    let jmad =
-        load_referenced_tag_from_source(source, &jmad_ref, "model_animation_graph", b"jmad")
-            .map_err(|error| error.to_string())?;
+    let jmad = load_referenced_tag_from_source(source, &jmad_ref, "model_animation_graph", b"jmad")
+        .map_err(|error| error.to_string())?;
     let animation = Animation::new(&jmad).map_err(|error| error.to_string())?;
     let skeleton = Skeleton::from_tag(&jmad);
     let render_tag = tag_ref_path(&root, "render model").and_then(|reference| {

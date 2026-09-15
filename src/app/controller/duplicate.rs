@@ -853,6 +853,9 @@ fn parse_duplicate_body(
 
 impl Baboon {
     pub(super) fn begin_duplicate_tag(&mut self) {
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
         let Some(state) = self.rename_tag.as_ref() else {
             return;
         };

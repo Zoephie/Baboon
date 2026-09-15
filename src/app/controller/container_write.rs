@@ -131,7 +131,11 @@ pub(in crate::app) struct ContainerWriteFailure {
 impl ContainerWriteFailure {
     /// A failure at a file operation, where the OS error is the whole story
     /// and nothing is holding anything.
-    pub(in crate::app) fn at(phase: LeasePhase, file: &Path, error: impl std::fmt::Display) -> Self {
+    pub(in crate::app) fn at(
+        phase: LeasePhase,
+        file: &Path,
+        error: impl std::fmt::Display,
+    ) -> Self {
         Self {
             phase,
             file: file.to_path_buf(),
@@ -283,9 +287,8 @@ pub(in crate::app) fn swap_container_triplet(
                 stuck.push(format!("{}: {error}", targets[index].display()));
             }
         }
-        (!stuck.is_empty()).then(|| {
-            ContainerWriteFailure::at(LeasePhase::Rollback, output, stuck.join("; "))
-        })
+        (!stuck.is_empty())
+            .then(|| ContainerWriteFailure::at(LeasePhase::Rollback, output, stuck.join("; ")))
     };
 
     let mut backed_up = Vec::new();

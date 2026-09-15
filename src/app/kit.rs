@@ -573,12 +573,9 @@ fn requested_path_matches(kit: &Kit, path: &Path) -> bool {
 }
 
 fn kit_has_dirty_documents(kit: &Kit) -> bool {
-    kit.parsed_tags
-        .iter()
-        .any(|(key, document)| {
-            document.dirty.is_set() && document_edits_are_saveable(kit, key, document)
-        })
-        || kit.chimp.documents.values().any(|document| document.dirty)
+    kit.parsed_tags.iter().any(|(key, document)| {
+        document.dirty.is_set() && document_edits_are_saveable(kit, key, document)
+    }) || kit.chimp.documents.values().any(|document| document.dirty)
 }
 
 /// Whether this kit's edits to `key` could be written back at all.
@@ -621,8 +618,8 @@ fn active_after_removal(active: usize, removed: usize, new_len: usize) -> usize 
 
 #[cfg(test)]
 mod tests {
-    use super::{Kit, KitId, TagDocument, active_after_removal, kit_has_dirty_documents};
     use super::EditingKitProfileIdentity;
+    use super::{Kit, KitId, TagDocument, active_after_removal, kit_has_dirty_documents};
     use crate::app::test_definition_path;
     use crate::source::{LoadedSourceData, TagEntry, TagEntryLocation, TagSource, build_tree};
     use blam_tags::TagFile;

@@ -197,6 +197,10 @@ impl Baboon {
 }
 
 fn draw_find_window_header(ui: &mut Ui, open: &mut bool) {
+    draw_icon_window_header(ui, "Find", ButtonIcon::Find, open);
+}
+
+pub(super) fn draw_icon_window_header(ui: &mut Ui, title: &str, icon: ButtonIcon, open: &mut bool) {
     const HEADER_HEIGHT: f32 = 28.0;
     const TITLE_ICON_SIZE: f32 = 18.0;
     const TITLE_GAP: f32 = 7.0;
@@ -208,7 +212,7 @@ fn draw_find_window_header(ui: &mut Ui, open: &mut bool) {
     let font = TextStyle::Heading.resolve(ui.style());
     let galley = ui
         .painter()
-        .layout_no_wrap("Find".to_owned(), font, text_dark());
+        .layout_no_wrap(title.to_owned(), font, text_dark());
     let group_width = TITLE_ICON_SIZE + TITLE_GAP + galley.size().x;
     let icon_rect = egui::Rect::from_min_size(
         egui::pos2(
@@ -217,7 +221,7 @@ fn draw_find_window_header(ui: &mut Ui, open: &mut bool) {
         ),
         Vec2::splat(TITLE_ICON_SIZE),
     );
-    paint_button_icon_at(ui, ButtonIcon::Find, icon_rect, text_dark());
+    paint_button_icon_at(ui, icon, icon_rect, text_dark());
     ui.painter().galley(
         egui::pos2(
             icon_rect.right() + TITLE_GAP,
@@ -232,8 +236,12 @@ fn draw_find_window_header(ui: &mut Ui, open: &mut bool) {
         Vec2::splat(20.0),
     );
     let close = ui
-        .interact(close_rect, ui.id().with("find_close"), Sense::click())
-        .on_hover_text("Close Find");
+        .interact(
+            close_rect,
+            ui.id().with("window_header_close"),
+            Sense::click(),
+        )
+        .on_hover_text(format!("Close {title}"));
     let color = ui.style().interact(&close).fg_stroke.color;
     let cross = close_rect.shrink(5.0);
     ui.painter().line_segment(

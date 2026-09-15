@@ -16,7 +16,9 @@ fn definitions() -> std::path::PathBuf {
 }
 
 fn definition(group: &str) -> std::path::PathBuf {
-    definitions().join("haloce_evolved").join(format!("{group}.json"))
+    definitions()
+        .join("haloce_evolved")
+        .join(format!("{group}.json"))
 }
 
 /// A mounted container tag, as the browser would have indexed it.
@@ -56,13 +58,21 @@ fn group_tag_of(group: &str) -> u32 {
 fn a_new_campaign_evolved_tag_carries_the_shipped_generation() {
     let mut tag = TagFile::new(definition("cinematic_scene")).expect("build from the CE schema");
     assert_eq!(
-        (tag.header.build_version, tag.header.build_number, tag.header.version),
+        (
+            tag.header.build_version,
+            tag.header.build_number,
+            tag.header.version
+        ),
         (0, 0, 0),
         "TagFile::new starts at zero, which is what makes the stamp necessary"
     );
     apply_editing_kit_mcc_header(&mut tag, CAMPAIGN_EVOLVED_GAME).expect("CE is a known game");
     assert_eq!(
-        (tag.header.build_version, tag.header.build_number, tag.header.version),
+        (
+            tag.header.build_version,
+            tag.header.build_number,
+            tag.header.version
+        ),
         CAMPAIGN_EVOLVED_GENERATION
     );
 }
@@ -76,7 +86,11 @@ fn campaign_evolved_carries_the_same_generation_as_reach() {
     let stamp = |game: &str| {
         let mut tag = TagFile::new(definition("cinematic_scene")).expect("any tag will do");
         apply_editing_kit_mcc_header(&mut tag, game).unwrap_or_else(|e| panic!("{game}: {e}"));
-        (tag.header.build_version, tag.header.build_number, tag.header.version)
+        (
+            tag.header.build_version,
+            tag.header.build_number,
+            tag.header.version,
+        )
     };
     assert_eq!(stamp(CAMPAIGN_EVOLVED_GAME), stamp("haloreach_mcc"));
     assert_eq!(stamp(CAMPAIGN_EVOLVED_GAME), CAMPAIGN_EVOLVED_GENERATION);
@@ -158,14 +172,22 @@ fn an_imported_tag_is_restamped_for_campaign_evolved() {
     let mut foreign = TagFile::new(definition("cinematic_scene")).expect("any tag will do");
     apply_editing_kit_mcc_header(&mut foreign, "halo3_mcc").expect("H3 is a known game");
     assert_ne!(
-        (foreign.header.build_version, foreign.header.build_number, foreign.header.version),
+        (
+            foreign.header.build_version,
+            foreign.header.build_number,
+            foreign.header.version
+        ),
         CAMPAIGN_EVOLVED_GENERATION,
         "the fixture has to start wrong for this to prove anything"
     );
 
     apply_editing_kit_mcc_header(&mut foreign, CAMPAIGN_EVOLVED_GAME).expect("CE is a known game");
     assert_eq!(
-        (foreign.header.build_version, foreign.header.build_number, foreign.header.version),
+        (
+            foreign.header.build_version,
+            foreign.header.build_number,
+            foreign.header.version
+        ),
         CAMPAIGN_EVOLVED_GENERATION
     );
 
@@ -173,7 +195,11 @@ fn an_imported_tag_is_restamped_for_campaign_evolved() {
     let mut zeroed = TagFile::new(definition("cinematic_scene")).expect("any tag will do");
     apply_editing_kit_mcc_header(&mut zeroed, CAMPAIGN_EVOLVED_GAME).expect("CE is a known game");
     assert_eq!(
-        (zeroed.header.build_version, zeroed.header.build_number, zeroed.header.version),
+        (
+            zeroed.header.build_version,
+            zeroed.header.build_number,
+            zeroed.header.version
+        ),
         CAMPAIGN_EVOLVED_GENERATION
     );
 }
@@ -263,7 +289,11 @@ fn an_abstract_base_group_is_refused_by_name() {
 /// a different property under the destination's.
 #[test]
 fn a_donor_of_another_group_is_never_offered() {
-    let entries = vec![container_entry(0, "objects/characters/elite/elite", "biped")];
+    let entries = vec![container_entry(
+        0,
+        "objects/characters/elite/elite",
+        "biped",
+    )];
     assert!(
         pick_container_template(entries.iter(), group_tag_of("cinematic_scene")).is_none(),
         "biped is not a cross-group donor"

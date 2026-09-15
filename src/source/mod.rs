@@ -289,7 +289,9 @@ impl ContainerPackageIndex {
     /// Record a cooked package. First insert wins so the mount order that
     /// already governs tag layering governs packages too.
     pub fn insert(&mut self, package: String, container: usize, rel_path: String) {
-        self.by_package.entry(package).or_insert((container, rel_path));
+        self.by_package
+            .entry(package)
+            .or_insert((container, rel_path));
     }
 
     /// Resolve a `/Game/...` package name (any case) to its container payload.
@@ -327,7 +329,9 @@ impl TagSource {
             TagSource::MonolithicCache { root, .. } => {
                 format!("Monolithic cache: {}", root.display())
             }
-            TagSource::IoStoreContainerSet { root, containers, .. } => {
+            TagSource::IoStoreContainerSet {
+                root, containers, ..
+            } => {
                 format!("Containers ({}): {}", containers.len(), root.display())
             }
         }
@@ -349,7 +353,10 @@ impl TagSource {
     /// tag. Errors for non-container sources or an unresolved reference. This is
     /// the same read the browser performs for a `TagEntryLocation::Container`.
     pub fn read_container_tag_by_ref(&self, group_tag: u32, reference: &str) -> Result<TagFile> {
-        let TagSource::IoStoreContainerSet { containers, index, .. } = self else {
+        let TagSource::IoStoreContainerSet {
+            containers, index, ..
+        } = self
+        else {
             anyhow::bail!("tag-reference resolution requires a container source");
         };
         let (container, rel_path) = index.lookup(group_tag, reference).ok_or_else(|| {
@@ -616,10 +623,17 @@ mod container_ref_tests {
         // Wrong group and unknown paths still miss.
         assert!(
             index
-                .lookup(u32::from_be_bytes(*b"scnr"), "levels\\halo1\\solo\\c10\\level_a")
+                .lookup(
+                    u32::from_be_bytes(*b"scnr"),
+                    "levels\\halo1\\solo\\c10\\level_a"
+                )
                 .is_none()
         );
-        assert!(index.lookup(sbsp, "levels\\halo1\\solo\\c99\\nope").is_none());
+        assert!(
+            index
+                .lookup(sbsp, "levels\\halo1\\solo\\c99\\nope")
+                .is_none()
+        );
     }
 
     /// An exact hit must never be shadowed by a `_Generated_` neighbour.
@@ -637,6 +651,9 @@ mod container_ref_tests {
             2,
             "generated.ubulk".to_owned(),
         );
-        assert_eq!(index.lookup(sbsp, "levels\\x\\bsp"), Some((1, "exact.ubulk")));
+        assert_eq!(
+            index.lookup(sbsp, "levels\\x\\bsp"),
+            Some((1, "exact.ubulk"))
+        );
     }
 }

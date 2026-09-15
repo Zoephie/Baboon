@@ -36,7 +36,10 @@ fn the_shipped_database_opens_and_covers_both_directions() {
 fn a_missing_database_reports_rather_than_panics() {
     let mut state = TagCompatUiState::default();
     state.ensure_loaded(Path::new("no/such/directory"));
-    assert!(state.error().is_some(), "a missing file must be reported, not ignored");
+    assert!(
+        state.error().is_some(),
+        "a missing file must be reported, not ignored"
+    );
 }
 
 /// The window opens filtered to losses, because thirty thousand rows that
@@ -81,7 +84,10 @@ fn the_animation_graph_reports_its_losses_with_locations() {
     state.focus("haloreach_mcc", "haloce_evolved", "model_animation_graph");
     state.refresh();
 
-    assert_eq!(state.selected_group.as_deref(), Some("model_animation_graph"));
+    assert_eq!(
+        state.selected_group.as_deref(),
+        Some("model_animation_graph")
+    );
     assert!(!state.fields.is_empty(), "there are rows to show");
 
     let dropped: Vec<&str> = state
@@ -91,7 +97,10 @@ fn the_animation_graph_reports_its_losses_with_locations() {
         .filter_map(|row| row.source_name.as_deref())
         .collect();
     for expected in ["node joint flags", "additional flags"] {
-        assert!(dropped.contains(&expected), "{expected} is dropped: {dropped:?}");
+        assert!(
+            dropped.contains(&expected),
+            "{expected} is dropped: {dropped:?}"
+        );
     }
 
     let renamed = state
@@ -136,7 +145,11 @@ fn the_export_matches_what_is_on_screen() {
     );
     assert!(csv.contains("model_animation_graph"));
     for line in &lines[1..] {
-        assert_eq!(line.matches('"').count() % 2, 0, "unbalanced quoting: {line}");
+        assert_eq!(
+            line.matches('"').count() % 2,
+            0,
+            "unbalanced quoting: {line}"
+        );
     }
 }
 
@@ -163,8 +176,9 @@ fn the_tab_lays_out_against_the_shipped_database() {
                 ..Default::default()
             },
             |ctx| {
-                egui::CentralPanel::default()
-                    .show(ctx, |ui| super::super::ui::help::draw_tag_compat_body_for_tests(ui, state));
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    super::super::ui::help::draw_tag_compat_body_for_tests(ui, state)
+                });
             },
         );
     };
@@ -173,7 +187,10 @@ fn the_tab_lays_out_against_the_shipped_database() {
     // it has to lay out before anything is chosen.
     render(&mut state);
     assert!(state.selected_group.is_none());
-    assert!(!state.groups.is_empty(), "the group list populated during the frame");
+    assert!(
+        !state.groups.is_empty(),
+        "the group list populated during the frame"
+    );
 
     // A group selected, with rows for the grid to lay out.
     state.focus("haloreach_mcc", "haloce_evolved", "model_animation_graph");

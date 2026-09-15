@@ -813,10 +813,7 @@ pub(in crate::app) enum ContainerDumpScope {
     AllShipped,
     /// Just the tags beneath one browser folder, captured at right-click.
     /// `label` is the folder's display path, for the confirmation wording.
-    Folder {
-        label: String,
-        keys: Vec<String>,
-    },
+    Folder { label: String, keys: Vec<String> },
 }
 
 /// The outcome of a container write, kept on screen until dismissed.

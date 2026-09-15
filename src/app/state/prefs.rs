@@ -120,12 +120,30 @@ pub(in crate::app) struct EditingKitShortcut {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::app) struct CustomEditingKitProfile {
+    pub(in crate::app) read_only: bool,
     pub(in crate::app) id: String,
     pub(in crate::app) name: String,
     pub(in crate::app) game: String,
     pub(in crate::app) root: PathBuf,
-    /// Relative to the executable directory. `None` uses the bundled folder icon.
+    /// Relative to the active data directory, with legacy executable-relative lookup.
+    /// `None` uses the bundled engine artwork.
     pub(in crate::app) icon: Option<PathBuf>,
+}
+
+impl CustomEditingKitProfile {
+    pub(in crate::app) fn is_read_only_for(
+        &self,
+        identity: Option<&EditingKitProfileIdentity>,
+        root: Option<&Path>,
+    ) -> bool {
+        self.read_only
+            && self.game != "haloce_evolved"
+            && (identity.is_some_and(|identity| identity.id == self.id)
+                || root.is_some_and(|root| {
+                    root.ancestors()
+                        .any(|ancestor| same_recent_path(ancestor, &self.root))
+                }))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -143,6 +161,7 @@ pub(in crate::app) enum CustomEditingKitIconDraft {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::app) struct CustomEditingKitDraft {
+    pub(in crate::app) read_only: bool,
     pub(in crate::app) editing_id: Option<String>,
     pub(in crate::app) name: String,
     pub(in crate::app) game: String,
@@ -161,6 +180,7 @@ pub(in crate::app) struct CustomEditingKitRemoval {
 impl CustomEditingKitDraft {
     pub(in crate::app) fn new() -> Self {
         Self {
+            read_only: false,
             editing_id: None,
             name: String::new(),
             game: "halo2_mcc".to_owned(),
@@ -173,6 +193,7 @@ impl CustomEditingKitDraft {
 
     pub(in crate::app) fn from_profile(profile: &CustomEditingKitProfile) -> Self {
         Self {
+            read_only: profile.read_only,
             editing_id: Some(profile.id.clone()),
             name: profile.name.clone(),
             game: profile.game.clone(),

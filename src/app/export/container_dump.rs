@@ -55,8 +55,7 @@ pub(in crate::app) fn dump_shipped_container_tags(
     if total == 0 {
         anyhow::bail!("this workspace has no container tags to extract");
     }
-    fs::create_dir_all(output)
-        .with_context(|| format!("failed to create {}", output.display()))?;
+    fs::create_dir_all(output).with_context(|| format!("failed to create {}", output.display()))?;
 
     // Reads decompress a container chunk and writes hit the filesystem, so this
     // is worth spreading — but only so far. Past a handful of threads the disk
@@ -95,9 +94,7 @@ pub(in crate::app) fn dump_shipped_container_tags(
                             Ok(None) => {
                                 skipped.fetch_add(1, Ordering::Relaxed);
                             }
-                            Err(error) => {
-                                failures.push(format!("{}: {error}", entry.display_path))
-                            }
+                            Err(error) => failures.push(format!("{}: {error}", entry.display_path)),
                         }
                         // One message per tag would be tens of thousands of
                         // repaints for a bar that moves less than a pixel.
@@ -198,7 +195,12 @@ mod tests {
     fn mirrors_the_display_path() {
         assert_eq!(
             safe_relative_path("levels/solo/c10/c10.scenario"),
-            Some(PathBuf::from("levels").join("solo").join("c10").join("c10.scenario"))
+            Some(
+                PathBuf::from("levels")
+                    .join("solo")
+                    .join("c10")
+                    .join("c10.scenario")
+            )
         );
     }
 
@@ -216,7 +218,11 @@ mod tests {
     fn refuses_to_escape_the_output_root() {
         assert_eq!(
             safe_relative_path("../../windows/system32/foo.scenario"),
-            Some(PathBuf::from("windows").join("system32").join("foo.scenario"))
+            Some(
+                PathBuf::from("windows")
+                    .join("system32")
+                    .join("foo.scenario")
+            )
         );
         assert_eq!(
             safe_relative_path("c:/absolute/foo.scenario"),

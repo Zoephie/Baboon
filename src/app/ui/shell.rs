@@ -27,7 +27,7 @@ impl Baboon {
                 egui::menu::bar(ui, |ui| {
                     aligned_menu_button(ui, "File", |ui| {
                         style_list_menu(ui);
-                        if ui.button("New Tag...").clicked() {
+                        if ui.add_enabled(!self.editing_kit_is_read_only(self.active), egui::Button::new("New Tag...")).clicked() {
                             ui.close_menu();
                             self.open_new_tag_dialog();
                         }
@@ -161,7 +161,7 @@ impl Baboon {
                             ui,
                             ButtonIcon::Save,
                             save_label,
-                            true,
+                            !self.editing_kit_is_read_only(self.active),
                         )
                         .clicked()
                         {
@@ -170,7 +170,7 @@ impl Baboon {
                         }
                         if ui
                             .add_enabled(
-                                self.kits[self.active].selected_key.is_some(),
+                                self.kits[self.active].selected_key.is_some() && !self.editing_kit_is_read_only(self.active),
                                 egui::Button::new("Save Current Tag As..."),
                             )
                             .clicked()
@@ -684,16 +684,17 @@ impl Baboon {
                                         .unwrap_or_else(|error| {
                                             format!("{} is unavailable: {error}", profile.name)
                                         });
-                                    let texture = self
-                                        .custom_editing_kit_texture(ui.ctx(), &profile)
-                                        .cloned();
-                                    let response = editing_kit_menu_row(
+                                    let texture = self.workspace_banner_texture(
+                                        ui.ctx(), &profile.game, Some(&profile.id),
+                                    );
+                                    let response = editing_kit_menu_row_with_read_only(
                                         ui,
                                         &profile.name,
                                         "EK",
                                         texture.as_ref(),
-                                        profile.icon.is_none() || texture.is_none(),
+                                        texture.is_none(),
                                         enabled,
+                                        profile.read_only && profile.game != "haloce_evolved",
                                     );
                                     let response = if enabled {
                                         response.on_hover_text(tooltip)
@@ -744,7 +745,7 @@ impl Baboon {
                             ui.add_enabled(false, egui::Button::new("No configured editing kits"));
                         }
                         ui.separator();
-                        if ui.button("Editing Kit Settings...").clicked() {
+                        if icon_text_button(ui, ButtonIcon::Settings, "Editing Kit Settings...", true).clicked() {
                             self.settings_tab = SettingsTab::EditingKits;
                             self.settings_open = true;
                             ui.close_menu();

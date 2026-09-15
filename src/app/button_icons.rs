@@ -11,6 +11,7 @@ pub(super) enum ButtonIcon {
     Browse,
     Cache,
     Open,
+    Edit,
     Import,
     Export,
     Clear,
@@ -64,6 +65,7 @@ pub(super) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::Browse => include_str!("../../assets/Button Icons/Browse.svg"),
         ButtonIcon::Cache => include_str!("../../assets/Button Icons/Cache.svg"),
         ButtonIcon::Open => include_str!("../../assets/Button Icons/Open.svg"),
+        ButtonIcon::Edit => include_str!("../../assets/Button Icons/Edit.svg"),
         ButtonIcon::Import => include_str!("../../assets/Button Icons/Import.svg"),
         ButtonIcon::Export => include_str!("../../assets/Button Icons/Export.svg"),
         ButtonIcon::Clear => include_str!("../../assets/Button Icons/Clear.svg"),
@@ -246,10 +248,7 @@ pub(super) fn selectable_icon_text_button(
         }
 
         let image = button_icon_image(ui, icon, text_dark(), BUTTON_ICON_SIZE);
-        ui.add(
-            egui::Button::image_and_text(image, label)
-                .min_size(Vec2::new(0.0, BUTTON_HEIGHT)),
-        )
+        ui.add(egui::Button::image_and_text(image, label).min_size(Vec2::new(0.0, BUTTON_HEIGHT)))
     })
     .inner
 }
@@ -493,8 +492,8 @@ pub(super) fn right_opening_menu_button<R>(
     // When moving between sibling rows, keep the popup drawn earlier in this
     // frame (if any) and draw the newly hovered child on the next frame. This
     // avoids one-frame overlap without depending on sibling draw order.
-    let switching_siblings = response.hovered()
-        && active_before_hover.is_some_and(|previous| previous != popup_id);
+    let switching_siblings =
+        response.hovered() && active_before_hover.is_some_and(|previous| previous != popup_id);
     let inner = if active == Some(popup_id) && !switching_siblings {
         right_opening_menu_popup(ui, &response, popup_id, popup_width, add_contents)
     } else {

@@ -294,7 +294,10 @@ mod tests {
         let path = temp("baboon-blend-header.baboonlevel");
         let bytes = write_sample(&path);
         assert_eq!(&bytes[0..8], MAGIC);
-        assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), VERSION);
+        assert_eq!(
+            u32::from_le_bytes(bytes[8..12].try_into().unwrap()),
+            VERSION
+        );
         assert_eq!(u32::from_le_bytes(bytes[12..16].try_into().unwrap()), 1);
         assert_eq!(u32::from_le_bytes(bytes[16..20].try_into().unwrap()), 1);
         assert_eq!(u32::from_le_bytes(bytes[20..24].try_into().unwrap()), 1);
@@ -307,7 +310,8 @@ mod tests {
         let bytes = write_sample(&path);
         // header 24, name length 4, name 7, counts 8
         let mut at = 24 + 4 + 7 + 8;
-        let f32_at = |bytes: &[u8], at: usize| f32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
+        let f32_at =
+            |bytes: &[u8], at: usize| f32::from_le_bytes(bytes[at..at + 4].try_into().unwrap());
 
         // Positions come through untouched.
         assert_eq!(f32_at(&bytes, at + 12), 1.0);
@@ -317,7 +321,11 @@ mod tests {
         at += 3 * 3 * 4;
         // V is flipped: Unreal's runs down the image, Blender's runs up.
         assert_eq!(f32_at(&bytes, at + 4), 1.0);
-        assert_eq!(f32_at(&bytes, at + 12), 0.75, "0.25 must arrive as 1 - 0.25");
+        assert_eq!(
+            f32_at(&bytes, at + 12),
+            0.75,
+            "0.25 must arrive as 1 - 0.25"
+        );
         at += 3 * 2 * 4;
         // Winding is reversed: Unreal is clockwise, Blender wants the other way.
         let index_at =
@@ -363,7 +371,10 @@ mod tests {
         assert_eq!(u32::from_le_bytes(bytes[20..24].try_into().unwrap()), 3);
         // Two placements of 136 bytes each, at the very end.
         let start = bytes.len() - 2 * PLACEMENT_SIZE;
-        assert_eq!(u32::from_le_bytes(bytes[start..start + 4].try_into().unwrap()), 0);
+        assert_eq!(
+            u32::from_le_bytes(bytes[start..start + 4].try_into().unwrap()),
+            0
+        );
         assert_eq!(
             u32::from_le_bytes(bytes[start + 4..start + 8].try_into().unwrap()),
             2,
@@ -371,7 +382,11 @@ mod tests {
         );
         let translation_at = start + 8 + 12 * 8;
         assert_eq!(
-            f64::from_le_bytes(bytes[translation_at..translation_at + 8].try_into().unwrap()),
+            f64::from_le_bytes(
+                bytes[translation_at..translation_at + 8]
+                    .try_into()
+                    .unwrap()
+            ),
             -1234.5,
             "the matrix is written row-major, translation last, as Unreal holds it"
         );
@@ -406,7 +421,10 @@ mod tests {
         )
         .unwrap();
         let script = std::fs::read_to_string(directory.join("build_blend.py")).unwrap();
-        assert!(script.contains("BABOONLV"), "the script must read this format");
+        assert!(
+            script.contains("BABOONLV"),
+            "the script must read this format"
+        );
         let readme = std::fs::read_to_string(directory.join("c10_README.txt")).unwrap();
         // The two things a user can get wrong.
         assert!(readme.contains("the meshes folder beside the masters"));

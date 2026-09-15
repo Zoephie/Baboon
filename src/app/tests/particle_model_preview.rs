@@ -22,8 +22,8 @@ use std::path::PathBuf;
 use blam_tags::TagFile;
 
 use crate::app::editor::{is_model_group, is_previewable_geometry_group};
-use crate::app::model_preview::loading::build_particle_model_preview;
 use crate::app::model_preview::RenderModelPreview;
+use crate::app::model_preview::loading::build_particle_model_preview;
 
 /// Root of an extracted MCC tag set, via `BLAM_TEST_<KIT>_TAGS` or the
 /// conventional local layout.
@@ -147,8 +147,7 @@ fn gen3_objects_become_regions_with_valid_geometry() {
     let Some(tags) = kit_tags("haloreach") else {
         return;
     };
-    let path =
-        tags.join("fx/particles/models/debris/generic_shards/generic_shards.particle_model");
+    let path = tags.join("fx/particles/models/debris/generic_shards/generic_shards.particle_model");
     if !path.is_file() {
         return;
     }
@@ -162,23 +161,36 @@ fn gen3_objects_become_regions_with_valid_geometry() {
         "every object needs a draw batch or it renders invisible",
     );
     for (region, batch) in preview.regions.iter().zip(&preview.batches) {
-        assert_eq!(region.name, batch.region_name, "batch must target its region");
+        assert_eq!(
+            region.name, batch.region_name,
+            "batch must target its region"
+        );
         assert!(
             region.permutations.contains(&batch.permutation_name),
             "batch permutation `{}` is not selectable in region `{}`",
             batch.permutation_name,
             region.name,
         );
-        assert!(batch.index_count > 0, "region `{}` has an empty batch", region.name);
+        assert!(
+            batch.index_count > 0,
+            "region `{}` has an empty batch",
+            region.name
+        );
     }
 
     // Every batch must address inside the shared buffers, or the
     // renderer reads past the end.
     for batch in &preview.batches {
         let end = (batch.index_start + batch.index_count) as usize;
-        assert!(end <= preview.indices.len(), "batch range past the index buffer");
+        assert!(
+            end <= preview.indices.len(),
+            "batch range past the index buffer"
+        );
         for &i in &preview.indices[batch.index_start as usize..end] {
-            assert!((i as usize) < preview.vertices.len(), "index past the vertex buffer");
+            assert!(
+                (i as usize) < preview.vertices.len(),
+                "index past the vertex buffer"
+            );
         }
     }
 
@@ -214,8 +226,8 @@ fn halo2_regions_carry_the_shipped_object_names() {
     assert_eq!(
         region_names,
         vec![
-            "can_1", "can_2", "can_3", "can_4", "can_5", "paper_1", "paper_2", "paper_3",
-            "butt_1", "butt_2",
+            "can_1", "can_2", "can_3", "can_4", "can_5", "paper_1", "paper_2", "paper_3", "butt_1",
+            "butt_2",
         ],
         "Halo 2 stores `models[].model name` — the region list must show them",
     );
@@ -240,7 +252,10 @@ fn single_object_tag_still_yields_one_region() {
 
     assert_eq!(preview.regions.len(), 1);
     assert_eq!(preview.regions[0].name, "brute_spike");
-    assert!(!preview.indices.is_empty(), "single-object preview must have geometry");
+    assert!(
+        !preview.indices.is_empty(),
+        "single-object preview must have geometry"
+    );
 }
 
 /// Drive the real UI entry point, not the builder underneath it.
@@ -365,7 +380,9 @@ fn every_shipped_particle_model_previews() {
         let Some(root) = kit_tags(kit) else { continue };
         let mut stack = vec![root.clone()];
         while let Some(dir) = stack.pop() {
-            let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
             for entry in entries.flatten() {
                 let path = entry.path();
                 if path.is_dir() {

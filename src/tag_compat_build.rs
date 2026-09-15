@@ -78,7 +78,6 @@ impl CompatVerdict {
             Self::Identical => "identical",
         }
     }
-
 }
 
 impl fmt::Display for CompatVerdict {
@@ -102,7 +101,10 @@ fn verdict_of(field: &FieldVerdict) -> CompatVerdict {
         FieldVerdict::OptionsRemapped { .. } => CompatVerdict::TypeChangedSafe,
         // Widening carries the value intact; narrowing may not, and the
         // converter reports what it could not hold.
-        FieldVerdict::Requantized { source_width, target_width } => {
+        FieldVerdict::Requantized {
+            source_width,
+            target_width,
+        } => {
             if target_width >= source_width {
                 CompatVerdict::TypeChangedSafe
             } else {
@@ -222,11 +224,13 @@ impl ReviewedCatalog {
             if !rule.group.eq_ignore_ascii_case(group) {
                 continue;
             }
-            if scope_matches(&rule.source_games, source) && scope_matches(&rule.target_games, target)
+            if scope_matches(&rule.source_games, source)
+                && scope_matches(&rule.target_games, target)
             {
                 out.insert(rule.source.clone(), rule.target.clone());
             }
-            if scope_matches(&rule.source_games, target) && scope_matches(&rule.target_games, source)
+            if scope_matches(&rule.source_games, target)
+                && scope_matches(&rule.target_games, source)
             {
                 out.insert(rule.target.clone(), rule.source.clone());
             }
@@ -248,7 +252,12 @@ fn groups_of(definitions: &Path, game: &str) -> Result<BTreeSet<String>, String>
     Ok(index
         .values()
         .filter_map(serde_json::Value::as_str)
-        .filter(|name| definitions.join(game).join(format!("{name}.json")).is_file())
+        .filter(|name| {
+            definitions
+                .join(game)
+                .join(format!("{name}.json"))
+                .is_file()
+        })
         .map(str::to_owned)
         .collect())
 }
@@ -364,7 +373,10 @@ fn rows_for(
             let detail = match &row.verdict {
                 FieldVerdict::Renamed { alias } => format!("was `{alias}`"),
                 FieldVerdict::TypeEquivalent { reason } => format!("{reason:?}"),
-                FieldVerdict::Requantized { source_width, target_width } => {
+                FieldVerdict::Requantized {
+                    source_width,
+                    target_width,
+                } => {
                     format!("re-encoded from {source_width} to {target_width} bytes")
                 }
                 FieldVerdict::OptionsLost { lost, .. } => {
@@ -428,7 +440,11 @@ fn struct_key(structure: &StructComparison, index: usize) -> String {
 /// be explicable without re-deriving the walk.
 fn pairing_of(structure: &StructComparison) -> &'static str {
     if structure.source_name == structure.target_name {
-        if structure.source_guid == structure.target_guid { "name+guid" } else { "name" }
+        if structure.source_guid == structure.target_guid {
+            "name+guid"
+        } else {
+            "name"
+        }
     } else if structure.source_guid == structure.target_guid {
         "guid"
     } else {
@@ -472,7 +488,11 @@ pub fn analyze_pair(
     let mut groups = Vec::new();
     // Every group either side defines, so the sheet is complete rather than
     // silently omitting what only one game has.
-    for group in source_groups.union(&target_groups).cloned().collect::<BTreeSet<_>>() {
+    for group in source_groups
+        .union(&target_groups)
+        .cloned()
+        .collect::<BTreeSet<_>>()
+    {
         let in_source = source_groups.contains(&group);
         let in_target = target_groups.contains(&group);
         let source_fourcc = fourcc_of(definitions, source_game, &group);
@@ -554,7 +574,10 @@ pub fn analyze_pair(
         let renames = catalog.0.renames(&group, source_game, target_game);
         let (structs, fields) = rows_for(&comparison, &renames);
 
-        let size_diff_structs = structs.iter().filter(|s| s.source_size != s.target_size).count();
+        let size_diff_structs = structs
+            .iter()
+            .filter(|s| s.source_size != s.target_size)
+            .count();
         let field_diff_structs = structs
             .iter()
             .filter(|s| s.verdict != CompatVerdict::Identical)
@@ -565,8 +588,13 @@ pub fn analyze_pair(
             group,
             source_fourcc,
             target_fourcc,
-            verdict: severity_verdict(comparison.severity)
-                .min(fields.iter().map(|f| f.verdict).min().unwrap_or(CompatVerdict::Identical)),
+            verdict: severity_verdict(comparison.severity).min(
+                fields
+                    .iter()
+                    .map(|f| f.verdict)
+                    .min()
+                    .unwrap_or(CompatVerdict::Identical),
+            ),
             shared_structs: structs.len(),
             field_diff_structs,
             size_diff_structs,
@@ -718,7 +746,10 @@ pub fn build_database(
         ("definitions_commit", definitions_commit(definitions)),
     ] {
         transaction
-            .execute("INSERT INTO meta(key,value) VALUES(?1,?2)", params![key, value])
+            .execute(
+                "INSERT INTO meta(key,value) VALUES(?1,?2)",
+                params![key, value],
+            )
             .map_err(|e| e.to_string())?;
     }
 
@@ -873,9 +904,7 @@ pub fn suggest_drops(reports: &[PairReportHandle], group_filter: Option<&str>) -
                 .fields
                 .iter()
                 .filter(|row| row.verdict == CompatVerdict::SourceOnly)
-                .filter_map(|row| {
-                    Some((row.source_name.as_deref()?, row.struct_key.as_str()))
-                })
+                .filter_map(|row| Some((row.source_name.as_deref()?, row.struct_key.as_str())))
                 .collect();
             for (field, structure) in paths {
                 entries.push(serde_json::json!({

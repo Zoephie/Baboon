@@ -49,7 +49,10 @@ fn folder_siblings(
 
     let mut push = |name: &str| {
         let name = name.to_owned();
-        if !names.iter().any(|existing: &String| existing.eq_ignore_ascii_case(&name)) {
+        if !names
+            .iter()
+            .any(|existing: &String| existing.eq_ignore_ascii_case(&name))
+        {
             names.push(name);
         }
     };
@@ -312,8 +315,14 @@ mod tests {
 
     #[test]
     fn normalizes_separators_and_strays() {
-        assert_eq!(normalize_folder_rel("/objects\\vehicles/"), "objects/vehicles");
-        assert_eq!(normalize_folder_rel("objects//vehicles"), "objects/vehicles");
+        assert_eq!(
+            normalize_folder_rel("/objects\\vehicles/"),
+            "objects/vehicles"
+        );
+        assert_eq!(
+            normalize_folder_rel("objects//vehicles"),
+            "objects/vehicles"
+        );
         assert_eq!(normalize_folder_rel("  "), "");
     }
 
@@ -385,12 +394,25 @@ mod tests {
     /// nothing could be created inside is refused up front.
     #[test]
     fn folder_names_inherit_the_shared_leaf_rules() {
-        for invalid in ["", "  ", ".", "..", "a/b", "a.b", "trailing ", "CON", "we:ird"] {
+        for invalid in [
+            "",
+            "  ",
+            ".",
+            "..",
+            "a/b",
+            "a.b",
+            "trailing ",
+            "CON",
+            "we:ird",
+        ] {
             assert!(
                 validate_folder_leaf_name(invalid, &[]).is_err(),
                 "{invalid:?} should be refused"
             );
         }
-        assert_eq!(validate_folder_leaf_name(" vehicles", &[]).unwrap(), "vehicles");
+        assert_eq!(
+            validate_folder_leaf_name(" vehicles", &[]).unwrap(),
+            "vehicles"
+        );
     }
 }

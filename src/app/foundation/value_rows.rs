@@ -277,11 +277,9 @@ pub(in crate::app) fn draw_foundation_bounds_row(
         foundation_label_cell(ui, &meta.label, meta.help.as_deref());
         let editable = edit.editable && !meta.read_only;
         if editable {
-            let lower_response =
-                foundation_text_edit_cell(ui, &mut lower.text, 92.0, lower_id);
+            let lower_response = foundation_text_edit_cell(ui, &mut lower.text, 92.0, lower_id);
             ui.label(RichText::new("to").color(subtle_dark()).small());
-            let upper_response =
-                foundation_text_edit_cell(ui, &mut upper.text, 92.0, upper_id);
+            let upper_response = foundation_text_edit_cell(ui, &mut upper.text, 92.0, upper_id);
             lower.note_response(&lower_response);
             upper.note_response(&upper_response);
             let commit = lower.should_commit(ui, &lower_response)
@@ -339,8 +337,7 @@ pub(in crate::app) fn draw_foundation_component_edit_row(
                 ui.label(RichText::new(label.as_str()).color(subtle_dark()).small());
             }
             if editable {
-                let response =
-                    foundation_text_edit_cell(ui, &mut draft.text, 92.0, ids[index]);
+                let response = foundation_text_edit_cell(ui, &mut draft.text, 92.0, ids[index]);
                 draft.note_response(&response);
                 responses.push(response);
             } else {

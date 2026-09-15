@@ -183,7 +183,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
                     style_list_menu(ui);
                     draw_recent_folders_menu(ui, &recents)
                 })
-            .flatten()
+                .flatten()
             {
                 self.recent_action = Some(recent_action);
                 ui.close_menu();

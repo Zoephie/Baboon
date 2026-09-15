@@ -64,12 +64,7 @@ impl NativeTemplateCache {
     /// Build the index for `game` if it is missing or was built from a different
     /// kit. Walking a kit takes about a second, so this is the call that has to
     /// not happen twice.
-    pub(in crate::app) fn ensure(
-        &mut self,
-        game: &str,
-        tags_root: &Path,
-        definitions_root: &Path,
-    ) {
+    pub(in crate::app) fn ensure(&mut self, game: &str, tags_root: &Path, definitions_root: &Path) {
         if self
             .built
             .get(game)
@@ -471,14 +466,28 @@ impl Baboon {
     /// monolithic cache is read-only, and a Campaign Evolved container has its
     /// own import path because a tag there is a package, not a file.
     pub(super) fn can_import_tags(&self) -> bool {
+        if self.editing_kit_is_read_only(self.active) {
+            return false;
+        }
         self.source().is_some_and(|source| {
             matches!(source.source, TagSource::LooseFolder { .. }) && source.game.is_some()
         })
     }
 
+    fn refuse_read_only_tag_import(&mut self) -> bool {
+        let index = self
+            .tag_import_dialog
+            .as_ref()
+            .and_then(|dialog| self.kit_index(dialog.kit));
+        index.is_some_and(|index| self.refuse_read_only_edit(index))
+    }
+
     /// Open Import Tags for the active kit. `destination_rel` pre-fills the
     /// destination from a right-clicked folder.
     pub(super) fn open_tag_import_dialog(&mut self, destination_rel: Option<String>) {
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
         let Some(target_game) = self.source().and_then(|source| source.game.clone()) else {
             self.status = "Import Tags needs a loaded editing kit with a detected game".to_owned();
             return;
@@ -634,10 +643,7 @@ impl Baboon {
         }
         thread::spawn(move || {
             let result = resolve_import_source_job(&input, &kit_roots, &names);
-            let _ = tx.send(WorkerMessage::ImportSourceResolved {
-                input,
-                result,
-            });
+            let _ = tx.send(WorkerMessage::ImportSourceResolved { input, result });
         });
     }
 
@@ -843,6 +849,9 @@ impl Baboon {
     }
 
     fn write_single_tag_import(&mut self, ctx: &egui::Context) {
+        if self.refuse_read_only_tag_import() {
+            return;
+        }
         let Some(dialog) = self.tag_import_dialog.as_ref() else {
             return;
         };
@@ -874,7 +883,9 @@ impl Baboon {
             return;
         };
         let target_tags_root = dialog.target_tags_root.clone();
-        if !normalize_conversion_path(&output).starts_with(normalize_conversion_path(&target_tags_root)) {
+        if !normalize_conversion_path(&output)
+            .starts_with(normalize_conversion_path(&target_tags_root))
+        {
             if let Some(dialog) = self.tag_import_dialog.as_mut() {
                 dialog.error = Some("The destination escapes this kit's tags folder".to_owned());
             }
@@ -893,8 +904,9 @@ impl Baboon {
                 prepare_companion_outputs(draft, &output, &target_tags_root, &dependency_schema)?;
             for path in companion_outputs.iter().chain(std::iter::once(&output)) {
                 if let Some(parent) = path.parent() {
-                    fs::create_dir_all(parent)
-                        .map_err(|error| format!("Could not create {}: {error}", parent.display()))?;
+                    fs::create_dir_all(parent).map_err(|error| {
+                        format!("Could not create {}: {error}", parent.display())
+                    })?;
                 }
             }
             for (companion, path) in draft.companion_tags.iter().zip(&companion_outputs) {
@@ -966,6 +978,9 @@ impl Baboon {
     }
 
     fn run_folder_tag_import(&mut self, accept_loss: bool, only: Option<HashSet<String>>) {
+        if self.refuse_read_only_tag_import() {
+            return;
+        }
         let Some(dialog) = self.tag_import_dialog.as_ref() else {
             return;
         };
@@ -1573,9 +1588,7 @@ mod tests {
     fn an_overlapping_import_is_refused_in_both_directions() {
         let source = Path::new("D:/H3EK/tags/objects");
         // Destination inside the source.
-        assert!(
-            plan_folder_import(source, Path::new("D:/H3EK/tags"), "objects/imported").is_err()
-        );
+        assert!(plan_folder_import(source, Path::new("D:/H3EK/tags"), "objects/imported").is_err());
         // Source inside the destination.
         assert!(plan_folder_import(source, Path::new("D:/H3EK/tags"), "objects").is_err());
         // A different kit is fine.
@@ -1625,7 +1638,9 @@ mod tests {
         // A recorded source revision is what marks a tag as kit-authored and so
         // eligible to be a template.
         native.header.version = 8;
-        native.write_atomic(target_root.join("stock.particle")).unwrap();
+        native
+            .write_atomic(target_root.join("stock.particle"))
+            .unwrap();
 
         let source = TagFile::new(definitions.join("halo3_mcc/particle.json")).unwrap();
         let kit_roots = HashMap::from([("haloreach_mcc".to_owned(), target_root.clone())]);
@@ -1774,7 +1789,10 @@ mod tests {
                     }
                 }
                 ConversionOutcome::Failed(error) => {
-                    panic!("{}: lights should not fail outright: {error}", path.display())
+                    panic!(
+                        "{}: lights should not fail outright: {error}",
+                        path.display()
+                    )
                 }
             }
         }
@@ -1811,12 +1829,7 @@ mod tests {
     fn a_kit_root_that_is_not_a_conversion_profile_is_ignored() {
         let roots = vec![("some_unshipped_game".to_owned(), PathBuf::from("D:/Kits/X"))];
         assert!(
-            detect_import_game(
-                Path::new("D:/Kits/X/tags/foo.weapon"),
-                &roots,
-                None,
-            )
-            .is_none()
+            detect_import_game(Path::new("D:/Kits/X/tags/foo.weapon"), &roots, None,).is_none()
         );
     }
 }

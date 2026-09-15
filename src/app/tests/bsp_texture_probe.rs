@@ -14,8 +14,7 @@ use super::*;
 /// one candidate passing the full chain is the assertion.
 #[test]
 fn a_real_bsps_render_layer_keeps_uvs_tangents_and_shader_paths() {
-    let Some(tags_root) = std::env::var_os("BABOON_MODEL_KIT").map(std::path::PathBuf::from)
-    else {
+    let Some(tags_root) = std::env::var_os("BABOON_MODEL_KIT").map(std::path::PathBuf::from) else {
         eprintln!("skipping: set BABOON_MODEL_KIT to an editing kit's tags folder");
         return;
     };

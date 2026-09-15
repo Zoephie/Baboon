@@ -1,6 +1,7 @@
 //! Preferences and last-session persistence, including legacy migration.
 //! It owns preference/session serialization and migration; interactive settings presentation belongs to the UI layer.
 
+use super::controller::add_standard_editing_kit_profiles;
 use super::*;
 
 pub(super) fn prefs_path() -> PathBuf {
@@ -59,7 +60,30 @@ pub(super) fn load_gui_prefs() -> GuiPrefs {
     let Ok(value) = serde_json::from_str::<Value>(&text) else {
         return GuiPrefs::default();
     };
-    prefs_from_value(&value)
+    let prefs = prefs_from_value(&value);
+    if value.get("editing_kit_profiles").is_none()
+        && (value.get("editing_kit_paths").is_some()
+            || value.get("custom_editing_kit_profiles").is_some())
+    {
+        // Preserve unrelated preferences and onboarding state during the one-time upgrade.
+        let mut migrated = value.clone();
+        if let Some(object) = migrated.as_object_mut() {
+            object.remove("editing_kit_paths");
+            object.remove("custom_editing_kit_profiles");
+            object.insert(
+                "editing_kit_profiles".to_owned(),
+                Value::Array(custom_editing_kit_profiles_value(
+                    &prefs.custom_editing_kit_profiles,
+                )),
+            );
+            if let Ok(text) = serde_json::to_string_pretty(&migrated)
+                && let Err(error) = write_text_atomic(&prefs_path(), &text)
+            {
+                eprintln!("Could not save editing-kit migration: {error}");
+            }
+        }
+    }
+    prefs
 }
 
 /// Decodes stored preferences, falling back to the default for anything the
@@ -171,9 +195,9 @@ fn prefs_from_value(value: &Value) -> GuiPrefs {
             .and_then(Value::as_str)
             .filter(|path| !path.trim().is_empty())
             .map(PathBuf::from),
-        editing_kit_paths: load_editing_kit_paths(&value),
+        editing_kit_paths: HashMap::new(),
         ek_folder_aliases: load_ek_folder_aliases(&value),
-        custom_editing_kit_profiles: load_custom_editing_kit_profiles(&value),
+        custom_editing_kit_profiles: load_unified_editing_kit_profiles(&value),
         tool_commands_window_pos: load_pos2(&value, "tool_commands_window_pos"),
         tool_commands_window_size: load_vec2(&value, "tool_commands_window_size"),
         tool_commands_left_width: value
@@ -457,7 +481,8 @@ fn load_ek_folder_aliases(value: &Value) -> Vec<EkFolderAlias> {
 
 fn load_custom_editing_kit_profiles(value: &Value) -> Vec<CustomEditingKitProfile> {
     let Some(entries) = value
-        .get("custom_editing_kit_profiles")
+        .get("editing_kit_profiles")
+        .or_else(|| value.get("custom_editing_kit_profiles"))
         .and_then(Value::as_array)
     else {
         return Vec::new();
@@ -488,7 +513,6 @@ fn load_custom_editing_kit_profiles(value: &Value) -> Vec<CustomEditingKitProfil
             .get("game")
             .and_then(Value::as_str)
             .and_then(supported_ek_game_id)
-            .filter(|game| *game != "haloce_evolved")
         else {
             continue;
         };
@@ -510,6 +534,11 @@ fn load_custom_editing_kit_profiles(value: &Value) -> Vec<CustomEditingKitProfil
             .map(PathBuf::from)
             .filter(|icon| safe_custom_icon_relative_path(icon));
         profiles.push(CustomEditingKitProfile {
+            read_only: game != "haloce_evolved"
+                && entry
+                    .get("read_only")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
             id: id.to_owned(),
             name: name.to_owned(),
             game: game.to_owned(),
@@ -526,6 +555,7 @@ fn custom_editing_kit_profiles_value(profiles: &[CustomEditingKitProfile]) -> Ve
         .map(|profile| {
             json!({
                 "id": profile.id,
+                "read_only": profile.read_only,
                 "name": profile.name,
                 "game": profile.game,
                 "root": profile.root.display().to_string(),
@@ -533,6 +563,15 @@ fn custom_editing_kit_profiles_value(profiles: &[CustomEditingKitProfile]) -> Ve
             })
         })
         .collect()
+}
+
+fn load_unified_editing_kit_profiles(value: &Value) -> Vec<CustomEditingKitProfile> {
+    let mut profiles = load_custom_editing_kit_profiles(value);
+    // The new field is authoritative: never resurrect removed legacy entries.
+    if value.get("editing_kit_profiles").is_none() {
+        add_standard_editing_kit_profiles(&mut profiles, &load_editing_kit_paths(value));
+    }
+    profiles
 }
 
 pub(super) fn save_gui_prefs(
@@ -564,15 +603,8 @@ fn prefs_to_value(
     let mut collapsed_tool_categories: Vec<&String> =
         prefs.tool_commands_collapsed_categories.iter().collect();
     collapsed_tool_categories.sort();
-    let mut editing_kit_paths = serde_json::Map::new();
-    for shortcut in EDITING_KIT_SHORTCUTS {
-        if let Some(path) = prefs.editing_kit_paths.get(shortcut.game) {
-            let text = path.display().to_string();
-            if !text.trim().is_empty() {
-                editing_kit_paths.insert(shortcut.game.to_owned(), json!(text));
-            }
-        }
-    }
+    let mut profiles = prefs.custom_editing_kit_profiles.clone();
+    add_standard_editing_kit_profiles(&mut profiles, &prefs.editing_kit_paths);
     json!({
         "browser_mode": browser_mode_str(prefs.browser_mode),
         "browser_sort": browser_sort_str(prefs.browser_sort),
@@ -596,14 +628,13 @@ fn prefs_to_value(
         "ui_scale": prefs.ui_scale,
         "model_preview_size": prefs.model_preview_size,
         "blender_path": prefs.blender_path.as_ref().map(|path| path.display().to_string()),
-        "editing_kit_paths": editing_kit_paths,
         "ek_folder_aliases": prefs.ek_folder_aliases.iter().map(|alias| {
             json!({
                 "folder_name": alias.folder_name,
                 "game": alias.game,
             })
         }).collect::<Vec<_>>(),
-        "custom_editing_kit_profiles": custom_editing_kit_profiles_value(&prefs.custom_editing_kit_profiles),
+        "editing_kit_profiles": custom_editing_kit_profiles_value(&profiles),
         "tool_commands_window_pos": prefs.tool_commands_window_pos.map(|pos| vec![pos.x, pos.y]),
         "tool_commands_window_size": prefs.tool_commands_window_size.map(|size| vec![size.x, size.y]),
         "tool_commands_left_width": prefs.tool_commands_left_width,
@@ -1114,6 +1145,7 @@ mod tests {
                 {
                     "id": "11111111-1111-4111-8111-111111111111",
                     "name": "Reach Project",
+                    "read_only": true,
                     "game": "haloreach_mcc",
                     "root": "\\\\?\\D:\\Kits\\ReachProject",
                     "icon": "editing kit icons/reach-11111111/icon-a.png"
@@ -1128,6 +1160,8 @@ mod tests {
             ]
         });
         let profiles = load_custom_editing_kit_profiles(&value);
+        assert!(profiles[0].read_only);
+        assert!(!profiles[1].read_only, "old entries must remain writable");
         assert_eq!(
             profiles
                 .iter()
@@ -1231,6 +1265,65 @@ mod nested_default_tests {
 #[cfg(test)]
 mod chimp_pref_tests {
     use super::*;
+
+    #[test]
+    fn editing_kit_migration_is_stable_and_saves_only_unified_profiles() {
+        let legacy = json!({
+            "editing_kit_paths": {
+                "halo2_mcc": "Z:/Unavailable/H2EK",
+                "haloce_evolved": "Z:/Unavailable/Halo Campaign Evolved"
+            },
+            "custom_editing_kit_profiles": [{
+                "id": "11111111-1111-4111-8111-111111111111",
+                "name": "My mod", "game": "halo3_mcc", "root": "Z:/Unavailable/Mod",
+                "icon": "editing kit icons/mod/icon.png"
+            }]
+        });
+        let prefs = prefs_from_value(&legacy);
+        assert!(prefs.editing_kit_paths.is_empty());
+        assert_eq!(prefs.custom_editing_kit_profiles.len(), 3);
+        assert_eq!(
+            prefs.custom_editing_kit_profiles,
+            prefs_from_value(&legacy).custom_editing_kit_profiles
+        );
+        assert_eq!(prefs.custom_editing_kit_profiles[0].name, "My mod");
+        assert!(prefs.custom_editing_kit_profiles[0].icon.is_some());
+        let saved = prefs_to_value(&prefs, &HashSet::new(), true);
+        assert!(saved.get("editing_kit_paths").is_none());
+        assert!(saved.get("custom_editing_kit_profiles").is_none());
+        assert_eq!(
+            prefs.custom_editing_kit_profiles,
+            prefs_from_value(&saved).custom_editing_kit_profiles
+        );
+        let mut removed = saved;
+        removed["editing_kit_profiles"] = json!([]);
+        removed["editing_kit_paths"] = legacy["editing_kit_paths"].clone();
+        assert!(
+            prefs_from_value(&removed)
+                .custom_editing_kit_profiles
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn editing_kit_detection_profiles_deduplicate_roots_without_changing_edits() {
+        let paths = HashMap::from([("halo2_mcc".to_owned(), PathBuf::from("Z:/Unavailable/H2EK"))]);
+        let mut profiles = Vec::new();
+        assert_eq!(add_standard_editing_kit_profiles(&mut profiles, &paths), 1);
+        profiles[0].name = "Renamed kit".to_owned();
+        profiles[0].icon = Some(PathBuf::from("editing kit icons/mod/icon.png"));
+        let previous = profiles.clone();
+        assert_eq!(add_standard_editing_kit_profiles(&mut profiles, &paths), 0);
+        assert_eq!(profiles, previous);
+        let legacy = json!({
+            "editing_kit_paths": { "halo2_mcc": "Z:/Unavailable/H2EK" },
+            "custom_editing_kit_profiles": custom_editing_kit_profiles_value(&profiles)
+        });
+        assert_eq!(
+            prefs_from_value(&legacy).custom_editing_kit_profiles,
+            previous
+        );
+    }
 
     #[test]
     fn chimp_is_enabled_for_preferences_written_before_it_existed() {
@@ -1431,6 +1524,7 @@ mod session_tests {
         let mut saved = kit(&root.display().to_string(), Some(BrowserMode::Folders));
         saved.profile_id = Some("custom-h2-project".to_owned());
         let profile = CustomEditingKitProfile {
+            read_only: false,
             id: "custom-h2-project".to_owned(),
             name: "Halo 2 Rebalance".to_owned(),
             game: "halo2_mcc".to_owned(),
@@ -1513,7 +1607,11 @@ mod session_tests {
 
         let restored = parse_last_session(&session_value(&session)).expect("session parses");
 
-        assert_eq!(restored.kits.len(), 2, "an empty workspace is still a workspace");
+        assert_eq!(
+            restored.kits.len(),
+            2,
+            "an empty workspace is still a workspace"
+        );
         assert!(restored.kits[0].bitmap_library_open);
         assert!(
             !restored.kits[1].bitmap_library_open,
@@ -1578,7 +1676,10 @@ mod session_tests {
         let value = session_value(&session);
         let restored = parse_last_session(&value).expect("session parses");
         assert_eq!(restored.kits.len(), 2);
-        assert!(!restored.kits[0].was_active, "the container kit was not focused");
+        assert!(
+            !restored.kits[0].was_active,
+            "the container kit was not focused"
+        );
         assert!(restored.kits[1].was_active, "the Halo 3 kit was focused");
         // It is the kit that is marked, not a position: the flag follows its
         // own workspace when the list is filtered.

@@ -308,18 +308,12 @@ mod tests {
             0
         );
 
-        assert!(
-            campaign_evolved
-                .iter()
-                .any(|entry| entry.url.as_deref()
-                    == Some("https://www.youtube.com/watch?v=2xL2AiuaFwE"))
-        );
-        assert!(
-            campaign_evolved
-                .iter()
-                .any(|entry| entry.url.as_deref()
-                    == Some("https://www.youtube.com/watch?v=Vc_uxtYe-2U"))
-        );
+        assert!(campaign_evolved.iter().any(
+            |entry| entry.url.as_deref() == Some("https://www.youtube.com/watch?v=2xL2AiuaFwE")
+        ));
+        assert!(campaign_evolved.iter().any(
+            |entry| entry.url.as_deref() == Some("https://www.youtube.com/watch?v=Vc_uxtYe-2U")
+        ));
 
         for entry in campaign_evolved {
             assert_eq!(entry.kind, TutorialKind::Video);
@@ -332,9 +326,7 @@ mod tests {
             image::load_from_memory_with_format(&bytes, image::ImageFormat::Png)
                 .expect("shipped tutorial thumbnail should decode as PNG");
 
-            let build_thumbnail = Path::new(env!("OUT_DIR"))
-                .join("docs")
-                .join(thumbnail);
+            let build_thumbnail = Path::new(env!("OUT_DIR")).join("docs").join(thumbnail);
             assert!(
                 build_thumbnail.is_file(),
                 "build script should package the tutorial thumbnail at {}",

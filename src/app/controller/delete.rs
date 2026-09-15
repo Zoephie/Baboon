@@ -310,6 +310,9 @@ impl Baboon {
     /// Open the delete confirmation for `key`, resolving everything the dialog
     /// needs to describe exactly what will happen.
     pub(super) fn open_delete_tag(&mut self, key: &str) {
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
         let Some(entry) = self.entry_for_key(key).cloned() else {
             self.status = "Tag is no longer in the source".to_owned();
             return;
@@ -324,8 +327,7 @@ impl Baboon {
         }
         let containers = self.mounted_containers().unwrap_or_default();
         let thresholds = container_appended_thresholds(&containers);
-        if let Err(error) =
-            delete_eligibility(&entry, &containers, &thresholds, &self.created_tags)
+        if let Err(error) = delete_eligibility(&entry, &containers, &thresholds, &self.created_tags)
         {
             self.status = error;
             return;
@@ -391,6 +393,9 @@ impl Baboon {
             self.status = "The workspace this delete came from is closed".to_owned();
             return;
         }
+        if self.refuse_read_only_edit(self.active) {
+            return;
+        }
         // Re-resolved after the dialog, not carried through it: a modeless
         // confirmation outlives the frame that opened it, and the source can
         // have moved on underneath.
@@ -400,8 +405,7 @@ impl Baboon {
         };
         let containers = self.mounted_containers().unwrap_or_default();
         let thresholds = container_appended_thresholds(&containers);
-        if let Err(error) =
-            delete_eligibility(&entry, &containers, &thresholds, &self.created_tags)
+        if let Err(error) = delete_eligibility(&entry, &containers, &thresholds, &self.created_tags)
         {
             self.status = error;
             return;
