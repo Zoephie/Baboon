@@ -26,6 +26,7 @@ pub(super) fn draw_tag(
     entry: &TagEntry,
     names: &TagNameIndex,
     source: Option<&TagSource>,
+    source_game: Option<&str>,
     rmdf_cache: &mut HashMap<String, Option<RenderMethodDefinition>>,
     rmop_cache: &mut HashMap<String, Option<RenderMethodOption>>,
     color_popup: &mut Option<MaterialColorPopup>,
@@ -67,13 +68,14 @@ pub(super) fn draw_tag(
     }
     ui.add_space(6.0);
 
-    if is_model && model_preview.active_tab == ModelTagPanelTab::RenderModel {
+    if is_model && model_preview.active_tab == ModelTagPanelTab::ModelPreview {
         draw_model_preview_panel(
             ui,
             tag,
             entry,
             names,
             source,
+            source_game,
             model_preview,
             model_preview_size,
             edit,
@@ -103,7 +105,7 @@ fn draw_model_tag_panel_tabs(ui: &mut Ui, model_preview: &mut ModelPreviewState,
         ui,
         &mut model_preview.active_tab,
         ModelTagPanelTab::Fields,
-        ModelTagPanelTab::RenderModel,
+        ModelTagPanelTab::ModelPreview,
         preview_panel_title(group_tag),
         ButtonIcon::RenderModel,
     );

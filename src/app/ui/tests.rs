@@ -86,6 +86,36 @@ fn shared_browser_buttons_use_standard_point_sizes() {
 }
 
 #[test]
+fn scrolling_dropdown_matches_button_height() {
+    let ctx = egui::Context::default();
+    ctx.set_style(foundation_style());
+    let mut dropdown_height = 0.0;
+    let _ = ctx.run(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(320.0, 100.0),
+            )),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                dropdown_height = combo_box_with_scroll(
+                    ui,
+                    egui::ComboBox::from_id_salt("button_height_test").selected_text("0. default"),
+                    |_| {},
+                )
+                .0
+                .response
+                .rect
+                .height();
+            });
+        },
+    );
+    assert_eq!(dropdown_height, BUTTON_HEIGHT);
+}
+
+#[test]
 fn pane_header_breadcrumbs_accumulate_clickable_folder_paths() {
     let (breadcrumbs, title) = pane_header_path_parts("objects\\characters/brute/brute.biped");
 

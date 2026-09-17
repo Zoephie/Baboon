@@ -222,6 +222,7 @@ impl Baboon {
                 entry,
                 names,
                 source.map(|source| &source.source),
+                source.and_then(|source| source.game.as_deref()),
                 &mut kit.rmdf_cache,
                 &mut kit.rmop_cache,
                 &mut self.color_popup,

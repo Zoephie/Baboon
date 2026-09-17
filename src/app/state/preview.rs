@@ -125,6 +125,8 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) selected_variant: Option<usize>,
     pub(in crate::app) region_selections: HashMap<String, ModelRegionSelection>,
     pub(in crate::app) show_markers: bool,
+    /// Draw the model skeleton over the preview, with hoverable bone names.
+    pub(in crate::app) show_armature: bool,
     /// Case-insensitive substring filter on marker names (empty = show all).
     /// Only applied while `show_markers` is on.
     pub(in crate::app) marker_filter: String,
@@ -154,10 +156,6 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) loaded_scenario_selection: std::collections::BTreeSet<usize>,
     pub(in crate::app) render_mode: ModelRenderMode,
     pub(in crate::app) show_backfaces: bool,
-    /// Sample the model's own shader textures rather than the flat per-material
-    /// palette. Off falls back to the untextured view, which stays useful for
-    /// reading silhouette and topology.
-    pub(in crate::app) shaded: bool,
     /// A texture-resolve job is running for the loaded model.
     pub(in crate::app) textures_pending: bool,
     /// `.model` overlays only: draw the render model itself. Off leaves just
@@ -195,6 +193,7 @@ impl Default for ModelPreviewState {
             selected_variant: None,
             region_selections: HashMap::new(),
             show_markers: false,
+            show_armature: false,
             marker_filter: String::new(),
             high_detail: true,
             loaded_high_detail: false,
@@ -204,9 +203,8 @@ impl Default for ModelPreviewState {
             overlays_loaded: false,
             scenario_bsp_selection: std::collections::BTreeSet::new(),
             loaded_scenario_selection: std::collections::BTreeSet::new(),
-            render_mode: ModelRenderMode::Shaded,
+            render_mode: ModelRenderMode::Textured,
             show_backfaces: false,
-            shaded: true,
             textures_pending: false,
             show_render: true,
             perspective: false,
@@ -235,29 +233,53 @@ impl ModelPreviewState {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::app) enum ModelRenderMode {
-    Shaded,
+    Solid,
     Wireframe,
-    ShadedWireframe,
+    SolidWireframe,
+    Textured,
+    TexturedWireframe,
 }
 
 impl ModelRenderMode {
-    pub(in crate::app) const ALL: [Self; 3] =
-        [Self::Shaded, Self::Wireframe, Self::ShadedWireframe];
+    pub(in crate::app) const ALL: [Self; 5] = [
+        Self::Solid,
+        Self::Wireframe,
+        Self::SolidWireframe,
+        Self::Textured,
+        Self::TexturedWireframe,
+    ];
 
     pub(in crate::app) fn label(self) -> &'static str {
         match self {
-            Self::Shaded => "Shaded",
+            Self::Solid => "Solid",
             Self::Wireframe => "Wireframe",
-            Self::ShadedWireframe => "Shaded + Wireframe",
+            Self::SolidWireframe => "Solid + Wireframe",
+            Self::Textured => "Textured",
+            Self::TexturedWireframe => "Textured + Wireframe",
         }
     }
 
     pub(in crate::app) fn draws_shading(self) -> bool {
-        matches!(self, Self::Shaded | Self::ShadedWireframe)
+        !matches!(self, Self::Wireframe)
     }
 
     pub(in crate::app) fn draws_wireframe(self) -> bool {
-        matches!(self, Self::Wireframe | Self::ShadedWireframe)
+        matches!(
+            self,
+            Self::Wireframe | Self::SolidWireframe | Self::TexturedWireframe
+        )
+    }
+
+    pub(in crate::app) fn uses_textures(self) -> bool {
+        matches!(self, Self::Textured | Self::TexturedWireframe)
+    }
+
+    pub(in crate::app) fn without_textures(self) -> Self {
+        match self {
+            Self::Textured => Self::Solid,
+            Self::TexturedWireframe => Self::SolidWireframe,
+            other => other,
+        }
     }
 }
 
@@ -267,17 +289,40 @@ mod model_render_mode_tests {
 
     #[test]
     fn model_render_modes_select_expected_passes() {
-        assert!(ModelRenderMode::Shaded.draws_shading());
-        assert!(!ModelRenderMode::Shaded.draws_wireframe());
+        assert!(ModelRenderMode::Solid.draws_shading());
+        assert!(!ModelRenderMode::Solid.draws_wireframe());
+        assert!(!ModelRenderMode::Solid.uses_textures());
 
         assert!(!ModelRenderMode::Wireframe.draws_shading());
         assert!(ModelRenderMode::Wireframe.draws_wireframe());
 
-        assert!(ModelRenderMode::ShadedWireframe.draws_shading());
-        assert!(ModelRenderMode::ShadedWireframe.draws_wireframe());
+        assert!(ModelRenderMode::SolidWireframe.draws_shading());
+        assert!(ModelRenderMode::SolidWireframe.draws_wireframe());
+        assert!(ModelRenderMode::Textured.draws_shading());
+        assert!(!ModelRenderMode::Textured.draws_wireframe());
+        assert!(ModelRenderMode::Textured.uses_textures());
+        assert!(ModelRenderMode::TexturedWireframe.draws_shading());
+        assert!(ModelRenderMode::TexturedWireframe.draws_wireframe());
+        assert!(ModelRenderMode::TexturedWireframe.uses_textures());
         assert_eq!(
             ModelPreviewState::default().render_mode,
-            ModelRenderMode::Shaded
+            ModelRenderMode::Textured
+        );
+    }
+
+    #[test]
+    fn unavailable_textures_keep_the_wireframe_choice() {
+        assert_eq!(
+            ModelRenderMode::Textured.without_textures(),
+            ModelRenderMode::Solid
+        );
+        assert_eq!(
+            ModelRenderMode::TexturedWireframe.without_textures(),
+            ModelRenderMode::SolidWireframe
+        );
+        assert_eq!(
+            ModelRenderMode::Wireframe.without_textures(),
+            ModelRenderMode::Wireframe
         );
     }
 }
@@ -285,7 +330,7 @@ mod model_render_mode_tests {
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(in crate::app) enum ModelTagPanelTab {
     Fields,
-    RenderModel,
+    ModelPreview,
 }
 
 #[derive(Clone, PartialEq, Eq)]

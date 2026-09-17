@@ -3385,7 +3385,9 @@ impl Baboon {
                 continue;
             };
             let path = match &entry.location {
-                TagEntryLocation::LooseFile(path) => Some(path.clone()),
+                TagEntryLocation::LooseFile(path) => {
+                    Some(fs::canonicalize(path).unwrap_or_else(|_| path.clone()))
+                }
                 TagEntryLocation::Monolithic { .. }
                 | TagEntryLocation::Container { .. }
                 | TagEntryLocation::NewContainer { .. } => None,
@@ -3614,8 +3616,8 @@ impl Baboon {
         let mut opened = restore_folders.len();
         let mut missing = 0usize;
         for tag in restore {
-            if self.ensure_restored_tag_entry(&tag) {
-                self.select_entry(tag.key, ctx.clone());
+            if let Some(current_key) = self.restored_tag_entry_key(&tag) {
+                self.select_entry(current_key, ctx.clone());
                 opened += 1;
             } else {
                 missing += 1;
@@ -3632,37 +3634,39 @@ impl Baboon {
         }
     }
 
-    fn ensure_restored_tag_entry(&mut self, tag: &LastSessionTag) -> bool {
-        if self.entry_for_key(&tag.key).is_some() {
-            return true;
+    /// Resolve a saved pane to the key used by the freshly mounted source.
+    ///
+    /// Loose-file keys include a displayed filesystem path. Windows accepts
+    /// both separators, and older sessions could therefore persist a mixed
+    /// `file:C:\.../objects\...` spelling that no longer compared equal to the
+    /// newly scanned entry. Rediscovering the file was not enough: restore then
+    /// opened the stale saved key and reported that the tag had disappeared.
+    /// Return the source's current key so existing sessions recover in place.
+    fn restored_tag_entry_key(&mut self, tag: &LastSessionTag) -> Option<String> {
+        if let Some(entry) = self.entry_for_key(&tag.key) {
+            return Some(entry.key.clone());
         }
-        let Some(path) = tag.path.as_ref() else {
-            return false;
-        };
+        let path = tag.path.as_ref()?;
         if !path.is_file() {
-            return false;
+            return None;
         }
-        let Some(source) = self.source() else {
-            return false;
-        };
+        let source = self.source()?;
         let TagSource::LooseFolder { root, .. } = &source.source else {
-            return false;
+            return None;
         };
-        let Ok(root) = fs::canonicalize(root) else {
-            return false;
-        };
-        let Ok(path) = fs::canonicalize(path) else {
-            return false;
-        };
+        let root = fs::canonicalize(root).ok()?;
+        let path = fs::canonicalize(path).ok()?;
         if !path.starts_with(&root) {
-            return false;
+            return None;
         }
-        let Ok(entry) = loose_file_entry(&root, &path, &source.names) else {
-            return false;
-        };
-        let Some(entry) = entry else {
-            return false;
-        };
+        if let Some(current_key) = loose_entry_key_for_canonical_path(
+            source.entries.iter().chain(source.all_entries.iter()),
+            &path,
+        ) {
+            return Some(current_key);
+        }
+        let entry = loose_file_entry(&root, &path, &source.names).ok()??;
+        let current_key = entry.key.clone();
         if let Some(source) = self.source_mut() {
             source.entries.retain(|existing| existing.key != tag.key);
             source.entries.push(entry.clone());
@@ -3678,7 +3682,7 @@ impl Baboon {
             }
         }
         self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
-        true
+        Some(current_key)
     }
 
     pub(super) fn close_all_tabs(&mut self) {
@@ -4002,7 +4006,7 @@ impl Baboon {
     /// Start resolving a loaded model's materials to textures, if it needs it.
     ///
     /// Idempotent and cheap to call every frame: it only spawns when a model is
-    /// loaded, shading is on, its textures are still absent, and no job for it
+    /// loaded, a textured mode is on, its textures are still absent, and no job for it
     /// is already running.
     pub(in crate::app) fn maybe_request_model_textures(
         &mut self,
@@ -4013,7 +4017,7 @@ impl Baboon {
         let Some(state) = self.kits[kit_index].model_previews.get(key) else {
             return;
         };
-        if !state.shaded || state.textures_pending {
+        if !state.render_mode.uses_textures() || state.textures_pending {
             return;
         }
         let Some(Ok(data)) = state.data.as_ref() else {
@@ -8633,7 +8637,11 @@ impl Baboon {
             if let Some(confirm) = self.block_confirm.take()
                 && routed
             {
+                let mut refresh_model_preview = false;
                 if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(&confirm.tag_key) {
+                    let deletes_model_variant = confirm.path == "variants"
+                        && matches!(confirm.kind, BlockOpKind::Delete(_))
+                        && doc.tag.header.group_tag.to_be_bytes() == *b"hlmt";
                     let op = BlockOp {
                         path: confirm.path,
                         kind: confirm.kind,
@@ -8641,8 +8649,18 @@ impl Baboon {
                     doc.journal.begin_edit(&doc.tag, "Block edit");
                     if let Some(status) = apply_block_ops(&mut doc.tag, vec![op], &mut doc.dirty) {
                         self.status = status;
+                        refresh_model_preview = deletes_model_variant;
                     }
                     doc.journal.end_edit_window();
+                }
+                if refresh_model_preview
+                    && let Some(preview) = self.kits[self.active]
+                        .model_previews
+                        .get_mut(&confirm.tag_key)
+                {
+                    preview.selected_variant = None;
+                    preview.loaded_key = None;
+                    preview.data = None;
                 }
             }
         } else if do_cancel {
@@ -9279,10 +9297,48 @@ fn render_last_opened_windows_prompt(
     action
 }
 
+fn loose_entry_key_for_canonical_path<'a>(
+    mut entries: impl Iterator<Item = &'a TagEntry>,
+    canonical_path: &Path,
+) -> Option<String> {
+    entries.find_map(|entry| match &entry.location {
+        TagEntryLocation::LooseFile(entry_path)
+            if fs::canonicalize(entry_path)
+                .ok()
+                .is_some_and(|path| path == canonical_path) =>
+        {
+            Some(entry.key.clone())
+        }
+        _ => None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::ensure_priority_suffix;
     use std::path::{Path, PathBuf};
+
+    #[test]
+    fn restored_loose_tag_uses_the_current_sources_key() {
+        let root = std::env::temp_dir().join(format!("baboon-session-key-{}", std::process::id()));
+        let path = root.join("objects").join("characters").join("brute.model");
+        std::fs::create_dir_all(path.parent().expect("tag has parent")).expect("create tag path");
+        std::fs::write(&path, b"tag").expect("create tag");
+        let canonical = std::fs::canonicalize(&path).expect("canonical tag path");
+        let entry = crate::source::TagEntry {
+            key: format!("file:{}", canonical.display()),
+            display_path: "objects/characters/brute.model".to_owned(),
+            group_tag: u32::from_be_bytes(*b"hlmt"),
+            group_name: Some("model".to_owned()),
+            location: crate::source::TagEntryLocation::LooseFile(canonical.clone()),
+        };
+
+        assert_eq!(
+            super::loose_entry_key_for_canonical_path(std::iter::once(&entry), &canonical),
+            Some(entry.key.clone())
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     fn last_opened_workspace_heading_prefers_the_named_project() {

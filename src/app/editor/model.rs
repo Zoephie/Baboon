@@ -135,7 +135,7 @@ pub(in crate::app) fn is_model_group(group_tag: u32, names: &TagNameIndex) -> bo
         || names.name_for(group_tag) == Some("gbxmodel")
 }
 
-/// Tags that get the Fields / Render Model tab pair and a geometry
+/// Tags that get the Fields / Model Preview tab pair and a geometry
 /// viewport — everything [`is_model_group`] covers, plus geometry-bearing
 /// tags that are not "models" in the object sense.
 ///

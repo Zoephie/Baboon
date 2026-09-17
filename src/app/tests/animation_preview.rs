@@ -133,6 +133,52 @@ fn a_translated_root_moves_the_skin_by_the_delta() {
     assert!((rows[3][3] - 0.5).abs() < 1e-4, "child x: {:?}", rows[3]);
 }
 
+#[test]
+fn armature_positions_follow_the_current_animation_pose() {
+    let nodes = test_nodes();
+    let bind_positions = armature_node_positions(
+        &preview_with_nodes(nodes.clone()),
+        &ModelPreviewState::default(),
+    );
+    let mut frame = bind_pose_frame(&nodes);
+    frame[0].translation[0] += 0.5;
+    let data = preview_with_nodes(nodes);
+    let mut state = ModelPreviewState::default();
+    state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose {
+        animation_index: 0,
+        frames: vec![frame],
+    }));
+    let animated = armature_node_positions(&data, &state);
+
+    assert_eq!(animated.len(), 2);
+    assert!((animated[0][0] - bind_positions[0][0] - 0.5).abs() < 1e-4);
+    assert!((animated[1][0] - bind_positions[1][0] - 0.5).abs() < 1e-4);
+}
+
+#[test]
+fn stop_restores_bind_pose_without_unloading_the_animation() {
+    let nodes = test_nodes();
+    let bind_positions = armature_node_positions(
+        &preview_with_nodes(nodes.clone()),
+        &ModelPreviewState::default(),
+    );
+    let mut frame = bind_pose_frame(&nodes);
+    frame[0].translation[0] += 0.5;
+    let data = preview_with_nodes(nodes);
+    let mut state = ModelPreviewState::default();
+    state.animation.selected = Some(2);
+    state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose {
+        animation_index: 2,
+        frames: vec![frame],
+    }));
+    state.animation.stopped = true;
+
+    assert!(animation_skinning_rows(&data, &state).is_none());
+    assert_eq!(armature_node_positions(&data, &state), bind_positions);
+    assert_eq!(state.animation.selected, Some(2));
+    assert!(state.animation.pose.is_some());
+}
+
 /// A node the animation does not cover falls back to its own bind pose —
 /// identity skin — rather than collapsing to the origin.
 #[test]
