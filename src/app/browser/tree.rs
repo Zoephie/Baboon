@@ -59,6 +59,14 @@ pub(in crate::app) fn entry_rel_path(entry: &TagEntry) -> String {
     without_ext.replace('\\', "/")
 }
 
+/// Format an internal or persisted path for presentation on this host. Tag
+/// references deliberately remain forward-slash portable; browser tooltips
+/// should look like native filesystem paths instead.
+fn native_display_path(path: &str) -> String {
+    let separator = std::path::MAIN_SEPARATOR.to_string();
+    path.replace('\\', &separator).replace('/', &separator)
+}
+
 /// The file an entry is on disk, for a drag that may leave Baboon and land
 /// on Sapien. Cache and container tags have none.
 pub(in crate::app) fn entry_loose_file(entry: &TagEntry) -> Option<PathBuf> {
@@ -908,6 +916,11 @@ pub(in crate::app) fn draw_tree_node_lazy(
             }
         },
     );
+    hover_tooltip_beside_pointer(
+        ui,
+        &response,
+        &native_display_path(&node.rel_path.to_string_lossy()),
+    );
     response.context_menu(|ui| {
         style_tag_context_menu(ui);
         let favorited = browser_favorite_folders(ui).map(|folders| {
@@ -1082,6 +1095,13 @@ pub(in crate::app) fn draw_tree_node(
             body,
         )
     };
+    if !groups_mode {
+        hover_tooltip_beside_pointer(
+            ui,
+            &header_response,
+            &native_display_path(&node.rel_path.to_string_lossy()),
+        );
+    }
     header_response.context_menu(|ui| {
         style_tag_context_menu(ui);
         if !groups_mode && favorite_keys.is_some() {
@@ -2159,7 +2179,7 @@ pub(in crate::app) fn draw_entry(
     let (row_rect, response) = ui.allocate_exact_size(row_size, Sense::click_and_drag());
     // Not `on_hover_text`: an egui tooltip would block the very drag this row
     // exists to start. See `hover_tooltip_beside_pointer`.
-    hover_tooltip_beside_pointer(ui, &response, &entry.display_path);
+    hover_tooltip_beside_pointer(ui, &response, &native_display_path(&entry.display_path));
     response.dnd_set_drag_payload(payload);
     if reveal_key == Some(entry.key.as_str()) {
         response.scroll_to_me(Some(egui::Align::Center));
@@ -2463,7 +2483,7 @@ pub(in crate::app) fn draw_favorites(
                     (ui.label(RichText::new(&label).color(text_dark())), ())
                 },
             );
-            let tooltip = folder.to_string_lossy().replace('\\', "/");
+            let tooltip = native_display_path(&folder.to_string_lossy());
             hover_tooltip_beside_pointer(ui, &response, &tooltip);
             if response.clicked() && action.is_none() {
                 action = Some(BrowserAction::OpenFolderBrowser {
@@ -2644,6 +2664,16 @@ pub(in crate::app) fn supports_delete_menu(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hover_paths_use_the_host_separator() {
+        let separator = std::path::MAIN_SEPARATOR;
+        let expected = ["objects", "characters", "brute.model"].join(&separator.to_string());
+        assert_eq!(
+            native_display_path("objects/characters\\brute.model"),
+            expected
+        );
+    }
 
     fn entry(location: TagEntryLocation) -> TagEntry {
         TagEntry {

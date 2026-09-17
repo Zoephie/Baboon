@@ -2075,7 +2075,7 @@ pub(in crate::app) fn combo_box_with_scroll<R>(
 ) -> (egui::InnerResponse<Option<R>>, Option<i32>) {
     let response = ui
         .scope(|ui| {
-            ui.spacing_mut().interact_size.y = 20.0;
+            ui.spacing_mut().interact_size.y = BUTTON_HEIGHT;
             ui.spacing_mut().button_padding.y = 2.0;
             // egui sizes a combo popup to its contents and only scrolls once
             // they exceed `combo_height`, so this is the clamp -- not a fixed

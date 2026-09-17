@@ -6,6 +6,9 @@ use eframe::glow::{self, HasContext as _};
 use std::cell::RefCell;
 use std::sync::Arc;
 
+const ARMATURE_COLOR: Color32 = Color32::from_rgb(255, 204, 0);
+const MARKER_TOOLTIP_COLOR: Color32 = Color32::from_rgb(120, 235, 255);
+
 pub(super) fn draw_model_viewport(
     ui: &mut Ui,
     data: &ModelPreviewData,
@@ -86,13 +89,12 @@ pub(super) fn draw_model_viewport(
             // when the toggles re-merged the preview. Gated on
             // `overlays_loaded` so a standalone collision/physics tag — whose
             // MAIN content uses these region names — is never filtered.
-            let region = batch.region_name.as_str();
-            let is_overlay = region == COLLISION_REGION || region == PHYSICS_REGION;
+            let is_overlay = state.overlays_loaded && batch.layer != ModelPreviewLayer::Render;
             if state.overlays_loaded && is_overlay {
-                if region == COLLISION_REGION && !state.show_collision {
+                if batch.layer == ModelPreviewLayer::Collision && !state.show_collision {
                     return None;
                 }
-                if region == PHYSICS_REGION && !state.show_physics {
+                if batch.layer == ModelPreviewLayer::Physics && !state.show_physics {
                     return None;
                 }
             }
@@ -104,6 +106,7 @@ pub(super) fn draw_model_viewport(
             (selection.enabled && selection.permutation == batch.permutation_name).then_some(index)
         })
         .collect::<Vec<_>>();
+    let skinning_rows = animation_skinning_rows(data, state);
     let frame = ModelGpuFrame {
         preview,
         geometry_id: data.geometry_id,
@@ -112,8 +115,12 @@ pub(super) fn draw_model_viewport(
         render_mode: state.render_mode,
         show_backfaces: state.show_backfaces,
         show_grid: state.show_grid,
-        textures: state.shaded.then(|| data.textures.clone()).flatten(),
-        bones: animation_skinning_rows(data, state).map(Arc::new),
+        textures: state
+            .render_mode
+            .uses_textures()
+            .then(|| data.textures.clone())
+            .flatten(),
+        bones: skinning_rows.clone().map(Arc::new),
     };
     painter.add(egui::PaintCallback {
         rect,
@@ -122,6 +129,51 @@ pub(super) fn draw_model_viewport(
         })),
     });
     painter.rect_stroke(rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
+
+    if state.show_armature {
+        let positions = armature_node_positions(data, state);
+        let projected = positions
+            .iter()
+            .map(|&position| camera.project(position).pos)
+            .collect::<Vec<_>>();
+        let hover_pos = response
+            .hovered()
+            .then(|| ui.input(|i| i.pointer.hover_pos()))
+            .flatten();
+        let mut hovered: Option<(usize, egui::Pos2, f32)> = None;
+        for (index, node) in data.preview.nodes.iter().enumerate() {
+            let Some(&joint) = projected.get(index) else {
+                continue;
+            };
+            if node.parent >= 0 {
+                let Some(&parent) = projected.get(node.parent as usize) else {
+                    continue;
+                };
+                painter.line_segment(
+                    [parent, joint],
+                    Stroke::new(3.5, Color32::from_rgba_unmultiplied(0, 0, 0, 180)),
+                );
+                painter.line_segment([parent, joint], Stroke::new(1.5, ARMATURE_COLOR));
+            }
+            painter.circle_filled(joint, 2.5, Color32::WHITE);
+            painter.circle_stroke(joint, 2.5, Stroke::new(1.0, Color32::BLACK));
+            if let Some(distance) = hover_pos.map(|pos| screen_edge_length(pos, joint)) {
+                if distance <= 6.0 && hovered.is_none_or(|(_, _, closest)| distance < closest) {
+                    hovered = Some((index, joint, distance));
+                }
+            }
+        }
+        if let Some((index, position, _)) = hovered {
+            if let Some(node) = data.preview.nodes.get(index) {
+                draw_preview_hover_label(
+                    &painter,
+                    position + Vec2::new(7.0, -7.0),
+                    &node.name,
+                    ARMATURE_COLOR,
+                );
+            }
+        }
+    }
 
     if state.show_markers {
         let hover_pos = if response.hovered() {
@@ -137,30 +189,84 @@ pub(super) fn draw_model_viewport(
             {
                 continue;
             }
-            let projected = camera.project(marker.position);
-            let axis_deltas = marker_axis_screen_deltas(&camera, marker.axes);
+            let (position, axes) = animated_marker_transform(marker, skinning_rows.as_deref());
+            let projected = camera.project(position);
+            let axis_deltas = marker_axis_screen_deltas(&camera, axes);
             draw_marker_axes(&painter, projected.pos, axis_deltas);
             if hover_pos.is_some_and(|pos| marker_axes_hovered(pos, projected.pos, axis_deltas)) {
-                let text_pos = projected.pos + Vec2::new(7.0, -7.0);
-                let label_rect = egui::Rect::from_min_size(
-                    text_pos,
-                    Vec2::new(marker.name.len() as f32 * 6.0 + 8.0, 16.0),
-                );
-                painter.rect_filled(
-                    label_rect,
-                    2.0,
-                    Color32::from_rgba_unmultiplied(0, 0, 0, 180),
-                );
-                painter.text(
-                    text_pos + Vec2::new(4.0, 1.0),
-                    Align2::LEFT_TOP,
+                draw_preview_hover_label(
+                    &painter,
+                    projected.pos + Vec2::new(7.0, -7.0),
                     &marker.name,
-                    FontId::proportional(10.0),
-                    Color32::from_rgb(255, 230, 40),
+                    MARKER_TOOLTIP_COLOR,
                 );
             }
         }
     }
+}
+
+fn animated_marker_transform(
+    marker: &RenderModelPreviewMarker,
+    skinning_rows: Option<&[[f32; 4]]>,
+) -> ([f32; 3], [[f32; 3]; 3]) {
+    let Some(rows) = skinning_rows else {
+        return (marker.position, marker.axes);
+    };
+    if marker.node_index < 0 {
+        return (marker.position, marker.axes);
+    }
+    let start = marker.node_index as usize * 3;
+    let Some(matrix) = rows.get(start..start + 3) else {
+        return (marker.position, marker.axes);
+    };
+    let transform_point = |point: [f32; 3]| {
+        matrix
+            .iter()
+            .map(|row| row[0] * point[0] + row[1] * point[1] + row[2] * point[2] + row[3])
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap_or(point)
+    };
+    let transform_axis = |axis: [f32; 3]| {
+        let transformed: [f32; 3] = matrix
+            .iter()
+            .map(|row| row[0] * axis[0] + row[1] * axis[1] + row[2] * axis[2])
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap_or(axis);
+        let length = transformed.iter().map(|v| v * v).sum::<f32>().sqrt();
+        if length > 0.0001 {
+            transformed.map(|v| v / length)
+        } else {
+            axis
+        }
+    };
+    (
+        transform_point(marker.position),
+        marker.axes.map(transform_axis),
+    )
+}
+
+fn draw_preview_hover_label(
+    painter: &egui::Painter,
+    text_pos: egui::Pos2,
+    text: &str,
+    color: Color32,
+) {
+    let label_rect =
+        egui::Rect::from_min_size(text_pos, Vec2::new(text.len() as f32 * 6.0 + 8.0, 16.0));
+    painter.rect_filled(
+        label_rect,
+        2.0,
+        Color32::from_rgba_unmultiplied(0, 0, 0, 180),
+    );
+    painter.text(
+        text_pos + Vec2::new(4.0, 1.0),
+        Align2::LEFT_TOP,
+        text,
+        FontId::proportional(10.0),
+        color,
+    );
 }
 
 #[derive(Clone, Copy)]
@@ -1095,6 +1201,27 @@ mod gpu_renderer_tests {
         );
     }
 
+    #[test]
+    fn marker_transform_uses_its_animated_bone() {
+        let marker = RenderModelPreviewMarker {
+            name: "weapon".to_owned(),
+            node_index: 1,
+            position: [1.0, 2.0, 3.0],
+            axes: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        };
+        let rows = vec![
+            [1.0, 0.0, 0.0, 99.0],
+            [0.0, 1.0, 0.0, 99.0],
+            [0.0, 0.0, 1.0, 99.0],
+            [1.0, 0.0, 0.0, 0.5],
+            [0.0, 1.0, 0.0, -0.25],
+            [0.0, 0.0, 1.0, 1.0],
+        ];
+        let (position, axes) = animated_marker_transform(&marker, Some(&rows));
+        assert_eq!(position, [1.5, 1.75, 4.0]);
+        assert_eq!(axes, marker.axes);
+    }
+
     /// The grid is a flat z = 0 line list with no skinning influences (a
     /// stray weight would let an animated draw warp it), snapped to world
     /// spacing, with the two axis lines appended last for their own colors.
@@ -1766,6 +1893,7 @@ pub(super) fn render_model_to_preview(
         for marker in &group.markers {
             preview.markers.push(RenderModelPreviewMarker {
                 name: group.name.clone(),
+                node_index: marker.node_index as i16,
                 position: transform_preview_marker_position(marker, &node_world),
                 axes: transform_preview_marker_axes(marker, &node_world),
             });
@@ -1855,6 +1983,7 @@ fn append_render_mesh_to_preview(
                 index_start,
                 index_count,
                 flat_color: None,
+                layer: ModelPreviewLayer::Render,
             });
         }
     }

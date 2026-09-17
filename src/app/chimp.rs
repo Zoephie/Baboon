@@ -1463,6 +1463,7 @@ fn chimp_skeletal_mesh_preview(mesh: SkeletalMesh) -> RenderModelPreview {
                 index_start,
                 index_count,
                 flat_color: None,
+                layer: ModelPreviewLayer::Render,
             });
         }
     }
@@ -1474,6 +1475,7 @@ fn chimp_skeletal_mesh_preview(mesh: SkeletalMesh) -> RenderModelPreview {
             index_start: 0,
             index_count: preview.indices.len() as u32,
             flat_color: None,
+            layer: ModelPreviewLayer::Render,
         });
     }
     preview
@@ -1494,6 +1496,7 @@ fn chimp_static_mesh_preview(mesh: StaticMesh) -> RenderModelPreview {
             index_start: 0,
             index_count: preview.indices.len() as u32,
             flat_color: None,
+            layer: ModelPreviewLayer::Render,
         });
     }
     preview

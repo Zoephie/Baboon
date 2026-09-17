@@ -72,6 +72,9 @@ pub(crate) struct PreviewAnimationPose {
 pub(crate) struct PreviewAnimationPlayback {
     pub selected: Option<usize>,
     pub playing: bool,
+    /// Stop is distinct from pause: it shows the bind pose while retaining
+    /// the selected and decoded animation.
+    pub stopped: bool,
     pub looped: bool,
     pub speed: f32,
     /// Seconds into the animation.
@@ -92,6 +95,7 @@ impl Default for PreviewAnimationPlayback {
         Self {
             selected: None,
             playing: false,
+            stopped: false,
             looped: true,
             speed: 1.0,
             time: 0.0,
@@ -113,6 +117,9 @@ pub(super) fn animation_skinning_rows(
     state: &ModelPreviewState,
 ) -> Option<Vec<[f32; 4]>> {
     let playback = &state.animation;
+    if playback.stopped {
+        return None;
+    }
     let pose = playback.pose.as_ref()?;
     let nodes = &data.preview.nodes;
     if nodes.is_empty() || nodes.len() > MAX_PREVIEW_BONES || pose.frames.is_empty() {
@@ -177,6 +184,76 @@ pub(super) fn animation_skinning_rows(
         rows.push(skin.m[2]);
     }
     Some(rows)
+}
+
+/// World-space joint positions for the armature overlay. This follows the
+/// same sampled parent-local pose as GPU skinning, and falls back to the bind
+/// pose when no animation is active.
+pub(super) fn armature_node_positions(
+    data: &ModelPreviewData,
+    state: &ModelPreviewState,
+) -> Vec<[f32; 3]> {
+    let nodes = &data.preview.nodes;
+    if nodes.is_empty() || nodes.len() > MAX_PREVIEW_BONES {
+        return Vec::new();
+    }
+
+    let sampled_frames = (!state.animation.stopped)
+        .then_some(state.animation.pose.as_ref())
+        .flatten()
+        .and_then(|pose| {
+            if pose.frames.is_empty() {
+                return None;
+            }
+            let frame_count = pose.frames.len();
+            let mut position = (state.animation.time * ANIMATION_FRAME_RATE).max(0.0);
+            if state.animation.looped && frame_count > 1 {
+                position %= frame_count as f32;
+            } else {
+                position = position.min((frame_count - 1) as f32);
+            }
+            let a = (position.floor() as usize).min(frame_count - 1);
+            let b = if state.animation.looped {
+                (a + 1) % frame_count
+            } else {
+                (a + 1).min(frame_count - 1)
+            };
+            Some((&pose.frames[a], &pose.frames[b], position - a as f32))
+        });
+
+    let mut world: Vec<(RealQuaternion, RealVector3d, f32)> = Vec::with_capacity(nodes.len());
+    let mut positions = Vec::with_capacity(nodes.len());
+    for (index, node) in nodes.iter().enumerate() {
+        let local = if let Some((a, b, blend)) = sampled_frames {
+            blend_transforms(a.get(index), b.get(index), blend, node)
+        } else {
+            (
+                quat(node.bind_rotation),
+                RealVector3d {
+                    i: node.bind_translation[0],
+                    j: node.bind_translation[1],
+                    k: node.bind_translation[2],
+                },
+                1.0,
+            )
+        };
+        let transform = if node.parent >= 0 {
+            let (parent_rotation, parent_translation, parent_scale) = world
+                .get(node.parent as usize)
+                .copied()
+                .unwrap_or((RealQuaternion::IDENTITY, RealVector3d::ZERO, 1.0));
+            (
+                (parent_rotation * local.0).normalized(),
+                parent_translation + (parent_rotation * (local.1 * parent_scale)),
+                parent_scale * local.2,
+            )
+        } else {
+            local
+        };
+        positions.push([transform.1.i, transform.1.j, transform.1.k]);
+        world.push(transform);
+    }
+    positions
 }
 
 /// Blend one node between two frames — nlerp on the shorter arc for the
@@ -431,6 +508,7 @@ impl Baboon {
                 }));
                 state.animation.time = 0.0;
                 state.animation.playing = true;
+                state.animation.stopped = false;
             }
             Err(error) => {
                 state.animation.error = Some(error);

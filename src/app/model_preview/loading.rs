@@ -351,6 +351,7 @@ pub(super) fn build_particle_model_preview(
             index_start,
             index_count,
             flat_color: None,
+            layer: ModelPreviewLayer::Render,
         });
     }
 

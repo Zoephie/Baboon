@@ -472,10 +472,11 @@ preview:
 - **Textured shading** (Halo 3 and Reach) — each mesh part is drawn with its own
   shader's maps, resolved through the render_model's materials: **diffuse**,
   **detail** (tiling at the shader's own scale), **normal**, and a **detail
-  normal** blended over it, plus alpha-test cutouts. A *Shaded* toggle drops
-  back to the flat per-material colours, which stay useful for reading
-  silhouette and topology. Textures resolve on a worker and the viewport waits
-  for them, so a model never appears untextured and then changes.
+  normal** blended over it, plus alpha-test cutouts. The display-mode selector
+  switches between **Textured**, flat **Solid**, wireframe, and combined modes;
+  solid colours stay useful for reading silhouette and topology. Textures
+  resolve on a worker and the viewport waits for them, so a model never appears
+  untextured and then changes.
 - **Variant selector** — switch between the model's named variants and see the
   per-region permutation set applied; region/permutation choices can be tweaked
   and synced back to the variant.

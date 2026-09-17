@@ -6,6 +6,7 @@
 
 use super::*;
 use blam_tags::geometry::{CompressionBounds, read_compression_bounds_at};
+use blam_tags::jms_split::MaterialLabel;
 use blam_tags::math::{RealPoint3d, RealQuaternion, RealVector3d};
 use blam_tags::render_model::extract_sbsp_render_geometry_meshes;
 use blam_tags::{AssFile, AssObjectPayload, AssTriangle, JmsFile};
@@ -20,8 +21,8 @@ pub(in crate::app) const PHYSICS_REGION: &str = "physics";
 
 /// Fixed overlay colors, chosen apart from the render palette so a collision
 /// or physics layer reads at a glance no matter what it overlaps.
-const COLLISION_COLOR: [u8; 3] = [216, 130, 74];
-const PHYSICS_COLOR: [u8; 3] = [104, 150, 216];
+const COLLISION_COLOR: [u8; 3] = [0xED, 0x5E, 0xBE];
+const PHYSICS_COLOR: [u8; 3] = [0xFF, 0x56, 0x56];
 const PORTAL_COLOR: [u8; 3] = [120, 196, 176];
 const WEATHER_COLOR: [u8; 3] = [150, 168, 200];
 
@@ -98,11 +99,38 @@ fn push_derived_batch(
         index_start,
         index_count: triples.len() as u32,
         flat_color: color,
+        layer: match region_name {
+            COLLISION_REGION => ModelPreviewLayer::Collision,
+            PHYSICS_REGION => ModelPreviewLayer::Physics,
+            _ => ModelPreviewLayer::Render,
+        },
     });
     ensure_preview_region(preview, region_name);
 }
 
 fn ensure_preview_region(preview: &mut RenderModelPreview, region_name: &str) {
+    ensure_preview_region_permutation(preview, region_name, "default");
+}
+
+fn ensure_preview_region_permutation(
+    preview: &mut RenderModelPreview,
+    region_name: &str,
+    permutation_name: &str,
+) {
+    if let Some(region) = preview
+        .regions
+        .iter_mut()
+        .find(|region| region.name == region_name)
+    {
+        if !region
+            .permutations
+            .iter()
+            .any(|name| name == permutation_name)
+        {
+            region.permutations.push(permutation_name.to_owned());
+        }
+        return;
+    }
     if !preview
         .regions
         .iter()
@@ -110,8 +138,129 @@ fn ensure_preview_region(preview: &mut RenderModelPreview, region_name: &str) {
     {
         preview.regions.push(RenderModelPreviewRegion {
             name: region_name.to_owned(),
-            permutations: vec!["default".to_owned()],
+            permutations: vec![permutation_name.to_owned()],
         });
+    }
+}
+
+/// Preserve a collision JMS's actual region/permutation cells and bone
+/// influences. The generic derived-mesh path intentionally flattens both,
+/// which is right for BSP helper layers but made model collision static and
+/// immune to the variant controls.
+fn append_collision_jms(
+    preview: &mut RenderModelPreview,
+    jms: &JmsFile,
+    skeleton: Option<&[blam_tags::JmsNode]>,
+) {
+    let node_map = skeleton.map(|target| {
+        jms.nodes
+            .iter()
+            .map(|source| target.iter().position(|node| node.name == source.name))
+            .collect::<Vec<_>>()
+    });
+    let mut cells: Vec<(String, String, Vec<RenderModelPreviewVertex>)> = Vec::new();
+
+    for triangle in &jms.triangles {
+        let (region_name, permutation_name) = if !jms.regions.is_empty() {
+            (
+                jms.regions
+                    .get(triangle.region.max(0) as usize)
+                    .cloned()
+                    .unwrap_or_else(|| "default".to_owned()),
+                "default".to_owned(),
+            )
+        } else {
+            let label = jms
+                .materials
+                .get(triangle.material.max(0) as usize)
+                .map(|material| MaterialLabel::parse(&material.material_name))
+                .unwrap_or_else(|| MaterialLabel::parse("default default"));
+            (label.region, label.permutation)
+        };
+        let corners = triangle.v.map(|index| jms.vertices.get(index as usize));
+        let [Some(a), Some(b), Some(c)] = corners else {
+            continue;
+        };
+        let source_vertices = [a, b, c];
+        let positions = source_vertices.map(|vertex| {
+            let p = point(&vertex.position);
+            [p[0] / JMS_SCALE, p[1] / JMS_SCALE, p[2] / JMS_SCALE]
+        });
+        let normal = face_normal(positions[0], positions[1], positions[2]);
+        let cell = if let Some(index) = cells.iter().position(|(region, permutation, _)| {
+            region == &region_name && permutation == &permutation_name
+        }) {
+            &mut cells[index].2
+        } else {
+            cells.push((region_name.clone(), permutation_name.clone(), Vec::new()));
+            &mut cells.last_mut().expect("just pushed collision cell").2
+        };
+        for (source, position) in source_vertices.into_iter().zip(positions) {
+            let mut indices = [0.0; 4];
+            let mut weights = [0.0; 4];
+            let mut count = 0;
+            for &(source_index, weight) in &source.node_sets {
+                if count == 4 || source_index < 0 || weight <= 0.0 {
+                    continue;
+                }
+                let target_index = if let Some(map) = &node_map {
+                    let Some(target_index) = map.get(source_index as usize).copied().flatten()
+                    else {
+                        continue;
+                    };
+                    target_index
+                } else {
+                    source_index as usize
+                };
+                if target_index >= MAX_PREVIEW_BONES {
+                    continue;
+                }
+                indices[count] = target_index as f32;
+                weights[count] = weight;
+                count += 1;
+            }
+            let weight_sum: f32 = weights.iter().sum();
+            if weight_sum > f32::EPSILON {
+                for weight in &mut weights {
+                    *weight /= weight_sum;
+                }
+            }
+            expand_preview_bounds_local(&mut preview.bounds_min, &mut preview.bounds_max, position);
+            cell.push(RenderModelPreviewVertex {
+                position,
+                normal,
+                node_indices: indices,
+                node_weights: weights,
+                ..Default::default()
+            });
+        }
+    }
+
+    for (region_name, permutation_name, vertices) in cells {
+        if vertices.is_empty() {
+            continue;
+        }
+        let vertex_base = preview.vertices.len() as u32;
+        let index_start = preview.indices.len() as u32;
+        preview
+            .indices
+            .extend((0..vertices.len() as u32).map(|offset| vertex_base + offset));
+        preview.vertices.extend(vertices);
+        let material_index = preview.materials.len().min(u16::MAX as usize) as u16;
+        preview
+            .materials
+            .push(RenderModelPreviewMaterial::default());
+        let index_count = preview.indices.len() as u32 - index_start;
+        preview.batches.push(RenderModelPreviewBatch {
+            region_name: region_name.clone(),
+            permutation_name: permutation_name.clone(),
+            material_index,
+            index_start,
+            index_count,
+            flat_color: Some(COLLISION_COLOR),
+            layer: ModelPreviewLayer::Collision,
+        });
+        ensure_preview_region_permutation(preview, &region_name, &permutation_name);
     }
 }
 
@@ -190,13 +339,7 @@ pub(super) fn build_collision_preview(
 ) -> Result<RenderModelPreview, String> {
     let jms = collision_jms_for_game(tag, skeleton).map_err(|error| error.to_string())?;
     let mut preview = empty_preview();
-    append_jms_triangles(
-        &mut preview,
-        &jms,
-        COLLISION_REGION,
-        Some(COLLISION_COLOR),
-        false,
-    );
+    append_collision_jms(&mut preview, &jms, skeleton);
     finish_preview(preview, "collision model")
 }
 
@@ -208,27 +351,105 @@ pub(super) fn build_physics_preview(
     skeleton: Option<&[blam_tags::JmsNode]>,
 ) -> Result<RenderModelPreview, String> {
     let jms = physics_jms_for_game(tag, skeleton).map_err(|error| error.to_string())?;
-    let mut triples: Vec<([f32; 3], [f32; 3])> = Vec::new();
+    let mut vertices = Vec::new();
     for sphere in &jms.spheres {
+        let mut triples = Vec::new();
         push_sphere(
             &mut triples,
             &sphere.rotation,
             point(&sphere.translation),
             sphere.radius,
         );
+        append_physics_shape(&mut vertices, &triples, sphere.parent, &jms, skeleton);
     }
     for shape in &jms.boxes {
+        let mut triples = Vec::new();
         push_box(&mut triples, shape);
+        append_physics_shape(&mut vertices, &triples, shape.parent, &jms, skeleton);
     }
     for capsule in &jms.capsules {
+        let mut triples = Vec::new();
         push_capsule(&mut triples, capsule);
+        append_physics_shape(&mut vertices, &triples, capsule.parent, &jms, skeleton);
     }
     for convex in &jms.convex_shapes {
+        let mut triples = Vec::new();
         push_convex(&mut triples, convex);
+        append_physics_shape(&mut vertices, &triples, convex.parent, &jms, skeleton);
     }
     let mut preview = empty_preview();
-    push_derived_batch(&mut preview, PHYSICS_REGION, Some(PHYSICS_COLOR), &triples);
+    push_physics_batch(&mut preview, vertices);
     finish_preview(preview, "physics model")
+}
+
+fn append_physics_shape(
+    output: &mut Vec<RenderModelPreviewVertex>,
+    triples: &[([f32; 3], [f32; 3])],
+    parent: i32,
+    jms: &JmsFile,
+    skeleton: Option<&[blam_tags::JmsNode]>,
+) {
+    let source_node = usize::try_from(parent)
+        .ok()
+        .and_then(|index| jms.nodes.get(index));
+    let target_node = source_node.and_then(|source| {
+        skeleton.and_then(|nodes| nodes.iter().position(|node| node.name == source.name))
+    });
+    for &(mut position, mut normal) in triples {
+        if let Some(node) = source_node {
+            let rotated = rotate(&node.rotation, position);
+            position = [
+                rotated[0] + node.translation.x / JMS_SCALE,
+                rotated[1] + node.translation.y / JMS_SCALE,
+                rotated[2] + node.translation.z / JMS_SCALE,
+            ];
+            normal = rotate(&node.rotation, normal);
+        }
+        let (node_indices, node_weights) = target_node
+            .filter(|&index| index < MAX_PREVIEW_BONES)
+            .map(|index| ([index as f32, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]))
+            .unwrap_or_default();
+        output.push(RenderModelPreviewVertex {
+            position,
+            normal,
+            node_indices,
+            node_weights,
+            ..Default::default()
+        });
+    }
+}
+
+fn push_physics_batch(preview: &mut RenderModelPreview, vertices: Vec<RenderModelPreviewVertex>) {
+    if vertices.is_empty() {
+        return;
+    }
+    let vertex_base = preview.vertices.len() as u32;
+    let index_start = preview.indices.len() as u32;
+    for vertex in &vertices {
+        expand_preview_bounds_local(
+            &mut preview.bounds_min,
+            &mut preview.bounds_max,
+            vertex.position,
+        );
+    }
+    preview
+        .indices
+        .extend((0..vertices.len() as u32).map(|offset| vertex_base + offset));
+    preview.vertices.extend(vertices);
+    let material_index = preview.materials.len().min(u16::MAX as usize) as u16;
+    preview
+        .materials
+        .push(RenderModelPreviewMaterial::default());
+    preview.batches.push(RenderModelPreviewBatch {
+        region_name: PHYSICS_REGION.to_owned(),
+        permutation_name: "default".to_owned(),
+        material_index,
+        index_start,
+        index_count: preview.indices.len() as u32 - index_start,
+        flat_color: Some(PHYSICS_COLOR),
+        layer: ModelPreviewLayer::Physics,
+    });
+    ensure_preview_region(preview, PHYSICS_REGION);
 }
 
 /// Emit one triangle with its flat face normal, ÷100 into world units.
@@ -605,6 +826,7 @@ fn ass_to_preview(ass: &AssFile, render_only: bool) -> RenderModelPreview {
                 index_start,
                 index_count,
                 flat_color: color,
+                layer: ModelPreviewLayer::Render,
             });
         }
         ensure_preview_region(&mut preview, region);
@@ -775,6 +997,7 @@ fn build_sbsp_preview_h3(tag: &TagFile, render_only: bool) -> Result<RenderModel
             index_start,
             index_count,
             flat_color: None,
+            layer: ModelPreviewLayer::Render,
         });
     }
     if !preview.batches.is_empty() {
@@ -1114,14 +1337,21 @@ pub(super) fn merge_preview_append(dst: &mut RenderModelPreview, src: &RenderMod
             index_start,
             index_count: (end - start) as u32,
             flat_color: batch.flat_color,
+            layer: batch.layer,
         });
     }
     for region in &src.regions {
-        if !dst
+        if let Some(existing) = dst
             .regions
-            .iter()
-            .any(|existing| existing.name == region.name)
+            .iter_mut()
+            .find(|existing| existing.name == region.name)
         {
+            for permutation in &region.permutations {
+                if !existing.permutations.contains(permutation) {
+                    existing.permutations.push(permutation.clone());
+                }
+            }
+        } else {
             dst.regions.push(region.clone());
         }
     }
@@ -1284,16 +1514,26 @@ impl Baboon {
             data.preview = Arc::new(merged);
             data.geometry_id = NEXT_MODEL_GEOMETRY_ID.fetch_add(1, Ordering::Relaxed);
         }
-        // The layer filter also consults the region selection, so the new
-        // regions need enabled entries — the variant reset ran before they
-        // existed.
-        for region in [COLLISION_REGION, PHYSICS_REGION] {
+        // The layer filter also consults region selection, so collision-only
+        // regions need entries. Shared names retain the render model's active
+        // permutation and therefore follow the same variant selection.
+        let regions = state
+            .data
+            .as_ref()
+            .and_then(|data| data.as_ref().ok())
+            .map(|data| data.preview.regions.clone())
+            .unwrap_or_default();
+        for region in regions {
             state
                 .region_selections
-                .entry(region.to_owned())
+                .entry(region.name)
                 .or_insert(ModelRegionSelection {
                     enabled: true,
-                    permutation: "default".to_owned(),
+                    permutation: region
+                        .permutations
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "default".to_owned()),
                 });
         }
         // A texture resolve in flight was keyed to the old geometry id and

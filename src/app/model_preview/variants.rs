@@ -259,33 +259,102 @@ pub(super) fn draw_variant_controls(
     ui: &mut Ui,
     data: &ModelPreviewData,
     state: &mut ModelPreviewState,
-    edit: &mut FieldEditContext<'_>,
-) -> bool {
-    let mut mutation_requested = false;
+) {
+    let region_name_width = data
+        .preview
+        .regions
+        .iter()
+        .filter(|region| !is_model_physics_overlay_region(data, state, region))
+        .map(|region| {
+            ui.painter()
+                .layout_no_wrap(region.name.clone(), bold_font(13.0), text_dark())
+                .size()
+                .x
+        })
+        .fold(90.0_f32, f32::max)
+        .min(180.0);
+    let row_width = ui.available_width().max(1.0);
+    ui.set_max_width(row_width);
+    let mut visible_rows = 0;
+    for region in &data.preview.regions {
+        if is_model_physics_overlay_region(data, state, region) {
+            continue;
+        }
+        if visible_rows > 0 {
+            ui.separator();
+        }
+        visible_rows += 1;
+        let selection = state
+            .region_selections
+            .entry(region.name.clone())
+            .or_insert_with(|| ModelRegionSelection {
+                enabled: !region.permutations.is_empty(),
+                permutation: region.permutations.first().cloned().unwrap_or_default(),
+            });
+        ui.horizontal_wrapped(|ui| {
+            ui.checkbox(&mut selection.enabled, "");
+            ui.add_sized(
+                Vec2::new(region_name_width, BUTTON_HEIGHT),
+                egui::Label::new(
+                    RichText::new(&region.name)
+                        .color(text_dark())
+                        .font(bold_font(13.0)),
+                ),
+            );
+            for permutation in &region.permutations {
+                let selected = selection.permutation == *permutation;
+                let response = selectable_text_button(ui, permutation, selected);
+                if response.clicked() {
+                    selection.permutation = permutation.clone();
+                    selection.enabled = true;
+                }
+            }
+        });
+    }
+}
+
+pub(super) fn draw_variant_selector(
+    ui: &mut Ui,
+    data: &ModelPreviewData,
+    state: &mut ModelPreviewState,
+) {
     // Reverse-sync: reflect manual region/permutation tweaks in the combo —
     // show the matching variant, or "(custom)" when the live selection matches
     // none. When it lands exactly on a variant, adopt it so Update/Drop target
     // the shown variant.
-    let active_variant = detect_active_variant(data, state);
+    let mut active_variant = detect_active_variant(data, state);
     if let Some(choice) = active_variant {
         state.selected_variant = choice;
     }
     ui.horizontal(|ui| {
-        ui.label(RichText::new("Variant").color(subtle_dark()));
+        ui.spacing_mut().item_spacing.x = 4.0;
+        if icon_button(
+            ui,
+            ButtonIcon::Left,
+            "Previous variant",
+            state.selected_variant.is_some_and(|index| index > 0),
+            text_dark(),
+        )
+        .clicked()
+        {
+            let previous = state.selected_variant.expect("previous variant is enabled") - 1;
+            reset_model_preview_selection(state, data, Some(previous));
+            active_variant = Some(Some(previous));
+        }
         let selected = match active_variant {
-            Some(None) => "<None>",
+            Some(None) => "<None>".to_owned(),
             Some(Some(idx)) => data
                 .variants
                 .get(idx)
-                .map(|variant| variant.name.as_str())
-                .unwrap_or("<None>"),
-            None => "(custom)",
+                .map(|variant| format!("{idx}. {}", variant.name))
+                .unwrap_or_else(|| "<None>".to_owned()),
+            None => "(custom)".to_owned(),
         };
         let (_, wheel_delta) = combo_box_with_scroll(
             ui,
             egui::ComboBox::from_id_salt(("model_preview_variant", &data.source_key))
                 .selected_text(selected)
-                .width(180.0),
+                .width(150.0),
             |ui| {
                 if ui
                     .selectable_label(state.selected_variant.is_none(), "<None>")
@@ -297,7 +366,7 @@ pub(super) fn draw_variant_controls(
                     if ui
                         .selectable_label(
                             state.selected_variant == Some(index),
-                            &data.variants[index].name,
+                            format!("{index}. {}", data.variants[index].name),
                         )
                         .clicked()
                     {
@@ -318,69 +387,58 @@ pub(super) fn draw_variant_controls(
                 reset_model_preview_selection(state, data, selected_variant);
             }
         }
+        let next = match state.selected_variant {
+            Some(index) if index + 1 < data.variants.len() => Some(index + 1),
+            None if !data.variants.is_empty() => Some(0),
+            _ => None,
+        };
+        if icon_button(
+            ui,
+            ButtonIcon::Right,
+            "Next variant",
+            next.is_some(),
+            text_dark(),
+        )
+        .clicked()
+        {
+            reset_model_preview_selection(state, data, next);
+        }
     });
-    ui.add_space(6.0);
+}
 
-    egui::ScrollArea::vertical()
-        .id_salt(("model_preview_regions", &data.source_key))
-        .max_height(230.0)
-        .show(ui, |ui| {
-            for region in &data.preview.regions {
-                let selection = state
-                    .region_selections
-                    .entry(region.name.clone())
-                    .or_insert_with(|| ModelRegionSelection {
-                        enabled: !region.permutations.is_empty(),
-                        permutation: region.permutations.first().cloned().unwrap_or_default(),
-                    });
-                ui.horizontal_wrapped(|ui| {
-                    ui.checkbox(&mut selection.enabled, "");
-                    ui.label(RichText::new(&region.name).color(text_dark()).strong());
-                    for permutation in &region.permutations {
-                        let selected = selection.permutation == *permutation;
-                        let response = ui.selectable_label(selected, permutation);
-                        if response.clicked() {
-                            selection.permutation = permutation.clone();
-                            selection.enabled = true;
-                        }
-                    }
-                });
-            }
-        });
-
-    ui.add_space(8.0);
-    ui.horizontal_wrapped(|ui| {
-        ui.label(RichText::new("New variant").color(subtle_dark()));
+pub(super) fn draw_variant_header_actions(
+    ui: &mut Ui,
+    data: &ModelPreviewData,
+    state: &mut ModelPreviewState,
+    edit: &mut FieldEditContext<'_>,
+) -> bool {
+    let mut mutation_requested = false;
+    icon_text_dropdown_button(ui, ButtonIcon::Save, "Save", |ui| {
+        ui.set_min_width(240.0);
+        ui.label("New Variant Name");
         ui.add_enabled(
             edit.editable,
-            egui::TextEdit::singleline(&mut state.new_variant_name).desired_width(130.0),
+            egui::TextEdit::singleline(&mut state.new_variant_name).desired_width(220.0),
         );
         let chosen_regions = selected_variant_regions(data, state);
         let create_name = normalized_new_variant_name(data, state);
         let can_create = edit.editable && create_name.is_some() && !chosen_regions.is_empty();
-        if ui
-            .add_enabled(
-                can_create,
-                egui::Button::new("Create new variant from selection..."),
-            )
+        if icon_text_button(ui, ButtonIcon::Add, "Save as New Variant", can_create)
             .on_hover_text("Create a .model variant using the visible region selections.")
             .clicked()
         {
-            let name = create_name.expect("button enabled only when name is valid");
             edit.model_variant_ops.push(ModelVariantOp::Create {
-                name,
+                name: create_name.expect("button enabled only when name is valid"),
                 regions: chosen_regions.clone(),
             });
             state.new_variant_name.clear();
             mutation_requested = true;
+            ui.close_menu();
         }
         let can_update =
             edit.editable && state.selected_variant.is_some() && !chosen_regions.is_empty();
         if ui
-            .add_enabled(
-                can_update,
-                egui::Button::new("Update existing variant from selection..."),
-            )
+            .add_enabled(can_update, egui::Button::new("Update Selected Variant"))
             .on_hover_text("Replace the selected variant's region permutations.")
             .clicked()
         {
@@ -391,22 +449,29 @@ pub(super) fn draw_variant_controls(
                 regions: chosen_regions,
             });
             mutation_requested = true;
-        }
-        let can_drop = edit.editable && state.selected_variant.is_some();
-        if ui
-            .add_enabled(can_drop, egui::Button::new("Drop Variant"))
-            .on_hover_text("Delete the selected variant from the .model tag.")
-            .clicked()
-        {
-            edit.model_variant_ops.push(ModelVariantOp::Drop {
-                variant_index: state
-                    .selected_variant
-                    .expect("button enabled only when a variant is selected"),
-            });
-            state.selected_variant = None;
-            mutation_requested = true;
+            ui.close_menu();
         }
     });
+    let can_delete = edit.editable && state.selected_variant.is_some();
+    if icon_text_button(ui, ButtonIcon::Garbage, "Delete", can_delete)
+        .on_hover_text("Delete selected variant")
+        .clicked()
+    {
+        let variant_index = state
+            .selected_variant
+            .expect("button enabled only when a variant is selected");
+        *edit.block_confirm = Some(BlockConfirm {
+            kit: None,
+            tag_key: edit.tag_key.to_owned(),
+            path: "variants".to_owned(),
+            kind: BlockOpKind::Delete(variant_index),
+            message: format!(
+                "Delete element {variant_index} of {} from this block?",
+                data.variants.len()
+            ),
+            confirm_label: "Delete".to_owned(),
+        });
+    }
     mutation_requested
 }
 
@@ -418,6 +483,10 @@ pub(super) fn selected_variant_regions(
         .regions
         .iter()
         .filter_map(|region| {
+            // Physics is an overlay toggle, not a .model variant region.
+            if is_model_physics_overlay_region(data, state, region) {
+                return None;
+            }
             let selection = state.region_selections.get(&region.name)?;
             if !selection.enabled
                 || selection.permutation.is_empty()
@@ -434,6 +503,25 @@ pub(super) fn selected_variant_regions(
             })
         })
         .collect()
+}
+
+/// The physics overlay uses a synthetic `physics/default` draw batch. Hide it
+/// from Model Setup while preserving its internal selection for draw filtering.
+/// A genuine render region named `physics` (or a standalone physics tag) must
+/// still appear normally.
+pub(super) fn is_model_physics_overlay_region(
+    data: &ModelPreviewData,
+    state: &ModelPreviewState,
+    region: &RenderModelPreviewRegion,
+) -> bool {
+    state.overlays_loaded
+        && region.name == PHYSICS_REGION
+        && data.preview.batches.iter().any(|batch| {
+            batch.layer == ModelPreviewLayer::Physics && batch.region_name == region.name
+        })
+        && !data.preview.batches.iter().any(|batch| {
+            batch.layer == ModelPreviewLayer::Render && batch.region_name == region.name
+        })
 }
 
 pub(super) fn normalized_new_variant_name(

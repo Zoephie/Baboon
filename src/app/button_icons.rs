@@ -21,6 +21,7 @@ pub(super) enum ButtonIcon {
     Container,
     DefaultTag,
     Doc,
+    Down,
     Duplicate,
     Favourite,
     FavouriteFilled,
@@ -36,6 +37,8 @@ pub(super) enum ButtonIcon {
     HaloMods,
     InsertRow,
     Json,
+    Loop,
+    Markers,
     JumpTo,
     JumpUp,
     Left,
@@ -44,15 +47,20 @@ pub(super) enum ButtonIcon {
     Move,
     Opened,
     Other,
+    Pause,
+    Play,
     Remove,
+    Refresh,
     RenderModel,
     Rename,
     Right,
     Save,
     Settings,
     Sort,
+    Stop,
     Tag,
     Bitmap,
+    View,
     WindowMode,
     FolderClosed,
     FolderOpen,
@@ -75,6 +83,7 @@ pub(super) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::Container => include_str!("../../assets/Button Icons/Container.svg"),
         ButtonIcon::DefaultTag => include_str!("../../assets/icons/default_tag.svg"),
         ButtonIcon::Doc => include_str!("../../assets/Button Icons/Doc.svg"),
+        ButtonIcon::Down => include_str!("../../assets/Button Icons/Down.svg"),
         ButtonIcon::Duplicate => include_str!("../../assets/Button Icons/Duplicate.svg"),
         ButtonIcon::Favourite => include_str!("../../assets/Button Icons/Favourite.svg"),
         ButtonIcon::FavouriteFilled => {
@@ -92,6 +101,8 @@ pub(super) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::HaloMods => include_str!("../../assets/Button Icons/Halo Mods.svg"),
         ButtonIcon::InsertRow => include_str!("../../assets/Button Icons/Insert Row.svg"),
         ButtonIcon::Json => include_str!("../../assets/Button Icons/JSON.svg"),
+        ButtonIcon::Loop => include_str!("../../assets/Button Icons/Loop.svg"),
+        ButtonIcon::Markers => include_str!("../../assets/icons/markers.svg"),
         ButtonIcon::JumpTo => include_str!("../../assets/Button Icons/Jump To.svg"),
         ButtonIcon::JumpUp => include_str!("../../assets/Button Icons/Jump Up.svg"),
         ButtonIcon::Left => include_str!("../../assets/Button Icons/Left.svg"),
@@ -104,14 +115,19 @@ pub(super) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::Move => include_str!("../../assets/Button Icons/Move.svg"),
         ButtonIcon::Opened => include_str!("../../assets/Button Icons/Opened.svg"),
         ButtonIcon::Other => include_str!("../../assets/Button Icons/Other.svg"),
+        ButtonIcon::Pause => include_str!("../../assets/Button Icons/Pause.svg"),
+        ButtonIcon::Play => include_str!("../../assets/Button Icons/Play.svg"),
         ButtonIcon::Remove => include_str!("../../assets/Button Icons/Remove.svg"),
+        ButtonIcon::Refresh => include_str!("../../assets/Button Icons/Refresh.svg"),
         ButtonIcon::RenderModel => include_str!("../../assets/icons/render_model.svg"),
         ButtonIcon::Rename => include_str!("../../assets/Button Icons/Rename.svg"),
         ButtonIcon::Right => include_str!("../../assets/Button Icons/Right.svg"),
         ButtonIcon::Save => include_str!("../../assets/Button Icons/Save.svg"),
         ButtonIcon::Settings => include_str!("../../assets/Button Icons/Settings.svg"),
         ButtonIcon::Sort => include_str!("../../assets/Button Icons/Sort.svg"),
+        ButtonIcon::Stop => include_str!("../../assets/Button Icons/Stop.svg"),
         ButtonIcon::Tag => include_str!("../../assets/Button Icons/Tag.svg"),
+        ButtonIcon::View => include_str!("../../assets/Button Icons/View.svg"),
         ButtonIcon::Bitmap => {
             if is_dark_mode() {
                 include_str!("../../assets/icons/bitmap.svg")
@@ -253,6 +269,55 @@ pub(super) fn selectable_icon_text_button(
     .inner
 }
 
+pub(super) fn selectable_icon_button(
+    ui: &mut Ui,
+    icon: ButtonIcon,
+    tooltip: &str,
+    selected: bool,
+    enabled: bool,
+) -> egui::Response {
+    ui.scope(|ui| {
+        if selected {
+            let selection = ui.visuals().selection;
+            let widgets = &mut ui.visuals_mut().widgets;
+            widgets.inactive.weak_bg_fill = selection.bg_fill;
+            widgets.inactive.bg_stroke = selection.stroke;
+            widgets.hovered.weak_bg_fill = selection.bg_fill;
+            widgets.active.weak_bg_fill = selection.bg_fill;
+        }
+        icon_button(ui, icon, tooltip, enabled, text_dark())
+    })
+    .inner
+}
+
+pub(super) fn selectable_text_button(
+    ui: &mut Ui,
+    label: impl Into<egui::WidgetText>,
+    selected: bool,
+) -> egui::Response {
+    // Add directly to the wrapping parent. A scope is measured after its
+    // contents, too late for the parent to move a whole button to the next row.
+    let response = ui.add(
+        egui::Button::new(label)
+            .selected(selected)
+            .wrap_mode(egui::TextWrapMode::Extend)
+            .min_size(Vec2::new(0.0, BUTTON_HEIGHT)),
+    );
+    if selected && response.hovered() {
+        let hover_color = if is_dark_mode() {
+            Color32::WHITE
+        } else {
+            Color32::BLACK
+        };
+        ui.painter().rect_stroke(
+            response.rect.expand(1.0),
+            ui.visuals().widgets.hovered.rounding,
+            Stroke::new(ui.visuals().selection.stroke.width, hover_color),
+        );
+    }
+    response
+}
+
 /// egui offsets a popup frame to align its first row with the trigger. Shift
 /// only the positioning response by that inset so the frame edge aligns with
 /// the real button while retaining the frame's visible content padding.
@@ -325,6 +390,32 @@ pub(super) fn icon_menu_button<R>(
         egui::Rect::from_center_size(menu.response.rect.center(), Vec2::splat(BUTTON_ICON_SIZE));
     paint_button_icon_at(ui, icon, icon_rect, text_dark());
     menu.response.on_hover_text(tooltip)
+}
+
+pub(super) fn icon_text_dropdown_button<R>(
+    ui: &mut Ui,
+    icon: ButtonIcon,
+    label: &str,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    let menu = ui.menu_button(format!("     {label}      "), add_contents);
+    let icon_rect = egui::Rect::from_center_size(
+        egui::pos2(
+            menu.response.rect.left() + 13.0,
+            menu.response.rect.center().y,
+        ),
+        Vec2::splat(BUTTON_ICON_SIZE),
+    );
+    let chevron_rect = egui::Rect::from_center_size(
+        egui::pos2(
+            menu.response.rect.right() - 12.0,
+            menu.response.rect.center().y,
+        ),
+        Vec2::splat(BUTTON_ICON_SIZE),
+    );
+    paint_button_icon_at(ui, icon, icon_rect, text_dark());
+    paint_button_icon_at(ui, ButtonIcon::Down, chevron_rect, text_dark());
+    menu
 }
 
 /// Header action menus sit against the right edge of their pane. Align their

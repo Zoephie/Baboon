@@ -9,7 +9,15 @@
 
 use super::*;
 use blam_tags::math::RealRgbColor;
-use blam_tags::{AssInstance, AssMaterial, AssObject, AssVertex, JmsTriangle, JmsVertex};
+use blam_tags::{
+    AssInstance, AssMaterial, AssObject, AssVertex, JmsMaterial, JmsNode, JmsTriangle, JmsVertex,
+};
+
+#[test]
+fn overlay_colors_match_their_tag_icons() {
+    assert_eq!(COLLISION_COLOR, [0xED, 0x5E, 0xBE]);
+    assert_eq!(PHYSICS_COLOR, [0xFF, 0x56, 0x56]);
+}
 
 fn jms_vertex(x: f32, y: f32, z: f32) -> JmsVertex {
     JmsVertex {
@@ -67,6 +75,90 @@ fn a_jms_collision_mesh_scales_down_and_recomputes_its_normals() {
     assert_eq!(preview.batches[0].region_name, COLLISION_REGION);
     assert_eq!(preview.batches[0].flat_color, Some(COLLISION_COLOR));
     assert_eq!(preview.regions.len(), 1, "the region doubles as the toggle");
+}
+
+#[test]
+fn collision_cells_keep_variant_names_and_remap_bones_by_name() {
+    let mut vertices = vec![
+        jms_vertex(0.0, 0.0, 0.0),
+        jms_vertex(100.0, 0.0, 0.0),
+        jms_vertex(0.0, 100.0, 0.0),
+    ];
+    for vertex in &mut vertices {
+        vertex.node_sets = vec![(0, 1.0)];
+    }
+    let collision_node = JmsNode {
+        name: "spine".to_owned(),
+        parent: -1,
+        rotation: RealQuaternion::IDENTITY,
+        translation: RealPoint3d::ZERO,
+    };
+    let target_skeleton = vec![
+        JmsNode {
+            name: "pelvis".to_owned(),
+            ..collision_node.clone()
+        },
+        collision_node.clone(),
+    ];
+    let jms = JmsFile {
+        nodes: vec![collision_node],
+        materials: vec![JmsMaterial {
+            name: "metal".to_owned(),
+            material_name: "(1) major armor".to_owned(),
+        }],
+        vertices,
+        triangles: vec![JmsTriangle {
+            material: 0,
+            v: [0, 1, 2],
+            region: 0,
+        }],
+        ..Default::default()
+    };
+    let mut preview = empty_preview();
+    append_collision_jms(&mut preview, &jms, Some(&target_skeleton));
+
+    assert_eq!(preview.batches[0].region_name, "armor");
+    assert_eq!(preview.batches[0].permutation_name, "major");
+    assert_eq!(preview.batches[0].layer, ModelPreviewLayer::Collision);
+    assert_eq!(preview.vertices[0].node_indices[0], 1.0);
+    assert_eq!(preview.vertices[0].node_weights[0], 1.0);
+}
+
+#[test]
+fn physics_shapes_are_placed_and_weighted_by_their_parent_bone() {
+    let source_node = JmsNode {
+        name: "spine".to_owned(),
+        parent: -1,
+        rotation: RealQuaternion::IDENTITY,
+        translation: RealPoint3d {
+            x: 100.0,
+            y: 0.0,
+            z: 0.0,
+        },
+    };
+    let target_skeleton = vec![
+        JmsNode {
+            name: "pelvis".to_owned(),
+            ..source_node.clone()
+        },
+        source_node.clone(),
+    ];
+    let jms = JmsFile {
+        nodes: vec![source_node],
+        ..Default::default()
+    };
+    let mut vertices = Vec::new();
+    append_physics_shape(
+        &mut vertices,
+        &[([0.25, 0.0, 0.0], [0.0, 0.0, 1.0])],
+        0,
+        &jms,
+        Some(&target_skeleton),
+    );
+
+    assert_eq!(vertices[0].position, [1.25, 0.0, 0.0]);
+    assert_eq!(vertices[0].node_indices[0], 1.0);
+    assert_eq!(vertices[0].node_weights[0], 1.0);
 }
 
 /// Authored normals survive when asked for — H1 BSP render geometry carries

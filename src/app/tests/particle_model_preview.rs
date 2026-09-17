@@ -1,4 +1,4 @@
-//! `particle_model` tags get a working Render Model tab.
+//! `particle_model` tags get a working Model Preview tab.
 //!
 //! blam-tags owns the decode (splitting the merged triangle strip at the
 //! `m_gpu_data/m_variants` boundaries, decompressing through the
@@ -113,7 +113,7 @@ fn particle_model_is_previewable_without_becoming_a_model() {
         let label = String::from_utf8_lossy(group).into_owned();
         assert!(
             is_previewable_geometry_group(tag, &names),
-            "`{label}` must open the Render Model tab",
+            "`{label}` must open the Model Preview tab",
         );
         assert!(
             !is_model_group(tag, &names),
@@ -136,7 +136,7 @@ fn render_model_is_previewable() {
     let tag = u32::from_be_bytes(*b"mode");
     assert!(
         is_previewable_geometry_group(tag, &names),
-        "`mode` must open the Render Model tab",
+        "`mode` must open the Model Preview tab",
     );
 }
 
@@ -317,7 +317,7 @@ fn load_model_preview_derives_object_names_from_the_entry() {
 
 /// A shipped Halo 3 `render_model` opened on its own must produce a preview
 /// with geometry: `load_model_preview` draws the tag itself, no `hlmt`
-/// wrapper involved, which is what the Render Model tab inside the tag shows.
+/// wrapper involved, which is what the Model Preview tab inside the tag shows.
 #[test]
 fn a_shipped_render_model_previews_on_its_own() {
     let Some(tags) = kit_tags("halo3") else {
@@ -334,7 +334,7 @@ fn a_shipped_render_model_previews_on_its_own() {
     let names = names();
     assert!(
         is_previewable_geometry_group(tag.header.group_tag, &names),
-        "`mode` must open the Render Model tab",
+        "`mode` must open the Model Preview tab",
     );
     let entry = crate::source::TagEntry {
         key: format!("file:{}", path.display()),

@@ -42,6 +42,13 @@ pub(super) fn foundation_visuals() -> egui::Visuals {
     } else {
         Color32::from_rgb(218, 218, 214)
     };
+    // Buttons and combo boxes paint `weak_bg_fill`. Use premultiplied sRGB
+    // values for a visually literal 10% neutral overlay; `from_white_alpha`
+    // gamma-converts the color channels and reads much brighter on dark bars.
+    visuals.widgets.inactive.weak_bg_fill = neutral_button_fill(is_dark_mode(), 26);
+    visuals.widgets.hovered.weak_bg_fill = neutral_button_fill(is_dark_mode(), 51);
+    visuals.widgets.active.weak_bg_fill = neutral_button_fill(is_dark_mode(), 64);
+    visuals.widgets.open.weak_bg_fill = neutral_button_fill(is_dark_mode(), 51);
     visuals.widgets.hovered.bg_fill = if is_dark_mode() {
         Color32::from_rgb(82, 82, 82)
     } else {
@@ -55,6 +62,27 @@ pub(super) fn foundation_visuals() -> egui::Visuals {
     visuals.menu_rounding = egui::Rounding::same(5.0);
     visuals.window_stroke = Stroke::new(1.0, foundation_group_edge());
     visuals
+}
+
+fn neutral_button_fill(dark_mode: bool, alpha: u8) -> Color32 {
+    if dark_mode {
+        Color32::from_rgba_premultiplied(alpha, alpha, alpha, alpha)
+    } else {
+        Color32::from_black_alpha(alpha)
+    }
+}
+
+#[cfg(test)]
+mod neutral_button_tests {
+    use super::*;
+
+    #[test]
+    fn neutral_button_fills_use_literal_ten_and_twenty_percent_channels() {
+        assert_eq!(neutral_button_fill(true, 26).to_array(), [26, 26, 26, 26]);
+        assert_eq!(neutral_button_fill(true, 51).to_array(), [51, 51, 51, 51]);
+        assert_eq!(neutral_button_fill(false, 26).to_array(), [0, 0, 0, 26]);
+        assert_eq!(neutral_button_fill(false, 51).to_array(), [0, 0, 0, 51]);
+    }
 }
 
 /// Consistent styling for empty text-input prompts without changing egui's

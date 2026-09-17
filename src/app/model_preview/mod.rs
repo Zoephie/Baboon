@@ -32,6 +32,35 @@ pub(in crate::app) use renderer::material_color;
 use renderer::*;
 use variants::*;
 
+// The material resolver currently understands the render-method shader/bitmap
+// formats validated for H3EK and HREK. Other kits may share a tag container
+// generation, but that alone does not make their texture path supported.
+fn model_preview_supports_textures(game: Option<&str>) -> bool {
+    matches!(game, Some("halo3_mcc" | "haloreach_mcc"))
+}
+
+#[cfg(test)]
+mod texture_availability_tests {
+    use super::model_preview_supports_textures;
+
+    #[test]
+    fn textured_shading_is_limited_to_supported_editing_kits() {
+        assert!(model_preview_supports_textures(Some("halo3_mcc")));
+        assert!(model_preview_supports_textures(Some("haloreach_mcc")));
+        for game in [
+            None,
+            Some("haloce_mcc"),
+            Some("halo2_mcc"),
+            Some("halo3odst_mcc"),
+            Some("halo4_mcc"),
+            Some("halo2amp_mcc"),
+            Some("haloce_evolved"),
+        ] {
+            assert!(!model_preview_supports_textures(game), "{game:?}");
+        }
+    }
+}
+
 /// Renderer-facing preview geometry derived from a [`RenderModel`]. Lives in
 /// Baboon (not blam-tags) since it is purely a GUI concern.
 #[derive(Debug, Clone, Default)]
@@ -109,11 +138,24 @@ pub(crate) struct RenderModelPreviewBatch {
     /// geometry (collision, physics) sets it so an overlay keeps one
     /// recognizable color no matter where its material lands in the list.
     pub flat_color: Option<[u8; 3]>,
+    /// Which independently-toggleable model layer owns this batch. Keeping
+    /// this separate from `region_name` lets collision geometry retain its
+    /// real region/permutation taxonomy for variant selection.
+    pub layer: ModelPreviewLayer,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum ModelPreviewLayer {
+    #[default]
+    Render,
+    Collision,
+    Physics,
 }
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct RenderModelPreviewMarker {
     pub name: String,
+    pub node_index: i16,
     pub position: [f32; 3],
     pub axes: [[f32; 3]; 3],
 }
@@ -136,6 +178,33 @@ pub(crate) struct RenderModelPreviewNode {
 
 static NEXT_MODEL_GEOMETRY_ID: AtomicU64 = AtomicU64::new(1);
 
+fn animation_frame_position(playback: &PreviewAnimationPlayback, pose_frames: usize) -> f32 {
+    let last_frame = pose_frames.saturating_sub(1) as f32;
+    let position = playback.time * ANIMATION_FRAME_RATE;
+    if playback.looped && pose_frames > 1 {
+        position % pose_frames as f32
+    } else {
+        position.min(last_frame)
+    }
+}
+
+fn animation_frame_label(position: f32, pose_frames: usize) -> String {
+    let frame = if pose_frames > 0 {
+        position.floor() as usize + 1
+    } else {
+        0
+    };
+    format!("{frame} / {pose_frames}")
+}
+
+fn animation_header_group(ui: &mut Ui, width: f32, add_contents: impl FnOnce(&mut Ui)) {
+    ui.allocate_ui_with_layout(
+        Vec2::new(width, BUTTON_HEIGHT),
+        egui::Layout::left_to_right(egui::Align::Center),
+        add_contents,
+    );
+}
+
 fn model_preview_data(
     source_key: String,
     render_model_path: String,
@@ -154,12 +223,112 @@ fn model_preview_data(
     }
 }
 
+fn draw_animation_combo(
+    ui: &mut Ui,
+    entry_key: &str,
+    animations: &[PreviewAnimationEntry],
+    playback: &mut PreviewAnimationPlayback,
+    width: f32,
+) {
+    let selected_text = playback
+        .selected
+        .and_then(|index| animations.get(index))
+        .map(|entry| entry.name.as_str())
+        .unwrap_or("<None>");
+    let popup_id = ui.make_persistent_id(("model_animation_popup", entry_key));
+    let open = ui.memory(|memory| memory.is_popup_open(popup_id));
+    let response = ui
+        .scope(|ui| {
+            if open {
+                ui.visuals_mut().widgets.inactive.weak_bg_fill =
+                    ui.visuals().widgets.open.weak_bg_fill;
+            }
+            ui.add_sized(Vec2::new(width, BUTTON_HEIGHT), egui::Button::new(""))
+        })
+        .inner;
+    let foreground = if ui.is_enabled() {
+        text_dark()
+    } else {
+        ui.visuals().widgets.noninteractive.fg_stroke.color
+    };
+    ui.painter().text(
+        response.rect.left_center() + Vec2::new(8.0, 0.0),
+        Align2::LEFT_CENTER,
+        truncate_for_cell(selected_text, response.rect.width() - 36.0),
+        FontId::proportional(12.0),
+        foreground,
+    );
+    let arrow_rect = egui::Rect::from_center_size(
+        egui::pos2(response.rect.right() - 12.0, response.rect.center().y),
+        Vec2::splat(BUTTON_ICON_SIZE),
+    );
+    paint_button_icon_at(ui, ButtonIcon::Down, arrow_rect, foreground);
+    let just_opened = response.clicked() && !open;
+    if response.clicked() {
+        ui.memory_mut(|memory| memory.toggle_popup(popup_id));
+    }
+    egui::popup::popup_below_widget(
+        ui,
+        popup_id,
+        &response,
+        egui::popup::PopupCloseBehavior::CloseOnClickOutside,
+        |ui| {
+            ui.set_min_width(width.max(240.0));
+            let search = ui.add(
+                egui::TextEdit::singleline(&mut playback.filter)
+                    .hint_text(placeholder_text("search animations…"))
+                    .desired_width(320.0),
+            );
+            if just_opened {
+                search.request_focus();
+            }
+            ui.separator();
+            let filter = playback.filter.trim().to_ascii_lowercase();
+            egui::ScrollArea::vertical()
+                .max_height(300.0)
+                .show(ui, |ui| {
+                    let mut shown = 0;
+                    for (index, row) in animations.iter().enumerate() {
+                        if !filter.is_empty() && !row.name.to_ascii_lowercase().contains(&filter) {
+                            continue;
+                        }
+                        shown += 1;
+                        let label = if row.playable {
+                            format!("{}  ({} · {} frames)", row.name, row.kind, row.frame_count)
+                        } else {
+                            format!("{}  (no data)", row.name)
+                        };
+                        if ui
+                            .add_enabled(
+                                row.playable,
+                                egui::SelectableLabel::new(playback.selected == Some(index), label),
+                            )
+                            .clicked()
+                        {
+                            playback.selected = Some(index);
+                            playback.pose = None;
+                            playback.time = 0.0;
+                            playback.playing = false;
+                            playback.stopped = false;
+                            playback.error = None;
+                            ui.memory_mut(|memory| memory.close_popup());
+                        }
+                    }
+                    if shown == 0 {
+                        ui.label(RichText::new("No animations match.").color(subtle_dark()));
+                    }
+                });
+        },
+    );
+}
+
 pub(super) fn draw_model_preview_panel(
     ui: &mut Ui,
     tag: &TagFile,
     entry: &TagEntry,
     names: &TagNameIndex,
     source: Option<&TagSource>,
+    source_game: Option<&str>,
     state: &mut ModelPreviewState,
     model_preview_size: &mut f32,
     edit: &mut FieldEditContext<'_>,
@@ -169,165 +338,55 @@ pub(super) fn draw_model_preview_panel(
         return;
     }
 
-    let title = preview_panel_title(entry.group_tag);
-    egui::CollapsingHeader::new(RichText::new(title).strong().color(text_dark()))
-        .id_salt(("model_preview", &entry.key))
-        .default_open(true)
-        .show(ui, |ui| {
-            // The parse is synchronous; on the first frame for a tag, show a
-            // spinner, kick the (blocking) parse, and repaint so the decoded
-            // model appears next frame instead of a blank panel. (A future
-            // change can move the parse to a worker thread — see plan 1.9.)
-            let needs_load = state.needs_preview_load(&entry.key);
-            if needs_load {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label(RichText::new("Loading model…").color(subtle_dark()));
-                });
-                ensure_model_preview_loaded(tag, entry, names, source, state);
-                ui.ctx().request_repaint();
+    let supports_textures = model_preview_supports_textures(source_game);
+    if !supports_textures {
+        state.render_mode = state.render_mode.without_textures();
+    }
+
+    ui.scope(|ui| {
+        // The parse is synchronous; on the first frame for a tag, show a
+        // spinner, kick the (blocking) parse, and repaint so the decoded
+        // model appears next frame instead of a blank panel. (A future
+        // change can move the parse to a worker thread — see plan 1.9.)
+        let needs_load = state.needs_preview_load(&entry.key);
+        if needs_load {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(RichText::new("Loading model…").color(subtle_dark()));
+            });
+            ensure_model_preview_loaded(tag, entry, names, source, state);
+            ui.ctx().request_repaint();
+            return;
+        }
+
+        let is_campaign_evolved = tag.header.group_tag.to_be_bytes() == *b"hlmt"
+            && tag
+                .root()
+                .read_tag_ref_with_group("skeleton model")
+                .map(|(_, reference)| !reference.trim().is_empty())
+                .unwrap_or(false);
+
+        let Some(data_result) = state.data.take() else {
+            ui.label(RichText::new("No preview loaded").color(subtle_dark()));
+            return;
+        };
+        let mut restore_data = Some(data_result);
+        let data = match restore_data.as_ref().expect("preview data just set") {
+            Ok(data) => data,
+            Err(error) => {
+                ui.colored_label(Color32::from_rgb(150, 56, 44), error);
+                state.data = restore_data.take();
                 return;
             }
+        };
 
-            ui.horizontal(|ui| {
-                ui.label(RichText::new("Scale").color(subtle_dark()));
-                // Logarithmic across the whole range: linear made everything
-                // past a BSP-sized zoom live in the slider's last pixel.
-                ui.add(
-                    egui::Slider::new(&mut state.scale, MIN_PREVIEW_SCALE..=MAX_PREVIEW_SCALE)
-                        .logarithmic(true)
-                        .show_value(false)
-                        .clamping(egui::SliderClamping::Always),
-                );
-                let drag_speed = (state.scale * 0.05).max(0.01) as f64;
-                ui.add(
-                    egui::DragValue::new(&mut state.scale)
-                        .range(MIN_PREVIEW_SCALE..=MAX_PREVIEW_SCALE)
-                        .speed(drag_speed)
-                        .max_decimals(2)
-                        .suffix("×"),
-                );
-                if ui.button("Reset").clicked() {
-                    state.yaw = -0.45;
-                    state.pitch = 0.25;
-                    state.focus = [0.0; 3];
-                    state.scale = 1.0;
-                }
-                ui.checkbox(&mut state.show_markers, "Markers");
-                if state.show_markers {
-                    ui.add(
-                        egui::TextEdit::singleline(&mut state.marker_filter)
-                            .hint_text(placeholder_text("filter markers…"))
-                            .desired_width(110.0),
-                    );
-                }
-                egui::ComboBox::from_id_salt(("model_render_mode", &entry.key))
-                    .selected_text(state.render_mode.label())
-                    .show_ui(ui, |ui| {
-                        for mode in ModelRenderMode::ALL {
-                            ui.selectable_value(&mut state.render_mode, mode, mode.label());
-                        }
-                    });
-                ui.checkbox(&mut state.perspective, "Perspective")
-                    .on_hover_text(
-                        "Perspective projection instead of the flat orthographic view. \
-                         The framing at the orbit point stays identical, so toggling \
-                         never jumps.",
-                    );
-                ui.checkbox(&mut state.show_grid, "Grid").on_hover_text(
-                    "Ground-reference grid on the z = 0 plane, spaced to the \
-                     model's size, with the world X and Y axes picked out.",
-                );
-                ui.checkbox(&mut state.shaded, "Shaded")
-                    .on_hover_text(
-                        "Sample each part's own shader — diffuse, detail, normal, specular and                          self-illumination. Off draws the flat per-material colours, which stay                          useful for reading silhouette and topology.",
-                    );
-                ui.checkbox(&mut state.show_backfaces, "Backfaces");
-                // Campaign Evolved: static pieces are Nanite. Full detail is
-                // the faithful default; users can opt into the coarse fallback
-                // for unusually heavy models. Only meaningful for CE `.model`s.
-                let is_campaign_evolved = tag.header.group_tag.to_be_bytes() == *b"hlmt"
-                    && tag
-                        .root()
-                        .read_tag_ref_with_group("skeleton model")
-                        .map(|(_, r)| !r.trim().is_empty())
-                        .unwrap_or(false);
-                if is_campaign_evolved {
-                    ui.checkbox(&mut state.high_detail, "High detail")
-                        .on_hover_text(
-                            "Decode full-resolution Nanite geometry instead of Unreal's coarse \
-                             fallback. Disable this for a faster, lower-detail preview.",
-                        );
-                }
-                // `.model` tags can layer their collision and physics geometry
-                // over the render model. Not on Campaign Evolved, whose preview
-                // goes through the Unreal path the overlays don't compose with.
-                if tag.header.group_tag.to_be_bytes() == *b"hlmt" && !is_campaign_evolved {
-                    ui.checkbox(&mut state.show_collision, "Collision")
-                        .on_hover_text(
-                            "Overlay the referenced collision_model's geometry, tinted orange. \
-                             Built once in the background when the preview loads, so toggling \
-                             is instant.",
-                        );
-                    ui.checkbox(&mut state.show_physics, "Physics")
-                        .on_hover_text(
-                            "Overlay the referenced physics_model's shapes, tinted blue.",
-                        );
-                    // The one moment a toggle cannot answer instantly: the
-                    // worker is still building the layers it would show.
-                    if state.overlays_pending && (state.show_collision || state.show_physics) {
-                        ui.spinner();
-                    }
-                    // Only offered while an overlay is on: unchecking it with
-                    // nothing else to draw would blank the viewport with no
-                    // way to see why.
-                    if state.show_collision || state.show_physics {
-                        ui.checkbox(&mut state.show_render, "Render").on_hover_text(
-                            "Draw the render model under the overlays. Off shows the \
-                             collision/physics geometry alone.",
-                        );
-                    } else {
-                        state.show_render = true;
-                    }
-                }
-                ui.label(RichText::new("Viewport").color(subtle_dark()));
-                ui.add(
-                    egui::Slider::new(
-                        model_preview_size,
-                        MIN_MODEL_PREVIEW_SIZE..=MAX_MODEL_PREVIEW_SIZE,
-                    )
-                    .show_value(false)
-                    .clamping(egui::SliderClamping::Always),
-                );
-                draw_model_viewport_size_input(ui, model_preview_size);
-                if ui.button("Refresh model").clicked() {
-                    state.loaded_key = None;
-                    state.data = None;
-                    ensure_model_preview_loaded(tag, entry, names, source, state);
-                }
-            });
-
-            let Some(data_result) = state.data.take() else {
-                ui.label(RichText::new("No preview loaded").color(subtle_dark()));
-                return;
-            };
-            let mut restore_data = Some(data_result);
-            let data = match restore_data.as_ref().expect("preview data just set") {
-                Ok(data) => data,
-                Err(error) => {
-                    ui.colored_label(Color32::from_rgb(150, 56, 44), error);
-                    state.data = restore_data.take();
-                    return;
-                }
-            };
-
-            // A scenario's per-BSP toggle list. Region toggles cannot serve
-            // here: a region only exists once its BSP is loaded, and the point
-            // of this list is choosing what to load in the first place.
+        // A scenario's per-BSP toggle list. Region toggles cannot serve
+        // here: a region only exists once its BSP is loaded, and the point
+        // of this list is choosing what to load in the first place.
+        let draw_scenario_setup = |ui: &mut Ui, state: &mut ModelPreviewState| {
             if !data.scenario_bsps.is_empty() {
-                ui.add_space(4.0);
+                ui.label(RichText::new("Structure BSPs").strong().color(text_dark()));
                 ui.horizontal_wrapped(|ui| {
-                    ui.label(RichText::new("Structure BSPs").color(subtle_dark()));
                     for (index, reference) in data.scenario_bsps.iter().enumerate() {
                         let Some(reference) = reference else {
                             continue;
@@ -352,193 +411,766 @@ pub(super) fn draw_model_preview_panel(
                             .color(subtle_dark()),
                     );
                 }
+                ui.separator();
             }
+        };
 
-            // Animation playback strip: selection decodes on a worker (the
-            // per-frame hook in tag_pane sees `selected` change), sampling is
-            // per-draw-frame, and the clock advances here.
-            if data.animations.is_some() || state.animation.error.is_some() {
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Animation").color(subtle_dark()));
-                    if let Some(animations) = data.animations.clone() {
-                        let selected_text = state
-                            .animation
-                            .selected
-                            .and_then(|index| animations.get(index))
-                            .map(|entry| entry.name.clone())
-                            .unwrap_or_else(|| "<none>".to_owned());
-                        // A graph can list a thousand animations. The search
-                        // box sits beside the picker (like the marker filter)
-                        // rather than inside its popup: egui's combo popup
-                        // hard-codes close-on-click, so a text field in there
-                        // closes the menu the moment it is clicked.
-                        ui.add(
-                            egui::TextEdit::singleline(&mut state.animation.filter)
-                                .hint_text(placeholder_text("search animations…"))
-                                .desired_width(140.0),
-                        );
-                        let filter = state.animation.filter.trim().to_ascii_lowercase();
-                        egui::ComboBox::from_id_salt(("model_animation", &entry.key))
-                            .selected_text(selected_text)
-                            .width(280.0)
-                            .show_ui(ui, |ui| {
-                                let mut shown = 0usize;
-                                for (index, row) in animations.iter().enumerate() {
-                                    if !filter.is_empty()
-                                        && !row.name.to_ascii_lowercase().contains(&filter)
-                                    {
-                                        continue;
-                                    }
-                                    shown += 1;
-                                    let label = if row.playable {
-                                        format!(
-                                            "{}  ({} · {} frames)",
-                                            row.name, row.kind, row.frame_count
-                                        )
-                                    } else {
-                                        format!("{}  (no data)", row.name)
-                                    };
-                                    if ui
-                                        .add_enabled(
-                                            row.playable,
-                                            egui::SelectableLabel::new(
-                                                state.animation.selected == Some(index),
-                                                label,
-                                            ),
-                                        )
-                                        .clicked()
-                                    {
-                                        state.animation.selected = Some(index);
-                                        state.animation.pose = None;
-                                        state.animation.time = 0.0;
-                                        state.animation.error = None;
-                                    }
-                                }
-                                if shown == 0 {
-                                    ui.label(
-                                        RichText::new("No animations match.")
-                                            .color(subtle_dark()),
-                                    );
-                                }
-                            });
-                        if state.animation.selected.is_some()
+        // Deferred until after the viewport/setup row so the player can use
+        // the full page width, matching the layout in the design reference.
+        let draw_animation_player = |ui: &mut Ui, state: &mut ModelPreviewState| {
+            ui.add_space(8.0);
+            draw_model_preview_section(ui, "Animation Player", None, |ui, part| {
+                let animations = data.animations.as_deref().map_or(&[][..], Vec::as_slice);
+                let pose_frames = state
+                    .animation
+                    .pose
+                    .as_ref()
+                    .map(|pose| pose.frames.len())
+                    .unwrap_or(0);
+                let controls_enabled = state.animation.selected.is_some() && pose_frames > 0;
+                let duration = pose_frames as f32 / ANIMATION_FRAME_RATE;
+                let last_frame = pose_frames.saturating_sub(1) as f32;
+                if part == ModelPreviewSectionPart::Header {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing.x = 16.0;
+                        let loading = state.animation.selected.is_some()
                             && state.animation.pose.is_none()
-                            && state.animation.error.is_none()
-                        {
-                            ui.spinner();
-                        }
-                        let pose_frames = state
-                            .animation
-                            .pose
-                            .as_ref()
-                            .map(|pose| pose.frames.len())
-                            .unwrap_or(0);
-                        if pose_frames > 0 {
-                            let duration = pose_frames as f32 / ANIMATION_FRAME_RATE;
-                            let last_frame = (pose_frames - 1) as f32;
-                            if ui
-                                .button(if state.animation.playing { "Pause" } else { "Play" })
-                                .clicked()
+                            && state.animation.error.is_none();
+                        let spinner_width = if loading { 20.0 } else { 0.0 };
+                        let combo_width = if ui.available_width() >= 600.0 {
+                            340.0
+                        } else {
+                            240.0_f32.min((ui.available_width() - spinner_width).max(1.0))
+                        };
+                        animation_header_group(ui, combo_width + spinner_width, |ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            ui.add_enabled_ui(!animations.is_empty(), |ui| {
+                                draw_animation_combo(
+                                    ui,
+                                    &entry.key,
+                                    animations,
+                                    &mut state.animation,
+                                    combo_width,
+                                );
+                            });
+                            if loading {
+                                ui.spinner();
+                            }
+                        });
+                        animation_header_group(ui, 112.0, |ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            if selectable_icon_button(
+                                ui,
+                                ButtonIcon::Play,
+                                "Play",
+                                state.animation.playing,
+                                controls_enabled,
+                            )
+                            .clicked()
                             {
-                                state.animation.playing = !state.animation.playing;
+                                state.animation.playing = true;
+                                state.animation.stopped = false;
                                 // Play at the end of a non-looping clip restarts it.
-                                if state.animation.playing
-                                    && !state.animation.looped
+                                if !state.animation.looped
                                     && state.animation.time * ANIMATION_FRAME_RATE >= last_frame
                                 {
                                     state.animation.time = 0.0;
                                 }
                             }
-                            ui.checkbox(&mut state.animation.looped, "Loop");
-                            ui.label(RichText::new("Speed").color(subtle_dark()));
-                            ui.add(
-                                egui::DragValue::new(&mut state.animation.speed)
-                                    .range(0.05..=4.0)
-                                    .speed(0.02)
-                                    .max_decimals(2)
-                                    .suffix("×"),
-                            );
-                            let mut frame_position =
-                                (state.animation.time * ANIMATION_FRAME_RATE).min(last_frame);
-                            if state.animation.looped && pose_frames > 1 {
-                                frame_position =
-                                    (state.animation.time * ANIMATION_FRAME_RATE) % pose_frames as f32;
-                            }
-                            let mut scrub = frame_position;
-                            if ui
-                                .add(
-                                    egui::Slider::new(&mut scrub, 0.0..=last_frame)
-                                        .show_value(false),
-                                )
-                                .changed()
+                            if selectable_icon_button(
+                                ui,
+                                ButtonIcon::Pause,
+                                "Pause",
+                                !state.animation.playing && !state.animation.stopped,
+                                controls_enabled,
+                            )
+                            .clicked()
                             {
-                                state.animation.time = scrub / ANIMATION_FRAME_RATE;
                                 state.animation.playing = false;
-                                frame_position = scrub;
+                                state.animation.stopped = false;
                             }
-                            ui.label(
-                                RichText::new(format!(
-                                    "{:>3} / {}",
-                                    frame_position.floor() as usize + 1,
-                                    pose_frames
-                                ))
-                                .color(subtle_dark()),
-                            );
-                            if state.animation.playing {
-                                let dt = ui.input(|input| input.stable_dt).min(0.1);
-                                state.animation.time += dt * state.animation.speed.max(0.0);
-                                if state.animation.looped {
-                                    if duration > 0.0 {
-                                        state.animation.time %= duration;
-                                    }
-                                } else if state.animation.time * ANIMATION_FRAME_RATE >= last_frame
-                                {
-                                    state.animation.time = last_frame / ANIMATION_FRAME_RATE;
-                                    state.animation.playing = false;
-                                }
-                                ui.ctx().request_repaint();
+                            if selectable_icon_button(
+                                ui,
+                                ButtonIcon::Stop,
+                                "Stop and return to the default pose",
+                                state.animation.stopped,
+                                controls_enabled,
+                            )
+                            .clicked()
+                            {
+                                state.animation.playing = false;
+                                state.animation.stopped = true;
+                                state.animation.time = 0.0;
                             }
-                        }
-                    }
-                    if let Some(error) = state.animation.error.clone() {
-                        ui.label(
-                            RichText::new(error).color(Color32::from_rgb(150, 56, 44)),
+                            ui.spacing_mut().item_spacing.x = 8.0;
+                            if selectable_icon_button(
+                                ui,
+                                ButtonIcon::Loop,
+                                "Loop animation",
+                                state.animation.looped,
+                                controls_enabled,
+                            )
+                            .clicked()
+                            {
+                                state.animation.looped = !state.animation.looped;
+                            }
+                        });
+                        let speed_label_width = ui
+                            .painter()
+                            .layout_no_wrap(
+                                "Speed".to_owned(),
+                                FontId::proportional(12.0),
+                                subtle_dark(),
+                            )
+                            .size()
+                            .x;
+                        animation_header_group(ui, speed_label_width + 4.0 + 48.0, |ui| {
+                            ui.spacing_mut().item_spacing.x = 4.0;
+                            ui.label(RichText::new("Speed").color(subtle_dark()));
+                            ui.add_enabled_ui(controls_enabled, |ui| {
+                                ui.add_sized(
+                                    Vec2::new(48.0, BUTTON_HEIGHT),
+                                    egui::DragValue::new(&mut state.animation.speed)
+                                        .range(0.05..=4.0)
+                                        .speed(0.02)
+                                        .max_decimals(2)
+                                        .suffix("×"),
+                                );
+                            });
+                        });
+                        let frame_position =
+                            animation_frame_position(&state.animation, pose_frames);
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(animation_frame_label(frame_position, pose_frames))
+                                    .color(subtle_dark()),
+                            )
+                            .wrap_mode(egui::TextWrapMode::Extend),
                         );
-                    }
-                });
-            }
-
-            let mut mutation_requested = false;
-            let desired_viewport = model_viewport_size(ui.available_width(), *model_preview_size);
-            let can_place_controls_beside = ui.available_width() >= desired_viewport.x + 360.0;
-            if can_place_controls_beside {
-                ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        draw_model_viewport_with_stats(ui, data, state, desired_viewport)
                     });
-                    ui.add_space(10.0);
-                    ui.vertical(|ui| {
-                        if draw_variant_controls(ui, data, state, edit) {
+                } else {
+                    ui.scope(|ui| {
+                        let mut scrub = animation_frame_position(&state.animation, pose_frames);
+                        ui.spacing_mut().slider_width = (ui.available_width() - 2.0).max(1.0);
+                        if ui
+                            .add_enabled(
+                                controls_enabled,
+                                egui::Slider::new(&mut scrub, 0.0..=last_frame.max(1.0))
+                                    .show_value(false),
+                            )
+                            .changed()
+                        {
+                            state.animation.time = scrub / ANIMATION_FRAME_RATE;
+                            state.animation.playing = false;
+                            state.animation.stopped = false;
+                        }
+                        if controls_enabled && state.animation.playing {
+                            let dt = ui.input(|input| input.stable_dt).min(0.1);
+                            state.animation.time += dt * state.animation.speed.max(0.0);
+                            if state.animation.looped {
+                                if duration > 0.0 {
+                                    state.animation.time %= duration;
+                                }
+                            } else if state.animation.time * ANIMATION_FRAME_RATE >= last_frame {
+                                state.animation.time = last_frame / ANIMATION_FRAME_RATE;
+                                state.animation.playing = false;
+                            }
+                            ui.ctx().request_repaint();
+                        }
+                    });
+                    if let Some(error) = state.animation.error.clone() {
+                        ui.label(RichText::new(error).color(Color32::from_rgb(150, 56, 44)));
+                    }
+                }
+            });
+        };
+
+        let mut mutation_requested = false;
+        let mut reload_requested = false;
+        let page_width = ui.available_width();
+        let can_place_controls_beside = page_width >= 780.0;
+        if can_place_controls_beside {
+            let gap = MODEL_PREVIEW_SECTION_GAP;
+            // At wide sizes the persisted preview scale controls the entire
+            // preview card. Reserve enough room for Model Setup, then let the
+            // card grow around its 470×300 viewport until it reaches that
+            // limit. Previously only the image changed size inside a fixed
+            // 40% column, which made the control feel disconnected.
+            let preview_width = wide_model_preview_section_width(page_width, *model_preview_size);
+            let setup_width = (page_width - preview_width - gap).max(WIDE_MODEL_SETUP_MIN_WIDTH);
+            let preview_viewport_size = model_viewport_size(preview_width, *model_preview_size);
+            let shared_body_height = preview_viewport_size.y + MODEL_PREVIEW_STATS_FOOTER_HEIGHT;
+            // Setup's body has 8-point top/bottom margins; Preview's body is
+            // edge-to-edge. Match their *outer* card heights, not just content.
+            let setup_body_height =
+                (shared_body_height - model_setup_extra_header_height(setup_width) - 16.0).max(1.0);
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = gap;
+                ui.allocate_ui(Vec2::new(preview_width, 0.0), |ui| {
+                    ui.set_min_width(preview_width);
+                    ui.set_max_width(preview_width);
+                    draw_model_preview_section(
+                        ui,
+                        "Model Preview",
+                        Some(shared_body_height),
+                        |ui, part| match part {
+                            ModelPreviewSectionPart::Header => draw_model_view_settings_menu(
+                                ui,
+                                tag,
+                                entry,
+                                state,
+                                model_preview_size,
+                                supports_textures,
+                                is_campaign_evolved,
+                                !data.preview.nodes.is_empty(),
+                            ),
+                            ModelPreviewSectionPart::Body => {
+                                draw_model_viewport_with_stats(
+                                    ui,
+                                    data,
+                                    state,
+                                    preview_viewport_size,
+                                );
+                            }
+                        },
+                    );
+                });
+                ui.allocate_ui(Vec2::new(setup_width, 0.0), |ui| {
+                    ui.set_min_width(setup_width);
+                    ui.set_max_width(setup_width);
+                    draw_model_preview_section(
+                        ui,
+                        "Model Setup",
+                        Some(setup_body_height),
+                        |ui, part| {
+                            if part == ModelPreviewSectionPart::Header {
+                                draw_model_setup_header_controls(
+                                    ui,
+                                    setup_width,
+                                    data,
+                                    state,
+                                    |ui, state| {
+                                        if draw_variant_header_actions(ui, data, state, edit) {
+                                            mutation_requested = true;
+                                        }
+                                        if icon_text_button(
+                                            ui,
+                                            ButtonIcon::Refresh,
+                                            "Refresh Model",
+                                            true,
+                                        )
+                                        .clicked()
+                                        {
+                                            state.loaded_key = None;
+                                            state.data = None;
+                                            ensure_model_preview_loaded(
+                                                tag, entry, names, source, state,
+                                            );
+                                            reload_requested = true;
+                                        }
+                                    },
+                                );
+                            } else {
+                                egui::ScrollArea::vertical()
+                                    .auto_shrink([false, false])
+                                    .max_height(setup_body_height)
+                                    .show(ui, |ui| {
+                                        draw_scenario_setup(ui, state);
+                                        draw_variant_controls(ui, data, state);
+                                    });
+                            }
+                        },
+                    );
+                });
+            });
+        } else {
+            draw_model_preview_section(ui, "Model Preview", None, |ui, part| match part {
+                ModelPreviewSectionPart::Header => draw_model_view_settings_menu(
+                    ui,
+                    tag,
+                    entry,
+                    state,
+                    model_preview_size,
+                    supports_textures,
+                    is_campaign_evolved,
+                    !data.preview.nodes.is_empty(),
+                ),
+                ModelPreviewSectionPart::Body => {
+                    let size = model_viewport_size(ui.available_width(), *model_preview_size);
+                    draw_model_viewport_with_stats(ui, data, state, size);
+                }
+            });
+            ui.add_space(8.0);
+            let setup_width = ui.available_width();
+            draw_model_preview_section(ui, "Model Setup", None, |ui, part| {
+                if part == ModelPreviewSectionPart::Header {
+                    draw_model_setup_header_controls(ui, setup_width, data, state, |ui, state| {
+                        if draw_variant_header_actions(ui, data, state, edit) {
                             mutation_requested = true;
                         }
+                        if icon_text_button(ui, ButtonIcon::Refresh, "Refresh Model", true)
+                            .clicked()
+                        {
+                            state.loaded_key = None;
+                            state.data = None;
+                            ensure_model_preview_loaded(tag, entry, names, source, state);
+                            reload_requested = true;
+                        }
                     });
-                });
+                } else {
+                    draw_scenario_setup(ui, state);
+                    draw_variant_controls(ui, data, state);
+                }
+            });
+        }
+        draw_animation_player(ui, state);
+        if mutation_requested {
+            state.loaded_key = None;
+            state.data = None;
+        } else if !reload_requested {
+            state.data = restore_data.take();
+        }
+    });
+    ui.add_space(8.0);
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ModelPreviewSectionPart {
+    Header,
+    Body,
+}
+
+const MODEL_PREVIEW_STATS_FOOTER_HEIGHT: f32 = 28.0;
+const MODEL_SETUP_EXTRA_HEADER_HEIGHT: f32 = 32.0;
+const MODEL_SETUP_INLINE_HEADER_MIN_WIDTH: f32 = 680.0;
+const MODEL_SETUP_SHARED_CONTROLS_ROW_MIN_WIDTH: f32 = 560.0;
+const WIDE_MODEL_SETUP_MIN_WIDTH: f32 = 400.0;
+const MODEL_PREVIEW_SECTION_GAP: f32 = 8.0;
+
+fn model_setup_extra_header_height(width: f32) -> f32 {
+    if width >= MODEL_SETUP_INLINE_HEADER_MIN_WIDTH {
+        0.0
+    } else if width >= MODEL_SETUP_SHARED_CONTROLS_ROW_MIN_WIDTH {
+        MODEL_SETUP_EXTRA_HEADER_HEIGHT
+    } else {
+        MODEL_SETUP_EXTRA_HEADER_HEIGHT * 2.0
+    }
+}
+
+fn draw_model_setup_header_controls(
+    ui: &mut Ui,
+    section_width: f32,
+    data: &ModelPreviewData,
+    state: &mut ModelPreviewState,
+    mut draw_actions: impl FnMut(&mut Ui, &mut ModelPreviewState),
+) {
+    let mut draw_action_group = |ui: &mut Ui, state: &mut ModelPreviewState| {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            draw_actions(ui, state);
+        });
+    };
+    if section_width < MODEL_SETUP_SHARED_CONTROLS_ROW_MIN_WIDTH {
+        // Three intact groups: title above, then variant navigation, then
+        // Save/Delete/Refresh. Do not let individual buttons escape the card.
+        ui.vertical(|ui| {
+            draw_variant_selector(ui, data, state);
+            draw_action_group(ui, state);
+        });
+    } else {
+        // The title is either inline or on the row above; the two control
+        // groups fit together at this width.
+        draw_variant_selector(ui, data, state);
+        draw_action_group(ui, state);
+    }
+}
+
+fn wide_model_preview_section_width(page_width: f32, model_preview_size: f32) -> f32 {
+    let desired_width =
+        470.0 * model_preview_size.clamp(MIN_MODEL_PREVIEW_SIZE, MAX_MODEL_PREVIEW_SIZE);
+    desired_width
+        .min((page_width - MODEL_PREVIEW_SECTION_GAP - WIDE_MODEL_SETUP_MIN_WIDTH).max(1.0))
+}
+
+/// A fixed, full-width section styled like the Tag Fields group headers, with
+/// room for compact controls on the right side of the header bar.
+fn draw_model_preview_section(
+    ui: &mut Ui,
+    title: &str,
+    min_body_height: Option<f32>,
+    mut add_contents: impl FnMut(&mut Ui, ModelPreviewSectionPart),
+) -> egui::Rect {
+    const RADIUS: f32 = 5.0;
+    // `allocate_ui` inherits its parent's layout. At wide widths this section
+    // lives inside the horizontal Preview/Setup row, so establish a vertical
+    // layout here instead of allowing the header, body and footer to become
+    // siblings in that outer row.
+    ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+        let width = ui.available_width().max(1.0);
+        let setup_header = title == "Model Setup";
+        let animation_header = title == "Animation Player";
+        let extra_header_height = if setup_header {
+            model_setup_extra_header_height(width)
+        } else if animation_header && width < 800.0 {
+            if width < 320.0 {
+                96.0
+            } else if width < 560.0 {
+                64.0
             } else {
-                draw_model_viewport_with_stats(ui, data, state, desired_viewport);
-                ui.add_space(8.0);
-                if draw_variant_controls(ui, data, state, edit) {
-                    mutation_requested = true;
+                32.0
+            }
+        } else {
+            0.0
+        };
+        let header_height = 40.0 + extra_header_height;
+        let (header_rect, _) =
+            ui.allocate_exact_size(Vec2::new(width, header_height), Sense::hover());
+        ui.painter().rect_filled(
+            header_rect,
+            egui::Rounding {
+                nw: RADIUS,
+                ne: RADIUS,
+                sw: 0.0,
+                se: 0.0,
+            },
+            foundation_section_bar(),
+        );
+
+        let header_content_rect = header_rect.shrink(8.0);
+        let title_rect = if extra_header_height > 0.0 {
+            egui::Rect::from_min_max(
+                header_content_rect.min,
+                egui::pos2(header_content_rect.max.x, header_content_rect.min.y + 24.0),
+            )
+        } else {
+            header_content_rect
+        };
+        let mut title_ui = ui.new_child(egui::UiBuilder::new().max_rect(title_rect));
+        title_ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+            ui.label(
+                RichText::new(title)
+                    .font(bold_font(12.5))
+                    .color(foundation_block_text()),
+            );
+        });
+        let actions_rect = if extra_header_height > 0.0 {
+            egui::Rect::from_min_max(
+                egui::pos2(
+                    header_content_rect.min.x,
+                    header_content_rect.max.y - extra_header_height + 2.0,
+                ),
+                header_content_rect.max,
+            )
+        } else if setup_header || animation_header {
+            let title_width = ui
+                .painter()
+                .layout_no_wrap(title.to_owned(), bold_font(12.5), foundation_block_text())
+                .size()
+                .x;
+            egui::Rect::from_min_max(
+                egui::pos2(
+                    header_content_rect.min.x + title_width + 16.0,
+                    header_content_rect.min.y,
+                ),
+                header_content_rect.max,
+            )
+        } else {
+            header_content_rect
+        };
+        let mut actions_ui = ui.new_child(egui::UiBuilder::new().max_rect(actions_rect));
+        if setup_header || animation_header {
+            actions_ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 8.0;
+                add_contents(ui, ModelPreviewSectionPart::Header);
+            });
+        } else {
+            actions_ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                add_contents(ui, ModelPreviewSectionPart::Header);
+            });
+        }
+
+        ui.add_space(-ui.spacing().item_spacing.y);
+        let body = egui::Frame::none()
+            .fill(foundation_group_bg())
+            .rounding(egui::Rounding {
+                nw: 0.0,
+                ne: 0.0,
+                sw: RADIUS,
+                se: RADIUS,
+            })
+            .inner_margin(egui::Margin::same(if title == "Model Preview" {
+                0.0
+            } else {
+                8.0
+            }))
+            .show(ui, |ui| {
+                ui.set_min_width(
+                    (width - if title == "Model Preview" { 0.0 } else { 16.0 }).max(1.0),
+                );
+                if let Some(min_body_height) = min_body_height {
+                    ui.set_min_height(min_body_height);
+                }
+                ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                    if title == "Model Preview" {
+                        ui.spacing_mut().item_spacing.y = 0.0;
+                    }
+                    add_contents(ui, ModelPreviewSectionPart::Body);
+                });
+            });
+        let container_rect = egui::Rect::from_min_max(header_rect.min, body.response.rect.max);
+        ui.painter().rect_stroke(
+            container_rect,
+            RADIUS,
+            Stroke::new(1.0, foundation_group_edge()),
+        );
+        container_rect
+    })
+    .inner
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_model_view_settings_menu(
+    ui: &mut Ui,
+    tag: &TagFile,
+    entry: &TagEntry,
+    state: &mut ModelPreviewState,
+    model_preview_size: &mut f32,
+    supports_textures: bool,
+    is_campaign_evolved: bool,
+    has_armature: bool,
+) {
+    preview_header_menu(
+        ui,
+        ButtonIcon::View,
+        &format!("View: {}", state.render_mode.label()),
+        |ui| {
+            const VIEW_SETTINGS_WIDTH: f32 = 280.0;
+            // Fix both bounds: a menu's sizing pass can otherwise let the
+            // full-width marker filter grow wider than the shading combo.
+            ui.set_width(VIEW_SETTINGS_WIDTH);
+            ui.scope(|ui| {
+                // Menu styling uses a compact 2 px inset; match the variant
+                // selector's normal button padding for this combo box.
+                ui.spacing_mut().button_padding.x = BUTTON_TEXT_PADDING_X;
+                ui.visuals_mut().widgets.inactive.weak_bg_fill =
+                    foundation_visuals().widgets.inactive.weak_bg_fill;
+                egui::ComboBox::from_id_salt(("model_render_mode", &entry.key))
+                    .selected_text(state.render_mode.label())
+                    .width(VIEW_SETTINGS_WIDTH)
+                    .show_ui(ui, |ui| {
+                        for mode in ModelRenderMode::ALL {
+                            if supports_textures || !mode.uses_textures() {
+                                ui.selectable_value(&mut state.render_mode, mode, mode.label());
+                            }
+                        }
+                    });
+            });
+            if is_campaign_evolved {
+                ui.checkbox(&mut state.high_detail, "High Detail")
+                    .on_hover_text(
+                        "Decode full-resolution Nanite geometry instead of Unreal's coarse fallback.",
+                    );
+            }
+            ui.separator();
+
+            if tag.header.group_tag.to_be_bytes() == *b"hlmt" && !is_campaign_evolved {
+                model_view_icon_checkbox(
+                    ui,
+                    &mut state.show_render,
+                    ModelViewCheckboxIcon::Tag(*b"mode"),
+                    "Render Model",
+                );
+                model_view_icon_checkbox(
+                    ui,
+                    &mut state.show_collision,
+                    ModelViewCheckboxIcon::Tag(*b"coll"),
+                    "Collision Model",
+                );
+                model_view_icon_checkbox(
+                    ui,
+                    &mut state.show_physics,
+                    ModelViewCheckboxIcon::Tag(*b"phmo"),
+                    "Physics Model",
+                );
+                if state.overlays_pending && (state.show_collision || state.show_physics) {
+                    ui.spinner();
                 }
             }
-            if mutation_requested {
-                state.loaded_key = None;
-                state.data = None;
-            } else {
-                state.data = restore_data.take();
-            }
+            ui.add_enabled_ui(has_armature, |ui| {
+                model_view_icon_checkbox(
+                    ui,
+                    &mut state.show_armature,
+                    ModelViewCheckboxIcon::Tag(*b"jmad"),
+                    "Armature",
+                )
+                .on_hover_text("Draw the model skeleton; hover a joint to see its name.");
+            });
+
+            ui.separator();
+            model_view_icon_checkbox(
+                ui,
+                &mut state.show_markers,
+                ModelViewCheckboxIcon::Markers,
+                "Show Markers",
+            );
+            draw_marker_filter_field(ui, &mut state.marker_filter);
+
+            ui.separator();
+            ui.checkbox(&mut state.show_grid, "Show Grid")
+                .on_hover_text(
+                    "Ground-reference grid on the z = 0 plane, spaced to the model's size.",
+                );
+            ui.checkbox(&mut state.show_backfaces, "Render Backfaces");
+        },
+    );
+    preview_header_menu(ui, ButtonIcon::Find, "Camera", |ui| {
+        ui.set_min_width(280.0);
+        ui.horizontal(|ui| {
+            ui.label("Zoom");
+            ui.add(
+                egui::Slider::new(&mut state.scale, MIN_PREVIEW_SCALE..=MAX_PREVIEW_SCALE)
+                    .logarithmic(true)
+                    .show_value(false)
+                    .clamping(egui::SliderClamping::Always),
+            );
+            let drag_speed = (state.scale * 0.05).max(0.01) as f64;
+            ui.add(
+                egui::DragValue::new(&mut state.scale)
+                    .range(MIN_PREVIEW_SCALE..=MAX_PREVIEW_SCALE)
+                    .speed(drag_speed)
+                    .max_decimals(2)
+                    .suffix("×"),
+            );
         });
-    ui.add_space(8.0);
+        ui.checkbox(&mut state.perspective, "Perspective Projection")
+            .on_hover_text(
+                "Perspective projection instead of the flat orthographic view. The framing at \
+                 the orbit point stays identical, so toggling never jumps.",
+            );
+        ui.horizontal(|ui| {
+            ui.label("Preview Size");
+            ui.add(
+                egui::Slider::new(
+                    model_preview_size,
+                    MIN_MODEL_PREVIEW_SIZE..=MAX_MODEL_PREVIEW_SIZE,
+                )
+                .show_value(false)
+                .clamping(egui::SliderClamping::Always),
+            );
+            draw_model_viewport_size_input(ui, model_preview_size);
+        });
+        if ui.button("Reset View").clicked() {
+            state.yaw = -0.45;
+            state.pitch = 0.25;
+            state.focus = [0.0; 3];
+            state.scale = 1.0;
+        }
+    });
+}
+
+#[derive(Clone, Copy)]
+enum ModelViewCheckboxIcon {
+    Tag([u8; 4]),
+    Markers,
+}
+
+fn model_view_icon_checkbox(
+    ui: &mut Ui,
+    checked: &mut bool,
+    icon: ModelViewCheckboxIcon,
+    label: &str,
+) -> egui::Response {
+    ui.horizontal(|ui| {
+        let checkbox_response = ui.checkbox(checked, "");
+        // Native checkbox text starts before the end of an empty checkbox's
+        // 24-point hitbox. Put the icon at that same text start, without
+        // overlapping the two clickable hitboxes.
+        let icon_left =
+            checkbox_response.rect.left() + ui.spacing().icon_width + ui.spacing().icon_spacing;
+        let interaction_left = icon_left.max(checkbox_response.rect.right());
+        ui.spacing_mut().item_spacing.x = interaction_left - checkbox_response.rect.right();
+        let interaction_width = (icon_left + 16.0 - interaction_left).max(1.0);
+        let (icon_hit_rect, icon_response) =
+            ui.allocate_exact_size(Vec2::new(interaction_width, BUTTON_HEIGHT), Sense::click());
+        let icon_rect = egui::Rect::from_min_size(
+            egui::pos2(icon_left, icon_hit_rect.center().y - 8.0),
+            Vec2::splat(16.0),
+        );
+        match icon {
+            ModelViewCheckboxIcon::Tag(group) => {
+                paint_tag_icon_at(ui, Some(u32::from_be_bytes(group)), icon_rect);
+            }
+            ModelViewCheckboxIcon::Markers => {
+                paint_button_icon_at(ui, ButtonIcon::Markers, icon_rect, text_dark());
+            }
+        }
+        ui.spacing_mut().item_spacing.x = 4.0;
+        let label_response = ui.add(egui::Label::new(label).sense(Sense::click()));
+        if icon_response.clicked() || label_response.clicked() {
+            *checked = !*checked;
+        }
+    })
+    .response
+}
+
+fn draw_marker_filter_field(ui: &mut Ui, filter: &mut String) -> egui::Response {
+    const HEIGHT: f32 = 24.0;
+    const ICON_SIZE: f32 = 16.0;
+    let width = ui.available_width().max(HEIGHT);
+    let (rect, background_response) =
+        ui.allocate_exact_size(Vec2::new(width, HEIGHT), Sense::hover());
+    let rounding = ui.visuals().widgets.inactive.rounding;
+    ui.painter()
+        .rect_filled(rect, rounding, ui.visuals().extreme_bg_color);
+
+    let icon_rect = egui::Rect::from_min_size(
+        egui::pos2(rect.left() + 4.0, rect.center().y - ICON_SIZE * 0.5),
+        Vec2::splat(ICON_SIZE),
+    );
+    paint_button_icon_at(ui, ButtonIcon::Filter, icon_rect, text_dark());
+    let icon_response = ui.interact(
+        icon_rect,
+        background_response.id.with("marker_filter_icon"),
+        Sense::click(),
+    );
+    let edit_rect = egui::Rect::from_min_max(
+        egui::pos2(icon_rect.right() + 8.0, rect.top()),
+        egui::pos2(rect.right() - 8.0, rect.bottom()),
+    );
+    let edit_response = ui.put(
+        edit_rect,
+        egui::TextEdit::singleline(filter)
+            .hint_text(placeholder_text("Filter Markers…"))
+            .text_color(text_dark())
+            .frame(false)
+            .margin(egui::Margin::same(0.0))
+            .vertical_align(egui::Align::Center)
+            .min_size(edit_rect.size()),
+    );
+    if icon_response.clicked() {
+        edit_response.request_focus();
+    }
+    let response = background_response
+        .union(icon_response)
+        .union(edit_response.clone());
+    let stroke = if edit_response.has_focus() {
+        ui.visuals().selection.stroke
+    } else if response.hovered() {
+        ui.visuals().widgets.hovered.bg_stroke
+    } else {
+        Stroke::new(1.0, foundation_input_edge())
+    };
+    ui.painter().rect_stroke(rect, rounding, stroke);
+    response
+}
+
+fn preview_header_menu(
+    ui: &mut Ui,
+    icon: ButtonIcon,
+    label: &str,
+    add_contents: impl FnOnce(&mut Ui),
+) {
+    icon_text_dropdown_button(ui, icon, label, add_contents);
 }
 
 /// What the preview panel and its tab call themselves, by tag group. Only
@@ -550,7 +1182,7 @@ pub(in crate::app) fn preview_panel_title(group_tag: u32) -> &'static str {
         b"phmo" => "Physics Model",
         b"sbsp" => "Structure BSP",
         b"scnr" => "Scenario Geometry",
-        _ => "Render Model",
+        _ => "Model Preview",
     }
 }
 
@@ -582,7 +1214,10 @@ fn model_preview_size_from_percent(percent: f32) -> f32 {
 fn model_viewport_size(available_width: f32, model_preview_size: f32) -> Vec2 {
     let scale = model_preview_size.clamp(MIN_MODEL_PREVIEW_SIZE, MAX_MODEL_PREVIEW_SIZE);
     let desired = Vec2::new(470.0 * scale, 300.0 * scale);
-    let width = desired.x.min(available_width.max(280.0)).max(280.0);
+    // Never force a minimum wider than the actual section. Doing so made the
+    // GL callback overflow its panel while egui clipped only the width, which
+    // visually stretched the model as the window narrowed.
+    let width = desired.x.min(available_width.max(1.0));
     Vec2::new(width, desired.y * (width / desired.x))
 }
 
@@ -595,7 +1230,7 @@ fn draw_model_viewport_with_stats(
     // Hold the viewport until the textures land, rather than drawing the model
     // untextured and re-shading it a second later — a model that changes
     // appearance under the cursor reads as a glitch, not as progress.
-    if state.shaded && state.textures_pending && data.textures.is_none() {
+    if state.render_mode.uses_textures() && state.textures_pending && data.textures.is_none() {
         let (rect, _) = ui.allocate_exact_size(desired_size, Sense::hover());
         ui.painter()
             .rect_stroke(rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
@@ -608,16 +1243,26 @@ fn draw_model_viewport_with_stats(
             });
         });
         ui.ctx().request_repaint();
-        return;
+    } else {
+        draw_model_viewport(ui, data, state, desired_size);
     }
-    draw_model_viewport(ui, data, state, desired_size);
-    ui.small(
-        RichText::new(format!(
+    let footer_width = ui.available_width().max(desired_size.x);
+    let (footer_rect, _) = ui.allocate_exact_size(
+        Vec2::new(footer_width, MODEL_PREVIEW_STATS_FOOTER_HEIGHT),
+        Sense::hover(),
+    );
+    ui.painter()
+        .rect_filled(footer_rect, 0.0, foundation_section_bar());
+    ui.painter().text(
+        footer_rect.left_center() + Vec2::new(8.0, 0.0),
+        Align2::LEFT_CENTER,
+        format!(
             "{} vertices, {} triangles",
             data.preview.vertices.len(),
             data.preview.indices.len() / 3
-        ))
-        .color(subtle_dark()),
+        ),
+        FontId::proportional(10.0),
+        foundation_block_text(),
     );
 }
 
@@ -700,6 +1345,169 @@ mod tests {
     use super::*;
 
     #[test]
+    fn model_setup_header_wraps_only_when_controls_need_room() {
+        assert_eq!(model_setup_extra_header_height(559.0), 64.0);
+        assert_eq!(model_setup_extra_header_height(560.0), 32.0);
+        assert_eq!(
+            model_setup_extra_header_height(679.0),
+            MODEL_SETUP_EXTRA_HEADER_HEIGHT
+        );
+        assert_eq!(model_setup_extra_header_height(680.0), 0.0);
+    }
+
+    #[test]
+    fn marker_filter_field_matches_button_height() {
+        let context = egui::Context::default();
+        context.set_fonts(foundation_fonts());
+        let mut filter = String::new();
+        let _ = context.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(320.0, 100.0),
+                )),
+                ..Default::default()
+            },
+            |context| {
+                egui::CentralPanel::default().show(context, |ui| {
+                    let available = ui.available_width();
+                    let response = draw_marker_filter_field(ui, &mut filter);
+                    assert_eq!(response.rect.height(), BUTTON_HEIGHT);
+                    assert_eq!(response.rect.width(), available);
+                });
+            },
+        );
+    }
+
+    #[test]
+    fn model_setup_header_groups_stay_inside_their_card() {
+        let data = model_preview_data(
+            String::new(),
+            String::new(),
+            RenderModelPreview::default(),
+            Vec::new(),
+        );
+        for width in [400.0, 559.0, 560.0, 679.0, 680.0, 900.0] {
+            let context = egui::Context::default();
+            context.set_fonts(foundation_fonts());
+            context.set_style(foundation_style());
+            let mut state = ModelPreviewState::default();
+            let _ = context.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(width + 16.0, 400.0),
+                    )),
+                    ..Default::default()
+                },
+                |context| {
+                    egui::CentralPanel::default().show(context, |ui| {
+                        ui.set_width(width);
+                        let mut actions_bounds = egui::Rect::NOTHING;
+                        let mut actions_area = egui::Rect::NOTHING;
+                        let card =
+                            draw_model_preview_section(ui, "Model Setup", None, |ui, part| {
+                                if part == ModelPreviewSectionPart::Header {
+                                    actions_area = ui.max_rect();
+                                    draw_model_setup_header_controls(
+                                        ui,
+                                        width,
+                                        &data,
+                                        &mut state,
+                                        |ui, _| {
+                                            icon_text_dropdown_button(
+                                                ui,
+                                                ButtonIcon::Save,
+                                                "Save",
+                                                |_| {},
+                                            );
+                                            icon_text_button(
+                                                ui,
+                                                ButtonIcon::Garbage,
+                                                "Delete",
+                                                true,
+                                            );
+                                            icon_text_button(
+                                                ui,
+                                                ButtonIcon::Refresh,
+                                                "Refresh Model",
+                                                true,
+                                            );
+                                        },
+                                    );
+                                    actions_bounds = ui.min_rect();
+                                }
+                            });
+                        assert!(
+                            actions_bounds.right() <= actions_area.right() + 1.0,
+                            "width {width}: controls {actions_bounds:?}, area {actions_area:?}"
+                        );
+                        assert!(
+                            actions_bounds.bottom() <= actions_area.bottom() + 1.0,
+                            "width {width}: controls {actions_bounds:?}, area {actions_area:?}"
+                        );
+                        assert!(card.width() <= width + 1.0);
+                    });
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn physics_overlay_is_not_a_model_setup_variant_region() {
+        let preview = RenderModelPreview {
+            regions: vec![
+                RenderModelPreviewRegion {
+                    name: "body".into(),
+                    permutations: vec!["default".into()],
+                },
+                RenderModelPreviewRegion {
+                    name: PHYSICS_REGION.into(),
+                    permutations: vec!["default".into()],
+                },
+            ],
+            batches: vec![
+                RenderModelPreviewBatch {
+                    region_name: "body".into(),
+                    layer: ModelPreviewLayer::Render,
+                    ..Default::default()
+                },
+                RenderModelPreviewBatch {
+                    region_name: PHYSICS_REGION.into(),
+                    layer: ModelPreviewLayer::Physics,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let data = model_preview_data(String::new(), String::new(), preview, Vec::new());
+        let mut state = ModelPreviewState {
+            overlays_loaded: true,
+            ..Default::default()
+        };
+        reset_model_preview_selection(&mut state, &data, None);
+
+        assert!(is_model_physics_overlay_region(
+            &data,
+            &state,
+            &data.preview.regions[1]
+        ));
+        assert!(state.region_selections[PHYSICS_REGION].enabled);
+        assert_eq!(selected_variant_regions(&data, &state).len(), 1);
+        assert_eq!(
+            selected_variant_regions(&data, &state)[0].region_name,
+            "body"
+        );
+
+        state.overlays_loaded = false;
+        assert!(!is_model_physics_overlay_region(
+            &data,
+            &state,
+            &data.preview.regions[1]
+        ));
+    }
+
+    #[test]
     fn viewport_percentage_conversion_clamps_to_persisted_range() {
         assert_eq!(model_preview_size_percent(1.25), 125.0);
         assert_eq!(model_preview_size_from_percent(125.0), 1.25);
@@ -714,7 +1522,303 @@ mod tests {
     }
 
     #[test]
+    fn viewport_shrinks_without_changing_aspect_ratio() {
+        let size = model_viewport_size(200.0, 1.0);
+        assert_eq!(size.x, 200.0);
+        assert!((size.x / size.y - 470.0 / 300.0).abs() < 0.000_001);
+    }
+
+    #[test]
+    fn variant_buttons_wrap_without_widening_a_narrow_setup_card() {
+        let preview = RenderModelPreview {
+            regions: vec![RenderModelPreviewRegion {
+                name: "helmet".into(),
+                permutations: vec![
+                    "minor".into(),
+                    "chiefweapon".into(),
+                    "jump_pack".into(),
+                    "stalker".into(),
+                ],
+            }],
+            ..Default::default()
+        };
+        let data = model_preview_data(String::new(), String::new(), preview, Vec::new());
+        for width in [280.0, 360.0, 520.0] {
+            let context = egui::Context::default();
+            context.set_fonts(foundation_fonts());
+            let mut state = ModelPreviewState::default();
+            let mut card_rect = egui::Rect::NOTHING;
+            let _ = context.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(width, 600.0),
+                    )),
+                    ..Default::default()
+                },
+                |context| {
+                    egui::CentralPanel::default().show(context, |ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        let available = ui.available_width();
+                        card_rect =
+                            draw_model_preview_section(ui, "Model Setup", None, |ui, part| {
+                                if part == ModelPreviewSectionPart::Body {
+                                    draw_variant_controls(ui, &data, &mut state);
+                                }
+                            });
+                        assert!(
+                            card_rect.width() <= available + 1.0,
+                            "pane {width}: card {}, available {available}",
+                            card_rect.width()
+                        );
+                    });
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn variant_rows_are_not_capped_shorter_than_the_setup_card() {
+        let preview = RenderModelPreview {
+            regions: (0..20)
+                .map(|index| RenderModelPreviewRegion {
+                    name: format!("region_{index}"),
+                    permutations: vec!["default".into()],
+                })
+                .collect(),
+            ..Default::default()
+        };
+        let data = model_preview_data(String::new(), String::new(), preview, Vec::new());
+        let context = egui::Context::default();
+        context.set_fonts(foundation_fonts());
+        let mut state = ModelPreviewState::default();
+        let _ = context.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(500.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |context| {
+                egui::CentralPanel::default().show(context, |ui| {
+                    let top = ui.next_widget_position().y;
+                    draw_variant_controls(ui, &data, &mut state);
+                    assert!(ui.min_rect().bottom() - top > 500.0);
+                });
+            },
+        );
+    }
+
+    #[test]
+    fn animation_groups_and_scrubber_fit_narrow_cards() {
+        for width in [280.0, 360.0, 520.0, 800.0] {
+            let context = egui::Context::default();
+            context.set_fonts(foundation_fonts());
+            let _ = context.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        Vec2::new(width, 600.0),
+                    )),
+                    ..Default::default()
+                },
+                |context| {
+                    egui::CentralPanel::default().show(context, |ui| {
+                        let available = ui.available_width();
+                        let rect =
+                            draw_model_preview_section(ui, "Animation Player", None, |ui, part| {
+                                if part == ModelPreviewSectionPart::Header {
+                                    ui.horizontal_wrapped(|ui| {
+                                        ui.spacing_mut().item_spacing.x = 16.0;
+                                        animation_header_group(ui, 240.0, |ui| {
+                                            ui.add_sized(
+                                                Vec2::new(240.0, BUTTON_HEIGHT),
+                                                egui::Button::new("Animation"),
+                                            );
+                                        });
+                                        animation_header_group(ui, 112.0, |ui| {
+                                            for _ in 0..4 {
+                                                ui.add_sized(
+                                                    ICON_BUTTON_SIZE,
+                                                    egui::Button::new(""),
+                                                );
+                                            }
+                                        });
+                                        animation_header_group(ui, 90.0, |ui| {
+                                            ui.label("Speed");
+                                            ui.add_sized(
+                                                Vec2::new(48.0, BUTTON_HEIGHT),
+                                                egui::DragValue::new(&mut 1.0_f32),
+                                            );
+                                        });
+                                        ui.label("2 / 9");
+                                    });
+                                } else {
+                                    let mut frame = 2.0;
+                                    ui.spacing_mut().slider_width =
+                                        (ui.available_width() - 2.0).max(1.0);
+                                    ui.add(
+                                        egui::Slider::new(&mut frame, 0.0..=9.0).show_value(false),
+                                    );
+                                }
+                            });
+                        assert!(
+                            rect.width() <= available + 1.0,
+                            "pane {width}: card {}, available {available}",
+                            rect.width()
+                        );
+                    });
+                },
+            );
+        }
+    }
+
+    #[test]
+    fn preview_scale_resizes_the_wide_section_until_setup_reaches_its_minimum() {
+        assert_eq!(wide_model_preview_section_width(1_600.0, 1.0), 470.0);
+        assert_eq!(wide_model_preview_section_width(1_600.0, 1.5), 705.0);
+        assert_eq!(
+            wide_model_preview_section_width(1_000.0, 2.0),
+            1_000.0 - MODEL_PREVIEW_SECTION_GAP - WIDE_MODEL_SETUP_MIN_WIDTH
+        );
+    }
+
+    #[test]
+    fn preview_and_setup_cards_match_outer_height_at_both_header_breakpoints() {
+        for setup_width in [360.0, 800.0] {
+            for scale in [1.0, 1.5] {
+                let context = egui::Context::default();
+                context.set_fonts(foundation_fonts());
+                let viewport = model_viewport_size(470.0 * scale, scale);
+                let shared_body_height = viewport.y + MODEL_PREVIEW_STATS_FOOTER_HEIGHT;
+                let setup_body_height =
+                    shared_body_height - model_setup_extra_header_height(setup_width) - 16.0;
+                let mut preview_rect = egui::Rect::NOTHING;
+                let mut setup_rect = egui::Rect::NOTHING;
+                let _ = context.run(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            Vec2::new(2_000.0, 1_200.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |context| {
+                        egui::CentralPanel::default().show(context, |ui| {
+                            ui.horizontal_top(|ui| {
+                                ui.allocate_ui(Vec2::new(viewport.x, 0.0), |ui| {
+                                    ui.set_width(viewport.x);
+                                    preview_rect = draw_model_preview_section(
+                                        ui,
+                                        "Model Preview",
+                                        Some(shared_body_height),
+                                        |ui, part| {
+                                            if part == ModelPreviewSectionPart::Body {
+                                                ui.allocate_exact_size(viewport, Sense::hover());
+                                                ui.allocate_exact_size(
+                                                    Vec2::new(
+                                                        viewport.x,
+                                                        MODEL_PREVIEW_STATS_FOOTER_HEIGHT,
+                                                    ),
+                                                    Sense::hover(),
+                                                );
+                                            }
+                                        },
+                                    );
+                                });
+                                ui.allocate_ui(Vec2::new(setup_width, 0.0), |ui| {
+                                    ui.set_width(setup_width);
+                                    setup_rect = draw_model_preview_section(
+                                        ui,
+                                        "Model Setup",
+                                        Some(setup_body_height),
+                                        |ui, part| {
+                                            if part == ModelPreviewSectionPart::Body {
+                                                egui::ScrollArea::vertical()
+                                                    .auto_shrink([false, false])
+                                                    .max_height(setup_body_height)
+                                                    .show(ui, |ui| {
+                                                        ui.set_min_height(setup_body_height * 2.0);
+                                                    });
+                                            }
+                                        },
+                                    );
+                                });
+                            });
+                        });
+                    },
+                );
+                assert!(
+                    (preview_rect.height() - setup_rect.height()).abs() < 1.0,
+                    "scale {scale}, setup width {setup_width}: preview={}, setup={}",
+                    preview_rect.height(),
+                    setup_rect.height()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn section_body_stays_below_header_inside_a_horizontal_row() {
+        let context = egui::Context::default();
+        context.set_fonts(foundation_fonts());
+        let mut header_rect = None;
+        let mut body_rect = None;
+        let _ = context.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(800.0, 600.0),
+                )),
+                ..Default::default()
+            },
+            |context| {
+                egui::CentralPanel::default().show(context, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.allocate_ui(Vec2::new(360.0, 0.0), |ui| {
+                            draw_model_preview_section(ui, "Model Preview", None, |ui, part| {
+                                match part {
+                                    ModelPreviewSectionPart::Header => {
+                                        header_rect = Some(ui.max_rect())
+                                    }
+                                    ModelPreviewSectionPart::Body => {
+                                        body_rect = Some(ui.max_rect())
+                                    }
+                                }
+                            });
+                        });
+                    });
+                });
+            },
+        );
+
+        let header_rect = header_rect.expect("header was drawn");
+        let body_rect = body_rect.expect("body was drawn");
+        assert!(body_rect.min.y >= header_rect.max.y);
+        // The preview viewport now reaches the card edge; the title retains
+        // its 8-point header inset.
+        assert!((header_rect.min.x - body_rect.min.x - 8.0).abs() < 1.0);
+    }
+
+    #[test]
     fn campaign_evolved_preview_defaults_to_full_detail() {
         assert!(ModelPreviewState::default().high_detail);
+    }
+
+    #[test]
+    fn model_geometry_uses_the_model_preview_tab_name() {
+        assert_eq!(
+            preview_panel_title(u32::from_be_bytes(*b"hlmt")),
+            "Model Preview"
+        );
+        assert_eq!(
+            preview_panel_title(u32::from_be_bytes(*b"mode")),
+            "Model Preview"
+        );
+        assert_eq!(
+            preview_panel_title(u32::from_be_bytes(*b"coll")),
+            "Collision Model"
+        );
     }
 }
