@@ -368,142 +368,13 @@ pub(super) fn paint_submenu_icon(ui: &Ui, response: &egui::Response, opens_left:
     image.paint_at(ui, rect);
 }
 
-/// Show a hover submenu to the left of a row in a right-anchored parent menu.
-/// The union of the row and the last popup rectangle forms a pointer corridor,
-/// so crossing the small inter-menu gap does not collapse the child.
-pub(super) fn left_opening_menu_popup<R>(
-    ui: &mut Ui,
-    response: &egui::Response,
-    popup_id: egui::Id,
-    popup_width: f32,
-    add_contents: impl FnOnce(&mut Ui) -> R,
-) -> Option<R> {
-    let previous_rect = egui::AreaState::load(ui.ctx(), popup_id).map(|state| state.rect());
-    let pointer = ui.input(|input| input.pointer.hover_pos());
-    let was_open = ui.data(|data| data.get_temp::<bool>(popup_id).unwrap_or(false));
-    let pointer_in_path = pointer.is_some_and(|pointer| {
-        previous_rect
-            .map(|rect| rect.union(response.rect).contains(pointer))
-            .unwrap_or(false)
-    });
-    if !(response.hovered() || response.clicked() || was_open && pointer_in_path) {
-        ui.data_mut(|data| data.insert_temp(popup_id, false));
-        return None;
-    }
-
-    let menu_frame = Frame::menu(ui.style());
-    let parent_outer_left = ui.max_rect().left() - menu_frame.total_margin().left;
-    let position = egui::pos2(
-        parent_outer_left - ui.spacing().menu_spacing,
-        response.rect.top(),
-    );
-    let shown = egui::Area::new(popup_id)
-        .kind(egui::UiKind::Menu)
-        .order(egui::Order::Foreground)
-        .pivot(Align2::RIGHT_TOP)
-        .fixed_pos(position)
-        .default_width(popup_width)
-        .show(ui.ctx(), |ui| {
-            menu_frame
-                .show(ui, |ui| {
-                    ui.with_layout(
-                        egui::Layout::top_down_justified(egui::Align::LEFT),
-                        add_contents,
-                    )
-                    .inner
-                })
-                .inner
-        });
-
-    let keep_open =
-        pointer.is_some_and(|pointer| shown.response.rect.union(response.rect).contains(pointer));
-    ui.data_mut(|data| data.insert_temp(popup_id, keep_open));
-    Some(shown.inner)
-}
-
-pub(super) fn right_opening_menu_popup<R>(
-    ui: &mut Ui,
-    response: &egui::Response,
-    popup_id: egui::Id,
-    popup_width: f32,
-    add_contents: impl FnOnce(&mut Ui) -> R,
-) -> Option<R> {
-    let previous_rect = egui::AreaState::load(ui.ctx(), popup_id).map(|state| state.rect());
-    let pointer = ui.input(|input| input.pointer.hover_pos());
-    let was_open = ui.data(|data| data.get_temp::<bool>(popup_id).unwrap_or(false));
-    let pointer_in_path = pointer.is_some_and(|pointer| {
-        previous_rect
-            .map(|rect| rect.union(response.rect).contains(pointer))
-            .unwrap_or(false)
-    });
-    if !(response.hovered() || response.clicked() || was_open && pointer_in_path) {
-        ui.data_mut(|data| data.insert_temp(popup_id, false));
-        return None;
-    }
-
-    let menu_frame = Frame::menu(ui.style());
-    let parent_outer_right = ui.max_rect().right() + menu_frame.total_margin().right;
-    let position = egui::pos2(
-        parent_outer_right + ui.spacing().menu_spacing,
-        response.rect.top(),
-    );
-    let shown = egui::Area::new(popup_id)
-        .kind(egui::UiKind::Menu)
-        .order(egui::Order::Foreground)
-        .pivot(Align2::LEFT_TOP)
-        .fixed_pos(position)
-        .default_width(popup_width)
-        .show(ui.ctx(), |ui| {
-            menu_frame
-                .show(ui, |ui| {
-                    ui.with_layout(
-                        egui::Layout::top_down_justified(egui::Align::LEFT),
-                        add_contents,
-                    )
-                    .inner
-                })
-                .inner
-        });
-
-    let keep_open =
-        pointer.is_some_and(|pointer| shown.response.rect.union(response.rect).contains(pointer));
-    ui.data_mut(|data| data.insert_temp(popup_id, keep_open));
-    Some(shown.inner)
-}
-
 pub(super) fn right_opening_menu_button<R>(
     ui: &mut Ui,
     label: impl Into<egui::WidgetText>,
     popup_width: f32,
     add_contents: impl FnOnce(&mut Ui) -> R,
 ) -> egui::InnerResponse<Option<R>> {
-    let response = ui.button(label);
-    paint_submenu_icon(ui, &response, false);
-    let popup_id = response.id.with("right_submenu");
-    let group_id = ui.layer_id().id.with("active_right_submenu");
-    let active_before_hover = ui.data(|data| data.get_temp::<egui::Id>(group_id));
-    if response.hovered() || response.clicked() {
-        if let Some(previous_popup_id) = active_before_hover.filter(|id| *id != popup_id) {
-            ui.data_mut(|data| data.insert_temp(previous_popup_id, false));
-        }
-        ui.data_mut(|data| data.insert_temp(group_id, popup_id));
-    }
-    let active = ui.data(|data| data.get_temp::<egui::Id>(group_id));
-    // When moving between sibling rows, keep the popup drawn earlier in this
-    // frame (if any) and draw the newly hovered child on the next frame. This
-    // avoids one-frame overlap without depending on sibling draw order.
-    let switching_siblings =
-        response.hovered() && active_before_hover.is_some_and(|previous| previous != popup_id);
-    let inner = if active == Some(popup_id) && !switching_siblings {
-        right_opening_menu_popup(ui, &response, popup_id, popup_width, add_contents)
-    } else {
-        ui.data_mut(|data| data.insert_temp(popup_id, false));
-        None
-    };
-    if inner.is_none() && active == Some(popup_id) && !switching_siblings {
-        ui.data_mut(|data| data.remove::<egui::Id>(group_id));
-    }
-    egui::InnerResponse::new(inner, response)
+    nested_menu_button(ui, label.into().text(), popup_width, false, add_contents)
 }
 
 pub(super) fn left_opening_menu_button<R>(
@@ -512,10 +383,66 @@ pub(super) fn left_opening_menu_button<R>(
     popup_width: f32,
     add_contents: impl FnOnce(&mut Ui) -> R,
 ) -> Option<R> {
-    let response = ui.button(label);
-    paint_submenu_icon(ui, &response, true);
-    let popup_id = response.id.with(("left_submenu", label));
-    left_opening_menu_popup(ui, &response, popup_id, popup_width, add_contents)
+    nested_menu_button(ui, label, popup_width, true, add_contents).inner
+}
+
+/// egui's own nested menu keeps child clicks in the parent menu hierarchy.
+/// The earlier detached Area looked right but lost clicks when the parent
+/// treated them as outside clicks.
+fn nested_menu_button<R>(
+    ui: &mut Ui,
+    label: &str,
+    popup_width: f32,
+    opens_left: bool,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    let original_visuals = ui.visuals().clone();
+    let original_menu_spacing = ui.spacing().menu_spacing;
+    if opens_left {
+        let margin = Frame::menu(ui.style()).total_margin();
+        let parent_width = ui.max_rect().width() + margin.left + margin.right;
+        let child_width = popup_width + margin.left + margin.right;
+        ui.spacing_mut().menu_spacing = -(parent_width + child_width + original_menu_spacing);
+    }
+    {
+        let visuals = ui.visuals_mut();
+        visuals.override_text_color = Some(Color32::TRANSPARENT);
+        for widget in [
+            &mut visuals.widgets.inactive,
+            &mut visuals.widgets.hovered,
+            &mut visuals.widgets.active,
+            &mut visuals.widgets.open,
+            &mut visuals.widgets.noninteractive,
+        ] {
+            widget.fg_stroke.color = Color32::TRANSPARENT;
+        }
+    }
+    let menu = ui.menu_button(
+        egui::RichText::new(label).color(Color32::TRANSPARENT),
+        |ui| {
+            ui.set_min_width(popup_width);
+            add_contents(ui)
+        },
+    );
+    *ui.visuals_mut() = original_visuals;
+    ui.spacing_mut().menu_spacing = original_menu_spacing;
+    let color = if ui.is_enabled() {
+        text_dark()
+    } else {
+        ui.visuals().widgets.noninteractive.fg_stroke.color
+    };
+    ui.painter().text(
+        egui::pos2(
+            menu.response.rect.left() + 8.0,
+            menu.response.rect.center().y,
+        ),
+        Align2::LEFT_CENTER,
+        label,
+        egui::TextStyle::Button.resolve(ui.style()),
+        color,
+    );
+    paint_submenu_icon(ui, &menu.response, opens_left);
+    menu
 }
 
 fn button_icon_uri_for_pixels_per_point(

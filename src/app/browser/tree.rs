@@ -294,57 +294,92 @@ fn context_menu_icon(label: &str) -> Option<ButtonIcon> {
     })
 }
 
-/// Right-opening submenu interaction using the same row geometry and SVG
-/// direction marker as the left-opening header-menu counterpart.
+/// Keep extract actions in egui's nested menu so their clicks reach the
+/// browser action dispatcher before the menu closes.
 fn context_menu_submenu_button(
     ui: &mut Ui,
     label: &str,
     icon: ButtonIcon,
     add_contents: impl FnOnce(&mut Ui) -> Option<BrowserAction>,
 ) -> Option<BrowserAction> {
-    let response = context_menu_button(ui, label);
+    extract_submenu_button(ui, label, icon, false, add_contents)
+}
+
+/// Header menus are right-aligned, so their children open to the left.
+fn left_opening_context_menu_submenu_button(
+    ui: &mut Ui,
+    label: &str,
+    icon: ButtonIcon,
+    add_contents: impl FnOnce(&mut Ui) -> Option<BrowserAction>,
+) -> Option<BrowserAction> {
+    extract_submenu_button(ui, label, icon, true, add_contents)
+}
+
+fn extract_submenu_button(
+    ui: &mut Ui,
+    label: &str,
+    icon: ButtonIcon,
+    opens_left: bool,
+    add_contents: impl FnOnce(&mut Ui) -> Option<BrowserAction>,
+) -> Option<BrowserAction> {
+    let mut action = None;
+    let original_visuals = ui.visuals().clone();
+    let original_menu_spacing = ui.spacing().menu_spacing;
+    // egui positions a nested menu at parent.right + menu_spacing. A negative
+    // offset puts the header child beyond the parent's left edge, while still
+    // keeping it in the native menu hierarchy for reliable click dispatch.
+    if opens_left {
+        let margin = Frame::menu(ui.style()).total_margin();
+        let parent_width = ui.max_rect().width() + margin.left + margin.right;
+        ui.spacing_mut().menu_spacing =
+            -(parent_width + CONTEXT_MENU_WIDTH + original_menu_spacing);
+    }
+    // egui paints its own arrow. Hide just its foreground, then draw our icon,
+    // label and direction-specific chevron after restoring the menu style.
+    {
+        let visuals = ui.visuals_mut();
+        visuals.override_text_color = Some(Color32::TRANSPARENT);
+        visuals.widgets.inactive.fg_stroke.color = Color32::TRANSPARENT;
+        visuals.widgets.hovered.fg_stroke.color = Color32::TRANSPARENT;
+        visuals.widgets.active.fg_stroke.color = Color32::TRANSPARENT;
+        visuals.widgets.open.fg_stroke.color = Color32::TRANSPARENT;
+        visuals.widgets.noninteractive.fg_stroke.color = Color32::TRANSPARENT;
+    }
+    let menu = ui.menu_button(RichText::new(label).color(Color32::TRANSPARENT), |ui| {
+        style_tag_context_menu(ui);
+        action = add_contents(ui);
+    });
+    *ui.visuals_mut() = original_visuals;
+    ui.spacing_mut().menu_spacing = original_menu_spacing;
+    paint_extract_submenu_row(ui, &menu.response, label, icon, opens_left);
+    action
+}
+
+fn paint_extract_submenu_row(
+    ui: &Ui,
+    response: &egui::Response,
+    label: &str,
+    icon: ButtonIcon,
+    opens_left: bool,
+) {
+    let color = if ui.is_enabled() {
+        text_dark()
+    } else {
+        ui.visuals().widgets.noninteractive.fg_stroke.color
+    };
     let icon_rect = egui::Rect::from_center_size(
         egui::pos2(response.rect.left() + 16.0, response.rect.center().y),
         Vec2::splat(16.0),
     );
-    paint_button_icon_at(ui, icon, icon_rect, text_dark());
-    paint_submenu_icon(ui, &response, false);
-    let popup_id = response.id.with(("right_submenu", label));
-    let action = right_opening_menu_popup(ui, &response, popup_id, CONTEXT_MENU_WIDTH, |ui| {
-        style_tag_context_menu(ui);
-        add_contents(ui)
-    })
-    .flatten();
-    if action.is_some() {
-        ui.close_menu();
-        ui.data_mut(|data| data.insert_temp(popup_id, false));
-    }
-    action
-}
-
-/// Header menus are anchored to the right edge of a pane, where egui's native
-/// right-opening submenu has nowhere to go and is constrained back over its
-/// parent. This counterpart keeps the same row treatment but places the child
-/// popup immediately to the parent's left.
-fn left_opening_context_menu_submenu_button(
-    ui: &mut Ui,
-    label: &str,
-    _icon: ButtonIcon,
-    add_contents: impl FnOnce(&mut Ui) -> Option<BrowserAction>,
-) -> Option<BrowserAction> {
-    let response = context_menu_button(ui, label);
-    paint_submenu_icon(ui, &response, true);
-    let popup_id = response.id.with(("left_submenu", label));
-    let action = left_opening_menu_popup(ui, &response, popup_id, CONTEXT_MENU_WIDTH, |ui| {
-        style_tag_context_menu(ui);
-        add_contents(ui)
-    })
-    .flatten();
-    if action.is_some() {
-        ui.close_menu();
-        ui.data_mut(|data| data.insert_temp(popup_id, false));
-    }
-    action
+    paint_button_icon_at(ui, icon, icon_rect, color);
+    ui.painter().text(
+        egui::pos2(response.rect.left() + 30.0, response.rect.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        FontId::proportional(12.0),
+        color,
+    );
+    paint_submenu_icon(ui, response, opens_left);
 }
 
 fn supports_tag_reimport(entry: &TagEntry) -> bool {
@@ -418,9 +453,8 @@ fn tag_extract_menu_button(
     entry: &TagEntry,
     open_left: bool,
 ) -> Option<BrowserAction> {
-    // The stock submenu row owns the drill-down interaction and arrow, but its
-    // label has no image slot. Make that label transparent and paint the same
-    // 16-point icon + 6-point gap geometry as every other context-menu row.
+    // The stock submenu owns the click lifecycle; paint our icon over its row
+    // to match the other context-menu actions.
     let contents = |ui: &mut Ui| {
         let mut action = None;
         ui.set_min_width(280.0);
