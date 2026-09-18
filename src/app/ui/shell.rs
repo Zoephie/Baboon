@@ -538,8 +538,10 @@ impl Baboon {
                                     b_key: None,
                                     b_path: None,
                                     comparison_kit_root: None,
+                                    git_history: GitHistoryState::default(),
                                     error: None,
                                     filters: TagDiffFilters::default(),
+                                    swapped: false,
                                     results: None,
                                 });
                             }

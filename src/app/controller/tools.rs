@@ -40,6 +40,7 @@ pub(in crate::app) fn add_standard_editing_kit_profiles(
         }
         profiles.push(CustomEditingKitProfile {
             read_only: false,
+            git_tracked: false,
             id,
             name: shortcut.label.to_owned(),
             game: shortcut.game.to_owned(),

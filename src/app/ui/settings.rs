@@ -37,6 +37,7 @@ mod editing_kit_card_tests {
     fn editing_kit_read_only_policy_tracks_profiles_and_excludes_campaign_evolved() {
         let mut profile = CustomEditingKitProfile {
             read_only: true,
+            git_tracked: false,
             id: "read-only-kit".to_owned(),
             name: "Protected kit".to_owned(),
             game: "halo2_mcc".to_owned(),
@@ -55,6 +56,8 @@ mod editing_kit_card_tests {
         ));
         assert!(!profile.is_read_only_for(None, Some(Path::new("C:/Kits/Other"))));
         assert!(CustomEditingKitDraft::from_profile(&profile).read_only);
+        profile.git_tracked = true;
+        assert!(CustomEditingKitDraft::from_profile(&profile).git_tracked);
         profile.read_only = false;
         assert!(!profile.is_read_only_for(Some(&identity), None));
         profile.read_only = true;
@@ -76,6 +79,11 @@ mod editing_kit_card_tests {
                 egui::Shape::Text(text) if text.galley.text() == "Read-Only")
             });
             assert_eq!(checkbox_visible, game != "haloce_evolved");
+            let git_checkbox_visible = output.shapes.iter().any(|shape| {
+                matches!(&shape.shape,
+                egui::Shape::Text(text) if text.galley.text() == "Tracked in Git")
+            });
+            assert_eq!(git_checkbox_visible, game != "haloce_evolved");
         }
     }
 
@@ -103,7 +111,7 @@ mod editing_kit_card_tests {
                         assert!(!actions.save && !actions.cancel && !actions.remove);
                         assert!(ui.min_rect().right() <= right + 1.0, "form fields overflow");
                         assert!(
-                            ui.next_widget_position().y < 400.0,
+                            ui.next_widget_position().y < 480.0,
                             "form unexpectedly fills height"
                         );
                     });
@@ -338,6 +346,7 @@ mod editing_kit_card_tests {
             .into_iter()
             .map(|id| CustomEditingKitProfile {
                 read_only: false,
+                git_tracked: false,
                 id: id.to_owned(),
                 name: id.to_owned(),
                 game: "halo2_mcc".to_owned(),
@@ -997,6 +1006,17 @@ fn draw_editing_kit_form(
                     .color(subtle_dark()),
             );
         });
+        ui.add_space(8.0);
+        ui.checkbox(&mut draft.git_tracked, "Tracked in Git");
+        ui.indent("editing_kit_git_help", |ui| {
+            ui.label(
+                RichText::new(
+                    "Compare tags with their version in this kit’s current Git commit (HEAD).",
+                )
+                .small()
+                .color(subtle_dark()),
+            );
+        });
     }
     if let Some(warning) = &draft.icon_warning {
         ui.label(
@@ -1469,8 +1489,11 @@ impl Baboon {
             .id(egui::Id::new("custom_editing_kit_dialog"))
             .title_bar(false)
             .collapsible(false)
-            .resizable(false)
+            .auto_sized()
             .default_width(580.0)
+            .max_width(580.0)
+            .max_height((ctx.screen_rect().height() - 32.0).max(0.0))
+            .scroll([false, true])
             .show(ctx, |ui| {
                 super::find::draw_icon_window_header(ui, title, ButtonIcon::Edit, &mut open);
                 ui.separator();
@@ -1566,6 +1589,7 @@ impl Baboon {
         };
         let profile = CustomEditingKitProfile {
             read_only: draft.read_only && game != "haloce_evolved",
+            git_tracked: draft.git_tracked && game != "haloce_evolved",
             id: id.clone(),
             name: name.clone(),
             game,

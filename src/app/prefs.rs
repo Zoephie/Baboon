@@ -539,6 +539,10 @@ fn load_custom_editing_kit_profiles(value: &Value) -> Vec<CustomEditingKitProfil
                     .get("read_only")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
+            git_tracked: entry
+                .get("git_tracked")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             id: id.to_owned(),
             name: name.to_owned(),
             game: game.to_owned(),
@@ -556,6 +560,7 @@ fn custom_editing_kit_profiles_value(profiles: &[CustomEditingKitProfile]) -> Ve
             json!({
                 "id": profile.id,
                 "read_only": profile.read_only,
+                "git_tracked": profile.git_tracked,
                 "name": profile.name,
                 "game": profile.game,
                 "root": profile.root.display().to_string(),
@@ -1146,6 +1151,7 @@ mod tests {
                     "id": "11111111-1111-4111-8111-111111111111",
                     "name": "Reach Project",
                     "read_only": true,
+                    "git_tracked": true,
                     "game": "haloreach_mcc",
                     "root": "\\\\?\\D:\\Kits\\ReachProject",
                     "icon": "editing kit icons/reach-11111111/icon-a.png"
@@ -1161,7 +1167,9 @@ mod tests {
         });
         let profiles = load_custom_editing_kit_profiles(&value);
         assert!(profiles[0].read_only);
+        assert!(profiles[0].git_tracked);
         assert!(!profiles[1].read_only, "old entries must remain writable");
+        assert!(!profiles[1].git_tracked, "old entries must not enable Git");
         assert_eq!(
             profiles
                 .iter()
@@ -1525,6 +1533,7 @@ mod session_tests {
         saved.profile_id = Some("custom-h2-project".to_owned());
         let profile = CustomEditingKitProfile {
             read_only: false,
+            git_tracked: false,
             id: "custom-h2-project".to_owned(),
             name: "Halo 2 Rebalance".to_owned(),
             game: "halo2_mcc".to_owned(),

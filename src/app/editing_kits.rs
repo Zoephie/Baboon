@@ -760,6 +760,7 @@ mod tests {
         fs::create_dir_all(root.join("data")).unwrap();
         let profiles = vec![CustomEditingKitProfile {
             read_only: false,
+            git_tracked: false,
             id: "existing".to_owned(),
             name: "Existing".to_owned(),
             game: "halo3_mcc".to_owned(),
@@ -812,6 +813,7 @@ mod tests {
 
         let referencing_profile = CustomEditingKitProfile {
             read_only: false,
+            git_tracked: false,
             id: "profile".to_owned(),
             name: "Profile".to_owned(),
             game: "halo3_mcc".to_owned(),
