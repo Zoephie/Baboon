@@ -1595,19 +1595,24 @@ mod tests {
 
     #[test]
     fn matching_tag_keeps_path_and_type_below_tags_root() {
-        let current_root = Path::new(r"C:\H2R\tags");
-        let reference_root = Path::new(r"D:\H2EK\tags");
-        let key = r"file:C:\H2R\tags\objects\characters\brute\brute.model";
+        let base = std::env::temp_dir();
+        let current_root = base.join("H2R").join("tags");
+        let reference_root = base.join("H2EK").join("tags");
+        let relative = Path::new("objects")
+            .join("characters")
+            .join("brute")
+            .join("brute.model");
+        let key = format!("file:{}", current_root.join(&relative).display());
         assert_eq!(
-            matching_tag_path(key, current_root, reference_root),
-            Some(reference_root.join(r"objects\characters\brute\brute.model"))
+            matching_tag_path(&key, &current_root, &reference_root),
+            Some(reference_root.join(relative))
+        );
+        let elsewhere = format!(
+            "file:{}",
+            base.join("Elsewhere").join("brute.model").display()
         );
         assert_eq!(
-            matching_tag_path(
-                r"file:C:\Elsewhere\brute.model",
-                current_root,
-                reference_root
-            ),
+            matching_tag_path(&elsewhere, &current_root, &reference_root),
             None
         );
     }
