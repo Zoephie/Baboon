@@ -54,8 +54,8 @@ fn truncate_end(text: &str, max_width: f32, measure: impl Fn(&str) -> f32) -> St
 
 fn commit_text(commit: &GitHistoryCommit) -> String {
     format!(
-        "{} · {} · {}",
-        commit.short_hash, commit.date, commit.subject
+        "{} · {} · {} · {}",
+        commit.short_hash, commit.date, commit.author, commit.subject
     )
 }
 
@@ -212,7 +212,7 @@ fn git_tag_history(
         .arg("log")
         .arg(format!("--max-count={}", GIT_HISTORY_PAGE + 1))
         .arg(format!("--skip={skip}"))
-        .arg("--format=%H%x09%h%x09%cs%x09%s")
+        .arg("--format=%H%x09%h%x09%cs%x09%an%x09%s")
         .arg("HEAD")
         .arg("--")
         .arg(format!(":(top,literal){relative}"))
@@ -227,11 +227,12 @@ fn git_tag_history(
     let mut commits: Vec<GitHistoryCommit> = String::from_utf8_lossy(&output.stdout)
         .lines()
         .filter_map(|line| {
-            let mut fields = line.splitn(4, '\t');
+            let mut fields = line.splitn(5, '\t');
             Some(GitHistoryCommit {
                 hash: fields.next()?.to_owned(),
                 short_hash: fields.next()?.to_owned(),
                 date: fields.next()?.to_owned(),
+                author: fields.next()?.to_owned(),
                 subject: fields.next()?.to_owned(),
             })
         })
@@ -1513,6 +1514,7 @@ mod tests {
         assert_eq!(first.len(), 10);
         assert!(has_more);
         assert_eq!(first[0].subject, "Tag revision 11");
+        assert_eq!(first[0].author, "Baboon Test");
         let latest_parent = git_commit_parent(&tags_root, &first[0].hash)
             .unwrap()
             .unwrap();

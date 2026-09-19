@@ -941,6 +941,7 @@ pub(in crate::app) struct GitHistoryCommit {
     pub(in crate::app) hash: String,
     pub(in crate::app) short_hash: String,
     pub(in crate::app) date: String,
+    pub(in crate::app) author: String,
     pub(in crate::app) subject: String,
 }
 
