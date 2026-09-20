@@ -15,6 +15,7 @@ mod recents;
 mod search_windows;
 mod settings;
 mod shell;
+mod tag_compare;
 mod tag_pane;
 mod tag_tiles;
 mod tool_commands;

@@ -309,6 +309,7 @@ fn shared_menu_entries_put_custom_profiles_first_in_creation_order() {
     let profiles = vec![
         CustomEditingKitProfile {
             read_only: false,
+            git_tracked: false,
             id: "one".to_owned(),
             name: "First".to_owned(),
             game: "halo3_mcc".to_owned(),
@@ -317,6 +318,7 @@ fn shared_menu_entries_put_custom_profiles_first_in_creation_order() {
         },
         CustomEditingKitProfile {
             read_only: false,
+            git_tracked: false,
             id: "two".to_owned(),
             name: "Second".to_owned(),
             game: "haloreach_mcc".to_owned(),

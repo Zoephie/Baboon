@@ -14,6 +14,8 @@ fn button_icon_lookup_uses_expected_assets() {
         ButtonIcon::Closed,
         ButtonIcon::CopyPath,
         ButtonIcon::Copy,
+        ButtonIcon::Compare,
+        ButtonIcon::Swap,
         ButtonIcon::Container,
         ButtonIcon::Doc,
         ButtonIcon::Down,

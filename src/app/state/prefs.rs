@@ -121,6 +121,7 @@ pub(in crate::app) struct EditingKitShortcut {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::app) struct CustomEditingKitProfile {
     pub(in crate::app) read_only: bool,
+    pub(in crate::app) git_tracked: bool,
     pub(in crate::app) id: String,
     pub(in crate::app) name: String,
     pub(in crate::app) game: String,
@@ -162,6 +163,7 @@ pub(in crate::app) enum CustomEditingKitIconDraft {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(in crate::app) struct CustomEditingKitDraft {
     pub(in crate::app) read_only: bool,
+    pub(in crate::app) git_tracked: bool,
     pub(in crate::app) editing_id: Option<String>,
     pub(in crate::app) name: String,
     pub(in crate::app) game: String,
@@ -181,6 +183,7 @@ impl CustomEditingKitDraft {
     pub(in crate::app) fn new() -> Self {
         Self {
             read_only: false,
+            git_tracked: false,
             editing_id: None,
             name: String::new(),
             game: "halo2_mcc".to_owned(),
@@ -194,6 +197,7 @@ impl CustomEditingKitDraft {
     pub(in crate::app) fn from_profile(profile: &CustomEditingKitProfile) -> Self {
         Self {
             read_only: profile.read_only,
+            git_tracked: profile.git_tracked,
             editing_id: Some(profile.id.clone()),
             name: profile.name.clone(),
             game: profile.game.clone(),
