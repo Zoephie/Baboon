@@ -125,6 +125,10 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) selected_variant: Option<usize>,
     pub(in crate::app) region_selections: HashMap<String, ModelRegionSelection>,
     pub(in crate::app) show_markers: bool,
+    /// Draw import-tool error geometry and expose each report on hover.
+    pub(in crate::app) show_errors: bool,
+    /// Include reports carrying the import tool's non-critical flag.
+    pub(in crate::app) show_non_critical_errors: bool,
     /// Draw the model skeleton over the preview, with hoverable bone names.
     pub(in crate::app) show_armature: bool,
     /// Case-insensitive substring filter on marker names (empty = show all).
@@ -193,6 +197,8 @@ impl Default for ModelPreviewState {
             selected_variant: None,
             region_selections: HashMap::new(),
             show_markers: false,
+            show_errors: false,
+            show_non_critical_errors: false,
             show_armature: false,
             marker_filter: String::new(),
             high_detail: true,

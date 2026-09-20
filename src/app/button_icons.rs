@@ -23,6 +23,7 @@ pub(super) enum ButtonIcon {
     Doc,
     Down,
     Duplicate,
+    Errors,
     Favourite,
     FavouriteFilled,
     FileExplorer,
@@ -85,6 +86,7 @@ pub(super) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::Doc => include_str!("../../assets/Button Icons/Doc.svg"),
         ButtonIcon::Down => include_str!("../../assets/Button Icons/Down.svg"),
         ButtonIcon::Duplicate => include_str!("../../assets/Button Icons/Duplicate.svg"),
+        ButtonIcon::Errors => include_str!("../../assets/icons/errors.svg"),
         ButtonIcon::Favourite => include_str!("../../assets/Button Icons/Favourite.svg"),
         ButtonIcon::FavouriteFilled => {
             include_str!("../../assets/Button Icons/Favourite Filled.svg")

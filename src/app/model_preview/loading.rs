@@ -372,7 +372,9 @@ pub(in crate::app) fn build_render_preview(
     let render_model = RenderModel::from_tag(render_tag).map_err(|error| error.to_string())?;
     let render_meshes =
         RenderModel::derive_render_meshes(render_tag).map_err(|error| error.to_string())?;
-    Ok(render_model_to_preview(&render_model, &render_meshes))
+    let mut preview = render_model_to_preview(&render_model, &render_meshes);
+    append_model_errors(render_tag, &mut preview, ModelPreviewLayer::Render);
+    Ok(preview)
 }
 
 /// Halo: Campaign Evolved model preview. Returns `None` when this isn't a CE

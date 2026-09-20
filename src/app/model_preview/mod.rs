@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 pub(in crate::app) mod animation;
 pub(in crate::app) mod derived;
+mod errors;
 pub(in crate::app) mod loading;
 pub(in crate::app) mod materials;
 mod renderer;
@@ -16,6 +17,7 @@ mod variants;
 
 use animation::*;
 use derived::*;
+use errors::*;
 use loading::*;
 // Re-exported up to `crate::app` for the worker messages and the playback
 // state that lives on `ModelPreviewState`.
@@ -78,6 +80,10 @@ pub(crate) struct RenderModelPreview {
     /// The render model's skeleton, for animation playback. Empty on derived
     /// previews (collision, physics, BSPs, particles), which cannot animate.
     pub nodes: Vec<RenderModelPreviewNode>,
+    /// Import-tool diagnostics carried by render, collision, and physics
+    /// tags. They stay separate from draw batches so the UI can paint them as
+    /// an always-legible overlay and attach hover text to each primitive.
+    pub errors: Vec<ModelErrorPrimitive>,
     pub bounds_min: [f32; 3],
     pub bounds_max: [f32; 3],
 }
@@ -150,6 +156,37 @@ pub(crate) enum ModelPreviewLayer {
     Render,
     Collision,
     Physics,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ModelErrorPoint {
+    pub position: [f32; 3],
+    pub node_indices: [i16; 4],
+    pub node_weights: [f32; 4],
+}
+
+const MODEL_ERROR_FALLBACK_COLOR: [u8; 4] = [255, 55, 45, 255];
+
+#[derive(Debug, Clone)]
+pub(crate) struct ModelErrorPrimitive {
+    pub label: String,
+    pub non_critical: bool,
+    /// Authored debug-view color as RGBA bytes.
+    pub color: [u8; 4],
+    pub layer: ModelPreviewLayer,
+    pub shape: ModelErrorShape,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum ModelErrorShape {
+    Point(ModelErrorPoint),
+    Vector {
+        point: ModelErrorPoint,
+        normal: [f32; 3],
+        length: f32,
+    },
+    Polyline(Vec<ModelErrorPoint>),
+    Face(Vec<ModelErrorPoint>),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -618,6 +655,7 @@ pub(super) fn draw_model_preview_panel(
                                 ui,
                                 tag,
                                 entry,
+                                data,
                                 state,
                                 model_preview_size,
                                 supports_textures,
@@ -689,6 +727,7 @@ pub(super) fn draw_model_preview_panel(
                     ui,
                     tag,
                     entry,
+                    data,
                     state,
                     model_preview_size,
                     supports_textures,
@@ -933,6 +972,7 @@ fn draw_model_view_settings_menu(
     ui: &mut Ui,
     tag: &TagFile,
     entry: &TagEntry,
+    data: &ModelPreviewData,
     state: &mut ModelPreviewState,
     model_preview_size: &mut f32,
     supports_textures: bool,
@@ -1015,6 +1055,28 @@ fn draw_model_view_settings_menu(
             );
             draw_marker_filter_field(ui, &mut state.marker_filter);
 
+            let error_count = data.preview.errors.len();
+            ui.add_enabled_ui(error_count > 0, |ui| {
+                model_view_icon_checkbox(
+                    ui,
+                    &mut state.show_errors,
+                    ModelViewCheckboxIcon::Errors,
+                    "Show Errors",
+                )
+                .on_hover_text(format!(
+                    "Highlight {error_count} error/warning report primitive(s); hover one to see its report."
+                ));
+                if state.show_errors {
+                    ui.indent("model_error_filters", |ui| {
+                        ui.checkbox(
+                            &mut state.show_non_critical_errors,
+                            "Show Non-Critical",
+                        )
+                        .on_hover_text("Include error and warning reports marked non-critical.");
+                    });
+                }
+            });
+
             ui.separator();
             ui.checkbox(&mut state.show_grid, "Show Grid")
                 .on_hover_text(
@@ -1072,6 +1134,7 @@ fn draw_model_view_settings_menu(
 enum ModelViewCheckboxIcon {
     Tag([u8; 4]),
     Markers,
+    Errors,
 }
 
 fn model_view_icon_checkbox(
@@ -1102,6 +1165,9 @@ fn model_view_icon_checkbox(
             }
             ModelViewCheckboxIcon::Markers => {
                 paint_button_icon_at(ui, ButtonIcon::Markers, icon_rect, text_dark());
+            }
+            ModelViewCheckboxIcon::Errors => {
+                paint_button_icon_at(ui, ButtonIcon::Errors, icon_rect, text_dark());
             }
         }
         ui.spacing_mut().item_spacing.x = 4.0;
