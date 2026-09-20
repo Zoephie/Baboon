@@ -125,6 +125,70 @@ fn collision_cells_keep_variant_names_and_remap_bones_by_name() {
 }
 
 #[test]
+fn collision_error_points_follow_the_same_bind_pose_as_the_mesh() {
+    let half_turn = std::f32::consts::FRAC_1_SQRT_2;
+    let collision = JmsFile {
+        nodes: vec![JmsNode {
+            name: "spine".to_owned(),
+            parent: -1,
+            rotation: RealQuaternion::IDENTITY,
+            translation: RealPoint3d::ZERO,
+        }],
+        ..Default::default()
+    };
+    let skeleton = vec![
+        JmsNode {
+            name: "pelvis".to_owned(),
+            parent: -1,
+            rotation: RealQuaternion::IDENTITY,
+            translation: RealPoint3d::ZERO,
+        },
+        JmsNode {
+            name: "spine".to_owned(),
+            parent: 0,
+            rotation: RealQuaternion {
+                i: half_turn,
+                j: 0.0,
+                k: 0.0,
+                w: half_turn,
+            },
+            translation: RealPoint3d {
+                x: 100.0,
+                y: 200.0,
+                z: 300.0,
+            },
+        },
+    ];
+    let point = ModelErrorPoint {
+        position: [0.0, 1.0, 0.0],
+        node_indices: [0, -1, -1, -1],
+        node_weights: [1.0, 0.0, 0.0, 0.0],
+    };
+    let mut errors = vec![ModelErrorPrimitive {
+        label: "open edge".to_owned(),
+        non_critical: false,
+        color: MODEL_ERROR_FALLBACK_COLOR,
+        layer: ModelPreviewLayer::Collision,
+        shape: ModelErrorShape::Vector {
+            point,
+            normal: [0.0, 1.0, 0.0],
+            length: 1.0,
+        },
+    }];
+
+    pose_collision_errors(&mut errors, &collision, &skeleton);
+
+    let ModelErrorShape::Vector { point, normal, .. } = &errors[0].shape else {
+        panic!("expected vector error");
+    };
+    assert_eq!(point.node_indices[0], 1, "bone remapped by name");
+    assert!((point.position[0] - 1.0).abs() < 0.001);
+    assert!((point.position[1] - 2.0).abs() < 0.001);
+    assert!((point.position[2] - 4.0).abs() < 0.001);
+    assert!(normal[1].abs() < 0.001 && (normal[2] - 1.0).abs() < 0.001);
+}
+
+#[test]
 fn physics_shapes_are_placed_and_weighted_by_their_parent_bone() {
     let source_node = JmsNode {
         name: "spine".to_owned(),

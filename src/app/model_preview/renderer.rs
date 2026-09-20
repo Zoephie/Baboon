@@ -9,6 +9,24 @@ use std::sync::Arc;
 const ARMATURE_COLOR: Color32 = Color32::from_rgb(255, 204, 0);
 const MARKER_TOOLTIP_COLOR: Color32 = Color32::from_rgb(120, 235, 255);
 
+fn model_error_color(error: &ModelErrorPrimitive) -> Color32 {
+    Color32::from_rgba_unmultiplied(
+        error.color[0],
+        error.color[1],
+        error.color[2],
+        error.color[3],
+    )
+}
+
+fn model_error_fill(error: &ModelErrorPrimitive) -> Color32 {
+    Color32::from_rgba_unmultiplied(
+        error.color[0],
+        error.color[1],
+        error.color[2],
+        ((error.color[3] as u16 * 72) / 255) as u8,
+    )
+}
+
 pub(super) fn draw_model_viewport(
     ui: &mut Ui,
     data: &ModelPreviewData,
@@ -89,17 +107,7 @@ pub(super) fn draw_model_viewport(
             // when the toggles re-merged the preview. Gated on
             // `overlays_loaded` so a standalone collision/physics tag — whose
             // MAIN content uses these region names — is never filtered.
-            let is_overlay = state.overlays_loaded && batch.layer != ModelPreviewLayer::Render;
-            if state.overlays_loaded && is_overlay {
-                if batch.layer == ModelPreviewLayer::Collision && !state.show_collision {
-                    return None;
-                }
-                if batch.layer == ModelPreviewLayer::Physics && !state.show_physics {
-                    return None;
-                }
-            }
-            // "Render off" leaves only the overlay layers on screen.
-            if !state.show_render && !is_overlay {
+            if !model_layer_visible(state, batch.layer) {
                 return None;
             }
             let selection = state.region_selections.get(&batch.region_name)?;
@@ -129,6 +137,18 @@ pub(super) fn draw_model_viewport(
         })),
     });
     painter.rect_stroke(rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
+
+    if state.show_errors {
+        draw_model_errors(
+            ui,
+            &painter,
+            &response,
+            &camera,
+            &data.preview.errors,
+            state,
+            skinning_rows.as_deref(),
+        );
+    }
 
     if state.show_armature {
         let positions = armature_node_positions(data, state);
@@ -203,6 +223,306 @@ pub(super) fn draw_model_viewport(
             }
         }
     }
+}
+
+fn model_layer_visible(state: &ModelPreviewState, layer: ModelPreviewLayer) -> bool {
+    if !state.overlays_loaded {
+        // A bare render/collision/physics tag is the primary preview, not an
+        // optional overlay. `show_render` remains true for that path.
+        return state.show_render;
+    }
+    match layer {
+        ModelPreviewLayer::Render => state.show_render,
+        ModelPreviewLayer::Collision => state.show_collision,
+        ModelPreviewLayer::Physics => state.show_physics,
+    }
+}
+
+fn draw_model_errors(
+    ui: &Ui,
+    painter: &egui::Painter,
+    response: &egui::Response,
+    camera: &PreviewCamera,
+    errors: &[ModelErrorPrimitive],
+    state: &ModelPreviewState,
+    skinning_rows: Option<&[[f32; 4]]>,
+) {
+    let pointer = response
+        .hovered()
+        .then(|| ui.input(|input| input.pointer.hover_pos()))
+        .flatten();
+    let mut hover = ErrorHoverState::new(pointer);
+
+    for error in errors {
+        if !model_layer_visible(state, error.layer)
+            || (error.non_critical && !state.show_non_critical_errors)
+        {
+            continue;
+        }
+        let color = model_error_color(error);
+        let label_color = Color32::from_rgb(error.color[0], error.color[1], error.color[2]);
+        draw_model_error_shape(
+            painter,
+            camera,
+            error,
+            color,
+            label_color,
+            skinning_rows,
+            &mut hover,
+        );
+    }
+
+    if let Some(hovered) = hover.closest {
+        draw_preview_hover_label(
+            painter,
+            hovered.position + Vec2::new(8.0, -20.0),
+            hovered.label,
+            hovered.color,
+        );
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ErrorHover<'a> {
+    distance: f32,
+    position: egui::Pos2,
+    label: &'a str,
+    color: Color32,
+}
+
+struct ErrorHoverState<'a> {
+    pointer: Option<egui::Pos2>,
+    closest: Option<ErrorHover<'a>>,
+}
+
+impl<'a> ErrorHoverState<'a> {
+    fn new(pointer: Option<egui::Pos2>) -> Self {
+        Self {
+            pointer,
+            closest: None,
+        }
+    }
+
+    fn consider(&mut self, distance: f32, position: egui::Pos2, label: &'a str, color: Color32) {
+        if self
+            .closest
+            .is_none_or(|closest| distance < closest.distance)
+        {
+            self.closest = Some(ErrorHover {
+                distance,
+                position,
+                label,
+                color,
+            });
+        }
+    }
+
+    fn consider_point(
+        &mut self,
+        position: egui::Pos2,
+        radius: f32,
+        label: &'a str,
+        color: Color32,
+    ) {
+        let Some(pointer) = self.pointer else { return };
+        let distance = screen_edge_length(pointer, position);
+        if distance <= radius {
+            self.consider(distance, position, label, color);
+        }
+    }
+
+    fn consider_segment(
+        &mut self,
+        start: egui::Pos2,
+        end: egui::Pos2,
+        label: &'a str,
+        color: Color32,
+    ) {
+        let Some(pointer) = self.pointer else { return };
+        let distance = point_segment_distance(pointer, start, end);
+        if distance <= 7.0 {
+            self.consider(distance, start, label, color);
+        }
+    }
+}
+
+fn draw_model_error_shape<'a>(
+    painter: &egui::Painter,
+    camera: &PreviewCamera,
+    error: &'a ModelErrorPrimitive,
+    color: Color32,
+    label_color: Color32,
+    skinning_rows: Option<&[[f32; 4]]>,
+    hover: &mut ErrorHoverState<'a>,
+) {
+    match &error.shape {
+        ModelErrorShape::Point(point) => {
+            let position = project_error_point(camera, point, skinning_rows);
+            painter.circle_filled(position, 4.5, color);
+            painter.circle_stroke(position, 5.5, Stroke::new(1.25, Color32::WHITE));
+            hover.consider_point(position, 8.0, &error.label, label_color);
+        }
+        ModelErrorShape::Vector {
+            point,
+            normal,
+            length,
+        } => {
+            let start_world = animated_error_point(point, skinning_rows);
+            let end_world = [
+                start_world[0] + normal[0] * length,
+                start_world[1] + normal[1] * length,
+                start_world[2] + normal[2] * length,
+            ];
+            let start = camera.project(start_world).pos;
+            let end = camera.project(end_world).pos;
+            painter.line_segment([start, end], Stroke::new(3.0, color));
+            hover.consider_segment(start, end, &error.label, label_color);
+        }
+        ModelErrorShape::Polyline(points) => {
+            let projected = project_error_points(camera, points, skinning_rows);
+            for pair in projected.windows(2) {
+                painter.line_segment([pair[0], pair[1]], Stroke::new(3.0, color));
+                hover.consider_segment(pair[0], pair[1], &error.label, label_color);
+            }
+        }
+        ModelErrorShape::Face(points) => {
+            draw_model_error_face(
+                painter,
+                camera,
+                error,
+                points,
+                color,
+                label_color,
+                skinning_rows,
+                hover,
+            );
+        }
+    }
+}
+
+fn draw_model_error_face<'a>(
+    painter: &egui::Painter,
+    camera: &PreviewCamera,
+    error: &'a ModelErrorPrimitive,
+    points: &[ModelErrorPoint],
+    color: Color32,
+    label_color: Color32,
+    skinning_rows: Option<&[[f32; 4]]>,
+    hover: &mut ErrorHoverState<'a>,
+) {
+    let projected = project_error_points(camera, points, skinning_rows);
+    if projected.len() < 3 {
+        return;
+    }
+
+    // egui's stroked convex-polygon tessellator forms mitered joins. When a
+    // face is viewed exactly edge-on, its screen-space area approaches zero
+    // and those joins can shoot far beyond the viewport. Fill only
+    // non-degenerate projections, then draw every bounded edge separately.
+    if polygon_area_twice(&projected).abs() > 0.5 {
+        painter.add(egui::Shape::convex_polygon(
+            projected.clone(),
+            model_error_fill(error),
+            Stroke::NONE,
+        ));
+    }
+    for (&start, &end) in polygon_edges(&projected) {
+        painter.line_segment([start, end], Stroke::new(2.0, color));
+    }
+
+    let Some(pointer) = hover.pointer else { return };
+    let edge_distance = polygon_edges(&projected)
+        .map(|(&start, &end)| point_segment_distance(pointer, start, end))
+        .fold(f32::INFINITY, f32::min);
+    let distance = if point_in_polygon(pointer, &projected) {
+        0.0
+    } else {
+        edge_distance
+    };
+    if distance <= 7.0 {
+        hover.consider(distance, pointer, &error.label, label_color);
+    }
+}
+
+fn project_error_point(
+    camera: &PreviewCamera,
+    point: &ModelErrorPoint,
+    skinning_rows: Option<&[[f32; 4]]>,
+) -> egui::Pos2 {
+    camera
+        .project(animated_error_point(point, skinning_rows))
+        .pos
+}
+
+fn project_error_points(
+    camera: &PreviewCamera,
+    points: &[ModelErrorPoint],
+    skinning_rows: Option<&[[f32; 4]]>,
+) -> Vec<egui::Pos2> {
+    points
+        .iter()
+        .map(|point| project_error_point(camera, point, skinning_rows))
+        .collect()
+}
+
+fn polygon_edges(polygon: &[egui::Pos2]) -> impl Iterator<Item = (&egui::Pos2, &egui::Pos2)> {
+    polygon
+        .iter()
+        .zip(polygon.iter().cycle().skip(1))
+        .take(polygon.len())
+}
+
+fn animated_error_point(point: &ModelErrorPoint, skinning_rows: Option<&[[f32; 4]]>) -> [f32; 3] {
+    let Some(rows) = skinning_rows else {
+        return point.position;
+    };
+    let weight_sum: f32 = point.node_weights.iter().sum();
+    if weight_sum <= f32::EPSILON {
+        return point.position;
+    }
+    let mut result = [0.0; 3];
+    for (&index, &weight) in point.node_indices.iter().zip(&point.node_weights) {
+        if index < 0 || weight <= 0.0 {
+            continue;
+        }
+        let start = index as usize * 3;
+        let Some(matrix) = rows.get(start..start + 3) else {
+            continue;
+        };
+        for axis in 0..3 {
+            result[axis] += weight
+                * (matrix[axis][0] * point.position[0]
+                    + matrix[axis][1] * point.position[1]
+                    + matrix[axis][2] * point.position[2]
+                    + matrix[axis][3]);
+        }
+    }
+    result
+}
+
+fn point_in_polygon(point: egui::Pos2, polygon: &[egui::Pos2]) -> bool {
+    let mut inside = false;
+    let mut previous = polygon[polygon.len() - 1];
+    for &current in polygon {
+        if (current.y > point.y) != (previous.y > point.y)
+            && point.x
+                < (previous.x - current.x) * (point.y - current.y) / (previous.y - current.y)
+                    + current.x
+        {
+            inside = !inside;
+        }
+        previous = current;
+    }
+    inside
+}
+
+fn polygon_area_twice(polygon: &[egui::Pos2]) -> f32 {
+    polygon
+        .iter()
+        .zip(polygon.iter().cycle().skip(1))
+        .take(polygon.len())
+        .map(|(a, b)| a.x * b.y - b.x * a.y)
+        .sum()
 }
 
 fn animated_marker_transform(
@@ -1589,6 +1909,73 @@ mod gpu_renderer_tests {
                 preview.batches[1].index_count
             ),
             (3, 3)
+        );
+    }
+
+    #[test]
+    fn error_face_hover_detects_inside_and_outside_points() {
+        let face = [
+            egui::pos2(10.0, 10.0),
+            egui::pos2(50.0, 10.0),
+            egui::pos2(50.0, 40.0),
+            egui::pos2(10.0, 40.0),
+        ];
+        assert!(point_in_polygon(egui::pos2(30.0, 25.0), &face));
+        assert!(!point_in_polygon(egui::pos2(60.0, 25.0), &face));
+        assert!(polygon_area_twice(&face).abs() > 0.5);
+
+        let edge_on = [
+            egui::pos2(10.0, 20.0),
+            egui::pos2(30.0, 20.0),
+            egui::pos2(50.0, 20.0),
+        ];
+        assert_eq!(polygon_area_twice(&edge_on), 0.0);
+    }
+
+    #[test]
+    fn error_visibility_follows_its_owning_model_layer() {
+        let mut state = ModelPreviewState::default();
+        state.overlays_loaded = true;
+        state.show_render = true;
+        state.show_collision = false;
+        state.show_physics = true;
+        assert!(model_layer_visible(&state, ModelPreviewLayer::Render));
+        assert!(!model_layer_visible(&state, ModelPreviewLayer::Collision));
+        assert!(model_layer_visible(&state, ModelPreviewLayer::Physics));
+
+        state.show_render = false;
+        assert!(!model_layer_visible(&state, ModelPreviewLayer::Render));
+        assert!(model_layer_visible(&state, ModelPreviewLayer::Physics));
+    }
+
+    #[test]
+    fn non_critical_errors_are_opt_in() {
+        let mut state = ModelPreviewState::default();
+        assert!(!state.show_non_critical_errors);
+        state.show_non_critical_errors = true;
+        assert!(state.show_non_critical_errors);
+    }
+
+    #[test]
+    fn error_overlay_uses_the_primitives_authored_color() {
+        let error = ModelErrorPrimitive {
+            label: "open edge".to_owned(),
+            non_critical: false,
+            color: [12, 34, 56, 78],
+            layer: ModelPreviewLayer::Collision,
+            shape: ModelErrorShape::Point(ModelErrorPoint {
+                position: [0.0; 3],
+                node_indices: [-1; 4],
+                node_weights: [0.0; 4],
+            }),
+        };
+        assert_eq!(
+            model_error_color(&error),
+            Color32::from_rgba_unmultiplied(12, 34, 56, 78)
+        );
+        assert_eq!(
+            model_error_fill(&error),
+            Color32::from_rgba_unmultiplied(12, 34, 56, 22)
         );
     }
 }

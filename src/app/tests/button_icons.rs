@@ -20,6 +20,7 @@ fn button_icon_lookup_uses_expected_assets() {
         ButtonIcon::Doc,
         ButtonIcon::Down,
         ButtonIcon::Duplicate,
+        ButtonIcon::Errors,
         ButtonIcon::Export,
         ButtonIcon::Favourite,
         ButtonIcon::FileExplorer,
