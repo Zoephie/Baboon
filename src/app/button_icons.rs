@@ -10,6 +10,10 @@ pub(super) enum ButtonIcon {
     About,
     Browse,
     Cache,
+    ChangeAdded,
+    ChangeModified,
+    ChangeRemoved,
+    ChangeSame,
     Open,
     Edit,
     Import,
@@ -35,6 +39,7 @@ pub(super) enum ButtonIcon {
     SearchBar,
     Function,
     Garbage,
+    Git,
     GitHub,
     Group,
     HaloMods,
@@ -75,6 +80,12 @@ pub(super) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::About => include_str!("../../assets/Button Icons/About.svg"),
         ButtonIcon::Browse => include_str!("../../assets/Button Icons/Browse.svg"),
         ButtonIcon::Cache => include_str!("../../assets/Button Icons/Cache.svg"),
+        ButtonIcon::ChangeAdded => include_str!("../../assets/Button Icons/change-added.svg"),
+        ButtonIcon::ChangeModified => {
+            include_str!("../../assets/Button Icons/change-modified.svg")
+        }
+        ButtonIcon::ChangeRemoved => include_str!("../../assets/Button Icons/change-removed.svg"),
+        ButtonIcon::ChangeSame => include_str!("../../assets/Button Icons/change-same.svg"),
         ButtonIcon::Open => include_str!("../../assets/Button Icons/Open.svg"),
         ButtonIcon::Edit => include_str!("../../assets/Button Icons/Edit.svg"),
         ButtonIcon::Import => include_str!("../../assets/Button Icons/Import.svg"),
@@ -102,6 +113,7 @@ pub(super) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         ButtonIcon::SearchBar => include_str!("../../assets/Button Icons/Search Bar Icon.svg"),
         ButtonIcon::Function => include_str!("../../assets/Button Icons/Function.svg"),
         ButtonIcon::Garbage => include_str!("../../assets/Button Icons/Garbage.svg"),
+        ButtonIcon::Git => include_str!("../../assets/Button Icons/Git.svg"),
         ButtonIcon::GitHub => include_str!("../../assets/Button Icons/GitHub.svg"),
         ButtonIcon::Group => include_str!("../../assets/Button Icons/Group.svg"),
         ButtonIcon::HaloMods => include_str!("../../assets/Button Icons/Halo Mods.svg"),
@@ -227,6 +239,16 @@ fn icon_color(icon: ButtonIcon, fallback: Color32) -> Color32 {
 }
 
 fn colorized_icon_svg(icon: ButtonIcon, color: Color32) -> String {
+    if matches!(
+        icon,
+        ButtonIcon::ChangeAdded
+            | ButtonIcon::ChangeModified
+            | ButtonIcon::ChangeRemoved
+            | ButtonIcon::ChangeSame
+    ) {
+        // These state badges carry their own semantic colors and outline.
+        return button_icon_svg(icon).to_owned();
+    }
     let color = svg_color(color);
     button_icon_svg(icon)
         .replace("currentColor", &color)

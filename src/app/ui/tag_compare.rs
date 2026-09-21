@@ -288,7 +288,7 @@ fn comparison_results(a: &TagFile, b: &TagFile) -> TagDiffResults {
     }
 }
 
-fn comparison_results_with_missing(
+pub(in crate::app) fn comparison_results_with_missing(
     before: Option<&TagFile>,
     after: Option<&TagFile>,
 ) -> TagDiffResults {
@@ -388,6 +388,208 @@ fn block_change_icon(diff: &TagFieldDiff) -> Option<ButtonIcon> {
     } else {
         None
     }
+}
+
+/// Draw the reusable field/before/delta/after results view used by Compare
+/// Tags and by Git Review. Keeping the presentation here makes Git history
+/// comparisons read exactly like the editor's ordinary semantic tag diff.
+pub(super) fn draw_tag_diff_list(
+    ui: &mut Ui,
+    results: &TagDiffResults,
+    filters: &mut TagDiffFilters,
+    swapped: &mut bool,
+    before_label: &str,
+    after_label: &str,
+    id_salt: &str,
+) {
+    if displayed_results(results, *swapped).0.is_empty() {
+        ui.label(RichText::new("No differences.").color(subtle_dark()));
+        return;
+    }
+    Frame::none()
+        .inner_margin(egui::Margin {
+            left: 10.0,
+            right: 10.0,
+            top: 4.0,
+            bottom: 8.0,
+        })
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                icon_text_dropdown_button(ui, ButtonIcon::Filter, "Filter", |ui| {
+                    ui.checkbox(&mut filters.both, "Both versions");
+                    ui.checkbox(&mut filters.current_only, "Before only");
+                    ui.checkbox(&mut filters.comparison_only, "After only");
+                });
+                if icon_text_button(ui, ButtonIcon::Swap, "Swap", true)
+                    .on_hover_text("Swap the two sides of the comparison")
+                    .clicked()
+                {
+                    *swapped = !*swapped;
+                }
+                let (diffs, truncated) = displayed_results(results, *swapped);
+                let display_filters = filters_for_display(*filters, *swapped);
+                let visible: Vec<&TagFieldDiff> = diffs
+                    .iter()
+                    .filter(|diff| show_diff(display_filters, diff))
+                    .collect();
+                let count = if visible.len() == diffs.len() {
+                    format!("{} differing field(s)", visible.len())
+                } else {
+                    format!("{} of {} differing field(s)", visible.len(), diffs.len())
+                };
+                ui.label(
+                    RichText::new(format!(
+                        "{}{}",
+                        count,
+                        if truncated { " (capped)" } else { "" }
+                    ))
+                    .small()
+                    .color(subtle_dark()),
+                );
+                if icon_text_button(ui, ButtonIcon::Copy, "Copy", !visible.is_empty())
+                    .on_hover_text("Copy the diff as tab-separated rows")
+                    .clicked()
+                {
+                    let (left_label, right_label) = if *swapped {
+                        (after_label, before_label)
+                    } else {
+                        (before_label, after_label)
+                    };
+                    let text = std::iter::once(format!("field\t{left_label}\t{right_label}"))
+                        .chain(
+                            visible
+                                .iter()
+                                .map(|diff| format!("{}\t{}\t{}", diff.path, diff.a, diff.b)),
+                        )
+                        .collect::<Vec<_>>()
+                        .join("\n");
+                    ui.output_mut(|output| output.copied_text = text);
+                }
+            })
+        });
+    ui.separator();
+
+    let (diffs, _) = displayed_results(results, *swapped);
+    let display_filters = filters_for_display(*filters, *swapped);
+    let (left_label, right_label) = if *swapped {
+        (after_label, before_label)
+    } else {
+        (before_label, after_label)
+    };
+    let visible: Vec<&TagFieldDiff> = diffs
+        .iter()
+        .filter(|diff| show_diff(display_filters, diff))
+        .collect();
+    if visible.is_empty() {
+        ui.label(RichText::new("No differences match these filters.").color(subtle_dark()));
+    }
+    ui.scope(|ui| {
+        ui.visuals_mut().widgets.noninteractive.bg_stroke =
+            Stroke::new(1.0_f32, foundation_group_edge());
+        let width = ui.available_width();
+        let height = ui.available_height().max(120.0);
+        let mut header_rect: Option<egui::Rect> = None;
+        TableBuilder::new(ui)
+            .id_salt(id_salt)
+            .striped(true)
+            .resizable(true)
+            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
+            .max_scroll_height(height)
+            .min_scrolled_height(0.0)
+            .column(Column::initial(width * 0.36).at_least(100.0).clip(true))
+            .column(Column::initial(width * 0.28).at_least(80.0).clip(true))
+            .column(Column::initial(96.0).at_least(55.0).clip(true))
+            .column(Column::remainder().at_least(80.0).clip(true))
+            .header(25.0, |mut header| {
+                for title in ["Field", left_label] {
+                    header.col(|ui| {
+                        let rect = ui.max_rect();
+                        header_rect = Some(header_rect.map_or(rect, |seen| seen.union(rect)));
+                        ui.painter().with_clip_rect(rect).text(
+                            egui::pos2(rect.left() + 8.0, rect.center().y),
+                            egui::Align2::LEFT_CENTER,
+                            title,
+                            bold_font(14.0),
+                            text_dark(),
+                        );
+                    });
+                }
+                header.col(|ui| {
+                    let rect = ui.max_rect();
+                    header_rect = Some(header_rect.map_or(rect, |seen| seen.union(rect)));
+                    ui.centered_and_justified(|ui| {
+                        ui.label(RichText::new("Diff.").font(bold_font(14.0)));
+                    });
+                });
+                header.col(|ui| {
+                    let rect = ui.max_rect();
+                    header_rect = Some(header_rect.map_or(rect, |seen| seen.union(rect)));
+                    ui.painter().with_clip_rect(rect).text(
+                        egui::pos2(rect.left() + 8.0, rect.center().y),
+                        egui::Align2::LEFT_CENTER,
+                        right_label,
+                        bold_font(14.0),
+                        text_dark(),
+                    );
+                });
+            })
+            .body(|body| {
+                body.rows(24.0, visible.len(), |mut row| {
+                    let diff = visible[row.index()];
+                    row.col(|ui| {
+                        ui.add_space(8.0);
+                        ui.add(
+                            egui::Label::new(RichText::new(&diff.path).monospace().small())
+                                .truncate()
+                                .halign(egui::Align::Min),
+                        );
+                    });
+                    row.col(|ui| {
+                        ui.add_space(8.0);
+                        ui.add(
+                            egui::Label::new(RichText::new(&diff.a).color(text_dark()))
+                                .truncate()
+                                .halign(egui::Align::Min),
+                        );
+                    });
+                    row.col(|ui| {
+                        let rect = ui.max_rect();
+                        if let Some(icon) = block_change_icon(diff) {
+                            let icon_rect =
+                                egui::Rect::from_center_size(rect.center(), Vec2::splat(16.0));
+                            paint_button_icon_at(ui, icon, icon_rect, text_dark());
+                        } else if let Some((direction, amount)) = numeric_delta(diff) {
+                            let (arrow, color) = match direction {
+                                Ordering::Greater => ("▲", good_news()),
+                                Ordering::Less => ("▼", material_delete_text()),
+                                Ordering::Equal => unreachable!(),
+                            };
+                            ui.painter().text(
+                                rect.center(),
+                                egui::Align2::CENTER_CENTER,
+                                format!("{arrow} {amount}"),
+                                egui::TextStyle::Body.resolve(ui.style()),
+                                color,
+                            );
+                        }
+                    });
+                    row.col(|ui| {
+                        ui.add_space(8.0);
+                        ui.add(
+                            egui::Label::new(RichText::new(&diff.b).color(text_dark()))
+                                .truncate()
+                                .halign(egui::Align::Min),
+                        );
+                    });
+                });
+            });
+        if let Some(rect) = header_rect {
+            ui.painter().line_segment(
+                [rect.left_bottom(), rect.right_bottom()],
+                Stroke::new(1.0_f32, foundation_group_edge()),
+            );
+        }
+    });
 }
 
 impl Baboon {

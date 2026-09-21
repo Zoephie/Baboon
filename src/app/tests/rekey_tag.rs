@@ -220,6 +220,7 @@ fn every_field_of_a_kit_is_accounted_for() {
         // against the new key rather than carried across it.
         bitmap_browser: _,
         model_browser: _,
+        git_review: _,
         folder_browsers: _,
 
         // The source's own entries, tree and indices, which the rename moves

@@ -133,6 +133,8 @@ mod bitmap_browser;
 use bitmap_browser::*;
 mod model_browser;
 use model_browser::*;
+mod git_review;
+use git_review::*;
 mod audio;
 mod sound_extract;
 use sound_extract::*;

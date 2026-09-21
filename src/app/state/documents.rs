@@ -993,6 +993,7 @@ pub(in crate::app) struct TagDiffState {
     pub(in crate::app) results: Option<TagDiffResults>,
 }
 
+#[derive(Clone)]
 pub(in crate::app) struct TagDiffResults {
     pub(in crate::app) diffs: Vec<TagFieldDiff>,
     /// True when the diff hit the cap and more differences exist.

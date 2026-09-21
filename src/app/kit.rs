@@ -77,6 +77,8 @@ pub(super) struct Kit {
     pub(super) bitmap_browser: BitmapBrowserState,
     /// The Model Library tab's state, the same shape for the same reasons.
     pub(super) model_browser: ModelBrowserState,
+    /// Read-only repository history and working-tree browser.
+    pub(super) git_review: GitReviewState,
     pub(super) model_previews: HashMap<String, ModelPreviewState>,
     /// Source-local render-method definition cache; `None` is a cached miss.
     pub(super) rmdf_cache: HashMap<String, Option<RenderMethodDefinition>>,
@@ -214,6 +216,7 @@ impl Kit {
             bitmap_previews: HashMap::new(),
             bitmap_browser: BitmapBrowserState::default(),
             model_browser: ModelBrowserState::default(),
+            git_review: GitReviewState::default(),
             model_previews: HashMap::new(),
             rmdf_cache: HashMap::new(),
             rmop_cache: HashMap::new(),
