@@ -79,6 +79,15 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             self.app.draw_model_library(ui, &self.ctx, self.kit_index);
             return egui_tiles::UiResponse::None;
         }
+        if key == GIT_REVIEW_KEY {
+            if ui.input(|input| input.pointer.any_pressed())
+                && ui.rect_contains_pointer(ui.max_rect())
+            {
+                self.focused = Some(key.clone());
+            }
+            self.app.draw_git_review(ui, self.kit_index);
+            return egui_tiles::UiResponse::None;
+        }
         if key == BLAM_KEY {
             if ui.input(|input| input.pointer.any_pressed())
                 && ui.rect_contains_pointer(ui.max_rect())
@@ -170,6 +179,9 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         if pane == MODEL_LIBRARY_KEY {
             return RichText::new(MODEL_LIBRARY_TITLE).color(text_dark()).into();
         }
+        if pane == GIT_REVIEW_KEY {
+            return RichText::new(GIT_REVIEW_TITLE).color(text_dark()).into();
+        }
         if pane == BLAM_KEY {
             return RichText::new(BLAM_TITLE).color(text_dark()).into();
         }
@@ -234,7 +246,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         if button_response.middle_clicked() {
             self.close_requests.push(key.clone());
         }
-        if is_folder_pane_key(&key) {
+        if is_folder_pane_key(&key) || key == GIT_REVIEW_KEY {
             button_response.context_menu(|ui| {
                 if ui.button("Close").clicked() {
                     self.close_requests.push(key.clone());
@@ -322,12 +334,13 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             _ => None,
         };
         let folder_icon = pane_key.is_some_and(|key| is_folder_pane_key(key));
+        let git_icon = pane_key.is_some_and(|key| key == GIT_REVIEW_KEY);
         let text = self.tab_title_for_tile(tiles, tile_id);
         let close_size = Vec2::splat(self.close_button_outer_size());
         let font_id = egui::TextStyle::Button.resolve(ui.style());
         let galley = text.into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, font_id);
         let x_margin = self.tab_title_spacing(ui.visuals());
-        let icon_width = if group_tag.is_some() || folder_icon {
+        let icon_width = if group_tag.is_some() || folder_icon || git_icon {
             ICON + ICON_GAP
         } else {
             0.0
@@ -365,6 +378,12 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
                     Vec2::splat(ICON),
                 );
                 paint_button_icon_at(ui, ButtonIcon::FolderOpen, icon_rect, text_dark());
+            } else if git_icon {
+                let icon_rect = egui::Rect::from_center_size(
+                    egui::pos2(inner.left() + ICON / 2.0, inner.center().y),
+                    Vec2::splat(ICON),
+                );
+                paint_button_icon_at(ui, ButtonIcon::Git, icon_rect, text_dark());
             }
             let text_color = self.tab_text_color(ui.visuals(), tiles, tile_id, state);
             let text_pos = egui::Align2::LEFT_CENTER
@@ -450,7 +469,11 @@ impl TagPaneBehavior<'_> {
         // The Bitmap Library, Model Library, and Blam! are not tags and have no
         // group icon; `Some(0)` here would reserve icon space and paint
         // whatever group zero resolves to.
-        if key == BITMAP_LIBRARY_KEY || key == MODEL_LIBRARY_KEY || key == BLAM_KEY {
+        if key == BITMAP_LIBRARY_KEY
+            || key == MODEL_LIBRARY_KEY
+            || key == GIT_REVIEW_KEY
+            || key == BLAM_KEY
+        {
             return None;
         }
         self.tab_labels
@@ -488,6 +511,10 @@ impl Baboon {
             }
             if key == MODEL_LIBRARY_KEY {
                 labels.insert(key.clone(), (MODEL_LIBRARY_TITLE.to_owned(), None));
+                continue;
+            }
+            if key == GIT_REVIEW_KEY {
+                labels.insert(key.clone(), (GIT_REVIEW_TITLE.to_owned(), None));
                 continue;
             }
             if key == BLAM_KEY {
@@ -614,6 +641,12 @@ impl Baboon {
             self.select_entry(open, ctx.clone());
         }
         if let Some(key) = self.kits[kit_index].model_browser.pending_open_raw.take() {
+            self.active = kit_index;
+            self.select_entry(key, ctx.clone());
+        }
+        // Git Review is another synthetic pane drawn while `tag_tree` is moved
+        // out. Defer its double-click open until the real tree is back too.
+        if let Some(key) = self.kits[kit_index].git_review.pending_open.take() {
             self.active = kit_index;
             self.select_entry(key, ctx.clone());
         }

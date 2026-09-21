@@ -7,6 +7,37 @@ const FOLDER_HEADER_ACTIONS_SINGLE_ROW_BREAKPOINT: f32 = 900.0;
 const FOLDER_HEADER_LAUNCHER_WIDTH: f32 = 190.0;
 const FOLDER_BROWSER_SEARCH_STACK_BREAKPOINT: f32 = 600.0;
 
+/// A full-width, borderless navigation row like the entries in a menu/list.
+/// It stays transparent at rest and uses only a soft fill for hover/press.
+fn sidebar_list_button(ui: &mut Ui, icon: ButtonIcon, label: &str) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width(), BUTTON_HEIGHT),
+        Sense::click(),
+    );
+    if response.hovered() || response.is_pointer_button_down_on() {
+        let fill = if response.is_pointer_button_down_on() {
+            ui.visuals().widgets.active.weak_bg_fill
+        } else {
+            ui.visuals().widgets.hovered.weak_bg_fill
+        };
+        ui.painter()
+            .rect_filled(rect, ui.visuals().widgets.hovered.rounding, fill);
+    }
+    let icon_rect = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + 12.0, rect.center().y),
+        Vec2::splat(BUTTON_ICON_SIZE),
+    );
+    paint_button_icon_at(ui, icon, icon_rect, text_dark());
+    ui.painter().text(
+        egui::pos2(icon_rect.right() + 6.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        TextStyle::Button.resolve(ui.style()),
+        text_dark(),
+    );
+    response
+}
+
 fn folder_browser_search_stacks(available_width: f32) -> bool {
     available_width < FOLDER_BROWSER_SEARCH_STACK_BREAKPOINT
 }
@@ -415,6 +446,7 @@ impl Baboon {
             ui,
             std::sync::Arc::clone(&self.kits[kit_index].deletable_keys),
         );
+        let mut open_git_review = false;
         let kit = &mut self.kits[kit_index];
         if let Some(source) = kit.source.as_mut() {
             ui.add_space(8.0);
@@ -517,6 +549,15 @@ impl Baboon {
                         &favorite_keys,
                     );
                     browser_favorites_divider(ui, favorites_visible);
+
+                    if matches!(source.source, TagSource::LooseFolder { .. }) {
+                        if sidebar_list_button(ui, ButtonIcon::Git, GIT_REVIEW_TITLE).clicked() {
+                            open_git_review = true;
+                        }
+                        ui.add_space(4.0);
+                        ui.separator();
+                        ui.add_space(4.0);
+                    }
 
                     let tree_action = if !filter.is_empty() {
                         // Active search renders a memoized, pruned tree. A loose
@@ -660,6 +701,10 @@ impl Baboon {
             }
         } else {
             ui.label("Use File to load a tag, folder, or monolithic cache.");
+        }
+        if open_git_review {
+            self.active = kit_index;
+            self.open_git_review();
         }
     }
 }
