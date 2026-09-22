@@ -868,17 +868,20 @@ pub(super) fn locate_definitions_root() -> PathBuf {
             expected = Some(beside_exe);
         }
     }
+    // The repo's own submodule first, as build.rs copies it: a sibling
+    // checkout beside the repo can be at any other commit, and tests (which run
+    // from target/*/deps, with no copy beside them) read whatever they find.
+    let dev_at_manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("definitions");
+    if dev_at_manifest.is_dir() {
+        return dev_at_manifest;
+    }
     let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("definitions");
     if dev.is_dir() {
         return dev;
     }
-    let dev_at_manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("definitions");
-    if dev_at_manifest.is_dir() {
-        return dev_at_manifest;
-    }
-    expected.unwrap_or(dev)
+    expected.unwrap_or(dev_at_manifest)
 }
 
 pub(crate) fn definitions_missing_message(path: &Path) -> String {
