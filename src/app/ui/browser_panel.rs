@@ -250,7 +250,9 @@ impl Baboon {
                                 ui,
                                 &mut pane.tree,
                                 &mut source.entries,
-                                &mut pane.group_tree,
+                                // A pane's Groups view is rebuilt from the full
+                                // index each frame; nothing to keep in step.
+                                None,
                                 &root,
                                 &names,
                                 selected.as_deref(),
@@ -611,7 +613,10 @@ impl Baboon {
                                         ui,
                                         &mut source.tree,
                                         &mut source.entries,
-                                        &mut source.group_tree,
+                                        source
+                                            .all_entries
+                                            .is_empty()
+                                            .then_some(&mut source.group_tree),
                                         &root,
                                         &source.names,
                                         selected.as_deref(),
