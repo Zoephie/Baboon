@@ -26,16 +26,45 @@ pub(super) enum DefEntry {
     Explanation { title: String, body: String },
 }
 
-/// Per-group documentation, keyed by struct GUID (stable across the name
-/// stripping and matching shipped tags exactly).
+/// Which struct a documentation sequence belongs to: its GUID (stable across
+/// the name stripping and matching shipped tags exactly), or, for definitions
+/// whose structs carry no GUID (every halo2_mcc struct is all zeros), its name.
+/// Keying those by the shared zero GUID handed one struct's explanations to
+/// every struct in the tag.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum StructKey {
+    Guid([u8; 16]),
+    Name(String),
+}
+
+impl StructKey {
+    fn new(guid: [u8; 16], name: &str) -> Self {
+        if guid == [0; 16] {
+            Self::Name(name.to_owned())
+        } else {
+            Self::Guid(guid)
+        }
+    }
+}
+
+/// Per-group documentation, keyed by struct ([`StructKey`]).
 #[derive(Default)]
 pub(super) struct DefDocs {
-    by_guid: HashMap<[u8; 16], Vec<DefEntry>>,
+    by_struct: HashMap<StructKey, Vec<DefEntry>>,
 }
 
 impl DefDocs {
-    pub(super) fn entries_for(&self, guid: &[u8; 16]) -> &[DefEntry] {
-        self.by_guid.get(guid).map(Vec::as_slice).unwrap_or(&[])
+    /// The documentation sequence for the struct with `guid` and `name`.
+    pub(super) fn entries_for(&self, guid: [u8; 16], name: &str) -> &[DefEntry] {
+        self.by_struct
+            .get(&StructKey::new(guid, name))
+            .map(Vec::as_slice)
+            .unwrap_or(&[])
+    }
+
+    pub(super) fn entries_for_struct(&self, tag_struct: &TagStruct<'_>) -> &[DefEntry] {
+        let definition = tag_struct.definition();
+        self.entries_for(definition.guid(), definition.name())
     }
 }
 
@@ -109,7 +138,7 @@ fn merge_structs_into(docs: &mut DefDocs, value: &serde_json::Value) {
     let Some(structs) = value.get("structs").and_then(|v| v.as_object()) else {
         return;
     };
-    for st in structs.values() {
+    for (struct_name, st) in structs {
         let Some(guid) = st
             .get("guid")
             .and_then(|g| g.as_str())
@@ -152,7 +181,7 @@ fn merge_structs_into(docs: &mut DefDocs, value: &serde_json::Value) {
                 });
             }
         }
-        docs.by_guid.entry(guid).or_insert(entries);
+        docs.by_struct.entry(StructKey::new(guid, struct_name)).or_insert(entries);
     }
 }
 
@@ -218,7 +247,7 @@ mod tests {
         }"#;
         let docs = parse_def_docs(json);
         let guid = parse_guid_hex("4015cede9c496f80bcd3fc8804062596").unwrap();
-        let entries = docs.entries_for(&guid);
+        let entries = docs.entries_for(guid, "s");
         assert_eq!(entries.len(), 3);
         match &entries[0] {
             DefEntry::Explanation { title, body } => {
@@ -270,7 +299,7 @@ mod tests {
         }"#;
         let docs = parse_def_docs(json);
         let guid = parse_guid_hex("4015cede9c496f80bcd3fc8804062596").unwrap();
-        let entries = docs.entries_for(&guid);
+        let entries = docs.entries_for(guid, "s");
         let render_model = parse_group_tag("mode").unwrap();
         let biped = parse_group_tag("bipd").unwrap();
         let vehicle = parse_group_tag("vehi").unwrap();
@@ -303,7 +332,7 @@ mod tests {
         let docs = build_def_docs(Path::new("definitions"), "halo3_mcc", "biped");
         // The object base struct GUID (where the inherited fields live).
         let guid = parse_guid_hex("6c5aa9947a45fcf55742a488f0943380").unwrap();
-        let entries = docs.entries_for(&guid);
+        let entries = docs.entries_for(guid, "s");
         assert!(
             !entries.is_empty(),
             "inherited object struct must resolve via the parent chain"
@@ -346,7 +375,7 @@ mod tests {
         let params = element.descend("distance parameters").unwrap();
 
         // GUID keying matches between the stripped layout and the JSON docs.
-        let entries = docs.entries_for(&params.definition().guid());
+        let entries = docs.entries_for_struct(&params);
         assert!(
             !entries.is_empty(),
             "distance-parameters struct must resolve docs by GUID"
@@ -365,10 +394,74 @@ mod tests {
         );
         // The sound-class struct supplies explanation rows to inject.
         assert!(
-            docs.entries_for(&element.definition().guid())
+            docs.entries_for_struct(&element)
                 .iter()
                 .any(|e| matches!(e, DefEntry::Explanation { .. })),
             "sound-class struct should supply explanations"
         );
+    }
+
+    /// Every halo2_mcc struct has the all-zero GUID (Halo 2's definitions carry
+    /// none, in tool.exe or HABT's XML). Keyed by that, one struct's
+    /// explanations went to every struct in the tag: masterchief.biped showed the
+    /// object's collision-damage explanations, empty, inside each `functions`
+    /// element. Keyed by name, each struct gets only its own.
+    #[test]
+    fn halo2_structs_get_only_their_own_explanations() {
+        let tag_path = "/Users/camden/Halo/halo2_mcc/tags/objects/characters/masterchief/masterchief.biped";
+        let def = crate::app::test_definition_path("halo2_mcc/biped.json");
+        if !std::path::Path::new(tag_path).exists() || !def.exists() {
+            eprintln!("skipping: H2 biped/definition not present");
+            return;
+        }
+        let docs = build_def_docs(&crate::app::locate_definitions_root(), "halo2_mcc", "biped");
+        let bytes = std::fs::read(tag_path).unwrap();
+        let tag = blam_tags::classic::read_classic_tag_file(
+            &bytes,
+            blam_tags::layout::TagLayout::from_json(&def).unwrap(),
+        )
+        .unwrap();
+
+        fn find<'a>(s: TagStruct<'a>, name: &str) -> Option<TagStruct<'a>> {
+            if s.definition().name() == name {
+                return Some(s);
+            }
+            s.fields_all().find_map(|f| {
+                f.as_struct()
+                    .and_then(|nested| find(nested, name))
+                    .or_else(|| f.as_block().and_then(|b| b.iter().find_map(|e| find(e, name))))
+            })
+        }
+        let explanations = |s: &TagStruct<'_>| -> Vec<String> {
+            docs.entries_for_struct(s)
+                .iter()
+                .filter_map(|e| match e {
+                    DefEntry::Explanation { title, .. } => Some(title.clone()),
+                    DefEntry::Field { .. } => None,
+                })
+                .collect()
+        };
+
+        let object = find(tag.root(), "object_block_struct").expect("the object struct");
+        assert_eq!(object.definition().guid(), [0; 16], "the premise: H2 structs have no GUID");
+        let titles = explanations(&object);
+        for expected in ["Applying collision damage", "Game collision damage parameters", "Absolute collision damage parameters"] {
+            assert!(titles.iter().any(|t| t == expected), "object struct lost {expected:?}: {titles:?}");
+        }
+        let function = find(tag.root(), "object_function_block_struct").expect("a functions element");
+        assert!(explanations(&function).is_empty(), "the functions element borrowed another struct's explanations");
+
+        // The object's explanations still precede the fields they introduce.
+        let order: Vec<&str> = docs
+            .entries_for_struct(&object)
+            .iter()
+            .filter_map(|e| match e {
+                DefEntry::Explanation { title, .. } => Some(title.as_str()),
+                DefEntry::Field { clean_name, .. } => Some(clean_name.as_str()),
+            })
+            .collect();
+        let at = |name: &str| order.iter().position(|n| *n == name).unwrap();
+        assert!(at("Applying collision damage") < at("Apply collision damage scale"));
+        assert!(at("Game collision damage parameters") < at("min game acc (default)"));
     }
 }

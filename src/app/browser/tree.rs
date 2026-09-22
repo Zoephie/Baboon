@@ -741,7 +741,11 @@ pub(in crate::app) fn draw_tree_lazy(
     ui: &mut Ui,
     tree: &mut TagTree,
     entries: &mut Vec<TagEntry>,
-    group_tree: &mut TagTree,
+    // The Groups view's tree, to keep in step with lazily loaded folders. Only
+    // when it has nothing better: built from the full tag index, it already
+    // holds every group, and rebuilding it from the handful of lazily loaded
+    // entries would cut it down to the folders the user happened to expand.
+    mut group_tree: Option<&mut TagTree>,
     root: &Path,
     names: &TagNameIndex,
     selected: Option<&str>,
@@ -779,7 +783,7 @@ pub(in crate::app) fn draw_tree_lazy(
                 ui,
                 node,
                 entries,
-                group_tree,
+                group_tree.as_deref_mut(),
                 root,
                 names,
                 selected,
@@ -818,7 +822,11 @@ pub(in crate::app) fn draw_tree_node_lazy(
     ui: &mut Ui,
     node: &mut TagTreeNode,
     entries: &mut Vec<TagEntry>,
-    group_tree: &mut TagTree,
+    // The Groups view's tree, to keep in step with lazily loaded folders. Only
+    // when it has nothing better: built from the full tag index, it already
+    // holds every group, and rebuilding it from the handful of lazily loaded
+    // entries would cut it down to the folders the user happened to expand.
+    mut group_tree: Option<&mut TagTree>,
     root: &Path,
     names: &TagNameIndex,
     selected: Option<&str>,
@@ -852,7 +860,9 @@ pub(in crate::app) fn draw_tree_node_lazy(
             if !node.entries_loaded {
                 match load_folder_node_entries(root, node, entries, names) {
                     Ok(()) => {
-                        *group_tree = crate::source::build_group_tree(entries);
+                        if let Some(group_tree) = group_tree.as_deref_mut() {
+                            *group_tree = crate::source::build_group_tree(entries);
+                        }
                         *status_update = Some(format!(
                             "Loaded {} tag(s) from {}",
                             node.entries.len(),
@@ -904,7 +914,7 @@ pub(in crate::app) fn draw_tree_node_lazy(
                         ui,
                         child,
                         entries,
-                        group_tree,
+                        group_tree.as_deref_mut(),
                         root,
                         names,
                         selected,
@@ -2698,6 +2708,70 @@ pub(in crate::app) fn supports_delete_menu(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Expanding a folder lazily loads its tags and, when handed the Groups
+    /// view's tree, rebuilds it from the lazily loaded entries. Handed the tree
+    /// built from the full index, that cut Groups down to the folders the user
+    /// had expanded (10 groups of halo2_mcc's 120). The browser now hands it
+    /// over only when there is no full index; handed nothing, it is left alone.
+    #[test]
+    fn expanding_a_lazy_folder_leaves_a_full_index_group_tree_alone() {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-lazy-groups-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("empty_folder")).unwrap();
+        let full_index = vec![TagEntry {
+            key: "objects/characters/masterchief/masterchief.biped".to_owned(),
+            display_path: "objects/characters/masterchief/masterchief.biped".to_owned(),
+            group_tag: u32::from_be_bytes(*b"bipd"),
+            group_name: None,
+            location: TagEntryLocation::LooseFile(root.join("objects/characters/masterchief/masterchief.biped")),
+        }];
+        let ancestors = vec!["empty_folder".to_owned()];
+
+        let expand = |hand_over: bool| -> usize {
+            let mut tree = crate::source::build_folder_directory_tree(&root).unwrap();
+            let mut entries = Vec::new();
+            let mut group_tree = crate::source::build_group_tree(&full_index);
+            assert_eq!(group_tree.children.len(), 1);
+            let ctx = egui::Context::default();
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let mut status = None;
+                    draw_tree_lazy(
+                        ui,
+                        &mut tree,
+                        &mut entries,
+                        hand_over.then_some(&mut group_tree),
+                        &root,
+                        &TagNameIndex::default(),
+                        None,
+                        "",
+                        false,
+                        false,
+                        &mut status,
+                        // Reveal opens the folder, which loads it.
+                        Some(Reveal { key: "unused", remaining: &ancestors }),
+                        BrowserSort::default(),
+                        true,
+                        None,
+                    );
+                });
+            });
+            assert!(tree.children.iter().any(|node| node.entries_loaded), "the folder was expanded and loaded");
+            group_tree.children.len()
+        };
+
+        assert_eq!(expand(true), 0, "handed over, it is rebuilt from the lazy entries (the bug's mechanism)");
+        assert_eq!(expand(false), 1, "not handed over, the full-index tree keeps its groups");
+        let _ = std::fs::remove_dir_all(root);
+    }
 
     #[test]
     fn hover_paths_use_the_host_separator() {

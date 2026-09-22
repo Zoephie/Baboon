@@ -120,8 +120,7 @@ fn push_shader_override_create(edit: &mut FieldEditContext<'_>, row_edit: &Shade
                 ..
             } = &mut op
             {
-                *initial_function_data =
-                    decode_hex(&constant_function_hex(value)).unwrap_or_default();
+                *initial_function_data = h2_constant_scalar_function_data(value, None);
             }
             edit.h2_shader_param_ops.push(op);
             true
@@ -2015,8 +2014,7 @@ pub(in crate::app) fn draw_shader_editable_value(
                     ..
                 } = &mut op
                 {
-                    *initial_function_data =
-                        decode_hex(&constant_function_hex(v)).unwrap_or_default();
+                    *initial_function_data = h2_constant_scalar_function_data(v, None);
                 }
                 edit.h2_shader_param_ops.push(op);
             }

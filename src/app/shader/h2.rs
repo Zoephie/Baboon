@@ -474,6 +474,14 @@ impl<'a> H2PostprocessBindings<'a> {
     }
 
     fn function(&self, parameter_index: usize, animation_type: i32) -> Option<FunctionView> {
+        // This module still carries the animation type as its stored index;
+        // name it at the boundary.
+        let typed = u32::try_from(animation_type).ok().and_then(Halo2ShaderAnimationType::from_index);
+        self.function_view(parameter_index, animation_type)
+            .map(|view| view.with_color_types(h2_animation_color_types(typed)))
+    }
+
+    fn function_view(&self, parameter_index: usize, animation_type: i32) -> Option<FunctionView> {
         let legacy = match animation_type {
             11 => h2_find_postprocess_by_parameter(&self.value_overlays, parameter_index),
             12 => h2_find_postprocess_by_parameter(&self.color_overlays, parameter_index),
@@ -723,13 +731,6 @@ fn h2_template_base_parameter_row(
             })
         }) {
             let mut row = h2_function_template_row(label, function, template_param, 12);
-            row.default_cell = default_cell;
-            row.parameter_type = Some(parameter_type_label.to_owned());
-            return Some(row);
-        }
-        if let Some(mut row) =
-            h2_legacy_animation_constant_row(&label, instance, template_param, 12)
-        {
             row.default_cell = default_cell;
             row.parameter_type = Some(parameter_type_label.to_owned());
             return Some(row);
@@ -992,10 +993,6 @@ fn h2_template_animation_row(
         h2_postprocess_constant_animation_row(&label, postprocess, template_index, animation_type)
     {
         row
-    } else if let Some(row) =
-        h2_legacy_animation_constant_row(&label, instance, template_param, animation_type)
-    {
-        row
     } else {
         let initial_function_data =
             h2_template_initial_function_data(template_param, animation_type);
@@ -1071,7 +1068,7 @@ fn h2_function_template_row(
                     current: h2_color_edit_current(rgba),
                     kind: ShaderRowEditKind::H2FunctionColor {
                         block_path,
-                        legacy_data: None,
+                        legacy_data: Some(function.function.to_bytes()),
                     },
                 }),
                 context_menu: None,
@@ -1095,7 +1092,13 @@ fn h2_function_template_row(
         return row;
     }
 
-    if let Some(value) = function.function.as_constant() {
+    // Only a Constant-type function becomes a numeric row: the edit writes a
+    // constant, and a flat periodic (say) would lose its shape to it.
+    if let Some(value) = function
+        .function
+        .as_constant()
+        .filter(|_| function.function.function_type() == FunctionType::Constant)
+    {
         let block_path = match function.edit.as_ref().map(|edit| &edit.data) {
             Some(FunctionDataStorage::Halo2ByteBlock(path)) => path.clone(),
             _ => String::new(),
@@ -1118,7 +1121,7 @@ fn h2_function_template_row(
                 current,
                 kind: ShaderRowEditKind::H2FunctionScalar {
                     block_path,
-                    legacy_data: None,
+                    legacy_data: Some(function.function.to_bytes()),
                 },
             }),
             context_menu: None,
@@ -1128,7 +1131,29 @@ fn h2_function_template_row(
         row.constant_function_view = Some(function);
         return row;
     }
-    let mut row = shader_function_grid_row(label, function);
+    // A Halo 2 function that is not a constant keeps the grid's placeholder
+    // text and opens the function editor from it.
+    let mut row = if function.function.as_h2().is_some() {
+        ShaderGridRow {
+            label,
+            default_cell: None,
+            value_cell: ShaderGridCell {
+                text: "<function data goes here>".to_owned(),
+                value_kind: "value",
+                color: None,
+            },
+            fill: material_function_row(),
+            parameter_type: Some("function".to_owned()),
+            is_overridden: true,
+            function: None,
+            edit: None,
+            context_menu: None,
+            create_anim_op: None,
+            constant_function_view: Some(function),
+        }
+    } else {
+        shader_function_grid_row(label, function)
+    };
     row.default_cell = Some(ShaderGridCell {
         text: format!(
             "value: {}",
@@ -1141,266 +1166,6 @@ fn h2_function_template_row(
         color: None,
     });
     row
-}
-
-fn h2_legacy_animation_constant_row(
-    label: &str,
-    instance: Option<&H2ParameterInstance<'_>>,
-    template_param: TagStruct<'_>,
-    animation_type: i32,
-) -> Option<ShaderGridRow> {
-    let instance = instance?;
-    let (anim_index, anim) = h2_find_animation_by_type(instance.element, animation_type)?;
-    let path = format!(
-        "parameters[{}]/animation properties[{anim_index}]",
-        instance.index
-    );
-    let function_struct = anim.field("function")?.as_struct()?;
-    let function_path = append_field_path(&path, "function");
-    let block_path = h2_function_data_path(function_struct, &function_path)?;
-    let bytes = halo2_function_bytes_from_struct(function_struct)?;
-    if is_h2_legacy_nonconstant_function_data(&bytes) {
-        return Some(h2_legacy_function_placeholder_row(
-            label,
-            h2_legacy_function_view(anim, function_struct, &function_path),
-        ));
-    }
-
-    if animation_type == 12 {
-        let rgba = h2_legacy_constant_color(&bytes)?;
-        let color = MaterialColorPopup::new(label, rgba[0], rgba[1], rgba[2], rgba[3]);
-        let synthetic = h2_synthetic_function_view_for_constant_color(rgba, anim, animation_type);
-        return Some(ShaderGridRow {
-            label: label.to_owned(),
-            default_cell: Some(ShaderGridCell {
-                text: "color: RGB".to_owned(),
-                value_kind: "default",
-                color: h2_template_animation_default_color(template_param, animation_type)
-                    .map(|rgba| MaterialColorPopup::new("", rgba[0], rgba[1], rgba[2], rgba[3])),
-            }),
-            value_cell: ShaderGridCell {
-                text: "color: RGB".to_owned(),
-                value_kind: "value",
-                color: Some(color),
-            },
-            fill: material_numeric_row(),
-            parameter_type: Some("color".to_owned()),
-            is_overridden: true,
-            function: None,
-            edit: Some(ShaderRowEdit {
-                path: block_path.clone(),
-                current: h2_color_edit_current(rgba),
-                kind: ShaderRowEditKind::H2FunctionColor {
-                    block_path,
-                    legacy_data: Some(bytes),
-                },
-            }),
-            context_menu: None,
-            create_anim_op: None,
-            constant_function_view: synthetic,
-        });
-    }
-
-    let value = h2_legacy_constant_scalar(&bytes)?;
-    let current = format_shader_float(value);
-    let synthetic = h2_synthetic_function_view_for_constant_scalar(value, anim, animation_type);
-    Some(ShaderGridRow {
-        label: label.to_owned(),
-        default_cell: Some(ShaderGridCell {
-            text: String::new(),
-            value_kind: "default",
-            color: None,
-        }),
-        value_cell: shader_value_cell(format!("value: {current}")),
-        fill: material_numeric_row(),
-        parameter_type: Some("animated scalar".to_owned()),
-        is_overridden: true,
-        function: None,
-        edit: Some(ShaderRowEdit {
-            path: block_path.clone(),
-            current,
-            kind: ShaderRowEditKind::H2FunctionScalar {
-                block_path,
-                legacy_data: Some(bytes),
-            },
-        }),
-        context_menu: None,
-        create_anim_op: None,
-        constant_function_view: synthetic,
-    })
-}
-
-fn h2_legacy_function_placeholder_row(
-    label: &str,
-    function: Option<FunctionView>,
-) -> ShaderGridRow {
-    ShaderGridRow {
-        label: label.to_owned(),
-        default_cell: Some(ShaderGridCell {
-            text: String::new(),
-            value_kind: "default",
-            color: None,
-        }),
-        value_cell: ShaderGridCell {
-            text: "<function data goes here>".to_owned(),
-            value_kind: "value",
-            color: None,
-        },
-        fill: material_function_row(),
-        parameter_type: Some("function".to_owned()),
-        is_overridden: true,
-        function: None,
-        edit: None,
-        context_menu: None,
-        create_anim_op: None,
-        constant_function_view: function,
-    }
-}
-
-fn h2_legacy_function_view(
-    animation_property: TagStruct<'_>,
-    function_struct: TagStruct<'_>,
-    function_path: &str,
-) -> Option<FunctionView> {
-    let data_block_path = h2_function_data_path(function_struct, function_path)?;
-    let bytes = halo2_function_bytes_from_struct(function_struct)?;
-    let h2_legacy = H2LegacyFunctionView::parse(bytes.clone());
-    let function =
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| TagFunction::parse(&bytes)))
-            .ok()
-            .and_then(Result::ok)
-            .or_else(|| {
-                decode_hex(&constant_function_hex(0.0))
-                    .ok()
-                    .and_then(|data| TagFunction::parse(&data).ok())
-            })?;
-    let mut view = if let Some(h2_legacy) = h2_legacy {
-        FunctionView::from_function(function).with_h2_legacy(h2_legacy)
-    } else {
-        FunctionView::from_function(function).with_h2_scalar_ui()
-    };
-    view.input_name = animation_property
-        .read_string_id("input name")
-        .unwrap_or_default();
-    view.range_name = animation_property
-        .read_string_id("range name")
-        .unwrap_or_default();
-    if view.h2_legacy.is_none() {
-        view.output_index = animation_property
-            .read_int_any("type")
-            .and_then(|value| i32::try_from(value).ok());
-    }
-    view.time_period_in_seconds = animation_property
-        .read_real("time period")
-        .or_else(|| animation_property.read_real("time period in seconds"))
-        .unwrap_or_default();
-
-    let animation_path = function_path
-        .rsplit_once('/')
-        .map(|(base, _)| base)
-        .unwrap_or("");
-    let sibling_path = |name: &str| {
-        if animation_path.is_empty() {
-            escape_field_path_segment(name)
-        } else {
-            append_field_path(animation_path, &escape_field_path_segment(name))
-        }
-    };
-    let time_field = if animation_property.field("time period").is_some() {
-        "time period"
-    } else if animation_property.field("time period in seconds").is_some() {
-        "time period in seconds"
-    } else {
-        ""
-    };
-
-    Some(
-        view.with_edit(FunctionEditPaths {
-            data: FunctionDataStorage::Halo2ByteBlock(data_block_path),
-            parameter_type: animation_property
-                .field("type")
-                .and_then(|field| field.value())
-                .is_some()
-                .then(|| sibling_path("type"))
-                .unwrap_or_default(),
-            input_name: animation_property
-                .field("input name")
-                .and_then(|field| field.value())
-                .is_some()
-                .then(|| sibling_path("input name"))
-                .unwrap_or_default(),
-            range_name: animation_property
-                .field("range name")
-                .and_then(|field| field.value())
-                .is_some()
-                .then(|| sibling_path("range name"))
-                .unwrap_or_default(),
-            time_period: (!time_field.is_empty()
-                && animation_property
-                    .field(time_field)
-                    .and_then(|field| field.value())
-                    .is_some())
-            .then(|| sibling_path(time_field))
-            .unwrap_or_default(),
-            block_path: animation_path.to_owned(),
-            block_index: animation_path
-                .rsplit_once('[')
-                .and_then(|(_, rest)| rest.strip_suffix(']'))
-                .and_then(|index| index.parse::<usize>().ok())
-                .unwrap_or(0),
-        }),
-    )
-}
-
-fn h2_synthetic_function_view_for_constant_scalar(
-    value: f32,
-    animation_property: TagStruct<'_>,
-    animation_type: i32,
-) -> Option<FunctionView> {
-    let data = decode_hex(&constant_function_hex(value)).ok()?;
-    let function = TagFunction::parse(&data).ok()?;
-    Some(h2_readonly_function_view(
-        function,
-        animation_property,
-        animation_type,
-    ))
-}
-
-fn h2_synthetic_function_view_for_constant_color(
-    rgba: [f32; 4],
-    animation_property: TagStruct<'_>,
-    animation_type: i32,
-) -> Option<FunctionView> {
-    let data = decode_hex(&constant_color_function_hex(
-        rgba[0], rgba[1], rgba[2], rgba[3],
-    ))
-    .ok()?;
-    let function = TagFunction::parse(&data).ok()?;
-    Some(h2_readonly_function_view(
-        function,
-        animation_property,
-        animation_type,
-    ))
-}
-
-fn h2_readonly_function_view(
-    function: TagFunction,
-    animation_property: TagStruct<'_>,
-    animation_type: i32,
-) -> FunctionView {
-    let mut view = FunctionView::from_function(function).with_h2_scalar_ui();
-    view.input_name = animation_property
-        .read_string_id("input name")
-        .unwrap_or_default();
-    view.range_name = animation_property
-        .read_string_id("range name")
-        .unwrap_or_default();
-    view.output_index = Some(animation_type);
-    view.time_period_in_seconds = animation_property
-        .read_real("time period")
-        .or_else(|| animation_property.read_real("time period in seconds"))
-        .unwrap_or_default();
-    view
 }
 
 fn h2_postprocess_constant_animation_row(
@@ -1552,14 +1317,12 @@ fn h2_template_initial_function_data(
 ) -> Vec<u8> {
     if let Some([r, g, b, a]) = h2_template_animation_default_color(template_param, animation_type)
     {
-        return decode_hex(&constant_color_function_hex(r, g, b, a))
-            .unwrap_or_else(|_| vec![0; 32]);
+        return h2_constant_color_function_data(r, g, b, a, None);
     }
-    decode_hex(&constant_function_hex(h2_template_animation_default_value(
-        template_param,
-        animation_type,
-    )))
-    .unwrap_or_else(|_| vec![0; 32])
+    h2_constant_scalar_function_data(
+        h2_template_animation_default_value(template_param, animation_type),
+        None,
+    )
 }
 
 fn h2_template_default_color(template_param: TagStruct<'_>) -> Option<[f32; 4]> {
@@ -1892,11 +1655,11 @@ fn h2_function_view_from_animation_property(
 ) -> Option<FunctionView> {
     let data_block_path = h2_function_data_path(function_struct, function_path)?;
     let bytes = halo2_function_bytes_from_struct(function_struct)?;
-    if is_h2_legacy_function_data(&bytes) {
-        return None;
-    }
-    let function = TagFunction::parse(&bytes).ok()?;
-    let mut view = FunctionView::from_function(function);
+    let animation_type = animation_property
+        .read_enum_name("type")
+        .and_then(|name| Halo2ShaderAnimationType::from_schema_name(&name));
+    let mut view = FunctionView::from_function(h2_tag_function(&bytes)?)
+        .with_color_types(h2_animation_color_types(animation_type));
     view.input_name = animation_property
         .read_string_id("input name")
         .unwrap_or_default();
@@ -1930,7 +1693,7 @@ fn h2_function_view_from_animation_property(
         ""
     };
     Some(
-        view.with_h2_scalar_ui().with_edit(FunctionEditPaths {
+        view.with_edit(FunctionEditPaths {
             data: FunctionDataStorage::Halo2ByteBlock(data_block_path),
             parameter_type: animation_property
                 .field("type")
@@ -1967,6 +1730,17 @@ fn h2_function_view_from_animation_property(
     )
 }
 
+/// The color graph types Guerilla offers a shader animation: its color editor
+/// (2/3/4-color) for color animations, its scalar editor otherwise. Shipped
+/// shaders agree: all 7,000 non-color animation functions are scalar, and
+/// 2,023 of 2,026 color ones are 2/3/4-color.
+fn h2_animation_color_types(animation_type: Option<Halo2ShaderAnimationType>) -> ColorTypeChoices {
+    match animation_type {
+        Some(Halo2ShaderAnimationType::Color) => ColorTypeChoices::MultiColorOnly,
+        _ => ColorTypeChoices::ScalarOnly,
+    }
+}
+
 fn h2_function_data_path(function_struct: TagStruct<'_>, function_path: &str) -> Option<String> {
     function_struct.field("data")?.as_block()?;
     Some(append_field_path(function_path, "data"))
@@ -1992,8 +1766,7 @@ fn classic_halo2_function_view_from_struct(
             halo2_function_bytes_from_struct(inner)?,
         )
     };
-    let function = TagFunction::parse(&bytes).ok()?;
-    let mut view = FunctionView::from_function(function);
+    let mut view = FunctionView::from_function(h2_tag_function(&bytes)?);
     view.input_name = parent.read_string_id("input name").unwrap_or_default();
     view.range_name = parent.read_string_id("range name").unwrap_or_default();
     view.time_period_in_seconds = parent
@@ -2031,7 +1804,7 @@ fn classic_halo2_function_view_from_struct(
             .is_some();
 
     Some(
-        view.with_h2_scalar_ui().with_edit(FunctionEditPaths {
+        view.with_edit(FunctionEditPaths {
             data: FunctionDataStorage::Halo2ByteBlock(data_block_path),
             parameter_type: String::new(),
             input_name: input_editable

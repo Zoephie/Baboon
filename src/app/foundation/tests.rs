@@ -218,21 +218,6 @@ mod tests {
         assert!(is_internal_schema_marker_name("whore function"));
     }
 
-    #[test]
-    fn legacy_mapping_function_bytes_build_inline_function_view() {
-        let mut raw = vec![0; 20];
-        raw[0] = 4;
-        raw[1] = 1;
-        raw[2] = 5;
-        raw[4..8].copy_from_slice(&0.8f32.to_le_bytes());
-        raw[8..12].copy_from_slice(&0.4f32.to_le_bytes());
-        raw[12..16].copy_from_slice(&0.25f32.to_le_bytes());
-
-        let view = legacy_mapping_function_view(&raw).expect("legacy data should parse");
-
-        assert!(view.h2_legacy.is_some());
-        assert_eq!(view.data_bytes(), raw);
-    }
 
     #[test]
     fn tag_reference_picker_paths_must_be_under_tags_root() {

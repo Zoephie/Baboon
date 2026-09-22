@@ -36,8 +36,8 @@ pub(in crate::app) struct MaterialColorPopup {
 
 #[derive(Clone, Copy)]
 pub(in crate::app) enum FunctionDraftColorTarget {
-    H3Logical(usize),
-    H2Logical(usize),
+    /// A logical color index (0..color count) of the function being edited.
+    Logical(usize),
 }
 
 #[derive(Clone, Copy)]

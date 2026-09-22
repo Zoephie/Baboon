@@ -1,32 +1,6 @@
 use super::*;
 
 #[test]
-fn generic_function_type_combo_offers_every_supported_mapping_function_type() {
-    let expected = [
-        FunctionType::Identity,
-        FunctionType::Constant,
-        FunctionType::Transition,
-        FunctionType::Periodic,
-        FunctionType::Linear,
-        FunctionType::LinearKey,
-        FunctionType::MultiLinearKey,
-        FunctionType::Spline,
-        FunctionType::MultiSpline,
-        FunctionType::Exponent,
-        FunctionType::Spline2,
-    ];
-
-    assert_eq!(EDITABLE_FUNCTION_TYPES, expected);
-    for kind in expected {
-        assert!(
-            is_editable_function_type(kind),
-            "{kind:?} should be editable"
-        );
-        assert_eq!(FunctionType::from_byte(kind as u8), Some(kind));
-    }
-}
-
-#[test]
 fn foundation_master_types_keep_all_curve_variants_in_curve_mode() {
     assert_eq!(
         EngineMasterType::from_function_type(FunctionType::Constant),
@@ -72,242 +46,109 @@ fn foundation_color_stop_slots_match_engine_header_layout() {
     assert_eq!(color_graph_slots(ColorGraphType::FourColor), &[0, 1, 2, 3]);
 }
 
-#[test]
-fn h2_legacy_function_type_options_match_supported_mapping_function_types() {
-    assert_eq!(
-        H2_FUNCTION_TYPE_OPTIONS.len(),
-        EDITABLE_FUNCTION_TYPES.len()
-    );
-    for (value, _) in H2_FUNCTION_TYPE_OPTIONS {
-        let kind = FunctionType::from_byte(value).expect("H2 option should map to function type");
-        assert!(
-            EDITABLE_FUNCTION_TYPES.contains(&kind),
-            "{kind:?} should be available in generic function editor too"
-        );
-    }
+/// An H2 byte-block of `len` bytes with the given header.
+fn h2_block(len: usize, function_type: u8, flags: u8, fn1: u8) -> Vec<u8> {
+    let mut raw = vec![0; len];
+    raw[0] = function_type;
+    raw[1] = flags;
+    raw[2] = fn1;
+    raw
+}
+
+fn h2(raw: &[u8]) -> TagFunction {
+    h2_tag_function(raw).expect("an H2 block parses")
 }
 
 #[test]
-fn h2_output_type_options_match_guerilla_color_counts() {
-    assert_eq!(
-        H2_OUTPUT_TYPE_OPTIONS,
-        [
-            (0, "scalar (intensity)"),
-            (1, "scalar (alpha)"),
-            (0x20, "2-color"),
-            (0x40, "3-color"),
-            (0x80, "4-color"),
-        ]
-    );
-    assert_eq!(h2_output_type_label(2), "2-color");
-    assert_eq!(h2_output_type_label(3), "3-color");
-    assert_eq!(h2_output_type_label(4), "4-color");
+fn h2_option_tables_are_the_engines() {
+    use blam_tags::tag_function::h2::{
+        FUNCTION_TYPES, TRANSITION_FUNCTION_NAMES, color_graph_type_name, function_type_name,
+    };
+    // Guerilla's picker lists every type, the multi types included.
+    assert_eq!(FUNCTION_TYPES.len(), 11);
+    assert_eq!(function_type_name(FunctionType::MultiLinearKey), "multi linear key");
+    assert_eq!(function_type_name(FunctionType::MultiSpline), "multi spline");
+    // The color graph type is the flags' high nibble; there is no "scalar
+    // (alpha)" (that was the RANGE bit). One color is "constant".
+    assert_eq!(color_graph_type_name(ColorGraphType::Scalar), "scalar (intensity)");
+    assert_eq!(color_graph_type_name(ColorGraphType::OneColor), "constant");
+    assert_eq!(TRANSITION_FUNCTION_NAMES.len(), 8);
 }
 
 #[test]
-fn h2_legacy_52_byte_periodic_function_reads_frequency_at_offset_20() {
-    let mut raw = vec![0; 52];
-    raw[0] = 3;
-    raw[2] = 6;
+fn h2_52_byte_periodic_reads_frequency_at_offset_20() {
+    let mut raw = h2_block(52, 3, 0, 6);
     raw[8..12].copy_from_slice(&1.0f32.to_le_bytes());
     raw[20..24].copy_from_slice(&0.25f32.to_le_bytes());
     raw[32..36].copy_from_slice(&1.0f32.to_le_bytes());
-    raw[36..40].copy_from_slice(&1.0f32.to_le_bytes());
-
-    let view = H2LegacyFunctionView::parse(raw).expect("legacy function should parse");
-
-    assert_eq!(view.exponent, 6);
-    assert_eq!(view.min, 0.0);
-    assert_eq!(view.max, 1.0);
-    assert_eq!(view.frequency, 0.25);
-    assert_eq!(view.phase, 0.0);
-    assert_eq!(&view.to_bytes()[20..24], &0.25f32.to_le_bytes());
+    let function = h2(&raw);
+    let f = function.as_h2().unwrap();
+    assert_eq!(f.function_index(0), 6);
+    assert_eq!((f.clamp_range_min(), f.clamp_range_max()), (0.0, 1.0));
+    assert_eq!(f.periodic_frequency_phase(0), Some((0.25, 0.0)));
+    assert_eq!(f.amplitude_range(0), Some((0.0, 1.0)));
+    assert_eq!(function.to_bytes(), raw, "reading never rewrites");
 }
 
 #[test]
-fn h2_legacy_color_function_preserves_bgra_endpoints() {
-    let mut raw = vec![0; 28];
-    raw[0] = 3;
-    raw[1] = 0x20;
-    raw[2] = 2;
+fn h2_two_color_second_color_is_slot_3() {
+    let mut raw = h2_block(52, 3, 0x20, 2);
     raw[4..8].copy_from_slice(&[0x10, 0x20, 0x30, 0x40]);
     raw[8..12].copy_from_slice(&[0x50, 0x60, 0x70, 0x80]);
-    raw[12..16].copy_from_slice(&0.25f32.to_le_bytes());
-    raw[16..20].copy_from_slice(&0.5f32.to_le_bytes());
-
-    let view = H2LegacyFunctionView::parse(raw.clone()).expect("color function should parse");
-    let data = view.to_bytes();
-
-    assert!(view.is_color_output());
-    assert_eq!(&data[4..12], &raw[4..12]);
-    assert_eq!(&data[12..16], &0.25f32.to_le_bytes());
-    assert_eq!(&data[16..20], &0.5f32.to_le_bytes());
+    raw[16..20].copy_from_slice(&[0x01, 0x02, 0x03, 0x04]);
+    let mut function = h2(&raw);
+    assert_eq!(function.color_count(), 2);
+    assert_eq!(function.as_h2().unwrap().color(1), Some(0x0403_0201));
+    function.as_h2_mut().unwrap().set_color(1, 0x04CC_BBAA).unwrap();
+    let data = function.to_bytes();
+    assert_eq!(&data[16..20], &[0xAA, 0xBB, 0xCC, 0x04]);
+    assert_eq!(&data[4..16], &raw[4..16], "slots 0-2 untouched");
 }
 
 #[test]
-fn h2_legacy_four_color_function_preserves_all_color_slots() {
-    let mut raw = vec![0; 28];
-    raw[0] = 7;
-    raw[1] = 0x80;
-    raw[4..8].copy_from_slice(&[0x10, 0x11, 0x12, 0x13]);
-    raw[8..12].copy_from_slice(&[0x20, 0x21, 0x22, 0x23]);
-    raw[12..16].copy_from_slice(&[0x30, 0x31, 0x32, 0x33]);
-    raw[16..20].copy_from_slice(&[0x40, 0x41, 0x42, 0x43]);
-    let mut view = H2LegacyFunctionView::parse(raw.clone()).expect("color function should parse");
-
-    assert_eq!(view.color_stop_count(), 4);
-    assert_eq!(view.color_stop(3), Color32::from_rgb(0x42, 0x41, 0x40));
-    view.set_color_stop(2, Color32::from_rgb(0xAA, 0xBB, 0xCC));
-    let data = view.to_bytes();
-
-    assert_eq!(&data[4..12], &raw[4..12]);
-    assert_eq!(&data[12..16], &[0xCC, 0xBB, 0xAA, 0x33]);
-    assert_eq!(&data[16..20], &raw[16..20]);
+fn h2_flags_0x40_is_four_color() {
+    let mut raw = h2_block(116, 7, 0x40, 4);
+    for (slot, bytes) in [[0x10u8, 0x11, 0x12, 0x13], [0x20, 0x21, 0x22, 0x23], [0x30, 0x31, 0x32, 0x33], [0x40, 0x41, 0x42, 0x43]]
+        .iter()
+        .enumerate()
+    {
+        raw[4 + 4 * slot..8 + 4 * slot].copy_from_slice(bytes);
+    }
+    let function = h2(&raw);
+    assert_eq!(function.color_graph_type(), ColorGraphType::FourColor);
+    assert_eq!(function.as_h2().unwrap().color(3), Some(0x4342_4140));
 }
 
 #[test]
-fn h2_legacy_color_stop_edit_writes_bgr_and_preserves_alpha() {
-    let mut raw = vec![0; 28];
-    raw[0] = 3;
-    raw[1] = 2;
-    raw[4..8].copy_from_slice(&[1, 2, 3, 4]);
-    raw[8..12].copy_from_slice(&[5, 6, 7, 8]);
-    let mut view = H2LegacyFunctionView::parse(raw).expect("color function should parse");
-
-    assert_eq!(view.color_stop(0), Color32::from_rgb(3, 2, 1));
-    view.set_color_stop(1, Color32::from_rgb(0xAA, 0xBB, 0xCC));
-    let data = view.to_bytes();
-
-    assert_eq!(&data[8..12], &[0xCC, 0xBB, 0xAA, 8]);
+fn h2_color_graph_type_and_range_never_touch_each_other() {
+    // Luna's report: picking the old "scalar (alpha)" output type set the
+    // RANGE bit. The two now live in their own bits.
+    let mut function = h2(&h2_block(28, 1, 0, 0));
+    let f = function.as_h2_mut().unwrap();
+    f.set_color_graph_type(ColorGraphType::TwoColor);
+    assert!(!f.is_ranged());
+    f.set_ranged(true);
+    assert_eq!(f.color_graph_type(), ColorGraphType::TwoColor);
+    assert_eq!(function.to_bytes()[1], 0x21);
 }
 
 #[test]
-fn h2_legacy_unset_second_color_displays_as_first_until_edited() {
-    let mut raw = vec![0; 28];
-    raw[0] = 3;
-    raw[1] = 2;
-    raw[4..8].copy_from_slice(&[0x00, 0x00, 0xC6, 0x00]);
-    let mut view = H2LegacyFunctionView::parse(raw).expect("color function should parse");
-
-    assert_eq!(view.color_stop(0), Color32::from_rgb(0xC6, 0x00, 0x00));
-    assert_eq!(view.color_stop(1), Color32::from_rgb(0xC6, 0x00, 0x00));
-
-    view.set_color_stop(1, Color32::from_rgb(0x80, 0x10, 0x20));
-    let data = view.to_bytes();
-
-    assert_eq!(&data[4..8], &[0x00, 0x00, 0xC6, 0x00]);
-    assert_eq!(&data[8..12], &[0x20, 0x10, 0x80, 0x00]);
-}
-
-#[test]
-fn h2_legacy_three_and_four_color_show_real_black_unset_slots() {
-    let mut raw = vec![0; 28];
-    raw[0] = 7;
-    raw[1] = 0x40;
-    raw[4..8].copy_from_slice(&[0x00, 0x00, 0xC6, 0x00]);
-    let mut view = H2LegacyFunctionView::parse(raw.clone()).expect("color function should parse");
-
-    assert_eq!(view.color_stop_count(), 3);
-    assert_eq!(view.color_stop(0), Color32::from_rgb(0xC6, 0x00, 0x00));
-    assert_eq!(view.color_stop(1), Color32::BLACK);
-    assert_eq!(view.color_stop(2), Color32::BLACK);
-
-    view.output_type = 0x80;
-    assert_eq!(view.color_stop_count(), 4);
-    assert_eq!(view.color_stop(0), Color32::from_rgb(0xC6, 0x00, 0x00));
-    assert_eq!(view.color_stop(1), Color32::BLACK);
-    assert_eq!(view.color_stop(2), Color32::BLACK);
-    assert_eq!(view.color_stop(3), Color32::BLACK);
-}
-
-#[test]
-fn h2_legacy_color_output_conversion_preserves_endpoints_and_inserts_black() {
-    let mut raw = vec![0; 28];
-    raw[0] = 7;
-    raw[1] = 0x20;
-    raw[4..8].copy_from_slice(&[0x00, 0x00, 0xC6, 0x00]);
-    let mut view = H2LegacyFunctionView::parse(raw).expect("color function should parse");
-
-    assert_eq!(view.color_stop(0), Color32::from_rgb(0xC6, 0x00, 0x00));
-    assert_eq!(view.color_stop(1), Color32::from_rgb(0xC6, 0x00, 0x00));
-
-    view.set_output_type(0x40);
-    assert_eq!(view.color_stop_count(), 3);
-    assert_eq!(view.color_stop(0), Color32::from_rgb(0xC6, 0x00, 0x00));
-    assert_eq!(view.color_stop(1), Color32::BLACK);
-    assert_eq!(view.color_stop(2), Color32::from_rgb(0xC6, 0x00, 0x00));
-    assert_eq!(
-        &view.to_bytes()[4..16],
-        &[0x00, 0x00, 0xC6, 0x00, 0, 0, 0, 0, 0x00, 0x00, 0xC6, 0x00]
-    );
-
-    view.set_output_type(0x80);
-    assert_eq!(view.color_stop_count(), 4);
-    assert_eq!(view.color_stop(0), Color32::from_rgb(0xC6, 0x00, 0x00));
-    assert_eq!(view.color_stop(1), Color32::BLACK);
-    assert_eq!(view.color_stop(2), Color32::BLACK);
-    assert_eq!(view.color_stop(3), Color32::from_rgb(0xC6, 0x00, 0x00));
-    assert_eq!(
-        &view.to_bytes()[4..20],
-        &[
-            0x00, 0x00, 0xC6, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0x00, 0x00, 0xC6, 0x00,
-        ]
-    );
-}
-
-#[test]
-fn damage_effect_vibration_function_reads_transition_values_at_observed_offsets() {
-    let mut raw = vec![0; 36];
-    raw[0] = 2;
-    raw[1] = 0;
-    raw[2] = 1;
+fn damage_effect_vibration_is_a_transition_function() {
+    let mut raw = h2_block(36, 2, 0, 1);
     raw[20..24].copy_from_slice(&0.8f32.to_le_bytes());
     raw[24..28].copy_from_slice(&0.4f32.to_le_bytes());
     raw[32..36].copy_from_slice(&1.0f32.to_le_bytes());
-
-    let view = H2LegacyFunctionView::parse_damage_effect_vibration(raw)
-        .expect("damage effect vibration function should parse");
-
-    assert_eq!(view.function_type, 2);
-    assert_eq!(view.output_type, 0);
-    assert_eq!(view.exponent, 1);
-    assert_eq!(view.min, 0.8);
-    assert_eq!(view.max, 0.4);
-    assert_eq!(&view.to_bytes()[20..24], &0.8f32.to_le_bytes());
-    assert_eq!(&view.to_bytes()[24..28], &0.4f32.to_le_bytes());
-}
-
-#[test]
-fn damage_effect_vibration_edit_emits_byte_block_op() {
-    let mut raw = vec![0; 36];
-    raw[0] = 2;
-    raw[1] = 0;
-    raw[2] = 1;
-    raw[20..24].copy_from_slice(&0.8f32.to_le_bytes());
-    raw[24..28].copy_from_slice(&0.4f32.to_le_bytes());
-    raw[32..36].copy_from_slice(&1.0f32.to_le_bytes());
-    let h2_legacy = H2LegacyFunctionView::parse_damage_effect_vibration(raw.clone())
-        .expect("damage effect vibration function should parse");
-    let function = TagFunction::parse(&decode_hex(&constant_function_hex(0.0)).unwrap())
-        .expect("placeholder function should parse");
-    let mut view = FunctionView::from_function(function).with_h2_legacy(h2_legacy);
+    let mut view = FunctionView::from_function(h2(&raw));
     let previous = FunctionSnapshot::from_view(&view);
-    let h2 = view.h2_legacy.as_mut().unwrap();
-    h2.exponent = 2;
-    h2.min = 1.0;
-    h2.max = 0.7;
-    let paths = FunctionEditPaths {
-        data: FunctionDataStorage::Halo2ByteBlock(
-            "player responses[1]/vibration/low frequency vibration/dirty whore/data".to_owned(),
-        ),
-        parameter_type: String::new(),
-        input_name: String::new(),
-        range_name: String::new(),
-        time_period: String::new(),
-        block_path: String::new(),
-        block_index: 0,
-    };
+    assert_eq!(view.function.as_h2().unwrap().amplitude_range(0), Some((0.8, 0.4)));
 
+    let f = view.function.as_h2_mut().unwrap();
+    f.set_function_index(0, 2).unwrap();
+    f.set_amplitude_range(0, 1.0, 0.7).unwrap();
+    let paths = foundation_function_edit_paths(
+        "player responses[1]/vibration/low frequency vibration/dirty whore/data",
+        FunctionEncoding::H2,
+    );
     let batch = push_function_edit(&paths, &previous, &view);
 
     assert!(batch.edits.is_empty());
@@ -321,12 +162,46 @@ fn damage_effect_vibration_edit_emits_byte_block_op() {
 }
 
 #[test]
+fn h2_storage_follows_the_encoding_not_the_path() {
+    // Any H2 function is a byte-block, whatever its path is called; before,
+    // only "vibration" paths were, and the rest were sent as hex to a data
+    // field that is not there.
+    let paths = foundation_function_edit_paths("particles[0]/emission rate/function/data", FunctionEncoding::H2);
+    assert!(matches!(paths.data, FunctionDataStorage::Halo2ByteBlock(_)));
+    let paths = foundation_function_edit_paths("particles[0]/emission rate/function/data", FunctionEncoding::Blob);
+    assert!(matches!(paths.data, FunctionDataStorage::DataField(_)));
+}
+
+#[test]
+fn h2_constant_writers_emit_the_h2_encoding() {
+    // Fresh constants are H2 blocks the engine reads back as the value, not
+    // 32-byte H3 blobs (whose GPU flag the H2 engine reads as two-color).
+    let scalar = h2_constant_scalar_function_data(0.75, None);
+    assert_eq!(scalar.len(), 28);
+    assert_eq!(h2(&scalar).evaluate(0.3, 0.9), 0.75);
+
+    // An existing scalar constant is patched in place: max follows a tied min.
+    let mut tied = h2_block(28, 1, 0, 0);
+    tied[4..8].copy_from_slice(&0.5f32.to_le_bytes());
+    tied[8..12].copy_from_slice(&0.5f32.to_le_bytes());
+    tied[20..28].copy_from_slice(&[0xAB; 8]);
+    let patched = h2_constant_scalar_function_data(2.0, Some(&tied));
+    assert_eq!(&patched[4..12], &[2.0f32.to_le_bytes(), 2.0f32.to_le_bytes()].concat());
+    assert_eq!(&patched[20..28], &tied[20..28]);
+
+    let color = h2_constant_color_function_data(1.0, 0.0, 0.0, 1.0, None);
+    let function = h2(&color);
+    assert_eq!(extract_constant_color(&function), Some([1.0, 0.0, 0.0, 1.0]));
+}
+
+#[test]
 fn dedicated_picker_updates_h3_function_draft_logical_slot() {
     let mut function = TagFunction::parse(&decode_hex(&constant_function_hex(0.0)).unwrap())
         .expect("constant function should parse");
-    function.set_color_graph_type(ColorGraphType::TwoColor);
-    function.set_color(0, 0x0011_2233);
-    function.set_color(3, 0x0044_5566);
+    let blob = function.as_blob_mut().unwrap();
+    blob.set_color_graph_type(ColorGraphType::TwoColor);
+    blob.set_color(0, 0x0011_2233);
+    blob.set_color(3, 0x0044_5566);
     let mut popup = FunctionPopup::new(
         "tag".to_owned(),
         "function".to_owned(),
@@ -334,31 +209,24 @@ fn dedicated_picker_updates_h3_function_draft_logical_slot() {
         true,
     );
 
-    popup.apply_draft_color(FunctionDraftColorTarget::H3Logical(1), 0x00AA_BBCC);
+    popup.apply_draft_color(FunctionDraftColorTarget::Logical(1), 0x00AA_BBCC);
 
-    assert_eq!(popup.view.function.header().colors[0], 0x0011_2233);
-    assert_eq!(popup.view.function.header().colors[3], 0x00AA_BBCC);
+    let header = popup.view.function.as_blob().unwrap().header();
+    assert_eq!(header.colors[0], 0x0011_2233);
+    assert_eq!(header.colors[3], 0x00AA_BBCC);
 }
 
 #[test]
-fn dedicated_picker_updates_h2_function_draft_stop() {
-    let mut raw = vec![0u8; 28];
-    raw[0] = 3;
-    raw[1] = 2;
+fn dedicated_picker_updates_h2_logical_color() {
+    let mut raw = h2_block(52, 3, 0x20, 0);
     raw[4..8].copy_from_slice(&[0x10, 0x20, 0x30, 0x40]);
-    raw[8..12].copy_from_slice(&[0x50, 0x60, 0x70, 0x80]);
-    let h2 = H2LegacyFunctionView::parse(raw).expect("H2 function should parse");
-    let function = TagFunction::parse(&decode_hex(&constant_function_hex(0.0)).unwrap())
-        .expect("placeholder function should parse");
-    let mut popup = FunctionPopup::new(
-        "tag".to_owned(),
-        "function".to_owned(),
-        FunctionView::from_function(function).with_h2_legacy(h2),
-        true,
-    );
+    raw[16..20].copy_from_slice(&[0x50, 0x60, 0x70, 0x80]);
+    let mut popup = FunctionPopup::new("tag".to_owned(), "function".to_owned(), FunctionView::from_function(h2(&raw)), true);
 
-    popup.apply_draft_color(FunctionDraftColorTarget::H2Logical(1), 0x00AA_BBCC);
+    // What the picker sends on OK: the swatch's original alpha over the new RGB.
+    popup.apply_draft_color(FunctionDraftColorTarget::Logical(1), 0x80AA_BBCC);
 
-    let data = popup.view.h2_legacy.as_ref().unwrap().to_bytes();
-    assert_eq!(&data[8..12], &[0xCC, 0xBB, 0xAA, 0x80]);
+    let data = popup.view.data_bytes();
+    assert_eq!(&data[16..20], &[0xCC, 0xBB, 0xAA, 0x80], "logical 1 is slot 3; alpha kept");
+    assert_eq!(&data[4..8], &raw[4..8]);
 }

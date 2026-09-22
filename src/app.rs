@@ -17,7 +17,7 @@ use std::thread;
 use blam_tags::bitmap::decode::decode_to_rgba8;
 use blam_tags::paths::{derive_tags_root, group_tag_to_extension, resolve_tag_path, tag_ref_path};
 use blam_tags::render_method::{
-    GlobalRenderMethodFlags, RenderMethod, RenderMethodAnimatedParameter,
+    GlobalRenderMethodFlags, Halo2ShaderAnimationType, RenderMethod, RenderMethodAnimatedParameter,
     RenderMethodAnimatedParameterType, RenderMethodDefinition, RenderMethodOption,
     RenderMethodOptionParameter, RenderMethodParameter, RenderMethodParameterType,
     compile_real_constant,
@@ -26,7 +26,7 @@ use blam_tags::{
     AssFile, Bitmap, ColorGraphType, CurvePointMode, CurveSegmentType, Endian,
     FoundationMasterType as EngineMasterType, FunctionFlags, FunctionKind, FunctionType, JmsFile,
     PERIODIC_FUNCTIONS, PeriodicParams, RenderModel, StringIdData, TRANSITION_FUNCTIONS, TagBlock,
-    TagField, TagFieldData, TagFieldType, TagFile, TagFunction, TagFunctionEditor,
+    TagField, TagFieldData, TagFieldType, TagFile, TagFunction, TagFunctionEditor, BlobFunction, FunctionEncoding, H2Function, SchemaEnum,
     TagReferenceData, TagResource, TagResourceKind, TagStruct, TransitionParams, format_group_tag,
     parse_group_tag,
 };
@@ -868,17 +868,20 @@ pub(super) fn locate_definitions_root() -> PathBuf {
             expected = Some(beside_exe);
         }
     }
+    // The repo's own submodule first, as build.rs copies it: a sibling
+    // checkout beside the repo can be at any other commit, and tests (which run
+    // from target/*/deps, with no copy beside them) read whatever they find.
+    let dev_at_manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("definitions");
+    if dev_at_manifest.is_dir() {
+        return dev_at_manifest;
+    }
     let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("definitions");
     if dev.is_dir() {
         return dev;
     }
-    let dev_at_manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("definitions");
-    if dev_at_manifest.is_dir() {
-        return dev_at_manifest;
-    }
-    expected.unwrap_or(dev)
+    expected.unwrap_or(dev_at_manifest)
 }
 
 pub(crate) fn definitions_missing_message(path: &Path) -> String {
@@ -1373,6 +1376,7 @@ mod tests {
         let function = TagFunction::parse(&bytes).unwrap();
 
         assert_eq!(function.color_graph_type(), ColorGraphType::OneColor);
+        let function = function.as_blob().unwrap();
         assert!(function.flags().is_gpu());
         assert_eq!(function.header().colors[0], 0xFFFF0000);
     }
@@ -1404,8 +1408,8 @@ mod tests {
 
     #[test]
     fn function_edit_halo2_byte_block_emits_data_op() {
-        let bytes = decode_hex(&constant_function_hex(0.5)).unwrap();
-        let function = TagFunction::parse(&bytes).unwrap();
+        let bytes = h2_constant_scalar_function_data(0.5, None);
+        let function = h2_tag_function(&bytes).unwrap();
         let view = FunctionView::from_function(function).with_edit(FunctionEditPaths {
             data: FunctionDataStorage::Halo2ByteBlock("parameters[0]/function/data".to_owned()),
             parameter_type: String::new(),
@@ -1416,7 +1420,7 @@ mod tests {
             block_index: 0,
         });
         let previous_function =
-            TagFunction::parse(&decode_hex(&constant_function_hex(0.0)).unwrap()).unwrap();
+            h2_tag_function(&h2_constant_scalar_function_data(0.0, None)).unwrap();
         let previous = FunctionSnapshot::from_view(&FunctionView::from_function(previous_function));
 
         let batch = push_function_edit(view.edit.as_ref().unwrap(), &previous, &view);
@@ -1446,7 +1450,7 @@ mod tests {
             },
         )
         .unwrap();
-        let bytes = decode_hex(&constant_function_hex(-0.25)).unwrap();
+        let bytes = h2_constant_scalar_function_data(-0.25, None);
 
         seed_halo2_function_byte_block_for_test(
             &mut tag,
@@ -1459,9 +1463,9 @@ mod tests {
             .descend("parameters[0]/animation properties[0]/function")
             .unwrap();
         assert_eq!(halo2_function_bytes_from_struct(mapping).unwrap(), bytes);
-        let function = TagFunction::parse(&bytes).unwrap();
+        let function = h2_tag_function(&bytes).unwrap();
         let reparsed =
-            TagFunction::parse(&halo2_function_bytes_from_struct(mapping).unwrap()).unwrap();
+            h2_tag_function(&halo2_function_bytes_from_struct(mapping).unwrap()).unwrap();
         assert_eq!(reparsed.to_bytes(), function.to_bytes());
     }
 
@@ -1488,7 +1492,7 @@ mod tests {
             },
         )
         .unwrap();
-        let bytes = decode_hex(&constant_function_hex(0.75)).unwrap();
+        let bytes = h2_constant_scalar_function_data(0.75, None);
         seed_halo2_function_byte_block_for_test(
             &mut tag,
             "parameters[0]/animation properties[0]/function/data",
@@ -1838,7 +1842,7 @@ mod tests {
                 parameter_name: "noyze0".to_owned(),
                 parameter_type_index: 0,
                 animation_type_index: 0,
-                initial_function_data: decode_hex(&constant_function_hex(7.5)).unwrap(),
+                initial_function_data: h2_constant_scalar_function_data(7.5, None),
             },
         )
         .unwrap();
@@ -1937,8 +1941,7 @@ mod tests {
                 parameter_name: "color_sharp".to_owned(),
                 parameter_type_index: 2,
                 animation_type_index: 12,
-                initial_function_data: decode_hex(&constant_color_function_hex(1.0, 0.0, 0.0, 1.0))
-                    .unwrap(),
+                initial_function_data: h2_constant_color_function_data(1.0, 0.0, 0.0, 1.0, None),
             },
         )
         .unwrap();
@@ -2354,7 +2357,7 @@ mod tests {
         seed_halo2_wrapped_function_byte_block_for_test(
             &mut shader,
             "postprocess definition[0]/overlays[0]/function",
-            &decode_hex(&constant_color_function_hex(1.0, 1.0, 0.0, 1.0)).unwrap(),
+            &h2_constant_color_function_data(1.0, 1.0, 0.0, 1.0, None),
         );
 
         let mut template =
@@ -2399,7 +2402,7 @@ mod tests {
             &H2ShaderParamOp::EditFunctionData {
                 block_path: "postprocess definition[0]/overlays[0]/function/function/data"
                     .to_owned(),
-                data: decode_hex(&constant_color_function_hex(0.0, 0.0, 0.0, 1.0)).unwrap(),
+                data: h2_constant_color_function_data(0.0, 0.0, 0.0, 1.0, None),
             },
         )
         .unwrap();
@@ -2413,7 +2416,7 @@ mod tests {
             .and_then(|field| field.as_struct())
             .unwrap();
         let bytes = halo2_function_bytes_from_struct(function_struct).unwrap();
-        let function = TagFunction::parse(&bytes).unwrap();
+        let function = h2_tag_function(&bytes).unwrap();
         assert_eq!(
             extract_constant_color(&function),
             Some([0.0, 0.0, 0.0, 1.0])
@@ -2423,7 +2426,7 @@ mod tests {
     #[test]
     fn h2_shader_color_function_create_and_edit_reparse() {
         let mut tag = h2_classic_shader_tag();
-        let red = decode_hex(&constant_color_function_hex(1.0, 0.0, 0.0, 1.0)).unwrap();
+        let red = h2_constant_color_function_data(1.0, 0.0, 0.0, 1.0, None);
         apply_one_h2_shader_param_op(
             &mut tag,
             &H2ShaderParamOp::EnsureAnimationProperty {
@@ -2450,7 +2453,7 @@ mod tests {
             .unwrap();
         assert_eq!(animation.read_int_any("type"), Some(12));
         let data_path = "parameters[0]/animation properties[0]/function/data";
-        let grey = decode_hex(&constant_color_function_hex(0.5, 0.5, 0.5, 1.0)).unwrap();
+        let grey = h2_constant_color_function_data(0.5, 0.5, 0.5, 1.0, None);
         apply_one_h2_shader_param_op(
             &mut tag,
             &H2ShaderParamOp::EditFunctionData {
@@ -2466,7 +2469,7 @@ mod tests {
             .unwrap();
         assert_eq!(halo2_function_bytes_from_struct(mapping).unwrap(), grey);
         let function =
-            TagFunction::parse(&halo2_function_bytes_from_struct(mapping).unwrap()).unwrap();
+            h2_tag_function(&halo2_function_bytes_from_struct(mapping).unwrap()).unwrap();
         let color = extract_constant_color(&function).unwrap();
         for (actual, expected) in
             color
@@ -2552,7 +2555,7 @@ mod tests {
     #[test]
     fn h2_shader_template_function_create_materializes_backing_data() {
         let mut tag = h2_classic_shader_tag();
-        let bytes = decode_hex(&constant_function_hex(0.5)).unwrap();
+        let bytes = h2_constant_scalar_function_data(0.5, None);
         apply_one_h2_shader_param_op(
             &mut tag,
             &H2ShaderParamOp::EnsureAnimationProperty {
@@ -2630,7 +2633,7 @@ mod tests {
             "2.5",
         )
         .unwrap();
-        let bytes = decode_hex(&constant_function_hex(0.75)).unwrap();
+        let bytes = h2_constant_scalar_function_data(0.75, None);
         seed_halo2_function_byte_block_for_test(
             &mut tag,
             "parameters[0]/animation properties[0]/function/data",
@@ -2694,7 +2697,7 @@ mod tests {
             },
         )
         .unwrap();
-        let bytes = decode_hex(&constant_function_hex(0.75)).unwrap();
+        let bytes = h2_constant_scalar_function_data(0.75, None);
         seed_halo2_function_byte_block_for_test(
             &mut tag,
             "parameters[1]/animation properties[0]/function/data",
@@ -2736,7 +2739,7 @@ mod tests {
             },
         )
         .unwrap();
-        let original = decode_hex(&constant_function_hex(0.25)).unwrap();
+        let original = h2_constant_scalar_function_data(0.25, None);
         let block_path = "parameters[0]/animation properties[0]/function/data";
         seed_halo2_function_byte_block_for_test(&mut tag, block_path, &original);
 
@@ -2771,9 +2774,9 @@ mod tests {
         )
         .unwrap();
         let block_path = "parameters[6]/animation properties[0]/function/data";
-        let original = decode_hex(&constant_function_hex(0.25)).unwrap();
+        let original = h2_constant_scalar_function_data(0.25, None);
         seed_halo2_function_byte_block_for_test(&mut tag, block_path, &original);
-        let edited = decode_hex(&constant_function_hex(0.75)).unwrap();
+        let edited = h2_constant_scalar_function_data(0.75, None);
 
         replace_halo2_function_byte_block(&mut tag, block_path, &edited).unwrap();
 
@@ -2853,7 +2856,7 @@ mod tests {
         seed_halo2_function_byte_block_for_test(
             &mut tag,
             block_path,
-            &decode_hex(&constant_function_hex(0.25)).unwrap(),
+            &h2_constant_scalar_function_data(0.25, None),
         );
         let mut linear_key = vec![0u8; 32];
         linear_key[0] = 5;
@@ -2899,7 +2902,7 @@ mod tests {
             },
         )
         .unwrap();
-        let bytes = decode_hex(&constant_function_hex(0.25)).unwrap();
+        let bytes = h2_constant_scalar_function_data(0.25, None);
         replace_halo2_function_byte_block(
             &mut tag,
             "parameters[0]/animation properties[0]/function/data",
@@ -2950,7 +2953,7 @@ mod tests {
     }
 
     fn seed_halo2_function_byte_block_for_test(tag: &mut TagFile, block_path: &str, data: &[u8]) {
-        TagFunction::parse(data).unwrap();
+        h2_tag_function(data).expect("seed data is an H2 block");
         seed_halo2_raw_function_byte_block_for_test(tag, block_path, data);
     }
 
@@ -2990,7 +2993,7 @@ mod tests {
         wrapper_path: &str,
         data: &[u8],
     ) {
-        TagFunction::parse(data).unwrap();
+        h2_tag_function(data).expect("seed data is an H2 block");
         let mut root = tag.root_mut();
         let mut wrapper_field = root.field_path_mut(wrapper_path).unwrap();
         let mut wrapper = wrapper_field.as_struct_mut().unwrap();

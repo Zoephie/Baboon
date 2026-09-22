@@ -40,7 +40,7 @@ pub(in crate::app) fn draw_foundation_function_row(
                                 edit.tag_key.to_owned(),
                                 canonical_field_path(path),
                                 FunctionView::from_function(function.clone())
-                                    .with_edit(foundation_function_edit_paths(path)),
+                                    .with_edit(foundation_function_edit_paths(path, function.encoding())),
                                 true,
                             ));
                         }
@@ -50,8 +50,8 @@ pub(in crate::app) fn draw_foundation_function_row(
                         // Inline preview is always read-only; the editable
                         // editor lives in the f() popup.
                         let mut view = FunctionView::from_function(function.clone());
-                        let mut selected = 0usize;
-                        draw_function_editor_contents(ui, &mut view, false, &mut selected, None);
+                        let (mut graph, mut point, mut no_popup) = (0usize, 0usize, None);
+                        draw_function_editor(ui, &mut view, false, &mut graph, &mut point, &mut no_popup);
                     });
                 });
             });
@@ -67,57 +67,13 @@ pub(in crate::app) fn draw_foundation_inline_function_row(
     data_path: &str,
     edit: &mut FieldEditContext<'_>,
 ) {
-    view = view.with_edit(foundation_function_edit_paths(data_path));
+    let encoding = view.function.encoding();
+    view = view.with_edit(foundation_function_edit_paths(data_path, encoding));
 
-    // H3+ mapping functions are commonly wrapped in a schema struct containing
-    // a `data` field (bipeds, particles, beams, contrails, and many others).
-    // Those wrappers used to fall through to the old inline editor even though
-    // direct function fields already opened the Foundation-compatible popup.
-    // Keep only the genuinely legacy H2 byte format inline.
-    if uses_foundation_function_popup(&view) {
-        draw_foundation_wrapped_function_row(ui, label, view, depth, edit);
-        return;
-    }
-
-    ui.horizontal_top(|ui| {
-        ui.add_space(depth as f32 * 12.0);
-        foundation_label_cell(ui, &label, None);
-        Frame::none()
-            .fill(foundation_group_bg())
-            .stroke(Stroke::new(1.0, foundation_group_edge()))
-            .inner_margin(egui::Margin::same(6.0))
-            .show(ui, |ui| {
-                ui.vertical(|ui| {
-                    ui.set_min_width(640.0);
-                    let previous = FunctionSnapshot::from_view(&view);
-                    let mut selected = 0usize;
-                    let changed = if view.h2_legacy.is_some() {
-                        draw_h2_legacy_function_editor_contents(ui, &mut view, edit.editable, None)
-                    } else {
-                        draw_function_editor_contents(
-                            ui,
-                            &mut view,
-                            edit.editable,
-                            &mut selected,
-                            None,
-                        )
-                    };
-                    if changed {
-                        let batch = push_function_edit(
-                            &foundation_function_edit_paths(data_path),
-                            &previous,
-                            &view,
-                        );
-                        edit.pending.extend(batch.edits);
-                        edit.function_data_ops.extend(batch.data_ops);
-                    }
-                });
-            });
-    });
-}
-
-fn uses_foundation_function_popup(view: &FunctionView) -> bool {
-    view.h2_legacy.is_none()
+    // Every function, whatever its game, shows the same row: its summary, the
+    // f() button that opens the editor, and the editor itself as a read-only
+    // preview.
+    draw_foundation_wrapped_function_row(ui, label, view, depth, edit);
 }
 
 fn draw_foundation_wrapped_function_row(
@@ -160,9 +116,9 @@ fn draw_foundation_wrapped_function_row(
                     });
                     ui.add_space(4.0);
                     ui.push_id(("wrapped_function", data_path_id(&view)), |ui| {
-                        let mut preview = FunctionView::from_function(view.function.clone());
-                        let mut selected = 0usize;
-                        draw_function_editor_contents(ui, &mut preview, false, &mut selected, None);
+                        let mut preview = view.clone();
+                        let (mut graph, mut point, mut no_popup) = (0usize, 0usize, None);
+                        draw_function_editor(ui, &mut preview, false, &mut graph, &mut point, &mut no_popup);
                     });
                 });
             });
@@ -176,12 +132,17 @@ fn data_path_id(view: &FunctionView) -> &str {
         .unwrap_or("function")
 }
 
-pub(in crate::app) fn foundation_function_edit_paths(data_path: &str) -> FunctionEditPaths {
+/// Write targets for a function at `data_path`. Where its bytes go follows
+/// from the encoding: a Halo 2 function lives in a byte-block, an H3+ blob in a
+/// data field.
+pub(in crate::app) fn foundation_function_edit_paths(
+    data_path: &str,
+    encoding: FunctionEncoding,
+) -> FunctionEditPaths {
     FunctionEditPaths {
-        data: if is_vibration_function_data_path(data_path) {
-            FunctionDataStorage::Halo2ByteBlock(data_path.to_owned())
-        } else {
-            FunctionDataStorage::DataField(data_path.to_owned())
+        data: match encoding {
+            FunctionEncoding::H2 => FunctionDataStorage::Halo2ByteBlock(data_path.to_owned()),
+            FunctionEncoding::Blob => FunctionDataStorage::DataField(data_path.to_owned()),
         },
         parameter_type: String::new(),
         input_name: String::new(),
@@ -190,10 +151,6 @@ pub(in crate::app) fn foundation_function_edit_paths(data_path: &str) -> Functio
         block_path: String::new(),
         block_index: 0,
     }
-}
-
-fn is_vibration_function_data_path(path: &str) -> bool {
-    is_vibration_function_path(path)
 }
 
 #[cfg(test)]
