@@ -689,17 +689,12 @@ pub(super) fn inline_mapping_function_from_struct(
     tag_struct: TagStruct<'_>,
     struct_path: &str,
 ) -> Option<(FunctionView, String)> {
-    match halo2_function_bytes_from_struct(tag_struct) {
-        Some(bytes) if !bytes.is_empty() => {
-            let data_path = append_field_path(struct_path, "data");
-            if let Some(view) = legacy_mapping_function_view_for_path(&bytes, struct_path) {
-                return Some((view, data_path));
-            }
-            if let Ok(function) = TagFunction::parse(&bytes) {
-                return Some((FunctionView::from_function(function), data_path));
-            }
-        }
-        _ => {}
+    // A Halo 2 `mapping_function` holds its function in a `data` byte-block,
+    // which is always the H2 encoding.
+    if let Some(bytes) = halo2_function_bytes_from_struct(tag_struct).filter(|bytes| !bytes.is_empty())
+        && let Some(function) = h2_tag_function(&bytes)
+    {
+        return Some((FunctionView::from_function(function), append_field_path(struct_path, "data")));
     }
 
     for field in tag_struct.fields_all() {
@@ -732,45 +727,8 @@ pub(super) fn inline_mapping_function_from_struct(
             }
             continue;
         }
-        if let Some(view) = legacy_mapping_function_view(&bytes) {
-            return Some((view, data_path));
-        }
     }
     None
-}
-
-pub(super) fn is_vibration_function_path(path: &str) -> bool {
-    let path = internal_marker_key(path);
-    (path.contains("low frequency rumble")
-        || path.contains("high frequency rumble")
-        || path.contains("low frequency vibration")
-        || path.contains("high frequency vibration"))
-        && (path.contains("dirty whore") || path.contains("function"))
-}
-
-fn legacy_mapping_function_view_for_path(bytes: &[u8], path: &str) -> Option<FunctionView> {
-    if is_vibration_function_path(path) {
-        if let Some(view) = damage_effect_vibration_function_view(bytes) {
-            return Some(view);
-        }
-    }
-    legacy_mapping_function_view(bytes)
-}
-
-fn damage_effect_vibration_function_view(bytes: &[u8]) -> Option<FunctionView> {
-    let h2_legacy = H2LegacyFunctionView::parse_damage_effect_vibration(bytes.to_vec())?;
-    let function = decode_hex(&constant_function_hex(0.0))
-        .ok()
-        .and_then(|data| TagFunction::parse(&data).ok())?;
-    Some(FunctionView::from_function(function).with_h2_legacy(h2_legacy))
-}
-
-pub(super) fn legacy_mapping_function_view(bytes: &[u8]) -> Option<FunctionView> {
-    let h2_legacy = H2LegacyFunctionView::parse(bytes.to_vec())?;
-    let function = decode_hex(&constant_function_hex(0.0))
-        .ok()
-        .and_then(|data| TagFunction::parse(&data).ok())?;
-    Some(FunctionView::from_function(function).with_h2_legacy(h2_legacy))
 }
 
 pub(in crate::app) fn draw_foundation_group(

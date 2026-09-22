@@ -40,7 +40,7 @@ pub(in crate::app) fn draw_foundation_function_row(
                                 edit.tag_key.to_owned(),
                                 canonical_field_path(path),
                                 FunctionView::from_function(function.clone())
-                                    .with_edit(foundation_function_edit_paths(path)),
+                                    .with_edit(foundation_function_edit_paths(path, function.encoding())),
                                 true,
                             ));
                         }
@@ -67,7 +67,8 @@ pub(in crate::app) fn draw_foundation_inline_function_row(
     data_path: &str,
     edit: &mut FieldEditContext<'_>,
 ) {
-    view = view.with_edit(foundation_function_edit_paths(data_path));
+    let encoding = view.function.encoding();
+    view = view.with_edit(foundation_function_edit_paths(data_path, encoding));
 
     // H3+ mapping functions are commonly wrapped in a schema struct containing
     // a `data` field (bipeds, particles, beams, contrails, and many others).
@@ -91,8 +92,8 @@ pub(in crate::app) fn draw_foundation_inline_function_row(
                     ui.set_min_width(640.0);
                     let previous = FunctionSnapshot::from_view(&view);
                     let mut selected = 0usize;
-                    let changed = if view.h2_legacy.is_some() {
-                        draw_h2_legacy_function_editor_contents(ui, &mut view, edit.editable, None)
+                    let changed = if view.function.as_h2().is_some() {
+                        draw_h2_function_editor_contents(ui, &mut view, edit.editable, None)
                     } else {
                         draw_function_editor_contents(
                             ui,
@@ -104,7 +105,7 @@ pub(in crate::app) fn draw_foundation_inline_function_row(
                     };
                     if changed {
                         let batch = push_function_edit(
-                            &foundation_function_edit_paths(data_path),
+                            &foundation_function_edit_paths(data_path, encoding),
                             &previous,
                             &view,
                         );
@@ -117,7 +118,7 @@ pub(in crate::app) fn draw_foundation_inline_function_row(
 }
 
 fn uses_foundation_function_popup(view: &FunctionView) -> bool {
-    view.h2_legacy.is_none()
+    view.function.as_h2().is_none()
 }
 
 fn draw_foundation_wrapped_function_row(
@@ -176,12 +177,17 @@ fn data_path_id(view: &FunctionView) -> &str {
         .unwrap_or("function")
 }
 
-pub(in crate::app) fn foundation_function_edit_paths(data_path: &str) -> FunctionEditPaths {
+/// Write targets for a function at `data_path`. Where its bytes go follows
+/// from the encoding: a Halo 2 function lives in a byte-block, an H3+ blob in a
+/// data field.
+pub(in crate::app) fn foundation_function_edit_paths(
+    data_path: &str,
+    encoding: FunctionEncoding,
+) -> FunctionEditPaths {
     FunctionEditPaths {
-        data: if is_vibration_function_data_path(data_path) {
-            FunctionDataStorage::Halo2ByteBlock(data_path.to_owned())
-        } else {
-            FunctionDataStorage::DataField(data_path.to_owned())
+        data: match encoding {
+            FunctionEncoding::H2 => FunctionDataStorage::Halo2ByteBlock(data_path.to_owned()),
+            FunctionEncoding::Blob => FunctionDataStorage::DataField(data_path.to_owned()),
         },
         parameter_type: String::new(),
         input_name: String::new(),
@@ -190,10 +196,6 @@ pub(in crate::app) fn foundation_function_edit_paths(data_path: &str) -> Functio
         block_path: String::new(),
         block_index: 0,
     }
-}
-
-fn is_vibration_function_data_path(path: &str) -> bool {
-    is_vibration_function_path(path)
 }
 
 #[cfg(test)]

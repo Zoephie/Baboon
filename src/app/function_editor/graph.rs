@@ -610,15 +610,18 @@ pub(in crate::app) fn color_graph_slots(cgt: ColorGraphType) -> &'static [usize]
 }
 
 pub(in crate::app) fn function_color_stops(function: &TagFunction) -> Vec<Color32> {
-    let mut stops: Vec<Color32> = match function.as_blob() {
-        Some(blob) => {
+    let mut stops: Vec<Color32> = match function {
+        TagFunction::Blob(blob) => {
             let header = blob.header();
             color_graph_slots(header.color_graph_type)
                 .iter()
                 .map(|&i| color32_from_argb(header.colors[i]))
                 .collect()
         }
-        None => Vec::new(),
+        TagFunction::H2(f) => (0..function.color_count())
+            .filter_map(|i| f.color(i))
+            .map(color32_from_argb)
+            .collect(),
     };
     if stops.is_empty() {
         let color = function.evaluate_color(0.0, 0.0);
@@ -767,7 +770,6 @@ pub(in crate::app) struct FunctionEditPaths {
 /// path from the display label.
 pub(in crate::app) struct FunctionView {
     pub(in crate::app) function: TagFunction,
-    pub(in crate::app) h2_legacy: Option<H2LegacyFunctionView>,
     pub(in crate::app) input_name: String,
     pub(in crate::app) range_name: String,
     /// Output enum index (`RenderMethodAnimatedParameterType`), when the
@@ -779,5 +781,4 @@ pub(in crate::app) struct FunctionView {
     /// path (material parameter blocks, template summaries) → the editor
     /// renders read-only.
     pub(in crate::app) edit: Option<FunctionEditPaths>,
-    pub(in crate::app) hide_scalar_color_controls: bool,
 }

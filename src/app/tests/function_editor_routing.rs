@@ -11,12 +11,11 @@ fn h3_wrapped_mapping_functions_use_foundation_popup() {
 }
 
 #[test]
-fn h2_wrapped_mapping_functions_keep_legacy_editor() {
-    let mut raw = vec![0; 52];
+fn h2_mapping_functions_use_the_h2_editor() {
+    let mut raw = vec![0; 28];
     raw[0] = FunctionType::Constant as u8;
     raw[8..12].copy_from_slice(&1.0f32.to_le_bytes());
-    let legacy = H2LegacyFunctionView::parse(raw).expect("legacy H2 function");
-    let view = constant_view().with_h2_legacy(legacy);
+    let view = FunctionView::from_function(h2_tag_function(&raw).expect("an H2 block"));
 
     assert!(!uses_foundation_function_popup(&view));
 }
@@ -187,4 +186,79 @@ fn a_seeded_function_survives_a_save_and_reload() {
 
     assert_eq!(after, before, "the seeded function changed across a save");
     assert_eq!(after.len(), 32, "and it is still a whole function");
+}
+
+/// Every `mapping_function` in a struct tree, with its resolvable path.
+fn collect_h2_mapping_functions(st: TagStruct<'_>, path: &str, out: &mut Vec<String>) {
+    if halo2_function_bytes_from_struct(st).is_some_and(|bytes| !bytes.is_empty()) {
+        out.push(path.to_owned());
+    }
+    for field in st.fields_all() {
+        let field_path = append_field_path_for(path, &field);
+        if let Some(nested) = field.as_struct() {
+            collect_h2_mapping_functions(nested, &field_path, out);
+        } else if let Some(block) = field.as_block() {
+            for (index, element) in block.iter().enumerate() {
+                collect_h2_mapping_functions(element, &format!("{field_path}[{index}]"), out);
+            }
+        }
+    }
+}
+
+/// Luna's report went through the field tree: a shipped Halo 2 effect's
+/// functions drew with the wrong editor and their edits never landed. Every
+/// function in the tag now derives the H2 encoding and byte-block storage from
+/// the real path, and an edit written through the byte-block writer reads back
+/// as exactly that edit.
+#[test]
+fn shipped_h2_effect_functions_derive_h2_and_write_back() {
+    let tag_path = "/Users/camden/Halo/halo2_mcc/tags/effects/cinematics/03/iac_engine_fire.effect";
+    let def = test_definition_path("halo2_mcc/effect.json");
+    if !std::path::Path::new(tag_path).exists() || !def.exists() {
+        eprintln!("skipping: H2 effect/definition not present");
+        return;
+    }
+    let bytes = std::fs::read(tag_path).unwrap();
+    let layout = blam_tags::layout::TagLayout::from_json(&def).unwrap();
+    let mut tag = blam_tags::classic::read_classic_tag_file(&bytes, layout).unwrap();
+
+    let mut paths = Vec::new();
+    collect_h2_mapping_functions(tag.root(), "", &mut paths);
+    assert!(paths.len() > 5, "the effect has particle functions ({} found)", paths.len());
+    eprintln!("checked {} H2 functions", paths.len());
+
+    let mut target = None;
+    for path in &paths {
+        let root = tag.root();
+        let st = root.descend(path).expect("the collected path resolves");
+        let original = halo2_function_bytes_from_struct(st).unwrap();
+        let (view, data_path) = inline_mapping_function_from_struct(st, path).expect("the editor finds the function");
+        assert_eq!(view.function.encoding(), FunctionEncoding::H2, "{path}");
+        assert_eq!(view.data_bytes(), original, "{path}: reading never rewrites");
+        let edit_paths = foundation_function_edit_paths(&data_path, view.function.encoding());
+        assert!(matches!(edit_paths.data, FunctionDataStorage::Halo2ByteBlock(_)), "{path}");
+        if target.is_none() && view.function.color_count() == 0 {
+            target = Some((view, edit_paths));
+        }
+    }
+
+    // Edit one scalar function's output range and write it back.
+    let (mut view, edit_paths) = target.expect("a scalar function to edit");
+    let before = view.data_bytes();
+    let previous = FunctionSnapshot::from_view(&view);
+    view.function.as_h2_mut().unwrap().set_clamp_range(0.25, 4.0).unwrap();
+    let batch = push_function_edit(&edit_paths, &previous, &view);
+    assert!(batch.edits.is_empty(), "no hex string edit for a byte-block");
+    assert_eq!(batch.data_ops.len(), 1);
+    let op = &batch.data_ops[0];
+    replace_halo2_function_byte_block(&mut tag, &op.block_path, &op.data).expect("the writer accepts it");
+
+    let struct_path = op.block_path.strip_suffix("/data").unwrap_or(&op.block_path);
+    let written = halo2_function_bytes_from_struct(tag.root().descend(struct_path).unwrap()).unwrap();
+    assert_eq!(written, op.data);
+    let reread = h2_tag_function(&written).unwrap();
+    let f = reread.as_h2().unwrap();
+    assert_eq!((f.clamp_range_min(), f.clamp_range_max()), (0.25, 4.0));
+    assert_eq!(&written[..4], &before[..4], "header untouched");
+    assert_eq!(&written[12..], &before[12..], "graph data untouched");
 }

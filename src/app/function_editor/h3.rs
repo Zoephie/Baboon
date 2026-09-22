@@ -59,55 +59,6 @@ pub(in crate::app) const OUTPUT_TYPE_OPTIONS: [(i32, &str); 9] = [
     (8, "alpha"),
 ];
 
-pub(in crate::app) const H2_OUTPUT_TYPE_OPTIONS: [(u8, &str); 5] = [
-    (0, "scalar (intensity)"),
-    (1, "scalar (alpha)"),
-    (0x20, "2-color"),
-    (0x40, "3-color"),
-    (0x80, "4-color"),
-];
-
-pub(in crate::app) const H2_FUNCTION_TYPE_OPTIONS: [(u8, &str); 11] = [
-    (0, "identity"),
-    (1, "constant"),
-    (2, "transition"),
-    (3, "periodic"),
-    (4, "linear"),
-    (5, "linear key"),
-    (6, "multi-linear key"),
-    (7, "spline"),
-    (8, "multi-spline"),
-    (9, "exponent"),
-    (10, "spline2"),
-];
-
-pub(in crate::app) const H2_EXPONENT_OPTIONS: [(u8, &str); 13] = [
-    (0, "one"),
-    (1, "zero"),
-    (2, "cosine"),
-    (3, "cosine variable"),
-    (4, "diagonal wave"),
-    (5, "diagonal wave variable"),
-    (6, "slide"),
-    (7, "slide variable"),
-    (8, "noise"),
-    (9, "jitter"),
-    (10, "slide"),
-    (11, "wander"),
-    (12, "spark"),
-];
-
-pub(in crate::app) const H2_TRANSITION_EXPONENT_OPTIONS: [(u8, &str); 8] = [
-    (0, "linear"),
-    (1, "early"),
-    (2, "late"),
-    (3, "very early"),
-    (4, "very late"),
-    (5, "cosine"),
-    (6, "zero"),
-    (7, "one"),
-];
-
 pub(in crate::app) const COLOR_GRAPH_OPTIONS: [(ColorGraphType, &str); 5] = [
     (ColorGraphType::Scalar, "scalar"),
     (ColorGraphType::OneColor, "1-color"),

@@ -1,154 +1,95 @@
-//! Legacy Halo 2 function layout, controls, and preservation tests.
-//! It owns function decoding, visualization, and edit construction; applying edits to documents and unrelated shader layout belong elsewhere.
+//! The Halo 2 function editor: the byte-block `c_function_definition` edited
+//! through the engine's own setters ([`H2Function`]), with the engine's option
+//! tables. Applying edits to documents and unrelated shader layout belong
+//! elsewhere.
 
 use super::*;
+use blam_tags::tag_function::h2::{
+    COLOR_GRAPH_TYPE_NAMES, FUNCTION_TYPE_NAMES, PERIODIC_FUNCTION_NAMES, TRANSITION_FUNCTION_NAMES,
+};
 
-pub(super) fn h2_legacy_combo(
-    ui: &mut Ui,
-    id: &str,
-    value: &mut u8,
-    options: &[(u8, &str)],
-    editable: bool,
-    width: f32,
-) -> bool {
-    let label = options
-        .iter()
-        .find(|(v, _)| v == value)
-        .map(|(_, name)| *name)
-        .unwrap_or("unknown");
+/// A Halo 2 `data` byte-block, read the way the H2 engine reads it.
+pub(in crate::app) fn h2_tag_function(bytes: &[u8]) -> Option<TagFunction> {
+    TagFunction::parse_encoded(FunctionEncoding::H2, bytes).ok()
+}
+
+/// A combo over `names` by index. Returns the picked index when it changed.
+fn h2_index_combo(ui: &mut Ui, id: &str, current: usize, names: &[&str], editable: bool, width: f32) -> Option<usize> {
+    let label = names.get(current).copied().unwrap_or("unknown");
     if !editable {
         foundation_input_cell(ui, label, width);
-        return false;
+        return None;
     }
-    let mut changed = false;
+    let mut picked = None;
     let (_, wheel_delta) = combo_box_with_scroll(
         ui,
-        egui::ComboBox::from_id_salt(id)
-            .selected_text(label)
-            .width(width),
+        egui::ComboBox::from_id_salt(id).selected_text(label).width(width),
         |ui| {
-            for (option_value, name) in options {
-                if ui
-                    .selectable_label(*value == *option_value, *name)
-                    .clicked()
-                    && *value != *option_value
-                {
-                    *value = *option_value;
-                    changed = true;
+            for (index, name) in names.iter().enumerate() {
+                if ui.selectable_label(index == current, *name).clicked() && index != current {
+                    picked = Some(index);
                 }
             }
         },
     );
-    if let Some(delta) = wheel_delta {
-        let current_index = options
-            .iter()
-            .position(|(option_value, _)| *value == *option_value)
-            .unwrap_or(0);
-        if let Some(next) = combo_scroll_next_index(current_index, options.len(), delta) {
-            let option_value = options[next].0;
-            *value = option_value;
-            changed = true;
-        }
+    if let Some(delta) = wheel_delta
+        && let Some(next) = combo_scroll_next_index(current.min(names.len() - 1), names.len(), delta)
+        && next != current
+    {
+        picked = Some(next);
     }
-    changed
+    picked
 }
 
-pub(super) fn h2_output_type_label(value: u8) -> &'static str {
-    match value {
-        0 => "scalar (intensity)",
-        1 => "scalar (alpha)",
-        2 | 0x20 => "2-color",
-        3 | 0x40 => "3-color",
-        4 | 0x80 => "4-color",
-        _ => "unknown",
-    }
+fn h2_drag(ui: &mut Ui, label: &str, value: f32, speed: f64, editable: bool) -> Option<f32> {
+    let mut v = value;
+    ui.label(RichText::new(label).color(text_dark()).small());
+    let changed = ui
+        .add_enabled(editable, egui::DragValue::new(&mut v).speed(speed).max_decimals(6))
+        .changed();
+    (changed && v.to_bits() != value.to_bits()).then_some(v)
 }
 
-pub(super) fn h2_output_type_combo(ui: &mut Ui, value: &mut u8, editable: bool) -> bool {
-    let label = h2_output_type_label(*value);
-    if !editable {
-        foundation_input_cell(ui, label, 140.0);
-        return false;
-    }
-    let mut changed = false;
-    let (_, wheel_delta) = combo_box_with_scroll(
-        ui,
-        egui::ComboBox::from_id_salt("h2_fn_output")
-            .selected_text(label)
-            .width(140.0),
-        |ui| {
-            for (option_value, name) in H2_OUTPUT_TYPE_OPTIONS {
-                let selected = h2_output_type_label(*value) == name;
-                if ui.selectable_label(selected, name).clicked() && *value != option_value {
-                    *value = option_value;
-                    changed = true;
-                }
-            }
-        },
-    );
-    if let Some(delta) = wheel_delta {
-        let current_index = H2_OUTPUT_TYPE_OPTIONS
-            .iter()
-            .position(|(_, name)| *name == label)
-            .unwrap_or(0);
-        if let Some(next) =
-            combo_scroll_next_index(current_index, H2_OUTPUT_TYPE_OPTIONS.len(), delta)
-        {
-            let option_value = H2_OUTPUT_TYPE_OPTIONS[next].0;
-            *value = option_value;
-            changed = true;
-        }
-    }
-    changed
-}
-
-pub(in crate::app) fn draw_h2_legacy_function_editor_contents(
+pub(in crate::app) fn draw_h2_function_editor_contents(
     ui: &mut Ui,
     view: &mut FunctionView,
     editable: bool,
     color_popup: Option<&mut Option<MaterialColorPopup>>,
 ) -> bool {
     let mut changed = false;
-    let Some(h2) = view.h2_legacy.as_mut() else {
+    let input_editable = editable && view.edit.as_ref().is_some_and(|paths| !paths.input_name.is_empty());
+    let range_editable = editable && view.edit.as_ref().is_some_and(|paths| !paths.range_name.is_empty());
+    let time_editable = editable && view.edit.as_ref().is_some_and(|paths| !paths.time_period.is_empty());
+    let Some(f) = view.function.as_h2_mut() else {
         return false;
     };
-    let input_editable = editable
-        && view
-            .edit
-            .as_ref()
-            .is_some_and(|paths| !paths.input_name.is_empty());
-    let range_editable = editable
-        && view
-            .edit
-            .as_ref()
-            .is_some_and(|paths| !paths.range_name.is_empty());
-    let time_editable = editable
-        && view
-            .edit
-            .as_ref()
-            .is_some_and(|paths| !paths.time_period.is_empty());
 
     ui.horizontal(|ui| {
         ui.label(RichText::new("Function type:").color(text_dark()).small());
-        changed |= h2_legacy_combo(
-            ui,
-            "h2_fn_type",
-            &mut h2.function_type,
-            &H2_FUNCTION_TYPE_OPTIONS,
-            editable,
-            130.0,
-        );
+        let current = f.function_type() as usize;
+        if let Some(index) = h2_index_combo(ui, "h2_fn_type", current, &FUNCTION_TYPE_NAMES, editable, 130.0)
+            && let Some(kind) = FunctionType::from_byte(index as u8)
+        {
+            f.set_function_type(kind);
+            changed = true;
+        }
+        ui.add_space(8.0);
+        ui.label(RichText::new("Color:").color(text_dark()).small());
+        let current = f.color_graph_type() as usize;
+        if let Some(index) = h2_index_combo(ui, "h2_fn_color", current, &COLOR_GRAPH_TYPE_NAMES, editable, 130.0) {
+            changed |= f.set_color_graph_type(index as u8).is_ok();
+        }
     });
-    ui.add_space(6.0);
+    ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.label(RichText::new("Input:").color(text_dark()).small());
         changed |= seeded_name_combo(ui, "h2_fn_input", &mut view.input_name, input_editable);
 
-        let mut ranged = !view.range_name.is_empty();
-        if ui
-            .add_enabled(range_editable, egui::Checkbox::new(&mut ranged, ""))
-            .changed()
-        {
+        // The RANGE flag is what the engine blends on; the range name is the
+        // input feeding it. Both follow the checkbox.
+        let mut ranged = f.is_ranged();
+        if ui.add_enabled(editable, egui::Checkbox::new(&mut ranged, "")).changed() {
+            f.set_ranged(ranged);
             if !ranged {
                 view.range_name.clear();
             }
@@ -160,57 +101,31 @@ pub(in crate::app) fn draw_h2_legacy_function_editor_contents(
         } else {
             foundation_input_cell(ui, "", 120.0);
         }
-
-        ui.label(RichText::new("Output Type:").color(text_dark()).small());
-        let mut output_type = h2.output_type;
-        if h2_output_type_combo(ui, &mut output_type, editable) {
-            h2.set_output_type(output_type);
-            changed = true;
-        }
     });
-    ui.add_space(8.0);
-    if !h2.is_color_output() {
+    ui.add_space(6.0);
+
+    if f.color_graph_type() == 0 {
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Min:").color(text_dark()).small());
-            changed |= h2_number_stepper(ui, "h2_min", &mut h2.min, 1.0, editable);
-            ui.label(RichText::new("Max:").color(text_dark()).small());
-            changed |= h2_number_stepper(ui, "h2_max", &mut h2.max, 1.0, editable);
+            let (min, max) = (f.clamp_range_min(), f.clamp_range_max());
+            let new_min = h2_drag(ui, "Min:", min, 0.01, editable);
+            let new_max = h2_drag(ui, "Max:", max, 0.01, editable);
+            if new_min.is_some() || new_max.is_some() {
+                changed |= f.set_clamp_range(new_min.unwrap_or(min), new_max.unwrap_or(max)).is_ok();
+            }
         });
     }
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("Exponent:").color(text_dark()).small());
-        let exponent_options: &[(u8, &str)] = if h2.function_type == 2 {
-            &H2_TRANSITION_EXPONENT_OPTIONS
-        } else {
-            &H2_EXPONENT_OPTIONS
-        };
-        changed |= h2_legacy_combo(
-            ui,
-            "h2_fn_exponent",
-            &mut h2.exponent,
-            exponent_options,
-            editable,
-            150.0,
-        );
-    });
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("Frequency:").color(text_dark()).small());
-        changed |= h2_number_stepper(ui, "h2_frequency", &mut h2.frequency, 0.25, editable);
-        ui.label(RichText::new("Phase:").color(text_dark()).small());
-        changed |= h2_number_stepper(ui, "h2_phase", &mut h2.phase, 1.0, editable);
-    });
+    for graph in 0..(1 + f.is_ranged() as usize) {
+        changed |= draw_h2_graph_parameters(ui, f, graph, editable);
+    }
     ui.add_space(8.0);
+
     ui.horizontal_top(|ui| {
-        draw_h2_legacy_graph_preview(ui, h2);
-        if h2.is_color_output() {
+        draw_h2_graph_preview(ui, &view.function);
+        if view.function.color_count() > 0 {
             ui.add_space(8.0);
-            changed |= draw_h2_legacy_color_stop_editors(ui, h2, editable, color_popup);
+            changed |= draw_h2_color_editors(ui, &mut view.function, editable, color_popup);
         }
     });
-    if h2.is_color_output() {
-        let (bar, _) = ui.allocate_exact_size(Vec2::new(360.0, 24.0), Sense::hover());
-        draw_function_color_gradient_horizontal(ui.painter(), bar, &h2.color_stops());
-    }
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.label(RichText::new("time period").color(text_dark()).small());
@@ -227,49 +142,86 @@ pub(in crate::app) fn draw_h2_legacy_function_editor_contents(
     changed
 }
 
-pub(super) fn h2_number_stepper(
-    ui: &mut Ui,
-    id: &str,
-    value: &mut f32,
-    step: f32,
-    editable: bool,
-) -> bool {
+/// The per-type parameters of `graph` (0 = green, 1 = the ranged red graph).
+fn draw_h2_graph_parameters(ui: &mut Ui, f: &mut H2Function, graph: usize, editable: bool) -> bool {
     let mut changed = false;
-    ui.push_id(id, |ui| {
-        ui.horizontal(|ui| {
-            if ui
-                .add_enabled(editable, egui::Button::new(RichText::new("-").small()))
-                .clicked()
-            {
-                *value -= step;
-                changed = true;
+    let tag = if graph == 0 { "" } else { " (range)" };
+    ui.horizontal(|ui| {
+        ui.push_id(("h2_graph", graph), |ui| match f.function_type() {
+            FunctionType::Transition | FunctionType::Periodic => {
+                let periodic = f.function_type() == FunctionType::Periodic;
+                let names: &[&str] = if periodic { &PERIODIC_FUNCTION_NAMES } else { &TRANSITION_FUNCTION_NAMES };
+                ui.label(RichText::new(format!("Function{tag}:")).color(text_dark()).small());
+                let current = f.function_index(graph) as usize;
+                if let Some(index) = h2_index_combo(ui, "h2_fn_index", current, names, editable, 170.0) {
+                    changed |= f.set_function_index(graph, index as u8).is_ok();
+                }
+                if let Some((frequency, phase)) = f.periodic_frequency_phase(graph) {
+                    let new_frequency = h2_drag(ui, "Frequency:", frequency, 0.05, editable);
+                    let new_phase = h2_drag(ui, "Phase:", phase, 0.05, editable);
+                    if new_frequency.is_some() || new_phase.is_some() {
+                        changed |= f
+                            .set_periodic_frequency_phase(graph, new_frequency.unwrap_or(frequency), new_phase.unwrap_or(phase))
+                            .is_ok();
+                    }
+                }
+                changed |= draw_h2_amplitude(ui, f, graph, editable);
             }
-            changed |= ui
-                .add_enabled(editable, egui::DragValue::new(value).speed(step))
-                .changed();
-            if ui
-                .add_enabled(editable, egui::Button::new(RichText::new("+").small()))
-                .clicked()
-            {
-                *value += step;
-                changed = true;
+            FunctionType::Exponent => {
+                if let Some(exponent) = f.exponent(graph)
+                    && let Some(v) = h2_drag(ui, &format!("Exponent{tag}:"), exponent, 0.05, editable)
+                {
+                    changed |= f.set_exponent(graph, v).is_ok();
+                }
+                changed |= draw_h2_amplitude(ui, f, graph, editable);
             }
+            FunctionType::Linear | FunctionType::LinearKey | FunctionType::Spline | FunctionType::Spline2 => {
+                ui.label(RichText::new(format!("Points{tag}:")).color(text_dark()).small());
+                for point in 0..f.control_point_count(graph) {
+                    let Some((x, y)) = f.control_point(graph, point) else { continue };
+                    ui.push_id(point, |ui| {
+                        ui.label(RichText::new(format!("x {x:.2}")).color(subtle_dark()).small());
+                        if let Some(v) = h2_drag(ui, "y", y, 0.01, editable) {
+                            changed |= f.set_control_point_y(graph, point, v).is_ok();
+                        }
+                    });
+                }
+            }
+            FunctionType::MultiLinearKey | FunctionType::MultiSpline => {
+                ui.label(
+                    RichText::new("the Halo 2 engine evaluates this type as 0")
+                        .color(subtle_dark())
+                        .small(),
+                );
+            }
+            FunctionType::Identity | FunctionType::Constant => {}
         });
     });
     changed
 }
 
-pub(super) fn draw_h2_legacy_color_stop_editors(
+fn draw_h2_amplitude(ui: &mut Ui, f: &mut H2Function, graph: usize, editable: bool) -> bool {
+    let Some((min, max)) = f.amplitude_range(graph) else { return false };
+    let new_min = h2_drag(ui, "Amp min:", min, 0.01, editable);
+    let new_max = h2_drag(ui, "Amp max:", max, 0.01, editable);
+    (new_min.is_some() || new_max.is_some())
+        && f.set_amplitude_range(graph, new_min.unwrap_or(min), new_max.unwrap_or(max)).is_ok()
+}
+
+/// Swatches for the populated colors, top = last. A dedicated color popup
+/// (when given) edits through [`FunctionDraftColorTarget::H2Logical`].
+fn draw_h2_color_editors(
     ui: &mut Ui,
-    h2: &mut H2LegacyFunctionView,
+    function: &mut TagFunction,
     editable: bool,
     mut color_popup: Option<&mut Option<MaterialColorPopup>>,
 ) -> bool {
     let mut changed = false;
+    let count = function.color_count();
     ui.vertical(|ui| {
-        // Top swatch is the high/end color, bottom swatch is the low/start color.
-        for index in (0..h2.color_stop_count()).rev() {
-            let mut color = h2.color_stop(index);
+        for index in (0..count).rev() {
+            let Some(argb) = function.as_h2().and_then(|f| f.color(index)) else { continue };
+            let mut color = color32_from_argb(argb);
             ui.horizontal(|ui| {
                 let dedicated = color_popup.as_deref_mut();
                 let resp = if dedicated.is_none() && editable {
@@ -277,27 +229,17 @@ pub(super) fn draw_h2_legacy_color_stop_editors(
                 } else {
                     let (rect, resp) = ui.allocate_exact_size(
                         Vec2::splat(24.0),
-                        if editable {
-                            Sense::click()
-                        } else {
-                            Sense::hover()
-                        },
+                        if editable { Sense::click() } else { Sense::hover() },
                     );
                     ui.painter().rect_filled(rect, 0.0, color);
-                    ui.painter()
-                        .rect_stroke(rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
+                    ui.painter().rect_stroke(rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
                     resp
                 };
                 ui.label(
-                    RichText::new(format!(
-                        "#{:02X}{:02X}{:02X}",
-                        color.r(),
-                        color.g(),
-                        color.b()
-                    ))
-                    .color(subtle_dark())
-                    .small()
-                    .monospace(),
+                    RichText::new(format!("#{:02X}{:02X}{:02X}", color.r(), color.g(), color.b()))
+                        .color(subtle_dark())
+                        .small()
+                        .monospace(),
                 );
                 match dedicated {
                     Some(popup) if resp.clicked() => {
@@ -309,342 +251,61 @@ pub(super) fn draw_h2_legacy_color_stop_editors(
                                 color.b() as f32 / 255.0,
                                 1.0,
                             )
-                            .with_function_draft_color(
-                                FunctionDraftColorTarget::H2Logical(index),
-                                0,
-                            ),
+                            .with_function_draft_color(FunctionDraftColorTarget::H2Logical(index), 0),
                         );
                     }
                     None if resp.changed() => {
-                        h2.set_color_stop(index, color);
-                        changed = true;
+                        // Keep the stored alpha; the swatch edits RGB.
+                        let rgb = (color.r() as u32) << 16 | (color.g() as u32) << 8 | color.b() as u32;
+                        if let Some(f) = function.as_h2_mut() {
+                            changed |= f.set_color(index, (argb & 0xFF00_0000) | rgb).is_ok();
+                        }
                     }
                     _ => {}
                 }
             });
             if index > 0 {
-                ui.add_space(if h2.color_stop_count() <= 2 {
-                    90.0
-                } else {
-                    18.0
-                });
+                ui.add_space(if count <= 2 { 90.0 } else { 18.0 });
             }
         }
     });
     changed
 }
 
-pub(super) fn draw_h2_legacy_graph_preview(ui: &mut Ui, h2: &H2LegacyFunctionView) {
-    let desired = Vec2::new(360.0, 120.0);
-    let (rect, _) = ui.allocate_exact_size(desired, Sense::hover());
+/// The normalized curve(s) the engine evaluates: green = graph 0 (range 0),
+/// red = graph 1 (range 1) when ranged; over the color gradient for color
+/// functions.
+fn draw_h2_graph_preview(ui: &mut Ui, function: &TagFunction) {
+    let (rect, _) = ui.allocate_exact_size(Vec2::new(360.0, 120.0), Sense::hover());
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, Color32::BLACK);
     let plot = rect.shrink(12.0);
-    if h2.is_color_output() {
-        draw_function_color_gradient_vertical(&painter, plot, &h2.color_stops());
+    if function.color_count() > 0 {
+        draw_function_color_gradient_vertical(&painter, plot, &function_color_stops(function));
     } else {
         painter.rect_filled(plot, 0.0, Color32::from_gray(180));
     }
     painter.rect_stroke(plot, 0.0, Stroke::new(1.0, Color32::from_gray(80)));
     for i in 1..10 {
         let x = egui::lerp(plot.left()..=plot.right(), i as f32 / 10.0);
-        painter.line_segment(
-            [egui::pos2(x, plot.top()), egui::pos2(x, plot.bottom())],
-            Stroke::new(1.0, Color32::from_gray(135)),
-        );
+        painter.line_segment([egui::pos2(x, plot.top()), egui::pos2(x, plot.bottom())], Stroke::new(1.0, Color32::from_gray(135)));
         let y = egui::lerp(plot.bottom()..=plot.top(), i as f32 / 10.0);
-        painter.line_segment(
-            [egui::pos2(plot.left(), y), egui::pos2(plot.right(), y)],
-            Stroke::new(1.0, Color32::from_gray(135)),
-        );
+        painter.line_segment([egui::pos2(plot.left(), y), egui::pos2(plot.right(), y)], Stroke::new(1.0, Color32::from_gray(135)));
     }
-    let low = h2.min.min(h2.max);
-    let high = h2.min.max(h2.max);
-    let span = (high - low).abs().max(0.0001);
-    let mut points = Vec::with_capacity(96);
-    for i in 0..96 {
-        let t = i as f32 / 95.0;
-        let y = ((h2.sample(t) - low) / span).clamp(0.0, 1.0);
-        points.push(egui::pos2(
-            egui::lerp(plot.left()..=plot.right(), t),
-            egui::lerp(plot.bottom()..=plot.top(), y),
-        ));
-    }
-    painter.add(egui::Shape::line(points, Stroke::new(2.0, Color32::GREEN)));
-}
-
-#[derive(Clone, PartialEq)]
-/// Recognized classic H2 byte layouts whose field offsets differ.
-/// Unknown layouts remain representable through their raw bytes rather than
-/// being normalized into the default shape.
-enum H2LegacyFunctionLayout {
-    Default,
-    DamageEffectVibration36,
-}
-
-#[derive(Clone, PartialEq)]
-/// Parsed view over a classic Halo 2 mapping-function byte block.
-/// `raw` is the preservation source: serialization patches known offsets into a
-/// clone instead of regenerating the blob and discarding unknown bytes.
-pub(in crate::app) struct H2LegacyFunctionView {
-    raw: Vec<u8>,
-    layout: H2LegacyFunctionLayout,
-    function_type: u8,
-    output_type: u8,
-    exponent: u8,
-    min: f32,
-    max: f32,
-    frequency: f32,
-    phase: f32,
-}
-
-impl H2LegacyFunctionView {
-    pub(in crate::app) fn parse(raw: Vec<u8>) -> Option<Self> {
-        if raw.len() < 20 {
-            return None;
-        }
-        let function_type = raw[0];
-        let output_type = raw[1];
-        let min = read_f32_le(&raw, 4).unwrap_or(0.0);
-        let max = read_f32_le(&raw, 8).unwrap_or(1.0);
-        let (exponent, frequency, phase) = if raw.len() >= 52 && function_type == 3 {
-            (
-                raw[2],
-                read_f32_le(&raw, 20).unwrap_or(0.0),
-                read_f32_le(&raw, 24).unwrap_or(0.0),
-            )
-        } else {
-            (
-                raw[2],
-                read_f32_le(&raw, 12).unwrap_or(0.0),
-                read_f32_le(&raw, 16).unwrap_or(0.0),
-            )
-        };
-        Some(Self {
-            function_type,
-            output_type,
-            exponent,
-            min,
-            max,
-            frequency,
-            phase,
-            raw,
-            layout: H2LegacyFunctionLayout::Default,
-        })
-    }
-
-    pub(in crate::app) fn parse_damage_effect_vibration(raw: Vec<u8>) -> Option<Self> {
-        if raw.len() < 20 {
-            return None;
-        }
-        let function_type = raw[0];
-        let output_type = raw[1];
-        let exponent = raw[2];
-        let min = read_f32_le(&raw, 20).unwrap_or(0.0);
-        let max = read_f32_le(&raw, 24).unwrap_or(1.0);
-        Some(Self {
-            function_type,
-            output_type,
-            exponent,
-            min,
-            max,
-            frequency: 0.0,
-            phase: 0.0,
-            raw,
-            layout: H2LegacyFunctionLayout::DamageEffectVibration36,
-        })
-    }
-
-    pub(in crate::app) fn to_bytes(&self) -> Vec<u8> {
-        let mut raw = self.raw.clone();
-        if raw.len() < 20 {
-            raw.resize(20, 0);
-        }
-        raw[0] = self.function_type;
-        raw[1] = self.output_type;
-        if self.layout == H2LegacyFunctionLayout::DamageEffectVibration36 {
-            raw[2] = self.exponent;
-            if raw.len() < 28 {
-                raw.resize(28, 0);
-            }
-            raw[20..24].copy_from_slice(&self.min.to_le_bytes());
-            raw[24..28].copy_from_slice(&self.max.to_le_bytes());
-            return raw;
-        }
-        if !self.is_color_output() {
-            raw[4..8].copy_from_slice(&self.min.to_le_bytes());
-            raw[8..12].copy_from_slice(&self.max.to_le_bytes());
-        }
-        if raw.len() >= 52 && self.function_type == 3 {
-            raw[2] = self.exponent;
-            raw[20..24].copy_from_slice(&self.frequency.to_le_bytes());
-            raw[24..28].copy_from_slice(&self.phase.to_le_bytes());
-        } else if !self.is_color_output() || self.color_stop_count() <= 2 {
-            raw[2] = self.exponent;
-            raw[12..16].copy_from_slice(&self.frequency.to_le_bytes());
-            raw[16..20].copy_from_slice(&self.phase.to_le_bytes());
-        } else {
-            raw[2] = self.exponent;
-        }
-        raw
-    }
-
-    fn is_color_output(&self) -> bool {
-        self.color_stop_count() > 0
-    }
-
-    fn color_stop_count(&self) -> usize {
-        h2_color_stop_count(self.output_type)
-    }
-
-    fn set_output_type(&mut self, output_type: u8) {
-        if self.output_type == output_type {
-            return;
-        }
-
-        let old_count = self.color_stop_count();
-        let new_count = h2_color_stop_count(output_type);
-        if old_count > 0 && new_count > 0 && old_count != new_count {
-            let old_slots = (0..old_count)
-                .map(|index| self.color_stop_slot_bytes(index))
-                .collect::<Vec<_>>();
-            let mut new_slots = vec![[0, 0, 0, 0]; new_count];
-            new_slots[0] = old_slots[0];
-            new_slots[new_count - 1] = old_slots[old_count - 1];
-
-            let interior_count = old_count.saturating_sub(2).min(new_count.saturating_sub(2));
-            for index in 0..interior_count {
-                new_slots[index + 1] = old_slots[index + 1];
-            }
-
-            let required_len = 4 + new_count * 4;
-            if self.raw.len() < required_len {
-                self.raw.resize(required_len, 0);
-            }
-            for (index, slot) in new_slots.iter().enumerate() {
-                let offset = 4 + index * 4;
-                self.raw[offset..offset + 4].copy_from_slice(slot);
-            }
-        }
-
-        self.output_type = output_type;
-    }
-
-    fn color_stop(&self, index: usize) -> Color32 {
-        if index >= self.color_stop_count() {
-            return Color32::BLACK;
-        }
-        let offset = 4 + index * 4;
-        if self.color_stop_count() == 2 && index == 1 && h2_bgra_color_is_unset(&self.raw, offset) {
-            return self.color_stop(0);
-        }
-        h2_bgra_color(&self.raw, offset).unwrap_or(Color32::BLACK)
-    }
-
-    fn set_color_stop(&mut self, index: usize, color: Color32) {
-        if index >= self.color_stop_count() {
-            return;
-        }
-        let offset = 4 + index * 4;
-        if self.raw.len() < offset + 4 {
-            self.raw.resize(offset + 4, 0);
-        }
-        let alpha = self.raw[offset + 3];
-        self.raw[offset] = color.b();
-        self.raw[offset + 1] = color.g();
-        self.raw[offset + 2] = color.r();
-        self.raw[offset + 3] = alpha;
-    }
-
-    fn color_stop_slot_bytes(&self, index: usize) -> [u8; 4] {
-        let offset = 4 + index * 4;
-        if self.color_stop_count() == 2 && index == 1 && h2_bgra_color_is_unset(&self.raw, offset) {
-            let color = self.color_stop(0);
-            let alpha = self.raw.get(offset + 3).copied().unwrap_or(0);
-            return [color.b(), color.g(), color.r(), alpha];
-        }
-        let mut slot = [0, 0, 0, 0];
-        if let Some(bytes) = self.raw.get(offset..offset + 4) {
-            slot.copy_from_slice(bytes);
-        }
-        slot
-    }
-
-    fn color_stops(&self) -> Vec<Color32> {
-        (0..self.color_stop_count())
-            .map(|index| self.color_stop(index))
-            .collect()
-    }
-
-    fn sample(&self, x: f32) -> f32 {
-        let n = match self.function_type {
-            0 => x,
-            1 => 0.0,
-            2 => h2_transition_sample(self.exponent, x),
-            3 => h2_periodic_sample(self.exponent, x * self.frequency + self.phase),
-            4 => x,
-            _ => x,
-        }
-        .clamp(0.0, 1.0);
-        self.min + n * (self.max - self.min)
-    }
-}
-
-pub(super) fn h2_bgra_color(raw: &[u8], offset: usize) -> Option<Color32> {
-    Some(Color32::from_rgb(
-        *raw.get(offset + 2)?,
-        *raw.get(offset + 1)?,
-        *raw.get(offset)?,
-    ))
-}
-
-pub(super) fn h2_bgra_color_is_unset(raw: &[u8], offset: usize) -> bool {
-    raw.get(offset..offset + 4)
-        .is_none_or(|bytes| bytes.iter().all(|byte| *byte == 0))
-}
-
-pub(super) fn h2_color_stop_count(output_type: u8) -> usize {
-    match output_type {
-        2 | 0x20 => 2,
-        3 | 0x40 => 3,
-        4 | 0x80 => 4,
-        _ => 0,
-    }
-}
-
-pub(super) fn read_f32_le(raw: &[u8], offset: usize) -> Option<f32> {
-    Some(f32::from_le_bytes(
-        raw.get(offset..offset + 4)?.try_into().ok()?,
-    ))
-}
-
-pub(super) fn h2_periodic_sample(exponent: u8, x: f32) -> f32 {
-    let t = x.rem_euclid(1.0);
-    match exponent {
-        2 | 3 => (1.0 - (t * std::f32::consts::TAU).cos()) * 0.5,
-        4 | 5 => {
-            if t < 0.5 {
-                t * 2.0
-            } else {
-                (1.0 - t) * 2.0
-            }
-        }
-        _ => t,
-    }
-}
-
-pub(super) fn h2_transition_sample(exponent: u8, x: f32) -> f32 {
-    let t = x.clamp(0.0, 1.0);
-    match exponent {
-        0 => t,
-        1 => t * t,
-        2 => t * t * t,
-        3 => t.sqrt(),
-        4 => t.cbrt(),
-        5 => (1.0 - (t * std::f32::consts::PI).cos()) * 0.5,
-        6 => 0.0,
-        7 => 1.0,
-        _ => t,
+    let graphs: &[(f32, Color32)] = if function.is_ranged() {
+        &[(1.0, Color32::RED), (0.0, Color32::GREEN)]
+    } else {
+        &[(0.0, Color32::GREEN)]
+    };
+    for &(range, stroke) in graphs {
+        let points = (0..96)
+            .map(|i| {
+                let t = i as f32 / 95.0;
+                let y = function.evaluate_shape(t, range).clamp(0.0, 1.0);
+                egui::pos2(egui::lerp(plot.left()..=plot.right(), t), egui::lerp(plot.bottom()..=plot.top(), y))
+            })
+            .collect();
+        painter.add(egui::Shape::line(points, Stroke::new(2.0, stroke)));
     }
 }
 
@@ -656,13 +317,11 @@ impl FunctionView {
     pub(in crate::app) fn from_function(function: TagFunction) -> Self {
         Self {
             function,
-            h2_legacy: None,
             input_name: String::new(),
             range_name: String::new(),
             output_index: None,
             time_period_in_seconds: 0.0,
             edit: None,
-            hide_scalar_color_controls: false,
         }
     }
 
@@ -672,7 +331,6 @@ impl FunctionView {
     ) -> Self {
         Self {
             function,
-            h2_legacy: None,
             input_name: animated.input_name.clone(),
             range_name: animated.range_name.clone(),
             output_index: animated.parameter_type.and_then(|kind| {
@@ -683,7 +341,6 @@ impl FunctionView {
             }),
             time_period_in_seconds: animated.time_period_in_seconds,
             edit: None,
-            hide_scalar_color_controls: false,
         }
     }
 
@@ -692,22 +349,8 @@ impl FunctionView {
         self
     }
 
-    pub(in crate::app) fn with_h2_scalar_ui(mut self) -> Self {
-        self.hide_scalar_color_controls = true;
-        self
-    }
-
-    pub(in crate::app) fn with_h2_legacy(mut self, h2_legacy: H2LegacyFunctionView) -> Self {
-        self.h2_legacy = Some(h2_legacy);
-        self.hide_scalar_color_controls = true;
-        self
-    }
-
     pub(in crate::app) fn data_bytes(&self) -> Vec<u8> {
-        self.h2_legacy
-            .as_ref()
-            .map(H2LegacyFunctionView::to_bytes)
-            .unwrap_or_else(|| self.function.to_bytes())
+        self.function.to_bytes()
     }
 }
 
@@ -756,19 +399,21 @@ impl FunctionPopup {
         target: FunctionDraftColorTarget,
         argb: u32,
     ) {
-        match target {
-            FunctionDraftColorTarget::H3Logical(index) if self.view.h2_legacy.is_none() => {
-                let mut editor = TagFunctionEditor::from_function(self.view.function.clone());
-                if editor.set_color(index, argb).is_ok() {
-                    self.view.function = editor.into_function();
-                }
+        // The target names which editor opened the picker; both encodings take
+        // the logical color through the engine's setter.
+        let (FunctionDraftColorTarget::H3Logical(index) | FunctionDraftColorTarget::H2Logical(index)) = target;
+        if self.view.function.as_h2().is_some() {
+            // The H2 swatches edit RGB; keep the stored alpha.
+            let keep = self.view.function.as_h2().and_then(|f| f.color(index)).unwrap_or(0xFF00_0000);
+            let argb = (keep & 0xFF00_0000) | (argb & 0x00FF_FFFF);
+            if let Some(f) = self.view.function.as_h2_mut() {
+                let _ = f.set_color(index, argb);
             }
-            FunctionDraftColorTarget::H2Logical(index) => {
-                if let Some(h2) = self.view.h2_legacy.as_mut() {
-                    h2.set_color_stop(index, color32_from_argb(argb));
-                }
-            }
-            _ => {}
+            return;
+        }
+        let mut editor = TagFunctionEditor::from_function(self.view.function.clone());
+        if editor.set_color(index, argb).is_ok() {
+            self.view.function = editor.into_function();
         }
     }
 }

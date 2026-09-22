@@ -145,60 +145,29 @@ pub(in crate::app) fn constant_function_hex(v: f32) -> String {
     blob.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-pub(in crate::app) fn is_h2_legacy_constant_function_data(data: &[u8]) -> bool {
-    data.len() >= 8 && is_h2_legacy_function_data(data) && matches!(data.first(), Some(1))
-}
-
-pub(super) fn is_h2_legacy_function_data(data: &[u8]) -> bool {
-    !data.is_empty() && data.len() != 32
-}
-
-pub(super) fn is_h2_legacy_nonconstant_function_data(data: &[u8]) -> bool {
-    is_h2_legacy_function_data(data) && !is_h2_legacy_constant_function_data(data)
-}
-
-pub(super) fn h2_legacy_constant_scalar(data: &[u8]) -> Option<f32> {
-    if !is_h2_legacy_constant_function_data(data) {
-        return None;
-    }
-    Some(f32::from_le_bytes(data.get(4..8)?.try_into().ok()?))
-}
-
-pub(super) fn h2_legacy_constant_color(data: &[u8]) -> Option<[f32; 4]> {
-    if !is_h2_legacy_constant_function_data(data)
-        || data.len() < 8
-        || data.get(1).copied()? & 0x20 == 0
-    {
-        return None;
-    }
-    Some([
-        byte_to_float(data[6]),
-        byte_to_float(data[5]),
-        byte_to_float(data[4]),
-        byte_to_float(data[7]),
-    ])
-}
-
+/// Halo 2 constant-scalar bytes for `value`. An existing scalar constant is
+/// patched in place through the engine's clamp range (the max follows the min
+/// when the two were tied); anything else becomes a fresh engine-shaped
+/// constant rather than an H3 blob, which the Halo 2 engine would misread.
 pub(in crate::app) fn h2_constant_scalar_function_data(
     value: f32,
     existing: Option<&[u8]>,
 ) -> Vec<u8> {
-    if let Some(existing) = existing.filter(|data| is_h2_legacy_constant_function_data(data)) {
-        let mut data = existing.to_vec();
-        let old = h2_legacy_constant_scalar(existing);
-        data[4..8].copy_from_slice(&value.to_le_bytes());
-        if data.len() >= 12
-            && old.is_some_and(|old| {
-                f32::from_le_bytes(data[8..12].try_into().unwrap_or_default()) == old
-            })
-        {
-            data[8..12].copy_from_slice(&value.to_le_bytes());
+    if let Some(mut f) = existing
+        .and_then(|data| H2Function::parse(data).ok())
+        .filter(|f| f.function_type() == FunctionType::Constant && f.color_graph_type() == 0)
+    {
+        let (min, max) = (f.clamp_range_min(), f.clamp_range_max());
+        let max = if max.to_bits() == min.to_bits() { value } else { max };
+        if f.set_clamp_range(value, max).is_ok() {
+            return f.to_bytes();
         }
-        return data;
     }
-    decode_hex(&constant_function_hex(value)).unwrap_or_default()
+    H2Function::new_constant(value).to_bytes()
 }
 
+/// Halo 2 constant-color bytes. An existing color constant keeps everything
+/// but its first color; anything else becomes a fresh engine-shaped constant.
 pub(in crate::app) fn h2_constant_color_function_data(
     r: f32,
     g: f32,
@@ -206,22 +175,24 @@ pub(in crate::app) fn h2_constant_color_function_data(
     a: f32,
     existing: Option<&[u8]>,
 ) -> Vec<u8> {
-    if let Some(existing) = existing.filter(|data| is_h2_legacy_constant_function_data(data)) {
-        let mut data = existing.to_vec();
-        data[4] = float_channel_to_u8(b);
-        data[5] = float_channel_to_u8(g);
-        data[6] = float_channel_to_u8(r);
-        data[7] = float_channel_to_u8(a);
-        return data;
+    let argb = (float_channel_to_u8(a) as u32) << 24
+        | (float_channel_to_u8(r) as u32) << 16
+        | (float_channel_to_u8(g) as u32) << 8
+        | float_channel_to_u8(b) as u32;
+    if let Some(mut f) = existing
+        .and_then(|data| H2Function::parse(data).ok())
+        .filter(|f| f.function_type() == FunctionType::Constant && f.color_graph_type() != 0)
+        && f.set_color(0, argb).is_ok()
+    {
+        return f.to_bytes();
     }
-    decode_hex(&constant_color_function_hex(r, g, b, a)).unwrap_or_default()
+    H2Function::new_constant_color(argb).to_bytes()
 }
 
 /// True when `f` is a Constant-type function with a color (not scalar) output.
 /// Used to decide whether to show a constant color swatch vs a graph row.
 pub(in crate::app) fn is_constant_color_fn(f: &TagFunction) -> bool {
-    f.color_graph_type() != ColorGraphType::Scalar
-        && matches!(f.as_blob().map(BlobFunction::kind), Some(FunctionKind::Constant { .. }))
+    f.color_graph_type() != ColorGraphType::Scalar && f.function_type() == FunctionType::Constant
 }
 
 /// Extract the (r, g, b, a) components from a constant 1-color function.
@@ -230,7 +201,10 @@ pub(in crate::app) fn extract_constant_color(f: &TagFunction) -> Option<[f32; 4]
     if !is_constant_color_fn(f) {
         return None;
     }
-    let argb = f.as_blob()?.header().colors[0];
+    let argb = match f {
+        TagFunction::Blob(blob) => blob.header().colors[0],
+        TagFunction::H2(h2) => h2.color(0)?,
+    };
     let alpha = ((argb >> 24) & 0xFF) as f32 / 255.0;
     Some([
         ((argb >> 16) & 0xFF) as f32 / 255.0, // r
