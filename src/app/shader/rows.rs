@@ -155,7 +155,7 @@ pub(in crate::app) fn h2_constant_scalar_function_data(
 ) -> Vec<u8> {
     if let Some(mut f) = existing
         .and_then(|data| H2Function::parse(data).ok())
-        .filter(|f| f.function_type() == FunctionType::Constant && f.color_graph_type() == 0)
+        .filter(|f| f.function_type() == FunctionType::Constant && f.color_graph_type() == ColorGraphType::Scalar)
     {
         let (min, max) = (f.clamp_range_min(), f.clamp_range_max());
         let max = if max.to_bits() == min.to_bits() { value } else { max };
@@ -181,7 +181,7 @@ pub(in crate::app) fn h2_constant_color_function_data(
         | float_channel_to_u8(b) as u32;
     if let Some(mut f) = existing
         .and_then(|data| H2Function::parse(data).ok())
-        .filter(|f| f.function_type() == FunctionType::Constant && f.color_graph_type() != 0)
+        .filter(|f| f.function_type() == FunctionType::Constant && f.color_graph_type() != ColorGraphType::Scalar)
         && f.set_color(0, argb).is_ok()
     {
         return f.to_bytes();

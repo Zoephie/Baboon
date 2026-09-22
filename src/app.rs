@@ -17,7 +17,7 @@ use std::thread;
 use blam_tags::bitmap::decode::decode_to_rgba8;
 use blam_tags::paths::{derive_tags_root, group_tag_to_extension, resolve_tag_path, tag_ref_path};
 use blam_tags::render_method::{
-    GlobalRenderMethodFlags, RenderMethod, RenderMethodAnimatedParameter,
+    GlobalRenderMethodFlags, Halo2ShaderAnimationType, RenderMethod, RenderMethodAnimatedParameter,
     RenderMethodAnimatedParameterType, RenderMethodDefinition, RenderMethodOption,
     RenderMethodOptionParameter, RenderMethodParameter, RenderMethodParameterType,
     compile_real_constant,
@@ -26,7 +26,7 @@ use blam_tags::{
     AssFile, Bitmap, ColorGraphType, CurvePointMode, CurveSegmentType, Endian,
     FoundationMasterType as EngineMasterType, FunctionFlags, FunctionKind, FunctionType, JmsFile,
     PERIODIC_FUNCTIONS, PeriodicParams, RenderModel, StringIdData, TRANSITION_FUNCTIONS, TagBlock,
-    TagField, TagFieldData, TagFieldType, TagFile, TagFunction, TagFunctionEditor, BlobFunction, FunctionEncoding, H2Function,
+    TagField, TagFieldData, TagFieldType, TagFile, TagFunction, TagFunctionEditor, BlobFunction, FunctionEncoding, H2Function, SchemaEnum,
     TagReferenceData, TagResource, TagResourceKind, TagStruct, TransitionParams, format_group_tag,
     parse_group_tag,
 };

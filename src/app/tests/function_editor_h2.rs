@@ -1,32 +1,6 @@
 use super::*;
 
 #[test]
-fn generic_function_type_combo_offers_every_supported_mapping_function_type() {
-    let expected = [
-        FunctionType::Identity,
-        FunctionType::Constant,
-        FunctionType::Transition,
-        FunctionType::Periodic,
-        FunctionType::Linear,
-        FunctionType::LinearKey,
-        FunctionType::MultiLinearKey,
-        FunctionType::Spline,
-        FunctionType::MultiSpline,
-        FunctionType::Exponent,
-        FunctionType::Spline2,
-    ];
-
-    assert_eq!(EDITABLE_FUNCTION_TYPES, expected);
-    for kind in expected {
-        assert!(
-            is_editable_function_type(kind),
-            "{kind:?} should be editable"
-        );
-        assert_eq!(FunctionType::from_byte(kind as u8), Some(kind));
-    }
-}
-
-#[test]
 fn foundation_master_types_keep_all_curve_variants_in_curve_mode() {
     assert_eq!(
         EngineMasterType::from_function_type(FunctionType::Constant),
@@ -87,14 +61,17 @@ fn h2(raw: &[u8]) -> TagFunction {
 
 #[test]
 fn h2_option_tables_are_the_engines() {
-    use blam_tags::tag_function::h2::{COLOR_GRAPH_TYPE_NAMES, FUNCTION_TYPE_NAMES, TRANSITION_FUNCTION_NAMES};
-    assert_eq!(FUNCTION_TYPE_NAMES.len(), EDITABLE_FUNCTION_TYPES.len());
-    for kind in EDITABLE_FUNCTION_TYPES {
-        assert!(FUNCTION_TYPE_NAMES.get(kind as usize).is_some(), "{kind:?} has an H2 name");
-    }
+    use blam_tags::tag_function::h2::{
+        FUNCTION_TYPES, TRANSITION_FUNCTION_NAMES, color_graph_type_name, function_type_name,
+    };
+    // Guerilla's picker lists every type, the multi types included.
+    assert_eq!(FUNCTION_TYPES.len(), 11);
+    assert_eq!(function_type_name(FunctionType::MultiLinearKey), "multi linear key");
+    assert_eq!(function_type_name(FunctionType::MultiSpline), "multi spline");
     // The color graph type is the flags' high nibble; there is no "scalar
-    // (alpha)" (that was the RANGE bit).
-    assert_eq!(COLOR_GRAPH_TYPE_NAMES, ["scalar (intensity)", "constant", "2-color", "3-color", "4-color"]);
+    // (alpha)" (that was the RANGE bit). One color is "constant".
+    assert_eq!(color_graph_type_name(ColorGraphType::Scalar), "scalar (intensity)");
+    assert_eq!(color_graph_type_name(ColorGraphType::OneColor), "constant");
     assert_eq!(TRANSITION_FUNCTION_NAMES.len(), 8);
 }
 
@@ -148,10 +125,10 @@ fn h2_color_graph_type_and_range_never_touch_each_other() {
     // RANGE bit. The two now live in their own bits.
     let mut function = h2(&h2_block(28, 1, 0, 0));
     let f = function.as_h2_mut().unwrap();
-    f.set_color_graph_type(2).unwrap();
+    f.set_color_graph_type(ColorGraphType::TwoColor);
     assert!(!f.is_ranged());
     f.set_ranged(true);
-    assert_eq!(f.color_graph_type(), 2);
+    assert_eq!(f.color_graph_type(), ColorGraphType::TwoColor);
     assert_eq!(function.to_bytes()[1], 0x21);
 }
 
@@ -232,7 +209,7 @@ fn dedicated_picker_updates_h3_function_draft_logical_slot() {
         true,
     );
 
-    popup.apply_draft_color(FunctionDraftColorTarget::H3Logical(1), 0x00AA_BBCC);
+    popup.apply_draft_color(FunctionDraftColorTarget::Logical(1), 0x00AA_BBCC);
 
     let header = popup.view.function.as_blob().unwrap().header();
     assert_eq!(header.colors[0], 0x0011_2233);
@@ -246,7 +223,8 @@ fn dedicated_picker_updates_h2_logical_color() {
     raw[16..20].copy_from_slice(&[0x50, 0x60, 0x70, 0x80]);
     let mut popup = FunctionPopup::new("tag".to_owned(), "function".to_owned(), FunctionView::from_function(h2(&raw)), true);
 
-    popup.apply_draft_color(FunctionDraftColorTarget::H2Logical(1), 0x00AA_BBCC);
+    // What the picker sends on OK: the swatch's original alpha over the new RGB.
+    popup.apply_draft_color(FunctionDraftColorTarget::Logical(1), 0x80AA_BBCC);
 
     let data = popup.view.data_bytes();
     assert_eq!(&data[16..20], &[0xCC, 0xBB, 0xAA, 0x80], "logical 1 is slot 3; alpha kept");

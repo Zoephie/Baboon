@@ -6,18 +6,13 @@ fn constant_view() -> FunctionView {
 }
 
 #[test]
-fn h3_wrapped_mapping_functions_use_foundation_popup() {
-    assert!(uses_foundation_function_popup(&constant_view()));
-}
-
-#[test]
-fn h2_mapping_functions_use_the_h2_editor() {
+fn every_function_reads_in_its_games_encoding() {
+    assert_eq!(constant_view().function.encoding(), FunctionEncoding::Blob);
     let mut raw = vec![0; 28];
     raw[0] = FunctionType::Constant as u8;
     raw[8..12].copy_from_slice(&1.0f32.to_le_bytes());
     let view = FunctionView::from_function(h2_tag_function(&raw).expect("an H2 block"));
-
-    assert!(!uses_foundation_function_popup(&view));
+    assert_eq!(view.function.encoding(), FunctionEncoding::H2);
 }
 
 /// Adding a block element that contains a `mapping_function` used to leave the
@@ -64,9 +59,10 @@ fn a_new_block_elements_function_is_recognized_by_the_editor() {
         data_path,
         "hologram[0]/shimmer to camo function/function/data"
     );
-    assert!(
-        uses_foundation_function_popup(&view),
-        "a Reach function belongs in the Foundation editor, not the H2 legacy one"
+    assert_eq!(
+        view.function.encoding(),
+        FunctionEncoding::Blob,
+        "a Reach function is an H3+ blob, not a Halo 2 byte-block"
     );
 }
 
@@ -108,12 +104,12 @@ fn a_new_functions_bytes_match_what_the_engine_writes() {
     );
 }
 
-/// Halo 2 models a function as a typed `MAPP` struct rather than a `data` blob,
-/// so nothing is seeded and the legacy editor keeps owning it. Pinned because
-/// both halves of this fix key on a schema name, and a change that started
-/// matching H2 would write Reach-shaped bytes into an H2 tag.
+/// A new Halo 2 element's function is an empty `data` byte-block. It must get
+/// the function editor (opened as the identity the engine grows an empty block
+/// into) and must never be seeded with an H3+ blob, which the H2 engine would
+/// misread.
 #[test]
-fn halo2_functions_are_left_to_the_legacy_path() {
+fn a_new_halo2_function_opens_as_h2_and_gets_no_h3_blob() {
     let mut tag = TagFile::new(test_definition_path("halo2_mcc/shader.json"))
         .expect("the Halo 2 shader schema loads");
     {
@@ -135,8 +131,7 @@ fn halo2_functions_are_left_to_the_legacy_path() {
         anim.add_element();
     }
 
-    // H2's `function` is a struct of typed fields, so there is no `data` field
-    // for the seeding to have touched.
+    // Nothing seeded: the byte-block is still empty and there is no data field.
     let function_struct = tag
         .root()
         .field_path("parameters[0]/animation properties[0]/function")
@@ -152,6 +147,16 @@ fn halo2_functions_are_left_to_the_legacy_path() {
         seeded.is_empty(),
         "Halo 2 should carry no seeded function blob, found {seeded:?}"
     );
+    assert_eq!(halo2_function_bytes_from_struct(function_struct), Some(Vec::new()));
+
+    let (view, data_path) = inline_mapping_function_from_struct(
+        function_struct,
+        "parameters[0]/animation properties[0]/function",
+    )
+    .expect("an empty H2 function still reaches the function editor");
+    assert_eq!(view.function.encoding(), FunctionEncoding::H2);
+    assert_eq!(view.function.function_type(), FunctionType::Identity);
+    assert_eq!(data_path, "parameters[0]/animation properties[0]/function/data");
 }
 
 /// Seeding is worthless if the bytes do not persist. A fresh element's function

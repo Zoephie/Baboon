@@ -690,11 +690,18 @@ pub(super) fn inline_mapping_function_from_struct(
     struct_path: &str,
 ) -> Option<(FunctionView, String)> {
     // A Halo 2 `mapping_function` holds its function in a `data` byte-block,
-    // which is always the H2 encoding.
-    if let Some(bytes) = halo2_function_bytes_from_struct(tag_struct).filter(|bytes| !bytes.is_empty())
-        && let Some(function) = h2_tag_function(&bytes)
-    {
-        return Some((FunctionView::from_function(function), append_field_path(struct_path, "data")));
+    // which is always the H2 encoding. An empty block (a new element) opens as
+    // what the engine grows it to on its first edit, a zeroed header: identity.
+    // Nothing is written unless the function is edited.
+    if let Some(bytes) = halo2_function_bytes_from_struct(tag_struct) {
+        let function = if bytes.is_empty() {
+            Some(TagFunction::H2(H2Function::new(FunctionType::Identity)))
+        } else {
+            h2_tag_function(&bytes)
+        };
+        if let Some(function) = function {
+            return Some((FunctionView::from_function(function), append_field_path(struct_path, "data")));
+        }
     }
 
     for field in tag_struct.fields_all() {

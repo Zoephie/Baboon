@@ -474,6 +474,14 @@ impl<'a> H2PostprocessBindings<'a> {
     }
 
     fn function(&self, parameter_index: usize, animation_type: i32) -> Option<FunctionView> {
+        // This module still carries the animation type as its stored index;
+        // name it at the boundary.
+        let typed = u32::try_from(animation_type).ok().and_then(Halo2ShaderAnimationType::from_index);
+        self.function_view(parameter_index, animation_type)
+            .map(|view| view.with_color_types(h2_animation_color_types(typed)))
+    }
+
+    fn function_view(&self, parameter_index: usize, animation_type: i32) -> Option<FunctionView> {
         let legacy = match animation_type {
             11 => h2_find_postprocess_by_parameter(&self.value_overlays, parameter_index),
             12 => h2_find_postprocess_by_parameter(&self.color_overlays, parameter_index),
@@ -1647,7 +1655,11 @@ fn h2_function_view_from_animation_property(
 ) -> Option<FunctionView> {
     let data_block_path = h2_function_data_path(function_struct, function_path)?;
     let bytes = halo2_function_bytes_from_struct(function_struct)?;
-    let mut view = FunctionView::from_function(h2_tag_function(&bytes)?);
+    let animation_type = animation_property
+        .read_enum_name("type")
+        .and_then(|name| Halo2ShaderAnimationType::from_schema_name(&name));
+    let mut view = FunctionView::from_function(h2_tag_function(&bytes)?)
+        .with_color_types(h2_animation_color_types(animation_type));
     view.input_name = animation_property
         .read_string_id("input name")
         .unwrap_or_default();
@@ -1716,6 +1728,17 @@ fn h2_function_view_from_animation_property(
                 .unwrap_or_default(),
         }),
     )
+}
+
+/// The color graph types Guerilla offers a shader animation: its color editor
+/// (2/3/4-color) for color animations, its scalar editor otherwise. Shipped
+/// shaders agree: all 7,000 non-color animation functions are scalar, and
+/// 2,023 of 2,026 color ones are 2/3/4-color.
+fn h2_animation_color_types(animation_type: Option<Halo2ShaderAnimationType>) -> ColorTypeChoices {
+    match animation_type {
+        Some(Halo2ShaderAnimationType::Color) => ColorTypeChoices::MultiColorOnly,
+        _ => ColorTypeChoices::ScalarOnly,
+    }
 }
 
 fn h2_function_data_path(function_struct: TagStruct<'_>, function_path: &str) -> Option<String> {

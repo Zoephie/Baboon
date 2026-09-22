@@ -3,8 +3,10 @@
 
 use super::*;
 
-/// Foundation graph used by the new H3+ editor. It renders primary and ranged
-/// graphs independently and edits the rich MultiSpline control-point model.
+/// The function editor's graph. It renders the primary and ranged graphs
+/// independently and drags their control points: the H3+ multi-part curve
+/// (which can also add, remove and retype) and Halo 2's fixed points (moved
+/// within the engine's x rules).
 pub(super) fn draw_foundation_graph(
     ui: &mut Ui,
     editor: &mut TagFunctionEditor,
@@ -58,14 +60,21 @@ pub(super) fn draw_foundation_graph(
         };
         if let Some(pos) = response.interact_pointer_pos() {
             if response.drag_started() || response.clicked() {
-                if let Some((graph, point, distance)) = nearest(pos)
+                // Pick where the button went down: egui reports the drag only
+                // once the pointer has moved past its threshold, by which point
+                // a quick drag has already left the point it started on.
+                let press = ui.input(|input| input.pointer.press_origin()).unwrap_or(pos);
+                let mut grabbed = false;
+                if let Some((graph, point, distance)) = nearest(press)
                     && distance <= 13.0
                 {
                     *selected_graph = graph;
                     *selected_point = point;
-                } else {
-                    let (x, _) = to_graph(pos);
+                    grabbed = true;
+                } else if editor.curve_points_are_editable_structure() {
+                    let (x, _) = to_graph(press);
                     if editor.insert_curve_point(*selected_graph, x).is_ok() {
+                        grabbed = true;
                         let count = editor
                             .curve_control_point_count(*selected_graph)
                             .unwrap_or(1);
@@ -83,8 +92,11 @@ pub(super) fn draw_foundation_graph(
                         changed = true;
                     }
                 }
+                // A press that grabbed nothing must not drag the point that
+                // happened to be selected before it.
+                ui.data_mut(|data| data.insert_temp(response.id, grabbed));
             }
-            if response.dragged() {
+            if response.dragged() && ui.data(|data| data.get_temp::<bool>(response.id)).unwrap_or(false) {
                 let value = to_graph(pos);
                 if editor
                     .set_curve_control_point(*selected_graph, *selected_point, value)
@@ -95,6 +107,7 @@ pub(super) fn draw_foundation_graph(
             }
         }
         if response.hovered()
+            && editor.curve_points_are_editable_structure()
             && ui.input(|input| {
                 input.key_pressed(egui::Key::Delete) || input.key_pressed(egui::Key::Backspace)
             })
@@ -113,6 +126,7 @@ pub(super) fn draw_foundation_graph(
         }
 
         let menu_position = response.interact_pointer_pos().unwrap_or(plot.center());
+        if editor.curve_points_are_editable_structure() {
         response.context_menu(|ui| {
             let (x, _) = to_graph(menu_position);
             if ui.button("Add point").clicked() {
@@ -186,6 +200,7 @@ pub(super) fn draw_foundation_graph(
                 }
             }
         });
+        }
     }
 
     let function = editor.function();
@@ -225,6 +240,20 @@ pub(super) fn draw_foundation_graph(
         painter.add(egui::Shape::line(samples, Stroke::new(2.0, color)));
     }
 
+    // Guerilla draws a spline's end tangents: p0 to p1 and p3 to p2.
+    if editor.function().as_h2().is_some()
+        && matches!(editor.function_type(), FunctionType::Spline | FunctionType::Spline2)
+    {
+        for graph in 0..editor.graph_count() {
+            let point = |i: usize| editor.curve_control_point(graph, i).map(to_screen);
+            if let (Some(p0), Some(p1), Some(p2), Some(p3)) = (point(0), point(1), point(2), point(3)) {
+                let stroke = Stroke::new(1.0, Color32::from_gray(150));
+                painter.line_segment([p0, p1], stroke);
+                painter.line_segment([p3, p2], stroke);
+            }
+        }
+    }
+
     for (graph, point, value) in curve_points(editor) {
         let graph_point = editor.curve_is_graph_point(graph, point).unwrap_or(true);
         let selected = graph == *selected_graph && point == *selected_point;
@@ -255,343 +284,6 @@ pub(super) fn draw_foundation_graph(
         draw_function_color_gradient_horizontal(painter, bar, &function_color_stops(function));
     }
     changed
-}
-
-/// Editable color swatches for the N populated color slots of a
-/// color-graph function. Returns whether any color changed.
-pub(super) fn draw_function_color_stop_editors(
-    ui: &mut Ui,
-    function: &mut TagFunction,
-    editable: bool,
-    mut color_popup: Option<&mut Option<MaterialColorPopup>>,
-) -> bool {
-    let slots = color_graph_slots(function.color_graph_type());
-    if slots.is_empty() {
-        return false;
-    }
-    let Some(function) = function.as_blob_mut() else {
-        return false;
-    };
-    let mut changed = false;
-    ui.vertical(|ui| {
-        // Render high-end color at top (last slot) and low-end at bottom
-        // (first slot), matching Guerilla's layout (top = y=1, bottom = y=0).
-        for (logical_index, &slot) in slots.iter().enumerate().rev() {
-            let argb = function.header().colors[slot];
-            let orig_alpha = (argb >> 24) as u8;
-            let mut color = color32_from_argb(argb);
-            ui.horizontal(|ui| {
-                let dedicated = color_popup.as_deref_mut();
-                let resp = if dedicated.is_none() && editable {
-                    ui.color_edit_button_srgba(&mut color)
-                } else {
-                    let (rect, resp) = ui.allocate_exact_size(
-                        Vec2::splat(24.0),
-                        if editable {
-                            Sense::click()
-                        } else {
-                            Sense::hover()
-                        },
-                    );
-                    ui.painter().rect_filled(rect, 0.0, color);
-                    ui.painter()
-                        .rect_stroke(rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
-                    resp
-                };
-                // Hex code label (#RRGGBB)
-                ui.label(
-                    RichText::new(format!(
-                        "#{:02X}{:02X}{:02X}",
-                        color.r(),
-                        color.g(),
-                        color.b()
-                    ))
-                    .color(subtle_dark())
-                    .small()
-                    .monospace(),
-                );
-                match dedicated {
-                    Some(popup) if resp.clicked() => {
-                        *popup = Some(
-                            MaterialColorPopup::new(
-                                &format!("Function color {}", logical_index + 1),
-                                color.r() as f32 / 255.0,
-                                color.g() as f32 / 255.0,
-                                color.b() as f32 / 255.0,
-                                1.0,
-                            )
-                            .with_function_draft_color(
-                                FunctionDraftColorTarget::H3Logical(logical_index),
-                                orig_alpha,
-                            ),
-                        );
-                    }
-                    None if resp.changed() => {
-                        let new_argb = ((orig_alpha as u32) << 24)
-                            | ((color.r() as u32) << 16)
-                            | ((color.g() as u32) << 8)
-                            | color.b() as u32;
-                        function.set_color(slot, new_argb);
-                        changed = true;
-                    }
-                    _ => {}
-                }
-            });
-        }
-    });
-    changed
-}
-
-/// Draw the function curve and, for any editable function, allow
-/// dragging the control points. Non-key functions become an editable
-/// key curve on the first drag (seeded from their current shape).
-/// Returns whether the function changed.
-pub(in crate::app) fn draw_function_graph_preview(
-    ui: &mut Ui,
-    function: &mut TagFunction,
-    editable: bool,
-    selected_point: &mut usize,
-) -> bool {
-    let size = Vec2::new(440.0, 190.0);
-    let sense = if editable {
-        Sense::click_and_drag()
-    } else {
-        Sense::hover()
-    };
-    let (rect, response) = ui.allocate_exact_size(size, sense);
-    let plot = rect.shrink2(Vec2::new(22.0, 18.0));
-    let point_screen = |x: f32, y: f32| {
-        egui::pos2(
-            egui::lerp(plot.left()..=plot.right(), x.clamp(0.0, 1.0)),
-            egui::lerp(plot.bottom()..=plot.top(), y.clamp(0.0, 1.0)),
-        )
-    };
-
-    // --- Interaction first, so handles/line reflect this frame's edit. ---
-    // Within HANDLE_HIT pixels of an existing handle: select/drag it.
-    // Outside: add a new point (click) or add-and-drag (drag).
-    const HANDLE_HIT: f32 = 14.0;
-
-    let mut changed = false;
-    if editable && let Some(function) = function.as_blob_mut() {
-        // Snapshot handles before any mutation this frame.
-        let hit_pts = blob_control_points(function);
-
-        let nearest_handle = |pos: egui::Pos2| -> Option<(usize, f32)> {
-            hit_pts
-                .iter()
-                .enumerate()
-                .map(|(i, &(x, y))| (i, point_screen(x, y).distance(pos)))
-                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
-        };
-
-        if let Some(pos) = response.interact_pointer_pos() {
-            // First frame of a drag gesture.
-            if response.drag_started() {
-                match nearest_handle(pos) {
-                    Some((i, d)) if d < HANDLE_HIT => {
-                        *selected_point = i;
-                    }
-                    _ => {
-                        // Empty area drag: convert and insert, then drag it.
-                        ensure_editable_curve(function);
-                        let nx = egui::remap_clamp(pos.x, plot.left()..=plot.right(), 0.0..=1.0);
-                        let ny = egui::remap_clamp(pos.y, plot.bottom()..=plot.top(), 0.0..=1.0);
-                        if let Some(idx) = function.insert_linear_key_point(nx, ny) {
-                            *selected_point = idx;
-                            changed = true;
-                        }
-                    }
-                }
-            }
-
-            // Drag in progress: move the selected handle.
-            if response.dragged() {
-                let n = function.active_linear_key_point_count().max(1);
-                *selected_point = (*selected_point).min(n - 1);
-                let nx = egui::remap_clamp(pos.x, plot.left()..=plot.right(), 0.0..=1.0);
-                let ny = egui::remap_clamp(pos.y, plot.bottom()..=plot.top(), 0.0..=1.0);
-                function.set_linear_key_point(*selected_point, nx, ny);
-                changed = true;
-            }
-
-            // Pure click (no drag): select near handle, or insert a new point.
-            if response.clicked() {
-                match nearest_handle(pos) {
-                    Some((i, d)) if d < HANDLE_HIT => {
-                        *selected_point = i;
-                    }
-                    _ => {
-                        ensure_editable_curve(function);
-                        let nx = egui::remap_clamp(pos.x, plot.left()..=plot.right(), 0.0..=1.0);
-                        let ny = egui::remap_clamp(pos.y, plot.bottom()..=plot.top(), 0.0..=1.0);
-                        if let Some(idx) = function.insert_linear_key_point(nx, ny) {
-                            *selected_point = idx;
-                            changed = true;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Delete / Backspace while the pointer is over the graph removes
-        // the currently selected handle (minimum 2 points kept).
-        if response.hovered()
-            && ui.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
-        {
-            let n = function.active_linear_key_point_count();
-            let i = (*selected_point).min(n.saturating_sub(1));
-            if function.delete_linear_key_point(i) {
-                let new_n = function.active_linear_key_point_count();
-                if *selected_point >= new_n {
-                    *selected_point = new_n.saturating_sub(1);
-                }
-                changed = true;
-            }
-        }
-    }
-
-    // --- Background, grid, normalized-shape curve. ---
-    {
-        let painter = ui.painter();
-        painter.rect_filled(rect, 0.0, Color32::BLACK);
-        if function.color_graph_type() == ColorGraphType::Scalar {
-            painter.rect_filled(plot, 0.0, function_plot_bg());
-        } else {
-            draw_function_color_gradient_vertical(painter, plot, &function_color_stops(function));
-        }
-        painter.rect_stroke(plot, 0.0, Stroke::new(1.0, grid_line()));
-        for i in 1..10 {
-            let x = egui::lerp(plot.left()..=plot.right(), i as f32 / 10.0);
-            painter.line_segment(
-                [egui::pos2(x, plot.top()), egui::pos2(x, plot.bottom())],
-                Stroke::new(1.0, function_grid_line()),
-            );
-            let y = egui::lerp(plot.bottom()..=plot.top(), i as f32 / 10.0);
-            painter.line_segment(
-                [egui::pos2(plot.left(), y), egui::pos2(plot.right(), y)],
-                Stroke::new(1.0, function_grid_line()),
-            );
-        }
-        // Plot the normalized curve SHAPE (0..1), not the output-mapped
-        // value — so curves with output ranges outside [0,1] (or
-        // inverted, like high=-1/low=0) still show their real shape.
-        let samples = (0..=80)
-            .map(|i| {
-                let x = i as f32 / 80.0;
-                let y = function.evaluate_shape(x, x).clamp(0.0, 1.0);
-                egui::pos2(
-                    egui::lerp(plot.left()..=plot.right(), x),
-                    egui::lerp(plot.bottom()..=plot.top(), y),
-                )
-            })
-            .collect::<Vec<_>>();
-        painter.add(egui::Shape::line(
-            samples,
-            Stroke::new(2.0, Color32::from_rgb(54, 132, 58)),
-        ));
-    }
-
-    // --- Handles (recomputed after any edit). ---
-    {
-        let control_points = function_control_points(function);
-        let painter = ui.painter();
-        for (i, (x, y)) in control_points.iter().enumerate() {
-            let point = point_screen(*x, *y);
-            let selected = editable && i == *selected_point;
-            let handle =
-                egui::Rect::from_center_size(point, Vec2::splat(if selected { 9.0 } else { 7.0 }));
-            painter.rect_filled(
-                handle,
-                0.0,
-                if selected {
-                    Color32::from_rgb(120, 220, 120)
-                } else {
-                    Color32::from_rgb(240, 240, 238)
-                },
-            );
-            painter.rect_stroke(handle, 0.0, Stroke::new(1.0, Color32::BLACK));
-        }
-        painter.text(
-            rect.left_bottom() + Vec2::new(6.0, -4.0),
-            Align2::LEFT_BOTTOM,
-            "0",
-            FontId::proportional(11.0),
-            text_dark(),
-        );
-        painter.text(
-            rect.right_top() + Vec2::new(-6.0, 4.0),
-            Align2::RIGHT_TOP,
-            "1",
-            FontId::proportional(11.0),
-            text_dark(),
-        );
-    }
-
-    if function.color_graph_type() != ColorGraphType::Scalar {
-        let bar = egui::Rect::from_min_size(
-            rect.left_bottom() + Vec2::new(28.0, 10.0),
-            Vec2::new(330.0, 24.0),
-        );
-        draw_function_color_gradient_horizontal(ui.painter(), bar, &function_color_stops(function));
-        ui.allocate_space(Vec2::new(0.0, 36.0));
-    }
-
-    changed
-}
-
-pub(in crate::app) fn function_control_points(function: &TagFunction) -> Vec<(f32, f32)> {
-    match function.as_blob() {
-        Some(blob) => blob_control_points(blob),
-        None => vec![
-            (0.0, function.evaluate_shape(0.0, 0.0)),
-            (1.0, function.evaluate_shape(1.0, 1.0)),
-        ],
-    }
-}
-
-fn blob_control_points(function: &BlobFunction) -> Vec<(f32, f32)> {
-    match function.kind() {
-        FunctionKind::LinearKey { .. } | FunctionKind::MultiLinearKey { .. } => {
-            // Only return the active (non-padding) points. Trailing slots
-            // that are bit-identical to the preceding slot are padding.
-            let pts = function.linear_key_points().unwrap();
-            let n = function.active_linear_key_point_count();
-            pts[..n].to_vec()
-        }
-        FunctionKind::MultiSpline { compact, .. } => {
-            // Expose the segment join points (the visible kinks) so each
-            // one can be clicked and inspected.
-            let mut result = vec![(0.0_f32, function.evaluate_shape(0.0, 0.0))];
-            for part in &compact.parts {
-                let x = part.ending_x.clamp(0.0, 1.0);
-                result.push((x, function.evaluate_shape(x, x)));
-            }
-            result
-        }
-        _ => vec![
-            (0.0, function.evaluate_shape(0.0, 0.0)),
-            (1.0, function.evaluate_shape(1.0, 1.0)),
-        ],
-    }
-}
-
-/// Convert any non-key function into a 2-point LinearKey curve, seeding
-/// the endpoints from the current normalised shape so the curve doesn't
-/// visually jump. No-op if it's already a key curve. Slots 2 and 3 are
-/// set to bit-identical copies of slot 1 so `active_lk_count` treats
-/// them as padding.
-pub(in crate::app) fn ensure_editable_curve(function: &mut BlobFunction) {
-    if function.linear_key_points().is_some() {
-        return;
-    }
-    let y0 = function.evaluate_shape(0.0, 0.0).clamp(0.0, 1.0);
-    let y1 = function.evaluate_shape(1.0, 1.0).clamp(0.0, 1.0);
-    function.set_function_type(FunctionType::LinearKey);
-    function.set_linear_key_point(0, 0.0, y0);
-    function.set_linear_key_point(1, 1.0, y1);
-    function.set_linear_key_point(2, 1.0, y1); // padding
-    function.set_linear_key_point(3, 1.0, y1); // padding
 }
 
 /// The engine stores color stops at non-contiguous slots in the header
@@ -781,4 +473,6 @@ pub(in crate::app) struct FunctionView {
     /// path (material parameter blocks, template summaries) → the editor
     /// renders read-only.
     pub(in crate::app) edit: Option<FunctionEditPaths>,
+    /// Which color graph types the field offers.
+    pub(in crate::app) color_types: ColorTypeChoices,
 }

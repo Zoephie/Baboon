@@ -3,37 +3,6 @@
 
 use super::*;
 
-pub(in crate::app) fn is_editable_function_type(kind: FunctionType) -> bool {
-    matches!(
-        kind,
-        FunctionType::Identity
-            | FunctionType::Constant
-            | FunctionType::Transition
-            | FunctionType::Periodic
-            | FunctionType::Linear
-            | FunctionType::LinearKey
-            | FunctionType::MultiLinearKey
-            | FunctionType::Spline
-            | FunctionType::MultiSpline
-            | FunctionType::Exponent
-            | FunctionType::Spline2
-    )
-}
-
-pub(in crate::app) const EDITABLE_FUNCTION_TYPES: [FunctionType; 11] = [
-    FunctionType::Identity,
-    FunctionType::Constant,
-    FunctionType::Transition,
-    FunctionType::Periodic,
-    FunctionType::Linear,
-    FunctionType::LinearKey,
-    FunctionType::MultiLinearKey,
-    FunctionType::Spline,
-    FunctionType::MultiSpline,
-    FunctionType::Exponent,
-    FunctionType::Spline2,
-];
-
 /// Curated function-input string_ids offered in the Input/Range combos.
 /// The current value is always added if missing, and free text is
 /// accepted, so this is only a convenience seed.
@@ -66,13 +35,6 @@ pub(in crate::app) const COLOR_GRAPH_OPTIONS: [(ColorGraphType, &str); 5] = [
     (ColorGraphType::ThreeColor, "3-color"),
     (ColorGraphType::FourColor, "4-color"),
 ];
-
-pub(in crate::app) fn function_type_label(kind: FunctionType) -> String {
-    match kind {
-        FunctionType::LinearKey | FunctionType::MultiLinearKey => "curve".to_owned(),
-        other => format!("{other:?}").to_ascii_lowercase(),
-    }
-}
 
 /// Editable combo seeded from the curated list + current value, with a
 /// free-text box for arbitrary string_ids. Returns whether `value`
@@ -129,54 +91,6 @@ pub(in crate::app) fn seeded_name_combo(
     changed
 }
 
-pub(in crate::app) fn function_type_combo(
-    ui: &mut Ui,
-    function: &mut TagFunction,
-    editable: bool,
-) -> bool {
-    let current = function.function_type();
-    if !editable {
-        foundation_input_cell(ui, &function_type_label(current), 130.0);
-        return false;
-    }
-    let mut changed = false;
-    let (_, wheel_delta) = combo_box_with_scroll(
-        ui,
-        egui::ComboBox::from_id_salt("fn_type")
-            .selected_text(function_type_label(current))
-            .width(130.0),
-        |ui| {
-            for kind in EDITABLE_FUNCTION_TYPES {
-                if ui
-                    .selectable_label(current == kind, function_type_label(kind))
-                    .clicked()
-                    && current != kind
-                    && let Some(function) = function.as_blob_mut()
-                {
-                    function.set_function_type(kind);
-                    changed = true;
-                }
-            }
-        },
-    );
-    if let Some(delta) = wheel_delta {
-        let current_index = EDITABLE_FUNCTION_TYPES
-            .iter()
-            .position(|kind| *kind == current)
-            .unwrap_or(0);
-        if let Some(next) =
-            combo_scroll_next_index(current_index, EDITABLE_FUNCTION_TYPES.len(), delta)
-        {
-            let kind = EDITABLE_FUNCTION_TYPES[next];
-            if let Some(function) = function.as_blob_mut() {
-                function.set_function_type(kind);
-                changed = true;
-            }
-        }
-    }
-    changed
-}
-
 pub(in crate::app) fn output_type_combo(
     ui: &mut Ui,
     output_index: &mut Option<i32>,
@@ -228,56 +142,6 @@ pub(in crate::app) fn output_type_combo(
     changed
 }
 
-pub(in crate::app) fn color_graph_combo(
-    ui: &mut Ui,
-    function: &mut TagFunction,
-    editable: bool,
-) -> bool {
-    let current = function.color_graph_type();
-    let label = COLOR_GRAPH_OPTIONS
-        .iter()
-        .find(|(k, _)| *k == current)
-        .map(|(_, n)| *n)
-        .unwrap_or("scalar");
-    if !editable {
-        foundation_input_cell(ui, label, 90.0);
-        return false;
-    }
-    let mut changed = false;
-    let (_, wheel_delta) = combo_box_with_scroll(
-        ui,
-        egui::ComboBox::from_id_salt("fn_colorgraph")
-            .selected_text(label)
-            .width(90.0),
-        |ui| {
-            for (kind, name) in COLOR_GRAPH_OPTIONS {
-                if ui.selectable_label(current == kind, name).clicked()
-                    && current != kind
-                    && let Some(function) = function.as_blob_mut()
-                {
-                    function.set_color_graph_type(kind);
-                    changed = true;
-                }
-            }
-        },
-    );
-    if let Some(delta) = wheel_delta {
-        let current_index = COLOR_GRAPH_OPTIONS
-            .iter()
-            .position(|(kind, _)| *kind == current)
-            .unwrap_or(0);
-        if let Some(next) = combo_scroll_next_index(current_index, COLOR_GRAPH_OPTIONS.len(), delta)
-        {
-            let kind = COLOR_GRAPH_OPTIONS[next].0;
-            if let Some(function) = function.as_blob_mut() {
-                function.set_color_graph_type(kind);
-                changed = true;
-            }
-        }
-    }
-    changed
-}
-
 fn master_label(master: EngineMasterType) -> &'static str {
     match master {
         EngineMasterType::Basic => "basic",
@@ -323,7 +187,105 @@ fn foundation_master_type_combo(
     changed
 }
 
-pub(in crate::app) fn draw_foundation_h3_function_editor_contents(
+/// Which color graph types a field offers. Guerilla restricts them per field:
+/// shader scalar animations are scalar-only, shader color animations 2/3/4-
+/// color only, everything else all five.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(in crate::app) enum ColorTypeChoices {
+    #[default]
+    All,
+    ScalarOnly,
+    MultiColorOnly,
+}
+
+impl ColorTypeChoices {
+    fn allows(self, kind: ColorGraphType) -> bool {
+        match self {
+            Self::All => true,
+            Self::ScalarOnly => kind == ColorGraphType::Scalar,
+            Self::MultiColorOnly => is_multi_color(kind),
+        }
+    }
+}
+
+fn is_multi_color(kind: ColorGraphType) -> bool {
+    matches!(kind, ColorGraphType::TwoColor | ColorGraphType::ThreeColor | ColorGraphType::FourColor)
+}
+
+fn color_type_label(editor: &TagFunctionEditor, kind: ColorGraphType) -> &'static str {
+    match editor.function().encoding() {
+        FunctionEncoding::H2 => blam_tags::tag_function::h2::color_graph_type_name(kind),
+        FunctionEncoding::Blob => COLOR_GRAPH_OPTIONS
+            .iter()
+            .find(|(k, _)| *k == kind)
+            .map_or("scalar", |(_, name)| *name),
+    }
+}
+
+/// The color graph type, offering what the field allows. Moving between
+/// color counts resamples the existing colors.
+fn color_type_combo(
+    ui: &mut Ui,
+    editor: &mut TagFunctionEditor,
+    choices: ColorTypeChoices,
+    editable: bool,
+) -> bool {
+    let current = editor.color_graph_type();
+    if !editable {
+        foundation_input_cell(ui, color_type_label(editor, current), 120.0);
+        return false;
+    }
+    let mut changed = false;
+    egui::ComboBox::from_id_salt("function_color_type")
+        .selected_text(color_type_label(editor, current))
+        .width(120.0)
+        .show_ui(ui, |ui| {
+            for (kind, _) in COLOR_GRAPH_OPTIONS {
+                if !choices.allows(kind) && kind != current {
+                    continue;
+                }
+                if ui.selectable_label(kind == current, color_type_label(editor, kind)).clicked() && kind != current {
+                    let resample = is_multi_color(current) && is_multi_color(kind);
+                    changed |= if resample {
+                        remap_editor_color_count(editor, kind)
+                    } else {
+                        editor.set_color_graph_type(kind).is_ok()
+                    };
+                }
+            }
+        });
+    changed
+}
+
+/// Halo 2's type picker: the raw type list, as Guerilla shows it.
+fn h2_function_type_combo(ui: &mut Ui, editor: &mut TagFunctionEditor, editable: bool) -> bool {
+    use blam_tags::tag_function::h2::{FUNCTION_TYPES, function_type_name};
+    let current = editor.function_type();
+    let label = function_type_name(current);
+    if !editable {
+        foundation_input_cell(ui, label, 130.0);
+        return false;
+    }
+    let mut changed = false;
+    egui::ComboBox::from_id_salt("h2_function_type")
+        .selected_text(label)
+        .width(130.0)
+        .show_ui(ui, |ui| {
+            for kind in FUNCTION_TYPES {
+                if ui.selectable_label(kind == current, function_type_name(kind)).clicked()
+                    && kind != current
+                    && editor.set_function_type(kind).is_ok()
+                {
+                    changed = true;
+                }
+            }
+        });
+    changed
+}
+
+/// The function editor, for every game: drawn in the f() window and, read-only,
+/// as the inline preview in the tag editor.
+pub(in crate::app) fn draw_function_editor(
     ui: &mut Ui,
     view: &mut FunctionView,
     editable: bool,
@@ -381,23 +343,32 @@ pub(in crate::app) fn draw_foundation_h3_function_editor_contents(
         } else {
             foundation_input_cell(ui, "none", 120.0);
         }
-        ui.label(RichText::new("Output:").color(text_dark()).small());
-        changed |= output_type_combo(ui, &mut view.output_index, output_editable);
+        // The output enum is the H3+ render-method parameter type; Halo 2's
+        // animation type is not part of the function.
+        if editor.function().encoding() == FunctionEncoding::Blob {
+            ui.label(RichText::new("Output:").color(text_dark()).small());
+            changed |= output_type_combo(ui, &mut view.output_index, output_editable);
+        }
         ui.label(RichText::new("Function type:").color(text_dark()).small());
-        if foundation_master_type_combo(ui, &mut editor, editable) {
+        let retyped = match editor.function().encoding() {
+            FunctionEncoding::Blob => foundation_master_type_combo(ui, &mut editor, editable),
+            FunctionEncoding::H2 => h2_function_type_combo(ui, &mut editor, editable),
+        };
+        if retyped {
             *selected_graph = 0;
             *selected_point = 0;
             changed = true;
         }
+        ui.label(RichText::new("Color:").color(text_dark()).small());
+        changed |= color_type_combo(ui, &mut editor, view.color_types, editable);
     });
 
     let master = editor.master_type();
     if master == EngineMasterType::Basic {
+        // A constant's value is its output range (min, and max when ranged).
         ui.add_space(8.0);
-        if editor.color_graph_type() != ColorGraphType::Scalar {
-            changed |= draw_foundation_right_rail(ui, &mut editor, editable, color_popup);
-            ui.add_space(6.0);
-        }
+        changed |= draw_foundation_right_rail(ui, &mut editor, editable, color_popup);
+        ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.label(RichText::new("time period").color(text_dark()).small());
             changed |= ui
@@ -460,18 +431,12 @@ fn draw_foundation_right_rail(
 ) -> bool {
     let mut changed = false;
     ui.vertical(|ui| {
-        if editor.color_graph_type() == ColorGraphType::Scalar {
-            let (mut min, mut max) = editor
-                .function()
-                .as_blob()
-                .map_or((0.0, 1.0), |f| (f.header().clamp_range_min, f.header().clamp_range_max));
+        if let Some((mut min, mut max)) = editor.clamp_range() {
             if labeled_drag(ui, "Max", &mut max, editable) {
-                set_editor_clamp_range(editor, min, max);
-                changed = true;
+                changed |= editor.set_clamp_range(min, max).is_ok();
             }
             if labeled_drag(ui, "Min", &mut min, editable) {
-                set_editor_clamp_range(editor, min, max);
-                changed = true;
+                changed |= editor.set_clamp_range(min, max).is_ok();
             }
         } else {
             for index in (0..editor.color_count()).rev() {
@@ -501,55 +466,15 @@ fn draw_foundation_right_rail(
                             1.0,
                         )
                         .with_function_draft_color(
-                            FunctionDraftColorTarget::H3Logical(index),
+                            FunctionDraftColorTarget::Logical(index),
                             alpha,
                         ),
                     );
                 }
             }
-            if matches!(
-                editor.color_graph_type(),
-                ColorGraphType::TwoColor | ColorGraphType::ThreeColor | ColorGraphType::FourColor
-            ) {
-                let current = editor.color_graph_type();
-                egui::ComboBox::from_id_salt("foundation_color_count")
-                    .selected_text(color_count_label(current))
-                    .width(90.0)
-                    .show_ui(ui, |ui| {
-                        for target in [
-                            ColorGraphType::TwoColor,
-                            ColorGraphType::ThreeColor,
-                            ColorGraphType::FourColor,
-                        ] {
-                            if ui
-                                .add_enabled(
-                                    editable,
-                                    egui::SelectableLabel::new(
-                                        target == current,
-                                        color_count_label(target),
-                                    ),
-                                )
-                                .clicked()
-                                && target != current
-                            {
-                                changed |= remap_editor_color_count(editor, target);
-                            }
-                        }
-                    });
-            }
         }
     });
     changed
-}
-
-fn color_count_label(kind: ColorGraphType) -> &'static str {
-    match kind {
-        ColorGraphType::TwoColor => "2-color",
-        ColorGraphType::ThreeColor => "3-color",
-        ColorGraphType::FourColor => "4-color",
-        ColorGraphType::OneColor => "1-color",
-        ColorGraphType::Scalar => "scalar",
-    }
 }
 
 /// Returns whether the color graph type changed (Halo 2 functions refuse it).
@@ -590,14 +515,6 @@ fn sample_argb_stops(stops: &[u32], t: f32) -> u32 {
         (a + (b - a) * local).round() as u32
     };
     (lerp(24) << 24) | (lerp(16) << 16) | (lerp(8) << 8) | lerp(0)
-}
-
-fn set_editor_clamp_range(editor: &mut TagFunctionEditor, min: f32, max: f32) {
-    let mut function = editor.function().clone();
-    if let Some(blob) = function.as_blob_mut() {
-        blob.set_clamp_range(min, max);
-        *editor = TagFunctionEditor::from_function(function);
-    }
 }
 
 fn set_editor_flag(editor: &mut TagFunctionEditor, flag: u8, value: bool) {
@@ -650,7 +567,8 @@ fn draw_curve_panel(
     if let Some((mut x, mut y)) = editor.curve_control_point(graph, *selected_point) {
         ui.horizontal(|ui| {
             ui.label(RichText::new("Selected point").color(text_dark()).strong());
-            if labeled_drag(ui, "X", &mut x, editable)
+            let x_movable = editor.curve_point_x_movable(graph, *selected_point);
+            if labeled_drag(ui, "X", &mut x, editable && x_movable)
                 && editor
                     .set_curve_control_point(graph, *selected_point, (x, y))
                     .is_ok()
@@ -667,6 +585,7 @@ fn draw_curve_panel(
             if ui
                 .add_enabled(
                     editable
+                        && editor.curve_points_are_editable_structure()
                         && editor
                             .curve_is_graph_point(graph, *selected_point)
                             .unwrap_or(false),
@@ -742,6 +661,10 @@ fn draw_curve_panel(
         }
     });
 
+    // Clamped/cyclic/exclusion are H3+ header flags; Halo 2 has none.
+    if editor.function().encoding() == FunctionEncoding::H2 {
+        return changed;
+    }
     ui.horizontal(|ui| {
         let mut clamped = editor.is_clamped();
         if ui
@@ -792,6 +715,7 @@ fn curve_segment_label(kind: CurveSegmentType) -> &'static str {
 
 fn draw_periodic_panel(ui: &mut Ui, editor: &mut TagFunctionEditor, editable: bool) -> bool {
     let mut changed = false;
+    let names = editor.periodic_functions();
     ui.columns(editor.graph_count(), |columns| {
         for (slot, column) in columns.iter_mut().enumerate() {
             let Some(mut params) = editor.periodic_params(slot) else {
@@ -806,7 +730,7 @@ fn draw_periodic_panel(ui: &mut Ui, editor: &mut TagFunctionEditor, editable: bo
                 .color(text_dark())
                 .strong(),
             );
-            let mut slot_changed = periodic_function_combo(column, slot, &mut params, editable);
+            let mut slot_changed = periodic_function_combo(column, slot, &mut params, names, editable);
             slot_changed |= labeled_drag(column, "Frequency", &mut params.frequency, editable);
             slot_changed |= labeled_drag(column, "Max", &mut params.amplitude_max, editable);
             slot_changed |= labeled_drag(column, "Phase", &mut params.phase, editable);
@@ -823,10 +747,11 @@ fn periodic_function_combo(
     ui: &mut Ui,
     slot: usize,
     params: &mut PeriodicParams,
+    names: &[&str],
     editable: bool,
 ) -> bool {
     let current = params.function_index as usize;
-    let label = PERIODIC_FUNCTIONS
+    let label = names
         .get(current)
         .copied()
         .unwrap_or("unknown");
@@ -835,7 +760,7 @@ fn periodic_function_combo(
         .selected_text(label)
         .width(180.0)
         .show_ui(ui, |ui| {
-            for (index, label) in PERIODIC_FUNCTIONS.iter().enumerate() {
+            for (index, label) in names.iter().enumerate() {
                 if ui
                     .add_enabled(
                         editable,
@@ -880,6 +805,7 @@ fn draw_exponent_panel(ui: &mut Ui, editor: &mut TagFunctionEditor, editable: bo
 
 fn draw_transition_panel(ui: &mut Ui, editor: &mut TagFunctionEditor, editable: bool) -> bool {
     let mut changed = false;
+    let names = editor.transition_functions();
     ui.columns(editor.graph_count(), |columns| {
         for (slot, column) in columns.iter_mut().enumerate() {
             let Some(mut params) = editor.transition_params(slot) else {
@@ -894,7 +820,7 @@ fn draw_transition_panel(ui: &mut Ui, editor: &mut TagFunctionEditor, editable: 
                 .color(text_dark())
                 .strong(),
             );
-            let mut slot_changed = transition_function_combo(column, slot, &mut params, editable);
+            let mut slot_changed = transition_function_combo(column, slot, &mut params, names, editable);
             slot_changed |= labeled_drag(column, "Max", &mut params.amplitude_max, editable);
             slot_changed |= labeled_drag(column, "Min", &mut params.amplitude_min, editable);
             if slot_changed && editor.set_transition_params(slot, params).is_ok() {
@@ -909,10 +835,11 @@ fn transition_function_combo(
     ui: &mut Ui,
     slot: usize,
     params: &mut TransitionParams,
+    names: &[&str],
     editable: bool,
 ) -> bool {
     let current = params.function_index as usize;
-    let label = TRANSITION_FUNCTIONS
+    let label = names
         .get(current)
         .copied()
         .unwrap_or("unknown");
@@ -921,7 +848,7 @@ fn transition_function_combo(
         .selected_text(label)
         .width(160.0)
         .show_ui(ui, |ui| {
-            for (index, label) in TRANSITION_FUNCTIONS.iter().enumerate() {
+            for (index, label) in names.iter().enumerate() {
                 if ui
                     .add_enabled(
                         editable,
