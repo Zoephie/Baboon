@@ -143,8 +143,7 @@ pub(in crate::app) fn draw_fields_with_docs(
     edit: &mut FieldEditContext<'_>,
     skip_field: Option<&str>,
 ) {
-    let guid = tag_struct.definition().guid();
-    let entries: &[DefEntry] = edit.docs.map(|docs| docs.entries_for(&guid)).unwrap_or(&[]);
+    let entries: &[DefEntry] = edit.docs.map(|docs| docs.entries_for_struct(tag_struct)).unwrap_or(&[]);
     let parent_raw = tag_struct.raw();
     let reference_value_width = shared_tag_reference_value_width(ui, depth);
     let mut cursor = 0usize;

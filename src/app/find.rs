@@ -101,7 +101,7 @@ fn collect_find_struct(
     out: &mut Vec<FindOccurrence>,
 ) {
     let entries = docs
-        .map(|docs| docs.entries_for(&tag_struct.definition().guid()))
+        .map(|docs| docs.entries_for_struct(&tag_struct))
         .unwrap_or(&[]);
     let mut doc_cursor = 0usize;
     for field in tag_struct.fields() {

@@ -92,7 +92,7 @@ fn collect_find_visible_paths(
     let mut any = false;
     if look_in.includes_blocks() {
         let entries = docs
-            .map(|docs| docs.entries_for(&tag_struct.definition().guid()))
+            .map(|docs| docs.entries_for_struct(&tag_struct))
             .unwrap_or(&[]);
         for (index, entry) in entries.iter().enumerate() {
             let DefEntry::Explanation { title, body } = entry else {
