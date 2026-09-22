@@ -53,12 +53,13 @@ pub(in crate::app) fn draw_function_editor_contents(
         ui.label(RichText::new("Input:").color(text_dark()).small());
         changed |= seeded_name_combo(ui, "fn_input", &mut view.input_name, input_editable);
 
-        let mut ranged = view.function.flags().is_ranged();
+        let mut ranged = view.function.is_ranged();
         if ui
             .add_enabled(type_editable, egui::Checkbox::new(&mut ranged, ""))
             .changed()
+            && let Some(function) = view.function.as_blob_mut()
         {
-            view.function.set_flag(FunctionFlags::RANGE, ranged);
+            function.set_flag(FunctionFlags::RANGE, ranged);
             changed = true;
         }
         ui.label(RichText::new("Range:").color(text_dark()).small());
@@ -91,8 +92,10 @@ pub(in crate::app) fn draw_function_editor_contents(
         ui.add_space(8.0);
 
         let is_color = view.function.color_graph_type() != ColorGraphType::Scalar;
-        let mut high = view.function.header().clamp_range_max;
-        let mut low = view.function.header().clamp_range_min;
+        let (mut low, mut high) = view
+            .function
+            .as_blob()
+            .map_or((0.0, 1.0), |f| (f.header().clamp_range_min, f.header().clamp_range_max));
 
         // Output-range axis: high at top, low at bottom (Guerilla style).
         // Only shown for scalar functions — for color graphs, clamp_range
@@ -102,16 +105,18 @@ pub(in crate::app) fn draw_function_editor_contents(
                 if ui
                     .add_enabled(type_editable, egui::DragValue::new(&mut high).speed(0.01))
                     .changed()
+                    && let Some(function) = view.function.as_blob_mut()
                 {
-                    view.function.set_clamp_range(low, high);
+                    function.set_clamp_range(low, high);
                     changed = true;
                 }
                 ui.add_space(118.0);
                 if ui
                     .add_enabled(type_editable, egui::DragValue::new(&mut low).speed(0.01))
                     .changed()
+                    && let Some(function) = view.function.as_blob_mut()
                 {
-                    view.function.set_clamp_range(low, high);
+                    function.set_clamp_range(low, high);
                     changed = true;
                 }
             });
@@ -155,7 +160,11 @@ pub(in crate::app) fn draw_function_editor_contents(
         } else {
             low + sy * (high - low)
         };
-        let is_key = view.function.linear_key_points().is_some();
+        let is_key = view
+            .function
+            .as_blob()
+            .and_then(BlobFunction::linear_key_points)
+            .is_some();
         let point_editable = type_editable && is_key;
         ui.vertical(|ui| {
             Frame::none()
@@ -201,9 +210,9 @@ pub(in crate::app) fn draw_function_editor_contents(
                 if ui
                     .add_enabled(point_editable, egui::DragValue::new(&mut px).speed(0.01))
                     .changed()
+                    && let Some(function) = view.function.as_blob_mut()
                 {
-                    view.function
-                        .set_linear_key_point(sel, px.clamp(0.0, 1.0), sy);
+                    function.set_linear_key_point(sel, px.clamp(0.0, 1.0), sy);
                     changed = true;
                 }
             });
@@ -213,9 +222,9 @@ pub(in crate::app) fn draw_function_editor_contents(
                 if ui
                     .add_enabled(point_editable, egui::DragValue::new(&mut py).speed(0.01))
                     .changed()
+                    && let Some(function) = view.function.as_blob_mut()
                 {
-                    view.function
-                        .set_linear_key_point(sel, sx, py.clamp(0.0, 1.0));
+                    function.set_linear_key_point(sel, sx, py.clamp(0.0, 1.0));
                     changed = true;
                 }
             });

@@ -269,6 +269,9 @@ pub(super) fn draw_function_color_stop_editors(
     if slots.is_empty() {
         return false;
     }
+    let Some(function) = function.as_blob_mut() else {
+        return false;
+    };
     let mut changed = false;
     ui.vertical(|ui| {
         // Render high-end color at top (last slot) and low-end at bottom
@@ -370,9 +373,9 @@ pub(in crate::app) fn draw_function_graph_preview(
     const HANDLE_HIT: f32 = 14.0;
 
     let mut changed = false;
-    if editable {
+    if editable && let Some(function) = function.as_blob_mut() {
         // Snapshot handles before any mutation this frame.
-        let hit_pts = function_control_points(function);
+        let hit_pts = blob_control_points(function);
 
         let nearest_handle = |pos: egui::Pos2| -> Option<(usize, f32)> {
             hit_pts
@@ -538,6 +541,16 @@ pub(in crate::app) fn draw_function_graph_preview(
 }
 
 pub(in crate::app) fn function_control_points(function: &TagFunction) -> Vec<(f32, f32)> {
+    match function.as_blob() {
+        Some(blob) => blob_control_points(blob),
+        None => vec![
+            (0.0, function.evaluate_shape(0.0, 0.0)),
+            (1.0, function.evaluate_shape(1.0, 1.0)),
+        ],
+    }
+}
+
+fn blob_control_points(function: &BlobFunction) -> Vec<(f32, f32)> {
     match function.kind() {
         FunctionKind::LinearKey { .. } | FunctionKind::MultiLinearKey { .. } => {
             // Only return the active (non-padding) points. Trailing slots
@@ -568,7 +581,7 @@ pub(in crate::app) fn function_control_points(function: &TagFunction) -> Vec<(f3
 /// visually jump. No-op if it's already a key curve. Slots 2 and 3 are
 /// set to bit-identical copies of slot 1 so `active_lk_count` treats
 /// them as padding.
-pub(in crate::app) fn ensure_editable_curve(function: &mut TagFunction) {
+pub(in crate::app) fn ensure_editable_curve(function: &mut BlobFunction) {
     if function.linear_key_points().is_some() {
         return;
     }
@@ -597,12 +610,16 @@ pub(in crate::app) fn color_graph_slots(cgt: ColorGraphType) -> &'static [usize]
 }
 
 pub(in crate::app) fn function_color_stops(function: &TagFunction) -> Vec<Color32> {
-    let header = function.header();
-    let slots = color_graph_slots(header.color_graph_type);
-    let mut stops: Vec<Color32> = slots
-        .iter()
-        .map(|&i| color32_from_argb(header.colors[i]))
-        .collect();
+    let mut stops: Vec<Color32> = match function.as_blob() {
+        Some(blob) => {
+            let header = blob.header();
+            color_graph_slots(header.color_graph_type)
+                .iter()
+                .map(|&i| color32_from_argb(header.colors[i]))
+                .collect()
+        }
+        None => Vec::new(),
+    };
     if stops.is_empty() {
         let color = function.evaluate_color(0.0, 0.0);
         stops.push(Color32::from_rgb(

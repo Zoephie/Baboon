@@ -324,9 +324,10 @@ fn damage_effect_vibration_edit_emits_byte_block_op() {
 fn dedicated_picker_updates_h3_function_draft_logical_slot() {
     let mut function = TagFunction::parse(&decode_hex(&constant_function_hex(0.0)).unwrap())
         .expect("constant function should parse");
-    function.set_color_graph_type(ColorGraphType::TwoColor);
-    function.set_color(0, 0x0011_2233);
-    function.set_color(3, 0x0044_5566);
+    let blob = function.as_blob_mut().unwrap();
+    blob.set_color_graph_type(ColorGraphType::TwoColor);
+    blob.set_color(0, 0x0011_2233);
+    blob.set_color(3, 0x0044_5566);
     let mut popup = FunctionPopup::new(
         "tag".to_owned(),
         "function".to_owned(),
@@ -336,8 +337,9 @@ fn dedicated_picker_updates_h3_function_draft_logical_slot() {
 
     popup.apply_draft_color(FunctionDraftColorTarget::H3Logical(1), 0x00AA_BBCC);
 
-    assert_eq!(popup.view.function.header().colors[0], 0x0011_2233);
-    assert_eq!(popup.view.function.header().colors[3], 0x00AA_BBCC);
+    let header = popup.view.function.as_blob().unwrap().header();
+    assert_eq!(header.colors[0], 0x0011_2233);
+    assert_eq!(header.colors[3], 0x00AA_BBCC);
 }
 
 #[test]

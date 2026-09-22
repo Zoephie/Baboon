@@ -221,7 +221,7 @@ pub(in crate::app) fn h2_constant_color_function_data(
 /// Used to decide whether to show a constant color swatch vs a graph row.
 pub(in crate::app) fn is_constant_color_fn(f: &TagFunction) -> bool {
     f.color_graph_type() != ColorGraphType::Scalar
-        && matches!(f.kind(), FunctionKind::Constant { .. })
+        && matches!(f.as_blob().map(BlobFunction::kind), Some(FunctionKind::Constant { .. }))
 }
 
 /// Extract the (r, g, b, a) components from a constant 1-color function.
@@ -230,7 +230,7 @@ pub(in crate::app) fn extract_constant_color(f: &TagFunction) -> Option<[f32; 4]
     if !is_constant_color_fn(f) {
         return None;
     }
-    let argb = f.header().colors[0];
+    let argb = f.as_blob()?.header().colors[0];
     let alpha = ((argb >> 24) & 0xFF) as f32 / 255.0;
     Some([
         ((argb >> 16) & 0xFF) as f32 / 255.0, // r
@@ -1538,7 +1538,10 @@ pub(in crate::app) fn shader_function_grid_text(function: &TagFunction) -> Strin
         return format!("value: {}", format_shader_float(value));
     }
 
-    match function.kind() {
+    let Some(blob) = function.as_blob() else {
+        return format!("{:?}: {}", function.function_type(), function_sample_summary(function));
+    };
+    match blob.kind() {
         FunctionKind::Identity { .. } => format!("identity: {}", function_sample_summary(function)),
         FunctionKind::Constant { header } => {
             if header.flags.is_ranged() {

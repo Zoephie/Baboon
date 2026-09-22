@@ -100,6 +100,7 @@ fn a_new_functions_bytes_match_what_the_engine_writes() {
     );
     let function = TagFunction::parse(&bytes).expect("it parses");
     assert_eq!(function.function_type(), FunctionType::Identity);
+    let function = function.as_blob().expect("a blob");
     assert!(function.flags().is_clamped(), "CLAMPED");
     assert!(function.flags().is_gpu(), "GPU");
     assert!(

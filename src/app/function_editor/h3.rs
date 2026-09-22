@@ -200,6 +200,7 @@ pub(in crate::app) fn function_type_combo(
                     .selectable_label(current == kind, function_type_label(kind))
                     .clicked()
                     && current != kind
+                    && let Some(function) = function.as_blob_mut()
                 {
                     function.set_function_type(kind);
                     changed = true;
@@ -216,8 +217,10 @@ pub(in crate::app) fn function_type_combo(
             combo_scroll_next_index(current_index, EDITABLE_FUNCTION_TYPES.len(), delta)
         {
             let kind = EDITABLE_FUNCTION_TYPES[next];
-            function.set_function_type(kind);
-            changed = true;
+            if let Some(function) = function.as_blob_mut() {
+                function.set_function_type(kind);
+                changed = true;
+            }
         }
     }
     changed
@@ -297,7 +300,10 @@ pub(in crate::app) fn color_graph_combo(
             .width(90.0),
         |ui| {
             for (kind, name) in COLOR_GRAPH_OPTIONS {
-                if ui.selectable_label(current == kind, name).clicked() && current != kind {
+                if ui.selectable_label(current == kind, name).clicked()
+                    && current != kind
+                    && let Some(function) = function.as_blob_mut()
+                {
                     function.set_color_graph_type(kind);
                     changed = true;
                 }
@@ -312,8 +318,10 @@ pub(in crate::app) fn color_graph_combo(
         if let Some(next) = combo_scroll_next_index(current_index, COLOR_GRAPH_OPTIONS.len(), delta)
         {
             let kind = COLOR_GRAPH_OPTIONS[next].0;
-            function.set_color_graph_type(kind);
-            changed = true;
+            if let Some(function) = function.as_blob_mut() {
+                function.set_color_graph_type(kind);
+                changed = true;
+            }
         }
     }
     changed
@@ -502,8 +510,10 @@ fn draw_foundation_right_rail(
     let mut changed = false;
     ui.vertical(|ui| {
         if editor.color_graph_type() == ColorGraphType::Scalar {
-            let mut min = editor.function().header().clamp_range_min;
-            let mut max = editor.function().header().clamp_range_max;
+            let (mut min, mut max) = editor
+                .function()
+                .as_blob()
+                .map_or((0.0, 1.0), |f| (f.header().clamp_range_min, f.header().clamp_range_max));
             if labeled_drag(ui, "Max", &mut max, editable) {
                 set_editor_clamp_range(editor, min, max);
                 changed = true;
@@ -571,8 +581,7 @@ fn draw_foundation_right_rail(
                                 .clicked()
                                 && target != current
                             {
-                                remap_editor_color_count(editor, target);
-                                changed = true;
+                                changed |= remap_editor_color_count(editor, target);
                             }
                         }
                     });
@@ -592,11 +601,14 @@ fn color_count_label(kind: ColorGraphType) -> &'static str {
     }
 }
 
-fn remap_editor_color_count(editor: &mut TagFunctionEditor, target: ColorGraphType) {
+/// Returns whether the color graph type changed (Halo 2 functions refuse it).
+fn remap_editor_color_count(editor: &mut TagFunctionEditor, target: ColorGraphType) -> bool {
     let old = (0..editor.color_count())
         .filter_map(|index| editor.get_color(index))
         .collect::<Vec<_>>();
-    editor.set_color_graph_type(target);
+    if editor.set_color_graph_type(target).is_err() {
+        return false;
+    }
     let count = editor.color_count();
     for index in 0..count {
         let t = if count <= 1 {
@@ -607,6 +619,7 @@ fn remap_editor_color_count(editor: &mut TagFunctionEditor, target: ColorGraphTy
         let argb = sample_argb_stops(&old, t);
         let _ = editor.set_color(index, argb);
     }
+    true
 }
 
 fn sample_argb_stops(stops: &[u32], t: f32) -> u32 {
@@ -630,14 +643,18 @@ fn sample_argb_stops(stops: &[u32], t: f32) -> u32 {
 
 fn set_editor_clamp_range(editor: &mut TagFunctionEditor, min: f32, max: f32) {
     let mut function = editor.function().clone();
-    function.set_clamp_range(min, max);
-    *editor = TagFunctionEditor::from_function(function);
+    if let Some(blob) = function.as_blob_mut() {
+        blob.set_clamp_range(min, max);
+        *editor = TagFunctionEditor::from_function(function);
+    }
 }
 
 fn set_editor_flag(editor: &mut TagFunctionEditor, flag: u8, value: bool) {
     let mut function = editor.function().clone();
-    function.set_flag(flag, value);
-    *editor = TagFunctionEditor::from_function(function);
+    if let Some(blob) = function.as_blob_mut() {
+        blob.set_flag(flag, value);
+        *editor = TagFunctionEditor::from_function(function);
+    }
 }
 
 fn labeled_drag(ui: &mut Ui, label: &str, value: &mut f32, editable: bool) -> bool {
@@ -803,8 +820,8 @@ fn draw_curve_panel(
             ui.label(
                 RichText::new(format!(
                     "range {:.3} – {:.3}",
-                    editor.function().exclusion_min(),
-                    editor.function().exclusion_max()
+                    editor.function().as_blob().map_or(0.0, BlobFunction::exclusion_min),
+                    editor.function().as_blob().map_or(0.0, BlobFunction::exclusion_max)
                 ))
                 .color(subtle_dark())
                 .small(),

@@ -26,7 +26,7 @@ use blam_tags::{
     AssFile, Bitmap, ColorGraphType, CurvePointMode, CurveSegmentType, Endian,
     FoundationMasterType as EngineMasterType, FunctionFlags, FunctionKind, FunctionType, JmsFile,
     PERIODIC_FUNCTIONS, PeriodicParams, RenderModel, StringIdData, TRANSITION_FUNCTIONS, TagBlock,
-    TagField, TagFieldData, TagFieldType, TagFile, TagFunction, TagFunctionEditor,
+    TagField, TagFieldData, TagFieldType, TagFile, TagFunction, TagFunctionEditor, BlobFunction,
     TagReferenceData, TagResource, TagResourceKind, TagStruct, TransitionParams, format_group_tag,
     parse_group_tag,
 };
@@ -1373,6 +1373,7 @@ mod tests {
         let function = TagFunction::parse(&bytes).unwrap();
 
         assert_eq!(function.color_graph_type(), ColorGraphType::OneColor);
+        let function = function.as_blob().unwrap();
         assert!(function.flags().is_gpu());
         assert_eq!(function.header().colors[0], 0xFFFF0000);
     }
