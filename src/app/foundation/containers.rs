@@ -2355,6 +2355,24 @@ pub(in crate::app) fn block_selected_index(
         return 0;
     }
     let id = edit.widget_id(("block_sel", path));
+    // A field navigation selects the element holding its target, once per
+    // pane: after that the user's own paging through the block wins, even
+    // while the target is still glowing.
+    if let Some((nav, index)) = edit.field_nav.and_then(|nav| {
+        (nav.tag_key == edit.tag_key)
+            .then(|| nav.block_indices.iter().find(|(block, _)| block == path))
+            .flatten()
+            .map(|(_, index)| (nav, *index))
+    }) {
+        let applied_id = edit.widget_id(("block_sel_nav", path));
+        let applied = ui.data(|d| d.get_temp::<f64>(applied_id));
+        if applied != Some(nav.glow_until) {
+            ui.data_mut(|d| {
+                d.insert_temp(id, index);
+                d.insert_temp(applied_id, nav.glow_until);
+            });
+        }
+    }
     let raw = ui.data(|d| d.get_temp::<usize>(id)).unwrap_or(0);
     raw.min(count - 1)
 }

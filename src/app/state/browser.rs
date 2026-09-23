@@ -275,14 +275,19 @@ pub(in crate::app) struct PendingRefJump {
 
 /// Active "jump to a referencing field" navigation: force the target field's
 /// ancestor blocks open and glow the field until `glow_until` (egui time,
-/// seconds). Element selection along the path and the scroll target are set once
-/// via egui temp-data when the nav is created.
+/// seconds). The scroll target is set once via egui temp-data when the nav is
+/// created; element selection is applied by each pane as it draws the block.
 pub(in crate::app) struct FieldNav {
     /// The kit holding the tag being navigated.
     pub(in crate::app) kit: KitId,
     pub(in crate::app) tag_key: String,
     /// Exact indexed field path, e.g. `custom references[3]/sounds[1]/melee sound`.
     pub(in crate::app) field_path: String,
+    /// The element to select in each ancestor block, keyed by the block's drawn
+    /// path. Applied by the renderer rather than written into egui memory up
+    /// front: selection is keyed by the pane's view scope, and a tag can be
+    /// open in any number of tiles whose scopes only the renderer knows.
+    pub(in crate::app) block_indices: Vec<(String, usize)>,
     pub(in crate::app) glow_until: f64,
 }
 

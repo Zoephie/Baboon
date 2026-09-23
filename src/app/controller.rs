@@ -6849,28 +6849,14 @@ impl Baboon {
 
     /// Drive the editor to reveal `field_path` in the tag `tag_key`: select the
     /// element index at every ancestor block, scroll the exact leaf into view,
-    /// and glow it briefly. Element selection and scroll targets are written once
-    /// via egui temp-data; the glow/force-open persist via `self.field_nav`.
+    /// and glow it briefly. Scroll targets are written once via egui temp-data;
+    /// element selection, the glow and force-open persist via `self.field_nav`.
     pub(super) fn navigate_to_field(
         &mut self,
         ctx: &egui::Context,
         tag_key: &str,
         field_path: &str,
     ) {
-        // Select the referenced element at each ancestor block level. The block's
-        // selection is keyed by view-scope; write both so it lands whether the tab
-        // is docked or floating.
-        for (block_path, index) in ancestor_block_indices(field_path) {
-            for scope in ["docked", "floating"] {
-                let id = egui::Id::new((
-                    "field_edit",
-                    scope,
-                    tag_key,
-                    ("block_sel", block_path.as_str()),
-                ));
-                ctx.data_mut(|data| data.insert_temp(id, index));
-            }
-        }
         // Scroll the exact leaf field into view next frame, plus the enclosing
         // block header as a fallback for non-value leaves.
         ctx.data_mut(|data| data.insert_temp(field_jump_target_id(), field_path.to_owned()));
@@ -6881,6 +6867,7 @@ impl Baboon {
             kit: self.active_kit_id(),
             tag_key: tag_key.to_owned(),
             field_path: field_path.to_owned(),
+            block_indices: ancestor_block_indices(field_path),
             glow_until: ctx.input(|input| input.time) + 2.5,
         });
         ctx.request_repaint();
