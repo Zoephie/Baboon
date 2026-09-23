@@ -178,6 +178,7 @@ impl Baboon {
             });
         if changed {
             self.find.active = None;
+            self.find.results_key = None;
             self.refresh_find(ctx);
             if let Some(hit) = self.find.active_occurrence().cloned() {
                 self.activate_find_occurrence(ctx, hit);
@@ -191,7 +192,7 @@ impl Baboon {
         }
         if !open || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
             self.find.close();
-            ctx.data_mut(|data| data.remove::<FindRenderSnapshot>(find_render_snapshot_id()));
+            ctx.data_mut(|data| data.remove::<std::sync::Arc<FindRenderSnapshot>>(find_render_snapshot_id()));
         }
     }
 }

@@ -60,151 +60,115 @@ pub(in crate::app) fn compute_find_field_filter(
     match_case: bool,
     whole_word: bool,
 ) -> FieldFilter {
-    let mut visible_paths = std::collections::HashSet::new();
-    collect_find_visible_paths(
-        tag.root(),
+    let mut walk = FindFilterWalk {
         names,
-        docs,
-        "",
-        query,
+        plans: FindPlans::new(docs, query, match_case, whole_word),
         look_in,
-        match_case,
-        whole_word,
-        false,
-        &mut visible_paths,
-    );
-    FieldFilter { visible_paths }
+        canon: String::new(),
+        visible_paths: std::collections::HashSet::new(),
+    };
+    walk.collect(tag.root(), false);
+    FieldFilter {
+        visible_paths: walk.visible_paths,
+    }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn collect_find_visible_paths(
-    tag_struct: TagStruct<'_>,
-    names: &TagNameIndex,
-    docs: Option<&DefDocs>,
-    canon_prefix: &str,
-    query: &str,
+/// One filter walk. `canon` is the canonical path of the node being visited,
+/// grown and truncated in place; every element of a block shares its
+/// canonical paths, so most visits find theirs already recorded and allocate
+/// nothing.
+struct FindFilterWalk<'a> {
+    names: &'a TagNameIndex,
+    plans: FindPlans<'a>,
     look_in: FindLookIn,
-    match_case: bool,
-    whole_word: bool,
-    under_matched_container: bool,
-    visible_paths: &mut std::collections::HashSet<String>,
-) -> bool {
-    let mut any = false;
-    if look_in.includes_blocks() {
-        let entries = docs
-            .map(|docs| docs.entries_for_struct(&tag_struct))
-            .unwrap_or(&[]);
-        for (index, entry) in entries.iter().enumerate() {
-            let DefEntry::Explanation { title, body } = entry else {
-                continue;
+    canon: String,
+    visible_paths: std::collections::HashSet<String>,
+}
+
+impl FindFilterWalk<'_> {
+    fn mark_visible(&mut self) {
+        if !self.visible_paths.contains(self.canon.as_str()) {
+            self.visible_paths.insert(self.canon.clone());
+        }
+    }
+
+    fn collect(&mut self, tag_struct: TagStruct<'_>, under_matched_container: bool) -> bool {
+        let plan = self.plans.plan(&tag_struct);
+        let mut any = false;
+        if self.look_in.includes_blocks() {
+            for (index, entry) in plan.entries.iter().enumerate() {
+                if !matches!(entry, DefEntry::Explanation { .. }) {
+                    continue;
+                }
+                let matches = plan.doc_title_matches[index] || plan.doc_body_matches[index];
+                if matches || under_matched_container {
+                    // Same form as `documentation_path`.
+                    let len = self.canon.len();
+                    if len > 0 {
+                        self.canon.push('/');
+                    }
+                    let _ = std::fmt::Write::write_fmt(
+                        &mut self.canon,
+                        format_args!("@documentation {index}"),
+                    );
+                    self.mark_visible();
+                    self.canon.truncate(len);
+                    any = true;
+                }
+            }
+        }
+        for (field, field_plan) in tag_struct.fields().zip(&plan.fields) {
+            let parent_len = self.canon.len();
+            if parent_len > 0 {
+                self.canon.push('/');
+            }
+            self.canon.push_str(&field_plan.clean);
+            let is_block = field_plan.is_block;
+            let is_documentation = field_plan.is_documentation;
+            let label_enabled = if is_block || is_documentation {
+                self.look_in.includes_blocks()
+            } else {
+                self.look_in.includes_field_names()
             };
-            let matches =
-                !find_text_ranges(&clean_field_name(title), query, match_case, whole_word)
-                    .is_empty()
-                    || !find_text_ranges(body.trim_end(), query, match_case, whole_word).is_empty();
-            if matches || under_matched_container {
-                visible_paths.insert(documentation_path(canon_prefix, index));
-                any = true;
-            }
-        }
-    }
-    for field in tag_struct.fields() {
-        let clean = clean_field_name(field.name());
-        let canon = if canon_prefix.is_empty() {
-            clean.clone()
-        } else {
-            format!("{canon_prefix}/{clean}")
-        };
-        let is_block = field.as_block().is_some() || field.as_array().is_some();
-        let is_documentation = field.field_type() == TagFieldType::Explanation;
-        let display_label = if is_block {
-            foundation_block_title(field.name())
-        } else {
-            clean.clone()
-        };
-        let label_enabled = if is_block || is_documentation {
-            look_in.includes_blocks()
-        } else {
-            look_in.includes_field_names()
-        };
-        let label_matches = label_enabled
-            && !find_text_ranges(&display_label, query, match_case, whole_word).is_empty();
-        let documentation_body_matches = is_documentation
-            && look_in.includes_blocks()
-            && field.explanation().is_some_and(|body| {
-                !find_text_ranges(body.trim_end(), query, match_case, whole_word).is_empty()
-            });
-        let value_matches = !is_block
-            && !is_documentation
-            && look_in.includes_values()
-            && field.value().is_some_and(|value| {
-                !find_text_ranges(
-                    &format_foundation_scalar_value(names, &value),
-                    query,
-                    match_case,
-                    whole_word,
-                )
-                .is_empty()
-            });
-        let node_matches = label_matches || documentation_body_matches || value_matches;
-        let child_under_matched = under_matched_container || (is_block && label_matches);
-        let mut child_matches = false;
+            let label_matches = label_enabled && field_plan.label_matches;
+            let documentation_body_matches = is_documentation
+                && self.look_in.includes_blocks()
+                && field_plan.explanation_matches;
+            let value_matches = !is_block
+                && !is_documentation
+                && self.look_in.includes_values()
+                && field.value().is_some_and(|value| {
+                    self.plans
+                        .matches(&format_foundation_scalar_value(self.names, &value))
+                });
+            let node_matches = label_matches || documentation_body_matches || value_matches;
+            let child_under_matched = under_matched_container || (is_block && label_matches);
+            let mut child_matches = false;
 
-        if let Some(nested) = field.as_struct() {
-            child_matches |= collect_find_visible_paths(
-                nested,
-                names,
-                docs,
-                &canon,
-                query,
-                look_in,
-                match_case,
-                whole_word,
-                child_under_matched,
-                visible_paths,
-            );
-        } else if let Some(block) = field.as_block() {
-            for index in 0..block.len() {
-                if let Some(element) = block.element(index) {
-                    child_matches |= collect_find_visible_paths(
-                        element,
-                        names,
-                        docs,
-                        &canon,
-                        query,
-                        look_in,
-                        match_case,
-                        whole_word,
-                        child_under_matched,
-                        visible_paths,
-                    );
+            if let Some(nested) = field.as_struct() {
+                child_matches |= self.collect(nested, child_under_matched);
+            } else if let Some(block) = field.as_block() {
+                for index in 0..block.len() {
+                    if let Some(element) = block.element(index) {
+                        child_matches |= self.collect(element, child_under_matched);
+                    }
+                }
+            } else if let Some(array) = field.as_array() {
+                for index in 0..array.len() {
+                    if let Some(element) = array.element(index) {
+                        child_matches |= self.collect(element, child_under_matched);
+                    }
                 }
             }
-        } else if let Some(array) = field.as_array() {
-            for index in 0..array.len() {
-                if let Some(element) = array.element(index) {
-                    child_matches |= collect_find_visible_paths(
-                        element,
-                        names,
-                        docs,
-                        &canon,
-                        query,
-                        look_in,
-                        match_case,
-                        whole_word,
-                        child_under_matched,
-                        visible_paths,
-                    );
-                }
-            }
-        }
 
-        if node_matches || child_matches || under_matched_container {
-            visible_paths.insert(canon);
+            if node_matches || child_matches || under_matched_container {
+                self.mark_visible();
+            }
+            self.canon.truncate(parent_len);
+            any |= node_matches || child_matches;
         }
-        any |= node_matches || child_matches;
+        any
     }
-    any
 }
 
 /// Per-pane temporary request emitted by a filtered block header. Kept under

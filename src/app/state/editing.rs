@@ -653,15 +653,23 @@ fn path_is_ancestor(ancestor: &str, target: &str) -> bool {
 pub(in crate::app) enum FieldFilterAction {
     /// Hide everything except matches and their ancestor containers; expand the
     /// containers that remain.
-    Apply(FieldFilter),
+    Apply(std::sync::Arc<FieldFilter>),
     /// Re-expand every node to its normal default (query was cleared).
     RestoreDefaults,
+}
+
+/// The Find filter a pane last applied, with the inputs it was built from.
+/// Rebuilding it walks every element of the tag, so it is reused until the
+/// query, its options or the document change.
+pub(in crate::app) struct AppliedFindFilter {
+    pub(in crate::app) signature: String,
+    pub(in crate::app) filter: std::sync::Arc<FieldFilter>,
 }
 
 /// Which collapsible nodes a Find query wants open. Paths are the
 /// canonical field paths with element indices (`[3]`) stripped, so they're
 /// independent of which block element happens to be selected.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(in crate::app) struct FieldFilter {
     /// Canonical paths of every field that should render while searching:
     /// matches, their ancestor containers, and the contents of name-matched

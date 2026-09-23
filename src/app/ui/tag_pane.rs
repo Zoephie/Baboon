@@ -77,21 +77,38 @@ impl Baboon {
             && filter_in_scope;
         let field_filter = if apply_find_filter {
             let signature = format!(
-                "{}|{:?}|{}|{}",
-                self.find.query, self.find.look_in, self.find.match_case, self.find.whole_word
-            );
-            self.kits[kit_index]
-                .find_filter_applied
-                .insert(key.clone(), signature);
-            Some(FieldFilterAction::Apply(compute_find_field_filter(
-                &doc.tag,
-                self.names(),
-                def_docs.as_deref(),
-                &self.find.query,
+                "{}|{:?}|{}|{}|{:?}",
+                self.find.query,
                 self.find.look_in,
                 self.find.match_case,
                 self.find.whole_word,
-            )))
+                doc.content_stamp(),
+            );
+            let cached = self.kits[kit_index]
+                .find_filter_applied
+                .get(&key)
+                .filter(|applied| applied.signature == signature)
+                .map(|applied| applied.filter.clone());
+            let filter = cached.unwrap_or_else(|| {
+                let filter = std::sync::Arc::new(compute_find_field_filter(
+                    &doc.tag,
+                    self.names(),
+                    def_docs.as_deref(),
+                    &self.find.query,
+                    self.find.look_in,
+                    self.find.match_case,
+                    self.find.whole_word,
+                ));
+                self.kits[kit_index].find_filter_applied.insert(
+                    key.clone(),
+                    AppliedFindFilter {
+                        signature,
+                        filter: filter.clone(),
+                    },
+                );
+                filter
+            });
+            Some(FieldFilterAction::Apply(filter))
         } else {
             self.kits[kit_index]
                 .find_filter_applied

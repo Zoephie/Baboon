@@ -94,8 +94,9 @@ pub(super) struct Kit {
 
     // --- Per-tag Find filter state ---
     /// Tracks panes that need their normal collapse defaults restored after
-    /// Find's visual filter stops applying to them.
-    pub(super) find_filter_applied: HashMap<String, String>,
+    /// Find's visual filter stops applying to them, and caches the filter each
+    /// one last applied.
+    pub(super) find_filter_applied: HashMap<String, AppliedFindFilter>,
 
     // --- Browser and index state ---
     /// How this kit's browser lists tags, and in what order. Per kit because

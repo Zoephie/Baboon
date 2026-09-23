@@ -75,8 +75,9 @@ fn findable_highlight_data(
     text: &str,
     kind: FindTargetKind,
 ) -> Option<(Vec<std::ops::Range<usize>>, Option<std::ops::Range<usize>>)> {
-    let snapshot =
-        ui.data(|data| data.get_temp::<FindRenderSnapshot>(find_render_snapshot_id()))?;
+    let snapshot = ui.data(|data| {
+        data.get_temp::<std::sync::Arc<FindRenderSnapshot>>(find_render_snapshot_id())
+    })?;
     let cell = ui.data(|data| data.get_temp::<FindRenderCell>(find_render_cell_id()))?;
     if !snapshot
         .matching_cells

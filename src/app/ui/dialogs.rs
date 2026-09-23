@@ -1376,7 +1376,7 @@ impl Baboon {
             );
             return;
         };
-        let filter_action = FieldFilterAction::Apply((*filter).clone());
+        let filter_action = FieldFilterAction::Apply(std::sync::Arc::new(filter.clone()));
         let mut edit = FieldEditContext {
             expand_all: Some(true),
             nested_default: NestedDefault::Expanded,
