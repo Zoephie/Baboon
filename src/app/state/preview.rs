@@ -35,7 +35,9 @@ impl BitmapPreviewBg {
 
     pub(in crate::app) fn color(self) -> egui::Color32 {
         match self {
-            Self::DarkGray => egui::Color32::from_rgb(64, 64, 64),
+            // Match the dark-mode page background rather than the lighter
+            // Foundation section/header surfaces.
+            Self::DarkGray => egui::Color32::from_rgb(40, 40, 40),
             Self::Black => egui::Color32::BLACK,
             Self::White => egui::Color32::WHITE,
             Self::Magenta => egui::Color32::from_rgb(255, 0, 255),
@@ -61,8 +63,13 @@ pub(in crate::app) struct BitmapPreviewState {
     pub(in crate::app) show_green: bool,
     pub(in crate::app) show_blue: bool,
     pub(in crate::app) show_alpha: bool,
+    /// Draw a subtle fixed-size checker behind the image to expose alpha.
+    pub(in crate::app) show_checkerboard: bool,
+    /// Draw a high-contrast two-pixel outline just outside the image bounds.
+    pub(in crate::app) show_border: bool,
     pub(in crate::app) decoded: Option<Result<BitmapPreviewData, String>>,
     pub(in crate::app) texture: Option<egui::TextureHandle>,
+    pub(in crate::app) checker_texture: Option<egui::TextureHandle>,
     pub(in crate::app) texture_dirty: bool,
     pub(in crate::app) zoom: f32,
     /// Pan offset of the image center relative to the canvas center, in
@@ -85,8 +92,11 @@ impl Default for BitmapPreviewState {
             show_green: true,
             show_blue: true,
             show_alpha: true,
+            show_checkerboard: true,
+            show_border: true,
             decoded: None,
             texture: None,
+            checker_texture: None,
             texture_dirty: true,
             zoom: 1.0,
             pan: Vec2::ZERO,

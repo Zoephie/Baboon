@@ -774,7 +774,7 @@ pub(super) fn draw_model_preview_panel(
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum ModelPreviewSectionPart {
+pub(in crate::app) enum ModelPreviewSectionPart {
     Header,
     Body,
 }
@@ -833,7 +833,7 @@ fn wide_model_preview_section_width(page_width: f32, model_preview_size: f32) ->
 
 /// A fixed, full-width section styled like the Tag Fields group headers, with
 /// room for compact controls on the right side of the header bar.
-fn draw_model_preview_section(
+pub(in crate::app) fn draw_model_preview_section(
     ui: &mut Ui,
     title: &str,
     min_body_height: Option<f32>,
@@ -848,6 +848,8 @@ fn draw_model_preview_section(
         let width = ui.available_width().max(1.0);
         let setup_header = title == "Model Setup";
         let animation_header = title == "Animation Player";
+        let bitmap_header = title == "Bitmap Preview";
+        let edge_to_edge = matches!(title, "Model Preview" | "Bitmap Preview");
         let extra_header_height = if setup_header {
             model_setup_extra_header_height(width)
         } else if animation_header && width < 800.0 {
@@ -886,11 +888,13 @@ fn draw_model_preview_section(
         };
         let mut title_ui = ui.new_child(egui::UiBuilder::new().max_rect(title_rect));
         title_ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-            ui.label(
-                RichText::new(title)
-                    .font(bold_font(12.5))
-                    .color(foundation_block_text()),
-            );
+            if !bitmap_header {
+                ui.label(
+                    RichText::new(title)
+                        .font(bold_font(12.5))
+                        .color(foundation_block_text()),
+                );
+            }
         });
         let actions_rect = if extra_header_height > 0.0 {
             egui::Rect::from_min_max(
@@ -900,6 +904,8 @@ fn draw_model_preview_section(
                 ),
                 header_content_rect.max,
             )
+        } else if bitmap_header {
+            header_content_rect
         } else if setup_header || animation_header {
             let title_width = ui
                 .painter()
@@ -917,7 +923,7 @@ fn draw_model_preview_section(
             header_content_rect
         };
         let mut actions_ui = ui.new_child(egui::UiBuilder::new().max_rect(actions_rect));
-        if setup_header || animation_header {
+        if setup_header || animation_header || bitmap_header {
             actions_ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 add_contents(ui, ModelPreviewSectionPart::Header);
@@ -937,20 +943,14 @@ fn draw_model_preview_section(
                 sw: RADIUS,
                 se: RADIUS,
             })
-            .inner_margin(egui::Margin::same(if title == "Model Preview" {
-                0.0
-            } else {
-                8.0
-            }))
+            .inner_margin(egui::Margin::same(if edge_to_edge { 0.0 } else { 8.0 }))
             .show(ui, |ui| {
-                ui.set_min_width(
-                    (width - if title == "Model Preview" { 0.0 } else { 16.0 }).max(1.0),
-                );
+                ui.set_min_width((width - if edge_to_edge { 0.0 } else { 16.0 }).max(1.0));
                 if let Some(min_body_height) = min_body_height {
                     ui.set_min_height(min_body_height);
                 }
                 ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                    if title == "Model Preview" {
+                    if edge_to_edge {
                         ui.spacing_mut().item_spacing.y = 0.0;
                     }
                     add_contents(ui, ModelPreviewSectionPart::Body);
@@ -1143,7 +1143,7 @@ fn model_view_icon_checkbox(
     icon: ModelViewCheckboxIcon,
     label: &str,
 ) -> egui::Response {
-    ui.horizontal(|ui| {
+    let row = ui.horizontal(|ui| {
         let checkbox_response = ui.checkbox(checked, "");
         // Native checkbox text starts before the end of an empty checkbox's
         // 24-point hitbox. Put the icon at that same text start, without
@@ -1175,8 +1175,12 @@ fn model_view_icon_checkbox(
         if icon_response.clicked() || label_response.clicked() {
             *checked = !*checked;
         }
-    })
-    .response
+        checkbox_response
+    });
+    if ui.rect_contains_pointer(row.response.rect) && !row.inner.hovered() {
+        paint_checkbox_row_hover(ui, row.inner.rect, *checked);
+    }
+    row.response
 }
 
 fn draw_marker_filter_field(ui: &mut Ui, filter: &mut String) -> egui::Response {

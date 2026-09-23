@@ -19,6 +19,8 @@ mod tests {
             rgba: vec![10, 20, 30, 40],
         };
         let mut preview = BitmapPreviewState::default();
+        assert!(preview.show_checkerboard);
+        assert!(preview.show_border);
         preview.show_green = false;
         preview.show_alpha = false;
         assert_eq!(filtered_bitmap_rgba(&data, &preview), [10, 0, 30, 255]);

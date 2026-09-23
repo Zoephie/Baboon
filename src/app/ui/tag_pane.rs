@@ -6,6 +6,7 @@ use super::*;
 const TAG_HEADER_KEYWORDS_INLINE_BREAKPOINT: f32 = 1160.0;
 const TAG_HEADER_ACTIONS_SINGLE_ROW_BREAKPOINT: f32 = 1180.0;
 const TAG_HEADER_DYNAMIC_ACTIONS_WIDTH: f32 = 285.0;
+const BITMAP_HEADER_ACTIONS_WIDTH: f32 = 105.0;
 
 impl Baboon {
     /// Renders one open tag as a self-contained pane.
@@ -406,15 +407,18 @@ impl Baboon {
         let available = ui.available_width();
         let keywords_inline = available >= TAG_HEADER_KEYWORDS_INLINE_BREAKPOINT;
         let actions_single_row = available >= TAG_HEADER_ACTIONS_SINGLE_ROW_BREAKPOINT;
-        let has_dynamic_actions = entry.group_tag == u32::from_be_bytes(*b"scnr");
+        let dynamic_actions_width = match &entry.group_tag.to_be_bytes() {
+            b"scnr" => TAG_HEADER_DYNAMIC_ACTIONS_WIDTH,
+            b"bitm" => BITMAP_HEADER_ACTIONS_WIDTH,
+            _ => 0.0,
+        };
+        let has_dynamic_actions = dynamic_actions_width > 0.0;
         let actions_stacked = has_dynamic_actions && !actions_single_row;
         let action_width = if has_dynamic_actions {
             if actions_stacked {
-                TAG_HEADER_DYNAMIC_ACTIONS_WIDTH
+                dynamic_actions_width
             } else {
-                TAG_HEADER_DYNAMIC_ACTIONS_WIDTH
-                    + PANE_HEADER_SECTION_GAP
-                    + PANE_HEADER_COMMON_ACTIONS_WIDTH
+                dynamic_actions_width + PANE_HEADER_SECTION_GAP + PANE_HEADER_COMMON_ACTIONS_WIDTH
             }
         } else {
             PANE_HEADER_COMMON_ACTIONS_WIDTH
@@ -500,7 +504,11 @@ impl Baboon {
                                 ui.spacing_mut().item_spacing.y = 8.0;
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| self.draw_scenario_launcher_buttons(ui, kit_index, entry),
+                                    |ui| {
+                                        self.draw_tag_header_specific_actions(
+                                            ui, ctx, kit_index, entry,
+                                        )
+                                    },
                                 );
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
@@ -514,7 +522,7 @@ impl Baboon {
                         } else {
                             self.draw_tag_header_common_actions(ui, ctx, kit_index, entry);
                             if has_dynamic_actions {
-                                self.draw_scenario_launcher_buttons(ui, kit_index, entry);
+                                self.draw_tag_header_specific_actions(ui, ctx, kit_index, entry);
                             }
                         }
                     },
@@ -523,11 +531,11 @@ impl Baboon {
         });
 
         if !wide {
-            if entry.group_tag == u32::from_be_bytes(*b"scnr") {
+            if has_dynamic_actions {
                 ui.allocate_ui_with_layout(
                     Vec2::new(ui.available_width(), BUTTON_HEIGHT),
                     egui::Layout::right_to_left(egui::Align::Center),
-                    |ui| self.draw_scenario_launcher_buttons(ui, kit_index, entry),
+                    |ui| self.draw_tag_header_specific_actions(ui, ctx, kit_index, entry),
                 );
                 ui.add_space(8.0);
             }
@@ -544,6 +552,33 @@ impl Baboon {
             label,
             open_in_new_tab: true,
         })
+    }
+
+    fn draw_tag_header_specific_actions(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &egui::Context,
+        kit_index: usize,
+        entry: &TagEntry,
+    ) {
+        match &entry.group_tag.to_be_bytes() {
+            b"scnr" => self.draw_scenario_launcher_buttons(ui, kit_index, entry),
+            b"bitm" => {
+                let tags_root = self.loaded_tags_root_for(kit_index);
+                let can_reimport = bitmap_reimport_data_path(entry, tags_root.as_deref()).is_some();
+                if icon_text_button(ui, ButtonIcon::Import, "Reimport", can_reimport)
+                    .on_disabled_hover_text("Reimport requires a loose editing-kit bitmap tag")
+                    .on_hover_text(
+                        "Run tool bitmaps for this bitmap source path, then reload the tag",
+                    )
+                    .clicked()
+                {
+                    self.active = kit_index;
+                    self.begin_reimport_bitmap(entry.key.clone(), ctx.clone());
+                }
+            }
+            _ => {}
+        }
     }
 
     fn draw_tag_header_common_actions(
