@@ -112,7 +112,16 @@ pub(in crate::app) struct FindDialogState {
     pub(in crate::app) searching: bool,
     pub(in crate::app) progress: Option<(usize, usize)>,
     pub(in crate::app) unreadable: usize,
+    /// Inputs `occurrences` was last computed from. Find refreshes every frame,
+    /// and walking a large scenario takes far longer than a frame, so the walk
+    /// runs only when this changes.
+    pub(in crate::app) results_key: Option<String>,
+    /// Render lookup built from `occurrences`, shared by every field widget.
+    pub(in crate::app) matching_cells: std::sync::Arc<FindMatchingCells>,
 }
+
+pub(in crate::app) type FindMatchingCells =
+    std::collections::HashSet<(String, String, FindTargetKind)>;
 
 impl FindDialogState {
     /// Currently selected occurrence, if its stored index remains valid.
@@ -125,20 +134,22 @@ impl FindDialogState {
         self.open = false;
         self.active = None;
         self.occurrences.clear();
+        self.results_key = None;
+        self.matching_cells = Default::default();
         self.searching = false;
         self.progress = None;
         self.filter_results = false;
     }
 }
 
-/// Cloneable render-only Find data installed in egui temporary memory each frame.
-#[derive(Clone)]
+/// Render-only Find data installed in egui temporary memory each frame, behind
+/// an `Arc`: every field widget fetches it, and egui hands out clones.
 pub(in crate::app) struct FindRenderSnapshot {
     pub(in crate::app) query: String,
     pub(in crate::app) match_case: bool,
     pub(in crate::app) whole_word: bool,
     pub(in crate::app) active: Option<FindOccurrence>,
-    pub(in crate::app) matching_cells: std::collections::HashSet<(String, String, FindTargetKind)>,
+    pub(in crate::app) matching_cells: std::sync::Arc<FindMatchingCells>,
 }
 
 /// Identity of the Foundation field currently being painted.

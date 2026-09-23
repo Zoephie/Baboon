@@ -42,14 +42,24 @@ impl Dirty {
 /// `dirty` reflects divergence from the last successful save, while journal
 /// entries may still exist after saving to support later undo operations.
 pub(in crate::app) struct TagDocument {
+    /// Process-unique identity. `dirty`'s revision restarts at zero when a tag
+    /// is reloaded into a fresh document, so a cache keyed on the revision
+    /// alone would take the reload for the tag it replaced.
+    pub(in crate::app) id: u64,
     pub(in crate::app) tag: TagFile,
     pub(in crate::app) dirty: Dirty,
     pub(in crate::app) journal: EditJournal,
 }
 
+fn next_document_id() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 impl TagDocument {
     pub(in crate::app) fn clean(tag: TagFile) -> Self {
         Self {
+            id: next_document_id(),
             tag,
             dirty: Dirty::default(),
             journal: EditJournal::default(),
@@ -64,10 +74,17 @@ impl TagDocument {
         let mut dirty = Dirty::default();
         dirty.touch();
         Self {
+            id: next_document_id(),
             tag,
             dirty,
             journal: EditJournal::default(),
         }
+    }
+
+    /// Changes whenever this document's contents may have: any edit, undo or
+    /// redo, or the document being replaced by a reload.
+    pub(in crate::app) fn content_stamp(&self) -> (u64, u64) {
+        (self.id, self.dirty.revision())
     }
 }
 
