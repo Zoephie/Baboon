@@ -1181,17 +1181,7 @@ pub(in crate::app) fn draw_shader_editable_value(
                     Sense::hover(),
                 )
                 .on_hover_ui(|ui| {
-                    let native = texture.size_vec2();
-                    let scale = (256.0 / native.x.max(native.y).max(1.0)).min(1.0);
-                    ui.add(egui::Image::new(egui::load::SizedTexture::new(
-                        texture.id(),
-                        native * scale,
-                    )));
-                    ui.label(
-                        RichText::new(&open_ref)
-                            .small()
-                            .color(material_muted_text()),
-                    );
+                    bitmap_hover_preview_ui(ui, texture, &open_ref, material_muted_text());
                 });
             }
             let text_rect = egui::Rect::from_min_size(

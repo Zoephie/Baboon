@@ -361,15 +361,17 @@ pub(super) fn foundation_tag_reference_input_cell_colored(
     color: Color32,
     hover: Option<&str>,
     icon_group: Option<u32>,
-) {
+    show_hover_text: bool,
+) -> egui::Response {
     let height = 24.0;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     paint_tag_reference_value_cell(ui, rect, icon_group);
     let response =
         foundation_read_only_text_cell(ui, rect, text, color, tag_reference_icon_footprint());
-    if response.hovered() {
-        response.on_hover_text(hover.unwrap_or(text));
+    if response.hovered() && show_hover_text {
+        return response.on_hover_text(hover.unwrap_or(text));
     }
+    response
 }
 
 pub(super) fn foundation_tag_reference_text_edit_cell(

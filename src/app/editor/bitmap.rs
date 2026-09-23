@@ -261,11 +261,31 @@ fn draw_bitmap_index_control(
     if foundation_header_stepper_clicked(ui, "<", next > 0) {
         next -= 1;
     }
+    let mut selected_text = egui::text::LayoutJob::default();
+    let font_id = TextStyle::Button.resolve(ui.style());
+    selected_text.append(
+        &next.to_string(),
+        0.0,
+        egui::TextFormat {
+            font_id: font_id.clone(),
+            color: foundation_block_text(),
+            ..Default::default()
+        },
+    );
+    selected_text.append(
+        &format!("/ {}", count.saturating_sub(1)),
+        8.0,
+        egui::TextFormat {
+            font_id,
+            color: foundation_block_text().gamma_multiply(0.5),
+            ..Default::default()
+        },
+    );
     let (combo, wheel_delta) = combo_box_with_scroll(
         ui,
         egui::ComboBox::from_id_salt((id_salt, count))
-            .selected_text(format!("{next}"))
-            .width(54.0),
+            .selected_text(selected_text)
+            .width(64.0),
         |ui| {
             let just_opened = combo_popup_just_opened(ui);
             for index in 0..count {

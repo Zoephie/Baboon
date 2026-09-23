@@ -550,6 +550,7 @@ pub(in crate::app) fn draw_shader_grid_row_readonly(
         definitions_root: None,
         names: None,
         tags_root: None,
+        bitmap_hover_entries: None,
         tag_reference_catalog: None,
         tag_reference_picker: &mut tag_reference_picker,
         status: None,

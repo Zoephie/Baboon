@@ -102,6 +102,13 @@ impl Baboon {
 
         let kit = &mut self.kits[kit_index];
         let kit_id = kit.id;
+        let bitmap_hover_requests = begin_bitmap_hovers(
+            ui,
+            KitStamp {
+                kit: kit_id,
+                generation: kit.generation,
+            },
+        );
         let source = kit.source.as_ref();
         let names = &kit.names;
 
@@ -150,6 +157,7 @@ impl Baboon {
                 TagSource::LooseFolder { root, .. } => Some(root.as_path()),
                 _ => None,
             }),
+            bitmap_hover_entries: source.map(LoadedSourceData::full_entry_set),
             tag_reference_catalog: source
                 .and_then(|source| tag_reference_catalog_for_source(source, expert_mode)),
             tag_reference_picker: &mut self.tag_reference_picker,
@@ -362,6 +370,7 @@ impl Baboon {
             self.find.filter_results = false;
         }
         kit.parsed_tags.insert(key.clone(), doc);
+        self.queue_bitmap_hover_thumbnails(kit_index, &bitmap_hover_requests, ctx);
         // These ops are applied *after* the pane has been drawn, so the frame
         // on screen still shows the tag as it was before the edit. egui only
         // redraws when new input arrives, so nothing here is guaranteed to be

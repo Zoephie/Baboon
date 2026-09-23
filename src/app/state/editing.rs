@@ -436,6 +436,10 @@ pub(in crate::app) struct FieldEditContext<'a> {
     pub(in crate::app) definitions_root: Option<&'a Path>,
     pub(in crate::app) names: Option<&'a TagNameIndex>,
     pub(in crate::app) tags_root: Option<&'a Path>,
+    /// Entries available to source-aware bitmap hover previews. Loose sources
+    /// can also synthesize an entry from `tags_root` when their lazy browser
+    /// tree has not visited the referenced folder yet.
+    pub(in crate::app) bitmap_hover_entries: Option<&'a [TagEntry]>,
     /// Populated only for Campaign Evolved container sources. Loose editing
     /// kits continue to use `tags_root` and the native file picker.
     pub(in crate::app) tag_reference_catalog: Option<TagReferenceCatalog<'a>>,

@@ -2223,7 +2223,19 @@ pub(in crate::app) fn draw_entry(
     let (row_rect, response) = ui.allocate_exact_size(row_size, Sense::click_and_drag());
     // Not `on_hover_text`: an egui tooltip would block the very drag this row
     // exists to start. See `hover_tooltip_beside_pointer`.
-    hover_tooltip_beside_pointer(ui, &response, &native_display_path(&entry.display_path));
+    let hover_label = native_display_path(&entry.display_path);
+    if entry.group_tag == u32::from_be_bytes(*b"bitm") {
+        match bitmap_hover_texture(ui, entry) {
+            Some(Some(texture)) => {
+                paint_bitmap_hover_preview(ui, &response, &texture, &hover_label)
+            }
+            // Keep the path tooltip while the preview is loading, and for
+            // empty/unsupported bitmaps whose failed decode is cached.
+            _ => hover_tooltip_beside_pointer(ui, &response, &hover_label),
+        }
+    } else {
+        hover_tooltip_beside_pointer(ui, &response, &hover_label);
+    }
     response.dnd_set_drag_payload(payload);
     if reveal_key == Some(entry.key.as_str()) {
         response.scroll_to_me(Some(egui::Align::Center));

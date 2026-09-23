@@ -160,6 +160,56 @@ pub(in crate::app) fn reference_target_missing(
     !blam_tags::paths::resolve_tag_path(root, &rel, ext).exists()
 }
 
+/// Resolve the current contents of a tag-reference input to the source entry
+/// understood by the shared asynchronous thumbnail service. This deliberately
+/// accepts the live draft rather than only the committed tag value, so a pasted
+/// or typed bitmap reference begins previewing as soon as it becomes valid.
+pub(super) fn bitmap_reference_hover_entry(
+    entries: Option<&[TagEntry]>,
+    tags_root: Option<&Path>,
+    names: Option<&TagNameIndex>,
+    input: &str,
+    committed: Option<&(u32, String)>,
+) -> Option<TagEntry> {
+    let (group_tag, path) = parse_tag_reference(input)
+        .ok()
+        .and_then(|reference| reference.group_tag_and_name)
+        .or_else(|| committed.cloned())?;
+    if group_tag != u32::from_be_bytes(*b"bitm") {
+        return None;
+    }
+    let mut rel_path = sanitize_ref_path(&path).replace('/', "\\");
+    if rel_path.to_ascii_lowercase().ends_with(".bitmap") {
+        rel_path.truncate(rel_path.len() - ".bitmap".len());
+    }
+    if rel_path.is_empty() {
+        return None;
+    }
+
+    if let Some(entry) = entries.and_then(|entries| {
+        entries.iter().find(|entry| {
+            entry.group_tag == group_tag
+                && entry_rel_path(entry)
+                    .replace('/', "\\")
+                    .eq_ignore_ascii_case(&rel_path)
+        })
+    }) {
+        return Some(entry.clone());
+    }
+
+    let root = tags_root?;
+    let path = blam_tags::paths::resolve_tag_path(root, &rel_path, "bitmap");
+    Some(TagEntry {
+        key: format!("file:{}", path.display()),
+        display_path: format!("{}.bitmap", rel_path.replace('\\', "/")),
+        group_tag,
+        group_name: names
+            .and_then(|names| names.name_for(group_tag))
+            .map(str::to_owned),
+        location: TagEntryLocation::LooseFile(path),
+    })
+}
+
 pub(in crate::app) fn draw_foundation_tag_reference_row(
     ui: &mut Ui,
     meta: &FieldDisplayMeta,
@@ -192,7 +242,8 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
             let missing = target.as_ref().is_some_and(|(group, rel)| {
                 reference_target_missing(edit.names, edit.tags_root, *group, rel)
             });
-            if editable {
+            let is_bitmap_reference = icon_group == Some(u32::from_be_bytes(*b"bitm"));
+            let value_response = if editable {
                 let response = foundation_tag_reference_text_edit_cell(
                     ui,
                     &mut draft.text,
@@ -212,6 +263,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                         required_group,
                     );
                 }
+                response
             } else if !has_ref {
                 foundation_tag_reference_input_cell_colored(
                     ui,
@@ -220,7 +272,8 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                     subtle_dark(),
                     Some("This reference is empty"),
                     icon_group,
-                );
+                    true,
+                )
             } else if missing {
                 foundation_tag_reference_input_cell_colored(
                     ui,
@@ -229,7 +282,8 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                     REFERENCE_MISSING_COLOR,
                     Some("Referenced tag not found on disk"),
                     icon_group,
-                );
+                    true,
+                )
             } else {
                 foundation_tag_reference_input_cell_colored(
                     ui,
@@ -238,7 +292,24 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                     text_dark(),
                     None,
                     icon_group,
-                );
+                    !is_bitmap_reference,
+                )
+            };
+            // Resolve only the field under the pointer. Looking every bitmap
+            // reference up in a large source index on every frame would turn a
+            // purely visual affordance into editor-wide work.
+            if value_response.hovered()
+                && is_bitmap_reference
+                && let Some(entry) = bitmap_reference_hover_entry(
+                    edit.bitmap_hover_entries,
+                    edit.tags_root,
+                    edit.names,
+                    &draft.text,
+                    if draft.changed { None } else { target.as_ref() },
+                )
+                && let Some(Some(texture)) = bitmap_hover_texture(ui, &entry)
+            {
+                paint_bitmap_hover_preview(ui, &value_response, &texture, &entry.display_path);
             }
             // Flag a broken reference even while the field is being edited.
             if missing {
