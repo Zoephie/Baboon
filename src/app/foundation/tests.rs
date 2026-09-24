@@ -156,6 +156,7 @@ mod tests {
             definitions_root: Some(definitions_root.as_path()),
             names: None,
             tags_root: None,
+            bitmap_hover_entries: None,
             tag_reference_catalog: None,
             tag_reference_picker: &mut tag_reference_picker,
             status: None,
@@ -267,7 +268,6 @@ mod tests {
         assert!(is_internal_schema_marker_name("whore function"));
     }
 
-
     #[test]
     fn tag_reference_picker_paths_must_be_under_tags_root() {
         let tags_root = PathBuf::from("tags");
@@ -292,6 +292,57 @@ mod tests {
         assert_eq!(
             tag_reference_relative_path_with_extension(&outside, &tags_root).unwrap_err(),
             "Selected file must be inside the tags folder"
+        );
+    }
+
+    #[test]
+    fn bitmap_hover_resolves_a_loaded_entry_from_reference_text() {
+        let bitmap_group = parse_group_tag("bitm").unwrap();
+        let entry = TagEntry {
+            key: "bitmap-key".to_owned(),
+            display_path: "ui/hud/scope.bitmap".to_owned(),
+            group_tag: bitmap_group,
+            group_name: Some("bitmap".to_owned()),
+            location: TagEntryLocation::LooseFile(PathBuf::from("tags/ui/hud/scope.bitmap")),
+        };
+
+        let resolved = bitmap_reference_hover_entry(
+            Some(std::slice::from_ref(&entry)),
+            None,
+            None,
+            r"ui\hud\scope.bitmap",
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(resolved.key, entry.key);
+    }
+
+    #[test]
+    fn bitmap_hover_synthesizes_an_unvisited_loose_entry() {
+        let root = PathBuf::from("tags");
+        let resolved =
+            bitmap_reference_hover_entry(None, Some(&root), None, r"ui\hud\scope.bitmap", None)
+                .unwrap();
+
+        assert_eq!(resolved.display_path, "ui/hud/scope.bitmap");
+        assert!(matches!(
+            resolved.location,
+            TagEntryLocation::LooseFile(path) if path == root.join("ui").join("hud").join("scope.bitmap")
+        ));
+    }
+
+    #[test]
+    fn non_bitmap_references_do_not_request_bitmap_hovers() {
+        assert!(
+            bitmap_reference_hover_entry(
+                None,
+                Some(Path::new("tags")),
+                None,
+                r"ui\hud\scope.shader",
+                None,
+            )
+            .is_none()
         );
     }
 

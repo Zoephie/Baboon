@@ -39,8 +39,9 @@ pub(in crate::app) fn draw_foundation_function_row(
                             *edit.function_request = Some(FunctionPopup::new(
                                 edit.tag_key.to_owned(),
                                 canonical_field_path(path),
-                                FunctionView::from_function(function.clone())
-                                    .with_edit(foundation_function_edit_paths(path, function.encoding())),
+                                FunctionView::from_function(function.clone()).with_edit(
+                                    foundation_function_edit_paths(path, function.encoding()),
+                                ),
                                 true,
                             ));
                         }
@@ -51,7 +52,14 @@ pub(in crate::app) fn draw_foundation_function_row(
                         // editor lives in the f() popup.
                         let mut view = FunctionView::from_function(function.clone());
                         let (mut graph, mut point, mut no_popup) = (0usize, 0usize, None);
-                        draw_function_editor(ui, &mut view, false, &mut graph, &mut point, &mut no_popup);
+                        draw_function_editor(
+                            ui,
+                            &mut view,
+                            false,
+                            &mut graph,
+                            &mut point,
+                            &mut no_popup,
+                        );
                     });
                 });
             });
@@ -118,7 +126,14 @@ fn draw_foundation_wrapped_function_row(
                     ui.push_id(("wrapped_function", data_path_id(&view)), |ui| {
                         let mut preview = view.clone();
                         let (mut graph, mut point, mut no_popup) = (0usize, 0usize, None);
-                        draw_function_editor(ui, &mut preview, false, &mut graph, &mut point, &mut no_popup);
+                        draw_function_editor(
+                            ui,
+                            &mut preview,
+                            false,
+                            &mut graph,
+                            &mut point,
+                            &mut no_popup,
+                        );
                     });
                 });
             });

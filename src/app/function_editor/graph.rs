@@ -63,7 +63,9 @@ pub(super) fn draw_foundation_graph(
                 // Pick where the button went down: egui reports the drag only
                 // once the pointer has moved past its threshold, by which point
                 // a quick drag has already left the point it started on.
-                let press = ui.input(|input| input.pointer.press_origin()).unwrap_or(pos);
+                let press = ui
+                    .input(|input| input.pointer.press_origin())
+                    .unwrap_or(pos);
                 let mut grabbed = false;
                 if let Some((graph, point, distance)) = nearest(press)
                     && distance <= 13.0
@@ -96,7 +98,11 @@ pub(super) fn draw_foundation_graph(
                 // happened to be selected before it.
                 ui.data_mut(|data| data.insert_temp(response.id, grabbed));
             }
-            if response.dragged() && ui.data(|data| data.get_temp::<bool>(response.id)).unwrap_or(false) {
+            if response.dragged()
+                && ui
+                    .data(|data| data.get_temp::<bool>(response.id))
+                    .unwrap_or(false)
+            {
                 let value = to_graph(pos);
                 if editor
                     .set_curve_control_point(*selected_graph, *selected_point, value)
@@ -127,70 +133,54 @@ pub(super) fn draw_foundation_graph(
 
         let menu_position = response.interact_pointer_pos().unwrap_or(plot.center());
         if editor.curve_points_are_editable_structure() {
-        response.context_menu(|ui| {
-            let (x, _) = to_graph(menu_position);
-            if ui.button("Add point").clicked() {
-                if editor.insert_curve_point(*selected_graph, x).is_ok() {
-                    changed = true;
-                }
-                ui.close_menu();
-            }
-            let is_graph_point = editor
-                .curve_is_graph_point(*selected_graph, *selected_point)
-                .unwrap_or(false);
-            if ui
-                .add_enabled(is_graph_point, egui::Button::new("Delete point"))
-                .clicked()
-            {
-                if editor
-                    .delete_curve_point(*selected_graph, *selected_point)
-                    .is_ok()
-                {
-                    *selected_point = (*selected_point).saturating_sub(1);
-                    changed = true;
-                }
-                ui.close_menu();
-            }
-            ui.separator();
-            let segment_count = editor.curve_segment_count(*selected_graph).unwrap_or(0);
-            let mut start = 0usize;
-            let mut starts = Vec::with_capacity(segment_count);
-            for segment in 0..segment_count {
-                starts.push(start);
-                start += match editor.curve_segment_type(*selected_graph, segment) {
-                    Some(CurveSegmentType::Linear) => 1,
-                    Some(CurveSegmentType::Spline | CurveSegmentType::Spline2) => 3,
-                    None => 1,
-                };
-            }
-            let selected_segment = starts
-                .iter()
-                .rposition(|start| *start <= *selected_point)
-                .unwrap_or(0);
-            for (kind, label) in [
-                (CurveSegmentType::Linear, "Linear segment"),
-                (CurveSegmentType::Spline, "Spline segment"),
-                (CurveSegmentType::Spline2, "Spline2 segment"),
-            ] {
-                if ui.button(label).clicked() {
-                    if editor
-                        .set_curve_segment_type(*selected_graph, selected_segment, kind)
-                        .is_ok()
-                    {
+            response.context_menu(|ui| {
+                let (x, _) = to_graph(menu_position);
+                if ui.button("Add point").clicked() {
+                    if editor.insert_curve_point(*selected_graph, x).is_ok() {
                         changed = true;
                     }
                     ui.close_menu();
                 }
-            }
-            if selected_segment > 0 {
+                let is_graph_point = editor
+                    .curve_is_graph_point(*selected_graph, *selected_point)
+                    .unwrap_or(false);
+                if ui
+                    .add_enabled(is_graph_point, egui::Button::new("Delete point"))
+                    .clicked()
+                {
+                    if editor
+                        .delete_curve_point(*selected_graph, *selected_point)
+                        .is_ok()
+                    {
+                        *selected_point = (*selected_point).saturating_sub(1);
+                        changed = true;
+                    }
+                    ui.close_menu();
+                }
                 ui.separator();
-                for (mode, label) in [
-                    (CurvePointMode::Corner, "Corner point"),
-                    (CurvePointMode::Smooth, "Smooth point"),
+                let segment_count = editor.curve_segment_count(*selected_graph).unwrap_or(0);
+                let mut start = 0usize;
+                let mut starts = Vec::with_capacity(segment_count);
+                for segment in 0..segment_count {
+                    starts.push(start);
+                    start += match editor.curve_segment_type(*selected_graph, segment) {
+                        Some(CurveSegmentType::Linear) => 1,
+                        Some(CurveSegmentType::Spline | CurveSegmentType::Spline2) => 3,
+                        None => 1,
+                    };
+                }
+                let selected_segment = starts
+                    .iter()
+                    .rposition(|start| *start <= *selected_point)
+                    .unwrap_or(0);
+                for (kind, label) in [
+                    (CurveSegmentType::Linear, "Linear segment"),
+                    (CurveSegmentType::Spline, "Spline segment"),
+                    (CurveSegmentType::Spline2, "Spline2 segment"),
                 ] {
                     if ui.button(label).clicked() {
                         if editor
-                            .set_curve_join_mode(*selected_graph, selected_segment, mode)
+                            .set_curve_segment_type(*selected_graph, selected_segment, kind)
                             .is_ok()
                         {
                             changed = true;
@@ -198,8 +188,24 @@ pub(super) fn draw_foundation_graph(
                         ui.close_menu();
                     }
                 }
-            }
-        });
+                if selected_segment > 0 {
+                    ui.separator();
+                    for (mode, label) in [
+                        (CurvePointMode::Corner, "Corner point"),
+                        (CurvePointMode::Smooth, "Smooth point"),
+                    ] {
+                        if ui.button(label).clicked() {
+                            if editor
+                                .set_curve_join_mode(*selected_graph, selected_segment, mode)
+                                .is_ok()
+                            {
+                                changed = true;
+                            }
+                            ui.close_menu();
+                        }
+                    }
+                }
+            });
         }
     }
 
@@ -242,11 +248,16 @@ pub(super) fn draw_foundation_graph(
 
     // Guerilla draws a spline's end tangents: p0 to p1 and p3 to p2.
     if editor.function().as_h2().is_some()
-        && matches!(editor.function_type(), FunctionType::Spline | FunctionType::Spline2)
+        && matches!(
+            editor.function_type(),
+            FunctionType::Spline | FunctionType::Spline2
+        )
     {
         for graph in 0..editor.graph_count() {
             let point = |i: usize| editor.curve_control_point(graph, i).map(to_screen);
-            if let (Some(p0), Some(p1), Some(p2), Some(p3)) = (point(0), point(1), point(2), point(3)) {
+            if let (Some(p0), Some(p1), Some(p2), Some(p3)) =
+                (point(0), point(1), point(2), point(3))
+            {
                 let stroke = Stroke::new(1.0, Color32::from_gray(150));
                 painter.line_segment([p0, p1], stroke);
                 painter.line_segment([p3, p2], stroke);

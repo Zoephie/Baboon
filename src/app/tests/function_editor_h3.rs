@@ -64,11 +64,19 @@ fn new_editor_periodic_slots_roundtrip_independently() {
 
 /// One frame of the function editor's graph at the origin, so its plot sits at
 /// a known place: the graph allocates 465x225 and plots inside a 30x20 inset.
-fn graph_frame(ctx: &egui::Context, editor: &mut TagFunctionEditor, selected: &mut (usize, usize), events: Vec<egui::Event>) {
+fn graph_frame(
+    ctx: &egui::Context,
+    editor: &mut TagFunctionEditor,
+    selected: &mut (usize, usize),
+    events: Vec<egui::Event>,
+) {
     let _ = ctx.run(
         egui::RawInput {
             events,
-            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, Vec2::new(800.0, 600.0))),
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                Vec2::new(800.0, 600.0),
+            )),
             ..Default::default()
         },
         |ctx| {
@@ -97,11 +105,21 @@ fn graph_drag(editor: &mut TagFunctionEditor, from: (f32, f32), to: (f32, f32)) 
         modifiers: egui::Modifiers::NONE,
     };
     graph_frame(&ctx, editor, &mut selected, vec![]);
-    graph_frame(&ctx, editor, &mut selected, vec![egui::Event::PointerMoved(start)]);
+    graph_frame(
+        &ctx,
+        editor,
+        &mut selected,
+        vec![egui::Event::PointerMoved(start)],
+    );
     graph_frame(&ctx, editor, &mut selected, vec![button(start, true)]);
     for step in 1..=10 {
         let pos = start + (end - start) * (step as f32 / 10.0);
-        graph_frame(&ctx, editor, &mut selected, vec![egui::Event::PointerMoved(pos)]);
+        graph_frame(
+            &ctx,
+            editor,
+            &mut selected,
+            vec![egui::Event::PointerMoved(pos)],
+        );
     }
     graph_frame(&ctx, editor, &mut selected, vec![button(end, false)]);
     graph_frame(&ctx, editor, &mut selected, vec![]);
@@ -118,9 +136,17 @@ fn dragging_an_h2_linear_key_point_holds_it_between_its_neighbours() {
     let before = editor.curve_control_point(0, 1).unwrap();
     let selected = graph_drag(&mut editor, before, (0.95, 0.5));
 
-    assert_eq!(selected, (0, 1), "the drag picked the point under the pointer");
+    assert_eq!(
+        selected,
+        (0, 1),
+        "the drag picked the point under the pointer"
+    );
     let (x, y) = editor.curve_control_point(0, 1).unwrap();
-    assert_eq!(x, editor.curve_control_point(0, 2).unwrap().0, "stopped at the next point");
+    assert_eq!(
+        x,
+        editor.curve_control_point(0, 2).unwrap().0,
+        "stopped at the next point"
+    );
     assert!((y - 0.5).abs() < 0.01, "y follows the pointer ({y})");
 }
 
@@ -149,5 +175,9 @@ fn clicking_empty_graph_space_adds_no_h2_point() {
     let before = editor.to_bytes();
     graph_drag(&mut editor, (0.5, 0.1), (0.5, 0.1));
     assert_eq!(editor.curve_control_point_count(0), Some(4));
-    assert_eq!(editor.to_bytes(), before, "a click away from every point changes nothing");
+    assert_eq!(
+        editor.to_bytes(),
+        before,
+        "a click away from every point changes nothing"
+    );
 }

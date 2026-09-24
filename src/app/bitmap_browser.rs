@@ -34,6 +34,121 @@ const THUMBNAIL_CACHE_CAP: usize = 512;
 /// scrolls would be the most expensive thing in the frame.
 const THUMBNAIL_EVICT_BATCH: usize = 128;
 
+#[derive(Clone)]
+struct BitmapHoverContext {
+    stamp: KitStamp,
+    requests: Arc<Mutex<Vec<TagEntry>>>,
+}
+
+fn bitmap_hover_context_id() -> egui::Id {
+    egui::Id::new("bitmap_hover_context")
+}
+
+fn bitmap_hover_texture_id(stamp: KitStamp, key: &str) -> egui::Id {
+    egui::Id::new(("bitmap_hover_texture", stamp.kit.0, stamp.generation, key))
+}
+
+/// Start collecting hover-preview requests for the kit about to be drawn.
+/// Browser rows and tag-reference fields use the same context and cache.
+pub(in crate::app) fn begin_bitmap_hovers(ui: &Ui, stamp: KitStamp) -> Arc<Mutex<Vec<TagEntry>>> {
+    let requests = Arc::new(Mutex::new(Vec::new()));
+    ui.data_mut(|data| {
+        data.insert_temp(
+            bitmap_hover_context_id(),
+            BitmapHoverContext {
+                stamp,
+                requests: Arc::clone(&requests),
+            },
+        )
+    });
+    requests
+}
+
+/// Return a cached hover texture, or enqueue this entry for an asynchronous
+/// decode. The outer `Option` distinguishes "not decoded" from a cached miss.
+pub(in crate::app) fn bitmap_hover_texture(
+    ui: &Ui,
+    entry: &TagEntry,
+) -> Option<Option<egui::TextureHandle>> {
+    let context = ui.data(|data| data.get_temp::<BitmapHoverContext>(bitmap_hover_context_id()))?;
+    let texture_id = bitmap_hover_texture_id(context.stamp, &entry.key);
+    if let Some(cached) = ui.data(|data| data.get_temp::<Option<egui::TextureHandle>>(texture_id)) {
+        return Some(cached);
+    }
+    if let Ok(mut requests) = context.requests.lock()
+        && !requests.iter().any(|request| request.key == entry.key)
+    {
+        requests.push(entry.clone());
+    }
+    None
+}
+
+fn publish_bitmap_hover_texture(
+    ctx: &egui::Context,
+    stamp: KitStamp,
+    key: &str,
+    texture: Option<egui::TextureHandle>,
+) {
+    ctx.data_mut(|data| data.insert_temp(bitmap_hover_texture_id(stamp, key), texture));
+}
+
+/// Painter-only popup shared by browser drag sources and editable reference
+/// fields. It registers no tooltip area, so the popup cannot steal a click,
+/// text selection, or drop from the widget beneath it.
+pub(in crate::app) fn paint_bitmap_hover_preview(
+    ui: &Ui,
+    response: &egui::Response,
+    texture: &egui::TextureHandle,
+    text: &str,
+) {
+    if !response.hovered() || response.dragged() {
+        return;
+    }
+    let Some(pointer) = ui.ctx().pointer_latest_pos() else {
+        return;
+    };
+    let painter = ui.ctx().layer_painter(egui::LayerId::new(
+        egui::Order::Tooltip,
+        response.id.with("bitmap_hover_preview"),
+    ));
+    let image_size = fit_within(texture.size_vec2(), 256.0);
+    let galley = painter.layout(
+        text.to_owned(),
+        FontId::proportional(12.5),
+        text_dark(),
+        360.0,
+    );
+    let padding = Vec2::new(7.0, 7.0);
+    let gap = 5.0;
+    let content_width = image_size.x.max(galley.size().x);
+    let content_height = image_size.y + gap + galley.size().y;
+    let mut rect = egui::Rect::from_min_size(
+        pointer + Vec2::new(14.0, 18.0),
+        Vec2::new(content_width, content_height) + padding * 2.0,
+    );
+    let screen = ui.ctx().screen_rect();
+    if rect.right() > screen.right() {
+        rect = rect.translate(Vec2::new(screen.right() - rect.right(), 0.0));
+    }
+    if rect.bottom() > screen.bottom() {
+        rect = rect.translate(Vec2::new(0.0, -rect.height() - 24.0));
+    }
+    let visuals = ui.visuals();
+    painter.rect(rect, 4.0, visuals.window_fill, visuals.window_stroke);
+    let image_min = egui::pos2(rect.center().x - image_size.x * 0.5, rect.top() + padding.y);
+    painter.image(
+        texture.id(),
+        egui::Rect::from_min_size(image_min, image_size),
+        egui::Rect::from_min_max(egui::Pos2::ZERO, egui::pos2(1.0, 1.0)),
+        Color32::WHITE,
+    );
+    painter.galley(
+        egui::pos2(rect.left() + padding.x, image_min.y + image_size.y + gap),
+        galley,
+        text_dark(),
+    );
+}
+
 /// Decode jobs allowed to run at once.
 ///
 /// A fast scroll can want a hundred new thumbnails in a frame; without a bound
@@ -635,6 +750,46 @@ impl Baboon {
         if wanted.is_empty() {
             return;
         }
+        // Requested at twice the cell's point size, so the thumbnail still looks
+        // right after the slider grows a little and on a high-DPI display.
+        let max_edge = ((cell * 2.0).round() as u32).max(MIN_CELL as u32);
+        let entries = wanted
+            .into_iter()
+            .filter_map(|key| {
+                self.kits[kit_index]
+                    .bitmap_browser
+                    .entries
+                    .iter()
+                    .find(|entry| entry.key == key)
+                    .cloned()
+            })
+            .collect();
+        self.queue_bitmap_thumbnail_entries(kit_index, entries, max_edge, ctx);
+    }
+
+    pub(super) fn queue_bitmap_hover_thumbnails(
+        &mut self,
+        kit_index: usize,
+        requests: &Arc<Mutex<Vec<TagEntry>>>,
+        ctx: &egui::Context,
+    ) {
+        let entries = requests
+            .lock()
+            .map(|mut requests| std::mem::take(&mut *requests))
+            .unwrap_or_default();
+        self.queue_bitmap_thumbnail_entries(kit_index, entries, 256, ctx);
+    }
+
+    fn queue_bitmap_thumbnail_entries(
+        &mut self,
+        kit_index: usize,
+        entries: Vec<TagEntry>,
+        max_edge: u32,
+        ctx: &egui::Context,
+    ) {
+        if entries.is_empty() {
+            return;
+        }
         let Some(source) = self.kits[kit_index]
             .source
             .as_ref()
@@ -646,31 +801,19 @@ impl Baboon {
             kit: self.kits[kit_index].id,
             generation: self.kits[kit_index].generation,
         };
-        // Requested at twice the cell's point size, so the thumbnail still looks
-        // right after the slider grows a little and on a high-DPI display.
-        let max_edge = ((cell * 2.0).round() as u32).max(MIN_CELL as u32);
 
-        for key in wanted {
+        for entry in entries {
+            let key = entry.key.clone();
+            if let Some(cached) = self.kits[kit_index].bitmap_browser.thumbnails.get(&key) {
+                publish_bitmap_hover_texture(ctx, stamp, &key, cached);
+                continue;
+            }
             if self.kits[kit_index].bitmap_browser.pending.len() >= MAX_DECODES_IN_FLIGHT {
                 break;
             }
-            if self.kits[kit_index].bitmap_browser.pending.contains(&key)
-                || self.kits[kit_index]
-                    .bitmap_browser
-                    .thumbnails
-                    .contains(&key)
-            {
+            if self.kits[kit_index].bitmap_browser.pending.contains(&key) {
                 continue;
             }
-            let Some(entry) = self.kits[kit_index]
-                .bitmap_browser
-                .entries
-                .iter()
-                .find(|entry| entry.key == key)
-                .cloned()
-            else {
-                continue;
-            };
             self.kits[kit_index]
                 .bitmap_browser
                 .pending
@@ -716,9 +859,25 @@ impl Baboon {
             )),
             Err(_) => None,
         };
-        browser.thumbnails.insert(key, texture);
+        browser.thumbnails.insert(key.clone(), texture.clone());
+        publish_bitmap_hover_texture(ctx, stamp, &key, texture);
         false
     }
+}
+
+/// Shared contents of the shader-reference hover and any other ordinary egui
+/// tooltip that previews a bitmap.
+pub(in crate::app) fn bitmap_hover_preview_ui(
+    ui: &mut Ui,
+    texture: &egui::TextureHandle,
+    label: &str,
+    label_color: Color32,
+) {
+    ui.add(egui::Image::new(egui::load::SizedTexture::new(
+        texture.id(),
+        fit_within(texture.size_vec2(), 256.0),
+    )));
+    ui.label(RichText::new(label).small().color(label_color));
 }
 
 /// Scale `size` down to fit a square of `edge` points, never up.

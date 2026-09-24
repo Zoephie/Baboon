@@ -774,7 +774,7 @@ pub(super) fn draw_model_preview_panel(
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum ModelPreviewSectionPart {
+pub(in crate::app) enum ModelPreviewSectionPart {
     Header,
     Body,
 }
@@ -833,10 +833,22 @@ fn wide_model_preview_section_width(page_width: f32, model_preview_size: f32) ->
 
 /// A fixed, full-width section styled like the Tag Fields group headers, with
 /// room for compact controls on the right side of the header bar.
-fn draw_model_preview_section(
+pub(in crate::app) fn draw_model_preview_section(
     ui: &mut Ui,
     title: &str,
     min_body_height: Option<f32>,
+    add_contents: impl FnMut(&mut Ui, ModelPreviewSectionPart),
+) -> egui::Rect {
+    draw_model_preview_section_with_header_wrap(ui, title, min_body_height, None, add_contents)
+}
+
+/// Draws a preview section whose header actions can move to a second row once
+/// the section is narrower than `header_wrap_width`.
+pub(in crate::app) fn draw_model_preview_section_with_header_wrap(
+    ui: &mut Ui,
+    title: &str,
+    min_body_height: Option<f32>,
+    header_wrap_width: Option<f32>,
     mut add_contents: impl FnMut(&mut Ui, ModelPreviewSectionPart),
 ) -> egui::Rect {
     const RADIUS: f32 = 5.0;
@@ -848,7 +860,15 @@ fn draw_model_preview_section(
         let width = ui.available_width().max(1.0);
         let setup_header = title == "Model Setup";
         let animation_header = title == "Animation Player";
-        let extra_header_height = if setup_header {
+        let bitmap_header = title == "Bitmap Preview";
+        let wrapped_bitmap_header = bitmap_header
+            && header_wrap_width
+                .map(|wrap_width| width < wrap_width)
+                .unwrap_or(false);
+        let edge_to_edge = matches!(title, "Model Preview" | "Bitmap Preview");
+        let extra_header_height = if wrapped_bitmap_header {
+            40.0
+        } else if setup_header {
             model_setup_extra_header_height(width)
         } else if animation_header && width < 800.0 {
             if width < 320.0 {
@@ -886,13 +906,17 @@ fn draw_model_preview_section(
         };
         let mut title_ui = ui.new_child(egui::UiBuilder::new().max_rect(title_rect));
         title_ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-            ui.label(
-                RichText::new(title)
-                    .font(bold_font(12.5))
-                    .color(foundation_block_text()),
-            );
+            if !bitmap_header {
+                ui.label(
+                    RichText::new(title)
+                        .font(bold_font(12.5))
+                        .color(foundation_block_text()),
+                );
+            }
         });
-        let actions_rect = if extra_header_height > 0.0 {
+        let actions_rect = if bitmap_header {
+            header_content_rect
+        } else if extra_header_height > 0.0 {
             egui::Rect::from_min_max(
                 egui::pos2(
                     header_content_rect.min.x,
@@ -917,7 +941,12 @@ fn draw_model_preview_section(
             header_content_rect
         };
         let mut actions_ui = ui.new_child(egui::UiBuilder::new().max_rect(actions_rect));
-        if setup_header || animation_header {
+        if wrapped_bitmap_header {
+            actions_ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
+                add_contents(ui, ModelPreviewSectionPart::Header);
+            });
+        } else if setup_header || animation_header || bitmap_header {
             actions_ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
                 add_contents(ui, ModelPreviewSectionPart::Header);
@@ -937,20 +966,14 @@ fn draw_model_preview_section(
                 sw: RADIUS,
                 se: RADIUS,
             })
-            .inner_margin(egui::Margin::same(if title == "Model Preview" {
-                0.0
-            } else {
-                8.0
-            }))
+            .inner_margin(egui::Margin::same(if edge_to_edge { 0.0 } else { 8.0 }))
             .show(ui, |ui| {
-                ui.set_min_width(
-                    (width - if title == "Model Preview" { 0.0 } else { 16.0 }).max(1.0),
-                );
+                ui.set_min_width((width - if edge_to_edge { 0.0 } else { 16.0 }).max(1.0));
                 if let Some(min_body_height) = min_body_height {
                     ui.set_min_height(min_body_height);
                 }
                 ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
-                    if title == "Model Preview" {
+                    if edge_to_edge {
                         ui.spacing_mut().item_spacing.y = 0.0;
                     }
                     add_contents(ui, ModelPreviewSectionPart::Body);
@@ -1143,7 +1166,7 @@ fn model_view_icon_checkbox(
     icon: ModelViewCheckboxIcon,
     label: &str,
 ) -> egui::Response {
-    ui.horizontal(|ui| {
+    let row = ui.horizontal(|ui| {
         let checkbox_response = ui.checkbox(checked, "");
         // Native checkbox text starts before the end of an empty checkbox's
         // 24-point hitbox. Put the icon at that same text start, without
@@ -1175,8 +1198,12 @@ fn model_view_icon_checkbox(
         if icon_response.clicked() || label_response.clicked() {
             *checked = !*checked;
         }
-    })
-    .response
+        checkbox_response
+    });
+    if ui.rect_contains_pointer(row.response.rect) && !row.inner.hovered() {
+        paint_checkbox_row_hover(ui, row.inner.rect, *checked);
+    }
+    row.response
 }
 
 fn draw_marker_filter_field(ui: &mut Ui, filter: &mut String) -> egui::Response {
@@ -1409,6 +1436,52 @@ pub(in crate::app) fn draw_standalone_mesh_preview(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn bitmap_header_control_rows(screen_width: f32, wrap_width: f32) -> (f32, f32) {
+        let context = egui::Context::default();
+        let mut left_y = 0.0;
+        let mut right_y = 0.0;
+        let _ = context.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(screen_width, 160.0),
+                )),
+                ..Default::default()
+            },
+            |context| {
+                egui::CentralPanel::default().show(context, |ui| {
+                    draw_model_preview_section_with_header_wrap(
+                        ui,
+                        "Bitmap Preview",
+                        Some(1.0),
+                        Some(wrap_width),
+                        |ui, part| {
+                            if part == ModelPreviewSectionPart::Header {
+                                left_y = ui.button("Selector").rect.center().y;
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        right_y = ui.button("Actions").rect.center().y;
+                                    },
+                                );
+                            }
+                        },
+                    );
+                });
+            },
+        );
+        (left_y, right_y)
+    }
+
+    #[test]
+    fn bitmap_header_moves_actions_to_a_second_row_below_its_wrap_width() {
+        let (wide_left, wide_right) = bitmap_header_control_rows(640.0, 400.0);
+        assert!((wide_left - wide_right).abs() < 1.0);
+
+        let (narrow_left, narrow_right) = bitmap_header_control_rows(320.0, 400.0);
+        assert!(narrow_right > narrow_left + BUTTON_HEIGHT);
+    }
 
     #[test]
     fn model_setup_header_wraps_only_when_controls_need_room() {

@@ -14,6 +14,10 @@ pub(super) enum ButtonIcon {
     ChangeModified,
     ChangeRemoved,
     ChangeSame,
+    ChannelAlpha,
+    ChannelBlue,
+    ChannelGreen,
+    ChannelRed,
     Open,
     Edit,
     Import,
@@ -86,6 +90,10 @@ pub(super) fn button_icon_svg(icon: ButtonIcon) -> &'static str {
         }
         ButtonIcon::ChangeRemoved => include_str!("../../assets/Button Icons/change-removed.svg"),
         ButtonIcon::ChangeSame => include_str!("../../assets/Button Icons/change-same.svg"),
+        ButtonIcon::ChannelAlpha => include_str!("../../assets/Button Icons/channel-alpha.svg"),
+        ButtonIcon::ChannelBlue => include_str!("../../assets/Button Icons/channel-blue.svg"),
+        ButtonIcon::ChannelGreen => include_str!("../../assets/Button Icons/channel-green.svg"),
+        ButtonIcon::ChannelRed => include_str!("../../assets/Button Icons/channel-red.svg"),
         ButtonIcon::Open => include_str!("../../assets/Button Icons/Open.svg"),
         ButtonIcon::Edit => include_str!("../../assets/Button Icons/Edit.svg"),
         ButtonIcon::Import => include_str!("../../assets/Button Icons/Import.svg"),
@@ -213,6 +221,33 @@ pub(super) fn icon_button(
     let icon_rect = egui::Rect::from_center_size(response.rect.center(), Vec2::splat(icon_size));
     paint_button_icon_at(ui, icon, icon_rect, icon_color);
     response.on_hover_text(tooltip)
+}
+
+/// Repaint a native checkbox with its hovered visuals when an adjacent icon
+/// or label owns the pointer. Icon checkbox rows are assembled from multiple
+/// widgets, while a normal text checkbox has one response spanning the row.
+pub(super) fn paint_checkbox_row_hover(ui: &Ui, checkbox_rect: egui::Rect, checked: bool) {
+    if !ui.is_enabled() {
+        return;
+    }
+    let visuals = &ui.visuals().widgets.hovered;
+    let (small_icon_rect, big_icon_rect) = ui.spacing().icon_rectangles(checkbox_rect);
+    ui.painter().add(egui::epaint::RectShape::new(
+        big_icon_rect.expand(visuals.expansion),
+        visuals.rounding,
+        visuals.bg_fill,
+        visuals.bg_stroke,
+    ));
+    if checked {
+        ui.painter().add(egui::Shape::line(
+            vec![
+                egui::pos2(small_icon_rect.left(), small_icon_rect.center().y),
+                egui::pos2(small_icon_rect.center().x, small_icon_rect.bottom()),
+                egui::pos2(small_icon_rect.right(), small_icon_rect.top()),
+            ],
+            visuals.fg_stroke,
+        ));
+    }
 }
 
 pub(super) fn icon_for_foundation_button(label: &str) -> Option<ButtonIcon> {
@@ -427,6 +462,45 @@ pub(super) fn icon_text_dropdown_button<R>(
     add_contents: impl FnOnce(&mut Ui) -> R,
 ) -> egui::InnerResponse<Option<R>> {
     let menu = ui.menu_button(format!("     {label}      "), add_contents);
+    let icon_rect = egui::Rect::from_center_size(
+        egui::pos2(
+            menu.response.rect.left() + 13.0,
+            menu.response.rect.center().y,
+        ),
+        Vec2::splat(BUTTON_ICON_SIZE),
+    );
+    let chevron_rect = egui::Rect::from_center_size(
+        egui::pos2(
+            menu.response.rect.right() - 12.0,
+            menu.response.rect.center().y,
+        ),
+        Vec2::splat(BUTTON_ICON_SIZE),
+    );
+    paint_button_icon_at(ui, icon, icon_rect, text_dark());
+    paint_button_icon_at(ui, ButtonIcon::Down, chevron_rect, text_dark());
+    menu
+}
+
+/// An icon-and-text dropdown whose popup is anchored to the trigger's right
+/// edge. Preview headers use this when their actions sit against the pane edge.
+pub(super) fn right_aligned_icon_text_dropdown_button<R>(
+    ui: &mut Ui,
+    icon: ButtonIcon,
+    label: &str,
+    popup_width: f32,
+    add_contents: impl FnOnce(&mut Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    // `popup_width` describes the content area set by the caller. Include the
+    // menu frame margins when positioning so the visible outer edge, not just
+    // the content edge, lands on the trigger's right edge.
+    let menu_margin = Frame::menu(ui.style()).total_margin();
+    let popup_outer_width = popup_width + menu_margin.left + menu_margin.right;
+    let menu = aligned_menu_custom_button(
+        ui,
+        egui::Button::new(format!("     {label}      ")),
+        Some(popup_outer_width),
+        add_contents,
+    );
     let icon_rect = egui::Rect::from_center_size(
         egui::pos2(
             menu.response.rect.left() + 13.0,

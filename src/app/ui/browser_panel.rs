@@ -74,6 +74,13 @@ impl Baboon {
             })
             .unwrap_or(0);
         let generation = self.kits[kit_index].generation;
+        let bitmap_hover_requests = begin_bitmap_hovers(
+            ui,
+            KitStamp {
+                kit: self.kits[kit_index].id,
+                generation,
+            },
+        );
         if pane.cached_generation != generation || pane.cached_source_len != source_len {
             if let Some(source) = self.kits[kit_index].source.as_mut() {
                 if let TagSource::LooseFolder { root, .. } = &source.source {
@@ -327,6 +334,8 @@ impl Baboon {
                 }
             });
 
+        self.queue_bitmap_hover_thumbnails(kit_index, &bitmap_hover_requests, ctx);
+
         self.show_browser_prefixes = show_browser_prefixes;
         self.folders_before_tags = folders_before_tags;
 
@@ -447,6 +456,13 @@ impl Baboon {
         set_browser_deletable_keys(
             ui,
             std::sync::Arc::clone(&self.kits[kit_index].deletable_keys),
+        );
+        let bitmap_hover_requests = begin_bitmap_hovers(
+            ui,
+            KitStamp {
+                kit: self.kits[kit_index].id,
+                generation: self.kits[kit_index].generation,
+            },
         );
         let mut open_git_review = false;
         let kit = &mut self.kits[kit_index];
@@ -711,6 +727,7 @@ impl Baboon {
             self.active = kit_index;
             self.open_git_review();
         }
+        self.queue_bitmap_hover_thumbnails(kit_index, &bitmap_hover_requests, ctx);
     }
 }
 

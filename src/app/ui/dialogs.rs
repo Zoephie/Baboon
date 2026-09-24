@@ -1388,6 +1388,7 @@ impl Baboon {
             definitions_root,
             names: Some(names),
             tags_root: None,
+            bitmap_hover_entries: None,
             tag_reference_catalog: None,
             tag_reference_picker: &mut tag_reference_picker,
             status: None,

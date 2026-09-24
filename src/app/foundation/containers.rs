@@ -143,7 +143,10 @@ pub(in crate::app) fn draw_fields_with_docs(
     edit: &mut FieldEditContext<'_>,
     skip_field: Option<&str>,
 ) {
-    let entries: &[DefEntry] = edit.docs.map(|docs| docs.entries_for_struct(tag_struct)).unwrap_or(&[]);
+    let entries: &[DefEntry] = edit
+        .docs
+        .map(|docs| docs.entries_for_struct(tag_struct))
+        .unwrap_or(&[]);
     let parent_raw = tag_struct.raw();
     let reference_value_width = shared_tag_reference_value_width(ui, depth);
     let mut cursor = 0usize;
@@ -699,7 +702,10 @@ pub(super) fn inline_mapping_function_from_struct(
             h2_tag_function(&bytes)
         };
         if let Some(function) = function {
-            return Some((FunctionView::from_function(function), append_field_path(struct_path, "data")));
+            return Some((
+                FunctionView::from_function(function),
+                append_field_path(struct_path, "data"),
+            ));
         }
     }
 

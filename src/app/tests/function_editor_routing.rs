@@ -147,7 +147,10 @@ fn a_new_halo2_function_opens_as_h2_and_gets_no_h3_blob() {
         seeded.is_empty(),
         "Halo 2 should carry no seeded function blob, found {seeded:?}"
     );
-    assert_eq!(halo2_function_bytes_from_struct(function_struct), Some(Vec::new()));
+    assert_eq!(
+        halo2_function_bytes_from_struct(function_struct),
+        Some(Vec::new())
+    );
 
     let (view, data_path) = inline_mapping_function_from_struct(
         function_struct,
@@ -156,7 +159,10 @@ fn a_new_halo2_function_opens_as_h2_and_gets_no_h3_blob() {
     .expect("an empty H2 function still reaches the function editor");
     assert_eq!(view.function.encoding(), FunctionEncoding::H2);
     assert_eq!(view.function.function_type(), FunctionType::Identity);
-    assert_eq!(data_path, "parameters[0]/animation properties[0]/function/data");
+    assert_eq!(
+        data_path,
+        "parameters[0]/animation properties[0]/function/data"
+    );
 }
 
 /// Seeding is worthless if the bytes do not persist. A fresh element's function
@@ -229,7 +235,11 @@ fn shipped_h2_effect_functions_derive_h2_and_write_back() {
 
     let mut paths = Vec::new();
     collect_h2_mapping_functions(tag.root(), "", &mut paths);
-    assert!(paths.len() > 5, "the effect has particle functions ({} found)", paths.len());
+    assert!(
+        paths.len() > 5,
+        "the effect has particle functions ({} found)",
+        paths.len()
+    );
     eprintln!("checked {} H2 functions", paths.len());
 
     let mut target = None;
@@ -237,11 +247,19 @@ fn shipped_h2_effect_functions_derive_h2_and_write_back() {
         let root = tag.root();
         let st = root.descend(path).expect("the collected path resolves");
         let original = halo2_function_bytes_from_struct(st).unwrap();
-        let (view, data_path) = inline_mapping_function_from_struct(st, path).expect("the editor finds the function");
+        let (view, data_path) =
+            inline_mapping_function_from_struct(st, path).expect("the editor finds the function");
         assert_eq!(view.function.encoding(), FunctionEncoding::H2, "{path}");
-        assert_eq!(view.data_bytes(), original, "{path}: reading never rewrites");
+        assert_eq!(
+            view.data_bytes(),
+            original,
+            "{path}: reading never rewrites"
+        );
         let edit_paths = foundation_function_edit_paths(&data_path, view.function.encoding());
-        assert!(matches!(edit_paths.data, FunctionDataStorage::Halo2ByteBlock(_)), "{path}");
+        assert!(
+            matches!(edit_paths.data, FunctionDataStorage::Halo2ByteBlock(_)),
+            "{path}"
+        );
         if target.is_none() && view.function.color_count() == 0 {
             target = Some((view, edit_paths));
         }
@@ -251,15 +269,27 @@ fn shipped_h2_effect_functions_derive_h2_and_write_back() {
     let (mut view, edit_paths) = target.expect("a scalar function to edit");
     let before = view.data_bytes();
     let previous = FunctionSnapshot::from_view(&view);
-    view.function.as_h2_mut().unwrap().set_clamp_range(0.25, 4.0).unwrap();
+    view.function
+        .as_h2_mut()
+        .unwrap()
+        .set_clamp_range(0.25, 4.0)
+        .unwrap();
     let batch = push_function_edit(&edit_paths, &previous, &view);
-    assert!(batch.edits.is_empty(), "no hex string edit for a byte-block");
+    assert!(
+        batch.edits.is_empty(),
+        "no hex string edit for a byte-block"
+    );
     assert_eq!(batch.data_ops.len(), 1);
     let op = &batch.data_ops[0];
-    replace_halo2_function_byte_block(&mut tag, &op.block_path, &op.data).expect("the writer accepts it");
+    replace_halo2_function_byte_block(&mut tag, &op.block_path, &op.data)
+        .expect("the writer accepts it");
 
-    let struct_path = op.block_path.strip_suffix("/data").unwrap_or(&op.block_path);
-    let written = halo2_function_bytes_from_struct(tag.root().descend(struct_path).unwrap()).unwrap();
+    let struct_path = op
+        .block_path
+        .strip_suffix("/data")
+        .unwrap_or(&op.block_path);
+    let written =
+        halo2_function_bytes_from_struct(tag.root().descend(struct_path).unwrap()).unwrap();
     assert_eq!(written, op.data);
     let reread = h2_tag_function(&written).unwrap();
     let f = reread.as_h2().unwrap();

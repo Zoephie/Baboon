@@ -30,12 +30,8 @@ pub(super) fn foundation_visuals() -> egui::Visuals {
     } else {
         foundation_input()
     };
-    visuals.selection.bg_fill = if is_dark_mode() {
-        Color32::from_rgb(64, 108, 134)
-    } else {
-        Color32::from_rgb(42, 91, 122)
-    };
-    visuals.selection.stroke = Stroke::new(1.0, Color32::from_rgb(120, 170, 198));
+    visuals.selection.bg_fill = selection_fill_for(is_dark_mode());
+    visuals.selection.stroke = Stroke::new(1.0, selection_stroke_for(is_dark_mode()));
     visuals.widgets.noninteractive.bg_fill = row_type();
     visuals.widgets.inactive.bg_fill = if is_dark_mode() {
         Color32::from_rgb(68, 68, 68)
@@ -72,6 +68,22 @@ fn neutral_button_fill(dark_mode: bool, alpha: u8) -> Color32 {
     }
 }
 
+fn selection_fill_for(dark_mode: bool) -> Color32 {
+    if dark_mode {
+        Color32::from_rgb(64, 108, 134) // #406C86
+    } else {
+        Color32::from_rgb(75, 125, 155) // #4B7D9B
+    }
+}
+
+fn selection_stroke_for(dark_mode: bool) -> Color32 {
+    if dark_mode {
+        Color32::from_rgb(120, 170, 198)
+    } else {
+        Color32::from_rgb(38, 63, 78) // #263F4E
+    }
+}
+
 #[cfg(test)]
 mod neutral_button_tests {
     use super::*;
@@ -82,6 +94,13 @@ mod neutral_button_tests {
         assert_eq!(neutral_button_fill(true, 51).to_array(), [51, 51, 51, 51]);
         assert_eq!(neutral_button_fill(false, 26).to_array(), [0, 0, 0, 26]);
         assert_eq!(neutral_button_fill(false, 51).to_array(), [0, 0, 0, 51]);
+    }
+
+    #[test]
+    fn selection_colors_are_lighter_with_a_dark_border_in_light_mode() {
+        assert_eq!(selection_fill_for(true), Color32::from_rgb(64, 108, 134));
+        assert_eq!(selection_fill_for(false), Color32::from_rgb(75, 125, 155));
+        assert_eq!(selection_stroke_for(false), Color32::from_rgb(38, 63, 78));
     }
 }
 
@@ -337,12 +356,14 @@ pub(super) fn foundation_block_bar() -> Color32 {
     if is_dark_mode() {
         Color32::from_rgb(72, 72, 72)
     } else {
-        Color32::from_rgb(98, 98, 96)
+        // Keep block headers distinct from the section bar without carrying
+        // the dark-theme slab into an otherwise light editor.
+        Color32::from_rgb(204, 204, 200)
     }
 }
 
 pub(super) fn foundation_block_text() -> Color32 {
-    Color32::from_rgb(245, 245, 245)
+    text_dark()
 }
 
 /// High-visibility navigation accent used by the filtered block jump. Block

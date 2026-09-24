@@ -6,6 +6,7 @@ use super::*;
 const TAG_HEADER_KEYWORDS_INLINE_BREAKPOINT: f32 = 1160.0;
 const TAG_HEADER_ACTIONS_SINGLE_ROW_BREAKPOINT: f32 = 1180.0;
 const TAG_HEADER_DYNAMIC_ACTIONS_WIDTH: f32 = 285.0;
+const BITMAP_HEADER_ACTIONS_WIDTH: f32 = 105.0;
 
 impl Baboon {
     /// Renders one open tag as a self-contained pane.
@@ -51,6 +52,7 @@ impl Baboon {
         let picker_was_open = self.tag_reference_picker.is_some();
         let def_docs = self.def_docs_for_entry(kit_index, entry);
         let ce_sound = self.ce_sound_binding(kit_index, &key, entry);
+        let bitmap_preview_view = self.bitmap_preview_view;
 
         let Some(mut doc) = self.kits[kit_index].parsed_tags.remove(&key) else {
             if self.kits[kit_index].loading_tags.contains(&key) {
@@ -118,6 +120,13 @@ impl Baboon {
 
         let kit = &mut self.kits[kit_index];
         let kit_id = kit.id;
+        let bitmap_hover_requests = begin_bitmap_hovers(
+            ui,
+            KitStamp {
+                kit: kit_id,
+                generation: kit.generation,
+            },
+        );
         let source = kit.source.as_ref();
         let names = &kit.names;
 
@@ -166,6 +175,7 @@ impl Baboon {
                 TagSource::LooseFolder { root, .. } => Some(root.as_path()),
                 _ => None,
             }),
+            bitmap_hover_entries: source.map(LoadedSourceData::full_entry_set),
             tag_reference_catalog: source
                 .and_then(|source| tag_reference_catalog_for_source(source, expert_mode)),
             tag_reference_picker: &mut self.tag_reference_picker,
@@ -214,6 +224,7 @@ impl Baboon {
 
         if is_bitmap_tag(entry) {
             let preview = kit.bitmap_previews.entry(key.clone()).or_default();
+            preview.apply_view_settings(bitmap_preview_view);
             draw_bitmap_tag(
                 ui,
                 ctx,
@@ -225,6 +236,7 @@ impl Baboon {
                 self.expert_mode,
                 &mut edit_context,
             );
+            self.bitmap_preview_view = preview.view_settings();
         } else {
             let mut local_model_preview;
             let model_preview = if is_previewable_geometry_group(entry.group_tag, names) {
@@ -378,6 +390,7 @@ impl Baboon {
             self.find.filter_results = false;
         }
         kit.parsed_tags.insert(key.clone(), doc);
+        self.queue_bitmap_hover_thumbnails(kit_index, &bitmap_hover_requests, ctx);
         // These ops are applied *after* the pane has been drawn, so the frame
         // on screen still shows the tag as it was before the edit. egui only
         // redraws when new input arrives, so nothing here is guaranteed to be
@@ -423,15 +436,18 @@ impl Baboon {
         let available = ui.available_width();
         let keywords_inline = available >= TAG_HEADER_KEYWORDS_INLINE_BREAKPOINT;
         let actions_single_row = available >= TAG_HEADER_ACTIONS_SINGLE_ROW_BREAKPOINT;
-        let has_dynamic_actions = entry.group_tag == u32::from_be_bytes(*b"scnr");
+        let dynamic_actions_width = match &entry.group_tag.to_be_bytes() {
+            b"scnr" => TAG_HEADER_DYNAMIC_ACTIONS_WIDTH,
+            b"bitm" => BITMAP_HEADER_ACTIONS_WIDTH,
+            _ => 0.0,
+        };
+        let has_dynamic_actions = dynamic_actions_width > 0.0;
         let actions_stacked = has_dynamic_actions && !actions_single_row;
         let action_width = if has_dynamic_actions {
             if actions_stacked {
-                TAG_HEADER_DYNAMIC_ACTIONS_WIDTH
+                dynamic_actions_width
             } else {
-                TAG_HEADER_DYNAMIC_ACTIONS_WIDTH
-                    + PANE_HEADER_SECTION_GAP
-                    + PANE_HEADER_COMMON_ACTIONS_WIDTH
+                dynamic_actions_width + PANE_HEADER_SECTION_GAP + PANE_HEADER_COMMON_ACTIONS_WIDTH
             }
         } else {
             PANE_HEADER_COMMON_ACTIONS_WIDTH
@@ -517,7 +533,11 @@ impl Baboon {
                                 ui.spacing_mut().item_spacing.y = 8.0;
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| self.draw_scenario_launcher_buttons(ui, kit_index, entry),
+                                    |ui| {
+                                        self.draw_tag_header_specific_actions(
+                                            ui, ctx, kit_index, entry,
+                                        )
+                                    },
                                 );
                                 ui.with_layout(
                                     egui::Layout::right_to_left(egui::Align::Center),
@@ -531,7 +551,7 @@ impl Baboon {
                         } else {
                             self.draw_tag_header_common_actions(ui, ctx, kit_index, entry);
                             if has_dynamic_actions {
-                                self.draw_scenario_launcher_buttons(ui, kit_index, entry);
+                                self.draw_tag_header_specific_actions(ui, ctx, kit_index, entry);
                             }
                         }
                     },
@@ -540,11 +560,11 @@ impl Baboon {
         });
 
         if !wide {
-            if entry.group_tag == u32::from_be_bytes(*b"scnr") {
+            if has_dynamic_actions {
                 ui.allocate_ui_with_layout(
                     Vec2::new(ui.available_width(), BUTTON_HEIGHT),
                     egui::Layout::right_to_left(egui::Align::Center),
-                    |ui| self.draw_scenario_launcher_buttons(ui, kit_index, entry),
+                    |ui| self.draw_tag_header_specific_actions(ui, ctx, kit_index, entry),
                 );
                 ui.add_space(8.0);
             }
@@ -561,6 +581,33 @@ impl Baboon {
             label,
             open_in_new_tab: true,
         })
+    }
+
+    fn draw_tag_header_specific_actions(
+        &mut self,
+        ui: &mut Ui,
+        ctx: &egui::Context,
+        kit_index: usize,
+        entry: &TagEntry,
+    ) {
+        match &entry.group_tag.to_be_bytes() {
+            b"scnr" => self.draw_scenario_launcher_buttons(ui, kit_index, entry),
+            b"bitm" => {
+                let tags_root = self.loaded_tags_root_for(kit_index);
+                let can_reimport = bitmap_reimport_data_path(entry, tags_root.as_deref()).is_some();
+                if icon_text_button(ui, ButtonIcon::Import, "Reimport", can_reimport)
+                    .on_disabled_hover_text("Reimport requires a loose editing-kit bitmap tag")
+                    .on_hover_text(
+                        "Run tool bitmaps for this bitmap source path, then reload the tag",
+                    )
+                    .clicked()
+                {
+                    self.active = kit_index;
+                    self.begin_reimport_bitmap(entry.key.clone(), ctx.clone());
+                }
+            }
+            _ => {}
+        }
     }
 
     fn draw_tag_header_common_actions(

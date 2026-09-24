@@ -17,27 +17,15 @@ pub(in crate::app) fn draw_bitmap_tag(
     if expert_mode {
         draw_tag_metadata(ui, tag, entry, names);
     }
+    draw_preview_panel_toggle(
+        ui,
+        &mut preview.active_tab,
+        BitmapPanelTab::Fields,
+        BitmapPanelTab::Texture,
+        "Bitmap Preview",
+        ButtonIcon::Bitmap,
+    );
     ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        let can_reimport = bitmap_reimport_data_path(entry, edit.tags_root).is_some();
-        if ui
-            .add_enabled(can_reimport, egui::Button::new("Reimport"))
-            .on_hover_text("Run tool bitmaps for this bitmap source path, then reload the tag")
-            .clicked()
-        {
-            *edit.bitmap_reimport = Some(entry.key.clone());
-        }
-        ui.separator();
-        draw_preview_panel_toggle(
-            ui,
-            &mut preview.active_tab,
-            BitmapPanelTab::Fields,
-            BitmapPanelTab::Texture,
-            "Texture Preview",
-            ButtonIcon::Bitmap,
-        );
-    });
-    ui.separator();
 
     match preview.active_tab {
         BitmapPanelTab::Fields => {
@@ -82,7 +70,7 @@ pub(in crate::app) fn draw_bitmap_preview(
         preview.texture_dirty = true;
     }
 
-    draw_bitmap_preview_data(ui, ctx, &entry.key, preview, true, "Image");
+    draw_bitmap_preview_data(ui, ctx, &entry.key, preview, true, "Bitmap");
 }
 
 /// Render an already-decoded RGBA preview with the same controls and canvas as
@@ -99,173 +87,26 @@ pub(in crate::app) fn draw_bitmap_preview_data(
     supports_image_selection: bool,
     image_label: &str,
 ) {
-    let Some(decoded) = preview.decoded.as_ref() else {
+    // Move the decoded payload out while the panel is drawn. This lets the
+    // shared header/body callbacks mutate the rest of the preview state
+    // without cloning a potentially very large RGBA buffer.
+    let Some(decoded) = preview.decoded.take() else {
         return;
     };
     let data = match decoded {
         Ok(data) => data,
-
         Err(error) => {
-            ui.colored_label(Color32::from_rgb(130, 32, 24), error);
+            ui.colored_label(Color32::from_rgb(130, 32, 24), &error);
+            preview.decoded = Some(Err(error));
             return;
         }
     };
 
-    ui.horizontal(|ui| {
-        let red_changed = ui.checkbox(&mut preview.show_red, "Red").changed();
-        let green_changed = ui.checkbox(&mut preview.show_green, "Green").changed();
-        let blue_changed = ui.checkbox(&mut preview.show_blue, "Blue").changed();
-        let alpha_changed = ui.checkbox(&mut preview.show_alpha, "Alpha").changed();
-        if red_changed || green_changed || blue_changed || alpha_changed {
-            preview.texture_dirty = true;
-        }
-    });
     // Deferred re-decode: index fields are disjoint from `decoded` so we can
-    // write them now, but `decoded = None` must wait until `data`'s borrow ends
-    // (applied at the end of the function).
+    // write them now, then decide whether to restore the payload after drawing.
     let mut redecode = false;
-    ui.horizontal(|ui| {
-        // Image (sequence) selector.
-        if data.image_count > 1 {
-            ui.label(RichText::new(image_label).color(subtle_dark()));
-            if ui
-                .add_enabled(preview.image_index > 0, egui::Button::new("◀"))
-                .clicked()
-            {
-                preview.image_index -= 1;
-
-                preview.mip_index = 0;
-                redecode = true;
-            }
-            ui.monospace(
-                RichText::new(format!("{}/{}", preview.image_index, data.image_count - 1))
-                    .color(text_dark()),
-            );
-            if ui
-                .add_enabled(
-                    preview.image_index + 1 < data.image_count,
-                    egui::Button::new("▶"),
-                )
-                .clicked()
-            {
-                preview.image_index += 1;
-                preview.mip_index = 0;
-                redecode = true;
-            }
-            ui.separator();
-        } else {
-            ui.label(RichText::new(format!("{image_label} 0")).color(subtle_dark()));
-        }
-        // Mip-level selector.
-        if data.mip_count > 1 {
-            ui.label(RichText::new("Mip").color(subtle_dark()));
-            if ui
-                .add_enabled(preview.mip_index > 0, egui::Button::new("◀"))
-                .clicked()
-            {
-                preview.mip_index -= 1;
-                redecode = true;
-            }
-            ui.monospace(
-                RichText::new(format!("{}/{}", preview.mip_index, data.mip_count - 1))
-                    .color(text_dark()),
-            );
-            if ui
-                .add_enabled(
-                    preview.mip_index + 1 < data.mip_count,
-                    egui::Button::new("▶"),
-                )
-                .clicked()
-            {
-                preview.mip_index += 1;
-                redecode = true;
-            }
-            ui.separator();
-        }
-        ui.monospace(RichText::new(format!("{} x {}", data.width, data.height)).color(text_dark()));
-        ui.label(RichText::new(&data.format_name).color(subtle_dark()));
-        ui.label(RichText::new(&data.type_name).color(subtle_dark()));
-
-        ui.separator();
-        ui.label(RichText::new(format!("Zoom {:.0}%", preview.zoom * 100.0)).color(subtle_dark()));
-        let (_, zoom_wheel_delta) = combo_box_with_scroll(
-            ui,
-            egui::ComboBox::from_id_salt(("bitmap_zoom_preset", texture_key))
-                .selected_text("Set…")
-                .width(58.0),
-            |ui| {
-                if ui.selectable_label(false, "Fit").clicked() {
-                    preview.zoom_initialized = false; // refit next frame
-                    preview.pan = Vec2::ZERO;
-                }
-                for pct in [25u32, 50, 100, 200, 400] {
-                    if ui.selectable_label(false, format!("{pct}%")).clicked() {
-                        preview.zoom = pct as f32 / 100.0;
-                        preview.zoom_initialized = true;
-                        preview.pan = Vec2::ZERO;
-                    }
-                }
-            },
-        );
-        if let Some(delta) = zoom_wheel_delta {
-            let presets = [0u32, 25, 50, 100, 200, 400];
-            let current_pct = (preview.zoom * 100.0).round() as u32;
-            let current = presets
-                .iter()
-                .position(|pct| *pct == current_pct)
-                .unwrap_or_else(|| {
-                    presets
-                        .iter()
-                        .enumerate()
-                        .skip(1)
-                        .min_by_key(|(_, pct)| pct.abs_diff(current_pct))
-                        .map(|(index, _)| index)
-                        .unwrap_or(0)
-                });
-            if let Some(next) = combo_scroll_next_index(current, presets.len(), delta) {
-                if presets[next] == 0 {
-                    preview.zoom_initialized = false;
-                } else {
-                    preview.zoom = presets[next] as f32 / 100.0;
-                    preview.zoom_initialized = true;
-                }
-                preview.pan = Vec2::ZERO;
-            }
-        }
-        if ui.button("Reset zoom").clicked() {
-            preview.zoom_initialized = false; // triggers fit-to-view on next frame
-            preview.pan = Vec2::ZERO;
-        }
-        ui.separator();
-        ui.label(RichText::new("BG").color(subtle_dark()));
-        let (_, bg_wheel_delta) = combo_box_with_scroll(
-            ui,
-            egui::ComboBox::from_id_salt(("bitmap_bg", texture_key))
-                .selected_text(preview.bg.label())
-                .width(86.0),
-            |ui| {
-                for bg in BitmapPreviewBg::ALL {
-                    if ui.selectable_label(preview.bg == bg, bg.label()).clicked() {
-                        preview.bg = bg;
-                    }
-                }
-            },
-        );
-        if let Some(delta) = bg_wheel_delta {
-            let current = BitmapPreviewBg::ALL
-                .iter()
-                .position(|bg| *bg == preview.bg)
-                .unwrap_or(0);
-            if let Some(next) = combo_scroll_next_index(current, BitmapPreviewBg::ALL.len(), delta)
-            {
-                preview.bg = BitmapPreviewBg::ALL[next];
-            }
-        }
-    });
-    ui.add_space(6.0);
-
     if preview.texture_dirty || preview.texture.is_none() {
-        let rgba = filtered_bitmap_rgba(data, preview);
+        let rgba = filtered_bitmap_rgba(&data, preview);
 
         let image = egui::ColorImage::from_rgba_unmultiplied(
             [data.width as usize, data.height as usize],
@@ -283,20 +124,573 @@ pub(in crate::app) fn draw_bitmap_preview_data(
         preview.texture_dirty = false;
     }
 
-    let Some(texture) = preview.texture.as_ref() else {
-        return;
-    };
+    let texture = preview
+        .texture
+        .as_ref()
+        .expect("a valid bitmap preview always uploads a texture")
+        .clone();
+    if preview.show_checkerboard && preview.checker_texture.is_none() {
+        let mut rgba = Vec::with_capacity(8 * 8 * 4);
+        for y in 0..8 {
+            for x in 0..8 {
+                let white = (x / 4 + y / 4) % 2 == 0;
+                rgba.extend_from_slice(if white {
+                    &[255, 255, 255, 13]
+                } else {
+                    &[0, 0, 0, 13]
+                });
+            }
+        }
+        preview.checker_texture = Some(ctx.load_texture(
+            format!("bitmap_checkerboard_{texture_key}"),
+            egui::ColorImage::from_rgba_unmultiplied([8, 8], &rgba),
+            egui::TextureOptions::NEAREST_REPEAT,
+        ));
+    }
+    let checker_texture = preview.checker_texture.clone();
     let image_size = texture.size_vec2();
+    let header_wrap_width =
+        bitmap_header_wrap_width(ui, &data, preview, supports_image_selection, image_label);
+
+    draw_model_preview_section_with_header_wrap(
+        ui,
+        "Bitmap Preview",
+        None,
+        header_wrap_width,
+        |ui, part| match part {
+            ModelPreviewSectionPart::Header => {
+                draw_bitmap_selection_controls(
+                    ui,
+                    &data,
+                    preview,
+                    supports_image_selection,
+                    image_label,
+                    &mut redecode,
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    draw_bitmap_view_menu(ui, preview);
+                    draw_bitmap_camera_menu(ui, preview);
+                    draw_bitmap_header_separator(ui);
+                    let previous_spacing = ui.spacing().item_spacing.x;
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    let before = (
+                        preview.show_red,
+                        preview.show_green,
+                        preview.show_blue,
+                        preview.show_alpha,
+                    );
+                    let alpha_action = draw_bitmap_channel_toggle(
+                        ui,
+                        preview.show_alpha,
+                        ButtonIcon::ChannelAlpha,
+                        "Alpha channel\nAlt-click: show only this channel\nShift-click: hide only this channel",
+                    );
+                    let blue_action = draw_bitmap_channel_toggle(
+                        ui,
+                        preview.show_blue,
+                        ButtonIcon::ChannelBlue,
+                        "Blue channel\nAlt-click: show only this channel\nShift-click: hide only this channel",
+                    );
+                    let green_action = draw_bitmap_channel_toggle(
+                        ui,
+                        preview.show_green,
+                        ButtonIcon::ChannelGreen,
+                        "Green channel\nAlt-click: show only this channel\nShift-click: hide only this channel",
+                    );
+                    let red_action = draw_bitmap_channel_toggle(
+                        ui,
+                        preview.show_red,
+                        ButtonIcon::ChannelRed,
+                        "Red channel\nAlt-click: show only this channel\nShift-click: hide only this channel",
+                    );
+                    ui.spacing_mut().item_spacing.x = previous_spacing;
+
+                    apply_bitmap_channel_action(preview, ButtonIcon::ChannelAlpha, alpha_action);
+                    apply_bitmap_channel_action(preview, ButtonIcon::ChannelBlue, blue_action);
+                    apply_bitmap_channel_action(preview, ButtonIcon::ChannelGreen, green_action);
+                    apply_bitmap_channel_action(preview, ButtonIcon::ChannelRed, red_action);
+                    preview.texture_dirty |= before
+                        != (
+                            preview.show_red,
+                            preview.show_green,
+                            preview.show_blue,
+                            preview.show_alpha,
+                        );
+                });
+            }
+            ModelPreviewSectionPart::Body => {
+                draw_bitmap_canvas_and_footer(
+                    ui,
+                    &texture,
+                    checker_texture.as_ref(),
+                    image_size,
+                    &data,
+                    preview,
+                );
+            }
+        },
+    );
+
+    if redecode && supports_image_selection {
+        preview.decoded = None;
+        preview.texture_dirty = true;
+    } else {
+        preview.decoded = Some(Ok(data));
+    }
+}
+
+fn bitmap_header_wrap_width(
+    ui: &Ui,
+    data: &BitmapPreviewData,
+    preview: &BitmapPreviewState,
+    supports_image_selection: bool,
+    image_label: &str,
+) -> Option<f32> {
+    if !supports_image_selection {
+        return None;
+    }
+
+    let image_selector = data.image_count > 1;
+    let mip_selector = data.mip_count > 1;
+    if !image_selector && !mip_selector {
+        return None;
+    }
+
+    let label_width = |label: &str| {
+        ui.painter()
+            .layout_no_wrap(
+                label.to_owned(),
+                TextStyle::Body.resolve(ui.style()),
+                foundation_block_text(),
+            )
+            .size()
+            .x
+    };
+    // Label + two 24 px steppers + 64 px index menu + the three 4 px gaps.
+    let selector_width = |label: &str| label_width(label) + 124.0;
+    let mut selection_width = 0.0;
+    if image_selector {
+        selection_width += selector_width(image_label);
+    }
+    if image_selector && mip_selector {
+        selection_width += 33.0; // 16 px + divider + 16 px.
+    }
+    if mip_selector {
+        selection_width += selector_width("Mipmap");
+    }
+
+    let menu_width = |label: &str| {
+        let text = format!("     {label}      ");
+        ui.painter()
+            .layout_no_wrap(
+                text,
+                TextStyle::Button.resolve(ui.style()),
+                foundation_block_text(),
+            )
+            .size()
+            .x
+            + ui.spacing().button_padding.x * 2.0
+    };
+    let zoom_label = format!("Zoom: {:.0}%", preview.zoom * 100.0);
+    let action_width =
+        menu_width("View") + menu_width(&zoom_label) + 4.0 * BUTTON_HEIGHT + 3.0 * 4.0 + 1.0 + 24.0;
+
+    // Include the section's 8 px inset on both sides and retain an 8 px gap
+    // between the selector and action groups at the point where they wrap.
+    Some(selection_width + action_width + 24.0)
+}
+
+fn draw_bitmap_selection_controls(
+    ui: &mut Ui,
+    data: &BitmapPreviewData,
+    preview: &mut BitmapPreviewState,
+    supports_image_selection: bool,
+    image_label: &str,
+    redecode: &mut bool,
+) {
+    if !supports_image_selection {
+        return;
+    }
+    ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        if data.image_count > 1 {
+            let next = ui
+                .horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    draw_bitmap_index_control(
+                        ui,
+                        image_label,
+                        "bitmap_image_selector",
+                        preview.image_index,
+                        data.image_count,
+                    )
+                })
+                .inner;
+            if next != preview.image_index {
+                preview.image_index = next;
+                preview.mip_index = 0;
+                *redecode = true;
+            }
+        }
+        if data.image_count > 1 && data.mip_count > 1 {
+            ui.add_space(16.0);
+            draw_bitmap_header_separator(ui);
+            ui.add_space(16.0);
+        }
+        if data.mip_count > 1 {
+            let next = ui
+                .horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    draw_bitmap_index_control(
+                        ui,
+                        "Mipmap",
+                        "bitmap_mipmap_selector",
+                        preview.mip_index,
+                        data.mip_count,
+                    )
+                })
+                .inner;
+            if next != preview.mip_index {
+                preview.mip_index = next;
+                *redecode = true;
+            }
+        }
+    });
+}
+
+fn draw_bitmap_header_separator(ui: &mut Ui) {
+    let (separator_rect, _) = ui.allocate_exact_size(Vec2::new(1.0, BUTTON_HEIGHT), Sense::hover());
+    ui.painter().vline(
+        separator_rect.center().x,
+        separator_rect.y_range(),
+        Stroke::new(1.0, foundation_group_edge()),
+    );
+}
+
+fn draw_bitmap_index_control(
+    ui: &mut Ui,
+    label: &str,
+    id_salt: &'static str,
+    selected: usize,
+    count: usize,
+) -> usize {
+    let mut next = selected.min(count.saturating_sub(1));
+    ui.label(RichText::new(label).color(foundation_block_text()));
+    if foundation_header_stepper_clicked(ui, "<", next > 0) {
+        next -= 1;
+    }
+    let mut selected_text = egui::text::LayoutJob::default();
+    let font_id = TextStyle::Button.resolve(ui.style());
+    selected_text.append(
+        &next.to_string(),
+        0.0,
+        egui::TextFormat {
+            font_id: font_id.clone(),
+            color: foundation_block_text(),
+            ..Default::default()
+        },
+    );
+    selected_text.append(
+        &format!("/ {}", count.saturating_sub(1)),
+        8.0,
+        egui::TextFormat {
+            font_id,
+            color: foundation_block_text().gamma_multiply(0.5),
+            ..Default::default()
+        },
+    );
+    let (combo, wheel_delta) = combo_box_with_scroll(
+        ui,
+        egui::ComboBox::from_id_salt((id_salt, count))
+            .selected_text(selected_text)
+            .width(64.0),
+        |ui| {
+            let just_opened = combo_popup_just_opened(ui);
+            for index in 0..count {
+                let row = ui.selectable_value(&mut next, index, format!("{index}"));
+                if just_opened && index == selected {
+                    row.scroll_to_me(Some(egui::Align::Center));
+                }
+            }
+        },
+    );
+    if let Some(delta) = wheel_delta
+        && let Some(index) = combo_scroll_next_index(next, count, delta)
+    {
+        next = index;
+    }
+    let _ = combo;
+    if foundation_header_stepper_clicked(ui, ">", next + 1 < count) {
+        next += 1;
+    }
+    next
+}
+
+fn draw_bitmap_view_menu(ui: &mut Ui, preview: &mut BitmapPreviewState) {
+    const VIEW_SETTINGS_WIDTH: f32 = 240.0;
+    right_aligned_icon_text_dropdown_button(
+        ui,
+        ButtonIcon::View,
+        "View",
+        VIEW_SETTINGS_WIDTH,
+        |ui| {
+            ui.set_width(VIEW_SETTINGS_WIDTH);
+            ui.scope(|ui| {
+                // The flat-list treatment makes the selected background read
+                // like other menu selections. Keep it local: its transparent
+                // inactive fill would otherwise erase the checkbox boxes in
+                // the Options section below.
+                style_list_menu(ui);
+                ui.label(
+                    RichText::new("Background Color")
+                        .strong()
+                        .color(text_dark()),
+                );
+                for bg in BitmapPreviewBg::ALL {
+                    ui.selectable_value(&mut preview.bg, bg, bg.label());
+                }
+            });
+            context_menu_separator(ui);
+            ui.label(RichText::new("Options").strong().color(text_dark()));
+            ui.checkbox(&mut preview.show_checkerboard, "Show Checkerboard")
+                .on_hover_text(
+                    "Draw a fixed 4 px checker behind the bitmap to make transparency visible.",
+                );
+            ui.checkbox(&mut preview.show_border, "Show Bitmap Border")
+                .on_hover_text("Draw a two-pixel contrasting outline outside the bitmap edge.");
+        },
+    );
+}
+
+fn draw_bitmap_channel_toggle(
+    ui: &mut Ui,
+    enabled: bool,
+    icon: ButtonIcon,
+    tooltip: &str,
+) -> BitmapChannelAction {
+    let response = ui
+        .scope(|ui| {
+            if enabled {
+                let (active_fill, active_border) = bitmap_channel_active_colors(icon);
+                let widgets = &mut ui.visuals_mut().widgets;
+                widgets.inactive.weak_bg_fill = active_fill;
+                widgets.hovered.weak_bg_fill = active_fill;
+                widgets.active.weak_bg_fill = active_fill;
+                widgets.inactive.bg_stroke = Stroke::new(1.0, active_border);
+                widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::WHITE);
+                widgets.active.bg_stroke = Stroke::new(1.0, Color32::WHITE);
+            }
+            icon_button(ui, icon, tooltip, true, text_dark())
+        })
+        .inner;
+    if response.clicked() {
+        let modifiers = ui.input(|input| input.modifiers);
+        if modifiers.alt {
+            BitmapChannelAction::Solo
+        } else if modifiers.shift {
+            BitmapChannelAction::Exclude
+        } else {
+            BitmapChannelAction::Toggle
+        }
+    } else {
+        BitmapChannelAction::None
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BitmapChannelAction {
+    None,
+    Toggle,
+    Solo,
+    Exclude,
+}
+
+fn apply_bitmap_channel_action(
+    preview: &mut BitmapPreviewState,
+    icon: ButtonIcon,
+    action: BitmapChannelAction,
+) {
+    if action == BitmapChannelAction::None {
+        return;
+    }
+    match action {
+        BitmapChannelAction::Solo => {
+            preview.show_red = false;
+            preview.show_green = false;
+            preview.show_blue = false;
+            preview.show_alpha = false;
+        }
+        BitmapChannelAction::Exclude => {
+            preview.show_red = true;
+            preview.show_green = true;
+            preview.show_blue = true;
+            preview.show_alpha = true;
+        }
+        BitmapChannelAction::None | BitmapChannelAction::Toggle => {}
+    }
+    let channel = match icon {
+        ButtonIcon::ChannelRed => &mut preview.show_red,
+        ButtonIcon::ChannelGreen => &mut preview.show_green,
+        ButtonIcon::ChannelBlue => &mut preview.show_blue,
+        ButtonIcon::ChannelAlpha => &mut preview.show_alpha,
+        _ => return,
+    };
+    *channel = match action {
+        BitmapChannelAction::Solo => true,
+        BitmapChannelAction::Exclude => false,
+        BitmapChannelAction::Toggle => !*channel,
+        BitmapChannelAction::None => *channel,
+    };
+}
+
+fn bitmap_channel_active_colors(icon: ButtonIcon) -> (Color32, Color32) {
+    // Use explicit premultiplied values here. `from_rgba_unmultiplied` converts
+    // saturated colors through linear space, which looks much brighter than a
+    // restrained UI fill. These are explicit 40%-opacity channel colors.
+    match icon {
+        ButtonIcon::ChannelRed => (
+            Color32::from_rgba_premultiplied(102, 0, 0, 102),
+            Color32::from_rgb(255, 0, 0),
+        ),
+        ButtonIcon::ChannelGreen => (
+            Color32::from_rgba_premultiplied(0, 102, 0, 102),
+            Color32::from_rgb(0, 255, 0),
+        ),
+        ButtonIcon::ChannelBlue => (
+            Color32::from_rgba_premultiplied(0, 0, 102, 102),
+            Color32::from_rgb(0, 0, 255),
+        ),
+        ButtonIcon::ChannelAlpha if is_dark_mode() => (
+            Color32::from_rgba_premultiplied(102, 102, 102, 102),
+            Color32::WHITE,
+        ),
+        ButtonIcon::ChannelAlpha => (
+            Color32::from_rgba_premultiplied(0, 0, 0, 102),
+            Color32::BLACK,
+        ),
+        _ => (Color32::TRANSPARENT, Color32::TRANSPARENT),
+    }
+}
+
+#[cfg(test)]
+mod bitmap_channel_control_tests {
+    use super::*;
+
+    #[test]
+    fn soloing_a_channel_enables_it_and_disables_the_rest() {
+        let mut preview = BitmapPreviewState::default();
+        apply_bitmap_channel_action(
+            &mut preview,
+            ButtonIcon::ChannelBlue,
+            BitmapChannelAction::Solo,
+        );
+
+        assert!(!preview.show_red);
+        assert!(!preview.show_green);
+        assert!(preview.show_blue);
+        assert!(!preview.show_alpha);
+    }
+
+    #[test]
+    fn excluding_a_channel_disables_it_and_enables_the_rest() {
+        let mut preview = BitmapPreviewState::default();
+        preview.show_red = false;
+        preview.show_green = false;
+        preview.show_blue = false;
+        preview.show_alpha = false;
+        apply_bitmap_channel_action(
+            &mut preview,
+            ButtonIcon::ChannelGreen,
+            BitmapChannelAction::Exclude,
+        );
+
+        assert!(preview.show_red);
+        assert!(!preview.show_green);
+        assert!(preview.show_blue);
+        assert!(preview.show_alpha);
+    }
+
+    #[test]
+    fn active_channel_fills_are_explicitly_forty_percent() {
+        assert_eq!(
+            bitmap_channel_active_colors(ButtonIcon::ChannelRed)
+                .0
+                .to_array(),
+            [102, 0, 0, 102]
+        );
+        assert_eq!(
+            bitmap_channel_active_colors(ButtonIcon::ChannelGreen)
+                .0
+                .to_array(),
+            [0, 102, 0, 102]
+        );
+        assert_eq!(
+            bitmap_channel_active_colors(ButtonIcon::ChannelBlue)
+                .0
+                .to_array(),
+            [0, 0, 102, 102]
+        );
+    }
+}
+
+fn draw_bitmap_camera_menu(ui: &mut Ui, preview: &mut BitmapPreviewState) {
+    let label = format!("Zoom: {:.0}%", preview.zoom * 100.0);
+    const ZOOM_SETTINGS_WIDTH: f32 = 240.0;
+    right_aligned_icon_text_dropdown_button(
+        ui,
+        ButtonIcon::Find,
+        &label,
+        ZOOM_SETTINGS_WIDTH,
+        |ui| {
+            ui.set_width(ZOOM_SETTINGS_WIDTH);
+            if ui.selectable_label(false, "Fit to View").clicked() {
+                preview.zoom_initialized = false;
+                preview.pan = Vec2::ZERO;
+            }
+            ui.separator();
+            for pct in [25u32, 50, 100, 200, 400] {
+                if ui
+                    .selectable_label(
+                        preview.zoom_initialized && (preview.zoom * 100.0).round() as u32 == pct,
+                        format!("{pct}%"),
+                    )
+                    .clicked()
+                {
+                    preview.zoom = pct as f32 / 100.0;
+                    preview.zoom_initialized = true;
+                    preview.pan = Vec2::ZERO;
+                }
+            }
+            ui.separator();
+            if ui.button("Reset View").clicked() {
+                preview.zoom = 1.0;
+                preview.zoom_initialized = true;
+                preview.pan = Vec2::ZERO;
+            }
+        },
+    );
+}
+
+fn draw_bitmap_canvas_and_footer(
+    ui: &mut Ui,
+    texture: &egui::TextureHandle,
+    checker_texture: Option<&egui::TextureHandle>,
+    image_size: Vec2,
+    data: &BitmapPreviewData,
+    preview: &mut BitmapPreviewState,
+) {
+    const FOOTER_HEIGHT: f32 = 32.0;
 
     // Allocate the whole remaining area as a fixed canvas and handle pan/zoom
     // manually. Using a ScrollArea here causes the scroll wheel to both zoom
     // (our code) and pan the viewport (egui), which fight and "teleport".
-    let canvas_size = ui.available_size();
+    let available = ui.available_size();
+    let canvas_size = Vec2::new(available.x, (available.y - FOOTER_HEIGHT).max(1.0));
     let (canvas_rect, canvas_resp) = ui.allocate_exact_size(canvas_size, Sense::click_and_drag());
 
     // Fit zoom = the scale at which the whole texture fits the canvas (never
-    // upscaling past 1:1). This is both the initial zoom and the minimum the
-    // user can zoom out to — you can't shrink the texture smaller than fit.
+    // upscaling past 1:1). It is the initial zoom, but manual zooming may go
+    // down to 25% even when a small bitmap already fits at 1:1.
     let fit_zoom = if canvas_rect.width() > 1.0
         && canvas_rect.height() > 1.0
         && image_size.x > 0.0
@@ -324,9 +718,8 @@ pub(in crate::app) fn draw_bitmap_preview_data(
         if scroll.abs() > f32::EPSILON {
             let old_zoom = preview.zoom;
             let factor = (scroll / 240.0).exp();
-            // Floor at fit_zoom so the texture can't be zoomed out smaller
-            // than the size where it fully fits the canvas.
-            let new_zoom = (old_zoom * factor).clamp(fit_zoom, 32.0);
+            let min_zoom = fit_zoom.min(0.25);
+            let new_zoom = (old_zoom * factor).clamp(min_zoom, 32.0);
             if (new_zoom - old_zoom).abs() > f32::EPSILON {
                 if let Some(ptr) = ui.input(|i| i.pointer.hover_pos()) {
                     // Image top-left in screen space at the current zoom.
@@ -357,19 +750,47 @@ pub(in crate::app) fn draw_bitmap_preview_data(
     preview.pan.x = preview.pan.x.clamp(-half_extra_x, half_extra_x);
     preview.pan.y = preview.pan.y.clamp(-half_extra_y, half_extra_y);
 
-    // Draw: dark background, then the image clipped to the canvas.
+    // Draw the canvas, then the screen-space alpha checker, the image, and an
+    // optional outline. The checker UVs are based on screen coordinates so
+    // its 4 px tiles never zoom with the bitmap.
     let painter = ui.painter();
     painter.rect_filled(canvas_rect, 0.0, preview.bg.color());
     painter.rect_stroke(canvas_rect, 0.0, Stroke::new(1.0, grid_line()));
 
     let img_tl = canvas_rect.center() + preview.pan - draw_size * 0.5;
     let img_rect = egui::Rect::from_min_size(img_tl, draw_size);
+    let clipped_img_rect = img_rect.intersect(canvas_rect);
+    if preview.show_checkerboard
+        && clipped_img_rect.is_positive()
+        && let Some(checker_texture) = checker_texture
+    {
+        let uv = egui::Rect::from_min_max(
+            egui::pos2(clipped_img_rect.left() / 8.0, clipped_img_rect.top() / 8.0),
+            egui::pos2(
+                clipped_img_rect.right() / 8.0,
+                clipped_img_rect.bottom() / 8.0,
+            ),
+        );
+        painter.image(checker_texture.id(), clipped_img_rect, uv, Color32::WHITE);
+    }
     painter.with_clip_rect(canvas_rect).image(
         texture.id(),
         img_rect,
         egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
         Color32::WHITE,
     );
+    if preview.show_border {
+        let color = if preview.bg == BitmapPreviewBg::White {
+            Color32::from_black_alpha(153)
+        } else {
+            Color32::from_white_alpha(153)
+        };
+        painter.with_clip_rect(canvas_rect).rect_stroke(
+            img_rect.expand(1.0),
+            0.0,
+            Stroke::new(2.0, color),
+        );
+    }
 
     // Under-cursor pixel coordinate + RGBA readout (samples the original
     // decoded pixels, independent of the channel-view toggles).
@@ -409,11 +830,27 @@ pub(in crate::app) fn draw_bitmap_preview_data(
         }
     }
 
-    // Apply a deferred image/mip change now that `data`'s borrow has ended.
-    if redecode && supports_image_selection {
-        preview.decoded = None;
-        preview.texture_dirty = true;
-    }
+    draw_bitmap_stats_footer(ui, data);
+}
+
+fn draw_bitmap_stats_footer(ui: &mut Ui, data: &BitmapPreviewData) {
+    const FOOTER_HEIGHT: f32 = 32.0;
+    let (footer_rect, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width().max(1.0), FOOTER_HEIGHT),
+        Sense::hover(),
+    );
+    ui.painter()
+        .rect_filled(footer_rect, 0.0, foundation_section_bar());
+    ui.painter().text(
+        footer_rect.left_center() + Vec2::new(8.0, 0.0),
+        Align2::LEFT_CENTER,
+        format!(
+            "{} × {}  ·  {}  ·  {}",
+            data.width, data.height, data.format_name, data.type_name
+        ),
+        FontId::proportional(10.0),
+        foundation_block_text(),
+    );
 }
 
 /// Field-aware diff of two same-group tags: walk both root structs in parallel

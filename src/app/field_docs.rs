@@ -181,7 +181,9 @@ fn merge_structs_into(docs: &mut DefDocs, value: &serde_json::Value) {
                 });
             }
         }
-        docs.by_struct.entry(StructKey::new(guid, struct_name)).or_insert(entries);
+        docs.by_struct
+            .entry(StructKey::new(guid, struct_name))
+            .or_insert(entries);
     }
 }
 
@@ -408,7 +410,8 @@ mod tests {
     /// element. Keyed by name, each struct gets only its own.
     #[test]
     fn halo2_structs_get_only_their_own_explanations() {
-        let tag_path = "/Users/camden/Halo/halo2_mcc/tags/objects/characters/masterchief/masterchief.biped";
+        let tag_path =
+            "/Users/camden/Halo/halo2_mcc/tags/objects/characters/masterchief/masterchief.biped";
         let def = crate::app::test_definition_path("halo2_mcc/biped.json");
         if !std::path::Path::new(tag_path).exists() || !def.exists() {
             eprintln!("skipping: H2 biped/definition not present");
@@ -429,7 +432,10 @@ mod tests {
             s.fields_all().find_map(|f| {
                 f.as_struct()
                     .and_then(|nested| find(nested, name))
-                    .or_else(|| f.as_block().and_then(|b| b.iter().find_map(|e| find(e, name))))
+                    .or_else(|| {
+                        f.as_block()
+                            .and_then(|b| b.iter().find_map(|e| find(e, name)))
+                    })
             })
         }
         let explanations = |s: &TagStruct<'_>| -> Vec<String> {
@@ -443,13 +449,28 @@ mod tests {
         };
 
         let object = find(tag.root(), "object_block_struct").expect("the object struct");
-        assert_eq!(object.definition().guid(), [0; 16], "the premise: H2 structs have no GUID");
+        assert_eq!(
+            object.definition().guid(),
+            [0; 16],
+            "the premise: H2 structs have no GUID"
+        );
         let titles = explanations(&object);
-        for expected in ["Applying collision damage", "Game collision damage parameters", "Absolute collision damage parameters"] {
-            assert!(titles.iter().any(|t| t == expected), "object struct lost {expected:?}: {titles:?}");
+        for expected in [
+            "Applying collision damage",
+            "Game collision damage parameters",
+            "Absolute collision damage parameters",
+        ] {
+            assert!(
+                titles.iter().any(|t| t == expected),
+                "object struct lost {expected:?}: {titles:?}"
+            );
         }
-        let function = find(tag.root(), "object_function_block_struct").expect("a functions element");
-        assert!(explanations(&function).is_empty(), "the functions element borrowed another struct's explanations");
+        let function =
+            find(tag.root(), "object_function_block_struct").expect("a functions element");
+        assert!(
+            explanations(&function).is_empty(),
+            "the functions element borrowed another struct's explanations"
+        );
 
         // The object's explanations still precede the fields they introduce.
         let order: Vec<&str> = docs

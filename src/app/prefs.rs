@@ -53,6 +53,10 @@ mod first_run_tests;
 #[path = "tests/prefs_update_channel.rs"]
 mod update_channel_tests;
 
+#[cfg(test)]
+#[path = "tests/prefs_bitmap_preview.rs"]
+mod bitmap_preview_tests;
+
 pub(super) fn load_gui_prefs() -> GuiPrefs {
     let Some(text) = read_prefs_text() else {
         return GuiPrefs::default();
@@ -190,6 +194,21 @@ fn prefs_from_value(value: &Value) -> GuiPrefs {
             .map(|value| value as f32)
             .unwrap_or(DEFAULT_MODEL_PREVIEW_SIZE)
             .clamp(MIN_MODEL_PREVIEW_SIZE, MAX_MODEL_PREVIEW_SIZE),
+        bitmap_preview_view: BitmapPreviewViewSettings {
+            bg: value
+                .get("bitmap_preview_background")
+                .and_then(Value::as_str)
+                .and_then(BitmapPreviewBg::from_str)
+                .unwrap_or(BitmapPreviewBg::DarkGray),
+            show_checkerboard: value
+                .get("bitmap_preview_checkerboard")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+            show_border: value
+                .get("bitmap_preview_border")
+                .and_then(Value::as_bool)
+                .unwrap_or(true),
+        },
         blender_path: value
             .get("blender_path")
             .and_then(Value::as_str)
@@ -632,6 +651,9 @@ fn prefs_to_value(
         "dark_mode": prefs.dark_mode,
         "ui_scale": prefs.ui_scale,
         "model_preview_size": prefs.model_preview_size,
+        "bitmap_preview_background": prefs.bitmap_preview_view.bg.as_str(),
+        "bitmap_preview_checkerboard": prefs.bitmap_preview_view.show_checkerboard,
+        "bitmap_preview_border": prefs.bitmap_preview_view.show_border,
         "blender_path": prefs.blender_path.as_ref().map(|path| path.display().to_string()),
         "ek_folder_aliases": prefs.ek_folder_aliases.iter().map(|alias| {
             json!({
