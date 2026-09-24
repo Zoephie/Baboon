@@ -21,7 +21,7 @@ impl Default for BitmapPanelTab {
 
 /// Background fill behind the bitmap preview image. Helps judge alpha edges
 /// against light/dark/saturated backdrops.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::app) enum BitmapPreviewBg {
     DarkGray,
     Black,
@@ -31,7 +31,7 @@ pub(in crate::app) enum BitmapPreviewBg {
 
 impl BitmapPreviewBg {
     pub(in crate::app) const ALL: [Self; 4] =
-        [Self::DarkGray, Self::Black, Self::White, Self::Magenta];
+        [Self::White, Self::DarkGray, Self::Black, Self::Magenta];
 
     pub(in crate::app) fn color(self) -> egui::Color32 {
         match self {
@@ -46,10 +46,47 @@ impl BitmapPreviewBg {
 
     pub(in crate::app) fn label(self) -> &'static str {
         match self {
-            Self::DarkGray => "Dark gray",
+            Self::DarkGray => "Dark Grey",
             Self::Black => "Black",
             Self::White => "White",
             Self::Magenta => "Magenta",
+        }
+    }
+
+    pub(in crate::app) fn as_str(self) -> &'static str {
+        match self {
+            Self::DarkGray => "dark_gray",
+            Self::Black => "black",
+            Self::White => "white",
+            Self::Magenta => "magenta",
+        }
+    }
+
+    pub(in crate::app) fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "dark_gray" => Some(Self::DarkGray),
+            "black" => Some(Self::Black),
+            "white" => Some(Self::White),
+            "magenta" => Some(Self::Magenta),
+            _ => None,
+        }
+    }
+}
+
+/// View choices shared by every bitmap preview and persisted between sessions.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(in crate::app) struct BitmapPreviewViewSettings {
+    pub(in crate::app) bg: BitmapPreviewBg,
+    pub(in crate::app) show_checkerboard: bool,
+    pub(in crate::app) show_border: bool,
+}
+
+impl Default for BitmapPreviewViewSettings {
+    fn default() -> Self {
+        Self {
+            bg: BitmapPreviewBg::DarkGray,
+            show_checkerboard: true,
+            show_border: true,
         }
     }
 }
@@ -104,6 +141,22 @@ impl Default for BitmapPreviewState {
             bg: BitmapPreviewBg::DarkGray,
             image_index: 0,
             mip_index: 0,
+        }
+    }
+}
+
+impl BitmapPreviewState {
+    pub(in crate::app) fn apply_view_settings(&mut self, settings: BitmapPreviewViewSettings) {
+        self.bg = settings.bg;
+        self.show_checkerboard = settings.show_checkerboard;
+        self.show_border = settings.show_border;
+    }
+
+    pub(in crate::app) fn view_settings(&self) -> BitmapPreviewViewSettings {
+        BitmapPreviewViewSettings {
+            bg: self.bg,
+            show_checkerboard: self.show_checkerboard,
+            show_border: self.show_border,
         }
     }
 }

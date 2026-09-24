@@ -476,7 +476,9 @@ impl<'a> H2PostprocessBindings<'a> {
     fn function(&self, parameter_index: usize, animation_type: i32) -> Option<FunctionView> {
         // This module still carries the animation type as its stored index;
         // name it at the boundary.
-        let typed = u32::try_from(animation_type).ok().and_then(Halo2ShaderAnimationType::from_index);
+        let typed = u32::try_from(animation_type)
+            .ok()
+            .and_then(Halo2ShaderAnimationType::from_index);
         self.function_view(parameter_index, animation_type)
             .map(|view| view.with_color_types(h2_animation_color_types(typed)))
     }

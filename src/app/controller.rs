@@ -7744,6 +7744,7 @@ impl Baboon {
             dark_mode: self.dark_mode,
             ui_scale: self.ui_scale,
             model_preview_size: self.model_preview_size,
+            bitmap_preview_view: self.bitmap_preview_view,
             blender_path: self.blender_path.clone(),
             editing_kit_paths: self.editing_kit_paths.clone(),
             ek_folder_aliases: self.ek_folder_aliases.clone(),

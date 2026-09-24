@@ -52,6 +52,7 @@ impl Baboon {
         let picker_was_open = self.tag_reference_picker.is_some();
         let def_docs = self.def_docs_for_entry(kit_index, entry);
         let ce_sound = self.ce_sound_binding(kit_index, &key, entry);
+        let bitmap_preview_view = self.bitmap_preview_view;
 
         let Some(mut doc) = self.kits[kit_index].parsed_tags.remove(&key) else {
             if self.kits[kit_index].loading_tags.contains(&key) {
@@ -206,6 +207,7 @@ impl Baboon {
 
         if is_bitmap_tag(entry) {
             let preview = kit.bitmap_previews.entry(key.clone()).or_default();
+            preview.apply_view_settings(bitmap_preview_view);
             draw_bitmap_tag(
                 ui,
                 ctx,
@@ -217,6 +219,7 @@ impl Baboon {
                 self.expert_mode,
                 &mut edit_context,
             );
+            self.bitmap_preview_view = preview.view_settings();
         } else {
             let mut local_model_preview;
             let model_preview = if is_previewable_geometry_group(entry.group_tag, names) {

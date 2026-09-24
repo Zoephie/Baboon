@@ -149,33 +149,87 @@ pub(in crate::app) fn draw_bitmap_preview_data(
     }
     let checker_texture = preview.checker_texture.clone();
     let image_size = texture.size_vec2();
+    let header_wrap_width =
+        bitmap_header_wrap_width(ui, &data, preview, supports_image_selection, image_label);
 
-    draw_model_preview_section(ui, "Bitmap Preview", None, |ui, part| match part {
-        ModelPreviewSectionPart::Header => {
-            draw_bitmap_selection_controls(
-                ui,
-                &data,
-                preview,
-                supports_image_selection,
-                image_label,
-                &mut redecode,
-            );
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                draw_bitmap_view_menu(ui, preview);
-                draw_bitmap_camera_menu(ui, preview);
-            });
-        }
-        ModelPreviewSectionPart::Body => {
-            draw_bitmap_canvas_and_footer(
-                ui,
-                &texture,
-                checker_texture.as_ref(),
-                image_size,
-                &data,
-                preview,
-            );
-        }
-    });
+    draw_model_preview_section_with_header_wrap(
+        ui,
+        "Bitmap Preview",
+        None,
+        header_wrap_width,
+        |ui, part| match part {
+            ModelPreviewSectionPart::Header => {
+                draw_bitmap_selection_controls(
+                    ui,
+                    &data,
+                    preview,
+                    supports_image_selection,
+                    image_label,
+                    &mut redecode,
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    draw_bitmap_view_menu(ui, preview);
+                    draw_bitmap_camera_menu(ui, preview);
+                    draw_bitmap_header_separator(ui);
+                    let previous_spacing = ui.spacing().item_spacing.x;
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    let before = (
+                        preview.show_red,
+                        preview.show_green,
+                        preview.show_blue,
+                        preview.show_alpha,
+                    );
+                    let alpha_action = draw_bitmap_channel_toggle(
+                        ui,
+                        preview.show_alpha,
+                        ButtonIcon::ChannelAlpha,
+                        "Alpha channel\nAlt-click: show only this channel\nShift-click: hide only this channel",
+                    );
+                    let blue_action = draw_bitmap_channel_toggle(
+                        ui,
+                        preview.show_blue,
+                        ButtonIcon::ChannelBlue,
+                        "Blue channel\nAlt-click: show only this channel\nShift-click: hide only this channel",
+                    );
+                    let green_action = draw_bitmap_channel_toggle(
+                        ui,
+                        preview.show_green,
+                        ButtonIcon::ChannelGreen,
+                        "Green channel\nAlt-click: show only this channel\nShift-click: hide only this channel",
+                    );
+                    let red_action = draw_bitmap_channel_toggle(
+                        ui,
+                        preview.show_red,
+                        ButtonIcon::ChannelRed,
+                        "Red channel\nAlt-click: show only this channel\nShift-click: hide only this channel",
+                    );
+                    ui.spacing_mut().item_spacing.x = previous_spacing;
+
+                    apply_bitmap_channel_action(preview, ButtonIcon::ChannelAlpha, alpha_action);
+                    apply_bitmap_channel_action(preview, ButtonIcon::ChannelBlue, blue_action);
+                    apply_bitmap_channel_action(preview, ButtonIcon::ChannelGreen, green_action);
+                    apply_bitmap_channel_action(preview, ButtonIcon::ChannelRed, red_action);
+                    preview.texture_dirty |= before
+                        != (
+                            preview.show_red,
+                            preview.show_green,
+                            preview.show_blue,
+                            preview.show_alpha,
+                        );
+                });
+            }
+            ModelPreviewSectionPart::Body => {
+                draw_bitmap_canvas_and_footer(
+                    ui,
+                    &texture,
+                    checker_texture.as_ref(),
+                    image_size,
+                    &data,
+                    preview,
+                );
+            }
+        },
+    );
 
     if redecode && supports_image_selection {
         preview.decoded = None;
@@ -183,6 +237,67 @@ pub(in crate::app) fn draw_bitmap_preview_data(
     } else {
         preview.decoded = Some(Ok(data));
     }
+}
+
+fn bitmap_header_wrap_width(
+    ui: &Ui,
+    data: &BitmapPreviewData,
+    preview: &BitmapPreviewState,
+    supports_image_selection: bool,
+    image_label: &str,
+) -> Option<f32> {
+    if !supports_image_selection {
+        return None;
+    }
+
+    let image_selector = data.image_count > 1;
+    let mip_selector = data.mip_count > 1;
+    if !image_selector && !mip_selector {
+        return None;
+    }
+
+    let label_width = |label: &str| {
+        ui.painter()
+            .layout_no_wrap(
+                label.to_owned(),
+                TextStyle::Body.resolve(ui.style()),
+                foundation_block_text(),
+            )
+            .size()
+            .x
+    };
+    // Label + two 24 px steppers + 64 px index menu + the three 4 px gaps.
+    let selector_width = |label: &str| label_width(label) + 124.0;
+    let mut selection_width = 0.0;
+    if image_selector {
+        selection_width += selector_width(image_label);
+    }
+    if image_selector && mip_selector {
+        selection_width += 33.0; // 16 px + divider + 16 px.
+    }
+    if mip_selector {
+        selection_width += selector_width("Mipmap");
+    }
+
+    let menu_width = |label: &str| {
+        let text = format!("     {label}      ");
+        ui.painter()
+            .layout_no_wrap(
+                text,
+                TextStyle::Button.resolve(ui.style()),
+                foundation_block_text(),
+            )
+            .size()
+            .x
+            + ui.spacing().button_padding.x * 2.0
+    };
+    let zoom_label = format!("Zoom: {:.0}%", preview.zoom * 100.0);
+    let action_width =
+        menu_width("View") + menu_width(&zoom_label) + 4.0 * BUTTON_HEIGHT + 3.0 * 4.0 + 1.0 + 24.0;
+
+    // Include the section's 8 px inset on both sides and retain an 8 px gap
+    // between the selector and action groups at the point where they wrap.
+    Some(selection_width + action_width + 24.0)
 }
 
 fn draw_bitmap_selection_controls(
@@ -219,13 +334,7 @@ fn draw_bitmap_selection_controls(
         }
         if data.image_count > 1 && data.mip_count > 1 {
             ui.add_space(16.0);
-            let (separator_rect, _) =
-                ui.allocate_exact_size(Vec2::new(1.0, BUTTON_HEIGHT), Sense::hover());
-            ui.painter().vline(
-                separator_rect.center().x,
-                separator_rect.y_range(),
-                Stroke::new(1.0, foundation_group_edge()),
-            );
+            draw_bitmap_header_separator(ui);
             ui.add_space(16.0);
         }
         if data.mip_count > 1 {
@@ -247,6 +356,15 @@ fn draw_bitmap_selection_controls(
             }
         }
     });
+}
+
+fn draw_bitmap_header_separator(ui: &mut Ui) {
+    let (separator_rect, _) = ui.allocate_exact_size(Vec2::new(1.0, BUTTON_HEIGHT), Sense::hover());
+    ui.painter().vline(
+        separator_rect.center().x,
+        separator_rect.y_range(),
+        Stroke::new(1.0, foundation_group_edge()),
+    );
 }
 
 fn draw_bitmap_index_control(
@@ -308,86 +426,31 @@ fn draw_bitmap_index_control(
     next
 }
 
-fn bitmap_channel_label(preview: &BitmapPreviewState) -> String {
-    let mut label = String::new();
-    for (shown, channel) in [
-        (preview.show_red, 'R'),
-        (preview.show_green, 'G'),
-        (preview.show_blue, 'B'),
-        (preview.show_alpha, 'A'),
-    ] {
-        if shown {
-            label.push(channel);
-        }
-    }
-    if label.is_empty() {
-        "None".to_owned()
-    } else {
-        label
-    }
-}
-
 fn draw_bitmap_view_menu(ui: &mut Ui, preview: &mut BitmapPreviewState) {
-    let label = format!("View: {}", bitmap_channel_label(preview));
     const VIEW_SETTINGS_WIDTH: f32 = 240.0;
     right_aligned_icon_text_dropdown_button(
         ui,
         ButtonIcon::View,
-        &label,
+        "View",
         VIEW_SETTINGS_WIDTH,
         |ui| {
             ui.set_width(VIEW_SETTINGS_WIDTH);
-            ui.label(RichText::new("Channels").strong().color(text_dark()));
-            let mut changed = false;
-            changed |= bitmap_channel_checkbox(
-                ui,
-                &mut preview.show_red,
-                ButtonIcon::ChannelRed,
-                "Red Channel",
-            );
-            changed |= bitmap_channel_checkbox(
-                ui,
-                &mut preview.show_green,
-                ButtonIcon::ChannelGreen,
-                "Green Channel",
-            );
-            changed |= bitmap_channel_checkbox(
-                ui,
-                &mut preview.show_blue,
-                ButtonIcon::ChannelBlue,
-                "Blue Channel",
-            );
-            changed |= bitmap_channel_checkbox(
-                ui,
-                &mut preview.show_alpha,
-                ButtonIcon::ChannelAlpha,
-                "Alpha Channel",
-            );
-            preview.texture_dirty |= changed;
-            ui.separator();
-            ui.label(
-                RichText::new("Background Color")
-                    .strong()
-                    .color(text_dark()),
-            );
-            let background_dropdown_open = ui
-                .scope(|ui| {
-                    ui.spacing_mut().button_padding.x = BUTTON_TEXT_PADDING_X;
-                    ui.visuals_mut().widgets.inactive.weak_bg_fill =
-                        foundation_visuals().widgets.inactive.weak_bg_fill;
-                    egui::ComboBox::from_id_salt("bitmap_background_color")
-                        .selected_text(preview.bg.label())
-                        .width(VIEW_SETTINGS_WIDTH)
-                        .show_ui(ui, |ui| {
-                            for bg in BitmapPreviewBg::ALL {
-                                ui.selectable_value(&mut preview.bg, bg, bg.label());
-                            }
-                        })
-                })
-                .inner
-                .inner
-                .is_some();
-            ui.separator();
+            ui.scope(|ui| {
+                // The flat-list treatment makes the selected background read
+                // like other menu selections. Keep it local: its transparent
+                // inactive fill would otherwise erase the checkbox boxes in
+                // the Options section below.
+                style_list_menu(ui);
+                ui.label(
+                    RichText::new("Background Color")
+                        .strong()
+                        .color(text_dark()),
+                );
+                for bg in BitmapPreviewBg::ALL {
+                    ui.selectable_value(&mut preview.bg, bg, bg.label());
+                }
+            });
+            context_menu_separator(ui);
             ui.label(RichText::new("Options").strong().color(text_dark()));
             ui.checkbox(&mut preview.show_checkerboard, "Show Checkerboard")
                 .on_hover_text(
@@ -395,33 +458,179 @@ fn draw_bitmap_view_menu(ui: &mut Ui, preview: &mut BitmapPreviewState) {
                 );
             ui.checkbox(&mut preview.show_border, "Show Bitmap Border")
                 .on_hover_text("Draw a two-pixel contrasting outline outside the bitmap edge.");
-            if background_dropdown_open {
-                // ComboBox popups are detached from egui's menu hierarchy.
-                // Keep the final row inside the parent menu's active bounds so
-                // clicking Magenta is not interpreted as an outside click.
-                ui.add_space(BUTTON_HEIGHT + ui.spacing().item_spacing.y);
-            }
         },
     );
 }
 
-fn bitmap_channel_checkbox(ui: &mut Ui, checked: &mut bool, icon: ButtonIcon, label: &str) -> bool {
-    let before = *checked;
-    let row = ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 4.0;
-        let checkbox_response = ui.checkbox(checked, "");
-        let icon_response = ui
-            .add(button_icon_image(ui, icon, text_dark(), BUTTON_ICON_SIZE).sense(Sense::click()));
-        let label_response = ui.add(egui::Label::new(label).sense(Sense::click()));
-        if icon_response.clicked() || label_response.clicked() {
-            *checked = !*checked;
+fn draw_bitmap_channel_toggle(
+    ui: &mut Ui,
+    enabled: bool,
+    icon: ButtonIcon,
+    tooltip: &str,
+) -> BitmapChannelAction {
+    let response = ui
+        .scope(|ui| {
+            if enabled {
+                let (active_fill, active_border) = bitmap_channel_active_colors(icon);
+                let widgets = &mut ui.visuals_mut().widgets;
+                widgets.inactive.weak_bg_fill = active_fill;
+                widgets.hovered.weak_bg_fill = active_fill;
+                widgets.active.weak_bg_fill = active_fill;
+                widgets.inactive.bg_stroke = Stroke::new(1.0, active_border);
+                widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::WHITE);
+                widgets.active.bg_stroke = Stroke::new(1.0, Color32::WHITE);
+            }
+            icon_button(ui, icon, tooltip, true, text_dark())
+        })
+        .inner;
+    if response.clicked() {
+        let modifiers = ui.input(|input| input.modifiers);
+        if modifiers.alt {
+            BitmapChannelAction::Solo
+        } else if modifiers.shift {
+            BitmapChannelAction::Exclude
+        } else {
+            BitmapChannelAction::Toggle
         }
-        checkbox_response
-    });
-    if ui.rect_contains_pointer(row.response.rect) && !row.inner.hovered() {
-        paint_checkbox_row_hover(ui, row.inner.rect, *checked);
+    } else {
+        BitmapChannelAction::None
     }
-    before != *checked
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum BitmapChannelAction {
+    None,
+    Toggle,
+    Solo,
+    Exclude,
+}
+
+fn apply_bitmap_channel_action(
+    preview: &mut BitmapPreviewState,
+    icon: ButtonIcon,
+    action: BitmapChannelAction,
+) {
+    if action == BitmapChannelAction::None {
+        return;
+    }
+    match action {
+        BitmapChannelAction::Solo => {
+            preview.show_red = false;
+            preview.show_green = false;
+            preview.show_blue = false;
+            preview.show_alpha = false;
+        }
+        BitmapChannelAction::Exclude => {
+            preview.show_red = true;
+            preview.show_green = true;
+            preview.show_blue = true;
+            preview.show_alpha = true;
+        }
+        BitmapChannelAction::None | BitmapChannelAction::Toggle => {}
+    }
+    let channel = match icon {
+        ButtonIcon::ChannelRed => &mut preview.show_red,
+        ButtonIcon::ChannelGreen => &mut preview.show_green,
+        ButtonIcon::ChannelBlue => &mut preview.show_blue,
+        ButtonIcon::ChannelAlpha => &mut preview.show_alpha,
+        _ => return,
+    };
+    *channel = match action {
+        BitmapChannelAction::Solo => true,
+        BitmapChannelAction::Exclude => false,
+        BitmapChannelAction::Toggle => !*channel,
+        BitmapChannelAction::None => *channel,
+    };
+}
+
+fn bitmap_channel_active_colors(icon: ButtonIcon) -> (Color32, Color32) {
+    // Use explicit premultiplied values here. `from_rgba_unmultiplied` converts
+    // saturated colors through linear space, which looks much brighter than a
+    // restrained UI fill. These are explicit 40%-opacity channel colors.
+    match icon {
+        ButtonIcon::ChannelRed => (
+            Color32::from_rgba_premultiplied(102, 0, 0, 102),
+            Color32::from_rgb(255, 0, 0),
+        ),
+        ButtonIcon::ChannelGreen => (
+            Color32::from_rgba_premultiplied(0, 102, 0, 102),
+            Color32::from_rgb(0, 255, 0),
+        ),
+        ButtonIcon::ChannelBlue => (
+            Color32::from_rgba_premultiplied(0, 0, 102, 102),
+            Color32::from_rgb(0, 0, 255),
+        ),
+        ButtonIcon::ChannelAlpha if is_dark_mode() => (
+            Color32::from_rgba_premultiplied(102, 102, 102, 102),
+            Color32::WHITE,
+        ),
+        ButtonIcon::ChannelAlpha => (
+            Color32::from_rgba_premultiplied(0, 0, 0, 102),
+            Color32::BLACK,
+        ),
+        _ => (Color32::TRANSPARENT, Color32::TRANSPARENT),
+    }
+}
+
+#[cfg(test)]
+mod bitmap_channel_control_tests {
+    use super::*;
+
+    #[test]
+    fn soloing_a_channel_enables_it_and_disables_the_rest() {
+        let mut preview = BitmapPreviewState::default();
+        apply_bitmap_channel_action(
+            &mut preview,
+            ButtonIcon::ChannelBlue,
+            BitmapChannelAction::Solo,
+        );
+
+        assert!(!preview.show_red);
+        assert!(!preview.show_green);
+        assert!(preview.show_blue);
+        assert!(!preview.show_alpha);
+    }
+
+    #[test]
+    fn excluding_a_channel_disables_it_and_enables_the_rest() {
+        let mut preview = BitmapPreviewState::default();
+        preview.show_red = false;
+        preview.show_green = false;
+        preview.show_blue = false;
+        preview.show_alpha = false;
+        apply_bitmap_channel_action(
+            &mut preview,
+            ButtonIcon::ChannelGreen,
+            BitmapChannelAction::Exclude,
+        );
+
+        assert!(preview.show_red);
+        assert!(!preview.show_green);
+        assert!(preview.show_blue);
+        assert!(preview.show_alpha);
+    }
+
+    #[test]
+    fn active_channel_fills_are_explicitly_forty_percent() {
+        assert_eq!(
+            bitmap_channel_active_colors(ButtonIcon::ChannelRed)
+                .0
+                .to_array(),
+            [102, 0, 0, 102]
+        );
+        assert_eq!(
+            bitmap_channel_active_colors(ButtonIcon::ChannelGreen)
+                .0
+                .to_array(),
+            [0, 102, 0, 102]
+        );
+        assert_eq!(
+            bitmap_channel_active_colors(ButtonIcon::ChannelBlue)
+                .0
+                .to_array(),
+            [0, 0, 102, 102]
+        );
+    }
 }
 
 fn draw_bitmap_camera_menu(ui: &mut Ui, preview: &mut BitmapPreviewState) {

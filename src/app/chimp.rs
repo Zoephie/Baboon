@@ -4011,7 +4011,7 @@ impl Baboon {
                 false
             }
             ChimpDocumentView::Texture => {
-                draw_chimp_texture_preview(ui, document);
+                draw_chimp_texture_preview(ui, document, &mut self.bitmap_preview_view);
                 false
             }
             ChimpDocumentView::Mesh => {
@@ -6264,7 +6264,11 @@ impl Kit {
     }
 }
 
-fn draw_chimp_texture_preview(ui: &mut Ui, document: &mut ChimpDocument) {
+fn draw_chimp_texture_preview(
+    ui: &mut Ui,
+    document: &mut ChimpDocument,
+    view_settings: &mut BitmapPreviewViewSettings,
+) {
     let options: Vec<(usize, String)> = document
         .texture_previews
         .iter()
@@ -6354,7 +6358,9 @@ fn draw_chimp_texture_preview(ui: &mut Ui, document: &mut ChimpDocument) {
         }
     }
 
+    preview.preview.apply_view_settings(*view_settings);
     draw_bitmap_preview_data(ui, &ctx, &texture_key, &mut preview.preview, true, "Layer");
+    *view_settings = preview.preview.view_settings();
 }
 
 #[derive(Clone, Copy)]

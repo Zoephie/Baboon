@@ -2743,7 +2743,9 @@ mod tests {
             display_path: "objects/characters/masterchief/masterchief.biped".to_owned(),
             group_tag: u32::from_be_bytes(*b"bipd"),
             group_name: None,
-            location: TagEntryLocation::LooseFile(root.join("objects/characters/masterchief/masterchief.biped")),
+            location: TagEntryLocation::LooseFile(
+                root.join("objects/characters/masterchief/masterchief.biped"),
+            ),
         }];
         let ancestors = vec!["empty_folder".to_owned()];
 
@@ -2769,19 +2771,33 @@ mod tests {
                         false,
                         &mut status,
                         // Reveal opens the folder, which loads it.
-                        Some(Reveal { key: "unused", remaining: &ancestors }),
+                        Some(Reveal {
+                            key: "unused",
+                            remaining: &ancestors,
+                        }),
                         BrowserSort::default(),
                         true,
                         None,
                     );
                 });
             });
-            assert!(tree.children.iter().any(|node| node.entries_loaded), "the folder was expanded and loaded");
+            assert!(
+                tree.children.iter().any(|node| node.entries_loaded),
+                "the folder was expanded and loaded"
+            );
             group_tree.children.len()
         };
 
-        assert_eq!(expand(true), 0, "handed over, it is rebuilt from the lazy entries (the bug's mechanism)");
-        assert_eq!(expand(false), 1, "not handed over, the full-index tree keeps its groups");
+        assert_eq!(
+            expand(true),
+            0,
+            "handed over, it is rebuilt from the lazy entries (the bug's mechanism)"
+        );
+        assert_eq!(
+            expand(false),
+            1,
+            "not handed over, the full-index tree keeps its groups"
+        );
         let _ = std::fs::remove_dir_all(root);
     }
 

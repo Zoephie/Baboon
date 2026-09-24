@@ -209,7 +209,10 @@ impl ColorTypeChoices {
 }
 
 fn is_multi_color(kind: ColorGraphType) -> bool {
-    matches!(kind, ColorGraphType::TwoColor | ColorGraphType::ThreeColor | ColorGraphType::FourColor)
+    matches!(
+        kind,
+        ColorGraphType::TwoColor | ColorGraphType::ThreeColor | ColorGraphType::FourColor
+    )
 }
 
 fn color_type_label(editor: &TagFunctionEditor, kind: ColorGraphType) -> &'static str {
@@ -244,7 +247,11 @@ fn color_type_combo(
                 if !choices.allows(kind) && kind != current {
                     continue;
                 }
-                if ui.selectable_label(kind == current, color_type_label(editor, kind)).clicked() && kind != current {
+                if ui
+                    .selectable_label(kind == current, color_type_label(editor, kind))
+                    .clicked()
+                    && kind != current
+                {
                     let resample = is_multi_color(current) && is_multi_color(kind);
                     changed |= if resample {
                         remap_editor_color_count(editor, kind)
@@ -272,7 +279,9 @@ fn h2_function_type_combo(ui: &mut Ui, editor: &mut TagFunctionEditor, editable:
         .width(130.0)
         .show_ui(ui, |ui| {
             for kind in FUNCTION_TYPES {
-                if ui.selectable_label(kind == current, function_type_name(kind)).clicked()
+                if ui
+                    .selectable_label(kind == current, function_type_name(kind))
+                    .clicked()
                     && kind != current
                     && editor.set_function_type(kind).is_ok()
                 {
@@ -465,10 +474,7 @@ fn draw_foundation_right_rail(
                             color.b() as f32 / 255.0,
                             1.0,
                         )
-                        .with_function_draft_color(
-                            FunctionDraftColorTarget::Logical(index),
-                            alpha,
-                        ),
+                        .with_function_draft_color(FunctionDraftColorTarget::Logical(index), alpha),
                     );
                 }
             }
@@ -694,8 +700,14 @@ fn draw_curve_panel(
             ui.label(
                 RichText::new(format!(
                     "range {:.3} – {:.3}",
-                    editor.function().as_blob().map_or(0.0, BlobFunction::exclusion_min),
-                    editor.function().as_blob().map_or(0.0, BlobFunction::exclusion_max)
+                    editor
+                        .function()
+                        .as_blob()
+                        .map_or(0.0, BlobFunction::exclusion_min),
+                    editor
+                        .function()
+                        .as_blob()
+                        .map_or(0.0, BlobFunction::exclusion_max)
                 ))
                 .color(subtle_dark())
                 .small(),
@@ -730,7 +742,8 @@ fn draw_periodic_panel(ui: &mut Ui, editor: &mut TagFunctionEditor, editable: bo
                 .color(text_dark())
                 .strong(),
             );
-            let mut slot_changed = periodic_function_combo(column, slot, &mut params, names, editable);
+            let mut slot_changed =
+                periodic_function_combo(column, slot, &mut params, names, editable);
             slot_changed |= labeled_drag(column, "Frequency", &mut params.frequency, editable);
             slot_changed |= labeled_drag(column, "Max", &mut params.amplitude_max, editable);
             slot_changed |= labeled_drag(column, "Phase", &mut params.phase, editable);
@@ -751,10 +764,7 @@ fn periodic_function_combo(
     editable: bool,
 ) -> bool {
     let current = params.function_index as usize;
-    let label = names
-        .get(current)
-        .copied()
-        .unwrap_or("unknown");
+    let label = names.get(current).copied().unwrap_or("unknown");
     let mut changed = false;
     egui::ComboBox::from_id_salt(("periodic_function", slot))
         .selected_text(label)
@@ -820,7 +830,8 @@ fn draw_transition_panel(ui: &mut Ui, editor: &mut TagFunctionEditor, editable: 
                 .color(text_dark())
                 .strong(),
             );
-            let mut slot_changed = transition_function_combo(column, slot, &mut params, names, editable);
+            let mut slot_changed =
+                transition_function_combo(column, slot, &mut params, names, editable);
             slot_changed |= labeled_drag(column, "Max", &mut params.amplitude_max, editable);
             slot_changed |= labeled_drag(column, "Min", &mut params.amplitude_min, editable);
             if slot_changed && editor.set_transition_params(slot, params).is_ok() {
@@ -839,10 +850,7 @@ fn transition_function_combo(
     editable: bool,
 ) -> bool {
     let current = params.function_index as usize;
-    let label = names
-        .get(current)
-        .copied()
-        .unwrap_or("unknown");
+    let label = names.get(current).copied().unwrap_or("unknown");
     let mut changed = false;
     egui::ComboBox::from_id_salt(("transition_function", slot))
         .selected_text(label)

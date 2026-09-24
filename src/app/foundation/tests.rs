@@ -219,7 +219,6 @@ mod tests {
         assert!(is_internal_schema_marker_name("whore function"));
     }
 
-
     #[test]
     fn tag_reference_picker_paths_must_be_under_tags_root() {
         let tags_root = PathBuf::from("tags");
@@ -273,14 +272,9 @@ mod tests {
     #[test]
     fn bitmap_hover_synthesizes_an_unvisited_loose_entry() {
         let root = PathBuf::from("tags");
-        let resolved = bitmap_reference_hover_entry(
-            None,
-            Some(&root),
-            None,
-            r"ui\hud\scope.bitmap",
-            None,
-        )
-        .unwrap();
+        let resolved =
+            bitmap_reference_hover_entry(None, Some(&root), None, r"ui\hud\scope.bitmap", None)
+                .unwrap();
 
         assert_eq!(resolved.display_path, "ui/hud/scope.bitmap");
         assert!(matches!(
