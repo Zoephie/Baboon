@@ -151,8 +151,9 @@ pub(in crate::app) fn draw_foundation_value_row(
     );
 }
 
-/// A color value row: channel readouts plus a clickable swatch that opens the
-/// color picker. ARGB rows show all four components in a/r/g/b order.
+/// A color value row: one editable cell per channel plus a clickable swatch
+/// that opens the color picker. ARGB rows show all four components in a/r/g/b
+/// order.
 
 pub(in crate::app) fn draw_foundation_color_row(
     ui: &mut Ui,
@@ -188,11 +189,16 @@ pub(in crate::app) fn draw_foundation_color_row(
         }
         _ => return,
     };
+    // Same order the color parser reads: "a, r, g, b" / "r, g, b".
     let channels: &[(&str, f32)] = if argb {
         &[("a", a), ("r", r), ("g", g), ("b", b)]
     } else {
         &[("r", r), ("g", g), ("b", b)]
     };
+    let parts = channels
+        .iter()
+        .map(|(label, channel)| ((*label).to_owned(), format_pc_float(*channel)))
+        .collect::<Vec<_>>();
     let swatch = Color32::from_rgb(
         float_channel_to_u8(r),
         float_channel_to_u8(g),
@@ -203,10 +209,7 @@ pub(in crate::app) fn draw_foundation_color_row(
     ui.horizontal(|ui| {
         ui.add_space(depth as f32 * 12.0);
         foundation_label_cell(ui, &meta.label, meta.help.as_deref());
-        for (label, channel) in channels {
-            ui.label(RichText::new(*label).color(subtle_dark()).small());
-            foundation_input_cell(ui, &format_pc_float(*channel), 76.0);
-        }
+        draw_foundation_component_cells(ui, &parts, 76.0, path, editable, edit);
 
         let (rect, response) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::click());
         ui.painter().rect_filled(rect, 2.0, swatch);
@@ -315,59 +318,74 @@ pub(in crate::app) fn draw_foundation_component_edit_row(
     edit: &mut FieldEditContext<'_>,
 ) {
     let indent = depth as f32 * 12.0;
-    let buffer_key = format!("{}|{}", edit.tag_key, path);
-    let mut values = Vec::with_capacity(parts.len());
-    let mut responses = Vec::with_capacity(parts.len());
-    let ids = parts
-        .iter()
-        .map(|(label, _)| edit.widget_id(("component", &buffer_key, label)))
-        .collect::<Vec<_>>();
-    for (label, value) in parts {
-        let key = format!("{buffer_key}|component|{label}");
-        let buffer = edit.buffers.take(&key, value);
-        values.push((label.clone(), value.clone(), key, buffer));
-    }
-
     ui.horizontal(|ui| {
         ui.add_space(indent);
         foundation_label_cell(ui, &meta.label, meta.help.as_deref());
         let editable = edit.editable && !meta.read_only;
-        for (index, (label, _, _, draft)) in values.iter_mut().enumerate() {
-            if !label.is_empty() {
-                ui.label(RichText::new(label.as_str()).color(subtle_dark()).small());
-            }
-            if editable {
-                let response = foundation_text_edit_cell(ui, &mut draft.text, 92.0, ids[index]);
-                draft.note_response(&response);
-                responses.push(response);
-            } else {
-                foundation_input_cell(ui, &draft.text, 92.0);
-            }
-        }
-        if editable {
-            let changed = values.iter().any(|(_, _, _, draft)| draft.changed);
-            let committed = responses
-                .iter()
-                .zip(values.iter())
-                .any(|(response, (_, _, _, draft))| draft.should_commit(ui, response));
-            if committed && changed {
-                edit.pending.push(PendingFieldEdit {
-                    path: path.to_owned(),
-                    input: values
-                        .iter()
-                        .map(|(_, _, _, draft)| draft.text.trim())
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                });
-            }
-        }
+        draw_foundation_component_cells(ui, parts, 92.0, path, editable, edit);
         if !suffix.is_empty() {
             ui.label(RichText::new(suffix).color(subtle_dark()).small());
         }
         draw_field_help(ui, meta);
     });
+}
 
-    for (_, _, key, draft) in values {
+/// One labelled cell per component, inside the caller's row layout. When
+/// `editable`, each cell is a text box, and once any of them commits a change
+/// the whole value is queued as one edit: every component's text joined with
+/// `", "`, in `parts` order — the order the field's parser reads them in.
+fn draw_foundation_component_cells(
+    ui: &mut Ui,
+    parts: &[(String, String)],
+    width: f32,
+    path: &str,
+    editable: bool,
+    edit: &mut FieldEditContext<'_>,
+) {
+    let buffer_key = format!("{}|{}", edit.tag_key, path);
+    let ids = parts
+        .iter()
+        .map(|(label, _)| edit.widget_id(("component", &buffer_key, label)))
+        .collect::<Vec<_>>();
+    let mut drafts = Vec::with_capacity(parts.len());
+    for (label, value) in parts {
+        let key = format!("{buffer_key}|component|{label}");
+        let draft = edit.buffers.take(&key, value);
+        drafts.push((key, draft));
+    }
+
+    let mut responses = Vec::with_capacity(parts.len());
+    for (index, ((label, _), (_, draft))) in parts.iter().zip(drafts.iter_mut()).enumerate() {
+        if !label.is_empty() {
+            ui.label(RichText::new(label.as_str()).color(subtle_dark()).small());
+        }
+        if editable {
+            let response = foundation_text_edit_cell(ui, &mut draft.text, width, ids[index]);
+            draft.note_response(&response);
+            responses.push(response);
+        } else {
+            foundation_input_cell(ui, &draft.text, width);
+        }
+    }
+    if editable {
+        let changed = drafts.iter().any(|(_, draft)| draft.changed);
+        let committed = responses
+            .iter()
+            .zip(drafts.iter())
+            .any(|(response, (_, draft))| draft.should_commit(ui, response));
+        if committed && changed {
+            edit.pending.push(PendingFieldEdit {
+                path: path.to_owned(),
+                input: drafts
+                    .iter()
+                    .map(|(_, draft)| draft.text.trim())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            });
+        }
+    }
+
+    for (key, draft) in drafts {
         edit.buffers.put(key, draft);
     }
 }
