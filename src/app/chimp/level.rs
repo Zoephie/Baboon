@@ -67,6 +67,7 @@ pub(in crate::app) struct LevelSkips {
 }
 
 impl LevelSkips {
+    #[cfg(test)]
     pub(in crate::app) fn total(&self) -> usize {
         self.inherited_mesh + self.unresolved_mesh + self.unreadable_instances
     }

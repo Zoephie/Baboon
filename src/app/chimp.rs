@@ -9,20 +9,20 @@ use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 mod level;
-pub(in crate::app) use level::{LevelScene, read_cell_into, read_cells};
+pub(in crate::app) use level::read_cells;
 mod level_blend;
 mod level_export;
 mod level_segment;
 mod mesh_weld;
 use level_export::{ExportStage, MeshDetail};
-pub(in crate::app) use level_export::{scene_to_usd, write_blend_export, write_segmented_usd};
+pub(in crate::app) use level_export::{write_blend_export, write_segmented_usd};
 use level_segment::SegmentBudget;
 use std::io::{Cursor, Write};
 
 use blam_tags::iostore::asset::texture2d::{Texture2dSurfaces, decode_texture2d_surfaces};
 use blam_tags::iostore::container::writer::{
-    PackageOverride, PackageReplacement, overwrite_package_in_place_with,
-    overwrite_packages_in_place_with, write_package_mod_container,
+    PackageOverride, PackageReplacement, overwrite_packages_in_place_with,
+    write_package_mod_container,
 };
 use blam_tags::iostore::object::archive::ExportContext;
 use blam_tags::iostore::object::edit::{
@@ -629,8 +629,6 @@ pub(super) struct ChimpState {
     document_tree: Option<egui_tiles::Tree<String>>,
     pub(super) documents: HashMap<String, ChimpDocument>,
     pub(super) loading_packages: HashSet<String>,
-    pending_overwrite: Option<String>,
-    pending_overwrite_skip_future: bool,
     save_dialog: Option<ChimpSaveDialog>,
 }
 
@@ -4846,274 +4844,6 @@ impl Baboon {
         self.begin_chimp_mount(kit_index, ctx);
     }
 
-    fn overwrite_chimp_package(&mut self, kit_index: usize, package: &str, ctx: egui::Context) {
-        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
-            return;
-        };
-        let world = world.clone();
-        let Some(document) = self.kits[kit_index].chimp.documents.get(package) else {
-            return;
-        };
-        let provider = document.provider.clone();
-        let (bytes, store) = match rebuild_chimp_document(&world, document) {
-            Ok(rebuilt) => rebuilt,
-            Err(error) => {
-                self.status = error;
-                return;
-            }
-        };
-        let archive = &world.archives()[provider.container];
-        let path = world.containers()[provider.container].path.clone();
-        let source_chunk = match archive
-            .chunk_index_for(&provider.entry_path)
-            .and_then(|index| archive.chunk_id(index))
-        {
-            Ok(chunk) => chunk,
-            Err(error) => {
-                self.status = format!("Could not resolve {package} in {}: {error}", path.display());
-                return;
-            }
-        };
-        if let Err(error) =
-            overwrite_package_in_place_with(archive, &path, &provider.entry_path, &bytes, &store)
-        {
-            self.status = format!("Could not overwrite {package}: {error}");
-            return;
-        }
-        let verified = blam_tags::iostore::IoStoreArchive::open(&path)
-            .and_then(|archive| {
-                let index = archive.find_chunk(&source_chunk).ok_or(
-                    blam_tags::iostore::IoStoreError::Package(
-                        "saved package chunk is absent after reopening",
-                    ),
-                )?;
-                archive.read_chunk(index)
-            })
-            .is_ok_and(|saved| saved == bytes);
-        if !verified {
-            self.status = format!(
-                "{package} was written, but validation failed; the package remains marked modified"
-            );
-            return;
-        }
-        if let Err(error) = self.accept_chimp_package_save(kit_index, package, bytes) {
-            self.status = format!("Saved {package}, but could not clear Chimp recovery: {error}");
-            return;
-        }
-        self.status = format!("Saved {package} into {}", path.display());
-        drop(world);
-        self.begin_chimp_mount(kit_index, ctx);
-    }
-
-    fn save_chimp_package_to_folder(
-        &mut self,
-        kit_index: usize,
-        package: &str,
-        ctx: egui::Context,
-    ) {
-        let stem = chimp_package_container_stem(package);
-        let Some(chosen) = rfd::FileDialog::new()
-            .set_title("Save Chimp package container")
-            .add_filter("Unreal IoStore container", &["utoc"])
-            .set_file_name(format!("{stem}.utoc"))
-            .save_file()
-        else {
-            return;
-        };
-        let output = chosen.with_extension("utoc");
-        let folder = output.parent().unwrap_or(Path::new(".")).to_path_buf();
-        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
-            return;
-        };
-        let world = world.clone();
-        let Some(document) = self.kits[kit_index].chimp.documents.get(package) else {
-            return;
-        };
-        let provider = document.provider.clone();
-        let (bytes, store) = match rebuild_chimp_document(&world, document) {
-            Ok(rebuilt) => rebuilt,
-            Err(error) => {
-                self.status = error;
-                return;
-            }
-        };
-        if let Err(error) = fs::create_dir_all(&folder) {
-            self.status = format!("Could not create {}: {error}", folder.display());
-            return;
-        }
-        let temporary = folder.join(format!("{stem}.building.utoc"));
-        let source_archive = &world.archives()[provider.container];
-        let source_chunk = match source_archive
-            .chunk_index_for(&provider.entry_path)
-            .and_then(|index| source_archive.chunk_id(index))
-        {
-            Ok(chunk) => chunk,
-            Err(error) => {
-                self.status = format!("Could not resolve {package}: {error}");
-                return;
-            }
-        };
-        let override_ = PackageOverride {
-            archive: source_archive,
-            uasset_path: &provider.entry_path,
-            bytes: bytes.clone(),
-            store,
-        };
-        if let Err(error) = write_package_mod_container(&[override_], &temporary) {
-            remove_chimp_triplet(&temporary);
-            self.status = format!("Could not build {}: {error}", output.display());
-            return;
-        }
-        let validated = blam_tags::iostore::IoStoreArchive::open(&temporary)
-            .and_then(|archive| {
-                let index = archive.find_chunk(&source_chunk).ok_or(
-                    blam_tags::iostore::IoStoreError::Package(
-                        "saved package chunk is absent from the new container",
-                    ),
-                )?;
-                archive.read_chunk(index)
-            })
-            .is_ok_and(|saved| saved == bytes);
-        if !validated {
-            remove_chimp_triplet(&temporary);
-            self.status = format!("Could not validate the rebuilt package container for {package}");
-            return;
-        }
-
-        drop(world);
-        let mut lease =
-            match self.acquire_container_write_lease(&output, ContainerWriteMode::Replace) {
-                Ok(lease) => lease,
-                Err(failure) => {
-                    remove_chimp_triplet(&temporary);
-                    self.status = failure.to_string();
-                    return;
-                }
-            };
-        if let Err(failure) = self.unmap_leased_containers(&mut lease) {
-            remove_chimp_triplet(&temporary);
-            self.status = failure.to_string();
-            self.release_container_write_lease(lease, ContainerWriteOutcome::Unchanged, &ctx);
-            return;
-        }
-        let replaced = replace_chimp_triplet(&temporary, &output);
-        let report = self.release_container_write_lease(
-            lease,
-            if replaced.is_ok() {
-                ContainerWriteOutcome::Committed
-            } else {
-                ContainerWriteOutcome::Unchanged
-            },
-            &ctx,
-        );
-        let reopen_failures = report.reopen_failures;
-        match replaced {
-            Ok(()) => {
-                if let Err(error) = self.accept_chimp_package_save(kit_index, package, bytes) {
-                    self.status =
-                        format!("Saved {package}, but could not clear Chimp recovery: {error}");
-                    return;
-                }
-                self.status = format!("Saved {package} as {}", output.display());
-                if !reopen_failures.is_empty() {
-                    self.status.push_str(&format!(
-                        "; {} tag mount(s) could not be reopened",
-                        reopen_failures.len()
-                    ));
-                }
-            }
-            Err(error) => {
-                self.status = format!("Could not install {}: {error}", output.display());
-            }
-        }
-        // Remounted by the lease, which knows what it idled.
-        let _ = ctx;
-    }
-
-    fn accept_chimp_package_save(
-        &mut self,
-        kit_index: usize,
-        package: &str,
-        bytes: Vec<u8>,
-    ) -> Result<(), String> {
-        if let Some(document) = self.kits[kit_index].chimp.documents.get_mut(package) {
-            if let Ok(payloads) = read_payloads(&document.header, &bytes) {
-                document.payloads = payloads;
-            }
-            document.original = bytes;
-        }
-        self.clear_chimp_recovery_packages(kit_index, &[package.to_owned()])?;
-        if let Some(document) = self.kits[kit_index].chimp.documents.get_mut(package) {
-            document.dirty = false;
-        }
-        Ok(())
-    }
-
-    pub(super) fn draw_chimp_overwrite_confirm_window(&mut self, ctx: &egui::Context) {
-        let Some(kit_index) = self
-            .kits
-            .iter()
-            .position(|kit| kit.chimp.pending_overwrite.is_some())
-        else {
-            return;
-        };
-        let package = self.kits[kit_index]
-            .chimp
-            .pending_overwrite
-            .clone()
-            .expect("checked above");
-        let source = self.kits[kit_index]
-            .chimp
-            .documents
-            .get(&package)
-            .and_then(|document| match &self.kits[kit_index].chimp.mount {
-                ChimpMount::Ready(world) => world
-                    .containers()
-                    .get(document.provider.container)
-                    .map(|container| container.path.clone()),
-                _ => None,
-            });
-        let mut confirm = false;
-        let mut cancel = false;
-        egui::Window::new("Overwrite Unreal package?")
-            .id(egui::Id::new("chimp_overwrite_confirm"))
-            .collapsible(false)
-            .resizable(false)
-            .anchor(egui::Align2::CENTER_CENTER, Vec2::ZERO)
-            .show(ctx, |ui| {
-                ui.colored_label(
-                    Color32::from_rgb(190, 72, 56),
-                    "This modifies the selected game container in place.",
-                );
-                ui.label(RichText::new(&package).strong());
-                if let Some(path) = &source {
-                    ui.label(path.display().to_string());
-                }
-                ui.label("Baboon appends the rebuilt chunks and atomically updates the UTOC.");
-                ui.checkbox(
-                    &mut self.kits[kit_index].chimp.pending_overwrite_skip_future,
-                    "Don't ask again (changeable in Settings)",
-                );
-                ui.horizontal(|ui| {
-                    if ui.button("Cancel").clicked() {
-                        cancel = true;
-                    }
-                    if ui.button("Overwrite package").clicked() {
-                        confirm = true;
-                    }
-                });
-            });
-        if cancel {
-            self.kits[kit_index].chimp.pending_overwrite = None;
-        } else if confirm {
-            if self.kits[kit_index].chimp.pending_overwrite_skip_future {
-                self.confirm_container_overwrite = false;
-            }
-            self.kits[kit_index].chimp.pending_overwrite = None;
-            self.overwrite_chimp_package(kit_index, &package, ctx.clone());
-        }
-    }
-
     fn extract_chimp_package(&mut self, kit_index: usize, package: &str) {
         let Some(document) = self.kits[kit_index].chimp.documents.get(package) else {
             return;
@@ -6331,30 +6061,6 @@ fn chimp_existing_triplet(path: &Path) -> Vec<String> {
                 .to_owned()
         })
         .collect()
-}
-
-fn chimp_package_container_stem(package: &str) -> String {
-    let leaf = package
-        .rsplit('/')
-        .find(|segment| !segment.is_empty())
-        .unwrap_or("Chimp");
-    let mut stem = leaf
-        .chars()
-        .map(|character| {
-            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_') {
-                character
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>();
-    if stem.is_empty() {
-        stem.push_str("Chimp");
-    }
-    if !stem.ends_with("_P") {
-        stem.push_str("_P");
-    }
-    stem
 }
 
 fn remove_chimp_triplet(path: &Path) {

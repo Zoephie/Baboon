@@ -116,6 +116,10 @@ fn number(value: f64) -> String {
     format!("{value}")
 }
 
+// The single-file USD writer, superseded by the segmented and Blender
+// exports. Nothing in the app calls it; its tests still use it as a reference,
+// so it is compiled for them only.
+#[cfg(test)]
 /// What an export produced, and what it could not.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(in crate::app) struct LevelExportReport {
@@ -166,6 +170,10 @@ struct Prototype {
     material: String,
 }
 
+// The single-file USD writer, superseded by the segmented and Blender
+// exports. Nothing in the app calls it; its tests still use it as a reference,
+// so it is compiled for them only.
+#[cfg(test)]
 /// Errors are deliberately not checked per call. A `BufWriter` that has failed
 /// once keeps failing, so a single flush at the end catches a disk filling up
 /// mid-write; checking eight million individual `write!`s would not learn
@@ -287,6 +295,10 @@ fn write_mesh_body(usd: &mut impl std::io::Write, mesh: &StaticMesh, material_pa
     let _ = writeln!(usd, "            }}");
 }
 
+// The single-file USD writer, superseded by the segmented and Blender
+// exports. Nothing in the app calls it; its tests still use it as a reference,
+// so it is compiled for them only.
+#[cfg(test)]
 fn write_instance(
     usd: &mut impl std::io::Write,
     index: usize,
@@ -696,6 +708,10 @@ fn write_segment_readme(
     readme.flush()
 }
 
+// The single-file USD writer, superseded by the segmented and Blender
+// exports. Nothing in the app calls it; its tests still use it as a reference,
+// so it is compiled for them only.
+#[cfg(test)]
 /// Export a level scene to a `.usda` file without ever holding it in memory.
 ///
 /// A whole level is 8.5 GiB of text over 745 meshes; building that as a `String`
@@ -807,6 +823,10 @@ fn write_stage_header(usd: &mut impl std::io::Write) {
     let _ = writeln!(usd, "{{");
 }
 
+// The single-file USD writer, superseded by the segmented and Blender
+// exports. Nothing in the app calls it; its tests still use it as a reference,
+// so it is compiled for them only.
+#[cfg(test)]
 fn write_materials(usd: &mut impl std::io::Write, materials: &[String]) {
     let _ = writeln!(usd, "    def Scope \"Materials\"");
     let _ = writeln!(usd, "    {{");
@@ -841,6 +861,10 @@ fn write_prototypes_open(usd: &mut impl std::io::Write) {
     let _ = writeln!(usd, "        uniform token visibility = \"invisible\"");
 }
 
+// The single-file USD writer, superseded by the segmented and Blender
+// exports. Nothing in the app calls it; its tests still use it as a reference,
+// so it is compiled for them only.
+#[cfg(test)]
 /// Convert a level scene into a USD (`.usda`) document held in memory.
 ///
 /// Only safe for a slice of a level — see [`write_scene_usd`] for anything whose

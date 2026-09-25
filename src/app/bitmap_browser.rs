@@ -279,10 +279,6 @@ impl ThumbnailCache {
         }
     }
 
-    pub(in crate::app) fn clear(&mut self) {
-        self.entries.clear();
-    }
-
     /// Keep what is still right after the kit's entries changed: a thumbnail
     /// whose tag is still listed and whose file has not been modified since it
     /// was decoded. The libraries used to clear everything on any generation

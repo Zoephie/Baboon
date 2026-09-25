@@ -51,6 +51,7 @@ pub(in crate::app) struct WeldReport {
 }
 
 impl WeldReport {
+    #[cfg(test)]
     pub(in crate::app) fn merged(&self) -> usize {
         self.before.saturating_sub(self.after)
     }
