@@ -214,6 +214,7 @@ fn every_field_of_a_kit_is_accounted_for() {
         rmdf_cache: _,
         rmop_cache: _,
         h2_templates: _,
+        index_jobs: _,
         modified_signature: _,
         generation: _,
         field_index: _,

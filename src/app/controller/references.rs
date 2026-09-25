@@ -10,14 +10,18 @@ impl Baboon {
         stamp: KitStamp,
         index: ReverseDependencyIndex,
     ) -> bool {
-        self.building_reverse_dependencies = false;
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
+        let Some(kit_index) = self.resolve_kit(stamp.kit) else {
             return true;
         };
-        self.reference_index_progress = None;
-        let paired_entry_index_build = self.building_reference_for_entry_index;
-        self.building_reference_for_entry_index = false;
+        // The build is over whether or not its result is still wanted.
+        self.kits[kit_index].index_jobs.reference_progress = None;
+        self.kits[kit_index].index_jobs.building_references = false;
+        let paired_entry_index_build =
+            std::mem::take(&mut self.kits[kit_index].index_jobs.references_for_entry_index);
         self.show_entry_index_wait_notice = false;
+        if self.resolve_stamp(stamp).is_none() {
+            return true;
+        }
         if let Some(source) = self.kits[kit_index].source.as_mut() {
             let n = index.len();
             if let (Some(game), TagSource::LooseFolder { root, .. }) =
@@ -53,10 +57,13 @@ impl Baboon {
     ) -> bool {
         // Drives the global progress bar only; the stamp is checked purely so
         // a closed or reloaded kit's progress stops updating it.
-        if self.resolve_stamp(stamp).is_none() || !self.building_reverse_dependencies {
+        let Some(kit_index) = self.resolve_stamp(stamp) else {
+            return true;
+        };
+        if !self.kits[kit_index].index_jobs.building_references {
             return true;
         }
-        if let Some(progress) = self.reference_index_progress.as_mut() {
+        if let Some(progress) = self.kits[kit_index].index_jobs.reference_progress.as_mut() {
             progress.processed = processed;
             progress.total = total;
         }

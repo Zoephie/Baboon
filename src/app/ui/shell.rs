@@ -347,7 +347,7 @@ impl Baboon {
                             .add_enabled(
                                 can_refresh_browser
                                     && !self.kits[self.active].scanning_entries
-                                    && !self.refreshing_entry_index,
+                                    && !self.kits[self.active].index_jobs.refreshing,
                                 egui::Button::new("Refresh Tag Browser"),
                             )
                             .clicked()
@@ -486,7 +486,7 @@ impl Baboon {
                             });
                             let has_index = self.source()
                                 .is_some_and(|source| source.reverse_dependencies.is_some());
-                            let label = if self.building_reverse_dependencies {
+                            let label = if self.kits[self.active].index_jobs.building_references {
                                 "Building Reference Index…"
                             } else if has_index {
                                 "Rebuild Reference Index"
@@ -495,7 +495,7 @@ impl Baboon {
                             };
                             if ui
                                 .add_enabled(
-                                    indexable && !self.building_reverse_dependencies,
+                                    indexable && !self.kits[self.active].index_jobs.building_references,
                                     egui::Button::new(label),
                                 )
                                 .clicked()
@@ -775,7 +775,7 @@ impl Baboon {
                     ui.label(RichText::new("Status").strong());
                     ui.separator();
                     if self.kits[self.active].scanning_entries {
-                        let progress = self.entry_index_progress.as_ref();
+                        let progress = self.kits[self.active].index_jobs.entry_progress.as_ref();
                         let label = progress
                             .map(|progress| progress.label.as_str())
                             .unwrap_or("Indexing tags...");
@@ -796,8 +796,8 @@ impl Baboon {
                             };
                             draw_index_progress_bar(ui, 260.0, Some(fraction), &text);
                         }
-                    } else if self.building_reverse_dependencies {
-                        let progress = self.reference_index_progress.as_ref();
+                    } else if self.kits[self.active].index_jobs.building_references {
+                        let progress = self.kits[self.active].index_jobs.reference_progress.as_ref();
                         let label = progress
                             .map(|progress| progress.label.as_str())
                             .unwrap_or("Building reference index...");
@@ -926,7 +926,7 @@ impl Baboon {
             });
 
         if self.show_entry_index_wait_notice
-            && (self.kits[self.active].scanning_entries || self.building_reference_for_entry_index)
+            && (self.kits[self.active].scanning_entries || self.kits[self.active].index_jobs.references_for_entry_index)
         {
             let mut open = self.show_entry_index_wait_notice;
             let mut hide_notice = false;
@@ -940,7 +940,7 @@ impl Baboon {
                     ui.label("Please wait until indexing is completed for best compatibility.");
                     ui.add_space(8.0);
                     if self.kits[self.active].scanning_entries {
-                        let progress = self.entry_index_progress.as_ref();
+                        let progress = self.kits[self.active].index_jobs.entry_progress.as_ref();
                         let label = progress
                             .map(|progress| progress.label.as_str())
                             .unwrap_or("Indexing tags...");
@@ -961,9 +961,9 @@ impl Baboon {
                             };
                             draw_index_progress_bar(ui, 330.0, Some(fraction), &text);
                         }
-                    } else if self.building_reference_for_entry_index {
+                    } else if self.kits[self.active].index_jobs.references_for_entry_index {
                         ui.label(RichText::new("Building reference index...").strong());
-                        if let Some(progress) = self.reference_index_progress.as_ref() {
+                        if let Some(progress) = self.kits[self.active].index_jobs.reference_progress.as_ref() {
                             let fraction = if progress.total == 0 {
                                 0.0
                             } else {

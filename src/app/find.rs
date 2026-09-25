@@ -533,7 +533,9 @@ impl Baboon {
             }
             self.find.searching = true;
             self.find.progress = self
-                .entry_index_progress
+                .kits[self.active]
+                .index_jobs
+                .entry_progress
                 .as_ref()
                 .map(|progress| (progress.processed, progress.total));
             self.find.occurrences.clear();

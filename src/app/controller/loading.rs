@@ -88,11 +88,9 @@ impl Baboon {
                 self.begin_chimp_mount(installed, ctx.clone());
             }
         }
-        self.refreshing_entry_index = false;
-        self.building_reverse_dependencies = false;
-        self.building_reference_for_entry_index = false;
-        self.reference_index_progress = None;
-        self.next_entry_index_refresh_at = 0.0;
+        // A fresh source for this kit: none of its old index work applies.
+        // Other kits' jobs are theirs, and are left running.
+        self.kits[installed].index_jobs = IndexJobs::default();
         let loose_folder_source = self.source().is_some_and(|source| {
             source.game.is_some() && matches!(source.source, TagSource::LooseFolder { .. })
         });
@@ -106,7 +104,7 @@ impl Baboon {
                 self.begin_scan_all_entries(ctx.clone());
             }
         } else {
-            self.schedule_next_entry_index_refresh(ctx);
+            self.schedule_next_entry_index_refresh(installed, ctx);
         }
         self.finish_pending_session_restore(ctx.clone());
         // This load made its own kit active. If a session restore is still in
@@ -142,7 +140,7 @@ impl Baboon {
             return true;
         };
         self.kits[kit_index].scanning_entries = false;
-        self.entry_index_progress = None;
+        self.kits[kit_index].index_jobs.entry_progress = None;
         match result {
             Ok(scanned) => {
                 let mut build_reference_index = false;
@@ -183,7 +181,7 @@ impl Baboon {
                         });
                     }
                 }
-                self.schedule_next_entry_index_refresh(ctx);
+                self.schedule_next_entry_index_refresh(kit_index, ctx);
                 if build_reference_index {
                     self.begin_build_reverse_dependencies_for_entry_index(ctx.clone());
                 } else {
@@ -213,7 +211,7 @@ impl Baboon {
         if !self.kits[kit_index].scanning_entries {
             return true;
         }
-        if let Some(progress) = self.entry_index_progress.as_mut() {
+        if let Some(progress) = self.kits[kit_index].index_jobs.entry_progress.as_mut() {
             progress.processed = processed;
             progress.total = total;
             progress.matched = matched;
@@ -229,11 +227,14 @@ impl Baboon {
         result: Result<EntryIndexRefresh, String>,
         ctx: &egui::Context,
     ) -> bool {
-        self.refreshing_entry_index = false;
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
+        let Some(kit_index) = self.resolve_kit(stamp.kit) else {
             return true;
         };
-        self.schedule_next_entry_index_refresh(ctx);
+        self.kits[kit_index].index_jobs.refreshing = false;
+        if self.resolve_stamp(stamp).is_none() {
+            return true;
+        }
+        self.schedule_next_entry_index_refresh(kit_index, ctx);
         match result {
             Ok(refresh) if refresh.changed => {
                 self.apply_entry_index_refresh(kit_index, refresh, ctx.clone())
@@ -353,6 +354,42 @@ mod scan_generation_tests {
 
         std::fs::remove_dir_all(&root).unwrap();
         assert_ne!(app.kits[0].generation, before);
+    }
+
+    /// Loading a source into one kit leaves another kit's index work alone.
+    /// The flags were app-wide, so any kit finishing a load cleared another
+    /// kit's running reference build (and its progress bar), which let a
+    /// second build start over it.
+    #[test]
+    fn loading_one_kit_leaves_another_kits_index_build_running() {
+        let mut app = Baboon::for_test();
+        app.kits[0].index_jobs.building_references = true;
+        let second = KitId(app.kits[0].id.0 + 1);
+        app.kits.push(Kit::empty(second, TagNameIndex::default()));
+
+        app.handle_source_loaded(
+            second,
+            Ok(LoadedSourceData {
+                label: "second".to_owned(),
+                source: TagSource::SingleFile {
+                    path: PathBuf::from("second.model"),
+                },
+                names: TagNameIndex::default(),
+                game: None,
+                entries: Vec::new(),
+                tree: TagTree::default(),
+                group_tree: TagTree::default(),
+                all_entries: Vec::new(),
+                reverse_dependencies: None,
+                initial_tag: None,
+                key_hints: Default::default(),
+                complete_scan: false,
+            }),
+            None,
+            &egui::Context::default(),
+        );
+
+        assert!(app.kits[0].index_jobs.building_references);
     }
 
     /// An empty tags folder scans to nothing, and that is a finished scan.

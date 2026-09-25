@@ -2474,14 +2474,14 @@ impl Baboon {
         let root = root.clone();
         let names = source.names.clone();
         let tx = self.tx.clone();
-        self.refreshing_entry_index = false;
+        self.kits[self.active].index_jobs.refreshing = false;
         self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
         self.kits[self.active].field_index.invalidate();
         let stamp = self.kit_stamp();
         let label = label.into();
         self.kits[self.active].scanning_entries = true;
         self.show_entry_index_wait_notice = true;
-        self.entry_index_progress = Some(EntryIndexProgressState {
+        self.kits[self.active].index_jobs.entry_progress = Some(EntryIndexProgressState {
             label: label.clone(),
             processed: 0,
             total: 0,
@@ -2515,13 +2515,13 @@ impl Baboon {
     /// Captured source identity prevents stale results from replacing newer state.
     pub(super) fn maybe_refresh_entry_index(&mut self, ctx: egui::Context) {
         if self.kits[self.active].scanning_entries
-            || self.refreshing_entry_index
-            || self.building_reverse_dependencies
+            || self.kits[self.active].index_jobs.refreshing
+            || self.kits[self.active].index_jobs.building_references
         {
             return;
         }
         let now = ctx.input(|input| input.time);
-        if now < self.next_entry_index_refresh_at {
+        if now < self.kits[self.active].index_jobs.next_refresh_at {
             return;
         }
         let should_refresh = self.source().is_some_and(|source| {
@@ -2532,12 +2532,12 @@ impl Baboon {
         if should_refresh {
             self.begin_refresh_entry_index(ctx);
         } else {
-            self.schedule_next_entry_index_refresh(&ctx);
+            self.schedule_next_entry_index_refresh(self.active, &ctx);
         }
     }
 
     pub(super) fn begin_refresh_entry_index(&mut self, ctx: egui::Context) {
-        if self.kits[self.active].scanning_entries || self.refreshing_entry_index {
+        if self.kits[self.active].scanning_entries || self.kits[self.active].index_jobs.refreshing {
             return;
         }
         let Some(source) = self.source() else {
@@ -2554,7 +2554,7 @@ impl Baboon {
         let tag_source = source.source.clone();
         let tx = self.tx.clone();
         let stamp = self.kit_stamp();
-        self.refreshing_entry_index = true;
+        self.kits[self.active].index_jobs.refreshing = true;
         thread::spawn(move || {
             let result = crate::source::refresh_entry_index(&game, &root, &names)
                 .map(|refresh| persist_entry_index_changes(&game, &root, &tag_source, refresh))
@@ -2587,9 +2587,9 @@ impl Baboon {
         }
     }
 
-    fn schedule_next_entry_index_refresh(&mut self, ctx: &egui::Context) {
+    pub(super) fn schedule_next_entry_index_refresh(&mut self, kit: usize, ctx: &egui::Context) {
         let now = ctx.input(|input| input.time);
-        self.next_entry_index_refresh_at = now + ENTRY_INDEX_REFRESH_INTERVAL_SECS;
+        self.kits[kit].index_jobs.next_refresh_at = now + ENTRY_INDEX_REFRESH_INTERVAL_SECS;
     }
 
     fn apply_entry_index_refresh(
@@ -6990,7 +6990,7 @@ impl Baboon {
     /// currently building (auto after the full scan, or via Tools → Build
     /// Reference Index).
     fn reference_index_unavailable_note(&self) -> String {
-        if self.building_reverse_dependencies || self.kits[self.active].scanning_entries {
+        if self.kits[self.active].index_jobs.building_references || self.kits[self.active].scanning_entries {
             "Reference index is building — try again in a moment.".to_owned()
         } else {
             "Reference index unavailable — run Tools → Build Reference Index.".to_owned()
@@ -7406,7 +7406,7 @@ impl Baboon {
         force: bool,
         paired_entry_index_build: bool,
     ) {
-        if self.building_reverse_dependencies || self.kits[self.active].scanning_entries {
+        if self.kits[self.active].index_jobs.building_references || self.kits[self.active].scanning_entries {
             return;
         }
         let Some(source) = self.source() else {
@@ -7461,9 +7461,9 @@ impl Baboon {
         let tag_source = source.source.clone();
         let stamp = self.kit_stamp();
         let tx = self.tx.clone();
-        self.building_reverse_dependencies = true;
-        self.building_reference_for_entry_index = paired_entry_index_build;
-        self.reference_index_progress = Some(ReferenceIndexProgressState {
+        self.kits[self.active].index_jobs.building_references = true;
+        self.kits[self.active].index_jobs.references_for_entry_index = paired_entry_index_build;
+        self.kits[self.active].index_jobs.reference_progress = Some(ReferenceIndexProgressState {
             label: "Building reference index...".to_owned(),
             processed: 0,
             total: entries.len(),

@@ -158,7 +158,7 @@ impl Baboon {
                             .color(text_dark()),
                     );
                     if explorer.index_unavailable {
-                        let note = if self.building_reverse_dependencies
+                        let note = if self.kits[self.active].index_jobs.building_references
                             || self.kits[explorer_kit_index].scanning_entries
                         {
                             "Reference index is building — reopen this in a moment."

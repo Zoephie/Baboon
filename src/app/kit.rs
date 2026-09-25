@@ -83,6 +83,10 @@ pub(super) struct Kit {
     /// Source-local render-method definition cache; `None` is a cached miss.
     pub(super) rmdf_cache: HashMap<String, Option<Arc<RenderMethodDefinition>>>,
     pub(super) h2_templates: H2TemplateCache,
+    /// This kit's background index work. It lived on the app, shared by every
+    /// kit: loading one kit reset another's in-flight reference build, and one
+    /// kit's build or refresh blocked every other kit's.
+    pub(super) index_jobs: IndexJobs,
     /// Source-local render-method option cache; `None` is a cached miss.
     pub(super) rmop_cache: HashMap<String, Option<Arc<RenderMethodOption>>>,
     /// Campaign Evolved Wwise bindings, cached per tag key because resolving
@@ -222,6 +226,7 @@ impl Kit {
             model_previews: HashMap::new(),
             rmdf_cache: HashMap::new(),
             h2_templates: H2TemplateCache::default(),
+            index_jobs: IndexJobs::default(),
             rmop_cache: HashMap::new(),
             ce_sound_bindings: HashMap::new(),
             pending_expand: HashMap::new(),
@@ -938,4 +943,19 @@ impl Kit {
                 _ => None,
             })
     }
+}
+
+/// A kit's background tag-index and reference-index jobs.
+#[derive(Default)]
+pub(super) struct IndexJobs {
+    /// Checking the cached loose-folder index for file changes.
+    pub(super) refreshing: bool,
+    /// When the next periodic refresh is due, in egui time.
+    pub(super) next_refresh_at: f64,
+    /// A reference-index build is running.
+    pub(super) building_references: bool,
+    /// That build was started by a tag-index build, which reports them as one.
+    pub(super) references_for_entry_index: bool,
+    pub(super) reference_progress: Option<ReferenceIndexProgressState>,
+    pub(super) entry_progress: Option<EntryIndexProgressState>,
 }

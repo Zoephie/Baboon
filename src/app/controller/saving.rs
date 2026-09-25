@@ -156,12 +156,12 @@ impl Baboon {
         result: Result<(), String>,
     ) -> bool {
         // Reports through the global status line only.
-        if self.resolve_stamp(stamp).is_none() {
+        let Some(kit_index) = self.resolve_stamp(stamp) else {
             return true;
-        }
+        };
         match result {
             Ok(()) => {
-                if !self.building_reference_for_entry_index {
+                if !self.kits[kit_index].index_jobs.references_for_entry_index {
                     self.status = format!("Index saved: {}", path.display());
                 }
             }

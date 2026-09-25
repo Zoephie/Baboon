@@ -396,15 +396,7 @@ pub struct Baboon {
     status_shown: String,
     status_changed_at: f64,
     folder_refactor: Option<FolderRefactorUiState>,
-    entry_index_progress: Option<EntryIndexProgressState>,
     show_entry_index_wait_notice: bool,
-    /// True while checking a cached loose-folder index for file changes.
-    refreshing_entry_index: bool,
-    next_entry_index_refresh_at: f64,
-    /// True while a background reverse-dependency index build is running.
-    building_reverse_dependencies: bool,
-    building_reference_for_entry_index: bool,
-    reference_index_progress: Option<ReferenceIndexProgressState>,
     terminal: TerminalState,
     /// Game identifiers (e.g. "halo3_mcc") for which the user has chosen to
     /// keep the terminal open. Persisted in prefs.json and restored per kit.
@@ -716,13 +708,7 @@ impl Baboon {
             status_shown: String::new(),
             status_changed_at: 0.0,
             folder_refactor: None,
-            entry_index_progress: None,
             show_entry_index_wait_notice: false,
-            refreshing_entry_index: false,
-            next_entry_index_refresh_at: 0.0,
-            building_reverse_dependencies: false,
-            building_reference_for_entry_index: false,
-            reference_index_progress: None,
             terminal: TerminalState {
                 input: String::new(),
                 lines: Vec::new(),
