@@ -130,13 +130,7 @@ impl Baboon {
         let source = kit.source.as_ref();
         let names = &kit.names;
 
-        let mut pending = Vec::new();
-        let mut block_ops = Vec::new();
-        let mut shader_ops = Vec::new();
-        let mut shader_param_ops = Vec::new();
-        let mut h2_shader_param_ops = Vec::new();
-        let mut function_data_ops = Vec::new();
-        let mut model_variant_ops = Vec::new();
+        let mut ops = DeferredOps::default();
         let mut color_request = None;
         let mut function_request = None;
         let mut block_clip_request = None;
@@ -183,8 +177,8 @@ impl Baboon {
             editable: !kit_read_only && is_editable_tag(entry, &doc.tag),
             show_block_sizes: self.show_block_sizes,
             buffers: &mut kit.edit_buffers,
-            pending: &mut pending,
-            block_ops: &mut block_ops,
+            pending: &mut ops.pending,
+            block_ops: &mut ops.block_ops,
             block_confirm: &mut self.block_confirm,
             open_request: &mut self.pending_open,
             sound_play_request: &mut self.audio.pending,
@@ -197,11 +191,11 @@ impl Baboon {
             ce_paks_root,
             tool_import: &mut self.pending_tool_import,
             bitmap_reimport: &mut bitmap_reimport,
-            shader_ops: &mut shader_ops,
-            shader_param_ops: &mut shader_param_ops,
-            h2_shader_param_ops: &mut h2_shader_param_ops,
-            function_data_ops: &mut function_data_ops,
-            model_variant_ops: &mut model_variant_ops,
+            shader_ops: &mut ops.shader_ops,
+            shader_param_ops: &mut ops.shader_param_ops,
+            h2_shader_param_ops: &mut ops.h2_shader_param_ops,
+            function_data_ops: &mut ops.function_data_ops,
+            model_variant_ops: &mut ops.model_variant_ops,
             color_request: &mut color_request,
             function_request: &mut function_request,
             docs: def_docs.as_deref(),
@@ -270,70 +264,23 @@ impl Baboon {
             request
         });
 
-        // Snapshot for undo before a mutating batch. Coalesces continuous edits
-        // into one entry; closes the window on frames with no edits.
-        // Every deferred op this pane collected, including the kinds the undo
-        // window below deliberately ignores. Used only to decide whether the
-        // frame needs redrawing.
+        // Every deferred op this pane collected. Applying them opens the undo
+        // window (or closes it on a frame with none), and `mutated` decides
+        // whether the frame needs redrawing.
         if kit_read_only {
-            pending.clear();
-            block_ops.clear();
-            shader_ops.clear();
-            shader_param_ops.clear();
-            h2_shader_param_ops.clear();
-            function_data_ops.clear();
-            model_variant_ops.clear();
+            ops = DeferredOps::default();
         }
-        let mutated = !pending.is_empty()
-            || !block_ops.is_empty()
-            || !shader_ops.is_empty()
-            || !shader_param_ops.is_empty()
-            || !h2_shader_param_ops.is_empty()
-            || !function_data_ops.is_empty()
-            || !model_variant_ops.is_empty();
-        if !pending.is_empty()
-            || !block_ops.is_empty()
-            || !shader_ops.is_empty()
-            || !shader_param_ops.is_empty()
-            || !model_variant_ops.is_empty()
-        {
-            doc.journal.begin_edit(&doc.tag, "Edit");
-        } else {
-            doc.journal.end_edit_window();
-        }
-        // Per-edit outcomes, from upstream: a draft whose value applied cleanly
-        // is marked clean, while one the parser rejected keeps the text the
-        // user typed instead of snapping back to the old value.
-        let applied = apply_pending_edits(&mut doc.tag, pending, &mut doc.dirty);
+        let mutated = !ops.is_empty();
+        let applied = apply_deferred_ops(&mut doc, ops);
+        // Per-edit outcomes: a draft whose value applied cleanly is marked
+        // clean, while one the parser rejected keeps the text the user typed
+        // instead of snapping back to the old value.
         kit.edit_buffers
             .accept_successful_edits(&key, &applied.outcomes);
         if let Some(status) = applied.status {
             self.status = status;
         }
-        if let Some(status) = apply_block_ops(&mut doc.tag, block_ops, &mut doc.dirty) {
-            self.status = status;
-        }
-        if let Some(status) = apply_shader_ops(&mut doc.tag, shader_ops, &mut doc.dirty) {
-            self.status = status;
-        }
-        if let Some(status) = apply_shader_param_ops(&mut doc.tag, shader_param_ops, &mut doc.dirty)
-        {
-            self.status = status;
-        }
-        if let Some(status) =
-            apply_h2_shader_param_ops(&mut doc.tag, h2_shader_param_ops, &mut doc.dirty)
-        {
-            self.status = status;
-        }
-        if let Some(status) =
-            apply_function_data_ops(&mut doc.tag, function_data_ops, &mut doc.dirty)
-        {
-            self.status = status;
-        }
-        if let Some(status) =
-            apply_model_variant_ops(&mut doc.tag, model_variant_ops, &mut doc.dirty)
-        {
-            self.status = status;
+        if applied.model_variants_changed {
             if let Some(preview) = kit.model_previews.get_mut(&key) {
                 preview.loaded_key = None;
                 preview.data = None;

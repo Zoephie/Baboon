@@ -14,6 +14,92 @@ pub(in crate::app) struct AppliedFieldEdits {
     pub(in crate::app) outcomes: Vec<FieldEditOutcome>,
 }
 
+/// Every kind of edit a tag pane collects while it draws. They are applied
+/// together once the draw has finished, behind one undo snapshot.
+#[derive(Default)]
+pub(in crate::app) struct DeferredOps {
+    pub(in crate::app) pending: Vec<PendingFieldEdit>,
+    pub(in crate::app) block_ops: Vec<BlockOp>,
+    pub(in crate::app) shader_ops: Vec<ShaderOp>,
+    pub(in crate::app) shader_param_ops: Vec<ShaderParamOp>,
+    pub(in crate::app) h2_shader_param_ops: Vec<H2ShaderParamOp>,
+    pub(in crate::app) function_data_ops: Vec<FunctionDataOp>,
+    pub(in crate::app) model_variant_ops: Vec<ModelVariantOp>,
+}
+
+impl DeferredOps {
+    pub(in crate::app) fn is_empty(&self) -> bool {
+        self.pending.is_empty()
+            && self.block_ops.is_empty()
+            && self.shader_ops.is_empty()
+            && self.shader_param_ops.is_empty()
+            && self.h2_shader_param_ops.is_empty()
+            && self.function_data_ops.is_empty()
+            && self.model_variant_ops.is_empty()
+    }
+}
+
+pub(in crate::app) struct AppliedDeferredOps {
+    /// The last batch's status line, if any batch set one.
+    pub(in crate::app) status: Option<String>,
+    /// Per-draft outcomes of the plain field edits.
+    pub(in crate::app) outcomes: Vec<FieldEditOutcome>,
+    /// A model-variant op ran, so a cached model preview is stale.
+    pub(in crate::app) model_variants_changed: bool,
+}
+
+/// Apply one frame's deferred edits to `doc`. Any edit at all opens (or
+/// extends) an undo window first; a frame with none closes it.
+///
+/// The undo decision used to list the op kinds by hand, and missed the H2
+/// shader-parameter and function-data ops: the H2 shader grid's main edits
+/// changed the tag with no snapshot to undo to.
+pub(in crate::app) fn apply_deferred_ops(
+    doc: &mut TagDocument,
+    ops: DeferredOps,
+) -> AppliedDeferredOps {
+    if ops.is_empty() {
+        doc.journal.end_edit_window();
+        return AppliedDeferredOps {
+            status: None,
+            outcomes: Vec::new(),
+            model_variants_changed: false,
+        };
+    }
+    doc.journal.begin_edit(&doc.tag, "Edit");
+    let DeferredOps {
+        pending,
+        block_ops,
+        shader_ops,
+        shader_param_ops,
+        h2_shader_param_ops,
+        function_data_ops,
+        model_variant_ops,
+    } = ops;
+    let tag = &mut doc.tag;
+    let dirty = &mut doc.dirty;
+    let applied = apply_pending_edits(tag, pending, dirty);
+    let mut status = applied.status;
+    let mut keep = |next: Option<String>| {
+        if next.is_some() {
+            status = next;
+        }
+    };
+    keep(apply_block_ops(tag, block_ops, dirty));
+    keep(apply_shader_ops(tag, shader_ops, dirty));
+    keep(apply_shader_param_ops(tag, shader_param_ops, dirty));
+    keep(apply_h2_shader_param_ops(tag, h2_shader_param_ops, dirty));
+    keep(apply_function_data_ops(tag, function_data_ops, dirty));
+    let variant_status = apply_model_variant_ops(tag, model_variant_ops, dirty);
+    let model_variants_changed = variant_status.is_some();
+    keep(variant_status);
+    AppliedDeferredOps {
+        status,
+        outcomes: applied.outcomes,
+        model_variants_changed,
+    }
+}
+
 pub(in crate::app) fn apply_pending_edits(
     tag: &mut TagFile,
     edits: Vec<PendingFieldEdit>,
@@ -1375,5 +1461,54 @@ mod campaign_evolved_field_paths {
             eprintln!("  {tagname}  ->  {p}");
         }
         assert!(broken.is_empty(), "{} unresolvable paths", broken.len());
+    }
+}
+
+#[cfg(test)]
+mod deferred_ops_tests {
+    use super::*;
+
+    fn document() -> TagDocument {
+        let schema = locate_definitions_root().join("halo3_mcc/render_model.json");
+        TagDocument::clean(TagFile::new(schema).unwrap())
+    }
+
+    /// Every kind of deferred op must open an undo window, not just the ones
+    /// someone remembered to list. The H2 shader grid's value edits and the
+    /// function editor's byte-block writes go through the two kinds the old
+    /// hand-written condition left out, so they changed the tag with nothing
+    /// to undo to. Whether the op then applies is beside the point here: the
+    /// snapshot is taken before it runs.
+    #[test]
+    fn every_deferred_op_kind_opens_an_undo_window() {
+        let mut h2_param = document();
+        apply_deferred_ops(
+            &mut h2_param,
+            DeferredOps {
+                h2_shader_param_ops: vec![H2ShaderParamOp::EditFunctionData {
+                    block_path: "missing".to_owned(),
+                    data: Vec::new(),
+                }],
+                ..DeferredOps::default()
+            },
+        );
+        assert!(h2_param.journal.can_undo(), "H2 shader parameter op");
+
+        let mut function_data = document();
+        apply_deferred_ops(
+            &mut function_data,
+            DeferredOps {
+                function_data_ops: vec![FunctionDataOp {
+                    block_path: "missing".to_owned(),
+                    data: Vec::new(),
+                }],
+                ..DeferredOps::default()
+            },
+        );
+        assert!(function_data.journal.can_undo(), "function data op");
+
+        let mut untouched = document();
+        apply_deferred_ops(&mut untouched, DeferredOps::default());
+        assert!(!untouched.journal.can_undo(), "a frame with no ops");
     }
 }
