@@ -836,9 +836,18 @@ impl Baboon {
                 // source a kit can be, and this is the one reader that knows
                 // how each stores its tags — including the JSON layout classic
                 // Halo CE and Halo 2 bitmaps need to parse at all.
-                let result = crate::source::read_entry(&source, &entry)
-                    .and_then(|tag| decode_thumbnail(&tag, 0, max_edge))
-                    .map_err(|error| error.to_string());
+                //
+                // `catch_unwind` as in the Model Library: the bitmap decoders
+                // have panicked on malformed data before, and a thread that
+                // panics never sends, so `pending` would keep its key and one
+                // of the four decode slots would be gone for good. Four such
+                // bitmaps stopped the library and every hover preview.
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    crate::source::read_entry(&source, &entry)
+                        .and_then(|tag| decode_thumbnail(&tag, 0, max_edge))
+                        .map_err(|error| error.to_string())
+                }))
+                .unwrap_or_else(|_| Err("bitmap decoder crashed".to_owned()));
                 let _ = tx.send(WorkerMessage::BitmapThumbnailDecoded { stamp, key, result });
                 ctx.request_repaint();
             });
