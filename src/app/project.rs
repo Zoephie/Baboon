@@ -77,6 +77,8 @@ pub(super) struct TagHistory {
 /// One undoable step: what it was called, and the tag bytes it restores.
 #[derive(Clone, Debug)]
 pub(super) struct HistoryStep {
+    /// The journal snapshot's id; see [`crate::app::Snapshot::id`].
+    pub(super) id: u64,
     pub(super) label: String,
     pub(super) bytes: Arc<Vec<u8>>,
 }
@@ -194,17 +196,25 @@ impl CampaignProjectSnapshot {
                 .map(|(identity, overlay)| (identity.clone(), overlay.digest))
                 .collect(),
             history: self.history_digest(),
+            history_rows: self
+                .history
+                .iter()
+                .flat_map(|(identity, entry)| {
+                    [(false, &entry.undo), (true, &entry.redo)]
+                        .into_iter()
+                        .flat_map(move |(is_redo, steps)| {
+                            steps.iter().enumerate().map(move |(position, step)| {
+                                ((identity.clone(), step.id), (is_redo, position))
+                            })
+                        })
+                })
+                .collect(),
         }
     }
 
-    /// One digest over the whole session history.
-    ///
-    /// The history table is replaced wholesale on every write — an undo stack
-    /// shifts by one on every edit, so nearly every row's position changes and
-    /// there is nothing to reconcile row by row. That makes *skipping* the
-    /// write when nothing changed the only thing standing between this feature
-    /// and rewriting tens of megabytes twice a second while someone drags a
-    /// slider.
+    /// One digest over the whole session history, so a save can skip the
+    /// history altogether when no journal has moved. When one has, only its
+    /// new steps are written; see `write_history`.
     pub(super) fn history_digest(&self) -> [u8; 32] {
         let mut hasher = Sha256::new();
         for (identity, entry) in &self.history {
@@ -261,9 +271,13 @@ pub(super) struct SavedProjectState {
     /// Each overlay's digest, by identity — rows whose bytes match are left
     /// alone rather than rewritten.
     pub(super) overlays: HashMap<String, [u8; 32]>,
-    /// One digest over the whole history table, which is replaced wholesale or
-    /// not at all.
+    /// One digest over the whole history, so a save can skip it when nothing
+    /// moved.
     pub(super) history: [u8; 32],
+    /// Every history row, `(identity, step id) → (is redo, position)`. A save
+    /// writes the bytes of a step only when it is not already here, and moves
+    /// the rest by updating two integers.
+    pub(super) history_rows: HashMap<(String, u64), (bool, usize)>,
 }
 
 /// Which kind of `.baboon` is being written.
@@ -468,6 +482,121 @@ pub(super) fn is_campaign_recovery_file(path: &Path) -> bool {
         .is_some_and(|name| name.starts_with(CAMPAIGN_RECOVERY_STEM))
 }
 
+/// Bring the history tables in line with `snapshot`, writing only what is
+/// not already there. Anything but a session file carries no history.
+fn write_history(
+    transaction: &rusqlite::Transaction<'_>,
+    snapshot: &CampaignProjectSnapshot,
+    on_disk: Option<&SavedProjectState>,
+    scope: ProjectScope,
+) -> Result<(), String> {
+    let failed = |error: rusqlite::Error| format!("Could not write project history: {error}");
+    // Rows in the table older builds wrote: this file's history is there, in a
+    // shape `on_disk` does not describe. Rewritten whole into `history_steps`,
+    // and cleared, in this same transaction.
+    let legacy = transaction
+        .query_row("SELECT EXISTS (SELECT 1 FROM history)", [], |row| {
+            row.get::<_, bool>(0)
+        })
+        .map_err(failed)?;
+    let known = on_disk
+        .filter(|_| !legacy && scope == ProjectScope::Session)
+        .map(|on_disk| &on_disk.history_rows);
+    if legacy {
+        transaction
+            .execute("DELETE FROM history", [])
+            .map_err(failed)?;
+    }
+    let Some(known) = known else {
+        transaction
+            .execute("DELETE FROM history_steps", [])
+            .map_err(failed)?;
+        if scope == ProjectScope::Session {
+            for ((identity, _), (is_redo, position), step) in history_rows(snapshot) {
+                insert_history_step(transaction, identity, step, is_redo, position)?;
+            }
+        }
+        return Ok(());
+    };
+    let wanted = snapshot.digests().history_rows;
+    for (identity, step) in known.keys() {
+        if !wanted.contains_key(&(identity.clone(), *step)) {
+            transaction
+                .execute(
+                    "DELETE FROM history_steps WHERE identity = ?1 AND step = ?2",
+                    params![identity, *step as i64],
+                )
+                .map_err(failed)?;
+        }
+    }
+    for ((identity, id), (is_redo, position), step) in history_rows(snapshot) {
+        match known.get(&(identity.clone(), id)) {
+            None => insert_history_step(transaction, identity, step, is_redo, position)?,
+            Some(&place) if place == (is_redo, position) => {}
+            Some(_) => {
+                transaction
+                    .execute(
+                        "UPDATE history_steps SET stack = ?3, position = ?4
+                         WHERE identity = ?1 AND step = ?2",
+                        params![
+                            identity,
+                            id as i64,
+                            history_stack_name(is_redo),
+                            position as i64
+                        ],
+                    )
+                    .map_err(failed)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Every step in `snapshot`, as `((identity, id), (is redo, position), step)`.
+fn history_rows(
+    snapshot: &CampaignProjectSnapshot,
+) -> impl Iterator<Item = ((&String, u64), (bool, usize), &HistoryStep)> {
+    snapshot.history.iter().flat_map(|(identity, entry)| {
+        [(false, &entry.undo), (true, &entry.redo)]
+            .into_iter()
+            .flat_map(move |(is_redo, steps)| {
+                steps
+                    .iter()
+                    .enumerate()
+                    .map(move |(position, step)| ((identity, step.id), (is_redo, position), step))
+            })
+    })
+}
+
+fn history_stack_name(is_redo: bool) -> &'static str {
+    if is_redo { "redo" } else { "undo" }
+}
+
+fn insert_history_step(
+    transaction: &rusqlite::Transaction<'_>,
+    identity: &str,
+    step: &HistoryStep,
+    is_redo: bool,
+    position: usize,
+) -> Result<(), String> {
+    transaction
+        .execute(
+            "INSERT OR REPLACE INTO history_steps
+             (identity, step, stack, position, label, bytes)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                identity,
+                step.id as i64,
+                history_stack_name(is_redo),
+                position as i64,
+                step.label,
+                step.bytes.as_slice(),
+            ],
+        )
+        .map_err(|error| format!("Could not write project history for {identity}: {error}"))?;
+    Ok(())
+}
+
 /// Write the project to `path`.
 ///
 /// `on_disk` is what the last successful save left in the overlays table, by
@@ -522,6 +651,19 @@ pub(super) fn save_campaign_project(
                  label TEXT NOT NULL,
                  bytes BLOB NOT NULL,
                  PRIMARY KEY (identity, stack, position)
+             );
+             -- Keyed by step rather than position, so a stack shifting by
+             -- one updates positions instead of rewriting every step's bytes.
+             -- Replaces `history`, which older builds wrote and which is still
+             -- read, and cleared by the first save that finds rows in it.
+             CREATE TABLE IF NOT EXISTS history_steps (
+                 identity TEXT NOT NULL,
+                 step INTEGER NOT NULL,
+                 stack TEXT NOT NULL,
+                 position INTEGER NOT NULL,
+                 label TEXT NOT NULL,
+                 bytes BLOB NOT NULL,
+                 PRIMARY KEY (identity, step)
              );
              CREATE TABLE IF NOT EXISTS folders (
                  path TEXT PRIMARY KEY
@@ -616,42 +758,15 @@ pub(super) fn save_campaign_project(
                 )
             })?;
     }
-    // History is replaced wholesale rather than reconciled. Undo stacks shift
-    // by one on every edit — a step pushed at the top, the oldest dropped — so
-    // almost every row's position changes and there is nothing to spare.
-    // Keeping it small is what makes that affordable, which is what the budget
-    // above is for.
-    // Skipped entirely when nothing has changed, which is what keeps an active
-    // edit session from rewriting the whole table twice a second.
+    // History is reconciled by step id. A step's bytes never change once it
+    // exists, so only steps new since the last save are written; the rest are
+    // moved (an undo stack shifts by one on every edit) or dropped. Keyed by
+    // position, every save used to rewrite every step, each a whole tag.
+    // Skipped entirely when nothing has changed.
     let history_unchanged =
         on_disk.is_some_and(|on_disk| on_disk.history == snapshot.history_digest());
     if !history_unchanged {
-        transaction
-            .execute("DELETE FROM history", [])
-            .map_err(|error| format!("Could not reset project history: {error}"))?;
-    }
-    if scope == ProjectScope::Session && !history_unchanged {
-        for (identity, entry) in &snapshot.history {
-            for (stack, steps) in [("undo", &entry.undo), ("redo", &entry.redo)] {
-                for (position, step) in steps.iter().enumerate() {
-                    transaction
-                        .execute(
-                            "INSERT INTO history (identity, stack, position, label, bytes)
-                             VALUES (?1, ?2, ?3, ?4, ?5)",
-                            params![
-                                identity,
-                                stack,
-                                position as i64,
-                                step.label,
-                                step.bytes.as_slice(),
-                            ],
-                        )
-                        .map_err(|error| {
-                            format!("Could not write project history for {identity}: {error}")
-                        })?;
-                }
-            }
-        }
+        write_history(&transaction, snapshot, on_disk, scope)?;
     }
     // Folders are replaced wholesale: the set is a handful of short strings, so
     // reconciling it would cost more than rewriting it. Session scope only —
@@ -785,38 +900,20 @@ pub(super) fn load_campaign_project(path: &Path) -> Result<CampaignProjectSnapsh
         .collect::<Result<HashMap<_, _>, String>>()?;
 
     // A project written before history existed simply has no table. That is a
-    // session with nothing to undo, not a project that fails to open.
-    let mut history: BTreeMap<String, TagHistory> = BTreeMap::new();
-    if let Ok(mut statement) = connection.prepare(
-        "SELECT identity, stack, label, bytes FROM history ORDER BY identity, stack, position",
-    ) {
-        let rows = statement
-            .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, Vec<u8>>(3)?,
-                ))
-            })
-            .map_err(|error| format!("Could not query project history: {error}"))?;
-        for row in rows {
-            let (identity, stack, label, bytes) =
-                row.map_err(|error| format!("Could not decode project history: {error}"))?;
-            let step = HistoryStep {
-                label,
-                bytes: Arc::new(bytes),
-            };
-            let entry = history.entry(identity).or_default();
-            match stack.as_str() {
-                "undo" => entry.undo.push(step),
-                "redo" => entry.redo.push(step),
-                // A stack name this build does not know is skipped rather than
-                // guessed at: restoring a step onto the wrong stack would undo
-                // in the wrong direction.
-                _ => {}
-            }
-        }
+    // session with nothing to undo, not a project that fails to open. One
+    // written before steps had ids keeps them in `history`, by position; its
+    // steps are given fresh ids, and its next save moves them across.
+    let mut history = read_history(
+        &connection,
+        "SELECT identity, stack, label, bytes, step FROM history_steps
+         ORDER BY identity, stack, position",
+    )?;
+    if history.is_empty() {
+        history = read_history(
+            &connection,
+            "SELECT identity, stack, label, bytes, NULL FROM history
+             ORDER BY identity, stack, position",
+        )?;
     }
 
     let folders = read_project_folders(&connection);
@@ -829,6 +926,53 @@ pub(super) fn load_campaign_project(path: &Path) -> Result<CampaignProjectSnapsh
         history,
         folders,
     })
+}
+
+/// Read history rows as `(identity, stack, label, bytes, step id or NULL)`.
+/// A missing table reads as no history.
+fn read_history(
+    connection: &Connection,
+    query: &str,
+) -> Result<BTreeMap<String, TagHistory>, String> {
+    let mut history: BTreeMap<String, TagHistory> = BTreeMap::new();
+    let Ok(mut statement) = connection.prepare(query) else {
+        return Ok(history);
+    };
+    let rows = statement
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Vec<u8>>(3)?,
+                row.get::<_, Option<i64>>(4)?,
+            ))
+        })
+        .map_err(|error| format!("Could not query project history: {error}"))?;
+    for row in rows {
+        let (identity, stack, label, bytes, id) =
+            row.map_err(|error| format!("Could not decode project history: {error}"))?;
+        let bytes = Arc::new(bytes);
+        let snapshot = match id {
+            Some(id) => crate::app::Snapshot::restored(id as u64, bytes, label),
+            None => crate::app::Snapshot::restored(crate::app::next_snapshot_id(), bytes, label),
+        };
+        let step = HistoryStep {
+            id: snapshot.id,
+            label: snapshot.label,
+            bytes: snapshot.bytes,
+        };
+        let entry = history.entry(identity).or_default();
+        match stack.as_str() {
+            "undo" => entry.undo.push(step),
+            "redo" => entry.redo.push(step),
+            // A stack name this build does not know is skipped rather than
+            // guessed at: restoring a step onto the wrong stack would undo
+            // in the wrong direction.
+            _ => {}
+        }
+    }
+    Ok(history)
 }
 
 fn logical_path_from_display(display_path: &str) -> String {
@@ -924,10 +1068,7 @@ impl Baboon {
         let steps = |steps: Vec<HistoryStep>| {
             steps
                 .into_iter()
-                .map(|step| crate::app::Snapshot {
-                    bytes: step.bytes,
-                    label: step.label,
-                })
+                .map(|step| crate::app::Snapshot::restored(step.id, step.bytes, step.label))
                 .collect::<Vec<_>>()
         };
         document
@@ -1322,6 +1463,7 @@ impl Baboon {
                 continue;
             };
             let step = |snapshot: &crate::app::Snapshot| HistoryStep {
+                id: snapshot.id,
                 label: snapshot.label.clone(),
                 // Shared with the journal rather than copied — this runs twice
                 // a second.
@@ -2057,6 +2199,7 @@ mod tests {
                 .iter()
                 .enumerate()
                 .map(|(index, size)| HistoryStep {
+                    id: index as u64 + 1,
                     label: format!("edit {index}"),
                     bytes: Arc::new(vec![0; *size]),
                 })
@@ -2116,20 +2259,22 @@ mod tests {
         }
     }
 
-    /// The history table is replaced wholesale, so a save that cannot tell it
-    /// is unchanged rewrites every step. During a drag that is tens of
-    /// megabytes twice a second.
+    /// A save writes only the history steps it has not written before: an
+    /// unchanged history not at all, and a stack that moved only its new step.
+    /// Every step is a whole tag, and saves run twice a second while editing.
     #[test]
-    fn an_unchanged_history_is_not_rewritten() {
+    fn a_save_writes_only_new_history_steps() {
         let path = temp_project("history-skip");
+        let step = |id: u64, label: &str| HistoryStep {
+            id,
+            label: label.to_owned(),
+            bytes: Arc::new(vec![id as u8; 3]),
+        };
         let mut snapshot = snapshot_of(vec![overlay("a", b"one")]);
         snapshot.history = BTreeMap::from([(
             "a".to_owned(),
             TagHistory {
-                undo: vec![HistoryStep {
-                    label: "Edit color".to_owned(),
-                    bytes: Arc::new(vec![1, 2, 3]),
-                }],
+                undo: vec![step(1, "Edit color")],
                 redo: Vec::new(),
                 revision: 7,
             },
@@ -2137,34 +2282,105 @@ mod tests {
         save_campaign_project(&path, &snapshot, None, ProjectScope::Session).unwrap();
         let saved = snapshot.digests();
 
-        // Reach into the file and mark the row, so a rewrite is detectable.
-        let connection = Connection::open(&path).unwrap();
-        connection
-            .execute("UPDATE history SET label = 'sentinel'", [])
-            .unwrap();
-        drop(connection);
+        // Mark the row on disk, so a rewrite of it is detectable.
+        let mark = || {
+            let connection = Connection::open(&path).unwrap();
+            connection
+                .execute("UPDATE history_steps SET label = 'sentinel'", [])
+                .unwrap();
+        };
+        mark();
 
-        // The tag was edited again, but the journal did not move — the same
-        // undo steps, the same revision.
+        // The tag was edited again, but the journal did not move.
         let mut later = snapshot_of(vec![overlay("a", b"two")]);
         later.history = snapshot.history.clone();
         save_campaign_project(&path, &later, Some(&saved), ProjectScope::Session).unwrap();
-
         let loaded = load_campaign_project(&path).unwrap();
-        assert_eq!(
-            loaded.history["a"].undo[0].label, "sentinel",
-            "an unchanged history was rewritten"
-        );
+        assert_eq!(loaded.history["a"].undo[0].label, "sentinel", "rewritten");
         assert_eq!(*loaded.overlays["a"].bytes, b"two".to_vec());
 
-        // A journal that did move is written again.
+        // A new edit: the old step moves below it and is not written again.
         let mut moved = later.clone();
-        moved.history.get_mut("a").unwrap().revision = 8;
+        let entry = moved.history.get_mut("a").unwrap();
+        entry.undo.push(step(2, "Edit name"));
+        entry.undo.push(step(5, "Edit size"));
+        entry.revision = 8;
         save_campaign_project(&path, &moved, Some(&later.digests()), ProjectScope::Session)
             .unwrap();
         let loaded = load_campaign_project(&path).unwrap();
-        assert_eq!(loaded.history["a"].undo[0].label, "Edit color");
+        let labels: Vec<&str> = loaded.history["a"]
+            .undo
+            .iter()
+            .map(|step| step.label.as_str())
+            .collect();
+        assert_eq!(
+            labels,
+            ["sentinel", "Edit name", "Edit size"],
+            "only the new steps are written"
+        );
 
+        // A new edit pushes the two oldest past the budget and one is then
+        // undone: step 5 moves from the top to the bottom, beneath a new
+        // step, and the file must read back in the snapshot's order.
+        let mut shifted = moved.clone();
+        let entry = shifted.history.get_mut("a").unwrap();
+        entry.undo = vec![step(5, "Edit size"), step(7, "Edit scale")];
+        entry.redo = vec![step(8, "Edit scale")];
+        entry.revision = 9;
+        save_campaign_project(
+            &path,
+            &shifted,
+            Some(&moved.digests()),
+            ProjectScope::Session,
+        )
+        .unwrap();
+        let loaded = load_campaign_project(&path).unwrap();
+        let ids = |steps: &[HistoryStep]| steps.iter().map(|step| step.id).collect::<Vec<_>>();
+        assert_eq!(ids(&loaded.history["a"].undo), [5, 7]);
+        assert_eq!(ids(&loaded.history["a"].redo), [8]);
+
+        let _ = fs::remove_file(&path);
+    }
+
+    /// A recovery file from before steps had ids keeps its history in the old
+    /// table. It still opens with its history, and the next save moves it
+    /// across rather than trusting a row map that does not describe it.
+    #[test]
+    fn history_in_the_old_table_is_read_and_moved_across() {
+        let path = temp_project("history-legacy");
+        let snapshot = snapshot_of(vec![overlay("a", b"one")]);
+        save_campaign_project(&path, &snapshot, None, ProjectScope::Session).unwrap();
+        let connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "CREATE TABLE IF NOT EXISTS history (
+                     identity TEXT NOT NULL, stack TEXT NOT NULL, position INTEGER NOT NULL,
+                     label TEXT NOT NULL, bytes BLOB NOT NULL,
+                     PRIMARY KEY (identity, stack, position));
+                 INSERT INTO history VALUES ('a', 'undo', 0, 'Old edit', x'0102');",
+            )
+            .unwrap();
+        drop(connection);
+
+        let loaded = load_campaign_project(&path).unwrap();
+        assert_eq!(loaded.history["a"].undo[0].label, "Old edit");
+        // What the app believes is on disk after adopting the file.
+        let adopted = loaded.digests();
+        let mut next = loaded.clone();
+        next.history.get_mut("a").unwrap().revision += 1;
+        save_campaign_project(&path, &next, Some(&adopted), ProjectScope::Session).unwrap();
+
+        let connection = Connection::open(&path).unwrap();
+        let legacy: i64 = connection
+            .query_row("SELECT COUNT(*) FROM history", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(legacy, 0, "the old table is cleared");
+        drop(connection);
+        let reloaded = load_campaign_project(&path).unwrap();
+        assert_eq!(
+            reloaded.history["a"].undo[0].label, "Old edit",
+            "and nothing lost"
+        );
         let _ = fs::remove_file(&path);
     }
 
@@ -2496,10 +2712,12 @@ mod tests {
                 overlay.identity.clone(),
                 TagHistory {
                     undo: vec![HistoryStep {
+                        id: 1,
                         label: "Edit color".to_owned(),
                         bytes: Arc::new(vec![7, 7, 7]),
                     }],
                     redo: vec![HistoryStep {
+                        id: 2,
                         label: "Block edit".to_owned(),
                         bytes: Arc::new(vec![9]),
                     }],
