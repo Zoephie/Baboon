@@ -26,7 +26,7 @@ use blam_tags::iostore::container::writer::{
 };
 use blam_tags::iostore::object::archive::ExportContext;
 use blam_tags::iostore::object::edit::{
-    count_object_references, default_value_for_type, editable_schema_slots, property_type_for_slot,
+    count_object_references, default_value_for_type, property_type_for_slot,
     set_property_slot, validate_value_for_type,
 };
 use blam_tags::iostore::object::export::{Export, ExportBlock, read_export_in, write_export_in};
@@ -6775,13 +6775,21 @@ fn draw_chimp_property_block(
         .iter()
         .filter_map(|entry| entry.slot.map(|slot| slot.index))
         .collect();
-    if !class.is_empty()
-        && let Ok(slots) = editable_schema_slots(class, usmap)
-    {
-        let omitted: Vec<_> = slots
-            .into_iter()
-            .filter(|(_, slot, ty)| {
-                !existing.contains(&slot.index) && default_value_for_type(ty, usmap).is_ok()
+    // Flattened once for the block. Every row used to flatten the class's
+    // whole schema chain again to find its own type, each frame.
+    let schema = (!class.is_empty())
+        .then(|| blam_tags::iostore::object::block::flattened_schema(class, usmap).ok())
+        .flatten();
+    if let Some(schema) = &schema {
+        let omitted: Vec<(&str, u8, &PropertyType)> = schema
+            .iter()
+            .enumerate()
+            .filter(|(index, (property, _, _))| {
+                !existing.contains(&(*index as u32))
+                    && default_value_for_type(&property.ty, usmap).is_ok()
+            })
+            .map(|(_, (property, array_index, _))| {
+                (property.name.as_str(), *array_index, &property.ty)
             })
             .collect();
         if !omitted.is_empty() {
@@ -6794,22 +6802,15 @@ fn draw_chimp_property_block(
                     ui.set_max_height(360.0);
                     let mut added = false;
                     egui::ScrollArea::vertical().show(ui, |ui| {
-                        for (name, slot, ty) in &omitted {
-                            let label = if slot.array_index == 0 {
-                                name.clone()
+                        for &(name, array_index, ty) in &omitted {
+                            let label = if array_index == 0 {
+                                name.to_owned()
                             } else {
-                                format!("{name}[{}]", slot.array_index)
+                                format!("{name}[{array_index}]")
                             };
                             if ui.button(label).on_hover_text(format!("{ty:?}")).clicked()
                                 && let Ok(value) = default_value_for_type(ty, usmap)
-                                && set_property_slot(
-                                    block,
-                                    class,
-                                    name,
-                                    slot.array_index,
-                                    value,
-                                    usmap,
-                                )
+                                && set_property_slot(block, class, name, array_index, value, usmap)
                                 .is_ok()
                             {
                                 changed = true;
@@ -6832,7 +6833,7 @@ fn draw_chimp_property_block(
         let id = ui.make_persistent_id((depth, index, entry.name.as_ref()));
         let declared = entry
             .slot
-            .and_then(|slot| property_type_for_slot(class, slot, usmap).ok());
+            .and_then(|slot| declared_slot_type(schema.as_deref()?, slot));
         let label = match entry.slot.map(|slot| slot.array_index) {
             Some(array_index) if array_index > 0 => {
                 format!("{}[{array_index}]", entry.name)
@@ -6843,7 +6844,6 @@ fn draw_chimp_property_block(
             ui.set_min_height(24.0);
             ui.label(RichText::new(label).strong()).on_hover_text(
                 declared
-                    .as_ref()
                     .map(|ty| format!("{ty:?}"))
                     .unwrap_or_else(|| "Native field without a USMAP slot".to_owned()),
             );
@@ -6852,7 +6852,7 @@ fn draw_chimp_property_block(
                     ui,
                     id,
                     &mut entry.value,
-                    declared.as_ref(),
+                    declared,
                     names,
                     usmap,
                     depth,
@@ -6863,6 +6863,41 @@ fn draw_chimp_property_block(
         ui.separator();
     }
     changed
+}
+
+/// A slot's declared type in an already-flattened schema: the rule
+/// `property_type_for_slot` applies, without flattening per call.
+fn declared_slot_type<'u>(
+    schema: &[(&'u blam_tags::iostore::object::usmap::UsmapProperty, u8, &'u str)],
+    slot: blam_tags::iostore::object::value::SchemaSlot,
+) -> Option<&'u PropertyType> {
+    let (property, array_index, _) = schema.get(slot.index as usize)?;
+    (*array_index == slot.array_index).then_some(&property.ty)
+}
+
+/// Look an enum up by name. `Usmap` keeps enums in a list, and the property
+/// editor did a linear search per enum-valued row, per frame. Hits are
+/// checked against the list, so a stale position only costs the search.
+fn usmap_enum<'u>(
+    usmap: &'u Usmap,
+    name: &str,
+) -> Option<&'u blam_tags::iostore::object::usmap::UsmapEnum> {
+    thread_local! {
+        static POSITIONS: std::cell::RefCell<HashMap<String, usize>> =
+            std::cell::RefCell::new(HashMap::new());
+    }
+    let cached = POSITIONS.with(|positions| positions.borrow().get(name).copied());
+    if let Some(position) = cached
+        && let Some(definition) = usmap.enums.get(position)
+        && definition.name == name
+    {
+        return Some(definition);
+    }
+    let position = usmap.enums.iter().position(|item| item.name == name)?;
+    POSITIONS.with(|positions| {
+        positions.borrow_mut().insert(name.to_owned(), position);
+    });
+    usmap.enums.get(position)
 }
 
 fn chimp_property_value_cell<R>(
@@ -7205,7 +7240,7 @@ fn draw_chimp_integer(
 ) -> bool {
     let ty = match declared {
         Some(PropertyType::Enum { inner, enum_name }) => {
-            if let Some(definition) = usmap.enums.iter().find(|item| item.name == *enum_name) {
+            if let Some(definition) = usmap_enum(usmap, enum_name) {
                 let selected = definition
                     .values
                     .iter()
@@ -7233,7 +7268,7 @@ fn draw_chimp_integer(
         Some(PropertyType::Byte {
             enum_name: Some(enum_name),
         }) => {
-            if let Some(definition) = usmap.enums.iter().find(|item| item.name == *enum_name) {
+            if let Some(definition) = usmap_enum(usmap, enum_name) {
                 let mut changed = false;
                 egui::ComboBox::from_id_salt(ui.next_auto_id())
                     .selected_text(
@@ -7387,7 +7422,9 @@ fn draw_chimp_sequence(
             depth + 1,
         )
     });
-    if !allow_duplicates {
+    // Only an edit can introduce a duplicate, so the quadratic scan runs on
+    // the frame something changed rather than every frame.
+    if changed && !allow_duplicates {
         let mut duplicate = false;
         for left in 0..values.len() {
             duplicate |= values[left + 1..]
@@ -7447,11 +7484,14 @@ fn draw_chimp_map(
         );
         changed
     });
+    // As for sets: only an edit can introduce a duplicate key.
     let mut duplicate = false;
-    for left in 0..values.len() {
-        duplicate |= values[left + 1..]
-            .iter()
-            .any(|right| values[left].0.semantic_eq(&right.0));
+    if changed {
+        for left in 0..values.len() {
+            duplicate |= values[left + 1..]
+                .iter()
+                .any(|right| values[left].0.semantic_eq(&right.0));
+        }
     }
     if duplicate {
         *values = before;
@@ -10197,6 +10237,66 @@ mod tests {
 
         assert_eq!(due_at(4.0, &mut app), Some(5.0), "still editing: nothing yet");
         assert_eq!(due_at(6.0, &mut app), None, "paused: checkpointed once");
+    }
+
+    /// The property editor reads each row's type out of one flattened schema
+    /// instead of asking the engine per row. Same answer, for every slot of
+    /// every class in the bundled schema, including a slot whose static-array
+    /// index does not match.
+    #[test]
+    fn declared_slot_types_match_the_engine_for_every_slot() {
+        use blam_tags::iostore::object::value::SchemaSlot;
+        let usmap = Usmap::meteorite().unwrap();
+        let mut compared = 0usize;
+        for class in &usmap.structs {
+            let Ok(schema) =
+                blam_tags::iostore::object::block::flattened_schema(&class.name, &usmap)
+            else {
+                continue;
+            };
+            for (index, (_, array_index, _)) in schema.iter().enumerate() {
+                for array_index in [*array_index, array_index.wrapping_add(1)] {
+                    let slot = SchemaSlot {
+                        index: index as u32,
+                        array_index,
+                        zero_masked: false,
+                    };
+                    assert_eq!(
+                        declared_slot_type(&schema, slot),
+                        property_type_for_slot(&class.name, slot, &usmap)
+                            .ok()
+                            .as_ref(),
+                        "{}[{index}]",
+                        class.name
+                    );
+                    compared += 1;
+                }
+            }
+            // The omitted-property menu lists the same slots the engine's
+            // catalog does.
+            let catalog = blam_tags::iostore::object::edit::editable_schema_slots(&class.name, &usmap)
+                .unwrap();
+            assert_eq!(catalog.len(), schema.len());
+            for ((name, slot, ty), (property, array_index, _)) in catalog.iter().zip(&schema) {
+                assert_eq!(
+                    (name.as_str(), slot.array_index, ty),
+                    (property.name.as_str(), *array_index, &property.ty)
+                );
+            }
+        }
+        assert!(compared > 10_000, "compared only {compared} slots");
+    }
+
+    /// A position remembered for one enum list is checked before it is used.
+    #[test]
+    fn a_stale_enum_position_still_finds_the_enum() {
+        let mut usmap = Usmap::meteorite().unwrap();
+        let name = usmap.enums[0].name.clone();
+        assert_eq!(usmap_enum(&usmap, &name).unwrap().name, name);
+        let last = usmap.enums.len() - 1;
+        usmap.enums.swap(0, last);
+        assert_eq!(usmap_enum(&usmap, &name).unwrap().name, name);
+        assert!(usmap_enum(&usmap, "NoSuchEnumAnywhere").is_none());
     }
 
     /// The exporters read the mesh kind straight off the exports now, not off
