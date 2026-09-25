@@ -1565,6 +1565,9 @@ pub(super) fn draw_terminal_output(
                 ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), |ui| {
                     ui.skip_ahead_auto_ids(first);
                     for line in &lines[first..last.max(first)] {
+                        #[cfg(test)]
+                        terminal_output_tests::LINES_BUILT
+                            .with(|built| built.set(built.get() + 1));
                         ui.add(egui::Label::new(terminal_line_text(line)).wrap());
                     }
                 });
@@ -1582,6 +1585,13 @@ pub(super) fn draw_terminal_output(
 #[cfg(test)]
 mod terminal_output_tests {
     use super::*;
+
+    thread_local! {
+        /// Output lines laid out. egui skips painting offscreen labels by
+        /// itself, so the painted text alone cannot show that the pane lays
+        /// out only what is in view.
+        pub(super) static LINES_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
 
     fn lines(count: usize) -> Vec<TerminalLineEntry> {
         (0..count)
@@ -1615,6 +1625,7 @@ mod terminal_output_tests {
 
     /// The text of every line painted in a frame.
     fn painted(ctx: &egui::Context, lines: &[TerminalLineEntry], bottom: bool) -> Vec<String> {
+        LINES_BUILT.with(|built| built.set(0));
         let output = ctx.run(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -1650,7 +1661,8 @@ mod terminal_output_tests {
 
         let top = painted(&egui::Context::default(), &lines, false);
         assert!(starts(&top, "0: ") && !starts(&top, "19999: "));
-        assert!(top.len() < 100, "painted {} lines", top.len());
+        let built = LINES_BUILT.with(std::cell::Cell::get);
+        assert!(built < 100, "laid out {built} of 20,000 lines");
 
         let ctx = egui::Context::default();
         // Scrolling animates over frames; land in one.
@@ -1659,7 +1671,8 @@ mod terminal_output_tests {
         let bottom = (0..3).map(|_| painted(&ctx, &lines, false)).last().unwrap();
         assert!(starts(&bottom, "19999: "), "the last line is in view");
         assert!(!starts(&bottom, "0: "));
-        assert!(bottom.len() < 100, "painted {} lines", bottom.len());
+        let built = LINES_BUILT.with(std::cell::Cell::get);
+        assert!(built < 100, "laid out {built} of 20,000 lines");
     }
 
     /// Frame time with a full terminal. Run with `--release --ignored
