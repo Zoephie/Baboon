@@ -73,6 +73,62 @@ pub fn save_entry_index(game: &str, root: &Path, entries: &[TagEntry]) -> Result
     save_entry_index_to_db(game, root, entries)
 }
 
+/// Record one tag in an index that already exists, replacing any row with the
+/// same key. Returns `false` without writing when `root` has no index yet: a
+/// single row would otherwise load back as a complete one-tag index.
+///
+/// This is what a single-file change on the UI thread should call —
+/// [`save_entry_index`] rewrites every row and stats every tag file.
+pub fn upsert_entry_index_row(game: &str, root: &Path, entry: &TagEntry) -> Result<bool> {
+    let conn = open_index_db()?;
+    let Some(source_id) = source_id(&conn, game, root)? else {
+        return Ok(false);
+    };
+    let mut upsert = conn
+        .prepare(
+            "INSERT INTO entries (
+                source_id, key, rel_path, display_path, group_tag, group_name,
+                size, modified_secs, modified_nanos
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+             ON CONFLICT(source_id, key) DO UPDATE SET
+                rel_path = excluded.rel_path,
+                display_path = excluded.display_path,
+                group_tag = excluded.group_tag,
+                group_name = excluded.group_name,
+                size = excluded.size,
+                modified_secs = excluded.modified_secs,
+                modified_nanos = excluded.modified_nanos",
+        )
+        .context("prepare entry index upsert")?;
+    execute_entry_row(&mut upsert, source_id, root, entry).context("upsert entry index row")?;
+    Ok(true)
+}
+
+/// Run an `entries` insert (or upsert) statement for one tag, filling its
+/// nine columns in table order.
+fn execute_entry_row(
+    statement: &mut rusqlite::Statement<'_>,
+    source_id: i64,
+    root: &Path,
+    entry: &TagEntry,
+) -> rusqlite::Result<usize> {
+    let rel_path = entry_relative_path(root, entry)
+        .map(|path| path_to_display(&path))
+        .unwrap_or_default();
+    let fingerprint = entry_file_path(entry).and_then(|path| file_fingerprint(path).ok().flatten());
+    statement.execute(params![
+        source_id,
+        &entry.key,
+        rel_path,
+        &entry.display_path,
+        i64::from(entry.group_tag),
+        entry.group_name.as_deref(),
+        fingerprint.map(|fp| fp.size as i64),
+        fingerprint.map(|fp| fp.modified_secs as i64),
+        fingerprint.map(|fp| i64::from(fp.modified_nanos)),
+    ])
+}
+
 /// Load a previously saved index for `game`. Returns `None` if no file exists,
 /// it can't be parsed, or it was saved for a different `root` folder (the keys
 /// are absolute paths, so the index is only valid for its original root).
@@ -507,23 +563,7 @@ fn save_entry_index_to_db(game: &str, root: &Path, entries: &[TagEntry]) -> Resu
             )
             .context("prepare entry index insert")?;
         for entry in entries {
-            let rel_path = entry_relative_path(root, entry)
-                .map(|path| path_to_display(&path))
-                .unwrap_or_default();
-            let fingerprint =
-                entry_file_path(entry).and_then(|path| file_fingerprint(path).ok().flatten());
-            insert
-                .execute(params![
-                    source_id,
-                    &entry.key,
-                    rel_path,
-                    &entry.display_path,
-                    i64::from(entry.group_tag),
-                    entry.group_name.as_deref(),
-                    fingerprint.map(|fp| fp.size as i64),
-                    fingerprint.map(|fp| fp.modified_secs as i64),
-                    fingerprint.map(|fp| i64::from(fp.modified_nanos)),
-                ])
+            execute_entry_row(&mut insert, source_id, root, entry)
                 .context("insert entry index row")?;
         }
     }

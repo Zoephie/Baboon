@@ -218,17 +218,19 @@ pub(super) fn register_saved_copy_in_loaded_source(
         .entries
         .sort_by(|a, b| a.display_path.cmp(&b.display_path));
     if !source.all_entries.is_empty() {
+        // One file changed, so one row: rewriting the whole index here stats
+        // every tag file on the UI thread, a cost that grows with the kit.
+        if let (Some(game), TagSource::LooseFolder { root, .. }) =
+            (source.game.as_deref(), &source.source)
+        {
+            let _ = crate::source::upsert_entry_index_row(game, root, &entry);
+        }
         source.all_entries.retain(|existing| existing.key != key);
         source.all_entries.push(entry);
         source
             .all_entries
             .sort_by(|a, b| a.display_path.cmp(&b.display_path));
         source.group_tree = crate::source::build_group_tree(&source.all_entries);
-        if let (Some(game), TagSource::LooseFolder { root, .. }) =
-            (source.game.as_deref(), &source.source)
-        {
-            let _ = crate::source::save_entry_index(game, root, &source.all_entries);
-        }
     } else {
         source.group_tree = crate::source::build_group_tree(&source.entries);
     }
