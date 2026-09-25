@@ -1368,11 +1368,9 @@ impl Baboon {
         let mut sound_play_request = None;
         let mut sound_extract_request = None;
         let mut tool_import = None;
-        let mut bitmap_reimport = None;
         let mut shader_ops = Vec::new();
         let mut shader_param_ops = Vec::new();
         let mut h2_shader_param_ops = Vec::new();
-        let mut function_data_ops = Vec::new();
         let mut model_variant_ops = Vec::new();
         let mut color_request = None;
         let mut function_request = None;
@@ -1424,11 +1422,9 @@ impl Baboon {
             ce_sound_ref_request: &mut None,
             ce_paks_root: None,
             tool_import: &mut tool_import,
-            bitmap_reimport: &mut bitmap_reimport,
             shader_ops: &mut shader_ops,
             shader_param_ops: &mut shader_param_ops,
             h2_shader_param_ops: &mut h2_shader_param_ops,
-            function_data_ops: &mut function_data_ops,
             model_variant_ops: &mut model_variant_ops,
             color_request: &mut color_request,
             function_request: &mut function_request,
@@ -4868,7 +4864,6 @@ mod cache_import_window_tests {
         moved.conflicts = OutsideTree::build(&[OutsideReference {
             key: r"cache:bitm:objects\weapons\rifle\bitmaps\ar_diffuse".to_owned(),
             display_path: "scratch/bitmaps/ar_diffuse.bitmap".to_owned(),
-            folder: String::new(),
         }]);
         render(&mut moved);
 
@@ -4896,12 +4891,10 @@ mod cache_import_window_tests {
                 OutsideReference {
                     key: r"cache:bitm:fx\decals\_bitmaps\scorch".to_owned(),
                     display_path: "fx/decals/_bitmaps/scorch.bitmap".to_owned(),
-                    folder: "fx/decals".to_owned(),
                 },
                 OutsideReference {
                     key: r"cache:rmt2:shaders\shader_templates\_0_0".to_owned(),
                     display_path: "shaders/shader_templates/_0_0.render_method_template".to_owned(),
-                    folder: "shaders/shader_templates".to_owned(),
                 },
             ],
             unresolved_references: ["fx/decals/_bitmaps/gone.bitmap".to_owned()]

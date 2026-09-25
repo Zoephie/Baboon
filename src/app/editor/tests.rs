@@ -1802,19 +1802,6 @@ mod tests {
         );
         assert_eq!(status.as_deref(), Some("Updated model variant 0"));
         assert_variant(&tag, 0, "test", "head", "damaged");
-
-        let status = apply_model_variant_ops(
-            &mut tag,
-            vec![ModelVariantOp::Drop { variant_index: 0 }],
-            &mut dirty,
-        );
-        assert_eq!(status.as_deref(), Some("Deleted model variant 0"));
-        let variants = tag
-            .root()
-            .field("variants")
-            .and_then(|field| field.as_block())
-            .unwrap();
-        assert_eq!(variants.len(), 0);
     }
 
     #[test]

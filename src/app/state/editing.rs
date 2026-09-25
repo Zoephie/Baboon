@@ -358,9 +358,6 @@ pub(in crate::app) enum ModelVariantOp {
         variant_index: usize,
         regions: Vec<ModelVariantRegionChoice>,
     },
-    Drop {
-        variant_index: usize,
-    },
 }
 
 #[derive(Clone)]
@@ -481,16 +478,12 @@ pub(in crate::app) struct FieldEditContext<'a> {
     pub(in crate::app) ce_sound_ref_request: &'a mut Option<CeSoundRefRequest>,
     /// Set when the user clicks "Import" on a geometry tag-reference row.
     pub(in crate::app) tool_import: &'a mut Option<ToolImportRequest>,
-    /// Set when the user clicks "Reimport" on a bitmap tag.
-    pub(in crate::app) bitmap_reimport: &'a mut Option<String>,
     /// Shader-specific deferred ops (add animated parameter + init).
     pub(in crate::app) shader_ops: &'a mut Vec<ShaderOp>,
     /// Shader-specific deferred ops (create parameter entry + set real value).
     pub(in crate::app) shader_param_ops: &'a mut Vec<ShaderParamOp>,
     /// H2EK-specific deferred ops (create classic shader parameters/animations).
     pub(in crate::app) h2_shader_param_ops: &'a mut Vec<H2ShaderParamOp>,
-    /// Function byte-block edits emitted by inline function editors.
-    pub(in crate::app) function_data_ops: &'a mut Vec<FunctionDataOp>,
     /// Model-preview variant edits queued from the render model tab.
     pub(in crate::app) model_variant_ops: &'a mut Vec<ModelVariantOp>,
     /// Set when the user clicks a color swatch on a value row; the caller hoists

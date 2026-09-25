@@ -256,11 +256,9 @@ pub(in crate::app) mod tests {
         let mut sound_play_request = None;
         let mut sound_extract_request = None;
         let mut tool_import = None;
-        let mut bitmap_reimport = None;
         let mut shader_ops = Vec::new();
         let mut shader_param_ops = Vec::new();
         let mut h2_shader_param_ops = Vec::new();
-        let mut function_data_ops = Vec::new();
         let mut model_variant_ops = Vec::new();
         let mut color_request = None;
         let mut function_request = None;
@@ -298,11 +296,9 @@ pub(in crate::app) mod tests {
             ce_sound_ref_request: &mut None,
             ce_paks_root: None,
             tool_import: &mut tool_import,
-            bitmap_reimport: &mut bitmap_reimport,
             shader_ops: &mut shader_ops,
             shader_param_ops: &mut shader_param_ops,
             h2_shader_param_ops: &mut h2_shader_param_ops,
-            function_data_ops: &mut function_data_ops,
             model_variant_ops: &mut model_variant_ops,
             color_request: &mut color_request,
             function_request: &mut function_request,

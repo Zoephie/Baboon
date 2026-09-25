@@ -23,7 +23,6 @@ pub(in crate::app) struct DeferredOps {
     pub(in crate::app) shader_ops: Vec<ShaderOp>,
     pub(in crate::app) shader_param_ops: Vec<ShaderParamOp>,
     pub(in crate::app) h2_shader_param_ops: Vec<H2ShaderParamOp>,
-    pub(in crate::app) function_data_ops: Vec<FunctionDataOp>,
     pub(in crate::app) model_variant_ops: Vec<ModelVariantOp>,
 }
 
@@ -34,7 +33,6 @@ impl DeferredOps {
             && self.shader_ops.is_empty()
             && self.shader_param_ops.is_empty()
             && self.h2_shader_param_ops.is_empty()
-            && self.function_data_ops.is_empty()
             && self.model_variant_ops.is_empty()
     }
 }
@@ -73,7 +71,6 @@ pub(in crate::app) fn apply_deferred_ops(
         shader_ops,
         shader_param_ops,
         h2_shader_param_ops,
-        function_data_ops,
         model_variant_ops,
     } = ops;
     let tag = &mut doc.tag;
@@ -89,7 +86,6 @@ pub(in crate::app) fn apply_deferred_ops(
     keep(apply_shader_ops(tag, shader_ops, dirty));
     keep(apply_shader_param_ops(tag, shader_param_ops, dirty));
     keep(apply_h2_shader_param_ops(tag, h2_shader_param_ops, dirty));
-    keep(apply_function_data_ops(tag, function_data_ops, dirty));
     let variant_status = apply_model_variant_ops(tag, model_variant_ops, dirty);
     let model_variants_changed = variant_status.is_some();
     keep(variant_status);
@@ -1316,19 +1312,6 @@ fn apply_one_model_variant_op(tag: &mut TagFile, op: &ModelVariantOp) -> Result<
             write_model_variant_regions(tag, *variant_index, regions)?;
             Ok(format!("Updated model variant {}", variant_index))
         }
-        ModelVariantOp::Drop { variant_index } => {
-            let mut root = tag.root_mut();
-            let mut field = root
-                .field_path_mut("variants")
-                .ok_or_else(|| "variants block not found".to_owned())?;
-            let mut block = field
-                .as_block_mut()
-                .ok_or_else(|| "variants is not a block".to_owned())?;
-            block
-                .delete_element(*variant_index)
-                .map_err(|e| format!("{e:?}"))?;
-            Ok(format!("Deleted model variant {}", variant_index))
-        }
     }
 }
 
@@ -1650,18 +1633,6 @@ mod deferred_ops_tests {
         );
         assert!(h2_param.journal.can_undo(), "H2 shader parameter op");
 
-        let mut function_data = document();
-        apply_deferred_ops(
-            &mut function_data,
-            DeferredOps {
-                function_data_ops: vec![FunctionDataOp {
-                    block_path: "missing".to_owned(),
-                    data: Vec::new(),
-                }],
-                ..DeferredOps::default()
-            },
-        );
-        assert!(function_data.journal.can_undo(), "function data op");
 
         let mut untouched = document();
         apply_deferred_ops(&mut untouched, DeferredOps::default());

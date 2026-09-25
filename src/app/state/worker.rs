@@ -65,7 +65,6 @@ pub(in crate::app) struct ContainerDeleteResult {
     pub(in crate::app) display_path: String,
     pub(in crate::app) group_tag: u32,
     pub(in crate::app) package: String,
-    pub(in crate::app) uasset_path: String,
     pub(in crate::app) ubulk_path: String,
     pub(in crate::app) target_label: String,
     pub(in crate::app) is_mod: bool,

@@ -129,7 +129,6 @@ impl Baboon {
         let mut color_request = None;
         let mut function_request = None;
         let mut block_clip_request = None;
-        let mut bitmap_reimport = None;
         let mut tsv_paste_request = None;
         let mut ce_sound_ref_request = None;
 
@@ -185,11 +184,9 @@ impl Baboon {
             ce_sound_ref_request: &mut ce_sound_ref_request,
             ce_paks_root,
             tool_import: &mut self.pending_tool_import,
-            bitmap_reimport: &mut bitmap_reimport,
             shader_ops: &mut ops.shader_ops,
             shader_param_ops: &mut ops.shader_param_ops,
             h2_shader_param_ops: &mut ops.h2_shader_param_ops,
-            function_data_ops: &mut ops.function_data_ops,
             model_variant_ops: &mut ops.model_variant_ops,
             color_request: &mut color_request,
             function_request: &mut function_request,
@@ -350,14 +347,6 @@ impl Baboon {
             ctx.data_mut(|data| data.insert_temp(jump_target_id(), block_path));
         }
 
-        if let Some(key) = bitmap_reimport {
-            // Resolves its source and entry against the active kit, and runs an
-            // external tool that rewrites the bitmap on disk. This pane's kit is
-            // the one being asked, so make it active first rather than trusting
-            // press-activation to have already landed this frame.
-            self.active = kit_index;
-            self.begin_reimport_bitmap(key, ctx.clone());
-        }
         // The model preview panel draws without `&mut Baboon`, so it cannot
         // start its own texture job. Started here instead, once the panel has
         // had its frame to load the geometry the textures belong to. The

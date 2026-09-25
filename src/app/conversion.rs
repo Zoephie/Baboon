@@ -223,11 +223,6 @@ pub(in crate::app) enum CacheSeed {
 pub(in crate::app) struct OutsideReference {
     pub(in crate::app) key: String,
     pub(in crate::app) display_path: String,
-    /// Where it is grouped in the dialog — the first two path segments, or the
-    /// first if that is all there is. Chosen so the question stays answerable:
-    /// a character folder can reach a couple of thousand tags, and nobody reads
-    /// a list that long, but they will read forty folder names with counts.
-    pub(in crate::app) folder: String,
 }
 
 pub(in crate::app) struct FolderConversionJob {
@@ -952,7 +947,6 @@ fn discover_outside_references(
         found.push(OutsideReference {
             key: entry.key.clone(),
             display_path: entry.display_path.clone(),
-            folder: grouping_folder(&entry.display_path),
         });
         send_folder_conversion_progress(
             tx,
@@ -974,20 +968,6 @@ fn discover_outside_references(
     }
     found.sort_by(|left, right| left.display_path.cmp(&right.display_path));
     (found, unresolved)
-}
-
-/// The folder a tag is offered under in the dialog.
-///
-/// Two segments, because one is too coarse to choose by — `objects` covers
-/// most of a build — and the full parent path is too many rows to read.
-fn grouping_folder(display_path: &str) -> String {
-    let normalized = display_path.replace('\\', "/");
-    let mut segments = normalized.split('/');
-    match (segments.next(), segments.next(), segments.next()) {
-        (Some(first), Some(second), Some(_)) => format!("{first}/{second}"),
-        (Some(first), Some(_), None) | (Some(first), None, None) => first.to_owned(),
-        _ => normalized,
-    }
 }
 
 /// A cache key, folded so a reference and an entry that name the same tag agree.
@@ -1702,14 +1682,6 @@ mod tests {
         assert!(
             !report.outside_references.is_empty(),
             "a weapon folder reached nothing outside itself, which cannot be right"
-        );
-        // Grouped so the question stays answerable.
-        assert!(
-            report
-                .outside_references
-                .iter()
-                .all(|reference| !reference.folder.is_empty()),
-            "an outside reference had no folder to be offered under"
         );
 
         // Accepting the answer brings them, and only them.

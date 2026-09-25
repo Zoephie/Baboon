@@ -722,7 +722,6 @@ fn run_container_delete(
         display_path: input.display_path,
         group_tag: input.group_tag,
         package: input.target.package_path,
-        uasset_path: input.target.uasset_path,
         ubulk_path: input.target.ubulk_path,
         target_label: input.target_label,
         is_mod: input.is_mod,

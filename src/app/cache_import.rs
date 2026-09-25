@@ -580,7 +580,6 @@ impl Baboon {
                 conflicts.push(OutsideReference {
                     key: entry.key.clone(),
                     display_path: relative.to_string_lossy().replace('\\', "/"),
-                    folder: String::new(),
                 });
             }
             let _ = tx.send(WorkerMessage::CacheImportConflicts { stamp, conflicts });
@@ -674,7 +673,6 @@ mod outside_tree_tests {
         OutsideReference {
             key: format!("cache:bitm:{}", path.replace('/', "\\")),
             display_path: path.to_owned(),
-            folder: String::new(),
         }
     }
 
