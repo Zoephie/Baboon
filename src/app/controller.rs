@@ -5476,6 +5476,7 @@ impl Baboon {
             edited: None,
             truncated: false,
             error: Some(error),
+            view: Default::default(),
         };
         let Some(dialog) = self.mod_export.as_ref() else {
             return failed("The review is no longer open".to_owned());
@@ -5503,6 +5504,7 @@ impl Baboon {
                 edited: Some(edited_tag),
                 truncated,
                 error: None,
+                view: Default::default(),
             }
         };
         if overlay.kind == CampaignProjectTagKind::New {
@@ -5523,6 +5525,7 @@ impl Baboon {
             edited: Some(edited_tag),
             truncated,
             error: None,
+            view: Default::default(),
         }
     }
 

@@ -12,11 +12,17 @@ struct DiffSection {
     label: String,
     kind: ModExportChange,
     rows: Vec<TagFieldDiff>,
+    /// The fields `rows` touch, as the editor's filter; see `diff_field_filter`.
+    filter: std::sync::Arc<FieldFilter>,
 }
 
 /// A container in the tag, holding whatever changed inside it.
+///
+/// Built once per reviewed tag and kept with its diff (`ModRowDiff::view`):
+/// building it clones every changed row and derives a filter per section,
+/// which for a large diff is too much to repeat every frame.
 #[derive(Default)]
-struct DiffNode {
+pub(in crate::app) struct DiffNode {
     title: String,
     children: Vec<DiffNode>,
     sections: Vec<DiffSection>,
@@ -1236,8 +1242,12 @@ impl Baboon {
                     label,
                     kind,
                     rows: vec![row.clone()],
+                    filter: Default::default(),
                 }),
             }
+        }
+        for section in &mut sections {
+            section.filter = std::sync::Arc::new(Self::diff_field_filter(&section.rows));
         }
         sections
     }
@@ -1250,6 +1260,8 @@ impl Baboon {
     /// merged into one title: four nested boxes around a single changed dword
     /// is depth without information.
     fn build_diff_tree(sections: Vec<DiffSection>) -> DiffNode {
+        #[cfg(test)]
+        diff_view_tests::TREES_BUILT.with(|built| built.set(built.get() + 1));
         let mut root = DiffNode::default();
         for section in sections {
             let (container, _) = Self::split_element_index(&section.element);
@@ -1334,7 +1346,7 @@ impl Baboon {
         ui: &mut Ui,
         tag: &blam_tags::TagFile,
         path: &str,
-        filter: &FieldFilter,
+        filter: &std::sync::Arc<FieldFilter>,
         names: &TagNameIndex,
         group_tag: u32,
         game: Option<&str>,
@@ -1376,7 +1388,7 @@ impl Baboon {
             );
             return;
         };
-        let filter_action = FieldFilterAction::Apply(std::sync::Arc::new(filter.clone()));
+        let filter_action = FieldFilterAction::Apply(filter.clone());
         let mut edit = FieldEditContext {
             expand_all: Some(true),
             nested_default: NestedDefault::Expanded,
@@ -1457,10 +1469,12 @@ impl Baboon {
             );
             return;
         }
-        let tree = Self::build_diff_tree(Self::build_diff_sections(&diff.rows));
+        let tree = diff
+            .view
+            .get_or_init(|| Self::build_diff_tree(Self::build_diff_sections(&diff.rows)));
         Self::draw_diff_node(
             ui,
-            &tree,
+            tree,
             0,
             diff,
             names,
@@ -1595,11 +1609,11 @@ impl Baboon {
             base_element,
             label,
             kind,
-            rows: section_rows,
+            filter,
+            ..
         } = section;
         let (kind, element, base_element, label) =
             (*kind, element.clone(), base_element.clone(), label.clone());
-        let filter = Self::diff_field_filter(section_rows);
         ui.add_space(6.0);
         if !element.is_empty() {
             // `Unresolved` stands in for "gone", the only way an element leaves.
@@ -1675,7 +1689,7 @@ impl Baboon {
                                             ui,
                                             tag,
                                             path,
-                                            &filter,
+                                            filter,
                                             names,
                                             group_tag,
                                             game,
@@ -4458,6 +4472,7 @@ mod mod_export_tests {
             label: String::new(),
             kind: ModExportChange::Modified,
             rows: Vec::new(),
+            filter: Default::default(),
         };
         let tree = Baboon::build_diff_tree(vec![section]);
         assert_eq!(tree.children.len(), 1);
@@ -4904,5 +4919,84 @@ mod cache_import_window_tests {
                 .collect();
         }
         render(&mut done);
+    }
+}
+
+#[cfg(test)]
+mod diff_view_tests {
+    use super::*;
+
+    thread_local! {
+        pub(super) static TREES_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    fn row(path: &str, a: &str, b: &str) -> TagFieldDiff {
+        TagFieldDiff {
+            path: path.to_owned(),
+            base_path: None,
+            a: a.to_owned(),
+            b: b.to_owned(),
+        }
+    }
+
+    fn rows() -> Vec<TagFieldDiff> {
+        vec![
+            row("flags", "0", "1"),
+            row("zone sets[2]", "old", "new"),
+            row("zone sets[2]/name", "a", "b"),
+            row("zone sets[2]/bsp flags", "0", "4"),
+            row("zone set pvs[3]", "pvs", ""),
+            row("zone set pvs[3]/bsp mask", "1", ""),
+        ]
+    }
+
+    /// Each section's filter is built once its rows are complete, and is the
+    /// filter those rows describe.
+    #[test]
+    fn each_section_keeps_the_filter_its_rows_describe() {
+        let sections = Baboon::build_diff_sections(&rows());
+        assert!(sections.len() >= 3);
+        for section in &sections {
+            assert_eq!(
+                section.filter.visible_paths,
+                Baboon::diff_field_filter(&section.rows).visible_paths,
+                "{}",
+                section.element
+            );
+        }
+    }
+
+    /// The review draws a tag's diff every frame; its tree is built on the
+    /// first and reused after.
+    #[test]
+    fn a_reviewed_diff_is_arranged_once() {
+        let diff = ModRowDiff {
+            rows: rows(),
+            base: None,
+            edited: None,
+            truncated: false,
+            error: None,
+            view: Default::default(),
+        };
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::app::foundation_fonts());
+        TREES_BUILT.with(|built| built.set(0));
+        for _ in 0..3 {
+            let _ = ctx.run(Default::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    Baboon::draw_mod_export_diff(
+                        ui,
+                        &diff,
+                        &TagNameIndex::default(),
+                        u32::from_be_bytes(*b"scnr"),
+                        None,
+                        None,
+                        false,
+                        "review",
+                    );
+                });
+            });
+        }
+        assert_eq!(TREES_BUILT.with(std::cell::Cell::get), 1);
     }
 }

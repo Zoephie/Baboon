@@ -7,6 +7,7 @@ use super::*;
 mod blam;
 mod browser_panel;
 mod dialogs;
+pub(in crate::app) use dialogs::DiffNode;
 mod find;
 mod first_run;
 mod git_review;
