@@ -81,10 +81,10 @@ pub(super) struct Kit {
     pub(super) git_review: GitReviewState,
     pub(super) model_previews: HashMap<String, ModelPreviewState>,
     /// Source-local render-method definition cache; `None` is a cached miss.
-    pub(super) rmdf_cache: HashMap<String, Option<RenderMethodDefinition>>,
+    pub(super) rmdf_cache: HashMap<String, Option<Arc<RenderMethodDefinition>>>,
     pub(super) h2_templates: H2TemplateCache,
     /// Source-local render-method option cache; `None` is a cached miss.
-    pub(super) rmop_cache: HashMap<String, Option<RenderMethodOption>>,
+    pub(super) rmop_cache: HashMap<String, Option<Arc<RenderMethodOption>>>,
     /// Campaign Evolved Wwise bindings, cached per tag key because resolving
     /// one walks several packages.
     pub(super) ce_sound_bindings: HashMap<String, Arc<crate::source::ce_audio::CeSoundBinding>>,

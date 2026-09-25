@@ -110,8 +110,8 @@ impl MaterialTextures {
 /// turns N of those reads into one.
 #[derive(Default)]
 struct ResolveCaches {
-    definitions: HashMap<String, Option<RenderMethodDefinition>>,
-    options: HashMap<String, Option<RenderMethodOption>>,
+    definitions: HashMap<String, Option<Arc<RenderMethodDefinition>>>,
+    options: HashMap<String, Option<Arc<RenderMethodOption>>>,
     /// Decoded bitmaps by `(path, image index)`. Shared maps are common —
     /// masterchief's visor variants all reach for the same detail map.
     bitmaps: HashMap<(String, i16), Option<TextureImage>>,
@@ -185,7 +185,10 @@ fn resolve_one_material(
     )
     .map(|definition| {
         ResolvedRenderMethod::resolve(&render_method, &definition, |option_path| {
+            // The engine's resolver takes owned options; this runs once per
+            // texture resolve on a worker, not per frame.
             cached_render_method_option(source, option_path, &mut caches.options)
+                .map(|option| (*option).clone())
         })
     });
 

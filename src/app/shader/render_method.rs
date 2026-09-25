@@ -19,8 +19,8 @@ pub(in crate::app) fn render_method_flags_mask(render_method: &RenderMethod) -> 
 pub(in crate::app) fn cached_render_method_definition(
     source: &TagSource,
     reference: &str,
-    cache: &mut HashMap<String, Option<RenderMethodDefinition>>,
-) -> Option<RenderMethodDefinition> {
+    cache: &mut HashMap<String, Option<Arc<RenderMethodDefinition>>>,
+) -> Option<Arc<RenderMethodDefinition>> {
     if reference.is_empty() {
         return None;
     }
@@ -41,6 +41,7 @@ pub(in crate::app) fn cached_render_method_definition(
                 }))
                 .ok()
                 .flatten()
+                .map(Arc::new)
             });
     cache.insert(key, parsed.clone());
     parsed
@@ -49,8 +50,8 @@ pub(in crate::app) fn cached_render_method_definition(
 pub(in crate::app) fn cached_render_method_option(
     source: &TagSource,
     reference: &str,
-    cache: &mut HashMap<String, Option<RenderMethodOption>>,
-) -> Option<RenderMethodOption> {
+    cache: &mut HashMap<String, Option<Arc<RenderMethodOption>>>,
+) -> Option<Arc<RenderMethodOption>> {
     if reference.is_empty() {
         return None;
     }
@@ -70,6 +71,7 @@ pub(in crate::app) fn cached_render_method_option(
                 }))
                 .ok()
                 .flatten()
+                .map(Arc::new)
             });
     cache.insert(key, parsed.clone());
     parsed
