@@ -144,20 +144,14 @@ pub(in crate::app) fn reference_target_missing_cached(
     group_tag: u32,
     rel_path: &str,
 ) -> bool {
-    const RECHECK_SECONDS: f64 = 2.0;
     let Some(root) = tags_root else {
         return false;
     };
-    let key = egui::Id::new(("reference_target_missing", root, group_tag, rel_path));
-    let now = ui.input(|input| input.time);
-    if let Some((missing, checked_at)) = ui.data(|data| data.get_temp::<(bool, f64)>(key))
-        && now - checked_at < RECHECK_SECONDS
-    {
-        return missing;
-    }
-    let missing = reference_target_missing(names, tags_root, group_tag, rel_path);
-    ui.data_mut(|data| data.insert_temp(key, (missing, now)));
-    missing
+    crate::app::ui::recheck_cached(
+        ui.ctx(),
+        ("reference_target_missing", root, group_tag, rel_path),
+        || reference_target_missing(names, tags_root, group_tag, rel_path),
+    )
 }
 
 pub(in crate::app) fn reference_target_missing(

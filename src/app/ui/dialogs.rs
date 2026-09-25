@@ -684,9 +684,13 @@ impl Baboon {
             let single = dialog.single_output();
             let folder = dialog.folder_output_root();
             let existing = if dialog.source_is_folder() {
-                folder.as_ref().is_some_and(|path| path.is_dir())
+                folder.as_ref().is_some_and(|path| {
+                    recheck_cached(ctx, ("is_dir", path), || path.is_dir())
+                })
             } else {
-                single.as_ref().is_some_and(|path| path.is_file())
+                single
+                    .as_ref()
+                    .is_some_and(|path| is_file_cached(ctx, path))
             };
             (single, folder, existing)
         };

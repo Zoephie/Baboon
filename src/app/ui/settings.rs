@@ -807,10 +807,13 @@ struct DraftIconTexture {
     texture: Option<egui::TextureHandle>,
 }
 
-fn draft_icon_path(icon: &CustomEditingKitIconDraft) -> Option<PathBuf> {
+fn draft_icon_path(ctx: &egui::Context, icon: &CustomEditingKitIconDraft) -> Option<PathBuf> {
     match icon {
         CustomEditingKitIconDraft::Default => None,
-        CustomEditingKitIconDraft::Existing(path) => resolve_custom_icon_path(path).ok(),
+        // Resolving looks for the file in two places; the form asks every frame.
+        CustomEditingKitIconDraft::Existing(path) => recheck_cached(ctx, ("kit_icon", path), || {
+            resolve_custom_icon_path(path).ok()
+        }),
         CustomEditingKitIconDraft::Selected(path) => Some(path.clone()),
     }
 }
@@ -820,7 +823,7 @@ fn draft_editing_kit_icon_texture(
     icon: &CustomEditingKitIconDraft,
 ) -> Option<egui::TextureHandle> {
     let key = egui::Id::new("editing_kit_draft_icon_texture");
-    let Some(path) = draft_icon_path(icon) else {
+    let Some(path) = draft_icon_path(ctx, icon) else {
         ctx.data_mut(|data| data.remove::<DraftIconTexture>(key));
         return None;
     };
@@ -938,7 +941,7 @@ fn draw_editing_kit_form(
     ui.add_space(8.0);
     editing_kit_field_label(ui, "Custom Icon (.png)");
     ui.horizontal(|ui| {
-        let mut display = draft_icon_path(&draft.icon)
+        let mut display = draft_icon_path(ui.ctx(), &draft.icon)
             .map(|path| path.display().to_string())
             .unwrap_or_default();
         let width = (ui.available_width()

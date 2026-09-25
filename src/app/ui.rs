@@ -707,6 +707,35 @@ fn explorer_entry_row(ui: &mut Ui, entry: &TagEntry) -> bool {
     .clicked()
 }
 
+/// `probe`'s answer, re-asked at most once a second.
+///
+/// For file-system questions the UI asks every frame — is a tool there, does
+/// an output exist. Each is a stat, and on a slow or network drive a stat per
+/// frame is a stall per frame. A file created or deleted outside Baboon shows
+/// up within the second. Keyed by `key` in egui's memory.
+pub(in crate::app) fn recheck_cached<T: Clone + Send + Sync + 'static>(
+    ctx: &egui::Context,
+    key: impl std::hash::Hash,
+    probe: impl FnOnce() -> T,
+) -> T {
+    const RECHECK_SECONDS: f64 = 1.0;
+    let key = egui::Id::new(("recheck_cached", key));
+    let now = ctx.input(|input| input.time);
+    if let Some((value, checked_at)) = ctx.data(|data| data.get_temp::<(T, f64)>(key))
+        && (0.0..RECHECK_SECONDS).contains(&(now - checked_at))
+    {
+        return value;
+    }
+    let value = probe();
+    ctx.data_mut(|data| data.insert_temp(key, (value.clone(), now)));
+    value
+}
+
+/// Whether `path` is a file, re-checked at most once a second.
+pub(in crate::app) fn is_file_cached(ctx: &egui::Context, path: &std::path::Path) -> bool {
+    recheck_cached(ctx, ("is_file", path), || path.is_file())
+}
+
 /// Blend `base` toward `accent` by `t` (0..1). Used for the unsaved-tab tint.
 fn tint_toward(base: Color32, accent: Color32, t: f32) -> Color32 {
     let lerp = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
@@ -784,7 +813,7 @@ impl Baboon {
 
             let tag_test_ready = self
                 .kit_tool_path(self.tag_test_executable())
-                .is_some_and(|path| path.is_file());
+                .is_some_and(|path| is_file_cached(ui.ctx(), &path));
             if launcher_button(ui, self.tag_test_icon.as_ref(), "T", tag_test_ready)
                 .on_hover_text("Launch tag_test without an auto-start scenario")
                 .clicked()
@@ -794,7 +823,7 @@ impl Baboon {
 
             let sapien_ready = self
                 .kit_tool_path("sapien.exe")
-                .is_some_and(|path| path.is_file());
+                .is_some_and(|path| is_file_cached(ui.ctx(), &path));
             if launcher_button(ui, self.sapien_icon.as_ref(), "S", sapien_ready)
                 .on_hover_text("Launch Sapien without an auto-start scenario")
                 .clicked()

@@ -23,7 +23,9 @@ pub(super) use tool_drop::KIT_TOOL_DROP_CURSOR;
 // Re-exported: the browser's row menus gate on this, and its drawing functions
 // reach it through egui memory rather than through `Baboon`.
 use scenario_launch::*;
-pub(super) use scenario_launch::{ScenarioLaunchAvailability, scenario_launch_availability};
+pub(super) use scenario_launch::{
+    ScenarioLaunchAvailability, scenario_launch_availability, scenario_launch_availability_with,
+};
 mod queries;
 use queries::*;
 mod saving;

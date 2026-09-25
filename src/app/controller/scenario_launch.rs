@@ -147,6 +147,15 @@ pub(in crate::app) struct ScenarioLaunchAvailability {
 pub(in crate::app) fn scenario_launch_availability(
     source: &LoadedSourceData,
 ) -> ScenarioLaunchAvailability {
+    scenario_launch_availability_with(source, Path::is_file)
+}
+
+/// [`scenario_launch_availability`], asking `is_file` whether each tool is
+/// there. The browser draws this every frame and passes a cached answer.
+pub(in crate::app) fn scenario_launch_availability_with(
+    source: &LoadedSourceData,
+    is_file: impl Fn(&Path) -> bool,
+) -> ScenarioLaunchAvailability {
     let unsupported = ScenarioLaunchAvailability::default();
     let Some(game) = source
         .game
@@ -171,10 +180,8 @@ pub(in crate::app) fn scenario_launch_availability(
     ScenarioLaunchAvailability {
         supported: true,
         offers_sapien: sapien_supports_scenario_argument(game),
-        sapien_present: kit_root.join("sapien.exe").is_file(),
-        tag_test_present: kit_root
-            .join(tag_test_executable_for_game(Some(game)))
-            .is_file(),
+        sapien_present: is_file(&kit_root.join("sapien.exe")),
+        tag_test_present: is_file(&kit_root.join(tag_test_executable_for_game(Some(game)))),
     }
 }
 

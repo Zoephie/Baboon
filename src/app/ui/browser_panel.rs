@@ -136,7 +136,11 @@ impl Baboon {
         let scenario_launch = self.kits[kit_index]
             .source
             .as_ref()
-            .map(crate::app::controller::scenario_launch_availability)
+            .map(|source| {
+                crate::app::controller::scenario_launch_availability_with(source, |path| {
+                    is_file_cached(ui.ctx(), path)
+                })
+            })
             .unwrap_or_default();
         let mut show_browser_prefixes = self.show_browser_prefixes;
         let mut folders_before_tags = self.folders_before_tags;

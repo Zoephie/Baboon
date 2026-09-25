@@ -469,3 +469,32 @@ fn monitor_commands_are_game_specific() {
     assert!(monitor_commands_for_game(Some("haloce_mcc")).is_empty());
     assert!(monitor_commands_for_game(None).is_empty());
 }
+
+/// A probe the UI asks every frame is answered from memory for a second,
+/// then asked again, so a file appearing outside Baboon still shows up.
+#[test]
+fn a_rechecked_probe_runs_at_most_once_a_second() {
+    let ctx = egui::Context::default();
+    let probes = std::cell::Cell::new(0);
+    let ask = |time: f64| {
+        let mut answer = false;
+        let _ = ctx.run(
+            egui::RawInput {
+                time: Some(time),
+                ..Default::default()
+            },
+            |ctx| {
+                answer = super::recheck_cached(ctx, "probe", || {
+                    probes.set(probes.get() + 1);
+                    probes.get() > 1
+                });
+            },
+        );
+        answer
+    };
+    assert!(!ask(10.0));
+    assert!(!ask(10.5), "within the second: the first answer, not asked again");
+    assert_eq!(probes.get(), 1);
+    assert!(ask(11.5), "after it: asked again, and the new answer used");
+    assert_eq!(probes.get(), 2);
+}

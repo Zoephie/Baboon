@@ -192,10 +192,10 @@ mod tests {
     }
 
     /// A reference row's "missing on disk" check is answered from memory for a
-    /// couple of seconds, not by a stat every frame, and still notices a file
+    /// second, not by a stat every frame, and still notices a file
     /// that disappears once that interval has passed.
     #[test]
-    fn reference_rows_recheck_their_target_every_couple_of_seconds() {
+    fn reference_rows_recheck_their_target_every_second() {
         let root = std::env::temp_dir().join(format!(
             "baboon-ref-missing-{}-{}",
             std::process::id(),
@@ -233,8 +233,8 @@ mod tests {
 
         assert!(!check_at(10.0));
         std::fs::remove_file(&file).unwrap();
-        let within = check_at(11.0);
-        let after = check_at(12.5);
+        let within = check_at(10.5);
+        let after = check_at(11.5);
 
         std::fs::remove_dir_all(&root).unwrap();
         assert!(!within, "within the interval the remembered answer stands (no stat)");
