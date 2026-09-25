@@ -160,6 +160,13 @@ impl Baboon {
                     };
                     source.reverse_dependencies = None;
                     kit.field_index.invalidate();
+                    // The lazy list was just cleared, and a folder pane only
+                    // rebuilds its tree (positions in that list) on a new
+                    // generation. Without this bump it kept indexing the
+                    // emptied list: rows went missing, and a Name/Type sort
+                    // indexed past the end. Bumped before the jobs below take
+                    // their stamps, so they match the new state.
+                    kit.generation = kit.generation.wrapping_add(1);
                     self.status = browser_refresh_error.map_or_else(
                         || format!("Tag index complete: {n} tags; building reference index..."),
                         |error| format!("Tag index complete, but browser refresh failed: {error}"),
@@ -302,5 +309,61 @@ pub(super) fn loaded_source_status(source: &LoadedSourceData) -> String {
             source.entries.len(),
             source.label
         ),
+    }
+}
+
+#[cfg(test)]
+mod scan_generation_tests {
+    use super::*;
+
+    /// A finished scan replaces the lists folder panes index into, so it has
+    /// to move the generation the panes rebuild on.
+    #[test]
+    fn a_finished_scan_moves_the_kit_generation() {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-scan-generation-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::LooseFolder {
+                root: root.clone(),
+                game: None,
+                definitions_root: PathBuf::new(),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+        });
+        let before = app.kits[0].generation;
+        let stamp = app.kit_stamp();
+        // Not empty: an empty scan leaves the reference build thinking the
+        // scan is unfinished, and it starts another scan, which bumps the
+        // generation on its own and would hide a missing bump here.
+        let scanned = vec![TagEntry {
+            key: "file:objects/a.model".to_owned(),
+            display_path: "objects/a.model".to_owned(),
+            group_tag: u32::from_be_bytes(*b"hlmt"),
+            group_name: None,
+            location: TagEntryLocation::LooseFile(root.join("objects/a.model")),
+        }];
+
+        app.handle_all_entries_scanned(stamp, Ok(scanned), &egui::Context::default());
+        assert!(!app.kits[0].scanning_entries, "no second scan was started");
+
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_ne!(app.kits[0].generation, before);
     }
 }
