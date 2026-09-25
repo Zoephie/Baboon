@@ -124,6 +124,73 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A closed block-index dropdown builds the label it shows, not one per
+    /// element of its target block. Every block-index field on screen used to
+    /// build all of them every frame, so a frame's labels grew with the size
+    /// of every block an index pointed into.
+    #[test]
+    fn closed_block_index_dropdowns_do_not_label_every_target_element() {
+        let mut tag = TagFile::new(crate::app::test_definition_path(
+            "haloreach_mcc/test_tag.json",
+        ))
+        .unwrap();
+        let target = {
+            let root = tag.root();
+            let index = root
+                .fields_all()
+                .find(|field| field.name() == "short block index")
+                .unwrap();
+            block_index_target_options(&root, &index, Some(root), "")
+                .expect("the test tag's block index resolves")
+                .path
+        };
+        let grow = |tag: &mut TagFile, by: usize| {
+            for _ in 0..by {
+                crate::app::apply_block_ops(
+                    tag,
+                    vec![BlockOp {
+                        path: target.clone(),
+                        kind: BlockOpKind::Add,
+                    }],
+                    &mut Dirty::default(),
+                );
+            }
+        };
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::app::foundation_fonts());
+        let labels_for_one_frame = |tag: &TagFile| {
+            DROPDOWN_LABELS_BUILT.with(|count| count.set(0));
+            with_test_edit_context(|edit| {
+                let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        draw_fields_with_docs(
+                            ui,
+                            &tag.root(),
+                            &TagNameIndex::default(),
+                            0,
+                            true,
+                            "",
+                            edit,
+                            None,
+                        );
+                    });
+                });
+            });
+            DROPDOWN_LABELS_BUILT.with(std::cell::Cell::get)
+        };
+
+        grow(&mut tag, 8);
+        crate::app::apply_field_edit(&mut tag, "short block index", "2").unwrap();
+        let small = labels_for_one_frame(&tag);
+        grow(&mut tag, 32);
+        let large = labels_for_one_frame(&tag);
+
+        assert_eq!(
+            small, large,
+            "a frame built {small} labels over 8 target elements and {large} over 40"
+        );
+    }
+
     fn with_test_edit_context(assertion: impl FnOnce(&mut FieldEditContext<'_>)) {
         let definitions_root = locate_definitions_root();
         let mut buffers = EditDrafts::default();

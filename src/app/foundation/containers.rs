@@ -199,13 +199,12 @@ pub(in crate::app) fn draw_fields_with_docs(
         // Resolve a block-index field's target block (sibling or ancestor) for
         // the element dropdown; `None` falls back to the numeric editor.
         let root = edit.root;
-        let block_index = block_index_target_options(tag_struct, &field, names, root, path_prefix);
+        let block_index = block_index_target_options(tag_struct, &field, root, path_prefix);
         let semantic_short_index = semantic_short_index_target_options(
             ui,
             edit,
             tag_struct,
             &field,
-            names,
             root,
             path_prefix,
         );
@@ -250,8 +249,8 @@ pub(in crate::app) fn draw_field(
     path_prefix: &str,
     edit: &mut FieldEditContext<'_>,
     meta_override: Option<FieldDisplayMeta>,
-    block_index: Option<(Vec<String>, String)>,
-    semantic_short_index: Option<(Vec<String>, String)>,
+    block_index: Option<BlockIndexTarget>,
+    semantic_short_index: Option<BlockIndexTarget>,
     tag_reference_value_width: f32,
 ) {
     let field_path = append_field_path_for(path_prefix, &field);
@@ -1201,11 +1200,20 @@ pub(in crate::app) fn handle_block_actions(
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many dropdown labels this thread has built, for tests that bound it.
+    pub(in crate::app) static DROPDOWN_LABELS_BUILT: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
 pub(in crate::app) fn block_element_dropdown_label(
     element: Option<TagStruct<'_>>,
     names: &TagNameIndex,
     index: usize,
 ) -> String {
+    #[cfg(test)]
+    DROPDOWN_LABELS_BUILT.with(|count| count.set(count.get() + 1));
     let Some(element) = element else {
         return format!("{index}.");
     };
@@ -2550,19 +2558,42 @@ pub(in crate::app) fn block_index_value(value: &TagFieldData) -> Option<i64> {
 /// "primary barrel" → the root "barrels" block). `None` for non-(plain)
 /// block-index fields, custom indices (no target in the definition), or targets
 /// that don't resolve — callers fall back to the numeric editor.
+/// The block a block-index field points into. Only its path and length are
+/// resolved per frame; the element labels, one per target element, are built
+/// by the row when it needs them.
+pub(in crate::app) struct BlockIndexTarget {
+    pub(in crate::app) path: String,
+    pub(in crate::app) len: usize,
+}
+
+/// The dropdown label of every element of `target`, for a popup that is open.
+pub(in crate::app) fn block_index_target_labels(
+    root: Option<TagStruct<'_>>,
+    target: &BlockIndexTarget,
+    names: &TagNameIndex,
+) -> Vec<String> {
+    let block = root
+        .and_then(|root| root.field_path(&target.path))
+        .and_then(|field| field.as_block());
+    (0..target.len)
+        .map(|index| {
+            block_element_dropdown_label(block.as_ref().and_then(|b| b.element(index)), names, index)
+        })
+        .collect()
+}
+
 pub(in crate::app) fn block_index_target_options(
     tag_struct: &TagStruct<'_>,
     field: &TagField<'_>,
-    names: &TagNameIndex,
     root: Option<TagStruct<'_>>,
     struct_path: &str,
-) -> Option<(Vec<String>, String)> {
+) -> Option<BlockIndexTarget> {
     let target_name = field.definition().block_index_target()?.name().to_owned();
     if target_name.is_empty() {
         return None;
     }
     // 1) The field's own struct (sibling block).
-    if let Some(found) = find_target_block(tag_struct, &target_name, names, struct_path) {
+    if let Some(found) = find_target_block(tag_struct, &target_name, struct_path) {
         return Some(found);
     }
     // 2) Ancestors — walk parent structs up to the root.
@@ -2575,7 +2606,7 @@ pub(in crate::app) fn block_index_target_options(
         } else {
             root.descend(parent)?
         };
-        if let Some(found) = find_target_block(&ancestor, &target_name, names, parent) {
+        if let Some(found) = find_target_block(&ancestor, &target_name, parent) {
             return Some(found);
         }
         if parent.is_empty() {
@@ -2594,16 +2625,15 @@ pub(in crate::app) fn semantic_short_index_target_options(
     edit: &FieldEditContext<'_>,
     tag_struct: &TagStruct<'_>,
     field: &TagField<'_>,
-    names: &TagNameIndex,
     root: Option<TagStruct<'_>>,
     struct_path: &str,
-) -> Option<(Vec<String>, String)> {
+) -> Option<BlockIndexTarget> {
     if field.field_type() != TagFieldType::ShortInteger {
         return None;
     }
     let target_key = semantic_short_index_target_key(field.name())?;
-    find_target_block_by_clean_key(tag_struct, target_key, names, struct_path).or_else(|| {
-        find_ancestor_target_block_by_clean_key(ui, edit, root?, target_key, names, struct_path)
+    find_target_block_by_clean_key(tag_struct, target_key, struct_path).or_else(|| {
+        find_ancestor_target_block_by_clean_key(ui, edit, root?, target_key, struct_path)
     })
 }
 
@@ -2621,9 +2651,8 @@ fn find_ancestor_target_block_by_clean_key(
     edit: &FieldEditContext<'_>,
     root: TagStruct<'_>,
     target_key: &str,
-    names: &TagNameIndex,
     struct_path: &str,
-) -> Option<(Vec<String>, String)> {
+) -> Option<BlockIndexTarget> {
     let mut current = Some(struct_path);
     while let Some(path) = current {
         let parent = path.rsplit_once('/').map(|(p, _)| p).unwrap_or("");
@@ -2632,11 +2661,11 @@ fn find_ancestor_target_block_by_clean_key(
         } else {
             root.descend(parent)?
         };
-        if let Some(found) = find_target_block_by_clean_key(&ancestor, target_key, names, parent) {
+        if let Some(found) = find_target_block_by_clean_key(&ancestor, target_key, parent) {
             return Some(found);
         }
         if let Some(found) =
-            find_nested_target_block_by_clean_key(ui, edit, &ancestor, target_key, names, parent, 4)
+            find_nested_target_block_by_clean_key(ui, edit, &ancestor, target_key, parent, 4)
         {
             return Some(found);
         }
@@ -2650,10 +2679,9 @@ fn find_nested_target_block_by_clean_key(
     edit: &FieldEditContext<'_>,
     tag_struct: &TagStruct<'_>,
     target_key: &str,
-    names: &TagNameIndex,
     struct_path: &str,
     depth_left: usize,
-) -> Option<(Vec<String>, String)> {
+) -> Option<BlockIndexTarget> {
     if depth_left == 0 {
         return None;
     }
@@ -2661,10 +2689,10 @@ fn find_nested_target_block_by_clean_key(
         let field_path = append_field_path_for(struct_path, &field);
         if let Some(block) = field.as_block() {
             if clean_field_key(field.name()) == target_key {
-                let labels = (0..block.len())
-                    .map(|i| block_element_dropdown_label(block.element(i), names, i))
-                    .collect();
-                return Some((labels, field_path));
+                return Some(BlockIndexTarget {
+                    path: field_path,
+                    len: block.len(),
+                });
             }
             let count = block.len();
             if count > 0 {
@@ -2676,7 +2704,6 @@ fn find_nested_target_block_by_clean_key(
                         edit,
                         &element,
                         target_key,
-                        names,
                         &element_path,
                         depth_left - 1,
                     ) {
@@ -2690,7 +2717,6 @@ fn find_nested_target_block_by_clean_key(
                 edit,
                 &nested,
                 target_key,
-                names,
                 &field_path,
                 depth_left - 1,
             ) {
@@ -2704,16 +2730,15 @@ fn find_nested_target_block_by_clean_key(
 fn find_target_block_by_clean_key(
     tag_struct: &TagStruct<'_>,
     target_key: &str,
-    names: &TagNameIndex,
     struct_path: &str,
-) -> Option<(Vec<String>, String)> {
+) -> Option<BlockIndexTarget> {
     for sibling in tag_struct.fields_all() {
         if let Some(block) = sibling.as_block() {
             if clean_field_key(sibling.name()) == target_key {
-                let labels = (0..block.len())
-                    .map(|i| block_element_dropdown_label(block.element(i), names, i))
-                    .collect();
-                return Some((labels, append_field_path_for(struct_path, &sibling)));
+                return Some(BlockIndexTarget {
+                    path: append_field_path_for(struct_path, &sibling),
+                    len: block.len(),
+                });
             }
         }
     }
@@ -2725,16 +2750,15 @@ fn find_target_block_by_clean_key(
 fn find_target_block(
     tag_struct: &TagStruct<'_>,
     target_name: &str,
-    names: &TagNameIndex,
     struct_path: &str,
-) -> Option<(Vec<String>, String)> {
+) -> Option<BlockIndexTarget> {
     for sibling in tag_struct.fields_all() {
         if let Some(block) = sibling.as_block() {
             if block.definition().name() == target_name {
-                let labels = (0..block.len())
-                    .map(|i| block_element_dropdown_label(block.element(i), names, i))
-                    .collect();
-                return Some((labels, append_field_path_for(struct_path, &sibling)));
+                return Some(BlockIndexTarget {
+                    path: append_field_path_for(struct_path, &sibling),
+                    len: block.len(),
+                });
             }
         }
     }
@@ -2749,16 +2773,29 @@ pub(in crate::app) fn draw_foundation_block_index_row(
     ui: &mut Ui,
     meta: &FieldDisplayMeta,
     current: i64,
-    labels: &[String],
-    target_block_path: &str,
+    target: &BlockIndexTarget,
     depth: usize,
     path: &str,
     edit: &mut FieldEditContext<'_>,
 ) {
+    let target_block_path = target.path.as_str();
     let editable = edit.editable && !meta.read_only;
-    let in_range = current >= 0 && (current as usize) < labels.len();
+    let in_range = current >= 0 && (current as usize) < target.len;
+    // Only the selected element's label is needed to draw a closed combo. The
+    // rest used to be built here too, every frame, for every block-index field
+    // on screen: one recursive walk per element of the target block.
+    let root = edit.root;
+    let default_names = TagNameIndex::default();
+    let names = edit.names.unwrap_or(&default_names);
     let selected_text = if in_range {
-        labels[current as usize].clone()
+        let block = root
+            .and_then(|root| root.field_path(target_block_path))
+            .and_then(|field| field.as_block());
+        block_element_dropdown_label(
+            block.as_ref().and_then(|block| block.element(current as usize)),
+            names,
+            current as usize,
+        )
     } else {
         "<none>".to_owned()
     };
@@ -2774,7 +2811,7 @@ pub(in crate::app) fn draw_foundation_block_index_row(
                 // Keyed on the option count for the same reason as the
                 // instance selector above: adding a palette entry must not
                 // leave the popup at the size it had before.
-                egui::ComboBox::from_id_salt(("block_index", path, labels.len()))
+                egui::ComboBox::from_id_salt(("block_index", path, target.len))
                     .selected_text(truncate_for_cell(&selected_text, 280.0))
                     .width(300.0),
                 |ui| {
@@ -2788,6 +2825,7 @@ pub(in crate::app) fn draw_foundation_block_index_row(
                     if none_row.clicked() {
                         new_index = Some(-1);
                     }
+                    let labels = block_index_target_labels(root, target, names);
                     for (i, label) in labels.iter().enumerate() {
                         let row = ui.selectable_label(current == i as i64, label);
                         if just_opened && current == i as i64 {
@@ -2801,7 +2839,7 @@ pub(in crate::app) fn draw_foundation_block_index_row(
             );
             if let Some(delta) = wheel_delta {
                 if let Some(next) =
-                    combo_scroll_next_i64(current, -1, labels.len() as i64 - 1, delta)
+                    combo_scroll_next_i64(current, -1, target.len as i64 - 1, delta)
                 {
                     new_index = Some(next);
                 }
@@ -2878,9 +2916,9 @@ mod palette_repro_tests {
             .fields_all()
             .find(|field| field.name() == "short block index")
             .unwrap();
-        let (_, target) =
-            block_index_target_options(&root, &index, &TagNameIndex::default(), Some(root), "")
-                .unwrap();
+        let target = block_index_target_options(&root, &index, Some(root), "")
+            .unwrap()
+            .path;
 
         assert!(target.contains('#'), "target should carry an exact ordinal");
         assert!(
@@ -2934,16 +2972,15 @@ mod palette_repro_tests {
                     {
                         for sub in element.fields_all() {
                             if sub.definition().block_index_target().is_some()
-                                && let Some((labels, target)) = block_index_target_options(
+                                && let Some(target) = block_index_target_options(
                                     &element,
                                     &sub,
-                                    &names,
                                     Some(root),
                                     "vehicles[0]",
                                 )
-                                && target.contains("palette")
+                                && target.path.contains("palette")
                             {
-                                return Some(labels);
+                                return Some(block_index_target_labels(Some(root), &target, &names));
                             }
                         }
                     }
@@ -3098,15 +3135,14 @@ mod palette_repro_tests {
                     };
                     for field in st.fields_all() {
                         if field.definition().block_index_target().is_some()
-                            && let Some((labels, target)) = block_index_target_options(
+                            && let Some(target) = block_index_target_options(
                                 &st,
                                 &field,
-                                &names,
                                 Some(root),
                                 struct_path,
                             )
                         {
-                            return Some((target, labels.len()));
+                            return Some((target.path, target.len));
                         }
                     }
                     None
