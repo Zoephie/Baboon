@@ -9213,7 +9213,7 @@ fn draw_chimp_header_sections(
                         .iter()
                         .enumerate()
                         .filter(|(_, name)| {
-                            filter.is_empty() || name.to_ascii_lowercase().contains(&filter)
+                            filter.is_empty() || chimp_contains_query(name, &filter)
                         })
                         .map(|(index, _)| index)
                         .collect();
@@ -9294,44 +9294,58 @@ fn draw_chimp_header_sections(
                             ui.add_space(4.0);
                             document.header_import_edit = Some(edit);
                         }
-                        egui::Grid::new("chimp_header_imports")
-                            .num_columns(4)
-                            .spacing([14.0, 2.0])
-                            .show(ui, |ui| {
-                                for (index, slot) in slots.iter().enumerate() {
-                                    ui.label(
-                                        RichText::new(format!("{index}"))
-                                            .color(subtle_dark())
-                                            .monospace(),
-                                    );
-                                    let (kind, target) = import_slot_display(slot, world);
-                                    ui.label(RichText::new(kind).color(subtle_dark()).small());
-                                    if ui
-                                        .add(
-                                            egui::Label::new(RichText::new(target).monospace())
-                                                .sense(egui::Sense::click()),
-                                        )
-                                        .on_hover_text("Retarget this import slot")
-                                        .clicked()
-                                    {
-                                        *start_import = Some((index, slot.clone()));
-                                    }
-                                    let references = usage
-                                        .import_references
-                                        .get(index)
-                                        .copied()
-                                        .unwrap_or_default();
-                                    ui.label(
-                                        RichText::new(match references {
-                                            0 => "unreferenced".to_owned(),
-                                            1 => "1 property".to_owned(),
-                                            n => format!("{n} properties"),
-                                        })
-                                        .color(subtle_dark())
-                                        .small(),
-                                    );
-                                    ui.end_row();
-                                }
+                        // Virtualised like the name map: a level package imports
+                        // thousands of slots, each resolved against the world.
+                        let row_height = ui.spacing().interact_size.y;
+                        egui::ScrollArea::vertical()
+                            .id_salt("chimp_header_import_rows")
+                            .max_height(260.0)
+                            .show_rows(ui, row_height, slots.len(), |ui, range| {
+                                egui::Grid::new("chimp_header_imports")
+                                    .num_columns(4)
+                                    .spacing([14.0, 2.0])
+                                    .show(ui, |ui| {
+                                        for (index, slot) in slots[range.clone()].iter().enumerate()
+                                        {
+                                            let index = range.start + index;
+                                            ui.label(
+                                                RichText::new(format!("{index}"))
+                                                    .color(subtle_dark())
+                                                    .monospace(),
+                                            );
+                                            let (kind, target) = import_slot_display(slot, world);
+                                            ui.label(
+                                                RichText::new(kind).color(subtle_dark()).small(),
+                                            );
+                                            if ui
+                                                .add(
+                                                    egui::Label::new(
+                                                        RichText::new(target).monospace(),
+                                                    )
+                                                    .sense(egui::Sense::click()),
+                                                )
+                                                .on_hover_text("Retarget this import slot")
+                                                .clicked()
+                                            {
+                                                *start_import = Some((index, slot.clone()));
+                                            }
+                                            let references = usage
+                                                .import_references
+                                                .get(index)
+                                                .copied()
+                                                .unwrap_or_default();
+                                            ui.label(
+                                                RichText::new(match references {
+                                                    0 => "unreferenced".to_owned(),
+                                                    1 => "1 property".to_owned(),
+                                                    n => format!("{n} properties"),
+                                                })
+                                                .color(subtle_dark())
+                                                .small(),
+                                            );
+                                            ui.end_row();
+                                        }
+                                    });
                             });
                         ui.add_space(4.0);
                         ui.horizontal(|ui| {
@@ -9373,56 +9387,65 @@ fn draw_chimp_header_sections(
                         ui.add_space(4.0);
                         document.header_export_edit = Some(edit);
                     }
-                    egui::Grid::new("chimp_header_exports")
-                        .num_columns(4)
-                        .spacing([14.0, 2.0])
-                        .show(ui, |ui| {
-                            for (index, export) in header.export_map.iter().enumerate() {
-                                ui.label(
-                                    RichText::new(format!("{index}"))
-                                        .color(subtle_dark())
-                                        .monospace(),
-                                );
-                                if ui
-                                    .add(
-                                        egui::Label::new(
-                                            RichText::new(
-                                                header
-                                                    .name_map
-                                                    .try_get(export.object_name)
-                                                    .map(|name| name.to_string())
-                                                    .unwrap_or_else(|| {
-                                                        "<bad name reference>".to_owned()
-                                                    }),
+                    let row_height = ui.spacing().interact_size.y;
+                    egui::ScrollArea::vertical()
+                        .id_salt("chimp_header_export_rows")
+                        .max_height(260.0)
+                        .show_rows(ui, row_height, header.export_map.len(), |ui, range| {
+                            egui::Grid::new("chimp_header_exports")
+                                .num_columns(4)
+                                .spacing([14.0, 2.0])
+                                .show(ui, |ui| {
+                                    for (index, export) in
+                                        header.export_map[range.clone()].iter().enumerate()
+                                    {
+                                        let index = range.start + index;
+                                        ui.label(
+                                            RichText::new(format!("{index}"))
+                                                .color(subtle_dark())
+                                                .monospace(),
+                                        );
+                                        if ui
+                                            .add(
+                                                egui::Label::new(
+                                                    RichText::new(
+                                                        header
+                                                            .name_map
+                                                            .try_get(export.object_name)
+                                                            .map(|name| name.to_string())
+                                                            .unwrap_or_else(|| {
+                                                                "<bad name reference>".to_owned()
+                                                            }),
+                                                    )
+                                                    .monospace(),
+                                                )
+                                                .sense(egui::Sense::click()),
                                             )
-                                            .monospace(),
-                                        )
-                                        .sense(egui::Sense::click()),
-                                    )
-                                    .on_hover_text("Edit this export's name and flags")
-                                    .clicked()
-                                {
-                                    *start_export = Some(index);
-                                }
-                                ui.label(
-                                    RichText::new(
-                                        world
-                                            .class_key(header, export.class_index)
-                                            .unwrap_or_else(|| "Unknown class".to_owned()),
-                                    )
-                                    .color(subtle_dark())
-                                    .small(),
-                                );
-                                ui.label(
-                                    RichText::new(format!(
-                                        "flags 0x{:08X} · hash 0x{:016X}",
-                                        export.object_flags, export.public_export_hash
-                                    ))
-                                    .color(subtle_dark())
-                                    .small(),
-                                );
-                                ui.end_row();
-                            }
+                                            .on_hover_text("Edit this export's name and flags")
+                                            .clicked()
+                                        {
+                                            *start_export = Some(index);
+                                        }
+                                        ui.label(
+                                            RichText::new(
+                                                world
+                                                    .class_key(header, export.class_index)
+                                                    .unwrap_or_else(|| "Unknown class".to_owned()),
+                                            )
+                                            .color(subtle_dark())
+                                            .small(),
+                                        );
+                                        ui.label(
+                                            RichText::new(format!(
+                                                "flags 0x{:08X} · hash 0x{:016X}",
+                                                export.object_flags, export.public_export_hash
+                                            ))
+                                            .color(subtle_dark())
+                                            .small(),
+                                        );
+                                        ui.end_row();
+                                    }
+                                });
                         });
                 });
 
@@ -10355,6 +10378,29 @@ mod tests {
         };
         for i in 0..6 {
             eprintln!("frame {i}: {:?}", frame(&ctx));
+        }
+    }
+
+    /// The name-map filter matches exactly what lowercasing each name did,
+    /// without the per-row, per-frame copy.
+    #[test]
+    fn the_name_filter_matches_as_lowercasing_did() {
+        let names = [
+            "SM_Warthog_Chassis",
+            "/Game/Vehicles/Warthog",
+            "ÉCLAIR_Mesh",
+            "éclair_mesh",
+            "",
+            "hog",
+        ];
+        for filter in ["", "hog", "warthog_c", "/game/", "éclair", "clair_m", "zzz"] {
+            for name in names {
+                assert_eq!(
+                    chimp_contains_query(name, filter),
+                    name.to_ascii_lowercase().contains(filter),
+                    "{name:?} / {filter:?}"
+                );
+            }
         }
     }
 
