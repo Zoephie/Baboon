@@ -1360,6 +1360,75 @@ fn draw_model_viewport_with_stats(
         FontId::proportional(10.0),
         foundation_block_text(),
     );
+    // Why a material drew untextured, which the resolve records and nothing
+    // showed: the model just looked flat.
+    if state.render_mode.uses_textures()
+        && let Some(textures) = data.textures.as_deref()
+        && let Some((summary, detail)) = texture_resolve_note(textures, &data.preview.materials)
+    {
+        ui.label(RichText::new(summary).small().color(subtle_dark()))
+            .on_hover_text(detail);
+    }
+}
+
+/// A line saying which materials resolved badly, and the reasons, for hover.
+/// `None` when every material resolved from its definition.
+fn texture_resolve_note(
+    textures: &[MaterialTextures],
+    materials: &[RenderModelPreviewMaterial],
+) -> Option<(String, String)> {
+    let name = |index: usize| {
+        materials
+            .get(index)
+            .map(|material| material.shader_path.as_str())
+            .filter(|path| !path.is_empty())
+            .unwrap_or("(no shader)")
+            .to_owned()
+    };
+    let failed: Vec<String> = textures
+        .iter()
+        .enumerate()
+        .filter_map(|(index, texture)| {
+            texture
+                .error
+                .as_ref()
+                .map(|error| format!("{}: {error}", name(index)))
+        })
+        .collect();
+    let partial: Vec<String> = textures
+        .iter()
+        .enumerate()
+        .filter(|(_, texture)| texture.error.is_none() && texture.used_shader_parameters_only)
+        .map(|(index, _)| name(index))
+        .collect();
+    if failed.is_empty() && partial.is_empty() {
+        return None;
+    }
+    let mut summary = Vec::new();
+    let mut detail = Vec::new();
+    if !failed.is_empty() {
+        summary.push(format!(
+            "{} of {} materials untextured",
+            failed.len(),
+            textures.len()
+        ));
+        detail.extend(failed);
+    }
+    if !partial.is_empty() {
+        summary.push(format!(
+            "{} read without their render method definition",
+            partial.len()
+        ));
+        detail.push(format!(
+            "Read from the shader's own parameters, without option defaults such as \
+             detail-map tiling:\n{}",
+            partial.join("\n")
+        ));
+    }
+    Some((
+        format!("{} — hover for why", summary.join("; ")),
+        detail.join("\n"),
+    ))
 }
 
 /// Build the renderer's camera-independent data for a standalone mesh, such as
@@ -2006,5 +2075,41 @@ mod playback_clock_tests {
         assert!((playback.time - 0.1).abs() < 1e-6, "{}", playback.time);
         advance_playback_clock(&mut playback, 8, 0.1, 10.0, 300.0);
         assert!((playback.time - 0.2).abs() < 1e-6, "{}", playback.time);
+    }
+}
+
+#[cfg(test)]
+mod texture_note_tests {
+    use super::*;
+
+    /// A material that drew untextured says why, instead of just looking flat.
+    #[test]
+    fn untextured_materials_say_why() {
+        let material = |path: &str| RenderModelPreviewMaterial {
+            shader_path: path.to_owned(),
+            ..Default::default()
+        };
+        let materials = [material("shaders/a"), material("shaders/b"), material("shaders/c")];
+        let textures = [
+            MaterialTextures {
+                error: Some("shader tag not found".to_owned()),
+                ..Default::default()
+            },
+            MaterialTextures {
+                used_shader_parameters_only: true,
+                ..Default::default()
+            },
+            MaterialTextures::default(),
+        ];
+        let (summary, detail) = texture_resolve_note(&textures, &materials).unwrap();
+        assert_eq!(
+            summary,
+            "1 of 3 materials untextured; 1 read without their render method definition \
+             — hover for why"
+        );
+        assert!(detail.contains("shaders/a: shader tag not found"));
+        assert!(detail.contains("shaders/b"));
+        assert!(!detail.contains("shaders/c"));
+        assert_eq!(texture_resolve_note(&textures[2..], &materials[2..]), None);
     }
 }
