@@ -14,6 +14,7 @@ pub(super) fn draw_material_tag(
     source: Option<&TagSource>,
     rmdf_cache: &mut HashMap<String, Option<RenderMethodDefinition>>,
     rmop_cache: &mut HashMap<String, Option<RenderMethodOption>>,
+    h2_templates: &mut H2TemplateCache,
     color_popup: &mut Option<MaterialColorPopup>,
     function_popup: &mut Option<FunctionPopup>,
     expert_mode: bool,
@@ -31,7 +32,7 @@ pub(super) fn draw_material_tag(
         .show(ui, |ui| {
             if is_shader_tag(entry) {
                 let model =
-                    build_h2ek_shader_editor_model(tag, entry, names, source).or_else(|| {
+                    build_h2ek_shader_editor_model(tag, entry, names, source, h2_templates).or_else(|| {
                         build_shader_editor_model(
                             tag,
                             entry.group_tag,

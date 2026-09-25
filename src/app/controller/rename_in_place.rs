@@ -297,6 +297,7 @@ pub(in crate::app) fn rekey_tag_in_kit(kit: &mut Kit, old: &str, new: &str) {
     // dropping them costs one re-resolve and cannot be wrong.
     kit.rmdf_cache.clear();
     kit.rmop_cache.clear();
+    kit.h2_templates = H2TemplateCache::default();
 
     // Forces `modified_tags` to be rebuilt: it maps keys to entries, and the
     // signature is what decides whether that is worth doing again.

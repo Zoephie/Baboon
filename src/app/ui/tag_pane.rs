@@ -248,6 +248,7 @@ impl Baboon {
                 source.and_then(|source| source.game.as_deref()),
                 &mut kit.rmdf_cache,
                 &mut kit.rmop_cache,
+                &mut kit.h2_templates,
                 &mut self.color_popup,
                 &mut self.function_popup,
                 model_preview,

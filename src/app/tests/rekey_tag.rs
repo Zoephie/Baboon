@@ -213,6 +213,7 @@ fn every_field_of_a_kit_is_accounted_for() {
         edit_buffers: _,
         rmdf_cache: _,
         rmop_cache: _,
+        h2_templates: _,
         modified_signature: _,
         generation: _,
         field_index: _,

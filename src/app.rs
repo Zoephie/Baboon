@@ -1548,7 +1548,7 @@ mod tests {
 
         let entry = h2_shader_entry(u32::from_be_bytes(*b"shad"));
         let model =
-            build_h2ek_shader_editor_model(&tag, &entry, &TagNameIndex::default(), None).unwrap();
+            build_h2ek_shader_editor_model(&tag, &entry, &TagNameIndex::default(), None, &mut H2TemplateCache::default()).unwrap();
         let (function_bytes, path) = first_halo2_byte_block_function_row(&model).unwrap();
 
         assert_eq!(function_bytes, bytes);
@@ -1564,13 +1564,13 @@ mod tests {
             header: vec![0; 64],
         };
         assert!(
-            build_h2ek_shader_editor_model(&classic, &entry, &TagNameIndex::default(), None)
+            build_h2ek_shader_editor_model(&classic, &entry, &TagNameIndex::default(), None, &mut H2TemplateCache::default())
                 .is_some()
         );
 
         let mcc = TagFile::new(test_definition_path("halo2_mcc/shader.json")).unwrap();
         assert!(
-            build_h2ek_shader_editor_model(&mcc, &entry, &TagNameIndex::default(), None).is_none()
+            build_h2ek_shader_editor_model(&mcc, &entry, &TagNameIndex::default(), None, &mut H2TemplateCache::default()).is_none()
         );
 
         let non_shader = classic;
@@ -1580,7 +1580,8 @@ mod tests {
                 &non_shader,
                 &non_shader_entry,
                 &TagNameIndex::default(),
-                None
+                None,
+                &mut H2TemplateCache::default(),
             )
             .is_none()
         );
@@ -1613,6 +1614,7 @@ mod tests {
             &h2_shader_entry(u32::from_be_bytes(*b"rmsh")),
             &TagNameIndex::default(),
             None,
+            &mut H2TemplateCache::default(),
         )
         .unwrap();
 
@@ -1642,6 +1644,7 @@ mod tests {
             &h2_shader_entry(u32::from_be_bytes(*b"rmsh")),
             &TagNameIndex::default(),
             None,
+            &mut H2TemplateCache::default(),
         )
         .unwrap();
 
@@ -2692,6 +2695,7 @@ mod tests {
             &h2_shader_entry(u32::from_be_bytes(*b"rmsh")),
             &TagNameIndex::default(),
             None,
+            &mut H2TemplateCache::default(),
         )
         .unwrap();
         let summary = first_h2_function_edit_summary(&model).expect("function row");
@@ -3074,6 +3078,54 @@ mod tests {
             wrote = true;
         });
         assert!(wrote, "failed to seed wrapped H2 function bytes");
+    }
+
+    /// The H2 shader grid is rebuilt every frame, and used to read and parse
+    /// its `.shader_template` off disk each time. Now the template is read
+    /// once, and again only when the file changes.
+    #[test]
+    fn the_h2_shader_grid_reads_its_template_once_per_change() {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-h2-template-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("shaders")).unwrap();
+        let template_path = root.join("shaders/test.shader_template");
+        std::fs::write(&template_path, b"not a template").unwrap();
+
+        let mut tag = h2_classic_shader_tag();
+        crate::app::apply_field_edit(&mut tag, "template", "stem:shaders/test").unwrap();
+        let entry = h2_shader_entry(u32::from_be_bytes(*b"shad"));
+        let source = TagSource::LooseFolder {
+            root: root.clone(),
+            game: None,
+            definitions_root: PathBuf::new(),
+        };
+        let mut templates = H2TemplateCache::default();
+        let mut frames = |templates: &mut H2TemplateCache| {
+            for _ in 0..3 {
+                build_h2ek_shader_editor_model(
+                    &tag,
+                    &entry,
+                    &TagNameIndex::default(),
+                    Some(&source),
+                    templates,
+                );
+            }
+        };
+
+        frames(&mut templates);
+        assert_eq!(templates.loads, 1, "three frames, one read");
+        // A different size is a different file, whatever the clock says.
+        std::fs::write(&template_path, b"still not a template, but longer").unwrap();
+        frames(&mut templates);
+
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(templates.loads, 2, "a changed file is read again, once");
     }
 
     fn h2_shader_entry(group_tag: u32) -> TagEntry {

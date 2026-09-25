@@ -82,6 +82,7 @@ pub(super) struct Kit {
     pub(super) model_previews: HashMap<String, ModelPreviewState>,
     /// Source-local render-method definition cache; `None` is a cached miss.
     pub(super) rmdf_cache: HashMap<String, Option<RenderMethodDefinition>>,
+    pub(super) h2_templates: H2TemplateCache,
     /// Source-local render-method option cache; `None` is a cached miss.
     pub(super) rmop_cache: HashMap<String, Option<RenderMethodOption>>,
     /// Campaign Evolved Wwise bindings, cached per tag key because resolving
@@ -220,6 +221,7 @@ impl Kit {
             git_review: GitReviewState::default(),
             model_previews: HashMap::new(),
             rmdf_cache: HashMap::new(),
+            h2_templates: H2TemplateCache::default(),
             rmop_cache: HashMap::new(),
             ce_sound_bindings: HashMap::new(),
             pending_expand: HashMap::new(),
