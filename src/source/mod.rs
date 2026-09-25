@@ -578,6 +578,14 @@ pub struct EntryIndexRefresh {
     pub added: usize,
     pub updated: usize,
     pub removed: usize,
+    /// Entries added or changed since the cached index: the only ones whose
+    /// index rows and references need rewriting.
+    pub touched: Vec<TagEntry>,
+    /// Keys the cached index had that are gone, or no longer tags.
+    pub removed_keys: Vec<String>,
+    /// References of each touched tag, read by whoever applies the refresh.
+    /// Empty from [`crate::source::refresh_entry_index`] itself.
+    pub touched_dependencies: Vec<(String, Vec<DependencyRef>)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

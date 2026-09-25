@@ -2551,12 +2551,14 @@ impl Baboon {
         };
         let root = root.clone();
         let names = source.names.clone();
+        let tag_source = source.source.clone();
         let tx = self.tx.clone();
         let stamp = self.kit_stamp();
         self.refreshing_entry_index = true;
         thread::spawn(move || {
-            let result =
-                crate::source::refresh_entry_index(&game, &root, &names).map_err(|e| e.to_string());
+            let result = crate::source::refresh_entry_index(&game, &root, &names)
+                .map(|refresh| persist_entry_index_changes(&game, &root, &tag_source, refresh))
+                .map_err(|e| e.to_string());
             let _ = tx.send(WorkerMessage::EntryIndexRefreshed { stamp, result });
             ctx.request_repaint();
         });
@@ -2594,56 +2596,64 @@ impl Baboon {
         &mut self,
         kit_index: usize,
         refresh: EntryIndexRefresh,
-        ctx: egui::Context,
+        _ctx: egui::Context,
     ) {
+        let EntryIndexRefresh {
+            entries,
+            added,
+            updated,
+            removed,
+            removed_keys,
+            touched_dependencies,
+            ..
+        } = refresh;
+        let n = entries.len();
+        let browser_refresh_error = self.install_complete_entry_set(kit_index, entries);
+        // Patched, not dropped: the worker read the changed tags' references
+        // and already wrote them (and the index rows) to disk. Dropping it, as
+        // this used to, left "References to" unavailable until a manual
+        // rebuild after any change the refresh noticed, including the user's
+        // own saves.
+        if let Some(index) = self.kits[kit_index]
+            .source
+            .as_mut()
+            .and_then(|source| source.reverse_dependencies.as_mut())
+        {
+            for key in &removed_keys {
+                index.clear_tag(key);
+            }
+            for (key, deps) in touched_dependencies {
+                index.set_tag_dependencies(key, deps);
+            }
+        }
+        self.status = browser_refresh_error.map_or_else(
+            || format!("Index updated: {n} tags ({added} added, {updated} changed, {removed} removed)"),
+            |error| format!("Index updated, but browser refresh failed: {error}"),
+        );
+    }
+
+    /// Adopt a complete entry set for a kit: the full list and its group tree,
+    /// a reset lazy browser, and a new generation so panes and caches rebuild.
+    /// Shared by the full scan and the periodic refresh, which used to do this
+    /// separately and had drifted (only one of them moved the generation).
+    /// Returns the browser reset's error, if it failed.
+    pub(super) fn install_complete_entry_set(
+        &mut self,
+        kit_index: usize,
+        entries: Vec<TagEntry>,
+    ) -> Option<String> {
         let kit = &mut self.kits[kit_index];
-        let Some(source) = kit.source.as_mut() else {
-            return;
-        };
-        let n = refresh.entries.len();
-        source.group_tree = crate::source::build_group_tree(&refresh.entries);
-        source.all_entries = refresh.entries;
-        let browser_refresh_error = if let TagSource::LooseFolder { root, .. } = &source.source {
+        let source = kit.source.as_mut()?;
+        source.group_tree = crate::source::build_group_tree(&entries);
+        source.all_entries = entries;
+        let error = if let TagSource::LooseFolder { root, .. } = &source.source {
             reset_lazy_folder_browser(root, &mut source.tree, &mut source.entries).err()
         } else {
             None
         };
-        source.reverse_dependencies = None;
         kit.field_index.invalidate();
         kit.generation = kit.generation.wrapping_add(1);
-        self.status = browser_refresh_error.map_or_else(
-            || {
-                format!(
-                    "Index updated: {n} tags ({} added, {} changed, {} removed)",
-                    refresh.added, refresh.updated, refresh.removed
-                )
-            },
-            |error| format!("Index updated, but browser refresh failed: {error}"),
-        );
-
-        if let (Some(game), TagSource::LooseFolder { root, .. }) =
-            (source.game.clone(), &source.source)
-        {
-            let root = root.clone();
-            let entries = source.all_entries.clone();
-            let tx = self.tx.clone();
-            let ctx = ctx.clone();
-            let stamp = KitStamp {
-                kit: kit.id,
-                generation: kit.generation,
-            };
-            let path = crate::source::index_db_path();
-            thread::spawn(move || {
-                let result = crate::source::save_entry_index(&game, &root, &entries)
-                    .map_err(|error| error.to_string());
-                let _ = tx.send(WorkerMessage::EntryIndexSaved {
-                    stamp,
-                    path,
-                    result,
-                });
-                ctx.request_repaint();
-            });
-        }
+        error
     }
 
     /// Starts the non-blocking release lookup and returns its result through `WorkerMessage`.
@@ -11173,6 +11183,33 @@ fn refresh_reverse_dependency_index_after_refactor(
     }
 }
 
+/// Write what a refresh found into the on-disk indexes, row by row, and read
+/// the references of the tags that changed. Runs on the refresh worker.
+///
+/// A refresh used to hand the whole entry list back to the UI, which dropped
+/// the reference index and spawned a rewrite of every index row, a stat per
+/// tag although the refresh had just taken them all. Only the tags that
+/// changed are touched now.
+fn persist_entry_index_changes(
+    game: &str,
+    root: &Path,
+    tag_source: &TagSource,
+    mut refresh: EntryIndexRefresh,
+) -> EntryIndexRefresh {
+    for key in &refresh.removed_keys {
+        let _ = crate::source::delete_entry_index_row(game, root, key);
+        let _ = crate::source::save_tag_dependencies(game, root, key, None);
+    }
+    for entry in &refresh.touched {
+        let _ = crate::source::upsert_entry_index_row(game, root, entry);
+        if let Ok(deps) = read_entry_dependencies(tag_source, entry) {
+            let _ = crate::source::save_tag_dependencies(game, root, &entry.key, Some(&deps));
+            refresh.touched_dependencies.push((entry.key.clone(), deps));
+        }
+    }
+    refresh
+}
+
 fn read_entry_dependencies(
     source: &TagSource,
     entry: &TagEntry,
@@ -12262,5 +12299,65 @@ mod dependency_database_tests {
         std::fs::remove_dir_all(&root).unwrap();
         assert_eq!(scanned, Ok(1), "the in-memory scan, not a rescan of the empty folder");
         assert!(waiting, "no scan yet: say so rather than scan on the UI thread");
+    }
+}
+
+#[cfg(test)]
+mod refresh_reference_tests {
+    use super::*;
+
+    /// A refresh patches the reference index with what changed. It used to
+    /// drop it, so "References to" said the index was unavailable until a
+    /// manual rebuild after any change the refresh noticed.
+    #[test]
+    fn a_refresh_patches_the_reference_index_instead_of_dropping_it() {
+        let target = DependencyRef {
+            group_tag: u32::from_be_bytes(*b"bitm"),
+            rel_path: "shared\\texture".to_owned(),
+        };
+        let mut index = ReverseDependencyIndex::default();
+        index.set_tag_dependencies("file:kept".to_owned(), vec![target.clone()]);
+        index.set_tag_dependencies("file:gone".to_owned(), vec![target.clone()]);
+        let root = std::env::temp_dir();
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::SingleFile {
+                path: root.join("x"),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: Some(index),
+            initial_tag: None,
+            key_hints: Default::default(),
+        });
+
+        app.apply_entry_index_refresh(
+            0,
+            EntryIndexRefresh {
+                entries: Vec::new(),
+                changed: true,
+                added: 1,
+                updated: 0,
+                removed: 1,
+                touched: Vec::new(),
+                removed_keys: vec!["file:gone".to_owned()],
+                touched_dependencies: vec![("file:new".to_owned(), vec![target.clone()])],
+            },
+            egui::Context::default(),
+        );
+
+        let index = app.kits[0]
+            .source
+            .as_ref()
+            .and_then(|source| source.reverse_dependencies.as_ref())
+            .expect("the reference index survives a refresh");
+        let mut referrers = index.dependents_for(target.group_tag, &target.rel_path).to_vec();
+        referrers.sort();
+        assert_eq!(referrers, ["file:kept", "file:new"]);
     }
 }

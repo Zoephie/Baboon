@@ -1232,6 +1232,54 @@ mod tests {
         assert_eq!(refreshed.entries.len(), 1);
     }
 
+    /// A refresh names what changed, so only those tags are rewritten: the
+    /// rows it writes leave the index exactly as a full rewrite would, and
+    /// references are saved per tag only where a reference index exists.
+    #[test]
+    fn a_refresh_reports_and_persists_only_what_changed() {
+        let root = temp_dir("refresh_changes");
+        let game = unique_game("refresh_changes");
+        let check = unique_game("refresh_changes_check");
+        fs::create_dir_all(root.join("objects")).unwrap();
+        for name in ["a.model", "b.model", "c.model"] {
+            write_fake_tag(&root.join("objects").join(name), b"hlmt");
+        }
+        let names = TagNameIndex::default();
+        let before = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        save_entry_index(&game, &root, &before).unwrap();
+        let key = |name: &str| before.iter().find(|e| e.display_path.ends_with(name)).unwrap().key.clone();
+
+        write_fake_tag_with_padding(&root.join("objects/b.model"), b"hlmt", 8);
+        fs::remove_file(root.join("objects/c.model")).unwrap();
+        write_fake_tag(&root.join("objects/d.model"), b"hlmt");
+        let refresh = refresh_entry_index(&game, &root, &names).unwrap();
+        let mut touched: Vec<String> = refresh.touched.iter().map(|e| e.display_path.clone()).collect();
+        touched.sort();
+
+        // Row by row, as the refresh worker writes them.
+        for gone in &refresh.removed_keys {
+            delete_entry_index_row(&game, &root, gone).unwrap();
+        }
+        for entry in &refresh.touched {
+            upsert_entry_index_row(&game, &root, entry).unwrap();
+        }
+        let after = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        save_entry_index(&check, &root, &after).unwrap();
+        let patched = load_entry_index(&game, &root).unwrap();
+        let rewritten = load_entry_index(&check, &root).unwrap();
+        let no_reference_index =
+            save_tag_dependencies(&game, &root, &key("a.model"), Some(&[])).unwrap();
+
+        remove_test_index(&game);
+        remove_test_index(&check);
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(touched, ["objects/b.model", "objects/d.model"]);
+        assert_eq!(refresh.removed_keys, [key("c.model")]);
+        let keys = |entries: &[TagEntry]| entries.iter().map(|e| e.key.clone()).collect::<Vec<_>>();
+        assert_eq!(keys(&patched), keys(&rewritten));
+        assert!(!no_reference_index, "no reference index here, so none is started");
+    }
+
     /// One row that names no file must not cost the whole index: the loader
     /// used to return nothing at all, so every other tag was re-probed and the
     /// reference index was lost with it.

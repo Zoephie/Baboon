@@ -146,27 +146,14 @@ impl Baboon {
         match result {
             Ok(scanned) => {
                 let mut build_reference_index = false;
+                let n = scanned.len();
+                // Moves the generation too: a folder pane only rebuilds its
+                // tree (positions in the lazy list, just cleared) on a new one.
+                // Done before the jobs below take their stamps.
+                let browser_refresh_error = self.install_complete_entry_set(kit_index, scanned);
                 let kit = &mut self.kits[kit_index];
                 if let Some(source) = kit.source.as_mut() {
-                    let n = scanned.len();
-                    source.group_tree = crate::source::build_group_tree(&scanned);
-                    source.all_entries = scanned;
-                    let browser_refresh_error = if let TagSource::LooseFolder { root, .. } =
-                        &source.source
-                    {
-                        reset_lazy_folder_browser(root, &mut source.tree, &mut source.entries).err()
-                    } else {
-                        None
-                    };
                     source.reverse_dependencies = None;
-                    kit.field_index.invalidate();
-                    // The lazy list was just cleared, and a folder pane only
-                    // rebuilds its tree (positions in that list) on a new
-                    // generation. Without this bump it kept indexing the
-                    // emptied list: rows went missing, and a Name/Type sort
-                    // indexed past the end. Bumped before the jobs below take
-                    // their stamps, so they match the new state.
-                    kit.generation = kit.generation.wrapping_add(1);
                     self.status = browser_refresh_error.map_or_else(
                         || format!("Tag index complete: {n} tags; building reference index..."),
                         |error| format!("Tag index complete, but browser refresh failed: {error}"),
