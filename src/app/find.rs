@@ -541,43 +541,55 @@ impl Baboon {
             self.find.occurrences.clear();
             return;
         }
-        let Some(source) = self.source() else {
+        if self.source().is_none() {
             self.find.occurrences.clear();
             return;
-        };
-        let entries = if source.all_entries.is_empty() {
-            source.entries.clone()
-        } else {
-            source.all_entries.clone()
-        };
+        }
         let mut open_keys = self.kits[self.active]
             .parsed_tags
             .keys()
             .cloned()
             .collect::<Vec<_>>();
         open_keys.sort();
-        let signature = format!(
-            "{}|{:?}|{}|{}|{}|{}|{}|{}",
-            self.kits[self.active].generation,
-            self.find.look_in,
-            self.find.match_case,
-            self.find.whole_word,
-            self.find.query,
-            entries.len(),
-            entries
-                .first()
-                .map(|entry| entry.key.as_str())
-                .unwrap_or(""),
-            open_keys.join("\u{1f}"),
-        );
-        if self.find.all_signature.as_deref() != Some(signature.as_str()) {
-            let closed_entries = entries
-                .iter()
-                .filter(|entry| !self.kits[self.active].parsed_tags.contains_key(&entry.key))
-                .cloned()
-                .collect::<Vec<_>>();
+        // Read in place: this runs on every edit while Find is open, and the
+        // entry list is the whole kit. It used to be cloned, all of it, before
+        // the signature said whether anything needed re-searching at all.
+        let (signature, fresh) = {
+            let kit = &self.kits[self.active];
+            let source = kit.source.as_ref().expect("checked above");
+            let entries = if source.all_entries.is_empty() {
+                &source.entries
+            } else {
+                &source.all_entries
+            };
+            let signature = format!(
+                "{}|{:?}|{}|{}|{}|{}|{}|{}",
+                kit.generation,
+                self.find.look_in,
+                self.find.match_case,
+                self.find.whole_word,
+                self.find.query,
+                entries.len(),
+                entries
+                    .first()
+                    .map(|entry| entry.key.as_str())
+                    .unwrap_or(""),
+                open_keys.join("\u{1f}"),
+            );
+            let fresh = (self.find.all_signature.as_deref() != Some(signature.as_str())).then(|| {
+                let closed_entries = entries
+                    .iter()
+                    .filter(|entry| !kit.parsed_tags.contains_key(&entry.key))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let order = entries.iter().map(|entry| entry.key.clone()).collect();
+                (closed_entries, order)
+            });
+            (signature, fresh)
+        };
+        if let Some((closed_entries, order)) = fresh {
             self.find.all_signature = Some(signature);
-            self.find.all_order = entries.iter().map(|entry| entry.key.clone()).collect();
+            self.find.all_order = order;
             self.begin_all_tag_find(ctx.clone(), closed_entries);
         }
 
