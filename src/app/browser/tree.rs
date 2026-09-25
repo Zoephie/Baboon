@@ -853,7 +853,7 @@ pub(in crate::app) fn draw_tree_node_lazy(
     let response = show_folder_tree_header(
         ui,
         &folder_label,
-        folder_label_color(ui, node, entries),
+        folder_label_color(ui, node),
         !filter.is_empty(),
         on_path,
         |ui| {
@@ -1118,7 +1118,7 @@ pub(in crate::app) fn draw_tree_node(
         show_group_tree_header(
             ui,
             &node.label,
-            folder_label_color(ui, node, entries),
+            folder_label_color(ui, node),
             show_prefixes,
             !filter.is_empty(),
             on_path,
@@ -1133,7 +1133,7 @@ pub(in crate::app) fn draw_tree_node(
         show_folder_tree_header(
             ui,
             &folder_label,
-            folder_label_color(ui, node, entries),
+            folder_label_color(ui, node),
             !filter.is_empty(),
             on_path,
             body,
@@ -1549,9 +1549,9 @@ pub(in crate::app) fn loose_folder_transfer_menu_items(
 /// Colour for a folder row: marked when anything beneath it carries edits that
 /// are not written into the game, so the workspace can be scanned top-down for
 /// where the modifications actually are.
-fn folder_label_color(ui: &Ui, node: &TagTreeNode, entries: &[TagEntry]) -> Color32 {
+fn folder_label_color(ui: &Ui, node: &TagTreeNode) -> Color32 {
     match browser_modified_tags(ui) {
-        Some(modified) if modified.subtree_has_modified(node, entries) => modified_text(),
+        Some(modified) if modified.subtree_has_modified(node) => modified_text(),
         // A folder the user made that nothing has landed in yet is not in any
         // pak, so it is drawn as the intention it is rather than as content.
         _ if folder_is_pending_and_empty(node) => subtle_dark(),

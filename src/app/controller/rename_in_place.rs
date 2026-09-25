@@ -11,7 +11,6 @@ use super::duplicate::{
     backup_paths_text, container_duplicate_index_key, container_index_for_utoc,
     create_duplicate_backup, validate_leaf_characters,
 };
-use std::thread;
 
 /// Where a rename is going, in every form the write and the browser need.
 struct RenameDestination {

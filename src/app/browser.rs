@@ -17,6 +17,15 @@ pub(super) use tree::*;
 #[derive(Default)]
 pub(in crate::app) struct ModifiedTags {
     keys: HashSet<String>,
+    /// Every folder above a modified tag, as a lowercased `/`-separated path.
+    folders: HashSet<String>,
+    /// The Groups-view node of every modified tag.
+    groups: HashSet<String>,
+}
+
+/// A tree node's or display path's folder in the form `folders` keys use.
+fn folder_key(path: &str) -> String {
+    path.replace('\\', "/").trim_matches('/').to_ascii_lowercase()
 }
 
 impl ModifiedTags {
@@ -26,29 +35,31 @@ impl ModifiedTags {
 
     pub(in crate::app) fn insert(&mut self, entry: &TagEntry) {
         self.keys.insert(entry.key.clone());
+        let path = folder_key(&entry.display_path);
+        let mut folder = path.as_str();
+        while let Some((parent, _)) = folder.rsplit_once('/') {
+            self.folders.insert(parent.to_owned());
+            folder = parent;
+        }
+        self.groups
+            .insert(crate::source::group_tree_label(entry));
     }
 
-    /// Whether anything under this folder is modified.
+    /// Whether anything under this folder (or Groups-view node) is modified.
     ///
-    /// Walks the subtree and stops at the first hit, so a folder that contains
-    /// an edit answers immediately; only clean folders pay for their whole
-    /// subtree, and an empty set skips the walk entirely.
-    pub(in crate::app) fn subtree_has_modified(
-        &self,
-        node: &TagTreeNode,
-        entries: &[TagEntry],
-    ) -> bool {
+    /// Answered from the ancestors recorded when the set was built, which
+    /// happens only when it changes. It used to walk the node's subtree, every
+    /// frame for every folder header drawn: the top-level folders together
+    /// cover the whole source, so any unsaved edit cost a walk of every entry
+    /// per frame. It also missed a modified tag inside a folder whose contents
+    /// had not been loaded yet.
+    pub(in crate::app) fn subtree_has_modified(&self, node: &TagTreeNode) -> bool {
         if self.keys.is_empty() {
             return false;
         }
-        node.entries.iter().any(|&index| {
-            entries
-                .get(index)
-                .is_some_and(|entry| self.keys.contains(&entry.key))
-        }) || node
-            .children
-            .iter()
-            .any(|child| self.subtree_has_modified(child, entries))
+        self.folders
+            .contains(&folder_key(&node.rel_path.to_string_lossy()))
+            || self.groups.contains(&node.label)
     }
 }
 
@@ -183,4 +194,43 @@ pub(in crate::app) fn removed_text() -> Color32 {
 /// The same goldenrod the workspace tab is tinted with.
 pub(in crate::app) fn modified_text() -> Color32 {
     Color32::from_rgb(214, 168, 46)
+}
+
+#[cfg(test)]
+mod modified_tags_tests {
+    use super::*;
+
+    fn node(rel_path: &str, label: &str) -> TagTreeNode {
+        TagTreeNode {
+            label: label.to_owned(),
+            rel_path: PathBuf::from(rel_path),
+            children: Vec::new(),
+            children_loaded: false,
+            entries: Vec::new(),
+            entries_loaded: false,
+            pending: false,
+        }
+    }
+
+    /// A header is marked modified from the set's own record of ancestors,
+    /// without walking its subtree (which also found nothing in a folder whose
+    /// contents had not been loaded).
+    #[test]
+    fn folder_and_group_headers_know_they_hold_an_edit() {
+        let mut modified = ModifiedTags::default();
+        modified.insert(&TagEntry {
+            key: "file:rifle".to_owned(),
+            display_path: "objects/Weapons/rifle.weapon".to_owned(),
+            group_tag: u32::from_be_bytes(*b"weap"),
+            group_name: Some("weapon".to_owned()),
+            location: TagEntryLocation::LooseFile(PathBuf::from("rifle.weapon")),
+        });
+
+        assert!(modified.subtree_has_modified(&node("objects", "objects")));
+        assert!(modified.subtree_has_modified(&node("objects/weapons", "weapons")), "unloaded, any case");
+        assert!(modified.subtree_has_modified(&node("weapon weap", "weapon weap")), "its Groups node");
+        assert!(!modified.subtree_has_modified(&node("levels", "levels")));
+        assert!(!modified.subtree_has_modified(&node("weapons", "weapons")), "not a same-named folder elsewhere");
+        assert!(!ModifiedTags::default().subtree_has_modified(&node("objects", "objects")));
+    }
 }

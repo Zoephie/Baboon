@@ -167,14 +167,7 @@ fn build_group_tree_from_indices(
 ) -> TagTree {
     let mut root = TreeBuildNode::default();
     for index in indices {
-        let entry = &entries[index];
-        let fourcc = format_group_tag(entry.group_tag);
-        let group = friendly_group_name(entry.group_tag, entry.group_name.as_deref(), &fourcc);
-        let label = if group == fourcc {
-            fourcc
-        } else {
-            format!("{group} {fourcc}")
-        };
+        let label = group_tree_label(&entries[index]);
         root.children.entry(label).or_default().entries.push(index);
     }
     TagTree {
@@ -184,6 +177,17 @@ fn build_group_tree_from_indices(
             .map(|(label, node)| finish_node(label, node, ""))
             .collect(),
         entries: root.entries,
+    }
+}
+
+/// The Groups-view node an entry is filed under, e.g. `bitmap bitm`.
+pub fn group_tree_label(entry: &TagEntry) -> String {
+    let fourcc = format_group_tag(entry.group_tag);
+    let group = friendly_group_name(entry.group_tag, entry.group_name.as_deref(), &fourcc);
+    if group == fourcc {
+        fourcc
+    } else {
+        format!("{group} {fourcc}")
     }
 }
 
