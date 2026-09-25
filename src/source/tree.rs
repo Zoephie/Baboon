@@ -443,6 +443,24 @@ where
 
 /// Probes one loose file and returns its stable source entry when it is a tag.
 /// Group detection is source-aware and must not be replaced by extension alone.
+/// `path` spelled on `root` as the source holds it, or `None` when it is not
+/// under `root`.
+///
+/// A loose entry's key is `file:` plus its path, and the folder scan builds
+/// those paths by joining names onto the root it was given. Canonicalizing is
+/// the right way to decide whether a path is inside the root, but not a way to
+/// spell it: on Windows it adds `\\?\`, on macOS it resolves `/var` to
+/// `/private/var`, and an entry built from that form gets a key the scan never
+/// produces, so the same tag is listed twice under two keys.
+pub fn path_on_root(root: &Path, path: &Path) -> std::io::Result<Option<PathBuf>> {
+    let canonical_root = std::fs::canonicalize(root)?;
+    let canonical = std::fs::canonicalize(path)?;
+    Ok(canonical
+        .strip_prefix(&canonical_root)
+        .ok()
+        .map(|relative| root.join(relative)))
+}
+
 pub fn loose_file_entry(
     root: &Path,
     path: &Path,

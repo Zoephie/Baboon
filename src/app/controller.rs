@@ -9665,9 +9665,20 @@ mod tests {
         write_classic_ce_tag(&saved_path, b"mod2");
 
         let registered = register_saved_copy_in_loaded_source(&mut source, &saved_path).unwrap();
+        // The key the folder scan gives the copy. The root is a temp folder,
+        // which is not canonical on macOS (/var is /private/var), and keying the
+        // copy off canonical paths gave it a key the scan never makes.
+        let scanned_key = loose_file_entry(&root, &saved_path, &TagNameIndex::default())
+            .unwrap()
+            .unwrap()
+            .key;
 
-        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(&root);
         assert!(registered);
+        assert!(
+            source.entries.iter().any(|entry| entry.key == scanned_key),
+            "the copy is keyed like the folder scan"
+        );
         assert!(
             source
                 .tree

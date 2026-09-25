@@ -199,14 +199,12 @@ pub(super) fn register_saved_copy_in_loaded_source(
     let TagSource::LooseFolder { root, .. } = &source.source else {
         return Ok(false);
     };
-    let canonical_root = fs::canonicalize(root)
-        .map_err(|error| format!("Could not resolve loaded tags folder: {error}"))?;
-    let canonical_path = fs::canonicalize(path)
-        .map_err(|error| format!("Could not resolve saved tag path: {error}"))?;
-    if !canonical_path.starts_with(&canonical_root) {
+    let Some(path) = crate::source::path_on_root(root, path)
+        .map_err(|error| format!("Could not resolve saved tag path: {error}"))?
+    else {
         return Ok(false);
-    }
-    let Some(entry) = loose_file_entry(&canonical_root, &canonical_path, &source.names)
+    };
+    let Some(entry) = loose_file_entry(root, &path, &source.names)
         .map_err(|error| format!("Could not inspect saved tag: {error:#}"))?
     else {
         return Ok(false);
