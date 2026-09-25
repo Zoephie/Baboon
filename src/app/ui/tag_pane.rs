@@ -234,9 +234,11 @@ impl Baboon {
                 local_model_preview = ModelPreviewState::default();
                 &mut local_model_preview
             };
+            let document_revision = (doc.id, doc.dirty.revision(), kit.generation);
             draw_tag(
                 ui,
                 &doc.tag,
+                document_revision,
                 entry,
                 names,
                 source.map(|source| &source.source),

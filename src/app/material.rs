@@ -6,9 +6,17 @@ use super::*;
 mod color_picker;
 pub(super) use color_picker::*;
 
+#[cfg(test)]
+thread_local! {
+    /// Shader editor models built, for the test that they are not rebuilt
+    /// every frame.
+    pub(super) static SHADER_MODELS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub(super) fn draw_material_tag(
     ui: &mut Ui,
     tag: &TagFile,
+    document_revision: (u64, u64, u64),
     entry: &TagEntry,
     names: &TagNameIndex,
     source: Option<&TagSource>,
@@ -31,16 +39,38 @@ pub(super) fn draw_material_tag(
         })
         .show(ui, |ui| {
             if is_shader_tag(entry) {
-                let model =
-                    build_h2ek_shader_editor_model(tag, entry, names, source, h2_templates).or_else(|| {
-                        build_shader_editor_model(
-                            tag,
-                            entry.group_tag,
-                            source,
-                            rmdf_cache,
-                            rmop_cache,
-                        )
-                    });
+                // Built once per revision of the document, not every frame:
+                // building it parses the tag's render method and walks its
+                // definition and options into rows. A failed build is kept
+                // too, so a definition that does not load is not retried
+                // every frame.
+                let memo = egui::Id::new(("shader_editor_model", document_revision.0));
+                let cached = ui.ctx().data(|data| {
+                    data.get_temp::<((u64, u64, u64), Option<Arc<ShaderEditorModel>>)>(memo)
+                });
+                let model = match cached {
+                    Some((revision, model)) if revision == document_revision => model,
+                    _ => {
+                        let model =
+                            build_h2ek_shader_editor_model(tag, entry, names, source, h2_templates)
+                                .or_else(|| {
+                                    build_shader_editor_model(
+                                        tag,
+                                        entry.group_tag,
+                                        source,
+                                        rmdf_cache,
+                                        rmop_cache,
+                                    )
+                                })
+                                .map(Arc::new);
+                        #[cfg(test)]
+                        SHADER_MODELS_BUILT.with(|built| built.set(built.get() + 1));
+                        ui.ctx().data_mut(|data| {
+                            data.insert_temp(memo, (document_revision, model.clone()))
+                        });
+                        model
+                    }
+                };
                 if let Some(model) = model {
                     draw_shader_editor_model(
                         ui,
@@ -759,5 +789,104 @@ pub(super) fn material_value_kind(value: &TagFieldData) -> &'static str {
         }
         TagFieldData::TagReference(r) if r.group_tag_and_name.is_none() => "default",
         _ => "value",
+    }
+}
+
+#[cfg(test)]
+mod shader_model_memo_tests {
+    use super::*;
+
+    /// The shader grid's model is built once for a revision of the document,
+    /// not on every frame, and again when the document changes.
+    #[test]
+    fn the_shader_grid_is_built_once_per_revision() {
+        let root = crate::test_kits::h3ek_tags();
+        if !root.is_dir() {
+            eprintln!("skipping: {} not present", root.display());
+            return;
+        }
+        let definitions_root = crate::app::locate_definitions_root();
+        let source = TagSource::LooseFolder {
+            root: root.clone(),
+            game: Some("halo3_mcc".to_owned()),
+            definitions_root: definitions_root.clone(),
+        };
+        let names = TagNameIndex::default();
+        let mut rmdf_cache = HashMap::new();
+        let mut rmop_cache = HashMap::new();
+        let mut h2_templates = H2TemplateCache::default();
+        // A shader whose grid actually builds, so the path measured is the
+        // H3+ one rather than the raw-field fallback.
+        let (tag, entry) = walkdir::WalkDir::new(root.join("shaders"))
+            .into_iter()
+            .filter_map(Result::ok)
+            .filter(|item| item.path().extension().is_some_and(|ext| ext == "shader"))
+            .find_map(|item| {
+                let entry = crate::source::loose_file_entry(&root, item.path(), &names).ok()??;
+                let tag = crate::source::read_tag_at_path(
+                    item.path(),
+                    Some("halo3_mcc"),
+                    Some(&definitions_root),
+                    entry.group_tag,
+                )
+                .ok()?;
+                build_shader_editor_model(
+                    &tag,
+                    entry.group_tag,
+                    Some(&source),
+                    &mut rmdf_cache,
+                    &mut rmop_cache,
+                )?;
+                Some((tag, entry))
+            })
+            .expect("a Halo 3 shader whose grid builds");
+
+        let ctx = egui::Context::default();
+        let mut draw = |revision: (u64, u64, u64)| {
+            let _ = ctx.run(Default::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    crate::app::foundation::extracted_tests::tests::with_test_edit_context(
+                        |edit| {
+                            draw_material_tag(
+                                ui,
+                                &tag,
+                                revision,
+                                &entry,
+                                &names,
+                                Some(&source),
+                                &mut rmdf_cache,
+                                &mut rmop_cache,
+                                &mut h2_templates,
+                                &mut None,
+                                &mut None,
+                                false,
+                                edit,
+                            );
+                        },
+                    );
+                });
+            });
+        };
+        SHADER_MODELS_BUILT.with(|built| built.set(0));
+        for _ in 0..3 {
+            draw((7, 1, 0));
+        }
+        assert_eq!(SHADER_MODELS_BUILT.with(std::cell::Cell::get), 1);
+        let memo = ctx.data(|data| {
+            data.get_temp::<((u64, u64, u64), Option<Arc<ShaderEditorModel>>)>(egui::Id::new((
+                "shader_editor_model",
+                7u64,
+            )))
+        });
+        assert!(
+            memo.is_some_and(|(_, model)| model.is_some()),
+            "the grid was drawn"
+        );
+        draw((7, 2, 0));
+        assert_eq!(
+            SHADER_MODELS_BUILT.with(std::cell::Cell::get),
+            2,
+            "an edit rebuilds it"
+        );
     }
 }

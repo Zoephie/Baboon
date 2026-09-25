@@ -4,7 +4,7 @@
 use super::*;
 
 #[cfg(test)]
-mod tests {
+pub(in crate::app) mod tests {
     use super::*;
 
     #[test]
@@ -241,7 +241,7 @@ mod tests {
         assert!(after, "after it, the missing file is noticed");
     }
 
-    fn with_test_edit_context(assertion: impl FnOnce(&mut FieldEditContext<'_>)) {
+    pub(in crate::app) fn with_test_edit_context(assertion: impl FnOnce(&mut FieldEditContext<'_>)) {
         let definitions_root = locate_definitions_root();
         let mut buffers = EditDrafts::default();
         let mut pending = Vec::new();

@@ -23,6 +23,9 @@ use super::sound_extract::{
 pub(super) fn draw_tag(
     ui: &mut Ui,
     tag: &TagFile,
+    // `(document id, dirty revision, kit generation)`: changes whenever `tag`
+    // or what it is read against may have.
+    document_revision: (u64, u64, u64),
     entry: &TagEntry,
     names: &TagNameIndex,
     source: Option<&TagSource>,
@@ -87,6 +90,7 @@ pub(super) fn draw_tag(
     draw_tag_fields_scroll(
         ui,
         tag,
+        document_revision,
         entry,
         names,
         source,
@@ -220,6 +224,7 @@ fn view_tab_button_optional_icon(
 fn draw_tag_fields_scroll(
     ui: &mut Ui,
     tag: &TagFile,
+    document_revision: (u64, u64, u64),
     entry: &TagEntry,
     names: &TagNameIndex,
     source: Option<&TagSource>,
@@ -248,6 +253,7 @@ fn draw_tag_fields_scroll(
                 draw_material_tag(
                     ui,
                     tag,
+                    document_revision,
                     entry,
                     names,
                     source,
