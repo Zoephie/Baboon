@@ -114,6 +114,7 @@ fn shipped_counts_read_whichever_entry_set_the_source_filled() {
         reverse_dependencies: None,
         initial_tag: None,
         key_hints: Default::default(),
+        complete_scan: false,
     };
     assert_eq!(shipped_counts_by_group(&source).get(&0x6269_7064), Some(&2));
 

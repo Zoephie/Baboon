@@ -406,6 +406,11 @@ pub struct LoadedSourceData {
     pub initial_tag: Option<(String, TagFile)>,
     /// Where each looked-up key was last found. See [`Self::entry_for_key`].
     pub key_hints: EntryKeyHints,
+    /// A full scan (or refresh) has installed `all_entries`. An empty
+    /// `all_entries` alone cannot say this: it is also what an empty folder
+    /// scans to, and reading it as "not scanned" made an empty folder rescan
+    /// forever.
+    pub complete_scan: bool,
 }
 
 #[cfg(test)]
@@ -843,6 +848,7 @@ mod entry_key_hint_tests {
             reverse_dependencies: None,
             initial_tag: None,
             key_hints: Default::default(),
+            complete_scan: false,
         }
     }
 

@@ -333,6 +333,7 @@ mod scan_generation_tests {
             reverse_dependencies: None,
             initial_tag: None,
             key_hints: Default::default(),
+            complete_scan: false,
         });
         let before = app.kits[0].generation;
         let stamp = app.kit_stamp();
@@ -352,5 +353,48 @@ mod scan_generation_tests {
 
         std::fs::remove_dir_all(&root).unwrap();
         assert_ne!(app.kits[0].generation, before);
+    }
+
+    /// An empty tags folder scans to nothing, and that is a finished scan.
+    /// The reference build used to read the empty list as "not scanned yet"
+    /// and start another scan, which landed empty and started another.
+    #[test]
+    fn an_empty_folder_is_scanned_once() {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-empty-scan-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::LooseFolder {
+                root: root.clone(),
+                game: None,
+                definitions_root: PathBuf::new(),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+        });
+        let stamp = app.kit_stamp();
+
+        app.handle_all_entries_scanned(stamp, Ok(Vec::new()), &egui::Context::default());
+
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(!app.kits[0].scanning_entries, "no second scan was started");
+        let index = app.kits[0].source.as_ref().unwrap().reverse_dependencies.as_ref();
+        assert!(index.is_some(), "an empty folder has an empty reference graph");
     }
 }

@@ -36,6 +36,7 @@ pub fn load_single_file(path: PathBuf, names: &TagNameIndex) -> Result<LoadedSou
         entries,
         initial_tag: Some((key, tag)),
         key_hints: Default::default(),
+        complete_scan: false,
     })
 }
 
@@ -112,6 +113,9 @@ fn load_resolved_folder(
         entries,
         tree,
         group_tree,
+        // A saved index is a complete scan; an empty one is not saved, so an
+        // empty folder still gets its first scan.
+        complete_scan: !all_entries.is_empty(),
         all_entries,
         reverse_dependencies,
         initial_tag: None,
@@ -172,6 +176,7 @@ pub fn load_monolithic_blob_index(
         group_tree,
         initial_tag: None,
         key_hints: Default::default(),
+        complete_scan: false,
         reverse_dependencies: None,
     })
 }
@@ -706,6 +711,7 @@ fn build_container_set(
         group_tree,
         initial_tag: None,
         key_hints: Default::default(),
+        complete_scan: false,
         reverse_dependencies: None,
     })
 }

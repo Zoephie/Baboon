@@ -637,6 +637,7 @@ mod tests {
             reverse_dependencies: None,
             initial_tag: None,
             key_hints: Default::default(),
+            complete_scan: false,
         };
         let catalog = tag_reference_catalog_for_source(&container_source, true)
             .expect("container source should expose a catalog");
@@ -658,6 +659,7 @@ mod tests {
             reverse_dependencies: None,
             initial_tag: None,
             key_hints: Default::default(),
+            complete_scan: false,
         };
         assert!(tag_reference_catalog_for_source(&loose_source, true).is_none());
     }

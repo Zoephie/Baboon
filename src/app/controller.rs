@@ -2646,6 +2646,7 @@ impl Baboon {
         let source = kit.source.as_mut()?;
         source.group_tree = crate::source::build_group_tree(&entries);
         source.all_entries = entries;
+        source.complete_scan = true;
         let error = if let TagSource::LooseFolder { root, .. } = &source.source {
             reset_lazy_folder_browser(root, &mut source.tree, &mut source.entries).err()
         } else {
@@ -7432,6 +7433,14 @@ impl Baboon {
         } else {
             source.full_entry_set().to_vec()
         };
+        if entries.is_empty() && is_loose && source.complete_scan {
+            // Scanned, and there is nothing in it: an empty graph, not a
+            // reason to scan again (which is what an empty folder did, forever).
+            if let Some(source) = self.source_mut() {
+                source.reverse_dependencies = Some(ReverseDependencyIndex::default());
+            }
+            return;
+        }
         if entries.is_empty() {
             // The full entry set isn't ready yet, so kick the scan first.
             // `begin_scan_all_entries` is idempotent (guards on
@@ -9712,6 +9721,7 @@ mod tests {
             reverse_dependencies: None,
             initial_tag: None,
             key_hints: Default::default(),
+            complete_scan: false,
         };
 
         let saved_path = root.join("saved").join("cyborg.gbxmodel");
@@ -10220,6 +10230,7 @@ mod listing_entries_tests {
             reverse_dependencies: None,
             initial_tag: None,
             key_hints: Default::default(),
+            complete_scan: false,
         }
     }
 
@@ -11786,6 +11797,7 @@ mod dependency_tests {
             reverse_dependencies: None,
             initial_tag: None,
             key_hints: Default::default(),
+            complete_scan: false,
         }
     }
 
@@ -12295,6 +12307,7 @@ mod dependency_database_tests {
             reverse_dependencies: None,
             initial_tag: None,
             key_hints: Default::default(),
+            complete_scan: false,
         }
     }
 
@@ -12365,6 +12378,7 @@ mod refresh_reference_tests {
             reverse_dependencies: Some(index),
             initial_tag: None,
             key_hints: Default::default(),
+            complete_scan: false,
         });
 
         app.apply_entry_index_refresh(
@@ -12437,6 +12451,7 @@ mod saved_tag_index_tests {
             reverse_dependencies: Some(ReverseDependencyIndex::default()),
             initial_tag: None,
             key_hints: Default::default(),
+            complete_scan: false,
         });
         crate::app::apply_field_edit(&mut tag, "render model", "mode:objects/crate").unwrap();
         app.kits[0]

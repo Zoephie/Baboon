@@ -1107,6 +1107,7 @@ mod tests {
             reverse_dependencies: None,
             initial_tag: None,
             key_hints: Default::default(),
+            complete_scan: false,
         }
     }
 
