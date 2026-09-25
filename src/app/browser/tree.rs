@@ -824,6 +824,107 @@ pub(in crate::app) fn draw_tree_lazy(
     clicked
 }
 
+/// What a folder block's height depends on besides the open state of the
+/// folders in it: the tree, the query and the view options. A height cached
+/// under one key is never reused under another.
+struct FolderLayoutKey<'a> {
+    node: &'a TagTreeNode,
+    entries: &'a [TagEntry],
+    filter: &'a str,
+    expand_folders: bool,
+    folders_before_tags: bool,
+    groups_mode: bool,
+}
+
+impl FolderLayoutKey<'_> {
+    fn hash(&self, ui: &Ui) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        std::ptr::from_ref(self.node).hash(&mut hasher);
+        self.node.entries.len().hash(&mut hasher);
+        self.node.children.len().hash(&mut hasher);
+        self.entries.as_ptr().hash(&mut hasher);
+        self.entries.len().hash(&mut hasher);
+        self.filter.hash(&mut hasher);
+        self.expand_folders.hash(&mut hasher);
+        self.folders_before_tags.hash(&mut hasher);
+        self.groups_mode.hash(&mut hasher);
+        let spacing = ui.spacing();
+        spacing.interact_size.y.to_bits().hash(&mut hasher);
+        spacing.item_spacing.y.to_bits().hash(&mut hasher);
+        spacing.indent.to_bits().hash(&mut hasher);
+        ui.ctx().pixels_per_point().to_bits().hash(&mut hasher);
+        hasher.finish()
+    }
+}
+
+fn folder_animation_counter_id() -> egui::Id {
+    egui::Id::new("browser_folder_animations")
+}
+
+/// Count a folder whose open/close animation is mid-way. A block whose
+/// drawing saw one measured a height that is about to change, so it is not
+/// cached.
+fn note_folder_animation(ui: &Ui, state: &egui::collapsing_header::CollapsingState) {
+    let openness = state.openness(ui.ctx());
+    if openness > 0.0 && openness < 1.0 {
+        ui.data_mut(|data| {
+            *data.get_temp_mut_or_default::<u64>(folder_animation_counter_id()) += 1
+        });
+    }
+}
+
+fn folder_animations(ui: &Ui) -> u64 {
+    ui.data(|data| {
+        data.get_temp::<u64>(folder_animation_counter_id())
+            .unwrap_or_default()
+    })
+}
+
+/// Draw one folder (header and open body) through `draw`, unless the height
+/// it had the last time it was drawn puts all of it outside the clip rect:
+/// then reserve that height and draw nothing.
+///
+/// A folder's contents can only change while it is drawn — a click needs it
+/// on screen, and `on_path` (a reveal opening folders) always draws — so the
+/// cached height stays true while it is skipped. Anything else it depends on
+/// is in `key`, a [`FolderLayoutKey`] hash.
+fn with_folder_block_skipping(
+    ui: &mut Ui,
+    id_source: &str,
+    key: u64,
+    on_path: bool,
+    draw: impl FnOnce(&mut Ui) -> Option<BrowserAction>,
+) -> Option<BrowserAction> {
+    let id = ui
+        .make_persistent_id(id_source)
+        .with("browser_folder_block");
+    let spacing = ui.spacing().item_spacing.y;
+    if !on_path
+        && tree_skips_rows()
+        && let Some((cached_key, height)) = ui.data(|data| data.get_temp::<(u64, f32)>(id))
+        && cached_key == key
+        && height > spacing
+    {
+        let rect =
+            egui::Rect::from_min_size(ui.cursor().min, Vec2::new(ui.available_width(), height));
+        if !ui.is_rect_visible(rect) {
+            ui.allocate_space(Vec2::new(0.0, height - spacing));
+            return None;
+        }
+    }
+    let top = ui.cursor().top();
+    let animations = folder_animations(ui);
+    let clicked = draw(ui);
+    let height = ui.cursor().top() - top;
+    if folder_animations(ui) == animations {
+        ui.data_mut(|data| data.insert_temp(id, (key, height)));
+    } else {
+        ui.data_mut(|data| data.remove::<(u64, f32)>(id));
+    }
+    clicked
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(in crate::app) fn draw_tree_node_lazy(
     ui: &mut Ui,
@@ -833,7 +934,7 @@ pub(in crate::app) fn draw_tree_node_lazy(
     // when it has nothing better: built from the full tag index, it already
     // holds every group, and rebuilding it from the handful of lazily loaded
     // entries would cut it down to the folders the user happened to expand.
-    mut group_tree: Option<&mut TagTree>,
+    group_tree: Option<&mut TagTree>,
     root: &Path,
     names: &TagNameIndex,
     selected: Option<&str>,
@@ -850,6 +951,58 @@ pub(in crate::app) fn draw_tree_node_lazy(
         return None;
     }
     let on_path = reveal.is_some_and(|reveal| reveal.matches_node(&node.label));
+    let layout_key = FolderLayoutKey {
+        node,
+        entries,
+        filter,
+        expand_folders: false,
+        folders_before_tags,
+        groups_mode: false,
+    }
+    .hash(ui);
+    let label = node.label.clone();
+    with_folder_block_skipping(ui, &label, layout_key, on_path, |ui| {
+        draw_tree_node_lazy_block(
+            ui,
+            node,
+            entries,
+            group_tree,
+            root,
+            names,
+            selected,
+            filter,
+            show_prefixes,
+            double_click_to_open,
+            status_update,
+            reveal,
+            on_path,
+            sort,
+            folders_before_tags,
+            favorite_keys,
+        )
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_tree_node_lazy_block(
+    ui: &mut Ui,
+    node: &mut TagTreeNode,
+    entries: &mut Vec<TagEntry>,
+    // See `draw_tree_node_lazy`.
+    mut group_tree: Option<&mut TagTree>,
+    root: &Path,
+    names: &TagNameIndex,
+    selected: Option<&str>,
+    filter: &str,
+    show_prefixes: bool,
+    double_click_to_open: bool,
+    status_update: &mut Option<String>,
+    reveal: Option<Reveal>,
+    on_path: bool,
+    sort: BrowserSort,
+    folders_before_tags: bool,
+    favorite_keys: Option<&HashSet<String>>,
+) -> Option<BrowserAction> {
     let inner_reveal = on_path.then(|| reveal.expect("on_path implies reveal").descend());
     let mut clicked = None;
     let folder_label = if show_prefixes {
@@ -1041,6 +1194,54 @@ pub(in crate::app) fn draw_tree_node(
         return None;
     }
     let on_path = reveal.is_some_and(|reveal| reveal.matches_node(&node.label));
+    let layout_key = FolderLayoutKey {
+        node,
+        entries,
+        filter,
+        expand_folders,
+        folders_before_tags,
+        groups_mode,
+    };
+    let layout_key = layout_key.hash(ui);
+    with_folder_block_skipping(ui, &node.label, layout_key, on_path, |ui| {
+        draw_tree_node_block(
+            ui,
+            node,
+            entries,
+            selected,
+            filter,
+            expand_folders,
+            show_prefixes,
+            double_click_to_open,
+            groups_mode,
+            reveal,
+            on_path,
+            sort,
+            folders_before_tags,
+            favorite_keys,
+            is_container,
+        )
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_tree_node_block(
+    ui: &mut Ui,
+    node: &TagTreeNode,
+    entries: &[TagEntry],
+    selected: Option<&str>,
+    filter: &str,
+    expand_folders: bool,
+    show_prefixes: bool,
+    double_click_to_open: bool,
+    groups_mode: bool,
+    reveal: Option<Reveal>,
+    on_path: bool,
+    sort: BrowserSort,
+    folders_before_tags: bool,
+    favorite_keys: Option<&HashSet<String>>,
+    is_container: bool,
+) -> Option<BrowserAction> {
     let inner_reveal = on_path.then(|| reveal.expect("on_path implies reveal").descend());
     let mut clicked = None;
     let body = |ui: &mut Ui| {
@@ -1665,6 +1866,7 @@ fn show_group_tree_header<R>(
     if force_open {
         state.set_open(true);
     }
+    note_folder_animation(ui, &state);
 
     let (name, fourcc) = group_tree_label_parts(label);
     let (response, toggle_clicked) =
@@ -1786,6 +1988,8 @@ fn show_folder_tree_header<R>(
     force_open: bool,
     add_body: impl FnOnce(&mut Ui) -> R,
 ) -> egui::Response {
+    #[cfg(test)]
+    TREE_ROWS_LAID_OUT.with(|count| count.set(count.get() + 1));
     let id = ui.make_persistent_id(id_source);
     let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
         ui.ctx(),
@@ -1795,6 +1999,7 @@ fn show_folder_tree_header<R>(
     if force_open {
         state.set_open(true);
     }
+    note_folder_animation(ui, &state);
 
     let (response, (toggle_clicked, guide_x)) =
         show_full_width_browser_row(ui, id.with("header"), Sense::click(), |ui| {
@@ -1814,6 +2019,11 @@ fn show_folder_tree_header<R>(
                 (toggle_clicked, icon_rect.center().x),
             )
         });
+    #[cfg(test)]
+    TREE_ROW_TOPS.with(|tops| {
+        tops.borrow_mut()
+            .push((id_source.to_owned(), response.rect.top()))
+    });
     if response.clicked() && !toggle_clicked {
         state.toggle(ui);
     }
@@ -2152,6 +2362,27 @@ pub(in crate::app) fn collect_hlsl_include_keys_into(
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Browser rows (tags and folder headers) this thread laid out.
+    pub(super) static TREE_ROWS_LAID_OUT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Off lays out every row, as the tree did before it skipped any, for
+    /// tests that compare the two.
+    pub(super) static TREE_SKIPS_ROWS: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+    /// Where each laid-out row landed: its folder label or tag key, and its top.
+    pub(super) static TREE_ROW_TOPS: std::cell::RefCell<Vec<(String, f32)>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+#[cfg(test)]
+fn tree_skips_rows() -> bool {
+    TREE_SKIPS_ROWS.with(|skips| skips.get())
+}
+
+#[cfg(not(test))]
+fn tree_skips_rows() -> bool {
+    true
+}
+
 pub(in crate::app) fn draw_entry_list(
     ui: &mut Ui,
     entry_indices: &[usize],
@@ -2165,36 +2396,66 @@ pub(in crate::app) fn draw_entry_list(
     favorite_keys: Option<&HashSet<String>>,
 ) -> Option<BrowserAction> {
     let ordered = ordered_indices(entry_indices, entries, sort);
-    let entry_indices: &[usize] = ordered.as_ref();
+    let matching: std::borrow::Cow<'_, [usize]> = if filter.is_empty() {
+        ordered
+    } else {
+        std::borrow::Cow::Owned(
+            ordered
+                .iter()
+                .copied()
+                .filter(|&index| entry_matches(&entries[index], filter))
+                .collect(),
+        )
+    };
+    // Every row is one fixed height, so the rows the clip rect can show
+    // are arithmetic; the rest are reserved as one block of space each side
+    // instead of being laid out one by one.
+    let spacing = ui.spacing().item_spacing.y;
+    let stride = ui.spacing().interact_size.y + spacing;
+    let top = ui.cursor().top();
+    let clip = ui.clip_rect();
+    let count = matching.len();
+    let (first, last) = if tree_skips_rows() {
+        let first = (((clip.top() - top) / stride).floor().max(0.0) as usize).min(count);
+        let last = (((clip.bottom() - top) / stride).ceil().max(0.0) as usize).clamp(first, count);
+        (first, last)
+    } else {
+        (0, count)
+    };
+    if let Some(reveal_key) = reveal_key
+        && let Some(position) = matching
+            .iter()
+            .position(|&index| entries[index].key == reveal_key)
+        && !(first..last).contains(&position)
+    {
+        let row_top = top + position as f32 * stride;
+        ui.scroll_to_rect(
+            egui::Rect::from_min_size(
+                egui::pos2(ui.cursor().left(), row_top),
+                Vec2::new(ui.available_width(), stride - spacing),
+            ),
+            Some(egui::Align::Center),
+        );
+    }
+    if first > 0 {
+        ui.allocate_space(Vec2::new(0.0, first as f32 * stride - spacing));
+    }
     let mut clicked = None;
-    for &entry_index in entry_indices {
-        let entry = &entries[entry_index];
-        if !entry_matches(entry, filter) {
-            continue;
-        }
-        if clicked.is_none() {
-            clicked = draw_entry(
-                ui,
-                entry,
-                selected,
-                show_prefixes,
-                double_click_to_open,
-                reveal_key,
-                favorite_keys,
-                true,
-            );
-        } else {
-            let _ = draw_entry(
-                ui,
-                entry,
-                selected,
-                show_prefixes,
-                double_click_to_open,
-                reveal_key,
-                favorite_keys,
-                true,
-            );
-        }
+    for &entry_index in &matching[first..last] {
+        let action = draw_entry(
+            ui,
+            &entries[entry_index],
+            selected,
+            show_prefixes,
+            double_click_to_open,
+            reveal_key,
+            favorite_keys,
+            true,
+        );
+        clicked = clicked.or(action);
+    }
+    if last < count {
+        ui.allocate_space(Vec2::new(0.0, (count - last) as f32 * stride - spacing));
     }
     clicked
 }
@@ -2225,8 +2486,12 @@ pub(in crate::app) fn draw_entry(
     // Every expanded row runs this each frame, on screen or not, so what a
     // row allocates waits until it is needed: the payload until a drag
     // starts, the path until the row is hovered, the label until it is drawn.
+    #[cfg(test)]
+    TREE_ROWS_LAID_OUT.with(|count| count.set(count.get() + 1));
     let row_size = Vec2::new(ui.available_width(), ui.spacing().interact_size.y);
     let (row_rect, response) = ui.allocate_exact_size(row_size, Sense::click_and_drag());
+    #[cfg(test)]
+    TREE_ROW_TOPS.with(|tops| tops.borrow_mut().push((entry.key.clone(), row_rect.top())));
     if response.hovered() {
         // Not `on_hover_text`: an egui tooltip would block the very drag this
         // row exists to start. See `hover_tooltip_beside_pointer`.
@@ -3697,3 +3962,7 @@ pub(in crate::app) fn supports_tag_import_info_extraction(group_tag: u32) -> boo
         b"hlmt" | b"mode" | b"phmo" | b"coll" | b"mod2"
     )
 }
+
+#[cfg(test)]
+#[path = "../tests/browser_tree_virtualization.rs"]
+mod browser_tree_virtualization;
