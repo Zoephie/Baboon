@@ -19,6 +19,32 @@ impl Baboon {
         }
         self.prepare_root_frame(ctx);
 
+        self.draw_menu_bar(ctx);
+        self.draw_status_bar(ctx);
+        self.draw_entry_index_wait_notice(ctx);
+        // Terminal panel — rendered AFTER status so it sits above it.
+        self.draw_terminal_panel(ctx);
+
+        egui::CentralPanel::default()
+            .frame(Frame::none().fill(editor_bg()))
+            .show(ctx, |ui| {
+                self.draw_kit_tiles(ui, ctx);
+            });
+        self.draw_auxiliary_windows(ctx);
+        self.persist_prefs_throttled(ctx.input(|input| input.time));
+        // Every kit, not just the active one: a background kit's sidecar can be
+        // dirty from edits made before the user switched away.
+        for kit in &mut self.kits {
+            kit.keywords.save_if_dirty();
+        }
+        self.draw_and_apply_color_popup(ctx);
+        self.draw_and_apply_function_popup(ctx);
+        self.process_frame_requests(ctx);
+    }
+
+    /// The top menu bar: the File, Edit, Tools, View, Help and Editing Kits
+    /// menus, then the tool launcher buttons.
+    fn draw_menu_bar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::top("menu")
             .frame(Frame::none().fill(menu_bar()).inner_margin(egui::Margin {
                 left: 6.0,
@@ -29,744 +55,734 @@ impl Baboon {
             .show(ctx, |ui| {
                 egui::menu::bar(ui, |ui| {
                     aligned_menu_button(ui, "File", |ui| {
-                        style_list_menu(ui);
-                        if ui.add_enabled(!self.editing_kit_is_read_only(self.active), egui::Button::new("New Tag...")).clicked() {
-                            ui.close_menu();
-                            self.open_new_tag_dialog();
-                        }
-                        // One entry, two implementations. A container tag is a
-                        // package rather than a file, so it lands through the
-                        // Campaign Evolved path; a loose kit converts from
-                        // another game. Splitting them in the menu would make
-                        // the user answer a question about Baboon's internals
-                        // to do the same thing.
-                        let can_import = self.current_source_is_container() || self.can_import_tags();
-                        if ui
-                            .add_enabled(can_import, egui::Button::new("Import Tags..."))
-                            .on_hover_text(if self.current_source_is_container() {
-                                "Bring a tag file into these containers"
-                            } else {
-                                "Bring a tag, or a whole folder of them, in from another game's editing kit"
-                            })
-                            .on_disabled_hover_text(
-                                "Load an editing kit or a Campaign Evolved container first",
-                            )
-                            .clicked()
-                        {
-                            ui.close_menu();
-                            if self.current_source_is_container() {
-                                self.begin_import_tag(None);
-                            } else {
-                                self.open_tag_import_dialog(None);
-                            }
-                        }
-                        if ui.button("Load Tag...").clicked() {
-                            ui.close_menu();
-                            self.begin_load_single(ctx.clone());
-                        }
-                        if ui.button("Load Folder...").clicked() {
-                            ui.close_menu();
-                            self.begin_load_folder(ctx.clone());
-                        }
-                        if ui.button("Load Monolithic blob_index.dat...").clicked() {
-                            ui.close_menu();
-                            self.begin_load_monolithic(ctx.clone());
-                        }
-                        if ui
-                            .button("Open Campaign Evolved container (.utoc)...")
-                            .clicked()
-                        {
-                            ui.close_menu();
-                            self.begin_load_iostore_container(ctx.clone());
-                        }
-                        if ui.button("Open Baboon Project...").clicked() {
-                            ui.close_menu();
-                            self.begin_open_campaign_project(ctx.clone());
-                        }
-                        // A workspace's edits are autosaved to a recovery file
-                        // whether or not they are ever saved anywhere else, so
-                        // these write a copy the user owns and can move, back up
-                        // or hand to someone. Before them, the only way to get a
-                        // `.baboon` out of Baboon was to export a mod.
-                        let can_save_project =
-                            self.current_source_is_campaign_project_capable(self.active);
-                        let project_target = self.kits[self.active]
-                            .campaign_project
-                            .as_ref()
-                            .and_then(|project| project.project_path.clone());
-                        if ui
-                            .add_enabled(
-                                can_save_project,
-                                egui::Button::new("Save Baboon Project"),
-                            )
-                            .on_hover_text(match project_target.as_deref() {
-                                Some(path) => format!("Write this workspace's changes to {}", path.display()),
-                                None => "Choose a .baboon file to keep this workspace's changes in".to_owned(),
-                            })
-                            .on_disabled_hover_text(
-                                "Baboon projects hold changes to Campaign Evolved containers",
-                            )
-                            .clicked()
-                        {
-                            ui.close_menu();
-                            self.defer_file_action(DeferredFileAction::SaveProject, ctx);
-                        }
-                        if ui
-                            .add_enabled(
-                                can_save_project,
-                                egui::Button::new("Save Baboon Project As..."),
-                            )
-                            .clicked()
-                        {
-                            ui.close_menu();
-                            self.defer_file_action(DeferredFileAction::SaveProjectAs, ctx);
-                        }
-                        ui.separator();
-                        let has_loaded_folder = self.loaded_tags_root().is_some();
-                        if ui
-                            .add_enabled(has_loaded_folder, egui::Button::new("Open Tags Folder"))
-                            .clicked()
-                        {
-                            ui.close_menu();
-                            self.open_loaded_tags_folder();
-                        }
-                        if ui
-                            .add_enabled(has_loaded_folder, egui::Button::new("Open Data Folder"))
-                            .clicked()
-                        {
-                            ui.close_menu();
-                            self.open_loaded_data_folder();
-                        }
-                        let recent_action = right_opening_menu_button(
-                            ui,
-                            "Recent Folders",
-                            280.0,
-                            |ui| {
-                                style_list_menu(ui);
-                                draw_recent_folders_menu(ui, &self.recent_folders)
-                            },
-                        )
-                        .inner
-                        .flatten();
-                        if let Some(action) = recent_action {
-                            ui.close_menu();
-                            self.apply_recent_action(action, ctx);
-                        }
-                        ui.separator();
-                        let save_label = if self.enable_chimp
-                            && self.kits[self.active].surface == KitSurface::Chimp
-                        {
-                            "Save Chimp Changes...    Ctrl+S"
-                        } else {
-                            "Save Current Tag    Ctrl+S"
-                        };
-                        if icon_text_button(
-                            ui,
-                            ButtonIcon::Save,
-                            save_label,
-                            !self.editing_kit_is_read_only(self.active),
-                        )
-                        .clicked()
-                        {
-                            ui.close_menu();
-                            self.defer_file_action(DeferredFileAction::SaveCurrentTag, ctx);
-                        }
-                        if ui
-                            .add_enabled(
-                                self.kits[self.active].selected_key.is_some() && !self.editing_kit_is_read_only(self.active),
-                                egui::Button::new("Save Current Tag As..."),
-                            )
-                            .clicked()
-                        {
-                            ui.close_menu();
-                            self.save_current_tag_as();
-                        }
-                        if self.current_source_is_container() {
-                            if ui
-                                .add_enabled(
-                                    self.can_poke_current_tag(),
-                                    egui::Button::new("Poke Current Tag...    Ctrl+P"),
-                                )
-                                .on_hover_text(
-                                    "Apply supported changes to this already-loaded tag in the verified Campaign Evolved process",
-                                )
-                                .clicked()
-                            {
-                                ui.close_menu();
-                                self.defer_file_action(DeferredFileAction::PokeCurrentTag, ctx);
-                            }
-                            if self.last_poke.is_some()
-                                && ui
-                                    .add_enabled(
-                                        !self.poke_undo_running,
-                                        egui::Button::new("Undo Last Poke"),
-                                    )
-                                    .on_hover_text(
-                                        "Restore the bytes from Baboon's last verified runtime poke",
-                                    )
-                                    .clicked()
-                            {
-                                ui.close_menu();
-                                self.begin_undo_last_poke(ctx.clone());
-                            }
-                            if ui
-                                .add_enabled(
-                                    self.kits[self.active].parsed_tags.values().any(|d| d.dirty.is_set())
-                                        || self.kits[self.active]
-                                            .campaign_project
-                                            .as_ref()
-                                            .is_some_and(|project| !project.overlays.is_empty()),
-                                    egui::Button::new("Export Mod..."),
-                                )
-                                .on_hover_text(
-                                    "Bundle every modified project tag into one portable mod overlay, with a copy of this project saved beside it",
-                                )
-                                .clicked()
-                            {
-                                ui.close_menu();
-                                self.defer_file_action(DeferredFileAction::ExportMod, ctx);
-                            }
-                            // The same review, opened to look rather than to
-                            // export -- which is how you check what a workspace
-                            // is carrying before quitting.
-                            if ui
-                                .add_enabled(
-                                    self.kits[self.active].has_unwritten_modifications(),
-                                    egui::Button::new("Review Changes..."),
-                                )
-                                .on_hover_text(
-                                    "See every edit this workspace is holding that is not written into the game",
-                                )
-                                .clicked()
-                            {
-                                ui.close_menu();
-                                self.review_changes();
-                            }
-                            // Expert-gated because it is the one action here
-                            // that writes tens of thousands of files: useful
-                            // for getting the tag set out to diff or grep, and
-                            // not something to trip over while editing.
-                            if self.expert_mode
-                                && ui
-                                    .add_enabled(
-                                        self.container_dump_job.is_none(),
-                                        egui::Button::new("Extract All Tags to Folder\u{2026}"),
-                                    )
-                                    .on_hover_text(
-                                        "Expert feature: write every tag these containers ship to a folder laid out like an editing kit. Tens of thousands of files \u{2014} this takes a while",
-                                    )
-                                    .on_disabled_hover_text(
-                                        "An extraction is already running",
-                                    )
-                                    .clicked()
-                            {
-                                ui.close_menu();
-                                self.defer_file_action(
-                                    DeferredFileAction::ExtractAllContainerTags,
-                                    ctx,
-                                );
-                            }
-                        }
-                        ui.separator();
-                        if ui
-                            .add_enabled(
-                                self.kits[self.active].selected_key.is_some(),
-                                egui::Button::new("Close Current Tag    Ctrl+W"),
-                            )
-                            .clicked()
-                        {
-                            // Deferred, per upstream: the close runs after the
-                            // editor renders, so an edit committed by the menu
-                            // taking focus is applied before the dirty check.
-                            if let Some(key) = self.kits[self.active].selected_key.clone() {
-                                self.defer_file_action(
-                                    DeferredFileAction::Close(PendingCloseAction::CloseTab(key)),
-                                    ctx,
-                                );
-                            }
-                            ui.close_menu();
-                        }
-                        if ui
-                            .add_enabled(
-                                !self.kits[self.active].open_tabs.is_empty(),
-                                egui::Button::new("Close All Tags"),
-                            )
-                            .clicked()
-                        {
-                            self.defer_file_action(
-                                DeferredFileAction::Close(PendingCloseAction::CloseAllTabs),
-                                ctx,
-                            );
-                            ui.close_menu();
-                        }
-                        ui.separator();
-                        let can_fix_dependencies = self.kits[self.active].selected_key.is_some()
-                            && self.source().is_some_and(|source| {
-                                matches!(source.source, TagSource::LooseFolder { .. })
-                            });
-                        if ui
-                            .add_enabled(
-                                can_fix_dependencies,
-                                egui::Button::new("Fix Tag Dependencies"),
-                            )
-                            .clicked()
-                        {
-                            ui.close_menu();
-                            self.fix_current_tag_dependencies();
-                        }
-                        // Regenerate Index: force a fresh full scan and
-                        // overwrite the cached index file.
-                        let can_regen = self.source()
-                            .map(|s| {
-                                matches!(s.source, TagSource::LooseFolder { .. })
-                                    && s.game.is_some()
-                            })
-                            .unwrap_or(false);
-                        if ui
-                            .add_enabled(
-                                can_regen && !self.kits[self.active].scanning_entries,
-                                egui::Button::new("Regenerate Index"),
-                            )
-                            .clicked()
-                        {
-                            ui.close_menu();
-                            // Clear cached entries so the scan runs fresh.
-                            if let Some(s) = self.source_mut() {
-                                s.all_entries.clear();
-                                s.group_tree = crate::source::build_group_tree(&[]);
-                                s.reverse_dependencies = None;
-                            }
-                            self.kits[self.active].field_index.invalidate();
-                            self.begin_scan_all_entries_with_label(
-                                ctx.clone(),
-                                "Rebuilding index...",
-                            );
-                        }
-                        let can_refresh_browser = self.source().is_some_and(|source| {
-                            matches!(source.source, TagSource::LooseFolder { .. })
-                                && source.game.is_some()
-                        });
-                        if ui
-                            .add_enabled(
-                                can_refresh_browser
-                                    && !self.kits[self.active].scanning_entries
-                                    && !self.kits[self.active].index_jobs.refreshing,
-                                egui::Button::new("Refresh Tag Browser"),
-                            )
-                            .clicked()
-                        {
-                            ui.close_menu();
-                            self.refresh_tag_browser(ctx.clone());
-                        }
-                        ui.separator();
-                        if icon_text_button(ui, ButtonIcon::Settings, "Settings...", true).clicked()
-                        {
-                            self.settings_open = true;
-                            ui.close_menu();
-                        }
+                        self.draw_file_menu(ui, ctx);
                     });
                     aligned_menu_button(ui, "Edit", |ui| {
-                        style_list_menu(ui);
-                        if ui
-                            .add_enabled(
-                                self.can_undo_current(),
-                                egui::Button::new("Undo    Ctrl+Z"),
-                            )
-                            .clicked()
-                        {
-                            ui.close_menu();
-                            self.undo_current_tag();
-                        }
-                        if ui
-                            .add_enabled(
-                                self.can_redo_current(),
-                                egui::Button::new("Redo    Ctrl+Shift+Z"),
-                            )
-                            .clicked()
-                        {
-                            ui.close_menu();
-                            self.redo_current_tag();
-                        }
-                        ui.separator();
-                        // The same two actions as the tab context menu and the
-                        // toolbar, spelled out. An unlabelled trash icon among
-                        // the tool launchers is not where anyone looks for this.
-                        let selected = self.kits[self.active].selected_key.clone();
-                        let discardable = selected
-                            .as_deref()
-                            .is_some_and(|key| self.tag_has_discardable_changes(self.active, key));
-                        if ui
-                            .add_enabled(
-                                discardable,
-                                egui::Button::new("Discard Unsaved Changes"),
-                            )
-                            .on_hover_text(
-                                "Return the current tag to the way its source has it",
-                            )
-                            .clicked()
-                        {
-                            ui.close_menu();
-                            if let Some(key) = selected {
-                                self.discard_tag_changes(self.active, &key, ctx);
-                            }
-                        }
-                        if self.current_source_is_campaign_project_capable(self.active) {
-                            let stashed = self.stashed_campaign_tags(self.active);
-                            let unsaved = self.kits[self.active]
-                                .parsed_tags
-                                .values()
-                                .filter(|document| document.dirty.is_set())
-                                .count();
-                            if ui
-                                .add_enabled(
-                                    !stashed.is_empty() || unsaved > 0,
-                                    egui::Button::new("Clear All Unsaved Modifications..."),
-                                )
-                                .on_hover_text(
-                                    "Return every tag in this workspace to the way the game \
-                                     ships it, including edits stashed in earlier sessions",
-                                )
-                                .on_disabled_hover_text(
-                                    "This workspace has no unsaved modifications",
-                                )
-                                .clicked()
-                            {
-                                ui.close_menu();
-                                self.clear_stash_confirm = Some(ClearStashConfirm {
-                                    kit: self.active_kit_id(),
-                                    stashed,
-                                    unsaved,
-                                });
-                            }
-                        }
+                        self.draw_edit_menu(ui, ctx);
                     });
                     aligned_menu_button(ui, "Tools", |ui| {
-                        style_list_menu(ui);
-                        if ui.button("Run Tool...").clicked() {
-                            ui.close_menu();
-                            self.tool_commands.open = true;
-                        }
-                        self.draw_monitor_tools_menu(ui);
-                        self.draw_assets_tools_menu(ui);
-                        ui.separator();
-                        if ui
-                            .add_enabled(
-                                self.kits[self.active].selected_key.is_some(),
-                                egui::Button::new("Find References to Current Tag"),
-                            )
-                            .clicked()
-                        {
-                            ui.close_menu();
-                            if let Some(key) = self.kits[self.active].selected_key.clone() {
-                                self.show_references_for(&key);
-                            }
-                        }
-                        if ui
-                            .add_enabled(
-                                self.kits[self.active].selected_key.is_some(),
-                                egui::Button::new("Explore References to Current Tag..."),
-                            )
-                            .clicked()
-                        {
-                            ui.close_menu();
-                            if let Some(key) = self.kits[self.active].selected_key.clone() {
-                                self.open_content_explorer(&key);
-                            }
-                        }
-                        if ui.button("Find Unreferenced Tags...").clicked() {
-                            ui.close_menu();
-                            self.show_unreferenced_tags();
-                        }
-                        {
-                            // Loose folders and Campaign Evolved containers can
-                            // both be indexed; cache sources cannot.
-                            let indexable = self.source().is_some_and(|source| {
-                                matches!(
-                                    source.source,
-                                    TagSource::LooseFolder { .. }
-                                        | TagSource::IoStoreContainerSet { .. }
-                                )
-                            });
-                            let has_index = self.source()
-                                .is_some_and(|source| source.reverse_dependencies.is_some());
-                            let label = if self.kits[self.active].index_jobs.building_references {
-                                "Building Reference Index…"
-                            } else if has_index {
-                                "Rebuild Reference Index"
-                            } else {
-                                "Build Reference Index"
-                            };
-                            if ui
-                                .add_enabled(
-                                    indexable && !self.kits[self.active].index_jobs.building_references,
-                                    egui::Button::new(label),
-                                )
-                                .clicked()
-                            {
-                                ui.close_menu();
-                                self.begin_build_reverse_dependencies(ctx.clone(), true);
-                            }
-                        }
-                        if ui.button("List Scenario Map IDs...").clicked() {
-                            ui.close_menu();
-                            self.show_map_ids(ctx);
-                        }
-                        if ui.button("List Sounds by Class...").clicked() {
-                            ui.close_menu();
-                            self.show_sounds_by_class(ctx);
-                        }
-                        if ui.button("List Uncompressed Sounds...").clicked() {
-                            ui.close_menu();
-                            self.show_uncompressed_sounds(ctx);
-                        }
-                        if ui.button("Search Field Values...").clicked() {
-                            ui.close_menu();
-                            self.field_value_search_open = true;
-                        }
-                        if icon_text_button(
-                            ui,
-                            ButtonIcon::Compare,
-                            "Compare Tags...",
-                            self.kits[self.active].selected_key.is_some(),
-                        )
-                        .clicked()
-                        {
-                            ui.close_menu();
-                            if let Some(key) = self.kits[self.active].selected_key.clone() {
-                                self.tag_diff = Some(TagDiffState {
-                                    kit: self.active_kit_id(),
-                                    a_key: key,
-                                    source: TagCompareSource::OpenTag,
-                                    b_kit: None,
-                                    b_key: None,
-                                    b_path: None,
-                                    comparison_kit_root: None,
-                                    git_history: GitHistoryState::default(),
-                                    error: None,
-                                    filters: TagDiffFilters::default(),
-                                    swapped: false,
-                                    results: None,
-                                    git_pending: None,
-                                });
-                            }
-                        }
-                        ui.separator();
-                        if ui.button("Browse Keywords...").clicked() {
-                            ui.close_menu();
-                            self.keyword_chooser_open = true;
-                        }
+                        self.draw_tools_menu(ui, ctx);
                     });
                     aligned_menu_button(ui, "View", |ui| {
-                        style_list_menu(ui);
-                        // The browser view belongs to a workspace, so this
-                        // menu shows and sets the focused kit's — matching the
-                        // Folders/Groups buttons in that kit's own toolbar.
-                        let kit = &mut self.kits[self.active];
-                        if ui
-                            .selectable_label(kit.browser_mode == BrowserMode::Folders, "Folders")
-                            .clicked()
-                        {
-                            kit.browser_mode = BrowserMode::Folders;
-                            ui.close_menu();
-                        }
-                        if ui
-                            .selectable_label(kit.browser_mode == BrowserMode::Groups, "Tag Groups")
-                            .clicked()
-                        {
-                            kit.browser_mode = BrowserMode::Groups;
-                            ui.close_menu();
-                        }
-                        ui.separator();
-                        let selected_sort = right_opening_menu_button(
-                            ui,
-                            format!("Sort by: {}", kit.browser_sort.label()),
-                            220.0,
-                            |ui| {
-                                style_list_menu(ui);
-                                for option in BrowserSort::ALL {
-                                    if ui
-                                        .selectable_label(
-                                            kit.browser_sort == option,
-                                            option.label(),
-                                        )
-                                        .clicked()
-                                    {
-                                        return Some(option);
-                                    }
-                                }
-                                None
-                            },
-                        )
-                        .inner
-                        .flatten();
-                        if let Some(option) = selected_sort {
-                            kit.browser_sort = option;
-                            ui.close_menu();
-                        }
-                        ui.separator();
-                        ui.checkbox(&mut self.show_browser_prefixes, "Show [tag]/[folder]");
-                        ui.checkbox(&mut self.show_block_sizes, "Show block sizes");
-                        ui.checkbox(&mut self.angles_in_degrees, "Angles in degrees")
-                            .on_hover_text(
-                                "Angle fields hold radians on disk. Guerilla and the other Halo \
-                                 tools show them in degrees, and so does Baboon — turn this off to \
-                                 read and type the stored radians instead.",
-                            );
-                        ui.checkbox(
-                            &mut self.scroll_to_cycle_dropdowns,
-                            "Scroll wheel cycles dropdowns",
-                        );
-                        ui.checkbox(&mut self.expert_mode, "Expert mode");
-                        ui.separator();
-                        let terminal_enabled = self.kits[self.active].terminal_work_dir.is_some();
-                        if ui
-                            .add_enabled(
-                                terminal_enabled,
-                                egui::SelectableLabel::new(self.kits[self.active].terminal_open, "Terminal"),
-                            )
-                            .clicked()
-                        {
-                            self.kits[self.active].terminal_open = !self.kits[self.active].terminal_open;
-                            self.remember_terminal_open_for_game();
-                            ui.close_menu();
-                        }
+                        self.draw_view_menu(ui);
                     });
                     aligned_menu_button(ui, "Help", |ui| {
-                        style_list_menu(ui);
-                        if ui.button("About...").clicked() {
-                            self.help_panel_tab = HelpPanelTab::About;
-                            self.about_open = true;
-                            ui.close_menu();
-                        }
-                        if icon_text_button(ui, ButtonIcon::Doc, "Doc...", true).clicked() {
-                            self.help_panel_tab = HelpPanelTab::Doc;
-                            self.about_open = true;
-                            ui.close_menu();
-                        }
-                        if ui.button("Tutorials...").clicked() {
-                            self.help_panel_tab = HelpPanelTab::Tutorials;
-                            self.about_open = true;
-                            ui.close_menu();
-                        }
-                        if ui.button("Tag Compatibility...").clicked() {
-                            self.help_panel_tab = HelpPanelTab::TagCompat;
-                            self.about_open = true;
-                            ui.close_menu();
-                        }
-                        if ui.button("Map Names...").clicked() {
-                            self.help_panel_tab = HelpPanelTab::MapNames;
-                            self.about_open = true;
-                            ui.close_menu();
-                        }
-                        if ui.button("Check for updates").clicked() {
-                            self.begin_check_for_updates(ctx.clone(), false);
-                            ui.close_menu();
-                        }
-                        if let Some(update) = self.available_update.as_ref() {
-                            let label = format!("Update available: {}...", update.short_name());
-                            let url = update.release_url.clone();
-                            if ui.button(label).clicked() {
-                                ctx.open_url(egui::OpenUrl::new_tab(url));
-                                ui.close_menu();
-                            }
-                        }
+                        self.draw_help_menu(ui, ctx);
                     });
                     aligned_menu_button(ui, "Editing Kits", |ui| {
-                        ui.set_min_width(EDITING_KIT_MENU_MIN_WIDTH);
-                        let entries = visible_editing_kit_menu_entries(
-                            &self.custom_editing_kit_profiles,
-                            &self.editing_kit_validation,
-                        );
-                        let total_rows = entries.len();
-                        for (index, entry) in entries.into_iter().enumerate() {
-                            match entry {
-                                EditingKitMenuEntry::Custom(profile) => {
-                                    let validation =
-                                        self.editing_kit_validation.custom(&profile.id);
-                                    let enabled = validation.is_ok();
-                                    let tooltip = validation
-                                        .as_ref()
-                                        .map(|layout| {
-                                            format!(
-                                                "Load {} from {}",
-                                                profile.name,
-                                                layout.root.display()
-                                            )
-                                        })
-                                        .unwrap_or_else(|error| {
-                                            format!("{} is unavailable: {error}", profile.name)
-                                        });
-                                    let texture = self.workspace_banner_texture(
-                                        ui.ctx(), &profile.game, Some(&profile.id),
-                                    );
-                                    let response = editing_kit_menu_row_with_read_only(
-                                        ui,
-                                        &profile.name,
-                                        "EK",
-                                        texture.as_ref(),
-                                        texture.is_none(),
-                                        enabled,
-                                        profile.read_only && profile.game != "haloce_evolved",
-                                    );
-                                    let response = if enabled {
-                                        response.on_hover_text(tooltip)
-                                    } else {
-                                        response.on_disabled_hover_text(tooltip)
-                                    };
-                                    if response.clicked() {
-                                        ui.close_menu();
-                                        self.load_custom_editing_kit_profile(
-                                            profile,
-                                            ctx.clone(),
-                                        );
-                                    }
-                                }
-                                EditingKitMenuEntry::BuiltIn(shortcut) => {
-                                    let texture =
-                                        self.game_banner_texture(ui.ctx(), shortcut.game).cloned();
-                                    let configured_path = self
-                                        .editing_kit_paths
-                                        .get(shortcut.game)
-                                        .expect("validated built-in path");
-                                    let tooltip = format!(
-                                        "Load {} from {}",
-                                        shortcut.label,
-                                        configured_path.display()
-                                    );
-                                    if editing_kit_menu_row(
-                                        ui,
-                                        game_display_name(shortcut.game),
-                                        shortcut.fallback,
-                                        texture.as_ref(),
-                                        false,
-                                        true,
-                                    )
-                                    .on_hover_text(tooltip)
-                                    .clicked()
-                                    {
-                                        ui.close_menu();
-                                        self.load_editing_kit_shortcut(shortcut, ctx.clone());
-                                    }
-                                }
-                            }
-                            if index + 1 < total_rows {
-                                ui.separator();
-                            }
-                        }
-                        if total_rows == 0 {
-                            ui.add_enabled(false, egui::Button::new("No configured editing kits"));
-                        }
-                        ui.separator();
-                        if icon_text_button(ui, ButtonIcon::Settings, "Editing Kit Settings...", true).clicked() {
-                            self.settings_tab = SettingsTab::EditingKits;
-                            self.settings_open = true;
-                            ui.close_menu();
-                        }
+                        self.draw_editing_kits_menu(ui, ctx);
                     });
                     self.draw_tool_launcher_buttons(ui);
                 });
             });
+    }
 
+    /// The File menu: loading sources, saving tags and projects, and closing.
+    fn draw_file_menu(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        style_list_menu(ui);
+        if ui
+            .add_enabled(
+                !self.editing_kit_is_read_only(self.active),
+                egui::Button::new("New Tag..."),
+            )
+            .clicked()
+        {
+            ui.close_menu();
+            self.open_new_tag_dialog();
+        }
+        // One entry, two implementations. A container tag is a
+        // package rather than a file, so it lands through the
+        // Campaign Evolved path; a loose kit converts from
+        // another game. Splitting them in the menu would make
+        // the user answer a question about Baboon's internals
+        // to do the same thing.
+        let can_import = self.current_source_is_container() || self.can_import_tags();
+        if ui
+            .add_enabled(can_import, egui::Button::new("Import Tags..."))
+            .on_hover_text(if self.current_source_is_container() {
+                "Bring a tag file into these containers"
+            } else {
+                "Bring a tag, or a whole folder of them, in from another game's editing kit"
+            })
+            .on_disabled_hover_text("Load an editing kit or a Campaign Evolved container first")
+            .clicked()
+        {
+            ui.close_menu();
+            if self.current_source_is_container() {
+                self.begin_import_tag(None);
+            } else {
+                self.open_tag_import_dialog(None);
+            }
+        }
+        if ui.button("Load Tag...").clicked() {
+            ui.close_menu();
+            self.begin_load_single(ctx.clone());
+        }
+        if ui.button("Load Folder...").clicked() {
+            ui.close_menu();
+            self.begin_load_folder(ctx.clone());
+        }
+        if ui.button("Load Monolithic blob_index.dat...").clicked() {
+            ui.close_menu();
+            self.begin_load_monolithic(ctx.clone());
+        }
+        if ui
+            .button("Open Campaign Evolved container (.utoc)...")
+            .clicked()
+        {
+            ui.close_menu();
+            self.begin_load_iostore_container(ctx.clone());
+        }
+        if ui.button("Open Baboon Project...").clicked() {
+            ui.close_menu();
+            self.begin_open_campaign_project(ctx.clone());
+        }
+        // A workspace's edits are autosaved to a recovery file
+        // whether or not they are ever saved anywhere else, so
+        // these write a copy the user owns and can move, back up
+        // or hand to someone. Before them, the only way to get a
+        // `.baboon` out of Baboon was to export a mod.
+        let can_save_project = self.current_source_is_campaign_project_capable(self.active);
+        let project_target = self.kits[self.active]
+            .campaign_project
+            .as_ref()
+            .and_then(|project| project.project_path.clone());
+        if ui
+            .add_enabled(can_save_project, egui::Button::new("Save Baboon Project"))
+            .on_hover_text(match project_target.as_deref() {
+                Some(path) => format!("Write this workspace's changes to {}", path.display()),
+                None => "Choose a .baboon file to keep this workspace's changes in".to_owned(),
+            })
+            .on_disabled_hover_text("Baboon projects hold changes to Campaign Evolved containers")
+            .clicked()
+        {
+            ui.close_menu();
+            self.defer_file_action(DeferredFileAction::SaveProject, ctx);
+        }
+        if ui
+            .add_enabled(
+                can_save_project,
+                egui::Button::new("Save Baboon Project As..."),
+            )
+            .clicked()
+        {
+            ui.close_menu();
+            self.defer_file_action(DeferredFileAction::SaveProjectAs, ctx);
+        }
+        ui.separator();
+        let has_loaded_folder = self.loaded_tags_root().is_some();
+        if ui
+            .add_enabled(has_loaded_folder, egui::Button::new("Open Tags Folder"))
+            .clicked()
+        {
+            ui.close_menu();
+            self.open_loaded_tags_folder();
+        }
+        if ui
+            .add_enabled(has_loaded_folder, egui::Button::new("Open Data Folder"))
+            .clicked()
+        {
+            ui.close_menu();
+            self.open_loaded_data_folder();
+        }
+        let recent_action = right_opening_menu_button(ui, "Recent Folders", 280.0, |ui| {
+            style_list_menu(ui);
+            draw_recent_folders_menu(ui, &self.recent_folders)
+        })
+        .inner
+        .flatten();
+        if let Some(action) = recent_action {
+            ui.close_menu();
+            self.apply_recent_action(action, ctx);
+        }
+        ui.separator();
+        let save_label = if self.enable_chimp && self.kits[self.active].surface == KitSurface::Chimp
+        {
+            "Save Chimp Changes...    Ctrl+S"
+        } else {
+            "Save Current Tag    Ctrl+S"
+        };
+        if icon_text_button(
+            ui,
+            ButtonIcon::Save,
+            save_label,
+            !self.editing_kit_is_read_only(self.active),
+        )
+        .clicked()
+        {
+            ui.close_menu();
+            self.defer_file_action(DeferredFileAction::SaveCurrentTag, ctx);
+        }
+        if ui
+            .add_enabled(
+                self.kits[self.active].selected_key.is_some()
+                    && !self.editing_kit_is_read_only(self.active),
+                egui::Button::new("Save Current Tag As..."),
+            )
+            .clicked()
+        {
+            ui.close_menu();
+            self.save_current_tag_as();
+        }
+        if self.current_source_is_container() {
+            if ui
+                .add_enabled(
+                    self.can_poke_current_tag(),
+                    egui::Button::new("Poke Current Tag...    Ctrl+P"),
+                )
+                .on_hover_text(
+                    "Apply supported changes to this already-loaded tag in the verified Campaign Evolved process",
+                )
+                .clicked()
+            {
+                ui.close_menu();
+                self.defer_file_action(DeferredFileAction::PokeCurrentTag, ctx);
+            }
+            if self.last_poke.is_some()
+                && ui
+                    .add_enabled(!self.poke_undo_running, egui::Button::new("Undo Last Poke"))
+                    .on_hover_text("Restore the bytes from Baboon's last verified runtime poke")
+                    .clicked()
+            {
+                ui.close_menu();
+                self.begin_undo_last_poke(ctx.clone());
+            }
+            if ui
+                .add_enabled(
+                    self.kits[self.active].parsed_tags.values().any(|d| d.dirty.is_set())
+                        || self.kits[self.active]
+                            .campaign_project
+                            .as_ref()
+                            .is_some_and(|project| !project.overlays.is_empty()),
+                    egui::Button::new("Export Mod..."),
+                )
+                .on_hover_text(
+                    "Bundle every modified project tag into one portable mod overlay, with a copy of this project saved beside it",
+                )
+                .clicked()
+            {
+                ui.close_menu();
+                self.defer_file_action(DeferredFileAction::ExportMod, ctx);
+            }
+            // The same review, opened to look rather than to
+            // export -- which is how you check what a workspace
+            // is carrying before quitting.
+            if ui
+                .add_enabled(
+                    self.kits[self.active].has_unwritten_modifications(),
+                    egui::Button::new("Review Changes..."),
+                )
+                .on_hover_text(
+                    "See every edit this workspace is holding that is not written into the game",
+                )
+                .clicked()
+            {
+                ui.close_menu();
+                self.review_changes();
+            }
+            // Expert-gated because it is the one action here
+            // that writes tens of thousands of files: useful
+            // for getting the tag set out to diff or grep, and
+            // not something to trip over while editing.
+            if self.expert_mode
+                && ui
+                    .add_enabled(
+                        self.container_dump_job.is_none(),
+                        egui::Button::new("Extract All Tags to Folder\u{2026}"),
+                    )
+                    .on_hover_text(
+                        "Expert feature: write every tag these containers ship to a folder laid out like an editing kit. Tens of thousands of files \u{2014} this takes a while",
+                    )
+                    .on_disabled_hover_text(
+                        "An extraction is already running",
+                    )
+                    .clicked()
+            {
+                ui.close_menu();
+                self.defer_file_action(
+                    DeferredFileAction::ExtractAllContainerTags,
+                    ctx,
+                );
+            }
+        }
+        ui.separator();
+        if ui
+            .add_enabled(
+                self.kits[self.active].selected_key.is_some(),
+                egui::Button::new("Close Current Tag    Ctrl+W"),
+            )
+            .clicked()
+        {
+            // Deferred, per upstream: the close runs after the
+            // editor renders, so an edit committed by the menu
+            // taking focus is applied before the dirty check.
+            if let Some(key) = self.kits[self.active].selected_key.clone() {
+                self.defer_file_action(
+                    DeferredFileAction::Close(PendingCloseAction::CloseTab(key)),
+                    ctx,
+                );
+            }
+            ui.close_menu();
+        }
+        if ui
+            .add_enabled(
+                !self.kits[self.active].open_tabs.is_empty(),
+                egui::Button::new("Close All Tags"),
+            )
+            .clicked()
+        {
+            self.defer_file_action(
+                DeferredFileAction::Close(PendingCloseAction::CloseAllTabs),
+                ctx,
+            );
+            ui.close_menu();
+        }
+        ui.separator();
+        let can_fix_dependencies = self.kits[self.active].selected_key.is_some()
+            && self
+                .source()
+                .is_some_and(|source| matches!(source.source, TagSource::LooseFolder { .. }));
+        if ui
+            .add_enabled(
+                can_fix_dependencies,
+                egui::Button::new("Fix Tag Dependencies"),
+            )
+            .clicked()
+        {
+            ui.close_menu();
+            self.fix_current_tag_dependencies();
+        }
+        // Regenerate Index: force a fresh full scan and
+        // overwrite the cached index file.
+        let can_regen = self
+            .source()
+            .map(|s| matches!(s.source, TagSource::LooseFolder { .. }) && s.game.is_some())
+            .unwrap_or(false);
+        if ui
+            .add_enabled(
+                can_regen && !self.kits[self.active].scanning_entries,
+                egui::Button::new("Regenerate Index"),
+            )
+            .clicked()
+        {
+            ui.close_menu();
+            // Clear cached entries so the scan runs fresh.
+            if let Some(s) = self.source_mut() {
+                s.all_entries.clear();
+                s.group_tree = crate::source::build_group_tree(&[]);
+                s.reverse_dependencies = None;
+            }
+            self.kits[self.active].field_index.invalidate();
+            self.begin_scan_all_entries_with_label(ctx.clone(), "Rebuilding index...");
+        }
+        let can_refresh_browser = self.source().is_some_and(|source| {
+            matches!(source.source, TagSource::LooseFolder { .. }) && source.game.is_some()
+        });
+        if ui
+            .add_enabled(
+                can_refresh_browser
+                    && !self.kits[self.active].scanning_entries
+                    && !self.kits[self.active].index_jobs.refreshing,
+                egui::Button::new("Refresh Tag Browser"),
+            )
+            .clicked()
+        {
+            ui.close_menu();
+            self.refresh_tag_browser(ctx.clone());
+        }
+        ui.separator();
+        if icon_text_button(ui, ButtonIcon::Settings, "Settings...", true).clicked() {
+            self.settings_open = true;
+            ui.close_menu();
+        }
+    }
+
+    /// The Edit menu: undo and redo, and discarding unsaved changes.
+    fn draw_edit_menu(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        style_list_menu(ui);
+        if ui
+            .add_enabled(self.can_undo_current(), egui::Button::new("Undo    Ctrl+Z"))
+            .clicked()
+        {
+            ui.close_menu();
+            self.undo_current_tag();
+        }
+        if ui
+            .add_enabled(
+                self.can_redo_current(),
+                egui::Button::new("Redo    Ctrl+Shift+Z"),
+            )
+            .clicked()
+        {
+            ui.close_menu();
+            self.redo_current_tag();
+        }
+        ui.separator();
+        // The same two actions as the tab context menu and the
+        // toolbar, spelled out. An unlabelled trash icon among
+        // the tool launchers is not where anyone looks for this.
+        let selected = self.kits[self.active].selected_key.clone();
+        let discardable = selected
+            .as_deref()
+            .is_some_and(|key| self.tag_has_discardable_changes(self.active, key));
+        if ui
+            .add_enabled(discardable, egui::Button::new("Discard Unsaved Changes"))
+            .on_hover_text("Return the current tag to the way its source has it")
+            .clicked()
+        {
+            ui.close_menu();
+            if let Some(key) = selected {
+                self.discard_tag_changes(self.active, &key, ctx);
+            }
+        }
+        if self.current_source_is_campaign_project_capable(self.active) {
+            let stashed = self.stashed_campaign_tags(self.active);
+            let unsaved = self.kits[self.active]
+                .parsed_tags
+                .values()
+                .filter(|document| document.dirty.is_set())
+                .count();
+            if ui
+                .add_enabled(
+                    !stashed.is_empty() || unsaved > 0,
+                    egui::Button::new("Clear All Unsaved Modifications..."),
+                )
+                .on_hover_text(
+                    "Return every tag in this workspace to the way the game \
+                     ships it, including edits stashed in earlier sessions",
+                )
+                .on_disabled_hover_text("This workspace has no unsaved modifications")
+                .clicked()
+            {
+                ui.close_menu();
+                self.clear_stash_confirm = Some(ClearStashConfirm {
+                    kit: self.active_kit_id(),
+                    stashed,
+                    unsaved,
+                });
+            }
+        }
+    }
+
+    /// The Tools menu: the tool runner, reference searches, and the tag listings.
+    fn draw_tools_menu(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        style_list_menu(ui);
+        if ui.button("Run Tool...").clicked() {
+            ui.close_menu();
+            self.tool_commands.open = true;
+        }
+        self.draw_monitor_tools_menu(ui);
+        self.draw_assets_tools_menu(ui);
+        ui.separator();
+        if ui
+            .add_enabled(
+                self.kits[self.active].selected_key.is_some(),
+                egui::Button::new("Find References to Current Tag"),
+            )
+            .clicked()
+        {
+            ui.close_menu();
+            if let Some(key) = self.kits[self.active].selected_key.clone() {
+                self.show_references_for(&key);
+            }
+        }
+        if ui
+            .add_enabled(
+                self.kits[self.active].selected_key.is_some(),
+                egui::Button::new("Explore References to Current Tag..."),
+            )
+            .clicked()
+        {
+            ui.close_menu();
+            if let Some(key) = self.kits[self.active].selected_key.clone() {
+                self.open_content_explorer(&key);
+            }
+        }
+        if ui.button("Find Unreferenced Tags...").clicked() {
+            ui.close_menu();
+            self.show_unreferenced_tags();
+        }
+        {
+            // Loose folders and Campaign Evolved containers can
+            // both be indexed; cache sources cannot.
+            let indexable = self.source().is_some_and(|source| {
+                matches!(
+                    source.source,
+                    TagSource::LooseFolder { .. } | TagSource::IoStoreContainerSet { .. }
+                )
+            });
+            let has_index = self
+                .source()
+                .is_some_and(|source| source.reverse_dependencies.is_some());
+            let label = if self.kits[self.active].index_jobs.building_references {
+                "Building Reference Index…"
+            } else if has_index {
+                "Rebuild Reference Index"
+            } else {
+                "Build Reference Index"
+            };
+            if ui
+                .add_enabled(
+                    indexable && !self.kits[self.active].index_jobs.building_references,
+                    egui::Button::new(label),
+                )
+                .clicked()
+            {
+                ui.close_menu();
+                self.begin_build_reverse_dependencies(ctx.clone(), true);
+            }
+        }
+        if ui.button("List Scenario Map IDs...").clicked() {
+            ui.close_menu();
+            self.show_map_ids(ctx);
+        }
+        if ui.button("List Sounds by Class...").clicked() {
+            ui.close_menu();
+            self.show_sounds_by_class(ctx);
+        }
+        if ui.button("List Uncompressed Sounds...").clicked() {
+            ui.close_menu();
+            self.show_uncompressed_sounds(ctx);
+        }
+        if ui.button("Search Field Values...").clicked() {
+            ui.close_menu();
+            self.field_value_search_open = true;
+        }
+        if icon_text_button(
+            ui,
+            ButtonIcon::Compare,
+            "Compare Tags...",
+            self.kits[self.active].selected_key.is_some(),
+        )
+        .clicked()
+        {
+            ui.close_menu();
+            if let Some(key) = self.kits[self.active].selected_key.clone() {
+                self.tag_diff = Some(TagDiffState {
+                    kit: self.active_kit_id(),
+                    a_key: key,
+                    source: TagCompareSource::OpenTag,
+                    b_kit: None,
+                    b_key: None,
+                    b_path: None,
+                    comparison_kit_root: None,
+                    git_history: GitHistoryState::default(),
+                    error: None,
+                    filters: TagDiffFilters::default(),
+                    swapped: false,
+                    results: None,
+                    git_pending: None,
+                });
+            }
+        }
+        ui.separator();
+        if ui.button("Browse Keywords...").clicked() {
+            ui.close_menu();
+            self.keyword_chooser_open = true;
+        }
+    }
+
+    /// The View menu: browser mode and sort, display toggles, expert mode, and
+    /// the terminal.
+    fn draw_view_menu(&mut self, ui: &mut Ui) {
+        style_list_menu(ui);
+        // The browser view belongs to a workspace, so this
+        // menu shows and sets the focused kit's — matching the
+        // Folders/Groups buttons in that kit's own toolbar.
+        let kit = &mut self.kits[self.active];
+        if ui
+            .selectable_label(kit.browser_mode == BrowserMode::Folders, "Folders")
+            .clicked()
+        {
+            kit.browser_mode = BrowserMode::Folders;
+            ui.close_menu();
+        }
+        if ui
+            .selectable_label(kit.browser_mode == BrowserMode::Groups, "Tag Groups")
+            .clicked()
+        {
+            kit.browser_mode = BrowserMode::Groups;
+            ui.close_menu();
+        }
+        ui.separator();
+        let selected_sort = right_opening_menu_button(
+            ui,
+            format!("Sort by: {}", kit.browser_sort.label()),
+            220.0,
+            |ui| {
+                style_list_menu(ui);
+                for option in BrowserSort::ALL {
+                    if ui
+                        .selectable_label(kit.browser_sort == option, option.label())
+                        .clicked()
+                    {
+                        return Some(option);
+                    }
+                }
+                None
+            },
+        )
+        .inner
+        .flatten();
+        if let Some(option) = selected_sort {
+            kit.browser_sort = option;
+            ui.close_menu();
+        }
+        ui.separator();
+        ui.checkbox(&mut self.show_browser_prefixes, "Show [tag]/[folder]");
+        ui.checkbox(&mut self.show_block_sizes, "Show block sizes");
+        ui.checkbox(&mut self.angles_in_degrees, "Angles in degrees")
+            .on_hover_text(
+                "Angle fields hold radians on disk. Guerilla and the other Halo \
+                 tools show them in degrees, and so does Baboon — turn this off to \
+                 read and type the stored radians instead.",
+            );
+        ui.checkbox(
+            &mut self.scroll_to_cycle_dropdowns,
+            "Scroll wheel cycles dropdowns",
+        );
+        ui.checkbox(&mut self.expert_mode, "Expert mode");
+        ui.separator();
+        let terminal_enabled = self.kits[self.active].terminal_work_dir.is_some();
+        if ui
+            .add_enabled(
+                terminal_enabled,
+                egui::SelectableLabel::new(self.kits[self.active].terminal_open, "Terminal"),
+            )
+            .clicked()
+        {
+            self.kits[self.active].terminal_open = !self.kits[self.active].terminal_open;
+            self.remember_terminal_open_for_game();
+            ui.close_menu();
+        }
+    }
+
+    /// The Help menu: About, documentation, tutorials, and the update check.
+    fn draw_help_menu(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        style_list_menu(ui);
+        if ui.button("About...").clicked() {
+            self.help_panel_tab = HelpPanelTab::About;
+            self.about_open = true;
+            ui.close_menu();
+        }
+        if icon_text_button(ui, ButtonIcon::Doc, "Doc...", true).clicked() {
+            self.help_panel_tab = HelpPanelTab::Doc;
+            self.about_open = true;
+            ui.close_menu();
+        }
+        if ui.button("Tutorials...").clicked() {
+            self.help_panel_tab = HelpPanelTab::Tutorials;
+            self.about_open = true;
+            ui.close_menu();
+        }
+        if ui.button("Tag Compatibility...").clicked() {
+            self.help_panel_tab = HelpPanelTab::TagCompat;
+            self.about_open = true;
+            ui.close_menu();
+        }
+        if ui.button("Map Names...").clicked() {
+            self.help_panel_tab = HelpPanelTab::MapNames;
+            self.about_open = true;
+            ui.close_menu();
+        }
+        if ui.button("Check for updates").clicked() {
+            self.begin_check_for_updates(ctx.clone(), false);
+            ui.close_menu();
+        }
+        if let Some(update) = self.available_update.as_ref() {
+            let label = format!("Update available: {}...", update.short_name());
+            let url = update.release_url.clone();
+            if ui.button(label).clicked() {
+                ctx.open_url(egui::OpenUrl::new_tab(url));
+                ui.close_menu();
+            }
+        }
+    }
+
+    /// The Editing Kits menu: one entry per configured editing kit.
+    fn draw_editing_kits_menu(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        ui.set_min_width(EDITING_KIT_MENU_MIN_WIDTH);
+        let entries = visible_editing_kit_menu_entries(
+            &self.custom_editing_kit_profiles,
+            &self.editing_kit_validation,
+        );
+        let total_rows = entries.len();
+        for (index, entry) in entries.into_iter().enumerate() {
+            match entry {
+                EditingKitMenuEntry::Custom(profile) => {
+                    let validation = self.editing_kit_validation.custom(&profile.id);
+                    let enabled = validation.is_ok();
+                    let tooltip = validation
+                        .as_ref()
+                        .map(|layout| {
+                            format!("Load {} from {}", profile.name, layout.root.display())
+                        })
+                        .unwrap_or_else(|error| {
+                            format!("{} is unavailable: {error}", profile.name)
+                        });
+                    let texture =
+                        self.workspace_banner_texture(ui.ctx(), &profile.game, Some(&profile.id));
+                    let response = editing_kit_menu_row_with_read_only(
+                        ui,
+                        &profile.name,
+                        "EK",
+                        texture.as_ref(),
+                        texture.is_none(),
+                        enabled,
+                        profile.read_only && profile.game != "haloce_evolved",
+                    );
+                    let response = if enabled {
+                        response.on_hover_text(tooltip)
+                    } else {
+                        response.on_disabled_hover_text(tooltip)
+                    };
+                    if response.clicked() {
+                        ui.close_menu();
+                        self.load_custom_editing_kit_profile(profile, ctx.clone());
+                    }
+                }
+                EditingKitMenuEntry::BuiltIn(shortcut) => {
+                    let texture = self.game_banner_texture(ui.ctx(), shortcut.game).cloned();
+                    let configured_path = self
+                        .editing_kit_paths
+                        .get(shortcut.game)
+                        .expect("validated built-in path");
+                    let tooltip =
+                        format!("Load {} from {}", shortcut.label, configured_path.display());
+                    if editing_kit_menu_row(
+                        ui,
+                        game_display_name(shortcut.game),
+                        shortcut.fallback,
+                        texture.as_ref(),
+                        false,
+                        true,
+                    )
+                    .on_hover_text(tooltip)
+                    .clicked()
+                    {
+                        ui.close_menu();
+                        self.load_editing_kit_shortcut(shortcut, ctx.clone());
+                    }
+                }
+            }
+            if index + 1 < total_rows {
+                ui.separator();
+            }
+        }
+        if total_rows == 0 {
+            ui.add_enabled(false, egui::Button::new("No configured editing kits"));
+        }
+        ui.separator();
+        if icon_text_button(ui, ButtonIcon::Settings, "Editing Kit Settings...", true).clicked() {
+            self.settings_tab = SettingsTab::EditingKits;
+            self.settings_open = true;
+            ui.close_menu();
+        }
+    }
+
+    /// The status bar: the status line, index and job progress, the update
+    /// link and the workspace's project.
+    fn draw_status_bar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("status")
             .frame(Frame::none().fill(menu_bar()).inner_margin(egui::Margin {
                 left: 6.0,
@@ -936,7 +952,10 @@ impl Baboon {
                     }
                 });
             });
+    }
 
+    /// The "please wait" window shown while the active kit is still indexing.
+    fn draw_entry_index_wait_notice(&mut self, ctx: &egui::Context) {
         if self.show_entry_index_wait_notice
             && (self.kits[self.active].scanning_entries
                 || self.kits[self.active].index_jobs.references_for_entry_index)
@@ -1004,8 +1023,10 @@ impl Baboon {
                 });
             self.show_entry_index_wait_notice = open && !hide_notice;
         }
+    }
 
-        // Terminal panel — rendered AFTER status so it sits above it.
+    /// The terminal panel, when the active kit has it open.
+    fn draw_terminal_panel(&mut self, ctx: &egui::Context) {
         if self.kits[self.active].terminal_open {
             let work_dir_label = self.kits[self.active]
                 .terminal_work_dir
@@ -1175,19 +1196,11 @@ impl Baboon {
                         });
                 });
         }
+    }
 
-        egui::CentralPanel::default()
-            .frame(Frame::none().fill(editor_bg()))
-            .show(ctx, |ui| {
-                self.draw_kit_tiles(ui, ctx);
-            });
-        self.draw_auxiliary_windows(ctx);
-        self.persist_prefs_throttled(ctx.input(|input| input.time));
-        // Every kit, not just the active one: a background kit's sidecar can be
-        // dirty from edits made before the user switched away.
-        for kit in &mut self.kits {
-            kit.keywords.save_if_dirty();
-        }
+    /// Draw the color picker popup and apply what it returns to the kit it was
+    /// opened from.
+    fn draw_and_apply_color_popup(&mut self, ctx: &egui::Context) {
         if let Some(result) = draw_color_popup(
             ctx,
             &mut self.color_popup,
@@ -1252,6 +1265,11 @@ impl Baboon {
                 }
             }
         }
+    }
+
+    /// Draw the function editor popup and apply what it returns to the kit it
+    /// was opened from.
+    fn draw_and_apply_function_popup(&mut self, ctx: &egui::Context) {
         if let Some(batch) =
             draw_function_popup(ctx, &mut self.function_popup, &mut self.color_popup)
         {
@@ -1276,6 +1294,11 @@ impl Baboon {
                 doc.journal.end_edit_window();
             }
         }
+    }
+
+    /// Settle what this frame queued after every window has drawn: prompts,
+    /// pending opens and field navigation, and the sound drains.
+    fn process_frame_requests(&mut self, ctx: &egui::Context) {
         self.handle_block_confirm(ctx);
         self.handle_save_changes_prompt(ctx);
         self.handle_last_opened_windows_prompt(ctx);
