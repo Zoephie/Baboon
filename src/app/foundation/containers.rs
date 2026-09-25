@@ -1063,9 +1063,13 @@ pub(in crate::app) fn draw_foundation_block(
         });
     }
 
-    // Paste / replace from the clipboard.
-    let clip_elements = edit.block_clipboard.map(|clip| clip.elements.clone());
-    if let Some(elements) = clip_elements {
+    // Paste / replace from the clipboard. The elements are cloned only for an
+    // action that was clicked: this runs for every block drawn, every frame,
+    // and used to deep-copy the whole clipboard each time.
+    if let Some(clip) = edit.block_clipboard
+        && (actions.paste || actions.replace_element || actions.replace_block)
+    {
+        let elements = clip.elements.clone();
         if actions.paste {
             let at = if count == 0 { 0 } else { sel + 1 };
             edit.block_ops.push(BlockOp {
