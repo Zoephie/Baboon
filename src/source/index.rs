@@ -53,16 +53,9 @@ fn app_cache_path(filename: &str, windows_folder: &str, unix_folder: &str) -> Pa
     if windows_folder == "Baboon" && unix_folder == "baboon" {
         return crate::storage::data_path(filename);
     }
-    if let Some(appdata) = std::env::var_os("APPDATA") {
-        return PathBuf::from(appdata).join(windows_folder).join(filename);
-    }
-    if let Some(home) = std::env::var_os("USERPROFILE") {
-        return PathBuf::from(home)
-            .join(".config")
-            .join(unix_folder)
-            .join(filename);
-    }
-    PathBuf::from(filename)
+    // The same root as installed-mode state (see `user_data_root`); this is
+    // only reached for the legacy Genesis files, which are read, not written.
+    crate::storage::user_data_root(windows_folder, unix_folder).join(filename)
 }
 
 /// Persist `entries` to the shared SQLite index DB. Called from the background
