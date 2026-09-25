@@ -3685,11 +3685,7 @@ impl Baboon {
         let id = self.kits[self.active].id;
         self.kits[self.active].tag_tree = egui_tiles::Tree::empty(tag_tree_id(id));
         self.kits[self.active].open_tabs.clear();
-        self.kits[self.active].parsed_tags.clear();
-        self.kits[self.active].loading_tags.clear();
-        self.kits[self.active].bitmap_previews.clear();
-        self.kits[self.active].folder_browsers.clear();
-        self.kits[self.active].edit_buffers.clear();
+        self.kits[self.active].drop_documents_except(None);
         self.kits[self.active].selected_key = None;
         self.color_popup = None;
         self.function_popup = None;
@@ -3701,30 +3697,14 @@ impl Baboon {
                 self.kits[self.active].close_tag_pane(&open);
             }
         }
-        self.kits[self.active]
-            .parsed_tags
-            .retain(|tab, _| tab == key);
-        self.kits[self.active].loading_tags.retain(|tab| tab == key);
-        self.kits[self.active]
-            .bitmap_previews
-            .retain(|tab, _| tab == key);
-        let edit_prefix = format!("{key}|");
-        self.kits[self.active]
-            .edit_buffers
-            .retain(|buffer_key, _| buffer_key.starts_with(&edit_prefix));
+        self.kits[self.active].drop_documents_except(Some(key));
         self.kits[self.active].selected_key = (!is_folder_pane_key(key)).then(|| key.to_owned());
         self.color_popup = None;
         self.function_popup = None;
     }
 
     pub(super) fn unload_tag(&mut self, key: &str) {
-        self.kits[self.active].parsed_tags.remove(key);
-        self.kits[self.active].loading_tags.remove(key);
-        self.kits[self.active].bitmap_previews.remove(key);
-        let edit_prefix = format!("{key}|");
-        self.kits[self.active]
-            .edit_buffers
-            .retain(|buffer_key, _| !buffer_key.starts_with(&edit_prefix));
+        self.kits[self.active].drop_document(key);
     }
 
     pub(super) fn handle_browser_action(&mut self, action: BrowserAction, ctx: egui::Context) {

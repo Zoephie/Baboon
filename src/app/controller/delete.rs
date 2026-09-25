@@ -52,12 +52,7 @@ fn loose_trash_destination(
 /// browser's memoised filter and the field-value index are both keyed on it, so
 /// without it a search would keep answering with a tag that is gone.
 fn forget_tag_in_kit(kit: &mut Kit, key: &str) {
-    kit.parsed_tags.remove(key);
-    kit.loading_tags.remove(key);
-    kit.bitmap_previews.remove(key);
-    kit.model_previews.remove(key);
-    kit.find_filter_applied.remove(key);
-    kit.edit_buffers.forget_tag(key);
+    kit.drop_document(key);
     if kit.selected_key.as_deref() == Some(key) {
         kit.selected_key = None;
     }

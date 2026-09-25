@@ -812,6 +812,51 @@ pub(super) fn tag_tree_id(id: KitId) -> egui::Id {
 }
 
 impl Kit {
+    /// Forget everything this kit holds for one open document: the parsed tag,
+    /// an in-flight load, its previews, Find filter, edit drafts and, for a
+    /// folder pane, its browser state.
+    ///
+    /// This used to be written out in four places (closing a tab, closing all,
+    /// closing all but one, deleting a tag), each clearing a different subset:
+    /// only the delete path dropped the model preview, whose geometry and
+    /// textures therefore outlived every closed tab.
+    pub(super) fn drop_document(&mut self, key: &str) {
+        self.parsed_tags.remove(key);
+        self.loading_tags.remove(key);
+        self.bitmap_previews.remove(key);
+        self.model_previews.remove(key);
+        self.find_filter_applied.remove(key);
+        self.edit_buffers.forget_tag(key);
+        self.folder_browsers.remove(key);
+    }
+
+    /// [`Self::drop_document`] for every document except `keep`.
+    pub(super) fn drop_documents_except(&mut self, keep: Option<&str>) {
+        let keys: HashSet<String> = self
+            .parsed_tags
+            .keys()
+            .chain(self.loading_tags.iter())
+            .chain(self.bitmap_previews.keys())
+            .chain(self.model_previews.keys())
+            .chain(self.find_filter_applied.keys())
+            .chain(self.folder_browsers.keys())
+            .filter(|key| Some(key.as_str()) != keep)
+            .cloned()
+            .collect();
+        for key in &keys {
+            self.drop_document(key);
+        }
+        // Drafts are keyed "<tag>|<field>", including ones for tags that were
+        // never loaded, so they are trimmed by prefix rather than by key.
+        match keep {
+            None => self.edit_buffers.clear(),
+            Some(keep) => {
+                let prefix = format!("{keep}|");
+                self.edit_buffers.retain(|draft, _| draft.starts_with(&prefix));
+            }
+        }
+    }
+
     /// This kit's browser entry for `key`, wherever it is listed: the visible
     /// entries, the full set a filtered browser hides, or a favorite pulled in
     /// from elsewhere.
@@ -958,4 +1003,33 @@ pub(super) struct IndexJobs {
     pub(super) references_for_entry_index: bool,
     pub(super) reference_progress: Option<ReferenceIndexProgressState>,
     pub(super) entry_progress: Option<EntryIndexProgressState>,
+}
+
+#[cfg(test)]
+mod document_cleanup_tests {
+    use super::*;
+
+    /// Closing tabs drops every cache kept for them, model previews included.
+    /// Three of the four close paths kept the model preview (its geometry and
+    /// textures) for the rest of the session.
+    #[test]
+    fn closing_tabs_drops_everything_kept_for_them() {
+        let mut kit = Kit::empty(KitId(0), TagNameIndex::default());
+        for key in ["kept", "closed"] {
+            kit.model_previews.insert(key.to_owned(), ModelPreviewState::default());
+            kit.bitmap_previews.insert(key.to_owned(), BitmapPreviewState::default());
+            kit.loading_tags.insert(key.to_owned());
+            kit.edit_buffers.insert_clean(format!("{key}|name"), "x".to_owned());
+        }
+
+        kit.drop_documents_except(Some("kept"));
+        assert_eq!(kit.model_previews.keys().collect::<Vec<_>>(), ["kept"]);
+        assert_eq!(kit.bitmap_previews.keys().collect::<Vec<_>>(), ["kept"]);
+        assert_eq!(kit.loading_tags.iter().collect::<Vec<_>>(), ["kept"]);
+
+        kit.drop_document("kept");
+        assert!(kit.model_previews.is_empty());
+        assert!(kit.bitmap_previews.is_empty());
+        assert!(kit.loading_tags.is_empty());
+    }
 }
