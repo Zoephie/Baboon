@@ -522,6 +522,15 @@ pub fn loose_file_entry(
         return Ok(None);
     };
     let rel = path.strip_prefix(root).unwrap_or(path);
+    // The folder scan's path is the root as given plus what it walked, joined
+    // with the platform's separator. A caller's path may have been joined from
+    // a `/`-separated relative path instead, which on Windows leaves both
+    // separators in it and a key the scan never produces. Rebuild the
+    // relative part from its components so the two agree.
+    let path = match path.strip_prefix(root) {
+        Ok(rel) => root.join(rel.components().collect::<PathBuf>()),
+        Err(_) => path.to_path_buf(),
+    };
     let group_name = names.name_for(group_tag).map(str::to_owned);
     let display_path = display_path_with_friendly_extension(rel, group_tag, names);
     Ok(Some(TagEntry {
@@ -529,7 +538,7 @@ pub fn loose_file_entry(
         display_path,
         group_tag,
         group_name,
-        location: TagEntryLocation::LooseFile(path.to_path_buf()),
+        location: TagEntryLocation::LooseFile(path),
     }))
 }
 

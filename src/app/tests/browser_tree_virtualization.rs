@@ -420,7 +420,8 @@ fn the_lazy_tree_skips_rows_without_moving_any() {
         opened
             .visible
             .iter()
-            .any(|(name, _)| name.ends_with("folder_24/tag_079.biped")),
+            // Keys are platform paths: `\` on Windows.
+            .any(|(name, _)| name.replace('\\', "/").ends_with("folder_24/tag_079.biped")),
         "the last folder did not open: {:?}",
         opened.visible.last()
     );
