@@ -587,14 +587,7 @@ mod tests {
     }
 
     fn scratch_dir(name: &str) -> PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .subsec_nanos();
-        let dir =
-            std::env::temp_dir().join(format!("baboon-{name}-{}-{nanos}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
+        crate::test_kits::unique_temp_dir(name)
     }
 
     fn run_job(

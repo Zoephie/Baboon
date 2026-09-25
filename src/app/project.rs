@@ -2457,14 +2457,7 @@ mod tests {
     }
 
     fn temp_project(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "baboon-{name}-{}-{}.baboon",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ))
+        crate::test_kits::unique_temp_path(name).with_extension("baboon")
     }
 
     fn identities_in(path: &Path) -> Vec<String> {

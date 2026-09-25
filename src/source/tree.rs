@@ -807,11 +807,7 @@ mod tests {
     }
 
     fn temp_dir(name: &str) -> PathBuf {
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("blam_tag_gui_{name}_{stamp}"))
+        crate::test_kits::unique_temp_path(name)
     }
 
     fn write_fake_tag(path: &Path, group: &[u8; 4]) {

@@ -68,3 +68,25 @@ pub(crate) fn definitions() -> &'static std::path::Path {
 pub(crate) fn leak(path: PathBuf) -> &'static str {
     Box::leak(path.display().to_string().into_boxed_str())
 }
+
+/// A path under the system temp directory that no other test, in this run or
+/// a parallel one, will be handed. Not created.
+pub(crate) fn unique_temp_path(name: &str) -> PathBuf {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_nanos())
+        .unwrap_or_default();
+    let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "baboon-{name}-{}-{nanos}-{serial}",
+        std::process::id()
+    ))
+}
+
+/// [`unique_temp_path`], created as an empty directory.
+pub(crate) fn unique_temp_dir(name: &str) -> PathBuf {
+    let dir = unique_temp_path(name);
+    std::fs::create_dir_all(&dir).expect("create a temporary test directory");
+    dir
+}

@@ -127,11 +127,7 @@ mod tests {
     use super::*;
 
     fn unique_temp_dir(name: &str) -> PathBuf {
-        let nanos = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .subsec_nanos();
-        std::env::temp_dir().join(format!("baboon-{name}-{}-{nanos}", std::process::id()))
+        crate::test_kits::unique_temp_path(name)
     }
 
     #[test]

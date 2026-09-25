@@ -578,19 +578,9 @@ pub(super) fn sanitise_project_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir(label: &str) -> PathBuf {
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "baboon-editing-kits-{label}-{}-{stamp}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&root).unwrap();
-        root
+        crate::test_kits::unique_temp_dir(&format!("editing-kits-{label}"))
     }
 
     #[test]

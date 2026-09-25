@@ -1263,11 +1263,7 @@ mod paks_dir_tests {
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or_default();
-        std::env::temp_dir().join(format!("baboon_paks_{name}_{stamp}"))
+        crate::test_kits::unique_temp_path(&format!("paks-{name}"))
     }
 
     fn touch(path: &Path) {
