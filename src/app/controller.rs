@@ -2462,10 +2462,24 @@ impl Baboon {
         ctx: egui::Context,
         label: impl Into<String>,
     ) {
-        if self.kits[self.active].scanning_entries {
+        self.begin_scan_all_entries_in(self.active, ctx, label);
+    }
+
+    /// Scan `kit_index`'s folder, which need not be the focused kit: the Model
+    /// and Bitmap Libraries ask for their own kit's scan. They used to call the
+    /// active-kit version, which scanned whichever kit had focus and left
+    /// theirs waiting for a scan it had recorded as requested.
+    pub(super) fn begin_scan_all_entries_in(
+        &mut self,
+        kit_index: usize,
+        ctx: egui::Context,
+        label: impl Into<String>,
+    ) {
+        let kit = &self.kits[kit_index];
+        if kit.scanning_entries {
             return;
         }
-        let Some(source) = self.source() else {
+        let Some(source) = kit.source.as_ref() else {
             return;
         };
         let TagSource::LooseFolder { root, .. } = &source.source else {
@@ -2474,19 +2488,23 @@ impl Baboon {
         let root = root.clone();
         let names = source.names.clone();
         let tx = self.tx.clone();
-        self.kits[self.active].index_jobs.refreshing = false;
-        self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
-        self.kits[self.active].field_index.invalidate();
-        let stamp = self.kit_stamp();
+        let kit = &mut self.kits[kit_index];
+        kit.index_jobs.refreshing = false;
+        kit.generation = kit.generation.wrapping_add(1);
+        kit.field_index.invalidate();
+        let stamp = KitStamp {
+            kit: kit.id,
+            generation: kit.generation,
+        };
         let label = label.into();
-        self.kits[self.active].scanning_entries = true;
-        self.show_entry_index_wait_notice = true;
-        self.kits[self.active].index_jobs.entry_progress = Some(EntryIndexProgressState {
+        kit.scanning_entries = true;
+        kit.index_jobs.entry_progress = Some(EntryIndexProgressState {
             label: label.clone(),
             processed: 0,
             total: 0,
             matched: 0,
         });
+        self.show_entry_index_wait_notice = true;
         self.status = label;
         thread::spawn(move || {
             let progress_tx = tx.clone();

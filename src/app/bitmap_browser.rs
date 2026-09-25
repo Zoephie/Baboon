@@ -728,7 +728,7 @@ impl Baboon {
             && !self.kits[kit_index].bitmap_browser.requested_scan;
         if needs_scan {
             self.kits[kit_index].bitmap_browser.requested_scan = true;
-            self.begin_scan_all_entries(ctx.clone());
+            self.begin_scan_all_entries_in(kit_index, ctx.clone(), "Indexing tags...");
         }
 
         let browser = &mut self.kits[kit_index].bitmap_browser;
