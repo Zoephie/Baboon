@@ -4860,10 +4860,41 @@ impl Baboon {
         doc.tag
             .write_atomic(&output)
             .map_err(|error| error.to_string())?;
+        // What the tag now points at, from the document just written.
+        let dependencies = {
+            let mut refs = Vec::new();
+            collect_tag_dependency_refs(doc.tag.root(), &mut refs);
+            refs
+        };
         if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(key) {
             doc.dirty.clear();
         }
+        self.record_saved_tag_in_indexes(&entry, dependencies);
         Ok(output)
+    }
+
+    /// Bring the on-disk indexes and the reference index up to date with a tag
+    /// the user just saved.
+    ///
+    /// A plain Save touched neither. The next periodic refresh then saw the
+    /// file's new modified time as a change, and (before refreshes were
+    /// patched in) dropped the whole reference index for it. Writing the row
+    /// here means the refresh sees nothing to do, and the references are the
+    /// ones the saved document holds.
+    fn record_saved_tag_in_indexes(&mut self, entry: &TagEntry, dependencies: Vec<DependencyRef>) {
+        let Some(source) = self.source_mut() else {
+            return;
+        };
+        if let (TagSource::LooseFolder { root, .. }, Some(game)) =
+            (&source.source, source.game.as_deref())
+            && !source.all_entries.is_empty()
+        {
+            let _ = crate::source::upsert_entry_index_row(game, root, entry);
+            let _ = crate::source::save_tag_dependencies(game, root, &entry.key, Some(&dependencies));
+        }
+        if let Some(index) = source.reverse_dependencies.as_mut() {
+            index.set_tag_dependencies(entry.key.clone(), dependencies);
+        }
     }
 
     pub(super) fn current_source_is_container(&self) -> bool {
@@ -12359,5 +12390,75 @@ mod refresh_reference_tests {
         let mut referrers = index.dependents_for(target.group_tag, &target.rel_path).to_vec();
         referrers.sort();
         assert_eq!(referrers, ["file:kept", "file:new"]);
+    }
+}
+
+#[cfg(test)]
+mod saved_tag_index_tests {
+    use super::*;
+
+    /// A plain Save leaves nothing for the periodic refresh to find, and the
+    /// reference index knows what the saved tag now points at.
+    #[test]
+    fn a_saved_tag_updates_its_index_row_and_references() {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-save-index-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let game = format!("save_index_{}", root.file_name().unwrap().to_string_lossy());
+        std::fs::create_dir_all(root.join("objects")).unwrap();
+        let path = root.join("objects/crate.model");
+        let mut tag = TagFile::new(locate_definitions_root().join("halo3_mcc/model.json")).unwrap();
+        tag.write_atomic(&path).unwrap();
+        let names = TagNameIndex::default();
+        let entries =
+            crate::source::scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        crate::source::save_entry_index(&game, &root, &entries).unwrap();
+        let entry = entries[0].clone();
+
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::LooseFolder {
+                root: root.clone(),
+                game: Some(game.clone()),
+                definitions_root: PathBuf::new(),
+            },
+            names: names.clone(),
+            game: Some(game.clone()),
+            entries: entries.clone(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: entries.clone(),
+            reverse_dependencies: Some(ReverseDependencyIndex::default()),
+            initial_tag: None,
+            key_hints: Default::default(),
+        });
+        crate::app::apply_field_edit(&mut tag, "render model", "mode:objects/crate").unwrap();
+        app.kits[0]
+            .parsed_tags
+            .insert(entry.key.clone(), TagDocument::modified(tag));
+
+        let saved = app.save_tag_by_key(&entry.key);
+        let refresh = crate::source::refresh_entry_index(&game, &root, &names);
+        let referrers = app.kits[0]
+            .source
+            .as_ref()
+            .and_then(|source| source.reverse_dependencies.as_ref())
+            .map(|index| {
+                index
+                    .dependents_for(u32::from_be_bytes(*b"mode"), "objects\\crate")
+                    .to_vec()
+            });
+
+        crate::source::remove_test_index_rows(&game);
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(saved.is_ok(), "{saved:?}");
+        assert!(!refresh.unwrap().changed, "the refresh finds the save already indexed");
+        assert_eq!(referrers, Some(vec![entry.key.clone()]));
     }
 }

@@ -119,6 +119,14 @@ pub fn delete_entry_index_row(game: &str, root: &Path, key: &str) -> Result<bool
     Ok(true)
 }
 
+/// Drop every index row a test wrote under `game`.
+#[cfg(test)]
+pub(crate) fn remove_test_index_rows(game: &str) {
+    if let Ok(conn) = open_index_db() {
+        let _ = conn.execute("DELETE FROM sources WHERE game = ?1", params![game]);
+    }
+}
+
 /// Replace one tag's rows in an existing reverse-dependency index, or remove
 /// them (`deps: None`). Like [`upsert_entry_index_row`], it does nothing for a
 /// folder with no reference index, since a partial graph would load back as a
