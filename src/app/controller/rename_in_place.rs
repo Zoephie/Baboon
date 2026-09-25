@@ -649,16 +649,21 @@ impl Baboon {
             is_mod,
             tag_bytes,
         };
-        let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result = run_container_rename(input);
-            let _ = tx.send(WorkerMessage::ContainerRenameFinished {
+        // Through spawn_worker so the lease always comes back, as for Duplicate.
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || WorkerMessage::ContainerRenameFinished {
                 stamp,
                 lease: lease_id,
-                result,
-            });
-            ctx.request_repaint();
-        });
+                result: run_container_rename(input),
+            },
+            move |error| WorkerMessage::ContainerRenameFinished {
+                stamp,
+                lease: lease_id,
+                result: Err(error),
+            },
+        );
     }
 
     pub(in crate::app) fn handle_container_rename_finished(

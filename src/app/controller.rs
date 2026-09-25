@@ -2506,27 +2506,33 @@ impl Baboon {
         });
         self.show_entry_index_wait_notice = true;
         self.status = label;
-        thread::spawn(move || {
-            let progress_tx = tx.clone();
-            let progress_ctx = ctx.clone();
-            let result = scan_folder_subtree_entries_with_progress(
-                &root,
-                std::path::Path::new(""),
-                &names,
-                move |progress| {
-                    let _ = progress_tx.send(WorkerMessage::EntryIndexScanProgress {
-                        stamp,
-                        processed: progress.processed,
-                        total: progress.total,
-                        matched: progress.matched,
-                    });
-                    progress_ctx.request_repaint();
-                },
-            )
-            .map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::AllEntriesScanned { stamp, result });
-            ctx.request_repaint();
-        });
+        let progress_ctx = ctx.clone();
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || {
+                let result = scan_folder_subtree_entries_with_progress(
+                    &root,
+                    std::path::Path::new(""),
+                    &names,
+                    move |progress| {
+                        let _ = tx.send(WorkerMessage::EntryIndexScanProgress {
+                            stamp,
+                            processed: progress.processed,
+                            total: progress.total,
+                            matched: progress.matched,
+                        });
+                        progress_ctx.request_repaint();
+                    },
+                )
+                .map_err(|e| e.to_string());
+                WorkerMessage::AllEntriesScanned { stamp, result }
+            },
+            move |error| WorkerMessage::AllEntriesScanned {
+                stamp,
+                result: Err(error),
+            },
+        );
     }
 
     /// Starts source work off the UI thread and reports completion through `WorkerMessage`.
@@ -2570,16 +2576,22 @@ impl Baboon {
         let root = root.clone();
         let names = source.names.clone();
         let tag_source = source.source.clone();
-        let tx = self.tx.clone();
         let stamp = self.kit_stamp();
         self.kits[self.active].index_jobs.refreshing = true;
-        thread::spawn(move || {
-            let result = crate::source::refresh_entry_index(&game, &root, &names)
-                .map(|refresh| persist_entry_index_changes(&game, &root, &tag_source, refresh))
-                .map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::EntryIndexRefreshed { stamp, result });
-            ctx.request_repaint();
-        });
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || WorkerMessage::EntryIndexRefreshed {
+                stamp,
+                result: crate::source::refresh_entry_index(&game, &root, &names)
+                    .map(|refresh| persist_entry_index_changes(&game, &root, &tag_source, refresh))
+                    .map_err(|e| e.to_string()),
+            },
+            move |error| WorkerMessage::EntryIndexRefreshed {
+                stamp,
+                result: Err(error),
+            },
+        );
     }
 
     pub(super) fn refresh_tag_browser(&mut self, ctx: egui::Context) {
@@ -3094,15 +3106,24 @@ impl Baboon {
             return;
         }
         let source_kind = source.source.clone();
-        let tx = self.tx.clone();
         let kit = self.active_kit_id();
         self.kits[self.active].loading_tags.insert(key.clone());
         self.status = format!("Loading {}", entry.display_path);
-        thread::spawn(move || {
-            let result = read_entry(&source_kind, &entry).map_err(|error| format!("{error:#}"));
-            let _ = tx.send(WorkerMessage::TagLoaded { kit, key, result });
-            ctx.request_repaint();
-        });
+        let panic_key = key.clone();
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || {
+                let result =
+                    read_entry(&source_kind, &entry).map_err(|error| format!("{error:#}"));
+                WorkerMessage::TagLoaded { kit, key, result }
+            },
+            move |error| WorkerMessage::TagLoaded {
+                kit,
+                key: panic_key,
+                result: Err(error),
+            },
+        );
     }
 
     /// Kept for save/export paths that address "the current tag".
@@ -4024,17 +4045,24 @@ impl Baboon {
             state.textures_pending = true;
         }
 
-        let (tx, ctx, key) = (self.tx.clone(), ctx.clone(), key.to_owned());
-        thread::spawn(move || {
-            let textures = resolve_model_textures(&source, &materials);
-            let _ = tx.send(WorkerMessage::ModelTexturesResolved {
+        let (key, panic_key) = (key.to_owned(), key.to_owned());
+        spawn_worker(
+            &self.tx,
+            ctx,
+            move || WorkerMessage::ModelTexturesResolved {
                 stamp,
                 key,
                 geometry_id,
-                textures,
-            });
-            ctx.request_repaint();
-        });
+                textures: resolve_model_textures(&source, &materials),
+            },
+            // No textures: the preview draws untextured, and stops waiting.
+            move |_| WorkerMessage::ModelTexturesResolved {
+                stamp,
+                key: panic_key,
+                geometry_id,
+                textures: Vec::new(),
+            },
+        );
     }
 
     pub(in crate::app) fn handle_model_textures_resolved(
@@ -6950,27 +6978,36 @@ impl Baboon {
                 self.ref_jump_loading.remove(&index);
                 continue;
             };
-            let tx = self.tx.clone();
             let kit = self.active_kit_id();
             // The popup's own target, as `handle_ref_jump_occurrences` compares
             // it; the walk matches against the normalized form.
             let query_target = (group_tag, rel_path.clone());
             let normalized = target.clone();
-            let ctx = ctx.clone();
-            thread::spawn(move || {
-                let target = query_target;
-                let result = read_entry(&source_kind, &entry)
-                    .map(|tag| ref_occurrences_in(&tag, target.0, &normalized))
-                    .map_err(|error| format!("{error:#}"));
-                let _ = tx.send(WorkerMessage::RefJumpOccurrences {
+            let (panic_key, panic_target) = (key.clone(), query_target.clone());
+            spawn_worker(
+                &self.tx,
+                ctx,
+                move || {
+                    let target = query_target;
+                    let result = read_entry(&source_kind, &entry)
+                        .map(|tag| ref_occurrences_in(&tag, target.0, &normalized))
+                        .map_err(|error| format!("{error:#}"));
+                    WorkerMessage::RefJumpOccurrences {
+                        kit,
+                        index,
+                        key,
+                        target,
+                        result,
+                    }
+                },
+                move |error| WorkerMessage::RefJumpOccurrences {
                     kit,
                     index,
-                    key,
-                    target,
-                    result,
-                });
-                ctx.request_repaint();
-            });
+                    key: panic_key,
+                    target: panic_target,
+                    result: Err(error),
+                },
+            );
         }
     }
 
@@ -7340,19 +7377,23 @@ impl Baboon {
                 .collect()
         };
         let tag_source = self.source().expect("checked").source.clone();
-        let tx = self.tx.clone();
         self.field_value_searching = true;
         self.status = format!("Searching field values for \"{display}\"…");
-        let search_ctx = ctx.clone();
-        thread::spawn(move || {
-            let result = run_field_value_search(&tag_source, &entries, &query_lower);
-            let _ = tx.send(WorkerMessage::FieldValueSearchFinished {
+        let panic_query = display.clone();
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || WorkerMessage::FieldValueSearchFinished {
                 stamp,
                 query: display,
-                result,
-            });
-            search_ctx.request_repaint();
-        });
+                result: run_field_value_search(&tag_source, &entries, &query_lower),
+            },
+            move |error| WorkerMessage::FieldValueSearchFinished {
+                stamp,
+                query: panic_query,
+                result: Err(error),
+            },
+        );
         // Build the index in the background so the next search is instant.
         self.begin_build_field_index(ctx);
     }

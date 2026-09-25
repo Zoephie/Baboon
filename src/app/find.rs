@@ -649,55 +649,68 @@ impl Baboon {
         self.find.searching = true;
         self.find.progress = Some((0, total));
         self.find.unreadable = 0;
-        thread::spawn(move || {
-            let mut occurrences = Vec::new();
-            let mut unreadable = 0;
-            let mut docs_by_group = HashMap::new();
-            for (index, entry) in entries.into_iter().enumerate() {
-                if supports_field_search(&entry) {
-                    let docs = documentation_source.as_ref().and_then(|(root, game)| {
-                        let group = names
-                            .name_for(entry.group_tag)
-                            .or_else(|| group_tag_to_extension(entry.group_tag))?;
-                        Some(
-                            docs_by_group
-                                .entry(entry.group_tag)
-                                .or_insert_with(|| build_def_docs(root, game, group)),
-                        )
-                    });
-                    match crate::source::read_entry(&tag_source, &entry) {
-                        Ok(tag) => occurrences.extend(collect_find_occurrences(
-                            &tag,
-                            &entry.key,
-                            &names,
-                            docs.map(|docs| &*docs),
-                            &query,
-                            look_in,
-                            match_case,
-                            whole_word,
-                        )),
-                        Err(_) => unreadable += 1,
+        let worker_ctx = ctx.clone();
+        let progress_tx = tx.clone();
+        spawn_worker(
+            &tx,
+            &worker_ctx,
+            move || {
+                let tx = progress_tx;
+                let mut occurrences = Vec::new();
+                let mut unreadable = 0;
+                let mut docs_by_group = HashMap::new();
+                for (index, entry) in entries.into_iter().enumerate() {
+                    if supports_field_search(&entry) {
+                        let docs = documentation_source.as_ref().and_then(|(root, game)| {
+                            let group = names
+                                .name_for(entry.group_tag)
+                                .or_else(|| group_tag_to_extension(entry.group_tag))?;
+                            Some(
+                                docs_by_group
+                                    .entry(entry.group_tag)
+                                    .or_insert_with(|| build_def_docs(root, game, group)),
+                            )
+                        });
+                        match crate::source::read_entry(&tag_source, &entry) {
+                            Ok(tag) => occurrences.extend(collect_find_occurrences(
+                                &tag,
+                                &entry.key,
+                                &names,
+                                docs.map(|docs| &*docs),
+                                &query,
+                                look_in,
+                                match_case,
+                                whole_word,
+                            )),
+                            Err(_) => unreadable += 1,
+                        }
+                    }
+                    let processed = index + 1;
+                    if processed == total || processed % 32 == 0 {
+                        let _ = tx.send(WorkerMessage::FindAllProgress {
+                            stamp,
+                            request_id,
+                            processed,
+                            total,
+                        });
+                        ctx.request_repaint();
                     }
                 }
-                let processed = index + 1;
-                if processed == total || processed % 32 == 0 {
-                    let _ = tx.send(WorkerMessage::FindAllProgress {
-                        stamp,
-                        request_id,
-                        processed,
-                        total,
-                    });
-                    ctx.request_repaint();
+                WorkerMessage::FindAllFinished {
+                    stamp,
+                    request_id,
+                    occurrences,
+                    unreadable,
                 }
-            }
-            let _ = tx.send(WorkerMessage::FindAllFinished {
+            },
+            // A crashed search ends like an empty one, so Find stops waiting.
+            move |_| WorkerMessage::FindAllFinished {
                 stamp,
                 request_id,
-                occurrences,
-                unreadable,
-            });
-            ctx.request_repaint();
-        });
+                occurrences: Vec::new(),
+                unreadable: 0,
+            },
+        );
     }
 
     /// Move the active Find occurrence with wraparound and reveal its field.

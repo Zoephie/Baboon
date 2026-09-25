@@ -117,15 +117,25 @@ impl Baboon {
             BlamLogKind::Info,
             format!("Importing {} — {}", job.asset_rel, ticked.join(", ")),
         );
-        thread::spawn(move || {
-            let (outcomes, created) = run_blam_import(&job, &tx, stamp, &ctx);
-            let _ = tx.send(WorkerMessage::BlamImportFinished {
+        let progress_ctx = ctx.clone();
+        let progress_tx = tx.clone();
+        spawn_worker(
+            &tx,
+            &ctx,
+            move || {
+                let (outcomes, created) = run_blam_import(&job, &progress_tx, stamp, &progress_ctx);
+                WorkerMessage::BlamImportFinished {
+                    stamp,
+                    outcomes,
+                    created,
+                }
+            },
+            move |error| WorkerMessage::BlamImportFinished {
                 stamp,
-                outcomes,
-                created,
-            });
-            ctx.request_repaint();
-        });
+                outcomes: vec![("import".to_owned(), Err(error))],
+                created: Vec::new(),
+            },
+        );
     }
 
     /// Returns true when the message was stale (its kit closed or reloaded).

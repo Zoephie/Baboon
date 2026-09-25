@@ -3078,16 +3078,21 @@ impl Baboon {
             kit: self.kits[kit_index].id,
             generation: self.kits[kit_index].generation,
         };
-        let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result = load_chimp_document(&world, &package);
-            let _ = tx.send(WorkerMessage::ChimpPackageLoaded {
+        let panic_package = package.clone();
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || WorkerMessage::ChimpPackageLoaded {
                 stamp,
+                result: load_chimp_document(&world, &package),
                 package,
-                result,
-            });
-            ctx.request_repaint();
-        });
+            },
+            move |error| WorkerMessage::ChimpPackageLoaded {
+                stamp,
+                package: panic_package,
+                result: Err(error),
+            },
+        );
     }
 
     /// Start a sweep for the packages that import `package`.

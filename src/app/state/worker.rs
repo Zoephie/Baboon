@@ -515,3 +515,87 @@ impl ContainerDumpJob {
         ))
     }
 }
+
+/// Run `job` on a worker thread and send the message it returns, then wake
+/// the UI.
+///
+/// If `job` panics, `on_panic` builds the message instead, from the panic's
+/// text. Most workers were plain `thread::spawn`s: a panic there sent
+/// nothing, so whatever the UI had marked as in flight (a loading tag, a
+/// running search, a container write) stayed that way for the session.
+/// Going through this, every job answers.
+pub(in crate::app) fn spawn_worker<J, P>(
+    tx: &std::sync::mpsc::Sender<WorkerMessage>,
+    ctx: &egui::Context,
+    job: J,
+    on_panic: P,
+) where
+    J: FnOnce() -> WorkerMessage + Send + 'static,
+    P: FnOnce(String) -> WorkerMessage + Send + 'static,
+{
+    let (tx, ctx) = (tx.clone(), ctx.clone());
+    std::thread::spawn(move || {
+        let message = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
+            .unwrap_or_else(|panic| on_panic(panic_text(panic.as_ref())));
+        let _ = tx.send(message);
+        ctx.request_repaint();
+    });
+}
+
+/// A panic payload as text, for a message saying the job crashed.
+pub(in crate::app) fn panic_text(panic: &(dyn std::any::Any + Send)) -> String {
+    let detail = panic
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| panic.downcast_ref::<&'static str>().copied())
+        .unwrap_or("no message");
+    format!("the worker crashed: {detail}")
+}
+
+#[cfg(test)]
+mod spawn_worker_tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// A worker that panics still answers, so whatever the UI marked as in
+    /// flight is settled. A plain `thread::spawn` sent nothing.
+    #[test]
+    fn a_panicking_worker_still_sends_its_message() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ctx = egui::Context::default();
+        spawn_worker(
+            &tx,
+            &ctx,
+            || panic!("decoder fell over"),
+            |error| WorkerMessage::TagLoaded {
+                kit: KitId(0),
+                key: "k".to_owned(),
+                result: Err(error),
+            },
+        );
+        spawn_worker(
+            &tx,
+            &ctx,
+            || WorkerMessage::TagLoaded {
+                kit: KitId(0),
+                key: "fine".to_owned(),
+                result: Err("not a panic".to_owned()),
+            },
+            |_| unreachable!(),
+        );
+
+        let mut results = Vec::new();
+        for _ in 0..2 {
+            let Ok(WorkerMessage::TagLoaded { key, result, .. }) =
+                rx.recv_timeout(Duration::from_secs(10))
+            else {
+                panic!("a worker did not answer");
+            };
+            results.push((key, result.unwrap_err()));
+        }
+        results.sort();
+        assert_eq!(results[0], ("fine".to_owned(), "not a panic".to_owned()));
+        assert_eq!(results[1].0, "k");
+        assert!(results[1].1.contains("decoder fell over"), "{}", results[1].1);
+    }
+}

@@ -504,12 +504,18 @@ impl Baboon {
             kit,
             generation: self.kits[self.active].generation,
         };
-        let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result = run_container_delete(input);
-            let _ = tx.send(WorkerMessage::ContainerDeleteFinished { stamp, result });
-            ctx.request_repaint();
-        });
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || WorkerMessage::ContainerDeleteFinished {
+                stamp,
+                result: run_container_delete(input),
+            },
+            move |error| WorkerMessage::ContainerDeleteFinished {
+                stamp,
+                result: Err(error),
+            },
+        );
     }
 
     pub(in crate::app) fn handle_container_delete_finished(

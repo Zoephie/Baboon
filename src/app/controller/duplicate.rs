@@ -1157,16 +1157,22 @@ impl Baboon {
             entry_count_before,
             source_display: entry.display_path.clone(),
         };
-        let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result = run_container_duplicate(input);
-            let _ = tx.send(WorkerMessage::ContainerDuplicateFinished {
+        // Through spawn_worker so the lease always comes back: a panicking
+        // write used to send nothing, leaving the container leased for good.
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || WorkerMessage::ContainerDuplicateFinished {
                 stamp,
                 lease: lease_id,
-                result,
-            });
-            ctx.request_repaint();
-        });
+                result: run_container_duplicate(input),
+            },
+            move |error| WorkerMessage::ContainerDuplicateFinished {
+                stamp,
+                lease: lease_id,
+                result: Err(error),
+            },
+        );
     }
 
     pub(in crate::app) fn handle_container_duplicate_finished(
