@@ -105,6 +105,11 @@ pub(in crate::app) struct BitmapPreviewState {
     /// Draw a high-contrast two-pixel outline just outside the image bounds.
     pub(in crate::app) show_border: bool,
     pub(in crate::app) decoded: Option<Result<BitmapPreviewData, String>>,
+    /// A decode running on a worker, to be taken as `decoded` when it lands.
+    /// Dropped with `decoded` when the tag changes, so a result decoded from
+    /// the old bytes is never shown.
+    pub(in crate::app) decoding:
+        Option<std::sync::mpsc::Receiver<Result<BitmapPreviewData, String>>>,
     pub(in crate::app) texture: Option<egui::TextureHandle>,
     pub(in crate::app) checker_texture: Option<egui::TextureHandle>,
     pub(in crate::app) texture_dirty: bool,
@@ -132,6 +137,7 @@ impl Default for BitmapPreviewState {
             show_checkerboard: true,
             show_border: true,
             decoded: None,
+            decoding: None,
             texture: None,
             checker_texture: None,
             texture_dirty: true,

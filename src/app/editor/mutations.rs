@@ -1633,7 +1633,6 @@ mod deferred_ops_tests {
         );
         assert!(h2_param.journal.can_undo(), "H2 shader parameter op");
 
-
         let mut untouched = document();
         apply_deferred_ops(&mut untouched, DeferredOps::default());
         assert!(!untouched.journal.can_undo(), "a frame with no ops");

@@ -2089,7 +2089,11 @@ mod texture_note_tests {
             shader_path: path.to_owned(),
             ..Default::default()
         };
-        let materials = [material("shaders/a"), material("shaders/b"), material("shaders/c")];
+        let materials = [
+            material("shaders/a"),
+            material("shaders/b"),
+            material("shaders/c"),
+        ];
         let textures = [
             MaterialTextures {
                 error: Some("shader tag not found".to_owned()),

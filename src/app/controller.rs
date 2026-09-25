@@ -7868,12 +7868,14 @@ impl Baboon {
         }
         if let Some(bitmap) = self.kits[kit].bitmap_previews.get_mut(key) {
             bitmap.decoded = None;
+            bitmap.decoding = None;
             bitmap.texture = None;
             bitmap.texture_dirty = true;
         }
         // rmdf/rmop caches are keyed by external render-method paths, not by this
-        // tag's contents, and the shader grid rebuilds from the tag each frame —
-        // so nothing to clear there.
+        // tag's contents, and the shader grid's model is keyed by the document's
+        // dirty revision, which the change has already moved — so nothing to
+        // clear there.
     }
 
     pub(super) fn undo_current_tag(&mut self) {

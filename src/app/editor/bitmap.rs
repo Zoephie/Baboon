@@ -62,12 +62,51 @@ pub(in crate::app) fn draw_bitmap_preview(
     entry: &TagEntry,
     preview: &mut BitmapPreviewState,
 ) {
+    // Decoded on a worker: a full-size block-compressed image can take a
+    // noticeable time to expand to RGBA, and it used to hold the frame. The
+    // level's compressed bytes are read out here, since the tag cannot leave
+    // this thread; turning them into pixels happens off it.
     if preview.decoded.is_none() {
-        preview.decoded = Some(
-            build_bitmap_preview(tag, preview.image_index, preview.mip_index)
-                .map_err(|error| error.to_string()),
-        );
-        preview.texture_dirty = true;
+        if let Some(receiver) = &preview.decoding {
+            match receiver.try_recv() {
+                Ok(result) => {
+                    preview.decoded = Some(result);
+                    preview.decoding = None;
+                    preview.texture_dirty = true;
+                }
+                Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    preview.decoded =
+                        Some(Err("The bitmap decode stopped unexpectedly".to_owned()));
+                    preview.decoding = None;
+                }
+            }
+        } else {
+            match extract_bitmap_level(tag, preview.image_index, preview.mip_index) {
+                Ok(level) => {
+                    let (sender, receiver) = std::sync::mpsc::channel();
+                    let repaint = ctx.clone();
+                    std::thread::spawn(move || {
+                        let result = std::panic::catch_unwind(|| decode_bitmap_level(level))
+                            .unwrap_or_else(|_| {
+                                Err(anyhow::anyhow!("decoding the bitmap panicked"))
+                            })
+                            .map_err(|error| error.to_string());
+                        let _ = sender.send(result);
+                        repaint.request_repaint();
+                    });
+                    preview.decoding = Some(receiver);
+                }
+                Err(error) => preview.decoded = Some(Err(error.to_string())),
+            }
+        }
+    }
+    if preview.decoded.is_none() {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.label(RichText::new("Decoding…").color(subtle_dark()));
+        });
+        return;
     }
 
     draw_bitmap_preview_data(ui, ctx, &entry.key, preview, true, "Bitmap");
@@ -862,6 +901,29 @@ pub(in crate::app) fn build_bitmap_preview(
     image_index: usize,
     mip_index: usize,
 ) -> anyhow::Result<BitmapPreviewData> {
+    decode_bitmap_level(extract_bitmap_level(tag, image_index, mip_index)?)
+}
+
+/// One level of one image, as compressed bytes plus what decoding them needs.
+/// Owns its bytes, so it can go to another thread; the tag cannot.
+pub(in crate::app) struct BitmapLevel {
+    format: blam_tags::bitmap::BitmapFormat,
+    width: u32,
+    height: u32,
+    bytes: Vec<u8>,
+    palette: blam_tags::bitmap::P8Palette,
+    image_count: usize,
+    mip_count: usize,
+    format_name: String,
+    type_name: String,
+}
+
+/// Read one mip of one image out of a bitmap tag.
+pub(in crate::app) fn extract_bitmap_level(
+    tag: &TagFile,
+    image_index: usize,
+    mip_index: usize,
+) -> anyhow::Result<BitmapLevel> {
     let bitmap = Bitmap::new(tag)?;
     if bitmap.is_empty() {
         anyhow::bail!("bitmap tag has no images");
@@ -901,20 +963,35 @@ pub(in crate::app) fn build_bitmap_preview(
             pixel_bytes.len()
         );
     }
-    let rgba = decode_to_rgba8(
+    Ok(BitmapLevel {
         format,
         width,
         height,
-        &pixel_bytes[offset..offset + mip_len],
-        bitmap.p8_palette(),
-    )?;
-    Ok(BitmapPreviewData {
-        width,
-        height,
+        bytes: pixel_bytes[offset..offset + mip_len].to_vec(),
+        palette: bitmap.p8_palette(),
         image_count,
         mip_count,
         format_name: image.format_name().unwrap_or_else(|| format!("{format:?}")),
         type_name: image.type_name().unwrap_or_else(|| "2D texture".to_owned()),
+    })
+}
+
+/// Expand a level to RGBA. Needs no tag, so it can run on a worker.
+pub(in crate::app) fn decode_bitmap_level(level: BitmapLevel) -> anyhow::Result<BitmapPreviewData> {
+    let rgba = decode_to_rgba8(
+        level.format,
+        level.width,
+        level.height,
+        &level.bytes,
+        level.palette,
+    )?;
+    Ok(BitmapPreviewData {
+        width: level.width,
+        height: level.height,
+        image_count: level.image_count,
+        mip_count: level.mip_count,
+        format_name: level.format_name,
+        type_name: level.type_name,
         rgba,
     })
 }
