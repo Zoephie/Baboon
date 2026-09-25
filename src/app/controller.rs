@@ -3159,6 +3159,9 @@ impl Baboon {
     }
 
     pub(super) fn request_close_action(&mut self, action: PendingCloseAction, ctx: &egui::Context) {
+        // Chimp's recovery checkpoints wait for edits to pause; one still
+        // waiting when the app or a workspace closes would be lost.
+        self.flush_all_chimp_checkpoints();
         if self.save_changes_prompt.visible
             || self.chimp_discard_prompt.is_some()
             || self.has_chimp_save_dialog()

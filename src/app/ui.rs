@@ -1061,9 +1061,18 @@ impl eframe::App for Baboon {
         // would ever put those back.
         self.sweep_container_write_leases(ctx);
         self.maybe_autosave_campaign_projects(ctx);
+        // Every kit, not only one whose Chimp workspace is on screen: a
+        // checkpoint waiting on a workspace the user switched away from would
+        // otherwise wait until they came back.
+        for kit_index in 0..self.kits.len() {
+            self.run_due_chimp_checkpoints(kit_index, ctx);
+        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // A quit that never asks the window to close (macOS Cmd+Q) skips the
+        // close request, which is where waiting checkpoints are otherwise flushed.
+        self.flush_all_chimp_checkpoints();
         self.window_state.persist_now();
         self.persist_session_on_exit();
     }

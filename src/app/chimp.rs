@@ -693,7 +693,18 @@ pub(super) struct ChimpDocument {
     /// longer describes anything and nothing may be written back through it.
     /// The document keeps its bytes, so reading and extraction still work.
     orphaned: bool,
+    /// When (egui time) this document's recovery checkpoint is due. Set by an
+    /// edit and pushed back by the next one, so a burst of edits checkpoints
+    /// once, after it stops.
+    checkpoint_due: Option<f64>,
 }
+
+/// How long edits must pause before a Chimp document's recovery checkpoint.
+///
+/// A checkpoint rebuilds every export of the package, serializes it and
+/// writes it to disk. It used to run on every change, and a property field
+/// changes on every keystroke and every frame of a drag.
+const CHIMP_CHECKPOINT_DELAY: f64 = 1.0;
 
 #[derive(Default)]
 enum ChimpReferrerState {
@@ -1358,6 +1369,7 @@ fn decode_chimp_document(
         header_error: None,
         referrers: ChimpReferrerState::Idle,
         orphaned: false,
+        checkpoint_due: None,
     };
     refresh_chimp_document_text(&mut document);
     refresh_chimp_metadata_text(&mut document, world);
@@ -2896,6 +2908,57 @@ impl Baboon {
         }
     }
 
+    /// Checkpoint every document in the kit whose edits have paused, and wake
+    /// the UI in time for the next one that is still waiting.
+    pub(super) fn run_due_chimp_checkpoints(&mut self, kit_index: usize, ctx: &egui::Context) {
+        let now = ctx.input(|input| input.time);
+        let mut due = Vec::new();
+        let mut next: Option<f64> = None;
+        for (package, document) in &self.kits[kit_index].chimp.documents {
+            match document.checkpoint_due {
+                Some(at) if at <= now => due.push(package.clone()),
+                Some(at) => next = Some(next.map_or(at, |next| next.min(at))),
+                None => {}
+            }
+        }
+        for package in due {
+            self.flush_chimp_checkpoint(kit_index, &package);
+        }
+        if let Some(at) = next {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64((at - now).max(0.0)));
+        }
+    }
+
+    /// Checkpoint `package` now if it has a checkpoint waiting.
+    pub(super) fn flush_chimp_checkpoint(&mut self, kit_index: usize, package: &str) {
+        let waiting = self.kits[kit_index]
+            .chimp
+            .documents
+            .get_mut(package)
+            .and_then(|document| document.checkpoint_due.take())
+            .is_some();
+        if waiting {
+            self.checkpoint_chimp_document(kit_index, package);
+        }
+    }
+
+    /// Checkpoint every waiting document in every kit, before the app or a
+    /// workspace closes and the delay would lose them.
+    pub(super) fn flush_all_chimp_checkpoints(&mut self) {
+        for kit_index in 0..self.kits.len() {
+            let packages: Vec<String> = self.kits[kit_index]
+                .chimp
+                .documents
+                .iter()
+                .filter(|(_, document)| document.checkpoint_due.is_some())
+                .map(|(package, _)| package.clone())
+                .collect();
+            for package in packages {
+                self.flush_chimp_checkpoint(kit_index, &package);
+            }
+        }
+    }
+
     fn checkpoint_chimp_document(&mut self, kit_index: usize, package: &str) {
         let Some(directory) = self.chimp_recovery_dir(kit_index) else {
             return;
@@ -4094,10 +4157,7 @@ impl Baboon {
             // Reference counts are derived from the same header the metadata
             // text is, so they go stale at exactly the same moment.
             document.header_usage = None;
-        }
-        let _ = document;
-        if changed {
-            self.checkpoint_chimp_document(kit_index, &package);
+            document.checkpoint_due = Some(ui.input(|input| input.time) + CHIMP_CHECKPOINT_DELAY);
         }
         if scan_referrers {
             let ctx = ui.ctx().clone();
@@ -10104,7 +10164,35 @@ mod tests {
             header_error: None,
             referrers: ChimpReferrerState::Idle,
             orphaned: false,
+            checkpoint_due: None,
         }
+    }
+
+    /// Edits schedule one recovery checkpoint for when they pause, instead of
+    /// a full rebuild and write per keystroke.
+    #[test]
+    fn a_chimp_checkpoint_waits_for_edits_to_pause() {
+        let mut app = Baboon::for_test();
+        let mut document = rename_fixture();
+        document.checkpoint_due = Some(5.0);
+        app.kits[0]
+            .chimp
+            .documents
+            .insert("/Game/Test/Thing".to_owned(), document);
+        let ctx = egui::Context::default();
+        let mut due_at = |time: f64, app: &mut Baboon| {
+            let _ = ctx.run(
+                egui::RawInput {
+                    time: Some(time),
+                    ..Default::default()
+                },
+                |ctx| app.run_due_chimp_checkpoints(0, ctx),
+            );
+            app.kits[0].chimp.documents["/Game/Test/Thing"].checkpoint_due
+        };
+
+        assert_eq!(due_at(4.0, &mut app), Some(5.0), "still editing: nothing yet");
+        assert_eq!(due_at(6.0, &mut app), None, "paused: checkpointed once");
     }
 
     /// An orphaned document's stored container index addresses a list that a
