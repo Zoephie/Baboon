@@ -397,33 +397,7 @@ pub(super) fn register_created_tag_in_source(
     entry: TagEntry,
     pending_folders: &[String],
 ) {
-    let key = entry.key.clone();
-    source.entries.retain(|existing| existing.key != key);
-    crate::source::insert_entry_sorted(&mut source.entries, entry.clone());
-    let loose_folder = matches!(&source.source, TagSource::LooseFolder { .. });
-    let had_complete_index = !source.all_entries.is_empty();
-    if loose_folder && had_complete_index {
-        source.all_entries.retain(|existing| existing.key != key);
-        crate::source::insert_entry_sorted(&mut source.all_entries, entry.clone());
-    } else if !loose_folder {
-        source.all_entries.clear();
-    }
-    if let TagSource::LooseFolder { root, .. } = &source.source {
-        if let Ok(tree) = crate::source::build_folder_directory_tree(root) {
-            source.tree = tree;
-        }
-        source.group_tree = crate::source::build_group_tree(if had_complete_index {
-            &source.all_entries
-        } else {
-            &source.entries
-        });
-        if had_complete_index && let Some(game) = source.game.as_deref() {
-            let _ = crate::source::save_entry_index(game, root, &source.all_entries);
-        }
-    } else {
-        crate::source::rebuild_folder_tree(source, pending_folders);
-        source.group_tree = crate::source::build_group_tree(&source.entries);
-    }
+    source.upsert_entry(entry, pending_folders);
 }
 
 /// Prompt for an override `.utoc` output path, defaulting to `default_name`.
@@ -2131,13 +2105,7 @@ impl Baboon {
         let key = entry.key.clone();
         let folder_seeds = self.kits[self.active].folder_seeds();
         if let Some(source) = self.source_mut() {
-            source.entries.retain(|existing| existing.key != key);
-            source.entries.push(entry.clone());
-            // Container sources keep their full set in `entries` (all_entries is
-            // empty), so rebuild both trees from it.
-            let group_tree = crate::source::build_group_tree(&source.entries);
-            crate::source::rebuild_folder_tree(source, &folder_seeds);
-            source.group_tree = group_tree;
+            source.upsert_entry(entry.clone(), &folder_seeds);
         }
         self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
         // Index what the new tag points at. Nothing else can: the reverse-
@@ -2425,23 +2393,9 @@ impl Baboon {
         };
 
         let key = entry.key.clone();
+        let folder_seeds = self.kits[self.active].folder_seeds();
         if let Some(source) = self.source_mut() {
-            source.entries.retain(|existing| existing.key != key);
-            source.entries.push(entry.clone());
-
-            if !source.all_entries.is_empty() {
-                source.all_entries.retain(|existing| existing.key != key);
-                source.all_entries.push(entry.clone());
-                source
-                    .all_entries
-                    .sort_by(|a, b| a.display_path.cmp(&b.display_path));
-                source.group_tree = crate::source::build_group_tree(&source.all_entries);
-                if let (Some(game), TagSource::LooseFolder { root, .. }) =
-                    (source.game.as_deref(), &source.source)
-                {
-                    let _ = crate::source::save_entry_index(game, root, &source.all_entries);
-                }
-            }
+            source.upsert_entry(entry, &folder_seeds);
         }
         self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
         self.select_entry(key, ctx);
@@ -3046,10 +3000,7 @@ impl Baboon {
             kit_state.selected_key = None;
         }
         if let Some(source) = kit_state.source.as_mut() {
-            source.entries.retain(|entry| entry.key != key);
-            source.all_entries.retain(|entry| entry.key != key);
-            crate::source::rebuild_folder_tree(source, &folder_seeds);
-            source.group_tree = crate::source::build_group_tree(&source.entries);
+            source.remove_entry(key, &folder_seeds);
             if let Some(index) = source.reverse_dependencies.as_mut() {
                 index.clear_tag(key);
             }
@@ -3675,19 +3626,12 @@ impl Baboon {
         }
         let entry = loose_file_entry(&root, &path, &source.names).ok()??;
         let current_key = entry.key.clone();
+        let folder_seeds = self.kits[self.active].folder_seeds();
         if let Some(source) = self.source_mut() {
-            source.entries.retain(|existing| existing.key != tag.key);
-            source.entries.push(entry.clone());
-            if !source.all_entries.is_empty() {
-                source
-                    .all_entries
-                    .retain(|existing| existing.key != tag.key);
-                source.all_entries.push(entry);
-                source
-                    .all_entries
-                    .sort_by(|a, b| a.display_path.cmp(&b.display_path));
-                source.group_tree = crate::source::build_group_tree(&source.all_entries);
+            if tag.key != current_key {
+                source.remove_entry(&tag.key, &folder_seeds);
             }
+            source.upsert_entry(entry, &folder_seeds);
         }
         self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
         Some(current_key)
@@ -8196,29 +8140,12 @@ impl Baboon {
         };
         let errors = resolved.errors;
         let entries = resolved.entries;
+        let folder_seeds = self.kits[self.active].folder_seeds();
         if let Some(source) = self.source_mut() {
             for entry in &entries {
-                if !source
-                    .entries
-                    .iter()
-                    .any(|existing| existing.key == entry.key)
-                {
-                    source.entries.push(entry.clone());
+                if source.entry_for_key(&entry.key).is_none() {
+                    source.upsert_entry(entry.clone(), &folder_seeds);
                 }
-                if !source.all_entries.is_empty()
-                    && !source
-                        .all_entries
-                        .iter()
-                        .any(|existing| existing.key == entry.key)
-                {
-                    source.all_entries.push(entry.clone());
-                }
-            }
-            if !source.all_entries.is_empty() {
-                source
-                    .all_entries
-                    .sort_by(|a, b| a.display_path.cmp(&b.display_path));
-                source.group_tree = crate::source::build_group_tree(&source.all_entries);
             }
         }
         for entry in &entries {
@@ -8522,23 +8449,21 @@ impl Baboon {
             return;
         }
         let key = format!("file:{}", abs.display());
-        // Ensure an entry exists so ensure_tag_loading can resolve it.
+        // Ensure an entry exists so ensure_tag_loading can resolve it. Built by
+        // the scanner's own constructor: this used to derive the display path
+        // from the unstripped reference, which could double the extension.
         if self.entry_for_key(&key).is_none() {
-            let group_name = self.names().name_for(req.group_tag).map(str::to_owned);
-            let display_path = if ext.is_empty() {
-                req.rel_path.replace('\\', "/")
-            } else {
-                format!("{}.{ext}", req.rel_path.replace('\\', "/"))
-            };
-            let entry = TagEntry {
-                key: key.clone(),
-                display_path,
-                group_tag: req.group_tag,
-                group_name,
-                location: TagEntryLocation::LooseFile(abs),
-            };
-            if let Some(source) = self.source_mut() {
-                source.entries.push(entry);
+            let names = self
+                .source()
+                .map(|source| source.names.clone())
+                .unwrap_or_default();
+            if let Ok(Some(entry)) = loose_file_entry(&root, &abs, &names) {
+                let folder_seeds = self.kits[self.active].folder_seeds();
+                if let Some(source) = self.source_mut() {
+                    source.upsert_entry(entry, &folder_seeds);
+                }
+                self.kits[self.active].generation =
+                    self.kits[self.active].generation.wrapping_add(1);
             }
         }
         self.select_entry(key.clone(), ctx.clone());

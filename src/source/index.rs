@@ -104,6 +104,21 @@ pub fn upsert_entry_index_row(game: &str, root: &Path, entry: &TagEntry) -> Resu
     Ok(true)
 }
 
+/// Remove one tag's row from an existing index. Like
+/// [`upsert_entry_index_row`], a folder with no index is left without one.
+pub fn delete_entry_index_row(game: &str, root: &Path, key: &str) -> Result<bool> {
+    let conn = open_index_db()?;
+    let Some(source_id) = source_id(&conn, game, root)? else {
+        return Ok(false);
+    };
+    conn.execute(
+        "DELETE FROM entries WHERE source_id = ?1 AND key = ?2",
+        params![source_id, key],
+    )
+    .context("delete entry index row")?;
+    Ok(true)
+}
+
 /// Run an `entries` insert (or upsert) statement for one tag, filling its
 /// nine columns in table order.
 fn execute_entry_row(

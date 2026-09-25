@@ -308,11 +308,31 @@ pub fn load_folder_node_entries(
         return Ok(());
     }
     let folder = root.join(&node.rel_path);
-    let mut new_entries = scan_folder_direct_entries(root, &folder, names)?;
-    new_entries.sort_by(|a, b| natural_key(&a.display_path).cmp(&natural_key(&b.display_path)));
-    let start = entries.len();
-    node.entries.extend(start..start + new_entries.len());
-    entries.extend(new_entries);
+    let mut found = scan_folder_direct_entries(root, &folder, names)?;
+    found.sort_by_cached_key(|entry| natural_key(&entry.display_path));
+    // A tag already in the list (loaded before the tree was rebuilt, or added
+    // by a save or a new tag) keeps its slot. Appending it again, as this
+    // used to, left the same key in the list twice after every Save As or New
+    // Tag followed by re-expanding its folder.
+    let known: HashMap<&str, usize> = entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| (entry.key.as_str(), index))
+        .collect();
+    let mut indices = Vec::with_capacity(found.len());
+    let mut appended = Vec::new();
+    for entry in found {
+        match known.get(entry.key.as_str()) {
+            Some(&index) => indices.push(index),
+            None => {
+                indices.push(entries.len() + appended.len());
+                appended.push(entry);
+            }
+        }
+    }
+    drop(known);
+    entries.extend(appended);
+    node.entries.extend(indices);
     node.entries_loaded = true;
     Ok(())
 }
@@ -1002,6 +1022,117 @@ mod tests {
         assert_eq!(paths(&upserted), paths(&rewritten));
         assert!(!refresh.changed);
         assert_eq!((refresh.added, refresh.updated, refresh.removed), (0, 0, 0));
+    }
+
+    fn loose_source(root: &Path, game: &str, entries: Vec<TagEntry>, all: Vec<TagEntry>) -> LoadedSourceData {
+        LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::LooseFolder {
+                root: root.to_path_buf(),
+                game: Some(game.to_owned()),
+                definitions_root: PathBuf::new(),
+            },
+            names: TagNameIndex::default(),
+            game: Some(game.to_owned()),
+            entries,
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: all,
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+        }
+    }
+
+    /// One tag in, one tag out, on an indexed loose folder: the full list stays
+    /// in `natural_key` order, a replaced entry keeps its lazy slot (trees hold
+    /// positions in that list), and the on-disk index matches a full rewrite.
+    #[test]
+    fn upserting_and_removing_an_entry_keeps_lists_and_index_consistent() {
+        let root = temp_dir("upsert_entry");
+        let game = unique_game("upsert_entry");
+        let check = unique_game("upsert_entry_check");
+        fs::create_dir_all(root.join("objects")).unwrap();
+        for name in ["a.model", "c.model"] {
+            write_fake_tag(&root.join("objects").join(name), b"hlmt");
+        }
+        let names = TagNameIndex::default();
+        let scanned = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        save_entry_index(&game, &root, &scanned).unwrap();
+        let mut source = loose_source(&root, &game, scanned.clone(), scanned.clone());
+        let lazy_c = source.entries.iter().position(|e| e.display_path.ends_with("c.model")).unwrap();
+
+        // A new tag (sorted into the middle of the full list), a rewritten one
+        // (replaced in place), and a deleted one.
+        write_fake_tag(&root.join("objects/B.model"), b"hlmt");
+        write_fake_tag_with_padding(&root.join("objects/c.model"), b"hlmt", 8);
+        fs::remove_file(root.join("objects/a.model")).unwrap();
+        let entry = |name: &str| loose_file_entry(&root, &root.join("objects").join(name), &names).unwrap().unwrap();
+        source.upsert_entry(entry("B.model"), &[]);
+        source.upsert_entry(entry("c.model"), &[]);
+        let replaced_in_place = source.entries[lazy_c].display_path.ends_with("c.model")
+            && source.entries.iter().filter(|e| e.display_path.ends_with("c.model")).count() == 1;
+        // A removal is allowed to shift the lazy list: it re-reads the tree.
+        source.remove_entry(&scanned[0].key, &[]);
+
+        let after = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        save_entry_index(&check, &root, &after).unwrap();
+        let indexed = load_entry_index(&game, &root).unwrap();
+        let rewritten = load_entry_index(&check, &root).unwrap();
+        let refresh = refresh_entry_index(&game, &root, &names).unwrap();
+
+        remove_test_index(&game);
+        remove_test_index(&check);
+        fs::remove_dir_all(&root).unwrap();
+
+        let order: Vec<&str> = source.all_entries.iter().map(|e| e.display_path.as_str()).collect();
+        assert_eq!(order, ["objects/B.model", "objects/c.model"], "natural (case-insensitive) order");
+        assert!(replaced_in_place, "a replaced entry keeps its slot, once");
+        let keys = |entries: &[TagEntry]| entries.iter().map(|e| e.key.clone()).collect::<Vec<_>>();
+        assert_eq!(keys(&indexed), keys(&rewritten));
+        assert!(!refresh.changed, "the index already matches the disk");
+    }
+
+    /// Expanding a folder again after its tree was rebuilt reuses the entries
+    /// the lazy list already has, instead of appending the same keys again.
+    #[test]
+    fn re_expanding_a_folder_does_not_duplicate_its_entries() {
+        let root = temp_dir("reexpand");
+        fs::create_dir_all(root.join("objects")).unwrap();
+        write_fake_tag(&root.join("objects/a.model"), b"hlmt");
+        write_fake_tag(&root.join("objects/b.model"), b"hlmt");
+        let names = TagNameIndex::default();
+        let mut entries = Vec::new();
+        for _ in 0..2 {
+            let mut tree = build_folder_directory_tree(&root).unwrap();
+            let node = tree.children.iter_mut().find(|node| node.label == "objects").unwrap();
+            load_folder_node_entries(&root, node, &mut entries, &names).unwrap();
+            assert_eq!(node.entries.len(), 2);
+        }
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(entries.len(), 2, "the second expansion added nothing");
+    }
+
+    /// A container's list is the full list and stays in `natural_key` order.
+    /// Several insert paths used to re-sort by a case-sensitive comparison,
+    /// which put "B" before "a" and broke `insert_entry_sorted` afterwards.
+    #[test]
+    fn a_containers_entries_stay_in_natural_order() {
+        let entry = |name: &str| TagEntry {
+            key: format!("ublock:{name}"),
+            display_path: name.to_owned(),
+            group_tag: 0,
+            group_name: None,
+            location: TagEntryLocation::LooseFile(PathBuf::from(name)),
+        };
+        let mut source = LoadedSourceData {
+            source: TagSource::SingleFile { path: PathBuf::from("x") },
+            ..loose_source(Path::new("/unused"), "none", vec![entry("a"), entry("c")], Vec::new())
+        };
+        source.upsert_entry(entry("B"), &[]);
+        source.upsert_entry(entry("b2"), &[]);
+        let order: Vec<&str> = source.entries.iter().map(|e| e.display_path.as_str()).collect();
+        assert_eq!(order, ["a", "B", "b2", "c"]);
     }
 
     /// One row that names no file must not cost the whole index: the loader

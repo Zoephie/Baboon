@@ -63,10 +63,7 @@ fn forget_tag_in_kit(kit: &mut Kit, key: &str) {
     }
     let folder_seeds = kit.folder_seeds();
     if let Some(source) = kit.source.as_mut() {
-        source.entries.retain(|entry| entry.key != key);
-        source.all_entries.retain(|entry| entry.key != key);
-        crate::source::rebuild_folder_tree(source, &folder_seeds);
-        source.group_tree = crate::source::build_group_tree(&source.entries);
+        source.remove_entry(key, &folder_seeds);
         if let Some(index) = source.reverse_dependencies.as_mut() {
             index.clear_tag(key);
         }
@@ -442,25 +439,6 @@ impl Baboon {
         }
         move_to_trash(path, &destination)?;
         self.forget_deleted_tag(self.active, &entry.key);
-        if let Some(source) = self.source_mut() {
-            if let TagSource::LooseFolder { root, .. } = &source.source
-                && let Ok(tree) = crate::source::build_folder_directory_tree(root)
-            {
-                source.tree = tree;
-            }
-            let complete_index = !source.all_entries.is_empty();
-            source.group_tree = crate::source::build_group_tree(if complete_index {
-                &source.all_entries
-            } else {
-                &source.entries
-            });
-            if complete_index
-                && let TagSource::LooseFolder { root, .. } = &source.source
-                && let Some(game) = source.game.as_deref()
-            {
-                let _ = crate::source::save_entry_index(game, root, &source.all_entries);
-            }
-        }
         Ok(destination)
     }
 

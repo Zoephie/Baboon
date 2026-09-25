@@ -405,11 +405,9 @@ impl Baboon {
                 return;
             };
             let key = entry.key.clone();
+            let folder_seeds = self.kits[kit].folder_seeds();
             if let Some(source) = self.kits[kit].source.as_mut() {
-                source.entries.push(entry.clone());
-                if !source.all_entries.is_empty() {
-                    source.all_entries.push(entry);
-                }
+                source.upsert_entry(entry, &folder_seeds);
             }
             self.kits[kit].generation = self.kits[kit].generation.wrapping_add(1);
             key

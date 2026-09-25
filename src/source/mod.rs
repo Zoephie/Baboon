@@ -408,6 +408,12 @@ pub struct LoadedSourceData {
     pub key_hints: EntryKeyHints,
 }
 
+#[cfg(test)]
+thread_local! {
+    /// Fallback scans this thread has made, for tests that bound them.
+    static KEY_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// A hint cache from tag key to its position in `entries` or `all_entries`.
 ///
 /// Key lookups were a linear scan of both lists, made every frame (tab labels,
@@ -417,12 +423,6 @@ pub struct LoadedSourceData {
 /// time one forgot. A hint is instead checked against the list before it is
 /// trusted, and a miss or a stale hint falls back to the scan and records what
 /// it found: a lookup is never wrong, and is only ever as slow as it used to be.
-#[cfg(test)]
-thread_local! {
-    /// Fallback scans this thread has made, for tests that bound them.
-    static KEY_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
-}
-
 #[derive(Default)]
 pub struct EntryKeyHints(std::sync::Mutex<HashMap<String, (EntryList, usize)>>);
 
@@ -436,6 +436,81 @@ pub enum EntryList {
 }
 
 impl LoadedSourceData {
+    /// Add `entry`, or replace the entry that has its key, and keep both lists,
+    /// both trees and the on-disk entry index in step with it.
+    ///
+    /// This is the one way to put a single tag into a loaded source. There
+    /// used to be about eight hand-written versions, and they disagreed: some
+    /// inserted in `natural_key` order, some pushed and then re-sorted by a
+    /// case-sensitive `display_path` comparison (which breaks the order
+    /// `insert_entry_sorted` relies on), some did not sort at all, and most
+    /// rewrote the whole entry index, a stat per tag, on the UI thread.
+    ///
+    /// For a loose folder, `entries` is the browser's lazy list and trees hold
+    /// positions in it, so an entry is replaced where it is or appended, never
+    /// inserted in the middle. Everywhere else `entries` is the full list and
+    /// stays sorted.
+    pub fn upsert_entry(&mut self, entry: TagEntry, pending_folders: &[String]) {
+        let key = entry.key.clone();
+        if let TagSource::LooseFolder { root, .. } = &self.source {
+            match self.entries.iter_mut().find(|existing| existing.key == key) {
+                Some(slot) => *slot = entry.clone(),
+                None => self.entries.push(entry.clone()),
+            }
+            // An empty `all_entries` is a folder not scanned yet, not an empty
+            // one: the scan will find this tag, and there is no index to add it
+            // to (`upsert_entry_index_row` will not create one).
+            if !self.all_entries.is_empty() {
+                self.all_entries.retain(|existing| existing.key != key);
+                insert_entry_sorted(&mut self.all_entries, entry.clone());
+                if let Some(game) = self.game.as_deref() {
+                    let _ = upsert_entry_index_row(game, root, &entry);
+                }
+            }
+        } else {
+            self.entries.retain(|existing| existing.key != key);
+            insert_entry_sorted(&mut self.entries, entry.clone());
+            if !self.all_entries.is_empty() {
+                self.all_entries.retain(|existing| existing.key != key);
+                insert_entry_sorted(&mut self.all_entries, entry);
+            }
+        }
+        self.rebuild_trees(pending_folders);
+    }
+
+    /// Remove the entry with `key` from both lists, both trees and the on-disk
+    /// entry index. Whether there was one.
+    pub fn remove_entry(&mut self, key: &str, pending_folders: &[String]) -> bool {
+        let before = self.entries.len() + self.all_entries.len();
+        self.entries.retain(|entry| entry.key != key);
+        self.all_entries.retain(|entry| entry.key != key);
+        let removed = self.entries.len() + self.all_entries.len() != before;
+        if let (TagSource::LooseFolder { root, .. }, Some(game)) = (&self.source, self.game.as_deref())
+        {
+            let _ = delete_entry_index_row(game, root, key);
+        }
+        self.rebuild_trees(pending_folders);
+        removed
+    }
+
+    /// Rebuild the folder and group trees after a change to the lists. A loose
+    /// folder's tree is re-read from disk (it is lazy, and positions in the
+    /// lazy list may have moved); other sources rebuild theirs from `entries`.
+    fn rebuild_trees(&mut self, pending_folders: &[String]) {
+        if let TagSource::LooseFolder { root, .. } = &self.source {
+            if let Ok(tree) = build_folder_directory_tree(root) {
+                self.tree = tree;
+            }
+        } else {
+            rebuild_folder_tree(self, pending_folders);
+        }
+        self.group_tree = build_group_tree(if self.all_entries.is_empty() {
+            &self.entries
+        } else {
+            &self.all_entries
+        });
+    }
+
     /// The entry with `key`, from `entries` first and then `all_entries`.
     pub fn entry_for_key(&self, key: &str) -> Option<&TagEntry> {
         let list = |which: EntryList| match which {

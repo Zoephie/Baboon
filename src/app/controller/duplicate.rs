@@ -641,21 +641,11 @@ fn apply_container_duplicate_source_state(
     }
 
     let key = entry.key.clone();
-    source.entries.retain(|existing| existing.key != key);
-    source.all_entries.retain(|existing| existing.key != key);
-    // Sorted, not pushed: the mount sorts by `natural_key` and the browser draws
-    // a folder in entry-vector order, so a pushed copy lands at the bottom of
-    // its folder instead of beside the tag it was duplicated from.
-    crate::source::insert_entry_sorted(&mut source.entries, entry.clone());
-    if !source.all_entries.is_empty() {
-        crate::source::insert_entry_sorted(&mut source.all_entries, entry.clone());
-    }
-    crate::source::rebuild_folder_tree(source, pending_folders);
-    source.group_tree = crate::source::build_group_tree(if source.all_entries.is_empty() {
-        &source.entries
-    } else {
-        &source.all_entries
-    });
+    // Sorted, not pushed (upsert_entry keeps a container's list in
+    // `natural_key` order): the browser draws a folder in entry-vector order,
+    // so a pushed copy would land at the bottom of its folder instead of
+    // beside the tag it was duplicated from.
+    source.upsert_entry(entry.clone(), pending_folders);
     if let Some(reverse) = source.reverse_dependencies.as_mut() {
         let mut dependencies = Vec::new();
         collect_tag_dependency_refs(tag.root(), &mut dependencies);

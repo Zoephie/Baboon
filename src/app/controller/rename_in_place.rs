@@ -491,24 +491,12 @@ pub(in crate::app) fn apply_container_rename_source_state(
         }
     }
 
-    source.entries.retain(|existing| existing.key != old_key);
-    source
-        .all_entries
-        .retain(|existing| existing.key != old_key);
-    // Sorted rather than pushed, for the same reason a duplicate is: the mount
-    // orders by `natural_key` and the browser draws a folder in entry-vector
-    // order, so a pushed entry lands at the bottom of its new folder instead of
-    // in the place the user will look for it.
-    crate::source::insert_entry_sorted(&mut source.entries, entry.clone());
-    if !source.all_entries.is_empty() {
-        crate::source::insert_entry_sorted(&mut source.all_entries, entry.clone());
-    }
-    crate::source::rebuild_folder_tree(source, pending_folders);
-    source.group_tree = crate::source::build_group_tree(if source.all_entries.is_empty() {
-        &source.entries
-    } else {
-        &source.all_entries
-    });
+    // Sorted rather than pushed (upsert_entry keeps a container's list in
+    // `natural_key` order), for the same reason a duplicate is: a pushed entry
+    // would land at the bottom of its new folder instead of where the user
+    // will look for it.
+    source.remove_entry(old_key, pending_folders);
+    source.upsert_entry(entry.clone(), pending_folders);
     // Dropped whole rather than patched. The index is keyed by tag key on the
     // referring side *and* on the referred-to side, so a rename moves rows this
     // has no way to enumerate — and a half-patched reference graph gives wrong
