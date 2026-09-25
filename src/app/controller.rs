@@ -948,9 +948,11 @@ impl Baboon {
                     lease,
                     result,
                 } => self.handle_container_rename_finished(stamp, lease, result, ctx),
-                WorkerMessage::ContainerDeleteFinished { stamp, result } => {
-                    self.handle_container_delete_finished(stamp, result)
-                }
+                WorkerMessage::ContainerDeleteFinished {
+                    stamp,
+                    lease,
+                    result,
+                } => self.handle_container_delete_finished(stamp, lease, result),
                 WorkerMessage::ChimpLevelProgress {
                     kit,
                     phase,

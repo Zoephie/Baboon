@@ -215,6 +215,9 @@ pub(in crate::app) enum WorkerMessage {
     },
     ContainerDeleteFinished {
         stamp: KitStamp,
+        /// The container write this job holds, round-tripped like Duplicate's
+        /// and Rename's so the handler can release it on every path.
+        lease: ContainerLeaseId,
         result: Result<ContainerDeleteResult, String>,
     },
     /// Exporting a level is minutes of work over thousands of cells and

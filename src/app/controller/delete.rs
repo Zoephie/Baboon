@@ -487,6 +487,26 @@ impl Baboon {
                 return;
             }
         };
+        // The lease Duplicate and Rename take, which Delete never did: it
+        // refuses a second write to this container while this one runs, from
+        // this workspace or another on the same install.
+        let Some(target_utoc) = containers
+            .get(target_container)
+            .map(|container| container.utoc_path.clone())
+        else {
+            self.status = "Container provenance is stale".to_owned();
+            return;
+        };
+        let lease = match self
+            .acquire_container_write_lease(&target_utoc, ContainerWriteMode::AppendInPlace)
+        {
+            Ok(lease) => lease,
+            Err(failure) => {
+                self.status = failure.to_string();
+                return;
+            }
+        };
+        let lease_id = self.park_container_write_lease(lease);
         self.container_delete_running.insert(kit);
         self.status = format!("Deleting {} from {target_label}…", entry.display_path);
         let input = ContainerDeleteWorkerInput {
@@ -509,10 +529,12 @@ impl Baboon {
             &ctx,
             move || WorkerMessage::ContainerDeleteFinished {
                 stamp,
+                lease: lease_id,
                 result: run_container_delete(input),
             },
             move |error| WorkerMessage::ContainerDeleteFinished {
                 stamp,
+                lease: lease_id,
                 result: Err(error),
             },
         );
@@ -521,8 +543,17 @@ impl Baboon {
     pub(in crate::app) fn handle_container_delete_finished(
         &mut self,
         stamp: KitStamp,
+        lease: ContainerLeaseId,
         result: Result<ContainerDeleteResult, String>,
     ) -> bool {
+        if let Some(lease) = self.take_container_write_lease(lease) {
+            let outcome = if result.is_ok() {
+                ContainerWriteOutcome::Committed
+            } else {
+                ContainerWriteOutcome::Unchanged
+            };
+            self.release_in_place_lease(lease, outcome);
+        }
         let kit_index = self.kit_index(stamp.kit);
         self.container_delete_running.remove(&stamp.kit);
         let result = match result {
@@ -967,5 +998,37 @@ mod tests {
         );
         assert!(loose_trash_destination(None, "../../escape.weapon", 1).is_err());
         assert!(loose_trash_destination(None, "", 1).is_err());
+    }
+}
+
+#[cfg(test)]
+mod delete_lease_tests {
+    use super::*;
+
+    /// A container delete holds the write lease while it runs and gives it back
+    /// when it finishes, failed or not, so the container can be written again.
+    #[test]
+    fn a_finished_container_delete_gives_its_lease_back() {
+        let mut app = Baboon::for_test();
+        let utoc = PathBuf::from("/game/Paks/pakchunk0-WinGDK.utoc");
+        let lease = app
+            .acquire_container_write_lease(&utoc, ContainerWriteMode::AppendInPlace)
+            .ok()
+            .expect("a free container leases");
+        let lease_id = app.park_container_write_lease(lease);
+        assert!(
+            app.acquire_container_write_lease(&utoc, ContainerWriteMode::AppendInPlace)
+                .is_err(),
+            "leased while the delete runs"
+        );
+
+        let stamp = app.kit_stamp();
+        app.handle_container_delete_finished(stamp, lease_id, Err("disk full".to_owned()));
+
+        let again = app
+            .acquire_container_write_lease(&utoc, ContainerWriteMode::AppendInPlace)
+            .ok()
+            .expect("free again once it finished");
+        app.release_in_place_lease(again, ContainerWriteOutcome::Unchanged);
     }
 }
