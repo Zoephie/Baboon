@@ -118,6 +118,7 @@ pub(super) fn draw_model_viewport(
     let frame = ModelGpuFrame {
         preview,
         geometry_id: data.geometry_id,
+        textures_id: data.textures_id,
         visible_batches,
         camera: camera.gpu_uniforms(),
         render_mode: state.render_mode,
@@ -650,6 +651,8 @@ fn pose_reach_bound(pose: &PreviewAnimationPose) -> f32 {
 struct ModelGpuFrame {
     preview: Arc<RenderModelPreview>,
     geometry_id: u64,
+    /// What `textures` belongs to; see `ModelPreviewData::textures_id`.
+    textures_id: u64,
     visible_batches: Vec<usize>,
     camera: ModelGpuCamera,
     render_mode: ModelRenderMode,
@@ -1347,7 +1350,7 @@ impl ModelGlRenderer {
     /// Bring the GPU's textures in line with the frame's, re-uploading only
     /// when the model changed or its textures arrived.
     unsafe fn sync_textures(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
-        let wanted = frame.textures.as_ref().map(|_| frame.geometry_id);
+        let wanted = frame.textures.as_ref().map(|_| frame.textures_id);
         if self.uploaded_textures == wanted {
             return;
         }

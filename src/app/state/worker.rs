@@ -202,7 +202,7 @@ pub(in crate::app) enum WorkerMessage {
         /// Identifies which load this answers, so a reply that arrives after the
         /// user switched detail level or reloaded is dropped rather than paired
         /// with geometry it does not belong to.
-        geometry_id: u64,
+        textures_id: u64,
         textures: Vec<MaterialTextures>,
     },
     BitmapReimportFinished {

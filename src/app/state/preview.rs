@@ -419,6 +419,13 @@ pub(in crate::app) struct ModelPreviewData {
     /// Monotonic identity used by the shared GL upload cache. Unlike a pointer,
     /// it cannot be accidentally reused after a preview reload.
     pub(in crate::app) geometry_id: u64,
+    /// Identity of the material list `textures` is resolved against. Set when
+    /// the preview loads and kept when collision/physics overlays merge in:
+    /// the merge only appends flat-coloured materials after the model's own,
+    /// so textures resolved for it (or still resolving) stay right. Keyed to
+    /// `geometry_id` instead, every merge threw away a resolve in flight and
+    /// re-uploaded textures already on the GPU.
+    pub(in crate::app) textures_id: u64,
     /// One entry per `RenderModelPreview::materials`, once the worker has
     /// resolved them. `None` while that job is still running — the panel shows
     /// its spinner rather than drawing the model untextured, so a model never

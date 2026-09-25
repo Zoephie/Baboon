@@ -1063,9 +1063,9 @@ impl Baboon {
                 WorkerMessage::ModelTexturesResolved {
                     stamp,
                     key,
-                    geometry_id,
+                    textures_id,
                     textures,
-                } => self.handle_model_textures_resolved(stamp, key, geometry_id, textures),
+                } => self.handle_model_textures_resolved(stamp, key, textures_id, textures),
                 WorkerMessage::BitmapThumbnailDecoded { stamp, key, result } => {
                     self.handle_bitmap_thumbnail_decoded(stamp, key, result, ctx)
                 }
@@ -4053,7 +4053,7 @@ impl Baboon {
             return;
         };
         let materials = data.preview.materials.clone();
-        let geometry_id = data.geometry_id;
+        let textures_id = data.textures_id;
         let stamp = KitStamp {
             kit: self.kits[kit_index].id,
             generation: self.kits[kit_index].generation,
@@ -4069,14 +4069,14 @@ impl Baboon {
             move || WorkerMessage::ModelTexturesResolved {
                 stamp,
                 key,
-                geometry_id,
+                textures_id,
                 textures: resolve_model_textures(&source, &materials),
             },
             // No textures: the preview draws untextured, and stops waiting.
             move |_| WorkerMessage::ModelTexturesResolved {
                 stamp,
                 key: panic_key,
-                geometry_id,
+                textures_id,
                 textures: Vec::new(),
             },
         );
@@ -4086,7 +4086,7 @@ impl Baboon {
         &mut self,
         stamp: KitStamp,
         key: String,
-        geometry_id: u64,
+        textures_id: u64,
         textures: Vec<MaterialTextures>,
     ) -> bool {
         let Some(kit_index) = self.resolve_kit(stamp.kit) else {
@@ -4107,9 +4107,9 @@ impl Baboon {
         let Some(Ok(data)) = state.data.as_mut() else {
             return true;
         };
-        // The model was reloaded while this ran — different geometry, and these
-        // textures are indexed against the materials of the old one.
-        if data.geometry_id != geometry_id {
+        // The model was reloaded while this ran, and these textures are
+        // indexed against the materials of the old one.
+        if data.textures_id != textures_id {
             return true;
         }
         data.textures = Some(std::sync::Arc::new(textures));

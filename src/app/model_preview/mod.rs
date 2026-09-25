@@ -250,11 +250,13 @@ fn model_preview_data(
     preview: RenderModelPreview,
     variants: Vec<ModelVariantPreview>,
 ) -> ModelPreviewData {
+    let geometry_id = NEXT_MODEL_GEOMETRY_ID.fetch_add(1, Ordering::Relaxed);
     ModelPreviewData {
         source_key,
         render_model_path,
         preview: Arc::new(preview),
-        geometry_id: NEXT_MODEL_GEOMETRY_ID.fetch_add(1, Ordering::Relaxed),
+        geometry_id,
+        textures_id: geometry_id,
         textures: None,
         variants,
         scenario_bsps: Vec::new(),
