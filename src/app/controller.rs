@@ -7580,20 +7580,15 @@ impl Baboon {
             self.set_tsv_paste_status("No editable cells matched.");
             return;
         }
-        let edit_count = edits.len();
         let applied_rows = data_rows.saturating_sub(skipped_rows);
         doc.journal.begin_edit(&doc.tag, "Paste TSV");
-        let _ = apply_pending_edits(&mut doc.tag, edits, &mut doc.dirty);
+        let applied = apply_pending_edits(&mut doc.tag, edits, &mut doc.dirty);
         doc.journal.end_edit_window();
         let active = self.active;
         self.invalidate_tag_caches_in(active, &tag_key);
 
-        let mut summary = format!("Pasted {edit_count} cell(s) across {applied_rows} row(s)");
-        if skipped_rows > 0 {
-            summary.push_str(&format!(
-                " — {skipped_rows} extra row(s) ignored (block has {element_count} elements; add more first)"
-            ));
-        }
+        let summary =
+            tsv_paste_summary(&applied.outcomes, applied_rows, skipped_rows, element_count);
         self.status = summary.clone();
         self.set_tsv_paste_status(&summary);
     }
@@ -10156,6 +10151,78 @@ fn fix_tag_dependencies_in_tag(
 
     report.lines.push(report.status());
     report
+}
+
+/// What a TSV paste did, counted from the per-cell outcomes. It used to count
+/// the cells it tried, so a paste whose cells all failed to parse still said
+/// every one of them was pasted.
+fn tsv_paste_summary(
+    outcomes: &[FieldEditOutcome],
+    applied_rows: usize,
+    skipped_rows: usize,
+    element_count: usize,
+) -> String {
+    let failed: Vec<&FieldEditOutcome> = outcomes
+        .iter()
+        .filter(|outcome| outcome.result.is_err())
+        .collect();
+    let pasted = outcomes.len() - failed.len();
+    let mut summary = if failed.is_empty() {
+        format!("Pasted {pasted} cell(s) across {applied_rows} row(s)")
+    } else {
+        format!(
+            "Pasted {pasted} of {} cell(s) across {applied_rows} row(s)",
+            outcomes.len()
+        )
+    };
+    if let Some(first) = failed.first() {
+        let error = first.result.as_ref().err().map(String::as_str).unwrap_or("");
+        summary.push_str(&format!(
+            " — {} failed; first: {} = \"{}\": {error}",
+            failed.len(),
+            first.path,
+            first.input
+        ));
+    }
+    if skipped_rows > 0 {
+        summary.push_str(&format!(
+            " — {skipped_rows} extra row(s) ignored (block has {element_count} elements; add more first)"
+        ));
+    }
+    summary
+}
+
+#[cfg(test)]
+mod tsv_paste_summary_tests {
+    use super::*;
+
+    fn outcome(path: &str, input: &str, result: Result<(), String>) -> FieldEditOutcome {
+        FieldEditOutcome {
+            path: path.to_owned(),
+            input: input.to_owned(),
+            result,
+        }
+    }
+
+    /// The summary counts cells that applied, and names what failed. It used
+    /// to count every cell it tried.
+    #[test]
+    fn a_tsv_paste_reports_the_cells_that_failed() {
+        let outcomes = [
+            outcome("regions[0]/name", "hull", Ok(())),
+            outcome("regions[1]/lod", "high", Err("expected i16 value".to_owned())),
+        ];
+        let summary = tsv_paste_summary(&outcomes, 2, 0, 2);
+        assert_eq!(
+            summary,
+            "Pasted 1 of 2 cell(s) across 2 row(s) — 1 failed; first: regions[1]/lod = \"high\": expected i16 value"
+        );
+        let clean = tsv_paste_summary(&outcomes[..1], 1, 3, 1);
+        assert_eq!(
+            clean,
+            "Pasted 1 cell(s) across 1 row(s) — 3 extra row(s) ignored (block has 1 elements; add more first)"
+        );
+    }
 }
 
 /// Where `tag` points at the reference `(group_tag, target)`, one row per
