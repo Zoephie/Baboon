@@ -1,0 +1,11 @@
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
+<circle class="loading-background" cx="128" cy="128" r="128" fill="#000000" fill-opacity="0.4"/>
+<g class="loading-lines" stroke="#404040">
+<circle cx="128" cy="128" r="31.5"/>
+<circle cx="128" cy="128" r="62.5"/>
+<circle cx="128" cy="128" r="69.5"/>
+<circle cx="128" cy="128" r="52.5"/>
+<circle cx="128" cy="128" r="45.5"/>
+<circle cx="128" cy="128" r="55.5"/>
+</g>
+</svg>

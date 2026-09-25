@@ -128,6 +128,13 @@ pub(in crate::app) enum WorkerMessage {
         key: String,
         result: Result<ThumbnailImage, String>,
     },
+    /// Base model geometry and variant metadata, parsed off the UI thread.
+    ModelPreviewLoaded {
+        stamp: KitStamp,
+        key: String,
+        request_id: u64,
+        result: Result<ModelPreviewData, String>,
+    },
     /// A `.model`'s animation-graph listing, read off the UI thread.
     ModelAnimationsListed {
         stamp: KitStamp,

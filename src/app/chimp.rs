@@ -3229,9 +3229,10 @@ impl Baboon {
                         ChimpBrowser::Groups => self.draw_chimp_tiles(ui, ctx, kit_index),
                         ChimpBrowser::Packages => self.draw_chimp_tiles(ui, ctx, kit_index),
                         ChimpBrowser::Archives => {
-                            ui.centered_and_justified(|ui| {
-                                ui.label("Select an archive to browse its folder hierarchy.");
-                            });
+                            crate::app::ui::centered_empty_state(
+                                ui,
+                                "Select an archive to browse its folder hierarchy.",
+                            );
                         }
                         ChimpBrowser::Files => self.draw_chimp_file(ui, kit_index),
                     }
@@ -3295,6 +3296,14 @@ impl Baboon {
     }
 
     fn draw_chimp_mount_status(&mut self, ui: &mut Ui, kit_index: usize) {
+        if matches!(self.kits[kit_index].chimp.mount, ChimpMount::Loading) {
+            crate::app::ui::centered_loading_state(
+                ui,
+                "Please wait — Chimp is starting up…",
+                "Discovering containers and indexing Unreal packages.",
+            );
+            return;
+        }
         ui.vertical_centered(|ui| {
             ui.add_space(48.0);
             ui.heading("Chimp");
@@ -3306,16 +3315,7 @@ impl Baboon {
                         self.begin_chimp_mount(kit_index, ui.ctx().clone());
                     }
                 }
-                ChimpMount::Loading => {
-                    ui.spinner();
-                    ui.label("Discovering containers and indexing Unreal packages…");
-                    ui.label(
-                        RichText::new(
-                            "Campaign Evolved tag editing remains available while this runs.",
-                        )
-                        .color(subtle_dark()),
-                    );
-                }
+                ChimpMount::Loading => {}
                 ChimpMount::Failed(error) => {
                     ui.colored_label(Color32::from_rgb(210, 80, 80), error);
                     if ui.button("Retry").clicked() {
@@ -3328,12 +3328,32 @@ impl Baboon {
     }
 
     fn draw_chimp_browser(&mut self, ui: &mut Ui, ctx: &egui::Context, kit_index: usize) {
+        if matches!(self.kits[kit_index].chimp.mount, ChimpMount::Loading) {
+            // Allocate the whole browser body so an otherwise empty loading
+            // state cannot collapse the resizable side panel around its icon.
+            let available = ui.available_size();
+            let (container, _) = ui.allocate_exact_size(available, Sense::hover());
+            let spinner_size = 128.0_f32
+                .min(container.width())
+                .min(container.height());
+            let top_padding = 48.0_f32.min((container.height() - spinner_size).max(0.0));
+            let spinner_rect = egui::Rect::from_min_size(
+                egui::pos2(
+                    container.center().x - spinner_size * 0.5,
+                    container.top() + top_padding,
+                ),
+                Vec2::splat(spinner_size),
+            );
+            crate::app::ui::paint_loading_rings_sized(
+                ui,
+                spinner_rect,
+                spinner_size,
+            );
+            return;
+        }
         ui.horizontal(|ui| {
             for (browser, label) in ChimpBrowser::TABS {
                 ui.selectable_value(&mut self.kits[kit_index].chimp.browser, browser, label);
-            }
-            if matches!(self.kits[kit_index].chimp.mount, ChimpMount::Loading) {
-                ui.spinner();
             }
         });
         ui.add_space(4.0);
@@ -3738,9 +3758,10 @@ impl Baboon {
 
     fn draw_chimp_file(&mut self, ui: &mut Ui, kit_index: usize) {
         let Some(path) = self.kits[kit_index].chimp.selected_file.clone() else {
-            ui.centered_and_justified(|ui| {
-                ui.label("Select a file from a legacy .pak container.");
-            });
+            crate::app::ui::centered_empty_state(
+                ui,
+                "Select a file from a legacy .pak container.",
+            );
             return;
         };
         let world = match &self.kits[kit_index].chimp.mount {
@@ -3817,16 +3838,12 @@ impl Baboon {
 
     fn draw_chimp_tiles(&mut self, ui: &mut Ui, ctx: &egui::Context, kit_index: usize) {
         let Some(mut tree) = self.kits[kit_index].chimp.document_tree.take() else {
-            ui.centered_and_justified(|ui| {
-                ui.label("Select a package to inspect it.");
-            });
+            crate::app::ui::centered_empty_state(ui, "Select a package to inspect it.");
             return;
         };
         if tree.is_empty() {
             self.kits[kit_index].chimp.document_tree = Some(tree);
-            ui.centered_and_justified(|ui| {
-                ui.label("Select a package to inspect it.");
-            });
+            crate::app::ui::centered_empty_state(ui, "Select a package to inspect it.");
             return;
         }
 

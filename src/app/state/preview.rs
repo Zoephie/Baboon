@@ -181,6 +181,9 @@ pub(in crate::app) struct BitmapPreviewData {
 /// selected document whose preview has not yet been resolved.
 pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) loaded_key: Option<String>,
+    /// Identifies the base geometry/variant build currently running. A newer
+    /// request replaces it; late worker replies are ignored by id.
+    pub(in crate::app) preview_load_id: Option<u64>,
     pub(in crate::app) render_model_path: Option<String>,
     pub(in crate::app) data: Option<Result<ModelPreviewData, String>>,
     pub(in crate::app) active_tab: ModelTagPanelTab,
@@ -253,6 +256,7 @@ impl Default for ModelPreviewState {
     fn default() -> Self {
         Self {
             loaded_key: None,
+            preview_load_id: None,
             render_model_path: None,
             data: None,
             active_tab: ModelTagPanelTab::Fields,

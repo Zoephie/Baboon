@@ -191,9 +191,36 @@ fn can_restore_review_selection(
         }
 }
 
+fn profile_has_git_tracking(
+    identity: Option<&EditingKitProfileIdentity>,
+    profiles: &[CustomEditingKitProfile],
+) -> bool {
+    identity
+        .and_then(|identity| profiles.iter().find(|profile| profile.id == identity.id))
+        .is_some_and(|profile| profile.git_tracked)
+}
+
 impl Baboon {
+    pub(super) fn git_review_enabled_for_kit(&self, kit: usize) -> bool {
+        self.kits.get(kit).is_some_and(|kit| {
+            matches!(
+                kit.source.as_ref().map(|source| &source.source),
+                Some(TagSource::LooseFolder { .. })
+            ) && profile_has_git_tracking(
+                kit.profile.as_ref(),
+                &self.custom_editing_kit_profiles,
+            )
+        })
+    }
+
     pub(super) fn open_git_review(&mut self) {
         let kit = self.active;
+        if !self.git_review_enabled_for_kit(kit) {
+            self.status =
+                "Enable Tracked in Git in this editing kit's settings to use Git Review"
+                    .to_owned();
+            return;
+        }
         let Some(root) = self.kits[kit]
             .source
             .as_ref()
@@ -487,6 +514,35 @@ impl Baboon {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn profile(id: &str, git_tracked: bool) -> CustomEditingKitProfile {
+        CustomEditingKitProfile {
+            read_only: false,
+            git_tracked,
+            id: id.to_owned(),
+            name: id.to_owned(),
+            game: "halo2_mcc".to_owned(),
+            root: PathBuf::from(id),
+            icon: None,
+        }
+    }
+
+    #[test]
+    fn git_review_requires_the_matching_profile_to_be_git_tracked() {
+        let identity = EditingKitProfileIdentity {
+            id: "tracked".to_owned(),
+            name: "Tracked".to_owned(),
+        };
+        let profiles = vec![profile("tracked", true), profile("other", false)];
+        assert!(profile_has_git_tracking(Some(&identity), &profiles));
+
+        let disabled = EditingKitProfileIdentity {
+            id: "other".to_owned(),
+            name: "Other".to_owned(),
+        };
+        assert!(!profile_has_git_tracking(Some(&disabled), &profiles));
+        assert!(!profile_has_git_tracking(None, &profiles));
+    }
 
     #[test]
     fn status_parsers_hide_non_tags_and_keep_tag_types() {
