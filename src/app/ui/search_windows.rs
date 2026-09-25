@@ -60,28 +60,30 @@ impl Baboon {
                 .take()
                 .expect("picker remains open while processing selection");
             let kit = picker_kit;
-            if let Some(doc) = self.kits[kit].parsed_tags.get_mut(&picker.tag_key) {
-                doc.journal.begin_edit(&doc.tag, "Change tag reference");
-                if let Some(status) = apply_pending_edits(
-                    &mut doc.tag,
-                    vec![PendingFieldEdit {
+            if self.kits[kit].parsed_tags.contains_key(&picker.tag_key) {
+                let ops = DeferredOps {
+                    pending: vec![PendingFieldEdit {
                         path: picker.field_path.clone(),
                         input: input.clone(),
                     }],
-                    &mut doc.dirty,
-                )
-                .status
-                {
-                    self.status = status;
+                    ..DeferredOps::default()
+                };
+                let applied = self.apply_doc_ops(
+                    kit,
+                    &picker.tag_key,
+                    "Change tag reference",
+                    ops,
+                    UndoStep::Own,
+                );
+                if applied.is_some() {
+                    // `insert_clean` from upstream: the picked reference is
+                    // now the document's value, so the draft starts
+                    // unmodified rather than looking like an uncommitted edit.
+                    self.kits[kit]
+                        .edit_buffers
+                        .insert_clean(format!("{}|{}", picker.tag_key, picker.field_path), input);
+                    self.invalidate_tag_caches_in(kit, &picker.tag_key);
                 }
-                doc.journal.end_edit_window();
-                // `insert_clean` from upstream: the picked reference is now
-                // the document's value, so the draft starts unmodified rather
-                // than looking like an uncommitted edit.
-                self.kits[kit]
-                    .edit_buffers
-                    .insert_clean(format!("{}|{}", picker.tag_key, picker.field_path), input);
-                self.invalidate_tag_caches_in(kit, &picker.tag_key);
             } else {
                 self.status = "The tag being edited is no longer open".to_owned();
             }

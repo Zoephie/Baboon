@@ -521,6 +521,88 @@ pub(in crate::app) struct FieldEditContext<'a> {
     pub(in crate::app) nested_default: NestedDefault,
 }
 
+/// Owned storage for every request and op a [`FieldEditContext`] can raise,
+/// for a context whose caller discards them: a read-only view that must
+/// still hand the renderer somewhere to write.
+#[derive(Default)]
+pub(in crate::app) struct EditSinks {
+    buffers: EditDrafts,
+    pending: Vec<PendingFieldEdit>,
+    block_ops: Vec<BlockOp>,
+    block_confirm: Option<BlockConfirm>,
+    open_request: Option<OpenTagRequest>,
+    sound_play_request: Option<super::audio::SoundAction>,
+    sound_extract_request: Option<super::sound_extract::ExtractRequest>,
+    ce_sound_ref_request: Option<CeSoundRefRequest>,
+    tool_import: Option<ToolImportRequest>,
+    shader_ops: Vec<ShaderOp>,
+    shader_param_ops: Vec<ShaderParamOp>,
+    h2_shader_param_ops: Vec<H2ShaderParamOp>,
+    model_variant_ops: Vec<ModelVariantOp>,
+    color_request: Option<MaterialColorPopup>,
+    function_request: Option<FunctionPopup>,
+    tsv_paste_request: Option<TsvPasteRequest>,
+    block_clip_request: Option<BlockClipboard>,
+    tag_reference_picker: Option<TagReferencePickerState>,
+}
+
+impl<'a> FieldEditContext<'a> {
+    /// A context that edits nothing: `editable` off, every optional input
+    /// absent, and every request written into `sinks`, which the caller drops.
+    /// Callers set what their view does have (a root, names, a filter) on the
+    /// result.
+    pub(in crate::app) fn read_only(
+        sinks: &'a mut EditSinks,
+        view_scope: &'a str,
+        tag_key: &'a str,
+    ) -> Self {
+        Self {
+            view_scope,
+            tag_key,
+            group_tag: 0,
+            root: None,
+            game: None,
+            definitions_root: None,
+            names: None,
+            tags_root: None,
+            bitmap_hover_entries: None,
+            tag_reference_catalog: None,
+            tag_reference_picker: &mut sinks.tag_reference_picker,
+            status: None,
+            editable: false,
+            show_block_sizes: false,
+            buffers: &mut sinks.buffers,
+            pending: &mut sinks.pending,
+            block_ops: &mut sinks.block_ops,
+            block_confirm: &mut sinks.block_confirm,
+            open_request: &mut sinks.open_request,
+            sound_play_request: &mut sinks.sound_play_request,
+            sound_status: None,
+            sound_volume: 1.0,
+            sound_extract_request: &mut sinks.sound_extract_request,
+            sound_language: None,
+            ce_sound: None,
+            ce_paks_root: None,
+            ce_sound_ref_request: &mut sinks.ce_sound_ref_request,
+            tool_import: &mut sinks.tool_import,
+            shader_ops: &mut sinks.shader_ops,
+            shader_param_ops: &mut sinks.shader_param_ops,
+            h2_shader_param_ops: &mut sinks.h2_shader_param_ops,
+            model_variant_ops: &mut sinks.model_variant_ops,
+            color_request: &mut sinks.color_request,
+            function_request: &mut sinks.function_request,
+            docs: None,
+            tsv_paste_request: &mut sinks.tsv_paste_request,
+            block_clipboard: None,
+            block_clip_request: &mut sinks.block_clip_request,
+            field_filter: None,
+            field_nav: None,
+            expand_all: None,
+            nested_default: NestedDefault::default(),
+        }
+    }
+}
+
 impl FieldEditContext<'_> {
     pub(in crate::app) fn widget_id(&self, salt: impl std::hash::Hash) -> egui::Id {
         egui::Id::new(("field_edit", self.view_scope, self.tag_key, salt))

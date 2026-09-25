@@ -7785,10 +7785,15 @@ impl Baboon {
             return;
         }
         let applied_rows = data_rows.saturating_sub(skipped_rows);
-        doc.journal.begin_edit(&doc.tag, "Paste TSV");
-        let applied = apply_pending_edits(&mut doc.tag, edits, &mut doc.dirty);
-        doc.journal.end_edit_window();
         let active = self.active;
+        let ops = DeferredOps {
+            pending: edits,
+            ..DeferredOps::default()
+        };
+        let Some(applied) = self.apply_doc_ops(active, &tag_key, "Paste TSV", ops, UndoStep::Own)
+        else {
+            return;
+        };
         self.invalidate_tag_caches_in(active, &tag_key);
 
         let summary =
@@ -8877,22 +8882,24 @@ impl Baboon {
             if let Some(confirm) = self.block_confirm.take()
                 && routed
             {
-                let mut refresh_model_preview = false;
-                if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(&confirm.tag_key) {
-                    let deletes_model_variant = confirm.path == "variants"
-                        && matches!(confirm.kind, BlockOpKind::Delete(_))
-                        && doc.tag.header.group_tag.to_be_bytes() == *b"hlmt";
-                    let op = BlockOp {
+                let deletes_model_variant = confirm.path == "variants"
+                    && matches!(confirm.kind, BlockOpKind::Delete(_))
+                    && self.kits[self.active]
+                        .parsed_tags
+                        .get(&confirm.tag_key)
+                        .is_some_and(|doc| doc.tag.header.group_tag.to_be_bytes() == *b"hlmt");
+                let ops = DeferredOps {
+                    block_ops: vec![BlockOp {
                         path: confirm.path,
                         kind: confirm.kind,
-                    };
-                    doc.journal.begin_edit(&doc.tag, "Block edit");
-                    if let Some(status) = apply_block_ops(&mut doc.tag, vec![op], &mut doc.dirty) {
-                        self.status = status;
-                        refresh_model_preview = deletes_model_variant;
-                    }
-                    doc.journal.end_edit_window();
-                }
+                    }],
+                    ..DeferredOps::default()
+                };
+                let active = self.active;
+                let applied =
+                    self.apply_doc_ops(active, &confirm.tag_key, "Block edit", ops, UndoStep::Own);
+                let refresh_model_preview = deletes_model_variant
+                    && applied.is_some_and(|applied| applied.status.is_some());
                 if refresh_model_preview
                     && let Some(preview) = self.kits[self.active]
                         .model_previews

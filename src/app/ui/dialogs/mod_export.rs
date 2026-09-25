@@ -245,23 +245,7 @@ impl Baboon {
     ) {
         // The editor collects deferred edits as it draws. Nothing here is
         // editable, so they are collected into locals and dropped.
-        let mut buffers = EditDrafts::default();
-        let mut pending = Vec::new();
-        let mut block_ops = Vec::new();
-        let mut block_confirm = None;
-        let mut open_request = None;
-        let mut sound_play_request = None;
-        let mut sound_extract_request = None;
-        let mut tool_import = None;
-        let mut shader_ops = Vec::new();
-        let mut shader_param_ops = Vec::new();
-        let mut h2_shader_param_ops = Vec::new();
-        let mut model_variant_ops = Vec::new();
-        let mut color_request = None;
-        let mut function_request = None;
-        let mut block_clip_request = None;
-        let mut tsv_paste_request = None;
-        let mut tag_reference_picker = None;
+        let mut sinks = EditSinks::default();
         let root = tag.root();
         let Some(target) = (if path.is_empty() {
             Some(root)
@@ -276,50 +260,15 @@ impl Baboon {
             return;
         };
         let filter_action = FieldFilterAction::Apply(filter.clone());
-        let mut edit = FieldEditContext {
-            expand_all: Some(true),
-            nested_default: NestedDefault::Expanded,
-            view_scope: scope,
-            tag_key: scope,
-            group_tag,
-            root: Some(root),
-            game,
-            definitions_root,
-            names: Some(names),
-            tags_root: None,
-            bitmap_hover_entries: None,
-            tag_reference_catalog: None,
-            tag_reference_picker: &mut tag_reference_picker,
-            status: None,
-            editable: false,
-            show_block_sizes: false,
-            buffers: &mut buffers,
-            pending: &mut pending,
-            block_ops: &mut block_ops,
-            block_confirm: &mut block_confirm,
-            open_request: &mut open_request,
-            sound_play_request: &mut sound_play_request,
-            sound_status: None,
-            sound_volume: 1.0,
-            sound_extract_request: &mut sound_extract_request,
-            sound_language: None,
-            ce_sound: None,
-            ce_sound_ref_request: &mut None,
-            ce_paks_root: None,
-            tool_import: &mut tool_import,
-            shader_ops: &mut shader_ops,
-            shader_param_ops: &mut shader_param_ops,
-            h2_shader_param_ops: &mut h2_shader_param_ops,
-            model_variant_ops: &mut model_variant_ops,
-            color_request: &mut color_request,
-            function_request: &mut function_request,
-            block_clipboard: None,
-            docs: None,
-            tsv_paste_request: &mut tsv_paste_request,
-            block_clip_request: &mut block_clip_request,
-            field_filter: Some(&filter_action),
-            field_nav: None,
-        };
+        let mut edit = FieldEditContext::read_only(&mut sinks, scope, scope);
+        edit.expand_all = Some(true);
+        edit.nested_default = NestedDefault::Expanded;
+        edit.group_tag = group_tag;
+        edit.root = Some(root);
+        edit.game = game;
+        edit.definitions_root = definitions_root;
+        edit.names = Some(names);
+        edit.field_filter = Some(&filter_action);
         draw_struct_fields_inline(ui, target, names, 0, expert_mode, path, &mut edit);
     }
 

@@ -519,68 +519,9 @@ pub(in crate::app) fn draw_shader_grid_row_readonly(
     color_popup: &mut Option<MaterialColorPopup>,
     function_popup: &mut Option<FunctionPopup>,
 ) {
-    let mut pending = Vec::new();
-    let mut block_ops = Vec::new();
-    let mut shader_ops = Vec::new();
-    let mut shader_param_ops = Vec::new();
-    let mut h2_shader_param_ops = Vec::new();
-    let mut model_variant_ops = Vec::new();
-    let mut block_confirm = None;
-    let mut open_request = None;
-    let mut sound_play_request = None;
-    let mut sound_extract_request = None;
-    let mut tool_import = None;
-    let mut buffers = EditDrafts::default();
-    let mut color_request = None;
-    let mut function_request = None;
-    let mut block_clip_request = None;
-    let mut tsv_paste_request = None;
-    let mut tag_reference_picker = None;
-    let mut ctx = FieldEditContext {
-        // The shader grid draws no collapsible containers of its own.
-        expand_all: None,
-        nested_default: NestedDefault::default(),
-        view_scope: "readonly",
-        tag_key: "",
-        group_tag: 0,
-        root: None,
-        game: None,
-        definitions_root: None,
-        names: None,
-        tags_root: None,
-        bitmap_hover_entries: None,
-        tag_reference_catalog: None,
-        tag_reference_picker: &mut tag_reference_picker,
-        status: None,
-        editable: false,
-        show_block_sizes: false,
-        buffers: &mut buffers,
-        pending: &mut pending,
-        block_ops: &mut block_ops,
-        block_confirm: &mut block_confirm,
-        open_request: &mut open_request,
-        sound_play_request: &mut sound_play_request,
-        sound_status: None,
-        sound_volume: 1.0,
-        sound_extract_request: &mut sound_extract_request,
-        sound_language: None,
-        ce_sound: None,
-        ce_sound_ref_request: &mut None,
-        ce_paks_root: None,
-        tool_import: &mut tool_import,
-        shader_ops: &mut shader_ops,
-        shader_param_ops: &mut shader_param_ops,
-        h2_shader_param_ops: &mut h2_shader_param_ops,
-        model_variant_ops: &mut model_variant_ops,
-        color_request: &mut color_request,
-        function_request: &mut function_request,
-        block_clipboard: None,
-        docs: None,
-        tsv_paste_request: &mut tsv_paste_request,
-        block_clip_request: &mut block_clip_request,
-        field_filter: None,
-        field_nav: None,
-    };
+    let mut sinks = EditSinks::default();
+    // The shader grid draws no collapsible containers of its own.
+    let mut ctx = FieldEditContext::read_only(&mut sinks, "readonly", "");
     draw_shader_grid_row(ui, row, depth, color_popup, function_popup, &mut ctx);
 }
 

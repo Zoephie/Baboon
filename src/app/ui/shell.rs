@@ -1213,57 +1213,43 @@ impl Baboon {
                 .color_popup_kit
                 .and_then(|kit| self.resolve_kit(kit))
                 .unwrap_or(self.active);
-            match result {
+            let (tag_key, label, ops) = match result {
                 ColorPopupResult::FieldEdit { tag_key, edit } => {
-                    if let Some(doc) = self.kits[kit].parsed_tags.get_mut(&tag_key) {
-                        doc.journal.begin_edit(&doc.tag, "Edit color");
-                        if let Some(status) =
-                            apply_pending_edits(&mut doc.tag, vec![edit], &mut doc.dirty).status
-                        {
-                            self.status = status;
-                        }
-                        doc.journal.end_edit_window();
-                    }
+                    let ops = DeferredOps {
+                        pending: vec![edit],
+                        ..DeferredOps::default()
+                    };
+                    (tag_key, "Edit color", ops)
                 }
                 ColorPopupResult::ShaderOp { tag_key, op } => {
-                    if let Some(doc) = self.kits[kit].parsed_tags.get_mut(&tag_key) {
-                        doc.journal.begin_edit(&doc.tag, "Shader edit");
-                        if let Some(status) =
-                            apply_shader_ops(&mut doc.tag, vec![op], &mut doc.dirty)
-                        {
-                            self.status = status;
-                        }
-                        doc.journal.end_edit_window();
-                    }
+                    let ops = DeferredOps {
+                        shader_ops: vec![op],
+                        ..DeferredOps::default()
+                    };
+                    (tag_key, "Shader edit", ops)
                 }
                 ColorPopupResult::ShaderParamOp { tag_key, op } => {
-                    if let Some(doc) = self.kits[kit].parsed_tags.get_mut(&tag_key) {
-                        doc.journal.begin_edit(&doc.tag, "Shader parameter");
-                        if let Some(status) =
-                            apply_shader_param_ops(&mut doc.tag, vec![op], &mut doc.dirty)
-                        {
-                            self.status = status;
-                        }
-                        doc.journal.end_edit_window();
-                    }
+                    let ops = DeferredOps {
+                        shader_param_ops: vec![op],
+                        ..DeferredOps::default()
+                    };
+                    (tag_key, "Shader parameter", ops)
                 }
                 ColorPopupResult::H2ShaderParamOp { tag_key, op } => {
-                    if let Some(doc) = self.kits[kit].parsed_tags.get_mut(&tag_key) {
-                        doc.journal.begin_edit(&doc.tag, "Shader parameter");
-                        if let Some(status) =
-                            apply_h2_shader_param_ops(&mut doc.tag, vec![op], &mut doc.dirty)
-                        {
-                            self.status = status;
-                        }
-                        doc.journal.end_edit_window();
-                    }
+                    let ops = DeferredOps {
+                        h2_shader_param_ops: vec![op],
+                        ..DeferredOps::default()
+                    };
+                    (tag_key, "Shader parameter", ops)
                 }
                 ColorPopupResult::FunctionDraftColor { target, argb } => {
                     if let Some(popup) = self.function_popup.as_mut() {
                         popup.apply_draft_color(target, argb);
                     }
+                    return;
                 }
-            }
+            };
+            self.apply_doc_ops(kit, &tag_key, label, ops, UndoStep::Own);
         }
     }
 
@@ -1277,22 +1263,12 @@ impl Baboon {
                 .function_popup_kit
                 .and_then(|kit| self.resolve_kit(kit))
                 .unwrap_or(self.active);
-            if let Some(doc) = self.kits[kit].parsed_tags.get_mut(&batch.tag_key) {
-                if !batch.edits.is_empty() || !batch.data_ops.is_empty() {
-                    doc.journal.begin_edit(&doc.tag, "Edit function");
-                }
-                if let Some(status) =
-                    apply_pending_edits(&mut doc.tag, batch.edits, &mut doc.dirty).status
-                {
-                    self.status = status;
-                }
-                if let Some(status) =
-                    apply_function_data_ops(&mut doc.tag, batch.data_ops, &mut doc.dirty)
-                {
-                    self.status = status;
-                }
-                doc.journal.end_edit_window();
-            }
+            let ops = DeferredOps {
+                pending: batch.edits,
+                function_data_ops: batch.data_ops,
+                ..DeferredOps::default()
+            };
+            self.apply_doc_ops(kit, &batch.tag_key, "Edit function", ops, UndoStep::Own);
         }
     }
 

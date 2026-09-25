@@ -54,7 +54,7 @@ impl Baboon {
         let ce_sound = self.ce_sound_binding(kit_index, &key, entry);
         let bitmap_preview_view = self.bitmap_preview_view;
 
-        let Some(mut doc) = self.kits[kit_index].parsed_tags.remove(&key) else {
+        let Some(doc) = self.kits[kit_index].parsed_tags.remove(&key) else {
             if self.kits[kit_index].loading_tags.contains(&key) {
                 ui.label("Loading tag data...");
             } else {
@@ -259,27 +259,13 @@ impl Baboon {
             request
         });
 
-        // Every deferred op this pane collected. Applying them opens the undo
-        // window (or closes it on a frame with none), and `mutated` decides
-        // whether the frame needs redrawing.
-        if kit_read_only {
-            ops = DeferredOps::default();
-        }
-        let mutated = !ops.is_empty();
-        let applied = apply_deferred_ops(&mut doc, ops);
-        // Per-edit outcomes: a draft whose value applied cleanly is marked
-        // clean, while one the parser rejected keeps the text the user typed
-        // instead of snapping back to the old value.
-        kit.edit_buffers
-            .accept_successful_edits(&key, &applied.outcomes);
-        if let Some(status) = applied.status {
-            self.status = status;
-        }
-        if applied.model_variants_changed {
-            if let Some(preview) = kit.model_previews.get_mut(&key) {
-                preview.invalidate_load();
-            }
-        }
+        // Every deferred op this pane collected, applied once the document is
+        // back in the kit. Applying them opens the undo window (or closes it
+        // on a frame with none), and `mutated` decides whether the frame
+        // needs redrawing.
+        let mutated = !kit_read_only && !ops.is_empty();
+        kit.parsed_tags.insert(key.clone(), doc);
+        self.apply_doc_ops(kit_index, &key, "Edit", ops, UndoStep::Coalesce);
         // A color swatch was clicked: open the shared picker. Each popup
         // records the kit it was opened from, so confirming it later edits
         // this document rather than whichever kit is active by then.
@@ -330,7 +316,6 @@ impl Baboon {
             // the filter produces the normal one-shot restore-defaults pass.
             self.find.filter_results = false;
         }
-        kit.parsed_tags.insert(key.clone(), doc);
         self.queue_bitmap_hover_thumbnails(kit_index, &bitmap_hover_requests, ctx);
         // These ops are applied *after* the pane has been drawn, so the frame
         // on screen still shows the tag as it was before the edit. egui only
