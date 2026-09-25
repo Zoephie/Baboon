@@ -64,6 +64,11 @@ pub(in crate::app) struct LevelSkips {
     pub(in crate::app) unresolved_mesh: usize,
     /// An instanced component whose placement array did not parse.
     pub(in crate::app) unreadable_instances: usize,
+    /// A cell package that could not be read at all.
+    pub(in crate::app) unreadable_cells: usize,
+    /// Cells whose reader thread panicked, taking everything it had read
+    /// from them with it.
+    pub(in crate::app) lost_cells: usize,
 }
 
 impl LevelSkips {
@@ -76,6 +81,28 @@ impl LevelSkips {
         self.inherited_mesh += other.inherited_mesh;
         self.unresolved_mesh += other.unresolved_mesh;
         self.unreadable_instances += other.unreadable_instances;
+        self.unreadable_cells += other.unreadable_cells;
+        self.lost_cells += other.lost_cells;
+    }
+
+    /// What was left out of an export and why, for the line that reports it.
+    /// `None` when nothing was.
+    pub(in crate::app) fn summary(&self) -> Option<String> {
+        let parts: Vec<String> = [
+            (self.lost_cells, "cell(s) lost to a reader crash"),
+            (self.unreadable_cells, "unreadable cell(s)"),
+            (self.unreadable_instances, "unreadable instance array(s)"),
+            (
+                self.inherited_mesh,
+                "placement(s) whose mesh is set on a Blueprint",
+            ),
+            (self.unresolved_mesh, "placement(s) with an unresolved mesh"),
+        ]
+        .into_iter()
+        .filter(|(count, _)| *count > 0)
+        .map(|(count, what)| format!("{count} {what}"))
+        .collect();
+        (!parts.is_empty()).then(|| format!("Left out: {}", parts.join(", ")))
     }
 }
 
@@ -312,6 +339,20 @@ pub(in crate::app) fn read_cell_into(cell: &ChimpPackage, scene: &mut LevelScene
     scene.cells += 1;
 }
 
+/// A chunk's scene, or — if its reader panicked — a scene that says its
+/// cells were lost. A panicked chunk used to come back as an empty scene, and
+/// its cells vanished from the export without a word.
+fn chunk_scene(cells: usize, joined: std::thread::Result<LevelScene>) -> LevelScene {
+    joined.unwrap_or_else(|_| LevelScene {
+        cells,
+        skipped: LevelSkips {
+            lost_cells: cells,
+            ..Default::default()
+        },
+        ..Default::default()
+    })
+}
+
 /// Read every cell of a level, using the machine rather than one core of it.
 ///
 /// Cells are independent — each is a package decoded on its own — and there are
@@ -337,7 +378,7 @@ pub(in crate::app) fn read_cells(
             .chunks(chunk.max(1))
             .map(|slice| {
                 let done = &done;
-                scope.spawn(move || {
+                let handle = scope.spawn(move || {
                     let mut scene = LevelScene::default();
                     for cell in slice {
                         if let Ok(document) = crate::app::chimp::load_chimp_package(world, cell) {
@@ -347,6 +388,7 @@ pub(in crate::app) fn read_cells(
                             // cells and a progress bar that stalls on the
                             // unreadable ones is lying about where it is.
                             scene.cells += 1;
+                            scene.skipped.unreadable_cells += 1;
                         }
                         let seen = done.fetch_add(1, Ordering::Relaxed) + 1;
                         if seen % 32 == 0 {
@@ -354,12 +396,13 @@ pub(in crate::app) fn read_cells(
                         }
                     }
                     scene
-                })
+                });
+                (slice.len(), handle)
             })
             .collect();
         handles
             .into_iter()
-            .map(|handle| handle.join().unwrap_or_default())
+            .map(|(cells, handle)| chunk_scene(cells, handle.join()))
             .collect()
     });
     progress(cells.len());
@@ -452,6 +495,22 @@ mod tests {
         assert_eq!(scene.placements[2].mesh, 0);
     }
 
+    /// A reader that panics loses its cells; that has to reach the export's
+    /// summary rather than vanish.
+    #[test]
+    fn cells_lost_to_a_panicked_reader_are_reported() {
+        let lost = chunk_scene(12, Err(Box::new("reader panicked")));
+        assert_eq!(lost.cells, 12);
+        assert_eq!(lost.skipped.lost_cells, 12);
+        let mut scene = LevelScene::default();
+        scene.absorb(lost);
+        assert_eq!(
+            scene.skipped.summary().as_deref(),
+            Some("Left out: 12 cell(s) lost to a reader crash")
+        );
+        assert_eq!(LevelSkips::default().summary(), None);
+    }
+
     #[test]
     fn skips_are_counted_by_reason() {
         let mut skips = LevelSkips::default();
@@ -459,6 +518,7 @@ mod tests {
             inherited_mesh: 2,
             unresolved_mesh: 1,
             unreadable_instances: 3,
+            ..LevelSkips::default()
         });
         skips.absorb(LevelSkips {
             inherited_mesh: 1,

@@ -2931,25 +2931,39 @@ impl Baboon {
             return;
         }
         let mut restored = 0usize;
+        let mut failures: Vec<String> = Vec::new();
         for (package, filename) in manifest.packages {
             let Some(provider) = world
                 .package(&package)
                 .and_then(|record| record.active_provider())
                 .cloned()
             else {
+                failures.push(format!("{package} is no longer mounted"));
                 continue;
             };
-            let Ok(bytes) = fs::read(directory.join(filename)) else {
-                continue;
+            let bytes = match fs::read(directory.join(&filename)) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    failures.push(format!("{package}: {error}"));
+                    continue;
+                }
             };
-            let Ok(mut document) = decode_chimp_document(world, provider.clone(), bytes) else {
-                continue;
+            let mut document = match decode_chimp_document(world, provider.clone(), bytes) {
+                Ok(document) => document,
+                Err(error) => {
+                    failures.push(format!("{package}: {error}"));
+                    continue;
+                }
             };
             // The recovery file contains the edited view of the package. Keep
             // the mounted source bytes as the discard baseline so a restored
             // edit can still be returned to the actual shipped package.
-            let Ok(source_bytes) = world.read_provider(&provider) else {
-                continue;
+            let source_bytes = match world.read_provider(&provider) {
+                Ok(bytes) => bytes,
+                Err(error) => {
+                    failures.push(format!("{package}: {error}"));
+                    continue;
+                }
             };
             document.original = source_bytes;
             document.dirty = true;
@@ -2963,9 +2977,17 @@ impl Baboon {
                 .open_document_pane(kit_id, &package);
             restored += 1;
         }
-        if restored > 0 {
-            self.status = format!("Chimp recovered {restored} unsaved package edit(s)");
-        }
+        // The recovery files are left in place either way, so an edit that
+        // could not come back this time is not deleted by having been tried.
+        self.status = match (restored, failures.first()) {
+            (0, None) => return,
+            (restored, None) => format!("Chimp recovered {restored} unsaved package edit(s)"),
+            (restored, Some(first)) => format!(
+                "Chimp recovered {restored} unsaved package edit(s); {} could not be \
+                 restored ({first})",
+                failures.len()
+            ),
+        };
     }
 
     /// Checkpoint every document in the kit whose edits have paused, and wake
@@ -2997,8 +3019,10 @@ impl Baboon {
             .get_mut(package)
             .and_then(|document| document.checkpoint_due.take())
             .is_some();
-        if waiting {
-            self.checkpoint_chimp_document(kit_index, package);
+        // Said, not swallowed: the user is relying on this copy to survive a
+        // crash, and a failed one leaves them unprotected without knowing.
+        if waiting && let Err(error) = self.checkpoint_chimp_document(kit_index, package) {
+            self.status = format!("Chimp could not save a recovery copy of {package}: {error}");
         }
     }
 
@@ -3019,22 +3043,21 @@ impl Baboon {
         }
     }
 
-    fn checkpoint_chimp_document(&mut self, kit_index: usize, package: &str) {
+    /// Write `package`'s recovery checkpoint. Nothing to checkpoint (no
+    /// container source, no mount, no document) is not an error.
+    fn checkpoint_chimp_document(&mut self, kit_index: usize, package: &str) -> Result<(), String> {
         let Some(directory) = self.chimp_recovery_dir(kit_index) else {
-            return;
+            return Ok(());
         };
         let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
-            return;
+            return Ok(());
         };
         let Some(document) = self.kits[kit_index].chimp.documents.get(package) else {
-            return;
+            return Ok(());
         };
-        let Ok((bytes, _)) = rebuild_chimp_document(world, document) else {
-            return;
-        };
-        if fs::create_dir_all(&directory).is_err() {
-            return;
-        }
+        let (bytes, _) = rebuild_chimp_document(world, document)?;
+        fs::create_dir_all(&directory)
+            .map_err(|error| format!("Could not create {}: {error}", directory.display()))?;
         let digest = Sha256::digest(package.as_bytes());
         let filename = format!(
             "{}.uasset",
@@ -3043,9 +3066,9 @@ impl Baboon {
                 .map(|byte| format!("{byte:02x}"))
                 .collect::<String>()
         );
-        if fs::write(directory.join(&filename), bytes).is_err() {
-            return;
-        }
+        let path = directory.join(&filename);
+        fs::write(&path, bytes)
+            .map_err(|error| format!("Could not write {}: {error}", path.display()))?;
         let source = self.kits[kit_index]
             .source
             .as_ref()
@@ -3057,9 +3080,11 @@ impl Baboon {
             .unwrap_or_default();
         manifest.source = source;
         manifest.packages.insert(package.to_owned(), filename);
-        if let Ok(bytes) = serde_json::to_vec_pretty(&manifest) {
-            let _ = fs::write(directory.join("manifest.json"), bytes);
-        }
+        let bytes = serde_json::to_vec_pretty(&manifest)
+            .map_err(|error| format!("Could not encode the recovery manifest: {error}"))?;
+        let path = directory.join("manifest.json");
+        fs::write(&path, bytes)
+            .map_err(|error| format!("Could not write {}: {error}", path.display()))
     }
 
     fn clear_chimp_recovery_packages(
@@ -5198,64 +5223,77 @@ impl Baboon {
             phase_started: Instant::now(),
         });
         self.status = format!("Exporting {name}…");
-        thread::spawn(move || {
-            let total = cells.len();
-            let report = |phase, done, total| {
-                let _ = tx.send(WorkerMessage::ChimpLevelProgress {
-                    kit,
-                    phase,
-                    done,
-                    total,
+        let panic_name = name.clone();
+        spawn_worker(
+            &self.tx.clone(),
+            &ctx.clone(),
+            move || {
+                let total = cells.len();
+                let report = |phase, done, total| {
+                    let _ = tx.send(WorkerMessage::ChimpLevelProgress {
+                        kit,
+                        phase,
+                        done,
+                        total,
+                    });
+                    ctx.request_repaint();
+                };
+                // Measured over all 2,334 cells of C10: 1.7s on one thread, 0.7s
+                // on four, and 0.8s on sixteen. Past four the threads contend for
+                // more than they win, and the whole walk is a second either way.
+                let threads = std::thread::available_parallelism()
+                    .map(|count| count.get())
+                    .unwrap_or(4)
+                    .min(4);
+                let scene = read_cells(&world, &cells, threads, &|done| {
+                    report(ChimpLevelPhase::ReadingCells, done, total)
                 });
-                ctx.request_repaint();
-            };
-            // Measured over all 2,334 cells of C10: 1.7s on one thread, 0.7s
-            // on four, and 0.8s on sixteen. Past four the threads contend for
-            // more than they win, and the whole walk is a second either way.
-            let threads = std::thread::available_parallelism()
-                .map(|count| count.get())
-                .unwrap_or(4)
-                .min(4);
-            let scene = read_cells(&world, &cells, threads, &|done| {
-                report(ChimpLevelPhase::ReadingCells, done, total)
-            });
-            report(ChimpLevelPhase::ReadingCells, total, total);
-            let stage = |stage, done, total| {
-                report(
-                    match stage {
-                        ExportStage::Meshes => ChimpLevelPhase::WritingMeshes,
-                        ExportStage::Segments => ChimpLevelPhase::WritingSegments,
-                    },
-                    done,
-                    total,
-                )
-            };
-            let result = match format {
-                ChimpLevelFormat::SegmentedUsd => {
-                    write_segmented_usd(&world, &scene, detail, &directory, &name, budget, &stage)
-                        .map_err(|error| error.to_string())
-                        .map(|report| {
-                            format!(
-                                "Exported {name}: {} meshes, {} placements, {} segment(s)",
-                                report.prototypes, report.instances, report.segments
-                            )
-                        })
-                }
-                ChimpLevelFormat::Blender => {
-                    write_blend_export(&world, &scene, detail, &directory, &name, budget, &stage)
-                        .map_err(|error| error.to_string())
-                        .map(|report| {
-                            format!(
-                                "Exported {name}: {} meshes, {} placements, {} master(s). \
+                report(ChimpLevelPhase::ReadingCells, total, total);
+                let stage = |stage, done, total| {
+                    report(
+                        match stage {
+                            ExportStage::Meshes => ChimpLevelPhase::WritingMeshes,
+                            ExportStage::Segments => ChimpLevelPhase::WritingSegments,
+                        },
+                        done,
+                        total,
+                    )
+                };
+                let left_out = scene.skipped.summary();
+                let result = match format {
+                    ChimpLevelFormat::SegmentedUsd => write_segmented_usd(
+                        &world, &scene, detail, &directory, &name, budget, &stage,
+                    )
+                    .map_err(|error| error.to_string())
+                    .map(|report| {
+                        format!(
+                            "Exported {name}: {} meshes, {} placements, {} segment(s)",
+                            report.prototypes, report.instances, report.segments
+                        )
+                    }),
+                    ChimpLevelFormat::Blender => write_blend_export(
+                        &world, &scene, detail, &directory, &name, budget, &stage,
+                    )
+                    .map_err(|error| error.to_string())
+                    .map(|report| {
+                        format!(
+                            "Exported {name}: {} meshes, {} placements, {} master(s). \
                                  Run build_blend.py in Blender to build them.",
-                                report.meshes, report.placements, report.segments
-                            )
-                        })
-                }
-            };
-            let _ = tx.send(WorkerMessage::ExportFinished(result));
-            ctx.request_repaint();
-        });
+                            report.meshes, report.placements, report.segments
+                        )
+                    }),
+                };
+                WorkerMessage::ExportFinished(result.map(|message| match left_out {
+                    Some(left_out) => format!("{message}. {left_out}"),
+                    None => message,
+                }))
+            },
+            move |error| {
+                WorkerMessage::ExportFinished(Err(format!(
+                    "Exporting {panic_name} failed: {error}"
+                )))
+            },
+        );
     }
 
     fn begin_extract_chimp_mesh(
