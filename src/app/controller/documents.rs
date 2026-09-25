@@ -32,12 +32,17 @@ impl Baboon {
                 self.apply_pending_history(index, &key);
             }
             Err(error) => {
-                self.terminal.lines.push(TerminalLineEntry::new(format!(
-                    "Folder refactor failed: {error}"
-                )));
+                let name = self
+                    .entry_for_key_in(index, &key)
+                    .map(|entry| entry.display_path.clone())
+                    .unwrap_or_else(|| key.clone());
+                let message = format!("Could not load {name}: {error}");
+                self.terminal
+                    .lines
+                    .push(TerminalLineEntry::new(message.clone()));
                 trim_terminal_lines(&mut self.terminal.lines);
                 self.terminal.scroll_to_bottom = true;
-                self.status = error;
+                self.status = message;
             }
         }
         false
@@ -74,5 +79,25 @@ impl Baboon {
             Err(error) => self.status = format!("Bitmap reimport failed: {error}"),
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod tag_load_failure_tests {
+    use super::*;
+
+    /// A tag that fails to load says so. The terminal line was copied from the
+    /// folder-refactor handler and reported "Folder refactor failed".
+    #[test]
+    fn a_failed_tag_load_names_the_tag() {
+        let mut app = Baboon::for_test();
+        let kit = app.kits[0].id;
+        app.kits[0].open_tag_pane("objects/broken.model");
+
+        app.handle_tag_loaded(kit, "objects/broken.model".to_owned(), Err("truncated".to_owned()));
+
+        let line = &app.terminal.lines.last().expect("a terminal line").text;
+        assert_eq!(line, "Could not load objects/broken.model: truncated");
+        assert_eq!(app.status, *line);
     }
 }
