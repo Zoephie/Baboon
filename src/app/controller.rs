@@ -945,6 +945,12 @@ impl Baboon {
                 } => self.handle_chimp_sources_overwritten(
                     kit, leases, containers, touched, written, result, ctx,
                 ),
+                WorkerMessage::TagCompareGit { request, update } => {
+                    self.handle_tag_compare_git(request, update)
+                }
+                WorkerMessage::GitReviewUpdated { kit, request, view } => {
+                    self.handle_git_review_updated(kit, request, view)
+                }
                 WorkerMessage::ChimpPackageLoaded {
                     stamp,
                     package,

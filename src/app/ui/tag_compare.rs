@@ -242,6 +242,149 @@ fn git_tag_history(
     Ok((commits, has_more))
 }
 
+/// The diff between a commit's copy of a tag and its parent's. Either side
+/// may be missing: the commit added or removed the tag. Runs on a worker.
+fn git_revision_comparison(
+    tags_root: &Path,
+    path: &Path,
+    revision: &str,
+    game: Option<&str>,
+    definitions_root: Option<&Path>,
+    group: u32,
+) -> Result<TagDiffResults, String> {
+    let load_tag = |revision: &str| -> Result<Option<TagFile>, String> {
+        git_tag_bytes_if_present(tags_root, path, revision)?
+            .map(|bytes| {
+                let tag = crate::source::read_tag_from_bytes(&bytes, game, definitions_root, group)
+                    .map_err(|error| {
+                        format!("Could not load tag from commit {revision}: {error}")
+                    })?;
+                if tag.group().tag != group {
+                    return Err(format!(
+                        "The tag in commit {revision} has a different tag type."
+                    ));
+                }
+                Ok(tag)
+            })
+            .transpose()
+    };
+    let parent = git_commit_parent(tags_root, revision)?;
+    let before = parent.as_deref().map(&load_tag).transpose()?.flatten();
+    let after = load_tag(revision)?;
+    Ok(comparison_results_with_missing(
+        before.as_ref(),
+        after.as_ref(),
+    ))
+}
+
+/// What a Compare window Git job read, for the UI thread to apply.
+pub(in crate::app) enum TagCompareGitUpdate {
+    /// A page of the tag's history; `append` for "Load older commits".
+    History {
+        append: bool,
+        result: Result<(Vec<GitHistoryCommit>, bool), String>,
+    },
+    /// The tag as committed at HEAD, to diff against the open document —
+    /// which stays on the UI thread, so the diff is done there.
+    Head(Result<TagFile, String>),
+    /// A commit against its parent, diffed already.
+    Revision(Result<TagDiffResults, String>),
+}
+
+/// Run a Compare window Git read on a worker. A new job supersedes the one
+/// before it, whose result is then dropped when it lands.
+fn run_tag_compare_git(
+    tx: &Sender<WorkerMessage>,
+    state: &mut TagDiffState,
+    ctx: &egui::Context,
+    job: impl FnOnce() -> TagCompareGitUpdate + Send + 'static,
+) {
+    // Numbered across windows, so a window closed and reopened on another
+    // tag cannot take the previous one's result.
+    static REQUESTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let request = REQUESTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    state.git_pending = Some(request);
+    spawn_worker(
+        tx,
+        ctx,
+        move || WorkerMessage::TagCompareGit {
+            request,
+            update: Ok(job()),
+        },
+        move |error| WorkerMessage::TagCompareGit {
+            request,
+            update: Err(error),
+        },
+    );
+}
+
+impl Baboon {
+    /// Applies `WorkerMessage::TagCompareGit` to the window that asked for it.
+    pub(in crate::app) fn handle_tag_compare_git(
+        &mut self,
+        request: u64,
+        update: Result<TagCompareGitUpdate, String>,
+    ) -> bool {
+        let Some(state) = self.tag_diff.as_mut() else {
+            return false;
+        };
+        if state.git_pending != Some(request) {
+            return false;
+        }
+        state.git_pending = None;
+        let update = match update {
+            Ok(update) => update,
+            Err(error) => {
+                state.error = Some(error);
+                return false;
+            }
+        };
+        match update {
+            TagCompareGitUpdate::History { append, result } => match result {
+                Ok((commits, has_more)) => {
+                    if append {
+                        state.git_history.commits.extend(commits);
+                    } else {
+                        state.git_history.commits = commits;
+                    }
+                    state.git_history.has_more = has_more;
+                    state.git_history.error = None;
+                }
+                Err(error) => state.git_history.error = Some(error),
+            },
+            TagCompareGitUpdate::Head(result) => {
+                let current = self
+                    .kits
+                    .iter()
+                    .find(|kit| kit.id == state.kit)
+                    .and_then(|kit| kit.parsed_tags.get(&state.a_key));
+                match (result, current) {
+                    (_, None) => {
+                        state.error = Some("The tag is no longer open.".to_owned());
+                    }
+                    (Ok(head), Some(current)) if head.group().tag == current.tag.group().tag => {
+                        state.results = Some(comparison_results(&current.tag, &head));
+                        state.error = None;
+                    }
+                    (Ok(_), Some(_)) => {
+                        state.error =
+                            Some("The tag in Git HEAD has a different tag type.".to_owned());
+                    }
+                    (Err(error), Some(_)) => state.error = Some(error),
+                }
+            }
+            TagCompareGitUpdate::Revision(result) => match result {
+                Ok(results) => {
+                    state.results = Some(results);
+                    state.error = None;
+                }
+                Err(error) => state.error = Some(error),
+            },
+        }
+        false
+    }
+}
+
 fn selected_open_tag<'a>(
     kits: &'a [Kit],
     kit: Option<KitId>,
@@ -668,15 +811,14 @@ impl Baboon {
             && !state.git_history.loaded
         {
             state.git_history.loaded = true;
-            if let Some(path) = current_path.as_ref() {
-                match git_tag_history(tags_root, path, 0) {
-                    Ok((commits, has_more)) => {
-                        state.git_history.commits = commits;
-                        state.git_history.has_more = has_more;
-                        state.git_history.error = None;
+            if let Some(path) = current_path.clone() {
+                let tags_root = tags_root.to_path_buf();
+                run_tag_compare_git(&self.tx, &mut state, ctx, move || {
+                    TagCompareGitUpdate::History {
+                        append: false,
+                        result: git_tag_history(&tags_root, &path, 0),
                     }
-                    Err(error) => state.git_history.error = Some(error),
-                }
+                });
             }
         }
         let kits = game
@@ -819,6 +961,7 @@ impl Baboon {
         let mut browse = false;
         let mut compare = false;
         let had_results = state.results.is_some();
+        let mut older_commits: Option<(usize, PathBuf)> = None;
         let mut selection_changed = false;
         egui::Window::new("Compare Tags")
             .id(egui::Id::new("tag_diff_window"))
@@ -1152,20 +1295,8 @@ impl Baboon {
                                             ui.separator();
                                             if ui.button("Load older commits…").clicked() {
                                                 let skip = state.git_history.commits.len();
-                                                if let Some(path) = current_path.as_ref() {
-                                                    match git_tag_history(tags_root, path, skip) {
-                                                        Ok((commits, has_more)) => {
-                                                            state
-                                                                .git_history
-                                                                .commits
-                                                                .extend(commits);
-                                                            state.git_history.has_more = has_more;
-                                                            state.git_history.error = None;
-                                                        }
-                                                        Err(error) => {
-                                                            state.git_history.error = Some(error)
-                                                        }
-                                                    }
+                                                if let Some(path) = current_path.clone() {
+                                                    older_commits = Some((skip, path));
                                                 }
                                             }
                                         }
@@ -1220,12 +1351,21 @@ impl Baboon {
                 if state.source == TagCompareSource::GitHistory {
                     if let Some(error) = &state.git_history.error {
                         ui.label(RichText::new(error).color(ui.visuals().error_fg_color));
-                    } else if state.git_history.loaded && state.git_history.commits.is_empty() {
+                    } else if state.git_history.loaded
+                        && state.git_pending.is_none()
+                        && state.git_history.commits.is_empty()
+                    {
                         ui.label(
                             RichText::new("No commits have changed this tag at its current path.")
                                 .color(subtle_dark()),
                         );
                     }
+                }
+                if state.git_pending.is_some() {
+                    ui.horizontal(|ui| {
+                        ui.spinner();
+                        ui.label(RichText::new("Reading Git…").color(subtle_dark()));
+                    });
                 }
                 if let Some(error) = &state.error {
                     ui.label(RichText::new(error).color(ui.visuals().error_fg_color));
@@ -1519,6 +1659,13 @@ impl Baboon {
                 }
             }
         }
+        if let Some((skip, path)) = older_commits {
+            let tags_root = tags_root.to_path_buf();
+            run_tag_compare_git(&self.tx, &mut state, ctx, move || TagCompareGitUpdate::History {
+                append: true,
+                result: git_tag_history(&tags_root, &path, skip),
+            });
+        }
         compare |= had_results && selection_changed;
         if compare {
             state.results = None;
@@ -1541,65 +1688,45 @@ impl Baboon {
                 state.results = Some(comparison_results(&a.tag, b));
                 state.error = None;
             } else if state.source == TagCompareSource::GitHead {
-                if let (Some(a), Some(path), Some(group)) = (a, current_path.as_ref(), group) {
-                    let result = git_tag_bytes(tags_root, path, "HEAD").and_then(|bytes| {
-                        crate::source::read_tag_from_bytes(&bytes, game, definitions_root, group)
-                            .map_err(|error| format!("Could not load tag from Git HEAD: {error}"))
-                    });
-                    match result {
-                        Ok(b) if b.group().tag == group => {
-                            state.results = Some(comparison_results(&a.tag, &b));
-                            state.error = None;
-                        }
-                        Ok(_) => {
-                            state.error =
-                                Some("The tag in Git HEAD has a different tag type.".to_owned())
-                        }
-                        Err(error) => state.error = Some(error),
-                    }
-                }
-            } else if state.source == TagCompareSource::GitHistory {
-                if let (Some(path), Some(group), Some(revision)) = (
-                    current_path.as_ref(),
-                    group,
-                    state.git_history.selected.as_deref(),
-                ) {
-                    let load_tag = |revision: &str| -> Result<Option<TagFile>, String> {
-                        git_tag_bytes_if_present(tags_root, path, revision)?
-                            .map(|bytes| {
-                                let tag = crate::source::read_tag_from_bytes(
+                if let (Some(_), Some(path), Some(group)) = (a, current_path.clone(), group) {
+                    let tags_root = tags_root.to_path_buf();
+                    let game = game.map(str::to_owned);
+                    let definitions_root = definitions_root.map(Path::to_path_buf);
+                    run_tag_compare_git(&self.tx, &mut state, ctx, move || {
+                        TagCompareGitUpdate::Head(
+                            git_tag_bytes(&tags_root, &path, "HEAD").and_then(|bytes| {
+                                crate::source::read_tag_from_bytes(
                                     &bytes,
-                                    game,
-                                    definitions_root,
+                                    game.as_deref(),
+                                    definitions_root.as_deref(),
                                     group,
                                 )
                                 .map_err(|error| {
-                                    format!("Could not load tag from commit {revision}: {error}")
-                                })?;
-                                if tag.group().tag != group {
-                                    return Err(format!(
-                                        "The tag in commit {revision} has a different tag type."
-                                    ));
-                                }
-                                Ok(tag)
-                            })
-                            .transpose()
-                    };
-                    let result = git_commit_parent(tags_root, revision).and_then(|parent| {
-                        let before = parent.as_deref().map(&load_tag).transpose()?.flatten();
-                        let after = load_tag(revision)?;
-                        Ok(comparison_results_with_missing(
-                            before.as_ref(),
-                            after.as_ref(),
+                                    format!("Could not load tag from Git HEAD: {error}")
+                                })
+                            }),
+                        )
+                    });
+                }
+            } else if state.source == TagCompareSource::GitHistory {
+                if let (Some(path), Some(group), Some(revision)) = (
+                    current_path.clone(),
+                    group,
+                    state.git_history.selected.clone(),
+                ) {
+                    let tags_root = tags_root.to_path_buf();
+                    let game = game.map(str::to_owned);
+                    let definitions_root = definitions_root.map(Path::to_path_buf);
+                    run_tag_compare_git(&self.tx, &mut state, ctx, move || {
+                        TagCompareGitUpdate::Revision(git_revision_comparison(
+                            &tags_root,
+                            &path,
+                            &revision,
+                            game.as_deref(),
+                            definitions_root.as_deref(),
+                            group,
                         ))
                     });
-                    match result {
-                        Ok(results) => {
-                            state.results = Some(results);
-                            state.error = None;
-                        }
-                        Err(error) => state.error = Some(error),
-                    }
                 }
             } else if let (Some(a), Some(group), Some(path)) = (a, group, selected_path) {
                 match crate::source::read_tag_at_path(&path, game, definitions_root, group) {
@@ -1819,6 +1946,51 @@ mod tests {
             matching_tag_path(&elsewhere, &current_root, &reference_root),
             None
         );
+    }
+
+    /// A Git read the window has moved past — the history page it asked for
+    /// before a compare — is dropped; the one it is waiting on applies.
+    #[test]
+    fn a_superseded_compare_git_read_is_dropped() {
+        let mut app = Baboon::for_test();
+        app.tag_diff = Some(TagDiffState {
+            kit: app.kits[0].id,
+            a_key: "file:a.weapon".to_owned(),
+            source: TagCompareSource::GitHistory,
+            b_kit: None,
+            b_key: None,
+            b_path: None,
+            comparison_kit_root: None,
+            git_history: GitHistoryState::default(),
+            error: None,
+            filters: TagDiffFilters::default(),
+            swapped: false,
+            results: None,
+            git_pending: Some(2),
+        });
+        let page = |subject: &str| TagCompareGitUpdate::History {
+            append: false,
+            result: Ok((
+                vec![GitHistoryCommit {
+                    hash: subject.to_owned(),
+                    short_hash: subject.to_owned(),
+                    date: String::new(),
+                    author: String::new(),
+                    subject: subject.to_owned(),
+                }],
+                false,
+            )),
+        };
+
+        app.handle_tag_compare_git(1, Ok(page("old")));
+        let state = app.tag_diff.as_ref().unwrap();
+        assert!(state.git_history.commits.is_empty(), "superseded: dropped");
+        assert_eq!(state.git_pending, Some(2));
+
+        app.handle_tag_compare_git(2, Ok(page("new")));
+        let state = app.tag_diff.as_ref().unwrap();
+        assert_eq!(state.git_history.commits[0].subject, "new");
+        assert_eq!(state.git_pending, None);
     }
 
     #[test]

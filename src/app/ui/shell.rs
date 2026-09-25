@@ -543,6 +543,7 @@ impl Baboon {
                                     filters: TagDiffFilters::default(),
                                     swapped: false,
                                     results: None,
+                                    git_pending: None,
                                 });
                             }
                         }

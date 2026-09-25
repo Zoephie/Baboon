@@ -648,6 +648,7 @@ impl Baboon {
         let selected_path = state.selected_path.clone();
         let results = state.results.clone();
         let error = state.error.clone();
+        let loading = state.loading;
         let local_count = state.local_files.len();
         let mut commit_filter = state.commit_filter.clone();
         let mut filter_text = state.filter.clone();
@@ -732,6 +733,21 @@ impl Baboon {
                     Stroke::new(1.0_f32, grid_line()),
                 );
 
+                if loading {
+                    Frame::none()
+                        .inner_margin(egui::Margin {
+                            left: 10.0,
+                            right: 10.0,
+                            top: 0.0,
+                            bottom: 8.0,
+                        })
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.label(RichText::new("Reading Git…").color(subtle_dark()));
+                            });
+                        });
+                }
                 if let Some(error) = error.as_ref() {
                     Frame::none()
                         .inner_margin(egui::Margin {
@@ -932,23 +948,17 @@ impl Baboon {
                 }
             }
             Some(GitReviewAction::Refresh) => {
-                if let Some(root) =
-                    self.kits[kit_index]
-                        .source
-                        .as_ref()
-                        .and_then(|source| match &source.source {
-                            TagSource::LooseFolder { root, .. } => Some(root.clone()),
-                            _ => None,
-                        })
-                {
-                    self.refresh_git_review(kit_index, &root);
-                }
+                self.run_git_review_job(kit_index, GitReviewJob::Refresh, ui.ctx());
             }
             Some(GitReviewAction::SelectRevision(selection)) => {
-                self.select_git_review_revision(kit_index, selection);
+                self.run_git_review_job(
+                    kit_index,
+                    GitReviewJob::SelectRevision(selection),
+                    ui.ctx(),
+                );
             }
             Some(GitReviewAction::SelectFile(path)) => {
-                self.select_git_review_file(kit_index, path);
+                self.run_git_review_job(kit_index, GitReviewJob::SelectFile(path), ui.ctx());
             }
             Some(GitReviewAction::OpenFile(path)) => {
                 self.open_git_review_file(kit_index, &path);

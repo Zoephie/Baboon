@@ -2,6 +2,7 @@
 //! It owns passive cross-frame state and operation messages; rendering and workflow execution belong to UI and controller modules.
 
 use super::*;
+use crate::app::ui::tag_compare::TagCompareGitUpdate;
 
 /// Completed in-place Campaign Evolved duplicate, ready for UI-thread source
 /// and document registration.
@@ -115,6 +116,17 @@ pub(in crate::app) enum WorkerMessage {
         touched: bool,
         written: Vec<ChimpWritten>,
         result: Result<(), String>,
+    },
+    /// A Compare window Git read; `request` says which.
+    TagCompareGit {
+        request: u64,
+        update: Result<TagCompareGitUpdate, String>,
+    },
+    /// A Git Review job's finished view; `request` says which job it was.
+    GitReviewUpdated {
+        kit: KitId,
+        request: u64,
+        view: Result<GitReviewView, String>,
     },
     ChimpPackageLoaded {
         stamp: KitStamp,

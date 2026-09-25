@@ -29,14 +29,6 @@ pub(in crate::app) fn native_git_display_path(git_path: &str) -> String {
     }
 }
 
-fn paths_refer_to_same_file(left: &Path, right: &Path) -> bool {
-    left == right
-        || matches!(
-            (fs::canonicalize(left), fs::canonicalize(right)),
-            (Ok(left), Ok(right)) if left == right
-        )
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::app) enum GitReviewSelection {
     Local,
@@ -82,6 +74,10 @@ pub(in crate::app) struct GitReviewState {
     pub(in crate::app) commit_filter: String,
     pub(in crate::app) filter: String,
     pub(in crate::app) error: Option<String>,
+    /// The newest Git job started for this review; older results are dropped.
+    pub(in crate::app) request: u64,
+    /// A Git job is running.
+    pub(in crate::app) loading: bool,
 }
 
 fn git_output(root: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
@@ -191,28 +187,51 @@ fn can_restore_review_selection(
         }
 }
 
-impl Baboon {
-    pub(super) fn open_git_review(&mut self) {
-        let kit = self.active;
-        let Some(root) = self.kits[kit]
-            .source
-            .as_ref()
-            .and_then(|source| match &source.source {
-                TagSource::LooseFolder { root, .. } => Some(root.clone()),
-                _ => None,
-            })
-        else {
-            self.status = "Git Review is available for folder-based editing kits".to_owned();
-            return;
-        };
-        self.kits[kit].open_tag_pane(GIT_REVIEW_KEY);
-        self.refresh_git_review(kit, &root);
+/// What a Git Review job needs from its kit, captured on the UI thread.
+#[derive(Clone)]
+pub(in crate::app) struct GitReviewKit {
+    source_root: PathBuf,
+    definitions_root: PathBuf,
+    game: Option<String>,
+}
+
+/// The part of [`GitReviewState`] that Git decides. A job takes a copy to a
+/// worker, runs Git and the tag reads against it there, and the finished copy
+/// replaces the state's in one go.
+#[derive(Clone, Default)]
+pub(in crate::app) struct GitReviewView {
+    pub(in crate::app) repo_root: Option<PathBuf>,
+    pub(in crate::app) branch: String,
+    pub(in crate::app) commits: Vec<GitReviewCommit>,
+    pub(in crate::app) local_files: Vec<GitReviewFile>,
+    pub(in crate::app) files: Vec<GitReviewFile>,
+    pub(in crate::app) selection: GitReviewSelection,
+    pub(in crate::app) selected_path: Option<String>,
+    pub(in crate::app) results: Option<TagDiffResults>,
+    pub(in crate::app) error: Option<String>,
+}
+
+/// A Git Review job for a worker.
+pub(in crate::app) enum GitReviewJob {
+    Refresh,
+    SelectRevision(GitReviewSelection),
+    SelectFile(String),
+}
+
+impl GitReviewView {
+    fn run(&mut self, kit: &GitReviewKit, job: GitReviewJob) {
+        match job {
+            GitReviewJob::Refresh => self.refresh(kit),
+            GitReviewJob::SelectRevision(selection) => self.select_revision(kit, selection),
+            GitReviewJob::SelectFile(path) => self.select_file(kit, path),
+        }
     }
 
-    pub(in crate::app) fn refresh_git_review(&mut self, kit: usize, source_root: &Path) {
-        let previous_repo = self.kits[kit].git_review.repo_root.clone();
-        let previous_selection = self.kits[kit].git_review.selection.clone();
-        let previous_path = self.kits[kit].git_review.selected_path.clone();
+    fn refresh(&mut self, kit: &GitReviewKit) {
+        let source_root = kit.source_root.as_path();
+        let previous_repo = self.repo_root.clone();
+        let previous_selection = self.selection.clone();
+        let previous_path = self.selected_path.clone();
         let result = (|| {
             // Git for Windows prints the worktree root with `/` separators.
             // Keep Git's relative file paths untouched, but store the root in
@@ -248,51 +267,40 @@ impl Baboon {
                 } else {
                     GitReviewSelection::Local
                 };
-                let state = &mut self.kits[kit].git_review;
-                state.repo_root = Some(repo);
-                state.branch = branch;
-                state.commits = commits;
-                state.local_files = files.clone();
-                state.files = files;
-                state.selection = GitReviewSelection::Local;
-                state.selected_path = None;
-                state.results = None;
-                state.error = None;
+                self.repo_root = Some(repo);
+                self.branch = branch;
+                self.commits = commits;
+                self.local_files = files.clone();
+                self.files = files;
+                self.selection = GitReviewSelection::Local;
+                self.selected_path = None;
+                self.results = None;
+                self.error = None;
                 if selection != GitReviewSelection::Local {
-                    self.select_git_review_revision(kit, selection);
-                    if self.kits[kit].git_review.error.is_some() {
-                        let state = &mut self.kits[kit].git_review;
-                        state.selection = GitReviewSelection::Local;
-                        state.files = state.local_files.clone();
+                    self.select_revision(kit, selection);
+                    if self.error.is_some() {
+                        self.selection = GitReviewSelection::Local;
+                        self.files = self.local_files.clone();
                         return;
                     }
                 }
                 if restore_previous
                     && let Some(path) = previous_path
-                    && self.kits[kit].git_review.error.is_none()
-                    && self.kits[kit]
-                        .git_review
-                        .files
-                        .iter()
-                        .any(|file| file.path == path)
+                    && self.error.is_none()
+                    && self.files.iter().any(|file| file.path == path)
                 {
-                    self.select_git_review_file(kit, path);
+                    self.select_file(kit, path);
                 }
             }
             Err(error) => {
-                let state = &mut self.kits[kit].git_review;
-                state.repo_root = None;
-                state.error = Some(error);
+                self.repo_root = None;
+                self.error = Some(error);
             }
         }
     }
 
-    pub(in crate::app) fn select_git_review_revision(
-        &mut self,
-        kit: usize,
-        selection: GitReviewSelection,
-    ) {
-        let Some(repo) = self.kits[kit].git_review.repo_root.clone() else {
+    fn select_revision(&mut self, kit: &GitReviewKit, selection: GitReviewSelection) {
+        let Some(repo) = self.repo_root.clone() else {
             return;
         };
         let mut files = match &selection {
@@ -313,130 +321,55 @@ impl Baboon {
             )
             .map(|text| parse_name_status(&text)),
         };
-        if let Ok(files) = &mut files
-            && let Some(source_root) =
-                self.kits[kit]
-                    .source
-                    .as_ref()
-                    .and_then(|source| match &source.source {
-                        TagSource::LooseFolder { root, .. } => Some(root.as_path()),
-                        _ => None,
-                    })
-        {
-            retain_source_tags(files, &repo, source_root);
+        if let Ok(files) = &mut files {
+            retain_source_tags(files, &repo, &kit.source_root);
         }
         let local_selected = selection == GitReviewSelection::Local;
         if local_selected && let Ok(files) = &mut files {
             sort_files_by_full_path(files);
         }
-        let state = &mut self.kits[kit].git_review;
-        state.selection = selection;
-        state.selected_path = None;
-        state.results = None;
+        self.selection = selection;
+        self.selected_path = None;
+        self.results = None;
         match files {
             Ok(files) => {
                 if local_selected {
-                    state.local_files = files.clone();
+                    self.local_files = files.clone();
                 }
-                state.files = files;
-                state.error = None;
+                self.files = files;
+                self.error = None;
             }
-            Err(error) => state.error = Some(error),
+            Err(error) => self.error = Some(error),
         }
     }
 
-    pub(in crate::app) fn select_git_review_file(&mut self, kit: usize, path: String) {
-        let result = self.git_review_comparison(kit, &path);
-        let state = &mut self.kits[kit].git_review;
-        state.selected_path = Some(path);
+    fn select_file(&mut self, kit: &GitReviewKit, path: String) {
+        let result = self.comparison(kit, &path);
+        self.selected_path = Some(path);
         match result {
             Ok(results) => {
-                state.results = Some(results);
-                state.error = None;
+                self.results = Some(results);
+                self.error = None;
             }
             Err(error) => {
-                state.results = None;
-                state.error = Some(error);
+                self.results = None;
+                self.error = Some(error);
             }
         }
     }
 
-    pub(in crate::app) fn open_git_review_file(&mut self, kit: usize, path: &str) {
-        let Some(repo) = self.kits[kit].git_review.repo_root.as_ref() else {
-            return;
-        };
-        let absolute = git_worktree_path(repo, path);
-        if !absolute.is_file() {
-            self.status = format!("Cannot open deleted tag {}", native_git_display_path(path));
-            return;
-        }
-
-        let existing_key = self.kits[kit].source.as_ref().and_then(|source| {
-            source
-                .entries
-                .iter()
-                .chain(source.all_entries.iter())
-                .find_map(|entry| match &entry.location {
-                    TagEntryLocation::LooseFile(existing)
-                        if paths_refer_to_same_file(existing, &absolute) =>
-                    {
-                        Some(entry.key.clone())
-                    }
-                    _ => None,
-                })
-        });
-        let key = if let Some(key) = existing_key {
-            key
-        } else {
-            let new_entry = self.kits[kit].source.as_ref().and_then(|source| {
-                let TagSource::LooseFolder { root, .. } = &source.source else {
-                    return None;
-                };
-                let absolute = fs::canonicalize(&absolute).unwrap_or_else(|_| absolute.clone());
-                loose_file_entry(root, &absolute, &source.names)
-                    .ok()
-                    .flatten()
-            });
-            let Some(entry) = new_entry else {
-                self.status = format!(
-                    "Cannot find tag {} in the loaded editing kit",
-                    native_git_display_path(path)
-                );
-                return;
-            };
-            let key = entry.key.clone();
-            let folder_seeds = self.kits[kit].folder_seeds();
-            if let Some(source) = self.kits[kit].source.as_mut() {
-                source.upsert_entry(entry, &folder_seeds);
-            }
-            self.kits[kit].generation = self.kits[kit].generation.wrapping_add(1);
-            key
-        };
-        self.kits[kit].git_review.pending_open = Some(key);
-    }
-
-    fn git_review_comparison(&self, kit: usize, path: &str) -> Result<TagDiffResults, String> {
-        let state = &self.kits[kit].git_review;
-        let repo = state
+    fn comparison(&self, kit: &GitReviewKit, path: &str) -> Result<TagDiffResults, String> {
+        let repo = self
             .repo_root
             .as_ref()
             .ok_or_else(|| "No Git repository is loaded.".to_owned())?;
-        let file = state
+        let file = self
             .files
             .iter()
             .find(|file| file.path == path)
             .ok_or_else(|| "The selected tag is no longer in this change set.".to_owned())?;
-        let source = self.kits[kit]
-            .source
-            .as_ref()
-            .ok_or_else(|| "The editing kit is no longer loaded.".to_owned())?;
-        let definitions_root = match &source.source {
-            TagSource::LooseFolder {
-                definitions_root, ..
-            } => definitions_root.as_path(),
-            _ => return Err("Git Review requires a folder-based editing kit.".to_owned()),
-        };
-        let game = source.game.as_deref();
+        let definitions_root = kit.definitions_root.as_path();
+        let game = kit.game.as_deref();
         let load_revision = |revision: &str| -> Result<Option<TagFile>, String> {
             let object = format!("{revision}:{path}");
             let exists = Command::new("git")
@@ -462,7 +395,7 @@ impl Baboon {
                 .map(Some)
                 .map_err(|error| format!("Could not parse working tag {path}: {error}"))
         };
-        let (before, after) = match &state.selection {
+        let (before, after) = match &self.selection {
             GitReviewSelection::Local => (load_revision("HEAD")?, load_working()?),
             GitReviewSelection::Commit(hash) => {
                 let parent = git_text(repo, &["rev-list", "--parents", "-n", "1", hash])?
@@ -479,6 +412,168 @@ impl Baboon {
                 after.as_ref(),
             ),
         )
+    }
+}
+
+impl GitReviewState {
+    fn view(&self) -> GitReviewView {
+        GitReviewView {
+            repo_root: self.repo_root.clone(),
+            branch: self.branch.clone(),
+            commits: self.commits.clone(),
+            local_files: self.local_files.clone(),
+            files: self.files.clone(),
+            selection: self.selection.clone(),
+            selected_path: self.selected_path.clone(),
+            results: self.results.clone(),
+            error: self.error.clone(),
+        }
+    }
+
+    fn apply(&mut self, view: GitReviewView) {
+        self.repo_root = view.repo_root;
+        self.branch = view.branch;
+        self.commits = view.commits;
+        self.local_files = view.local_files;
+        self.files = view.files;
+        self.selection = view.selection;
+        self.selected_path = view.selected_path;
+        self.results = view.results;
+        self.error = view.error;
+    }
+}
+
+impl Baboon {
+    pub(super) fn open_git_review(&mut self, ctx: &egui::Context) {
+        let kit = self.active;
+        if !matches!(
+            self.kits[kit].source.as_ref().map(|source| &source.source),
+            Some(TagSource::LooseFolder { .. })
+        ) {
+            self.status = "Git Review is available for folder-based editing kits".to_owned();
+            return;
+        }
+        self.kits[kit].open_tag_pane(GIT_REVIEW_KEY);
+        self.run_git_review_job(kit, GitReviewJob::Refresh, ctx);
+    }
+
+    /// Run Git for the review on a worker: `status` over a whole kit, and the
+    /// reads and diff behind a selected file, are too slow for a frame.
+    ///
+    /// Each job starts from the state as it stands and replaces it when it
+    /// finishes. Only the newest job's result is applied, so a slow read for
+    /// a file the user has already clicked past cannot land over a later one.
+    pub(in crate::app) fn run_git_review_job(
+        &mut self,
+        kit_index: usize,
+        job: GitReviewJob,
+        ctx: &egui::Context,
+    ) {
+        let Some((source_root, definitions_root, game)) =
+            self.kits[kit_index].source.as_ref().and_then(|source| {
+                match &source.source {
+                    TagSource::LooseFolder {
+                        root,
+                        definitions_root,
+                        ..
+                    } => Some((root.clone(), definitions_root.clone(), source.game.clone())),
+                    _ => None,
+                }
+            })
+        else {
+            self.kits[kit_index].git_review.error =
+                Some("Git Review requires a folder-based editing kit.".to_owned());
+            return;
+        };
+        let review_kit = GitReviewKit {
+            source_root,
+            definitions_root,
+            game,
+        };
+        let kit = self.kits[kit_index].id;
+        let state = &mut self.kits[kit_index].git_review;
+        state.request += 1;
+        state.loading = true;
+        let request = state.request;
+        let mut view = state.view();
+        spawn_worker(
+            &self.tx,
+            ctx,
+            move || {
+                view.run(&review_kit, job);
+                WorkerMessage::GitReviewUpdated {
+                    kit,
+                    request,
+                    view: Ok(view),
+                }
+            },
+            move |error| WorkerMessage::GitReviewUpdated {
+                kit,
+                request,
+                view: Err(error),
+            },
+        );
+    }
+
+    /// Applies `WorkerMessage::GitReviewUpdated` if it is the newest job.
+    pub(in crate::app) fn handle_git_review_updated(
+        &mut self,
+        kit: KitId,
+        request: u64,
+        view: Result<GitReviewView, String>,
+    ) -> bool {
+        let Some(kit_index) = self.kit_index(kit) else {
+            return false;
+        };
+        let state = &mut self.kits[kit_index].git_review;
+        if state.request != request {
+            return false;
+        }
+        state.loading = false;
+        match view {
+            Ok(view) => state.apply(view),
+            Err(error) => state.error = Some(error),
+        }
+        false
+    }
+
+    pub(in crate::app) fn open_git_review_file(&mut self, kit: usize, path: &str) {
+        let Some(repo) = self.kits[kit].git_review.repo_root.as_ref() else {
+            return;
+        };
+        let absolute = git_worktree_path(repo, path);
+        if !absolute.is_file() {
+            self.status = format!("Cannot open deleted tag {}", native_git_display_path(path));
+            return;
+        }
+        // The review only lists files under the kit's root as the kit spells
+        // it (`retain_source_tags`), so this is the path the kit's own scan
+        // produced, and its key is the scan's key. This used to canonicalize
+        // the path against every entry in the kit, twice, per click.
+        let key = format!("file:{}", absolute.display());
+        if self.kits[kit].entry_for_key(&key).is_none() {
+            let new_entry = self.kits[kit].source.as_ref().and_then(|source| {
+                let TagSource::LooseFolder { root, .. } = &source.source else {
+                    return None;
+                };
+                loose_file_entry(root, &absolute, &source.names)
+                    .ok()
+                    .flatten()
+            });
+            let Some(entry) = new_entry else {
+                self.status = format!(
+                    "Cannot find tag {} in the loaded editing kit",
+                    native_git_display_path(path)
+                );
+                return;
+            };
+            let folder_seeds = self.kits[kit].folder_seeds();
+            if let Some(source) = self.kits[kit].source.as_mut() {
+                source.upsert_entry(entry, &folder_seeds);
+            }
+            self.kits[kit].generation = self.kits[kit].generation.wrapping_add(1);
+        }
+        self.kits[kit].git_review.pending_open = Some(key);
     }
 }
 
@@ -587,4 +682,79 @@ mod tests {
             &[],
         ));
     }
+
+    /// Jobs finish in any order. A slow comparison for a file the user has
+    /// already clicked past must not land over the newer one.
+    #[test]
+    fn an_older_git_review_result_is_dropped() {
+        let mut app = Baboon::for_test();
+        let kit = app.kits[0].id;
+        app.kits[0].git_review.request = 2;
+        app.kits[0].git_review.loading = true;
+        let view = |path: &str| GitReviewView {
+            selected_path: Some(path.to_owned()),
+            ..Default::default()
+        };
+
+        app.handle_git_review_updated(kit, 1, Ok(view("first.weapon")));
+        let state = &app.kits[0].git_review;
+        assert_eq!(state.selected_path, None, "stale: not applied");
+        assert!(state.loading, "the newer job is still running");
+
+        app.handle_git_review_updated(kit, 2, Ok(view("second.weapon")));
+        let state = &app.kits[0].git_review;
+        assert_eq!(state.selected_path.as_deref(), Some("second.weapon"));
+        assert!(!state.loading);
+    }
+
+    /// Opening a reviewed file finds the entry the kit's own scan made, by
+    /// key, rather than adding a second one for the same file.
+    #[test]
+    fn opening_a_reviewed_file_finds_the_scanned_entry() {
+        let root = std::env::temp_dir().join(format!("baboon-git-open-{}", uuid::Uuid::new_v4()));
+        let tags = root.join("tags");
+        let path = tags.join("objects").join("rifle.weapon");
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let mut bytes = vec![0u8; 64];
+        bytes[36..40].copy_from_slice(b"weap");
+        fs::write(&path, &bytes).unwrap();
+        let entry = TagEntry {
+            key: format!("file:{}", path.display()),
+            display_path: "objects/rifle.weapon".to_owned(),
+            group_tag: u32::from_be_bytes(*b"weap"),
+            group_name: Some("weapon".to_owned()),
+            location: TagEntryLocation::LooseFile(path.clone()),
+        };
+        let entries = vec![entry.clone()];
+
+        let mut app = Baboon::for_test();
+        app.kits[0].source = Some(LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::LooseFolder {
+                root: tags.clone(),
+                game: None,
+                definitions_root: PathBuf::new(),
+            },
+            names: Default::default(),
+            game: None,
+            tree: crate::source::build_tree(&entries),
+            group_tree: crate::source::build_tree(&entries),
+            entries,
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+        });
+        app.kits[0].git_review.repo_root = Some(root.clone());
+        let generation = app.kits[0].generation;
+
+        app.open_git_review_file(0, "tags/objects/rifle.weapon");
+        let _ = fs::remove_dir_all(&root);
+
+        assert_eq!(app.kits[0].git_review.pending_open, Some(entry.key));
+        assert_eq!(app.kits[0].generation, generation, "no entry was added");
+        assert_eq!(app.kits[0].source.as_ref().unwrap().entries.len(), 1);
+    }
+
 }

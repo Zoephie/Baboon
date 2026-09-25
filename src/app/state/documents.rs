@@ -1008,6 +1008,8 @@ pub(in crate::app) struct TagDiffState {
     /// Reverses which tag is on the left in the results table.
     pub(in crate::app) swapped: bool,
     pub(in crate::app) results: Option<TagDiffResults>,
+    /// The Git read this window is waiting on, if any.
+    pub(in crate::app) git_pending: Option<u64>,
 }
 
 #[derive(Clone)]

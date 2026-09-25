@@ -725,7 +725,7 @@ impl Baboon {
         }
         if open_git_review {
             self.active = kit_index;
-            self.open_git_review();
+            self.open_git_review(ctx);
         }
         self.queue_bitmap_hover_thumbnails(kit_index, &bitmap_hover_requests, ctx);
     }
