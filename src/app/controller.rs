@@ -7040,21 +7040,45 @@ impl Baboon {
     /// Scan every scenario (`scnr`) tag and list its map id (+ map name where
     /// present). Reads `map id` at the scenario root, which covers the modern
     /// engines (H2A/H3/ODST/Reach/H4); classic Halo 2 stores it elsewhere.
+    /// Every tag a whole-source listing should walk, or why it cannot yet.
+    ///
+    /// A container mount enumerates every tag up front, into `entries`, and
+    /// leaves `all_entries` empty; a loose folder only has them all once its
+    /// background scan is done. The listings read `all_entries` directly, so
+    /// on a container they walked nothing, and on a folder mid-scan they
+    /// walked nothing too, and both said "none found".
+    fn listing_entries(&self) -> Result<&[TagEntry], String> {
+        let source = self.source().ok_or_else(|| "No source loaded.".to_owned())?;
+        if matches!(source.source, TagSource::LooseFolder { .. }) && source.all_entries.is_empty()
+        {
+            return Err(
+                "The tag index is still being built; try again once indexing finishes.".to_owned(),
+            );
+        }
+        Ok(source.full_entry_set())
+    }
+
     pub(super) fn show_map_ids(&mut self) {
+        let listed = match self.listing_entries() {
+            Ok(listed) => listed,
+            Err(note) => {
+                self.query_results = Some(TagQueryResults {
+                    kit: self.active_kit_id(),
+                    title: "Scenario map IDs".to_owned(),
+                    entries: Vec::new(),
+                    annotations: Vec::new(),
+                    note: Some(note),
+                    ref_target: None,
+                });
+                return;
+            }
+        };
         let Some(source) = self.source() else {
-            self.query_results = Some(TagQueryResults {
-                kit: self.active_kit_id(),
-                title: "Scenario map IDs".to_owned(),
-                entries: Vec::new(),
-                annotations: Vec::new(),
-                note: Some("No source loaded.".to_owned()),
-                ref_target: None,
-            });
             return;
         };
         let mut entries = Vec::new();
         let mut annotations = Vec::new();
-        for entry in &source.all_entries {
+        for entry in listed {
             if &entry.group_tag.to_be_bytes() != b"scnr" {
                 continue;
             }
@@ -7093,10 +7117,11 @@ impl Baboon {
     /// Scan every `snd!` tag once, reading its `sound class` + `compression`
     /// enum names. Shared by the class-listing and uncompressed-listing tools.
     /// Returns `(class, compression, entry)` triples, or `None` if no source.
-    fn scan_sound_tags(&self) -> Option<Vec<(String, String, TagEntry)>> {
-        let source = self.source()?;
+    fn scan_sound_tags(&self) -> Result<Vec<(String, String, TagEntry)>, String> {
+        let listed = self.listing_entries()?;
+        let source = self.source().ok_or_else(|| "No source loaded.".to_owned())?;
         let mut rows = Vec::new();
-        for entry in &source.all_entries {
+        for entry in listed {
             if &entry.group_tag.to_be_bytes() != b"snd!" {
                 continue;
             }
@@ -7113,7 +7138,7 @@ impl Baboon {
                 .unwrap_or_default();
             rows.push((class, compression, entry.clone()));
         }
-        Some(rows)
+        Ok(rows)
     }
 
     /// List every `snd!` tag annotated with its sound class + compression, with a
@@ -7121,16 +7146,19 @@ impl Baboon {
     /// `count-all-class-sounds`).
     pub(super) fn show_sounds_by_class(&mut self) {
         let title = "Sounds by class";
-        let Some(mut rows) = self.scan_sound_tags() else {
-            self.query_results = Some(TagQueryResults {
-                kit: self.active_kit_id(),
-                title: title.to_owned(),
-                entries: Vec::new(),
-                annotations: Vec::new(),
-                note: Some("No source loaded.".to_owned()),
-                ref_target: None,
-            });
-            return;
+        let mut rows = match self.scan_sound_tags() {
+            Ok(rows) => rows,
+            Err(note) => {
+                self.query_results = Some(TagQueryResults {
+                    kit: self.active_kit_id(),
+                    title: title.to_owned(),
+                    entries: Vec::new(),
+                    annotations: Vec::new(),
+                    note: Some(note),
+                    ref_target: None,
+                });
+                return;
+            }
         };
         rows.sort_by(|a, b| {
             a.0.cmp(&b.0)
@@ -7175,16 +7203,19 @@ impl Baboon {
     /// mirroring `dump-uncompressed-sounds`.
     pub(super) fn show_uncompressed_sounds(&mut self) {
         let title = "Uncompressed sounds";
-        let Some(rows) = self.scan_sound_tags() else {
-            self.query_results = Some(TagQueryResults {
-                kit: self.active_kit_id(),
-                title: title.to_owned(),
-                entries: Vec::new(),
-                annotations: Vec::new(),
-                note: Some("No source loaded.".to_owned()),
-                ref_target: None,
-            });
-            return;
+        let rows = match self.scan_sound_tags() {
+            Ok(rows) => rows,
+            Err(note) => {
+                self.query_results = Some(TagQueryResults {
+                    kit: self.active_kit_id(),
+                    title: title.to_owned(),
+                    entries: Vec::new(),
+                    annotations: Vec::new(),
+                    note: Some(note),
+                    ref_target: None,
+                });
+                return;
+            }
         };
         let mut hits: Vec<(String, String, TagEntry)> = rows
             .into_iter()
@@ -10190,6 +10221,70 @@ fn tsv_paste_summary(
         ));
     }
     summary
+}
+
+#[cfg(test)]
+mod listing_entries_tests {
+    use super::*;
+
+    fn source(source: TagSource, entries: Vec<TagEntry>) -> LoadedSourceData {
+        LoadedSourceData {
+            label: "test".to_owned(),
+            source,
+            names: TagNameIndex::default(),
+            game: None,
+            entries,
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+        }
+    }
+
+    fn sound() -> TagEntry {
+        TagEntry {
+            key: "file:/kit/tags/a.sound".to_owned(),
+            display_path: "a.sound".to_owned(),
+            group_tag: u32::from_be_bytes(*b"snd!"),
+            group_name: Some("sound".to_owned()),
+            location: TagEntryLocation::LooseFile(PathBuf::from("/kit/tags/a.sound")),
+        }
+    }
+
+    /// A source that lists every tag up front keeps them in `entries`, with
+    /// `all_entries` empty. The whole-source listings read `all_entries`, so
+    /// on such a source they walked nothing and reported "none found".
+    #[test]
+    fn whole_source_listings_see_a_source_listed_up_front() {
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(source(
+            TagSource::SingleFile {
+                path: PathBuf::from("/kit/tags/a.sound"),
+            },
+            vec![sound()],
+        ));
+        assert_eq!(app.listing_entries().map(<[TagEntry]>::len), Ok(1));
+    }
+
+    /// A loose folder mid-scan has only the folders browsed so far. Saying
+    /// "none found" from that is wrong; saying the index is not ready is not.
+    #[test]
+    fn whole_source_listings_wait_for_a_loose_folder_scan() {
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(source(
+            TagSource::LooseFolder {
+                root: PathBuf::from("/kit/tags"),
+                game: None,
+                definitions_root: PathBuf::new(),
+            },
+            vec![sound()],
+        ));
+        let Err(error) = app.listing_entries() else {
+            panic!("a loose folder mid-scan must not be listed");
+        };
+        assert!(error.contains("still being built"), "{error}");
+    }
 }
 
 #[cfg(test)]
