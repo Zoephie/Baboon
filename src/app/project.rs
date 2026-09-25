@@ -297,7 +297,10 @@ pub(super) struct ActiveCampaignProject {
     pub(super) overlays: HashMap<String, CampaignProjectOverlay>,
     /// Document key -> the `Dirty` revision its overlay bytes were written
     /// from, so an untouched document is never serialized twice.
-    pub(super) captured_revisions: HashMap<String, u64>,
+    /// Keyed by `content_stamp()`, not the bare revision: a reloaded
+    /// document starts again from revision 0, and a revision alone could take
+    /// it for the document it replaced and keep that one's stale bytes.
+    pub(super) captured_revisions: HashMap<String, (u64, u64)>,
     /// What the recovery file holds, by identity, so a save writes only the rows
     /// whose bytes changed instead of replacing every overlay.
     ///
@@ -1173,7 +1176,7 @@ impl Baboon {
             if let Some(revision) = self.kits[kit]
                 .parsed_tags
                 .get(&key)
-                .map(|document| document.dirty.revision())
+                .map(|document| document.content_stamp())
             {
                 if let Some(project) = self.kits[kit].campaign_project.as_mut() {
                     project.captured_revisions.insert(key, revision);
@@ -1231,7 +1234,7 @@ impl Baboon {
             .as_ref()
             .map(|project| project.captured_revisions.clone())
             .unwrap_or_default();
-        let mut now_captured: HashMap<String, u64> = HashMap::new();
+        let mut now_captured: HashMap<String, (u64, u64)> = HashMap::new();
         for (key, document) in &self.kits[kit].parsed_tags {
             if !document.dirty.is_set() {
                 continue;
@@ -1248,7 +1251,7 @@ impl Baboon {
             else {
                 continue;
             };
-            let revision = document.dirty.revision();
+            let revision = document.content_stamp();
             now_captured.insert(key.clone(), revision);
             if captured.get(key) == Some(&revision) && overlays.contains_key(&identity) {
                 continue;
@@ -1855,7 +1858,7 @@ impl Baboon {
         self.adopt_project_container_folders(kit, snapshot.folders.clone());
 
         let mut identity_to_key = HashMap::<String, String>::new();
-        let mut restored_revisions = HashMap::<String, u64>::new();
+        let mut restored_revisions = HashMap::<String, (u64, u64)>::new();
         let mut missing = 0usize;
 
         // Recreate new project tags first, including ones that are currently
@@ -1917,7 +1920,7 @@ impl Baboon {
                     // the project already holds its serialization. Recording
                     // that spares the first autosave after a restore from
                     // writing every stashed tag out again.
-                    restored_revisions.insert(key.clone(), document.dirty.revision());
+                    restored_revisions.insert(key.clone(), document.content_stamp());
                     self.kits[kit].parsed_tags.insert(key.clone(), document);
                     self.apply_pending_history(kit, &key);
                 } else {
@@ -1991,7 +1994,7 @@ impl Baboon {
                 // Same as a restore: the stashed bytes are this document's
                 // serialization already, so autosave need not redo it.
                 let document = TagDocument::modified(tag);
-                let revision = document.dirty.revision();
+                let revision = document.content_stamp();
                 self.kits[kit].parsed_tags.insert(key.to_owned(), document);
                 if let Some(project) = self.kits[kit].campaign_project.as_mut() {
                     project.captured_revisions.insert(key.to_owned(), revision);
