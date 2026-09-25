@@ -1028,19 +1028,196 @@ unsafe fn bind_preview_vertex_layout(
     Ok(())
 }
 
-struct ModelGlRenderer {
-    program: glow::NativeProgram,
+/// How many models stay on the GPU at once: geometry, ground grid and
+/// textures. Past this, the one drawn longest ago gives up its slot.
+const MODEL_GPU_SLOTS: usize = 4;
+
+/// Which slot each model draws from, least recently drawn out first.
+///
+/// The renderer used to hold one model. With two previews on screen each
+/// frame drew one model, then the other, and each draw replaced what the other
+/// had just uploaded: every frame re-sent both models' vertices, indices and
+/// textures to the GPU.
+#[derive(Default)]
+struct ModelSlotLru {
+    /// `(geometry id, last drawn)`, one per slot in use.
+    slots: Vec<(u64, u64)>,
+    clock: u64,
+}
+
+impl ModelSlotLru {
+    /// The slot for `geometry_id`, and whether it must be uploaded: a new
+    /// slot, or one taken from the model drawn longest ago.
+    fn acquire(&mut self, geometry_id: u64, capacity: usize) -> (usize, bool) {
+        self.clock += 1;
+        if let Some(index) = self.slots.iter().position(|(id, _)| *id == geometry_id) {
+            self.slots[index].1 = self.clock;
+            return (index, false);
+        }
+        if self.slots.len() < capacity.max(1) {
+            self.slots.push((geometry_id, self.clock));
+            return (self.slots.len() - 1, true);
+        }
+        let index = self
+            .slots
+            .iter()
+            .enumerate()
+            .min_by_key(|(_, (_, used))| *used)
+            .map(|(index, _)| index)
+            .unwrap_or(0);
+        self.slots[index] = (geometry_id, self.clock);
+        (index, true)
+    }
+
+    /// Forget a slot that could not be created.
+    fn abandon(&mut self, index: usize) {
+        if index + 1 == self.slots.len() {
+            self.slots.pop();
+        }
+    }
+}
+
+/// One model's buffers, ground grid and textures on the GPU.
+struct ModelGpuSlot {
     vertex_array: glow::NativeVertexArray,
     vertex_buffer: glow::NativeBuffer,
     index_buffer: glow::NativeBuffer,
-    /// The ground grid's own vertex array and buffer, rebuilt per geometry
+    /// The ground grid's own vertex array and buffer, built per geometry
     /// (its spacing and extent follow the model's bounds).
     grid_vertex_array: glow::NativeVertexArray,
     grid_vertex_buffer: glow::NativeBuffer,
     grid_vertex_count: i32,
     /// Vertex index where the world-axis lines begin; see `grid_line_vertices`.
     grid_axis_start: i32,
-    grid_for_geometry: Option<u64>,
+    grid_built: bool,
+    /// GL textures per material, in `RenderModelPreview::materials` order.
+    materials: Vec<MaterialGlTextures>,
+    /// The `textures_id` the uploaded `materials` belong to, so a reloaded
+    /// model, or another model given this slot, re-uploads rather than drawing
+    /// the wrong textures.
+    uploaded_textures: Option<u64>,
+}
+
+impl ModelGpuSlot {
+    unsafe fn new(gl: &glow::Context, program: glow::NativeProgram) -> Result<Self, String> {
+        unsafe {
+            let vertex_array = gl
+                .create_vertex_array()
+                .map_err(|error| error.to_string())?;
+            let vertex_buffer = gl.create_buffer().map_err(|error| error.to_string())?;
+            let index_buffer = gl.create_buffer().map_err(|error| error.to_string())?;
+            gl.bind_vertex_array(Some(vertex_array));
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer));
+            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(index_buffer));
+            bind_preview_vertex_layout(gl, program)?;
+            gl.bind_vertex_array(None);
+
+            let grid_vertex_array = gl
+                .create_vertex_array()
+                .map_err(|error| error.to_string())?;
+            let grid_vertex_buffer = gl.create_buffer().map_err(|error| error.to_string())?;
+            gl.bind_vertex_array(Some(grid_vertex_array));
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(grid_vertex_buffer));
+            bind_preview_vertex_layout(gl, program)?;
+            gl.bind_vertex_array(None);
+            gl.bind_buffer(glow::ARRAY_BUFFER, None);
+            Ok(Self {
+                vertex_array,
+                vertex_buffer,
+                index_buffer,
+                grid_vertex_array,
+                grid_vertex_buffer,
+                grid_vertex_count: 0,
+                grid_axis_start: 0,
+                grid_built: false,
+                materials: Vec::new(),
+                uploaded_textures: None,
+            })
+        }
+    }
+
+    unsafe fn upload_geometry(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
+        unsafe {
+            gl.bind_vertex_array(Some(self.vertex_array));
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
+            gl.buffer_data_u8_slice(
+                glow::ARRAY_BUFFER,
+                slice_bytes(&frame.preview.vertices),
+                glow::STATIC_DRAW,
+            );
+            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.index_buffer));
+            gl.buffer_data_u8_slice(
+                glow::ELEMENT_ARRAY_BUFFER,
+                slice_bytes(&frame.preview.indices),
+                glow::STATIC_DRAW,
+            );
+        }
+        self.grid_built = false;
+    }
+
+    /// Build the ground grid for this slot's model, once.
+    unsafe fn sync_grid(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
+        if self.grid_built {
+            return;
+        }
+        let (vertices, axis_start) = grid_line_vertices(&frame.preview);
+        unsafe {
+            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.grid_vertex_buffer));
+            gl.buffer_data_u8_slice(
+                glow::ARRAY_BUFFER,
+                slice_bytes(&vertices),
+                glow::STATIC_DRAW,
+            );
+            gl.bind_buffer(glow::ARRAY_BUFFER, None);
+        }
+        self.grid_axis_start = axis_start as i32;
+        self.grid_vertex_count = vertices.len() as i32;
+        self.grid_built = true;
+    }
+
+    /// Bring the slot's textures in line with the frame's, uploading only
+    /// when they changed or arrived.
+    unsafe fn sync_textures(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
+        let wanted = frame.textures.as_ref().map(|_| frame.textures_id);
+        if self.uploaded_textures == wanted {
+            return;
+        }
+        unsafe { self.release_textures(gl) };
+        self.uploaded_textures = wanted;
+        let Some(textures) = frame.textures.as_ref() else {
+            return;
+        };
+        self.materials = textures
+            .iter()
+            .map(|material| {
+                let mut uploaded = MaterialGlTextures::default();
+                for (slot, _) in SLOT_PARAMETERS {
+                    let index = slot as usize;
+                    uploaded.uv_scales[index] = 1.0;
+                    let Some(image) = material.get(slot) else {
+                        continue;
+                    };
+                    uploaded.uv_scales[index] = image.scale;
+                    uploaded.textures[index] = unsafe { upload_texture(gl, image) };
+                }
+                uploaded
+            })
+            .collect();
+    }
+
+    unsafe fn release_textures(&mut self, gl: &glow::Context) {
+        for material in self.materials.drain(..) {
+            for texture in material.textures.into_iter().flatten() {
+                unsafe { gl.delete_texture(texture) };
+            }
+        }
+    }
+}
+
+struct ModelGlRenderer {
+    program: glow::NativeProgram,
+    slots: Vec<ModelGpuSlot>,
+    lru: ModelSlotLru,
     center: glow::NativeUniformLocation,
     scale: glow::NativeUniformLocation,
     angles: glow::NativeUniformLocation,
@@ -1061,12 +1238,6 @@ struct ModelGlRenderer {
     uv_scale_b: Option<glow::NativeUniformLocation>,
     /// One sampler location per slot, in `TextureSlot` order.
     samplers: [Option<glow::NativeUniformLocation>; SLOT_COUNT],
-    uploaded_geometry: Option<u64>,
-    /// GL textures per material, in `RenderModelPreview::materials` order.
-    materials: Vec<MaterialGlTextures>,
-    /// The geometry the uploaded `materials` belong to, so a reloaded model
-    /// re-uploads rather than drawing the previous model's textures.
-    uploaded_textures: Option<u64>,
 }
 
 /// One material's textures on the GPU, in `TextureSlot` order.
@@ -1112,41 +1283,14 @@ impl ModelGlRenderer {
                 return Err(format!("model preview shader link failed: {error}"));
             }
 
-            let vertex_array = gl
-                .create_vertex_array()
-                .map_err(|error| error.to_string())?;
-            let vertex_buffer = gl.create_buffer().map_err(|error| error.to_string())?;
-            let index_buffer = gl.create_buffer().map_err(|error| error.to_string())?;
-            gl.bind_vertex_array(Some(vertex_array));
-            gl.bind_buffer(glow::ARRAY_BUFFER, Some(vertex_buffer));
-            gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(index_buffer));
-            bind_preview_vertex_layout(gl, program)?;
-            gl.bind_vertex_array(None);
-
-            let grid_vertex_array = gl
-                .create_vertex_array()
-                .map_err(|error| error.to_string())?;
-            let grid_vertex_buffer = gl.create_buffer().map_err(|error| error.to_string())?;
-            gl.bind_vertex_array(Some(grid_vertex_array));
-            gl.bind_buffer(glow::ARRAY_BUFFER, Some(grid_vertex_buffer));
-            bind_preview_vertex_layout(gl, program)?;
-            gl.bind_vertex_array(None);
-            gl.bind_buffer(glow::ARRAY_BUFFER, None);
-
             let uniform = |name| {
                 gl.get_uniform_location(program, name)
                     .ok_or_else(|| format!("model preview shader has no {name} uniform"))
             };
             Ok(Self {
                 program,
-                vertex_array,
-                vertex_buffer,
-                index_buffer,
-                grid_vertex_array,
-                grid_vertex_buffer,
-                grid_vertex_count: 0,
-                grid_axis_start: 0,
-                grid_for_geometry: None,
+                slots: Vec::new(),
+                lru: ModelSlotLru::default(),
                 center: uniform("u_center")?,
                 scale: uniform("u_scale")?,
                 angles: uniform("u_angles")?,
@@ -1167,36 +1311,30 @@ impl ModelGlRenderer {
                 uv_scale_a: gl.get_uniform_location(program, "u_uv_scale_a"),
                 uv_scale_b: gl.get_uniform_location(program, "u_uv_scale_b"),
                 samplers: SAMPLER_UNIFORMS.map(|name| gl.get_uniform_location(program, name)),
-                uploaded_geometry: None,
-                materials: Vec::new(),
-                uploaded_textures: None,
             })
         }
     }
 
     unsafe fn paint(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
         unsafe {
-            if self.uploaded_geometry != Some(frame.geometry_id) {
-                gl.bind_vertex_array(Some(self.vertex_array));
-                gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.vertex_buffer));
-                gl.buffer_data_u8_slice(
-                    glow::ARRAY_BUFFER,
-                    slice_bytes(&frame.preview.vertices),
-                    glow::STATIC_DRAW,
-                );
-                gl.bind_buffer(glow::ELEMENT_ARRAY_BUFFER, Some(self.index_buffer));
-                gl.buffer_data_u8_slice(
-                    glow::ELEMENT_ARRAY_BUFFER,
-                    slice_bytes(&frame.preview.indices),
-                    glow::STATIC_DRAW,
-                );
-                self.uploaded_geometry = Some(frame.geometry_id);
+            let (slot, upload) = self.lru.acquire(frame.geometry_id, MODEL_GPU_SLOTS);
+            if slot == self.slots.len() {
+                match ModelGpuSlot::new(gl, self.program) {
+                    Ok(created) => self.slots.push(created),
+                    Err(error) => {
+                        eprintln!("model preview: {error}");
+                        self.lru.abandon(slot);
+                        return;
+                    }
+                }
             }
-
-            self.sync_textures(gl, frame);
+            if upload {
+                self.slots[slot].upload_geometry(gl, frame);
+            }
+            self.slots[slot].sync_textures(gl, frame);
 
             gl.use_program(Some(self.program));
-            gl.bind_vertex_array(Some(self.vertex_array));
+            gl.bind_vertex_array(Some(self.slots[slot].vertex_array));
             // Sampler i reads texture unit i, fixed for the life of the program.
             for (unit, location) in self.samplers.iter().enumerate() {
                 if let Some(location) = location {
@@ -1249,9 +1387,16 @@ impl ModelGlRenderer {
             // the model correctly occludes the lines behind it and stands on
             // the ones in front.
             if frame.show_grid {
-                self.sync_grid(gl, frame);
-                if self.grid_vertex_count > 0 {
-                    gl.bind_vertex_array(Some(self.grid_vertex_array));
+                self.slots[slot].sync_grid(gl, frame);
+                let ModelGpuSlot {
+                    grid_vertex_array,
+                    grid_vertex_count,
+                    grid_axis_start,
+                    vertex_array,
+                    ..
+                } = self.slots[slot];
+                if grid_vertex_count > 0 {
+                    gl.bind_vertex_array(Some(grid_vertex_array));
                     if let Some(animated) = &self.animated {
                         gl.uniform_1_f32(Some(animated), 0.0);
                     }
@@ -1264,17 +1409,17 @@ impl ModelGlRenderer {
                     // Minor lines a step below the clear color; the world X
                     // and Y axes in Blender's muted red and green.
                     flat(gl, &self.base_color, [0.78, 0.82, 0.85]);
-                    gl.draw_arrays(glow::LINES, 0, self.grid_axis_start);
-                    let axis_verts = self.grid_vertex_count - self.grid_axis_start;
+                    gl.draw_arrays(glow::LINES, 0, grid_axis_start);
+                    let axis_verts = grid_vertex_count - grid_axis_start;
                     if axis_verts >= 2 {
                         flat(gl, &self.base_color, [0.72, 0.42, 0.42]);
-                        gl.draw_arrays(glow::LINES, self.grid_axis_start, 2);
+                        gl.draw_arrays(glow::LINES, grid_axis_start, 2);
                     }
                     if axis_verts >= 4 {
                         flat(gl, &self.base_color, [0.42, 0.62, 0.42]);
-                        gl.draw_arrays(glow::LINES, self.grid_axis_start + 2, 2);
+                        gl.draw_arrays(glow::LINES, grid_axis_start + 2, 2);
                     }
-                    gl.bind_vertex_array(Some(self.vertex_array));
+                    gl.bind_vertex_array(Some(vertex_array));
                     if frame.bones.is_some()
                         && let Some(animated) = &self.animated
                     {
@@ -1286,14 +1431,14 @@ impl ModelGlRenderer {
             if frame.render_mode.draws_shading() {
                 gl.polygon_mode(glow::FRONT_AND_BACK, glow::FILL);
                 gl.uniform_1_f32(Some(&self.unlit), 0.0);
-                self.draw_batches(gl, frame, false);
+                self.draw_batches(gl, frame, false, &self.slots[slot].materials);
             }
             if frame.render_mode.draws_wireframe() {
                 gl.polygon_mode(glow::FRONT_AND_BACK, glow::LINE);
                 gl.line_width(1.0);
                 gl.depth_func(glow::LEQUAL);
                 gl.uniform_1_f32(Some(&self.unlit), 1.0);
-                self.draw_batches(gl, frame, true);
+                self.draw_batches(gl, frame, true, &self.slots[slot].materials);
             }
 
             // Polygon mode is not reset by egui_glow's generic callback-state
@@ -1302,65 +1447,6 @@ impl ModelGlRenderer {
             gl.bind_vertex_array(None);
             gl.bind_buffer(glow::ARRAY_BUFFER, None);
             gl.use_program(None);
-        }
-    }
-
-    /// Re-tessellate the ground grid when the geometry changes — its spacing
-    /// and extent are derived from the model's bounds.
-    unsafe fn sync_grid(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
-        if self.grid_for_geometry == Some(frame.geometry_id) {
-            return;
-        }
-        let (vertices, axis_start) = grid_line_vertices(&frame.preview);
-        unsafe {
-            gl.bind_buffer(glow::ARRAY_BUFFER, Some(self.grid_vertex_buffer));
-            gl.buffer_data_u8_slice(
-                glow::ARRAY_BUFFER,
-                slice_bytes(&vertices),
-                glow::STATIC_DRAW,
-            );
-            gl.bind_buffer(glow::ARRAY_BUFFER, None);
-        }
-        self.grid_axis_start = axis_start as i32;
-        self.grid_vertex_count = vertices.len() as i32;
-        self.grid_for_geometry = Some(frame.geometry_id);
-    }
-
-    /// Bring the GPU's textures in line with the frame's, re-uploading only
-    /// when the model changed or its textures arrived.
-    unsafe fn sync_textures(&mut self, gl: &glow::Context, frame: &ModelGpuFrame) {
-        let wanted = frame.textures.as_ref().map(|_| frame.textures_id);
-        if self.uploaded_textures == wanted {
-            return;
-        }
-        unsafe { self.release_textures(gl) };
-        self.uploaded_textures = wanted;
-        let Some(textures) = frame.textures.as_ref() else {
-            return;
-        };
-        self.materials = textures
-            .iter()
-            .map(|material| {
-                let mut uploaded = MaterialGlTextures::default();
-                for (slot, _) in SLOT_PARAMETERS {
-                    let index = slot as usize;
-                    uploaded.uv_scales[index] = 1.0;
-                    let Some(image) = material.get(slot) else {
-                        continue;
-                    };
-                    uploaded.uv_scales[index] = image.scale;
-                    uploaded.textures[index] = unsafe { upload_texture(gl, image) };
-                }
-                uploaded
-            })
-            .collect();
-    }
-
-    unsafe fn release_textures(&mut self, gl: &glow::Context) {
-        for material in self.materials.drain(..) {
-            for texture in material.textures.into_iter().flatten() {
-                unsafe { gl.delete_texture(texture) };
-            }
         }
     }
 
@@ -1404,7 +1490,13 @@ impl ModelGlRenderer {
         }
     }
 
-    unsafe fn draw_batches(&self, gl: &glow::Context, frame: &ModelGpuFrame, wire: bool) {
+    unsafe fn draw_batches(
+        &self,
+        gl: &glow::Context,
+        frame: &ModelGpuFrame,
+        wire: bool,
+        materials: &[MaterialGlTextures],
+    ) {
         for &batch_index in &frame.visible_batches {
             let Some(batch) = frame.preview.batches.get(batch_index) else {
                 continue;
@@ -1427,7 +1519,7 @@ impl ModelGlRenderer {
             // The wireframe pass draws flat on purpose, so it never binds a
             // texture — and neither does a batch whose material did not resolve.
             let material = (!wire)
-                .then(|| self.materials.get(batch.material_index as usize))
+                .then(|| materials.get(batch.material_index as usize))
                 .flatten();
             unsafe {
                 self.bind_material(gl, material);
@@ -1492,6 +1584,41 @@ mod gpu_renderer_tests {
     use super::*;
     use blam_tags::math::{RealPoint2d, RealPoint3d, RealVector3d};
     use blam_tags::render_model::{GeometryPartType, RenderMeshPart, RenderVertex};
+
+    /// Two previews on screen draw alternately. Each model is uploaded once
+    /// and then stays; with one slot, every draw replaced the other model.
+    #[test]
+    fn two_visible_previews_each_upload_once() {
+        let mut lru = ModelSlotLru::default();
+        let mut uploads = 0;
+        let mut slots = std::collections::HashSet::new();
+        for _ in 0..100 {
+            for geometry in [10, 20] {
+                let (slot, upload) = lru.acquire(geometry, MODEL_GPU_SLOTS);
+                uploads += usize::from(upload);
+                slots.insert((geometry, slot));
+            }
+        }
+        assert_eq!(uploads, 2);
+        assert_eq!(slots.len(), 2, "each model keeps its own slot");
+    }
+
+    /// Past capacity, the model drawn longest ago gives up its slot, not one
+    /// still being drawn.
+    #[test]
+    fn the_least_recently_drawn_model_is_evicted() {
+        let mut lru = ModelSlotLru::default();
+        for geometry in 1..=4 {
+            lru.acquire(geometry, 4);
+        }
+        // 1 is drawn again, so 2 is now the oldest.
+        assert_eq!(lru.acquire(1, 4), (0, false));
+        let (slot, upload) = lru.acquire(5, 4);
+        assert!(upload);
+        assert_eq!(slot, 1, "model 2's slot");
+        assert_eq!(lru.acquire(1, 4), (0, false), "still resident");
+        assert!(lru.acquire(2, 4).1, "evicted, so uploaded again");
+    }
 
     #[test]
     fn dense_indices_use_full_u32_offsets_and_counts() {
