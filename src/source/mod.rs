@@ -512,7 +512,8 @@ impl LoadedSourceData {
         self.entries.retain(|entry| entry.key != key);
         self.all_entries.retain(|entry| entry.key != key);
         let removed = self.entries.len() + self.all_entries.len() != before;
-        if let (TagSource::LooseFolder { root, .. }, Some(game)) = (&self.source, self.game.as_deref())
+        if let (TagSource::LooseFolder { root, .. }, Some(game)) =
+            (&self.source, self.game.as_deref())
         {
             let _ = delete_entry_index_row(game, root, key);
         }
@@ -875,7 +876,9 @@ mod entry_key_hint_tests {
     }
 
     fn found<'a>(source: &'a LoadedSourceData, key: &str) -> Option<&'a str> {
-        source.entry_for_key(key).map(|entry| entry.display_path.as_str())
+        source
+            .entry_for_key(key)
+            .map(|entry| entry.display_path.as_str())
     }
 
     /// The lists are mutated in many places behind the hints' back. Whatever

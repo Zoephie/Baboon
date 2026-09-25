@@ -94,7 +94,11 @@ mod tag_load_failure_tests {
         let kit = app.kits[0].id;
         app.kits[0].open_tag_pane("objects/broken.model");
 
-        app.handle_tag_loaded(kit, "objects/broken.model".to_owned(), Err("truncated".to_owned()));
+        app.handle_tag_loaded(
+            kit,
+            "objects/broken.model".to_owned(),
+            Err("truncated".to_owned()),
+        );
 
         let line = &app.terminal.lines.last().expect("a terminal line").text;
         assert_eq!(line, "Could not load objects/broken.model: truncated");

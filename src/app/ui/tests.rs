@@ -493,7 +493,10 @@ fn a_rechecked_probe_runs_at_most_once_a_second() {
         answer
     };
     assert!(!ask(10.0));
-    assert!(!ask(10.5), "within the second: the first answer, not asked again");
+    assert!(
+        !ask(10.5),
+        "within the second: the first answer, not asked again"
+    );
     assert_eq!(probes.get(), 1);
     assert!(ask(11.5), "after it: asked again, and the new answer used");
     assert_eq!(probes.get(), 2);

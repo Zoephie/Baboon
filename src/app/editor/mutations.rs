@@ -1301,11 +1301,13 @@ pub(in crate::app) fn apply_model_variant_ops(
 
 fn apply_one_model_variant_op(tag: &mut TagFile, op: &ModelVariantOp) -> Result<String, String> {
     match op {
-        ModelVariantOp::Create { name, regions } => with_new_element(tag, "variants", |tag, index| {
-            apply_field_edit(tag, &format!("variants[{index}]/name"), name)?;
-            write_model_variant_regions(tag, index, regions)?;
-            Ok(format!("Created model variant '{name}'"))
-        }),
+        ModelVariantOp::Create { name, regions } => {
+            with_new_element(tag, "variants", |tag, index| {
+                apply_field_edit(tag, &format!("variants[{index}]/name"), name)?;
+                write_model_variant_regions(tag, index, regions)?;
+                Ok(format!("Created model variant '{name}'"))
+            })
+        }
         ModelVariantOp::Update {
             variant_index,
             regions,
@@ -1437,7 +1439,11 @@ pub(in crate::app) fn apply_one_shader_param_op(
         apply_field_edit(tag, &name_path, &op.parameter_name)?;
         for initial in &op.initial_fields {
             let field = escape_field_path_segment(&initial.field);
-            apply_field_edit(tag, &format!("{block_path}[{new_idx}]/{field}"), &initial.input)?;
+            apply_field_edit(
+                tag,
+                &format!("{block_path}[{new_idx}]/{field}"),
+                &initial.input,
+            )?;
         }
         for animated in &op.animated_parameters {
             apply_one_shader_op(
@@ -1523,7 +1529,8 @@ mod campaign_evolved_field_paths {
         }
         let defs = Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
         let names = crate::format::TagNameIndex::load_from_definitions(&defs);
-        let loaded = load_iostore_container_set(PathBuf::from(*PAKS), &names, &defs).expect("mount");
+        let loaded =
+            load_iostore_container_set(PathBuf::from(*PAKS), &names, &defs).expect("mount");
         let vehicles: Vec<_> = loaded
             .entries
             .iter()

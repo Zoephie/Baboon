@@ -2919,24 +2919,36 @@ mod tests {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     if open_first {
                         let id = ui.make_persistent_id("objects");
-                        let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
-                            ui.ctx(),
-                            id,
-                            false,
-                        );
+                        let mut state =
+                            egui::collapsing_header::CollapsingState::load_with_default_open(
+                                ui.ctx(),
+                                id,
+                                false,
+                            );
                         state.set_open(true);
                         state.store(ui.ctx());
                     }
-                    show_folder_tree_header(ui, "objects", label, text_dark(), false, false, |_| {
-                        drawn = true;
-                    });
+                    show_folder_tree_header(
+                        ui,
+                        "objects",
+                        label,
+                        text_dark(),
+                        false,
+                        false,
+                        |_| {
+                            drawn = true;
+                        },
+                    );
                 });
             });
             drawn
         };
 
         assert!(body_drawn("objects", true), "opened");
-        assert!(body_drawn("[folder] objects", false), "still open with the prefix shown");
+        assert!(
+            body_drawn("[folder] objects", false),
+            "still open with the prefix shown"
+        );
     }
 
     /// Draw one browser tree and report how much vertical space it left unused.
@@ -2948,7 +2960,7 @@ mod tests {
         let tree = crate::source::build_tree(&entries);
         let ctx = egui::Context::default();
         let mut left = 0.0;
-        ctx.run(
+        let _ = ctx.run(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,

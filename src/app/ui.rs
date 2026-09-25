@@ -1008,9 +1008,7 @@ impl Baboon {
             );
             let submitted = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
             if (add_clicked || submitted) && !draft.trim().is_empty() {
-                self.kits[kit_index]
-                    .keywords
-                    .add(tag_key, &draft);
+                self.kits[kit_index].keywords.add(tag_key, &draft);
                 draft.clear();
             }
             ui.data_mut(|data| data.insert_temp(draft_id, draft));
@@ -1130,14 +1128,15 @@ mod keyword_draft_tests {
         ctx.set_fonts(crate::app::foundation_fonts());
         let mut app = Baboon::for_test();
         let mut draft_ids = Vec::new();
-        let mut frame = |app: &mut Baboon, draft_ids: &mut Vec<egui::Id>| {
+        let frame = |app: &mut Baboon, draft_ids: &mut Vec<egui::Id>| {
             let _ = ctx.run(egui::RawInput::default(), |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
                     draft_ids.clear();
                     for pane in ["pane a", "pane b"] {
                         ui.push_id(pane, |ui| {
                             app.draw_keyword_bar(ui, 0, "file:crate.model");
-                            draft_ids.push(ui.make_persistent_id(("keyword_input", "file:crate.model")));
+                            draft_ids
+                                .push(ui.make_persistent_id(("keyword_input", "file:crate.model")));
                         });
                     }
                 });
@@ -1148,7 +1147,10 @@ mod keyword_draft_tests {
         ctx.data_mut(|data| data.insert_temp(draft_ids[0], "rocket".to_owned()));
         frame(&mut app, &mut draft_ids);
 
-        let draft = |id: egui::Id| ctx.data_mut(|data| data.get_temp::<String>(id)).unwrap_or_default();
+        let draft = |id: egui::Id| {
+            ctx.data_mut(|data| data.get_temp::<String>(id))
+                .unwrap_or_default()
+        };
         assert_eq!(draft(draft_ids[0]), "rocket");
         assert_eq!(draft(draft_ids[1]), "", "the other pane's box is untouched");
     }

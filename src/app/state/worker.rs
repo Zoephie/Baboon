@@ -644,6 +644,10 @@ mod spawn_worker_tests {
         results.sort();
         assert_eq!(results[0], ("fine".to_owned(), "not a panic".to_owned()));
         assert_eq!(results[1].0, "k");
-        assert!(results[1].1.contains("decoder fell over"), "{}", results[1].1);
+        assert!(
+            results[1].1.contains("decoder fell over"),
+            "{}",
+            results[1].1
+        );
     }
 }

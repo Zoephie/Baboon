@@ -1655,9 +1655,11 @@ impl Baboon {
         }
         if let Some((skip, path)) = older_commits {
             let tags_root = tags_root.to_path_buf();
-            run_tag_compare_git(&self.tx, &mut state, ctx, move || TagCompareGitUpdate::History {
-                append: true,
-                result: git_tag_history(&tags_root, &path, skip),
+            run_tag_compare_git(&self.tx, &mut state, ctx, move || {
+                TagCompareGitUpdate::History {
+                    append: true,
+                    result: git_tag_history(&tags_root, &path, skip),
+                }
             });
         }
         compare |= had_results && selection_changed;

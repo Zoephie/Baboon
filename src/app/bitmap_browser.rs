@@ -969,7 +969,10 @@ mod stale_result_tests {
     fn a_stale_thumbnail_still_frees_its_decode_slot() {
         let mut app = Baboon::for_test();
         let stamp = app.kit_stamp();
-        app.kits[0].bitmap_browser.pending.insert("file:a.bitmap".to_owned());
+        app.kits[0]
+            .bitmap_browser
+            .pending
+            .insert("file:a.bitmap".to_owned());
         app.kits[0].generation = app.kits[0].generation.wrapping_add(1);
 
         app.handle_bitmap_thumbnail_decoded(
@@ -1010,14 +1013,23 @@ mod stale_result_tests {
                 .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds))
                 .unwrap();
         };
-        let (same, changed, gone) = (root.join("same.bitmap"), root.join("changed.bitmap"), root.join("gone.bitmap"));
+        let (same, changed, gone) = (
+            root.join("same.bitmap"),
+            root.join("changed.bitmap"),
+            root.join("gone.bitmap"),
+        );
         for path in [&same, &changed, &gone] {
             std::fs::write(path, b"bitmap").unwrap();
             set_time(path, 1_000_000);
         }
         let key = |path: &Path| format!("file:{}", path.display());
         let mut cache = ThumbnailCache::default();
-        for listed in [key(&same), key(&changed), key(&gone), "ublock:0:pak.bitmap".to_owned()] {
+        for listed in [
+            key(&same),
+            key(&changed),
+            key(&gone),
+            "ublock:0:pak.bitmap".to_owned(),
+        ] {
             cache.insert(listed, None);
         }
         set_time(&changed, 2_000_000);
@@ -1027,9 +1039,15 @@ mod stale_result_tests {
 
         std::fs::remove_dir_all(&root).unwrap();
         assert!(cache.contains(&key(&same)), "unchanged: kept");
-        assert!(!cache.contains(&key(&changed)), "modified since it was decoded: dropped");
+        assert!(
+            !cache.contains(&key(&changed)),
+            "modified since it was decoded: dropped"
+        );
         assert!(!cache.contains(&key(&gone)), "no longer listed: dropped");
-        assert!(cache.contains("ublock:0:pak.bitmap"), "a pak tag cannot change: kept");
+        assert!(
+            cache.contains("ublock:0:pak.bitmap"),
+            "a pak tag cannot change: kept"
+        );
     }
 
     /// Same for a model preview's texture resolve: a stale result left

@@ -1704,13 +1704,21 @@ mod overlay_texture_tests {
         };
         app.handle_model_overlays_built(stamp, key.clone(), geometry_id, Some(overlay), None);
         let state = &app.kits[0].model_previews[&key];
-        assert!(state.textures_pending, "the resolve in flight is still awaited");
+        assert!(
+            state.textures_pending,
+            "the resolve in flight is still awaited"
+        );
         let Some(Ok(data)) = state.data.as_ref() else {
             panic!("preview data");
         };
         assert_ne!(data.geometry_id, geometry_id, "the geometry did change");
 
-        app.handle_model_textures_resolved(stamp, key.clone(), textures_id, vec![Default::default()]);
+        app.handle_model_textures_resolved(
+            stamp,
+            key.clone(),
+            textures_id,
+            vec![Default::default()],
+        );
         let Some(Ok(data)) = app.kits[0].model_previews[&key].data.as_ref() else {
             panic!("preview data");
         };

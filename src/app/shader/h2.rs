@@ -122,9 +122,8 @@ impl H2TemplateCache {
 fn template_stamp(source: &TagSource, reference: &str) -> Option<(u64, std::time::SystemTime)> {
     let root = match source {
         TagSource::LooseFolder { root, .. } => root.clone(),
-        TagSource::SingleFile { path } => {
-            blam_tags::paths::derive_tags_root(path).or_else(|| path.parent().map(Path::to_path_buf))?
-        }
+        TagSource::SingleFile { path } => blam_tags::paths::derive_tags_root(path)
+            .or_else(|| path.parent().map(Path::to_path_buf))?,
         TagSource::MonolithicCache { .. } | TagSource::IoStoreContainerSet { .. } => return None,
     };
     let metadata = std::fs::metadata(resolve_tag_path(&root, reference, "shader_template")).ok()?;

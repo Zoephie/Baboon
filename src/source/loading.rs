@@ -1451,7 +1451,7 @@ mod paks_dir_tests {
     #[test]
     fn the_real_install_root_resolves_to_its_paks_directory() {
         static ROOT: std::sync::LazyLock<&'static str> =
-        std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_install()));
+            std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_install()));
         if !Path::new(*ROOT).is_dir() {
             return;
         }
@@ -1498,7 +1498,8 @@ mod mod_export_tests {
         }
         let defs = Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
         let names = TagNameIndex::load_from_definitions(&defs);
-        let loaded = load_iostore_container_set(PathBuf::from(*PAKS), &names, &defs).expect("mount");
+        let loaded =
+            load_iostore_container_set(PathBuf::from(*PAKS), &names, &defs).expect("mount");
         let TagSource::IoStoreContainerSet { ref containers, .. } = loaded.source else {
             panic!("expected a container set");
         };
@@ -1598,7 +1599,8 @@ mod mod_export_tests {
         }
         let defs = Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
         let names = TagNameIndex::load_from_definitions(&defs);
-        let loaded = load_iostore_container_set(PathBuf::from(*PAKS), &names, &defs).expect("mount");
+        let loaded =
+            load_iostore_container_set(PathBuf::from(*PAKS), &names, &defs).expect("mount");
         let TagSource::IoStoreContainerSet { ref containers, .. } = loaded.source else {
             panic!("expected a container set");
         };
@@ -1671,7 +1673,8 @@ mod mod_export_tests {
         }
         let defs = Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
         let names = TagNameIndex::load_from_definitions(&defs);
-        let loaded = load_iostore_container_set(PathBuf::from(*PAKS), &names, &defs).expect("mount");
+        let loaded =
+            load_iostore_container_set(PathBuf::from(*PAKS), &names, &defs).expect("mount");
         let TagSource::IoStoreContainerSet { ref containers, .. } = loaded.source else {
             panic!("expected a container set");
         };
@@ -1783,7 +1786,8 @@ mod mod_export_tests {
         }
         let defs = Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
         let names = TagNameIndex::load_from_definitions(&defs);
-        let loaded = load_iostore_container_set(PathBuf::from(*PAKS), &names, &defs).expect("mount");
+        let loaded =
+            load_iostore_container_set(PathBuf::from(*PAKS), &names, &defs).expect("mount");
         let TagSource::IoStoreContainerSet { ref containers, .. } = loaded.source else {
             panic!("expected a container set");
         };

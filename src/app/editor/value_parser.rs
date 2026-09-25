@@ -286,9 +286,9 @@ pub(in crate::app) fn parse_gui_field_value(
         TagFieldType::WordBlockFlags => {
             Ok(TagFieldData::WordBlockFlags(mask_bits(trimmed, 16)? as u16))
         }
-        TagFieldType::LongBlockFlags => {
-            Ok(TagFieldData::LongBlockFlags(mask_bits(trimmed, 32)? as u32 as i32))
-        }
+        TagFieldType::LongBlockFlags => Ok(TagFieldData::LongBlockFlags(
+            mask_bits(trimmed, 32)? as u32 as i32
+        )),
         TagFieldType::CharBlockIndex => Ok(TagFieldData::CharBlockIndex(narrow(
             parse_block_index(trimmed)?,
             "char block index",
@@ -770,7 +770,9 @@ mod narrowing_tests {
             .map(|entry| entry.unwrap().path())
             .filter(|path| {
                 path.extension().is_some_and(|ext| ext == "json")
-                    && !path.file_name().is_some_and(|name| name.to_string_lossy().starts_with('_'))
+                    && !path
+                        .file_name()
+                        .is_some_and(|name| name.to_string_lossy().starts_with('_'))
             })
             .collect();
         paths.sort();
@@ -792,7 +794,10 @@ mod narrowing_tests {
     #[test]
     fn a_typed_value_that_does_not_fit_its_field_is_refused() {
         with_field(TagFieldType::CharBlockIndex, |field| {
-            assert!(parse_gui_field_value(field, "200").is_err(), "200 in a char block index");
+            assert!(
+                parse_gui_field_value(field, "200").is_err(),
+                "200 in a char block index"
+            );
             assert!(matches!(
                 parse_gui_field_value(field, "none"),
                 Ok(TagFieldData::CharBlockIndex(-1))
@@ -803,7 +808,10 @@ mod narrowing_tests {
             ));
         });
         with_field(TagFieldType::ByteFlags, |field| {
-            assert!(parse_gui_field_value(field, "0x1FF").is_err(), "0x1FF in byte flags");
+            assert!(
+                parse_gui_field_value(field, "0x1FF").is_err(),
+                "0x1FF in byte flags"
+            );
             assert!(matches!(
                 parse_gui_field_value(field, "0xFF"),
                 Ok(TagFieldData::ByteFlags { value: 0xFF, .. })
@@ -827,7 +835,10 @@ mod narrowing_tests {
                 "index {past_the_end} of {} options",
                 names.len()
             );
-            assert!(parse_gui_field_value(field, "300").is_err(), "300 in a char enum");
+            assert!(
+                parse_gui_field_value(field, "300").is_err(),
+                "300 in a char enum"
+            );
             assert!(parse_gui_field_value(field, "0").is_ok());
         });
     }

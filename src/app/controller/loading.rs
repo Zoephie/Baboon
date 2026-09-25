@@ -80,8 +80,10 @@ impl Baboon {
             .as_ref()
             .is_some_and(|source| matches!(&source.source, TagSource::IoStoreContainerSet { .. }));
         if campaign_evolved {
-            if let Some(TagSource::IoStoreContainerSet { containers, .. }) =
-                self.kits[installed].source.as_ref().map(|source| &source.source)
+            if let Some(TagSource::IoStoreContainerSet { containers, .. }) = self.kits[installed]
+                .source
+                .as_ref()
+                .map(|source| &source.source)
             {
                 crate::app::model_preview::prewarm_ce_mesh_sync_index(containers.clone());
             }
@@ -436,7 +438,15 @@ mod scan_generation_tests {
 
         std::fs::remove_dir_all(&root).unwrap();
         assert!(!app.kits[0].scanning_entries, "no second scan was started");
-        let index = app.kits[0].source.as_ref().unwrap().reverse_dependencies.as_ref();
-        assert!(index.is_some(), "an empty folder has an empty reference graph");
+        let index = app.kits[0]
+            .source
+            .as_ref()
+            .unwrap()
+            .reverse_dependencies
+            .as_ref();
+        assert!(
+            index.is_some(),
+            "an empty folder has an empty reference graph"
+        );
     }
 }

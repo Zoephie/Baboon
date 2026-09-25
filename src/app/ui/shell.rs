@@ -801,7 +801,10 @@ impl Baboon {
                             draw_index_progress_bar(ui, 260.0, Some(fraction), &text);
                         }
                     } else if self.kits[self.active].index_jobs.building_references {
-                        let progress = self.kits[self.active].index_jobs.reference_progress.as_ref();
+                        let progress = self.kits[self.active]
+                            .index_jobs
+                            .reference_progress
+                            .as_ref();
                         let label = progress
                             .map(|progress| progress.label.as_str())
                             .unwrap_or("Building reference index...");
@@ -935,7 +938,8 @@ impl Baboon {
             });
 
         if self.show_entry_index_wait_notice
-            && (self.kits[self.active].scanning_entries || self.kits[self.active].index_jobs.references_for_entry_index)
+            && (self.kits[self.active].scanning_entries
+                || self.kits[self.active].index_jobs.references_for_entry_index)
         {
             let mut open = self.show_entry_index_wait_notice;
             let mut hide_notice = false;
@@ -972,7 +976,11 @@ impl Baboon {
                         }
                     } else if self.kits[self.active].index_jobs.references_for_entry_index {
                         ui.label(RichText::new("Building reference index...").strong());
-                        if let Some(progress) = self.kits[self.active].index_jobs.reference_progress.as_ref() {
+                        if let Some(progress) = self.kits[self.active]
+                            .index_jobs
+                            .reference_progress
+                            .as_ref()
+                        {
                             let fraction = if progress.total == 0 {
                                 0.0
                             } else {
@@ -1528,12 +1536,7 @@ pub(super) fn draw_terminal_output(
                 Some((at, height)) if at == width => height,
                 _ => {
                     let height = egui::WidgetText::from(terminal_line_text(line))
-                        .into_galley(
-                            ui,
-                            Some(egui::TextWrapMode::Wrap),
-                            width,
-                            TextStyle::Body,
-                        )
+                        .into_galley(ui, Some(egui::TextWrapMode::Wrap), width, TextStyle::Body)
                         .size()
                         .y;
                     line.wrapped.set(Some((width, height)));
@@ -1568,8 +1571,7 @@ pub(super) fn draw_terminal_output(
                     ui.skip_ahead_auto_ids(first);
                     for line in &lines[first..last.max(first)] {
                         #[cfg(test)]
-                        terminal_output_tests::LINES_BUILT
-                            .with(|built| built.set(built.get() + 1));
+                        terminal_output_tests::LINES_BUILT.with(|built| built.set(built.get() + 1));
                         ui.add(egui::Label::new(terminal_line_text(line)).wrap());
                     }
                 });
@@ -1606,7 +1608,11 @@ mod terminal_output_tests {
             .collect()
     }
 
-    fn frame(ctx: &egui::Context, lines: &[TerminalLineEntry], bottom: bool) -> std::time::Duration {
+    fn frame(
+        ctx: &egui::Context,
+        lines: &[TerminalLineEntry],
+        bottom: bool,
+    ) -> std::time::Duration {
         let started = std::time::Instant::now();
         let _ = ctx.run(
             egui::RawInput {
@@ -1657,9 +1663,8 @@ mod terminal_output_tests {
     #[test]
     fn the_terminal_draws_the_lines_in_view() {
         let lines = lines(20_000);
-        let starts = |painted: &[String], prefix: &str| {
-            painted.iter().any(|text| text.starts_with(prefix))
-        };
+        let starts =
+            |painted: &[String], prefix: &str| painted.iter().any(|text| text.starts_with(prefix));
 
         let top = painted(&egui::Context::default(), &lines, false);
         assert!(starts(&top, "0: ") && !starts(&top, "19999: "));

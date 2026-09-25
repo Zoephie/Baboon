@@ -25,7 +25,9 @@ pub(in crate::app) struct ModifiedTags {
 
 /// A tree node's or display path's folder in the form `folders` keys use.
 fn folder_key(path: &str) -> String {
-    path.replace('\\', "/").trim_matches('/').to_ascii_lowercase()
+    path.replace('\\', "/")
+        .trim_matches('/')
+        .to_ascii_lowercase()
 }
 
 impl ModifiedTags {
@@ -41,8 +43,7 @@ impl ModifiedTags {
             self.folders.insert(parent.to_owned());
             folder = parent;
         }
-        self.groups
-            .insert(crate::source::group_tree_label(entry));
+        self.groups.insert(crate::source::group_tree_label(entry));
     }
 
     /// Whether anything under this folder (or Groups-view node) is modified.
@@ -227,10 +228,19 @@ mod modified_tags_tests {
         });
 
         assert!(modified.subtree_has_modified(&node("objects", "objects")));
-        assert!(modified.subtree_has_modified(&node("objects/weapons", "weapons")), "unloaded, any case");
-        assert!(modified.subtree_has_modified(&node("weapon weap", "weapon weap")), "its Groups node");
+        assert!(
+            modified.subtree_has_modified(&node("objects/weapons", "weapons")),
+            "unloaded, any case"
+        );
+        assert!(
+            modified.subtree_has_modified(&node("weapon weap", "weapon weap")),
+            "its Groups node"
+        );
         assert!(!modified.subtree_has_modified(&node("levels", "levels")));
-        assert!(!modified.subtree_has_modified(&node("weapons", "weapons")), "not a same-named folder elsewhere");
+        assert!(
+            !modified.subtree_has_modified(&node("weapons", "weapons")),
+            "not a same-named folder elsewhere"
+        );
         assert!(!ModifiedTags::default().subtree_has_modified(&node("objects", "objects")));
     }
 }

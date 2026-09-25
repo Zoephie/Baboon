@@ -71,7 +71,10 @@ fn h2_particle_mapping_field_edit_targets_exact_field() {
 /// duplicate.
 #[test]
 fn h2_contrail_derived_path_targets_the_second_duplicate() {
-    let tag_path = crate::test_kits::tag_path("halo2_mcc", "effects/objects/weapons/rifle/sniper_rifle/sniper.contrail");
+    let tag_path = crate::test_kits::tag_path(
+        "halo2_mcc",
+        "effects/objects/weapons/rifle/sniper_rifle/sniper.contrail",
+    );
     let def = test_definition_path("halo2_mcc/contrail.json");
     if !std::path::Path::new(tag_path).exists() || !std::path::Path::new(&def).exists() {
         eprintln!("skipping: H2 contrail/definition not present");
@@ -199,7 +202,10 @@ fn find_coded_field(st: &blam_tags::TagStruct<'_>, prefix: &str) -> Option<(Stri
 #[test]
 fn h2_jmad_name_code_block_resolves() {
     let Some(tag) = load_h2_tag(
-        crate::test_kits::tag_path("halo2_mcc", "objects/cinematics/cigar/cigar.model_animation_graph"),
+        crate::test_kits::tag_path(
+            "halo2_mcc",
+            "objects/cinematics/cigar/cigar.model_animation_graph",
+        ),
         "halo2_mcc/model_animation_graph.json",
     ) else {
         return;

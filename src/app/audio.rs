@@ -335,8 +335,15 @@ impl<K: Hash + Eq + Clone> PcmCache<K> {
 /// Where a finished decode belongs in the caches, stamped with the bank
 /// generation it was decoded against.
 enum PcmKey {
-    Bank { generation: u64, bank: usize, sub: usize },
-    Event { generation: u64, name: String },
+    Bank {
+        generation: u64,
+        bank: usize,
+        sub: usize,
+    },
+    Event {
+        generation: u64,
+        name: String,
+    },
 }
 
 /// A worker's report.
@@ -510,11 +517,7 @@ impl AudioState {
         });
     }
 
-    fn spawn_job(
-        &mut self,
-        ctx: &egui::Context,
-        job: impl FnOnce() -> AudioDone + Send + 'static,
-    ) {
+    fn spawn_job(&mut self, ctx: &egui::Context, job: impl FnOnce() -> AudioDone + Send + 'static) {
         self.jobs.running += 1;
         let tx = self.jobs.tx.clone();
         let ctx = ctx.clone();

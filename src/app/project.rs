@@ -1200,11 +1200,7 @@ impl Baboon {
     /// the entry a new tag is registered under decides whether it resolves at
     /// export, and two copies of that derivation is how one path came to build it
     /// and the other not to.
-    fn new_overlay_entry(
-        &self,
-        kit: usize,
-        overlay: &CampaignProjectOverlay,
-    ) -> OverlayAdoption {
+    fn new_overlay_entry(&self, kit: usize, overlay: &CampaignProjectOverlay) -> OverlayAdoption {
         // The names and the template come off the source: before it has
         // loaded, this is a "not yet" rather than a "no".
         if self.kits[kit].source.is_none() {
@@ -1233,7 +1229,7 @@ impl Baboon {
         let tag = match TagFile::read_from_bytes(&overlay.bytes) {
             Ok(tag) => tag,
             Err(error) => {
-                return OverlayAdoption::Failed(format!("its stashed bytes do not parse: {error}"))
+                return OverlayAdoption::Failed(format!("its stashed bytes do not parse: {error}"));
             }
         };
         let extension = group_tag_to_extension(overlay.group_tag)
@@ -2787,7 +2783,7 @@ mod tests {
     #[test]
     fn container_tag_identities_are_unique() {
         static PAKS: std::sync::LazyLock<&'static str> =
-        std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_paks()));
+            std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_paks()));
         if !std::path::Path::new(*PAKS).exists() {
             eprintln!("skipping: Campaign Evolved not present");
             return;
@@ -2891,7 +2887,11 @@ mod overlay_adoption_tests {
 
         app.adopt_pending_new_overlays(0);
 
-        let queue = &app.kits[0].campaign_project.as_ref().unwrap().pending_new_overlays;
+        let queue = &app.kits[0]
+            .campaign_project
+            .as_ref()
+            .unwrap()
+            .pending_new_overlays;
         assert!(queue.is_empty(), "dropped from the retry queue");
         assert!(app.status.contains("Could not restore 1"), "{}", app.status);
     }

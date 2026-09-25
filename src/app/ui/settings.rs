@@ -811,9 +811,11 @@ fn draft_icon_path(ctx: &egui::Context, icon: &CustomEditingKitIconDraft) -> Opt
     match icon {
         CustomEditingKitIconDraft::Default => None,
         // Resolving looks for the file in two places; the form asks every frame.
-        CustomEditingKitIconDraft::Existing(path) => recheck_cached(ctx, ("kit_icon", path), || {
-            resolve_custom_icon_path(path).ok()
-        }),
+        CustomEditingKitIconDraft::Existing(path) => {
+            recheck_cached(ctx, ("kit_icon", path), || {
+                resolve_custom_icon_path(path).ok()
+            })
+        }
         CustomEditingKitIconDraft::Selected(path) => Some(path.clone()),
     }
 }

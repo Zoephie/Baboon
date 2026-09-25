@@ -297,8 +297,8 @@ pub(super) fn new_container_template_for(
 /// It is 2.4 MB, and new_container_template_for parsed it on every call. That
 /// includes the stashed-overlay adoption, which retried every frame for an
 /// overlay it could not place, so one such overlay reparsed it every frame.
-pub(super) fn meteorite_usmap(
-) -> Result<std::sync::Arc<blam_tags::iostore::object::usmap::Usmap>, String> {
+pub(super) fn meteorite_usmap()
+-> Result<std::sync::Arc<blam_tags::iostore::object::usmap::Usmap>, String> {
     static USMAP: std::sync::OnceLock<
         Result<std::sync::Arc<blam_tags::iostore::object::usmap::Usmap>, String>,
     > = std::sync::OnceLock::new();
@@ -470,7 +470,6 @@ fn mod_output_path(output: PathBuf) -> PathBuf {
         .unwrap_or(stem);
     parent.join(MODS_DIR).join(folder).join(file_name)
 }
-
 
 /// An in-place container overwrite, as the worker needs it.
 #[derive(Clone)]
@@ -822,7 +821,9 @@ impl Baboon {
         // SoundBank. A decode worker holds the lock only while it reads a
         // file's bytes.
         let store = self.audio.ce_media.clone();
-        let mut store = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let mut store = store
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let binding = std::sync::Arc::new(ce_audio::resolve_sound_binding(
             containers,
             packages,
@@ -970,9 +971,7 @@ impl Baboon {
                     stamp,
                     index,
                     missing,
-                } => {
-                    self.handle_reverse_dependencies_built(stamp, index, missing)
-                }
+                } => self.handle_reverse_dependencies_built(stamp, index, missing),
                 WorkerMessage::ReferenceIndexProgress {
                     stamp,
                     processed,
@@ -1055,9 +1054,11 @@ impl Baboon {
                     lease,
                     result,
                 } => self.handle_container_rename_finished(stamp, lease, result, ctx),
-                WorkerMessage::InPlaceOverwriteFinished { job, lease, written } => {
-                    self.handle_in_place_overwrite_finished(*job, lease, written)
-                }
+                WorkerMessage::InPlaceOverwriteFinished {
+                    job,
+                    lease,
+                    written,
+                } => self.handle_in_place_overwrite_finished(*job, lease, written),
                 WorkerMessage::ContainerDeleteFinished {
                     stamp,
                     lease,
@@ -2740,7 +2741,11 @@ impl Baboon {
             }
         }
         self.status = browser_refresh_error.map_or_else(
-            || format!("Index updated: {n} tags ({added} added, {updated} changed, {removed} removed)"),
+            || {
+                format!(
+                    "Index updated: {n} tags ({added} added, {updated} changed, {removed} removed)"
+                )
+            },
             |error| format!("Index updated, but browser refresh failed: {error}"),
         );
     }
@@ -3197,8 +3202,7 @@ impl Baboon {
             &self.tx,
             &ctx,
             move || {
-                let result =
-                    read_entry(&source_kind, &entry).map_err(|error| format!("{error:#}"));
+                let result = read_entry(&source_kind, &entry).map_err(|error| format!("{error:#}"));
                 WorkerMessage::TagLoaded { kit, key, result }
             },
             move |error| WorkerMessage::TagLoaded {
@@ -3252,9 +3256,7 @@ impl Baboon {
         // was opened for.
         let writing = match &action {
             PendingCloseAction::CloseApp => self.chimp_writes.keys().next().copied(),
-            PendingCloseAction::CloseKit(id) => {
-                self.chimp_writes.contains_key(id).then_some(*id)
-            }
+            PendingCloseAction::CloseKit(id) => self.chimp_writes.contains_key(id).then_some(*id),
             _ => None,
         };
         if let Some(kit) = writing {
@@ -5021,7 +5023,8 @@ impl Baboon {
             && !source.all_entries.is_empty()
         {
             let _ = crate::source::upsert_entry_index_row(game, root, entry);
-            let _ = crate::source::save_tag_dependencies(game, root, &entry.key, Some(&dependencies));
+            let _ =
+                crate::source::save_tag_dependencies(game, root, &entry.key, Some(&dependencies));
         }
         if let Some(index) = source.reverse_dependencies.as_mut() {
             index.set_tag_dependencies(entry.key.clone(), dependencies);
@@ -5334,7 +5337,10 @@ impl Baboon {
                 "Saved into {}, but reloading the pak failed: {e}",
                 job.utoc_path.display()
             ),
-            None => format!("Saved into {} (game files modified)", job.utoc_path.display()),
+            None => format!(
+                "Saved into {} (game files modified)",
+                job.utoc_path.display()
+            ),
         };
     }
 
@@ -7209,7 +7215,10 @@ impl Baboon {
         let current = kit == self.active_kit_id()
             && self.query_results.as_ref().is_some_and(|results| {
                 results.ref_target.as_ref() == Some(&target)
-                    && results.entries.get(index).is_some_and(|entry| entry.key == key)
+                    && results
+                        .entries
+                        .get(index)
+                        .is_some_and(|entry| entry.key == key)
             });
         if !current {
             return true;
@@ -7229,7 +7238,9 @@ impl Baboon {
     /// currently building (auto after the full scan, or via Tools → Build
     /// Reference Index).
     fn reference_index_unavailable_note(&self) -> String {
-        if self.kits[self.active].index_jobs.building_references || self.kits[self.active].scanning_entries {
+        if self.kits[self.active].index_jobs.building_references
+            || self.kits[self.active].scanning_entries
+        {
             "Reference index is building — try again in a moment.".to_owned()
         } else {
             "Reference index unavailable — run Tools → Build Reference Index.".to_owned()
@@ -7275,9 +7286,10 @@ impl Baboon {
     /// on a container they walked nothing, and on a folder mid-scan they
     /// walked nothing too, and both said "none found".
     fn listing_entries(&self) -> Result<&[TagEntry], String> {
-        let source = self.source().ok_or_else(|| "No source loaded.".to_owned())?;
-        if matches!(source.source, TagSource::LooseFolder { .. }) && source.all_entries.is_empty()
-        {
+        let source = self
+            .source()
+            .ok_or_else(|| "No source loaded.".to_owned())?;
+        if matches!(source.source, TagSource::LooseFolder { .. }) && source.all_entries.is_empty() {
             return Err(
                 "The tag index is still being built; try again once indexing finishes.".to_owned(),
             );
@@ -7558,7 +7570,9 @@ impl Baboon {
         force: bool,
         paired_entry_index_build: bool,
     ) {
-        if self.kits[self.active].index_jobs.building_references || self.kits[self.active].scanning_entries {
+        if self.kits[self.active].index_jobs.building_references
+            || self.kits[self.active].scanning_entries
+        {
             return;
         }
         let Some(source) = self.source() else {
@@ -10392,7 +10406,12 @@ fn tsv_paste_summary(
         )
     };
     if let Some(first) = failed.first() {
-        let error = first.result.as_ref().err().map(String::as_str).unwrap_or("");
+        let error = first
+            .result
+            .as_ref()
+            .err()
+            .map(String::as_str)
+            .unwrap_or("");
         summary.push_str(&format!(
             " — {} failed; first: {} = \"{}\": {error}",
             failed.len(),
@@ -10468,7 +10487,10 @@ mod listing_entries_tests {
         let ctx = egui::Context::default();
 
         app.show_sounds_by_class(&ctx);
-        let waiting = app.query_results.as_ref().and_then(|results| results.note.clone());
+        let waiting = app
+            .query_results
+            .as_ref()
+            .and_then(|results| results.note.clone());
         let message = app
             .rx
             .recv_timeout(std::time::Duration::from_secs(10))
@@ -10478,7 +10500,10 @@ mod listing_entries_tests {
 
         assert_eq!(waiting.as_deref(), Some("Reading 1 tag(s)…"));
         let results = app.query_results.expect("results");
-        assert_eq!(results.title, "Sounds by class (0)", "the one sound is unreadable");
+        assert_eq!(
+            results.title, "Sounds by class (0)",
+            "the one sound is unreadable"
+        );
         assert_eq!(results.note.as_deref(), Some("No sound tags found."));
     }
 
@@ -10520,7 +10545,11 @@ mod tsv_paste_summary_tests {
     fn a_tsv_paste_reports_the_cells_that_failed() {
         let outcomes = [
             outcome("regions[0]/name", "hull", Ok(())),
-            outcome("regions[1]/lod", "high", Err("expected i16 value".to_owned())),
+            outcome(
+                "regions[1]/lod",
+                "high",
+                Err("expected i16 value".to_owned()),
+            ),
         ];
         let summary = tsv_paste_summary(&outcomes, 2, 0, 2);
         assert_eq!(
@@ -12711,15 +12740,24 @@ mod dependency_database_tests {
         };
         let mut app = Baboon::for_test();
         app.install_loaded_source(loose(&root, vec![known]));
-        let scanned = app.dependency_database_entries().map(|entries| entries.len());
+        let scanned = app
+            .dependency_database_entries()
+            .map(|entries| entries.len());
 
         let mut unscanned = Baboon::for_test();
         unscanned.install_loaded_source(loose(&root, Vec::new()));
         let waiting = unscanned.dependency_database_entries().is_err();
 
         std::fs::remove_dir_all(&root).unwrap();
-        assert_eq!(scanned, Ok(1), "the in-memory scan, not a rescan of the empty folder");
-        assert!(waiting, "no scan yet: say so rather than scan on the UI thread");
+        assert_eq!(
+            scanned,
+            Ok(1),
+            "the in-memory scan, not a rescan of the empty folder"
+        );
+        assert!(
+            waiting,
+            "no scan yet: say so rather than scan on the UI thread"
+        );
     }
 }
 
@@ -12778,7 +12816,9 @@ mod refresh_reference_tests {
             .as_ref()
             .and_then(|source| source.reverse_dependencies.as_ref())
             .expect("the reference index survives a refresh");
-        let mut referrers = index.dependents_for(target.group_tag, &target.rel_path).to_vec();
+        let mut referrers = index
+            .dependents_for(target.group_tag, &target.rel_path)
+            .to_vec();
         referrers.sort();
         assert_eq!(referrers, ["file:kept", "file:new"]);
     }
@@ -12850,7 +12890,10 @@ mod saved_tag_index_tests {
         crate::source::remove_test_index_rows(&game);
         std::fs::remove_dir_all(&root).unwrap();
         assert!(saved.is_ok(), "{saved:?}");
-        assert!(!refresh.unwrap().changed, "the refresh finds the save already indexed");
+        assert!(
+            !refresh.unwrap().changed,
+            "the refresh finds the save already indexed"
+        );
         assert_eq!(referrers, Some(vec![entry.key.clone()]));
     }
 }
@@ -12905,20 +12948,33 @@ mod in_place_overwrite_tests {
     #[test]
     fn a_tag_edited_during_its_save_stays_dirty() {
         let mut app = Baboon::for_test();
-        let tag = TagFile::new(crate::app::test_definition_path("halo4_mcc/camera_track.json"))
-            .unwrap();
+        let tag = TagFile::new(crate::app::test_definition_path(
+            "halo4_mcc/camera_track.json",
+        ))
+        .unwrap();
         app.kits[0]
             .parsed_tags
             .insert("tag".to_owned(), TagDocument::modified(tag));
         let at_save = app.kits[0].parsed_tags["tag"].dirty.revision();
 
-        app.kits[0].parsed_tags.get_mut("tag").unwrap().dirty.touch();
+        app.kits[0]
+            .parsed_tags
+            .get_mut("tag")
+            .unwrap()
+            .dirty
+            .touch();
         app.finish_in_place_overwrite(job(&app, at_save), saved());
-        assert!(app.kits[0].parsed_tags["tag"].dirty.is_set(), "edited mid-save");
+        assert!(
+            app.kits[0].parsed_tags["tag"].dirty.is_set(),
+            "edited mid-save"
+        );
 
         let now = app.kits[0].parsed_tags["tag"].dirty.revision();
         app.finish_in_place_overwrite(job(&app, now), saved());
-        assert!(!app.kits[0].parsed_tags["tag"].dirty.is_set(), "saved as it stands");
+        assert!(
+            !app.kits[0].parsed_tags["tag"].dirty.is_set(),
+            "saved as it stands"
+        );
     }
 
     /// The worker's lease is released whatever the write did, or the
@@ -12938,7 +12994,11 @@ mod in_place_overwrite_tests {
         };
         let utoc = job.utoc_path.clone();
         app.handle_in_place_overwrite_finished(job, lease, failed);
-        assert!(app.status.contains("export this mod again"), "{}", app.status);
+        assert!(
+            app.status.contains("export this mod again"),
+            "{}",
+            app.status
+        );
         let again = app
             .acquire_container_write_lease(&utoc, ContainerWriteMode::AppendInPlace)
             .expect("the container is writable again");

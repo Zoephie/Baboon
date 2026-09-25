@@ -142,11 +142,14 @@ mod tests {
         let expected: Vec<PathBuf> = items.iter().map(|i| i.out_path.clone()).collect();
 
         let mut audio = AudioState::default();
-        audio.run_extract(ExtractRequest {
-            items,
-            tags_root: None,
-            label: "ce extract test".to_owned(),
-        }, &egui::Context::default());
+        audio.run_extract(
+            ExtractRequest {
+                items,
+                tags_root: None,
+                label: "ce extract test".to_owned(),
+            },
+            &egui::Context::default(),
+        );
         audio.wait_for_audio_jobs();
 
         for path in &expected {
@@ -522,9 +525,10 @@ mod tests {
     #[ignore]
     fn ce_shader_model_clear_reference_saves() {
         let defs = crate::test_kits::definitions();
-        let tag_path = std::path::Path::new(
-            crate::test_kits::tag_path("haloce_mcc", "characters/crewman/shaders/crewman_body.shader_model"),
-        );
+        let tag_path = std::path::Path::new(crate::test_kits::tag_path(
+            "haloce_mcc",
+            "characters/crewman/shaders/crewman_body.shader_model",
+        ));
         if !tag_path.exists() || !defs.exists() {
             eprintln!("skip: no CE tag/defs");
             return;
@@ -590,9 +594,10 @@ mod tests {
     fn ce_inline_permutation_extracts_and_decodes() {
         use blam_tags::audio::decode_ogg_vorbis;
         let defs = crate::test_kits::definitions();
-        let tag_path = std::path::Path::new(
-            crate::test_kits::tag_path("haloce_mcc", "sound/sinomatixx_music/b40_extraction_music.sound"),
-        );
+        let tag_path = std::path::Path::new(crate::test_kits::tag_path(
+            "haloce_mcc",
+            "sound/sinomatixx_music/b40_extraction_music.sound",
+        ));
         if !tag_path.exists() || !defs.exists() {
             eprintln!("skip: no CE tag/defs");
             return;
@@ -626,9 +631,10 @@ mod tests {
     fn ce_inline_xbox_adpcm_extracts_and_decodes() {
         use super::audio::InlineCodec;
         let defs = crate::test_kits::definitions();
-        let tag_path = std::path::Path::new(
-            crate::test_kits::tag_path("haloce_mcc", "sound/sfx/weapons/sniper rifle/fire.sound"),
-        );
+        let tag_path = std::path::Path::new(crate::test_kits::tag_path(
+            "haloce_mcc",
+            "sound/sfx/weapons/sniper rifle/fire.sound",
+        ));
         if !tag_path.exists() || !defs.exists() {
             eprintln!("skip: no CE tag/defs");
             return;
@@ -678,9 +684,10 @@ mod tests {
     #[ignore]
     fn ce_extract_writes_wav_and_raw_ogg() {
         let defs = crate::test_kits::definitions();
-        let tag_path = std::path::Path::new(
-            crate::test_kits::tag_path("haloce_mcc", "sound/sinomatixx_music/b40_extraction_music.sound"),
-        );
+        let tag_path = std::path::Path::new(crate::test_kits::tag_path(
+            "haloce_mcc",
+            "sound/sinomatixx_music/b40_extraction_music.sound",
+        ));
         if !tag_path.exists() || !defs.exists() {
             eprintln!("skip: no CE tag/defs");
             return;
@@ -697,11 +704,14 @@ mod tests {
 
         let items = build_extract_items(&tag, &rows, None, &wav_dir, false, None);
         let mut audio = super::audio::AudioState::default();
-        audio.run_extract(ExtractRequest {
-            items,
-            tags_root: None,
-            label: "ce".to_owned(),
-        }, &egui::Context::default());
+        audio.run_extract(
+            ExtractRequest {
+                items,
+                tags_root: None,
+                label: "ce".to_owned(),
+            },
+            &egui::Context::default(),
+        );
         audio.wait_for_audio_jobs();
         let wav = std::fs::read(wav_dir.join(format!("{}.wav", sanitize_component(&rows[0].name))))
             .expect("wav written");
@@ -713,11 +723,14 @@ mod tests {
         let ogg_dir = std::env::temp_dir().join("baboon_ce_extract_ogg");
         let _ = std::fs::remove_dir_all(&ogg_dir);
         let items = build_extract_items(&tag, &rows, None, &ogg_dir, true, None);
-        audio.run_extract(ExtractRequest {
-            items,
-            tags_root: None,
-            label: "ce".to_owned(),
-        }, &egui::Context::default());
+        audio.run_extract(
+            ExtractRequest {
+                items,
+                tags_root: None,
+                label: "ce".to_owned(),
+            },
+            &egui::Context::default(),
+        );
         audio.wait_for_audio_jobs();
         let ogg = std::fs::read(ogg_dir.join(format!("{}.ogg", sanitize_component(&rows[0].name))))
             .expect("ogg written");
@@ -756,11 +769,14 @@ mod tests {
         let items = build_extract_items(&tag, &rows, h2_params, &dir, false, None);
         let count = items.len();
         let mut audio = super::audio::AudioState::default();
-        audio.run_extract(ExtractRequest {
-            items,
-            tags_root: None,
-            label: "h2".to_owned(),
-        }, &egui::Context::default());
+        audio.run_extract(
+            ExtractRequest {
+                items,
+                tags_root: None,
+                label: "h2".to_owned(),
+            },
+            &egui::Context::default(),
+        );
         audio.wait_for_audio_jobs();
         // At least one WAV should have been written with a valid RIFF header.
         let mut found = 0usize;
@@ -797,11 +813,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let items = build_extract_items(&tag, &rows, None, &dir, false, None);
         let mut audio = super::audio::AudioState::default();
-        audio.run_extract(ExtractRequest {
-            items,
-            tags_root: Some(tags_root.to_path_buf()),
-            label: "bank".to_owned(),
-        }, &egui::Context::default());
+        audio.run_extract(
+            ExtractRequest {
+                items,
+                tags_root: Some(tags_root.to_path_buf()),
+                label: "bank".to_owned(),
+            },
+            &egui::Context::default(),
+        );
         audio.wait_for_audio_jobs();
         let mut found = 0usize;
         for entry in walkdir(&dir) {

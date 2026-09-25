@@ -286,7 +286,12 @@ mod key_scope_tests {
     }
 
     /// One frame: a text box standing in for a field editor, and Find.
-    fn frame(app: &mut Baboon, ctx: &egui::Context, events: Vec<egui::Event>, focus: Option<egui::Id>) {
+    fn frame(
+        app: &mut Baboon,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+        focus: Option<egui::Id>,
+    ) {
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -334,7 +339,11 @@ mod key_scope_tests {
         frame(&mut app, &ctx, Vec::new(), None);
         frame(&mut app, &ctx, Vec::new(), field);
         frame(&mut app, &ctx, vec![key(egui::Key::Enter)], None);
-        assert_eq!(app.find.active, Some(0), "Enter in a field must not step Find");
+        assert_eq!(
+            app.find.active,
+            Some(0),
+            "Enter in a field must not step Find"
+        );
         frame(&mut app, &ctx, Vec::new(), field);
         frame(&mut app, &ctx, vec![key(egui::Key::Escape)], None);
         assert!(app.find.open, "Escape in a field must not close Find");

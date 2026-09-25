@@ -23,10 +23,10 @@ use blam_tags::render_method::{
     compile_real_constant,
 };
 use blam_tags::{
-    AssFile, Bitmap, ColorGraphType, CurvePointMode, CurveSegmentType, Endian,
-    FoundationMasterType as EngineMasterType, FunctionFlags, FunctionKind, FunctionType, JmsFile,
-    PeriodicParams, RenderModel, StringIdData, TagBlock,
-    TagField, TagFieldData, TagFieldType, TagFile, TagFunction, TagFunctionEditor, BlobFunction, FunctionEncoding, H2Function, SchemaEnum,
+    AssFile, Bitmap, BlobFunction, ColorGraphType, CurvePointMode, CurveSegmentType, Endian,
+    FoundationMasterType as EngineMasterType, FunctionEncoding, FunctionFlags, FunctionKind,
+    FunctionType, H2Function, JmsFile, PeriodicParams, RenderModel, SchemaEnum, StringIdData,
+    TagBlock, TagField, TagFieldData, TagFieldType, TagFile, TagFunction, TagFunctionEditor,
     TagReferenceData, TagResource, TagResourceKind, TagStruct, TransitionParams, format_group_tag,
     parse_group_tag,
 };
@@ -1537,8 +1537,14 @@ mod tests {
         );
 
         let entry = h2_shader_entry(u32::from_be_bytes(*b"shad"));
-        let model =
-            build_h2ek_shader_editor_model(&tag, &entry, &TagNameIndex::default(), None, &mut H2TemplateCache::default()).unwrap();
+        let model = build_h2ek_shader_editor_model(
+            &tag,
+            &entry,
+            &TagNameIndex::default(),
+            None,
+            &mut H2TemplateCache::default(),
+        )
+        .unwrap();
         let (function_bytes, path) = first_halo2_byte_block_function_row(&model).unwrap();
 
         assert_eq!(function_bytes, bytes);
@@ -1554,13 +1560,26 @@ mod tests {
             header: vec![0; 64],
         };
         assert!(
-            build_h2ek_shader_editor_model(&classic, &entry, &TagNameIndex::default(), None, &mut H2TemplateCache::default())
-                .is_some()
+            build_h2ek_shader_editor_model(
+                &classic,
+                &entry,
+                &TagNameIndex::default(),
+                None,
+                &mut H2TemplateCache::default()
+            )
+            .is_some()
         );
 
         let mcc = TagFile::new(test_definition_path("halo2_mcc/shader.json")).unwrap();
         assert!(
-            build_h2ek_shader_editor_model(&mcc, &entry, &TagNameIndex::default(), None, &mut H2TemplateCache::default()).is_none()
+            build_h2ek_shader_editor_model(
+                &mcc,
+                &entry,
+                &TagNameIndex::default(),
+                None,
+                &mut H2TemplateCache::default()
+            )
+            .is_none()
         );
 
         let non_shader = classic;
@@ -3096,7 +3115,7 @@ mod tests {
             definitions_root: PathBuf::new(),
         };
         let mut templates = H2TemplateCache::default();
-        let mut frames = |templates: &mut H2TemplateCache| {
+        let frames = |templates: &mut H2TemplateCache| {
             for _ in 0..3 {
                 build_h2ek_shader_editor_model(
                     &tag,

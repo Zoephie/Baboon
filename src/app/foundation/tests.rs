@@ -237,11 +237,16 @@ pub(in crate::app) mod tests {
         let after = check_at(11.5);
 
         std::fs::remove_dir_all(&root).unwrap();
-        assert!(!within, "within the interval the remembered answer stands (no stat)");
+        assert!(
+            !within,
+            "within the interval the remembered answer stands (no stat)"
+        );
         assert!(after, "after it, the missing file is noticed");
     }
 
-    pub(in crate::app) fn with_test_edit_context(assertion: impl FnOnce(&mut FieldEditContext<'_>)) {
+    pub(in crate::app) fn with_test_edit_context(
+        assertion: impl FnOnce(&mut FieldEditContext<'_>),
+    ) {
         let definitions_root = locate_definitions_root();
         let mut buffers = EditDrafts::default();
         let mut pending = Vec::new();

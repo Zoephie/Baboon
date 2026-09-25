@@ -852,7 +852,8 @@ impl Kit {
             None => self.edit_buffers.clear(),
             Some(keep) => {
                 let prefix = format!("{keep}|");
-                self.edit_buffers.retain(|draft, _| draft.starts_with(&prefix));
+                self.edit_buffers
+                    .retain(|draft, _| draft.starts_with(&prefix));
             }
         }
     }
@@ -1016,10 +1017,13 @@ mod document_cleanup_tests {
     fn closing_tabs_drops_everything_kept_for_them() {
         let mut kit = Kit::empty(KitId(0), TagNameIndex::default());
         for key in ["kept", "closed"] {
-            kit.model_previews.insert(key.to_owned(), ModelPreviewState::default());
-            kit.bitmap_previews.insert(key.to_owned(), BitmapPreviewState::default());
+            kit.model_previews
+                .insert(key.to_owned(), ModelPreviewState::default());
+            kit.bitmap_previews
+                .insert(key.to_owned(), BitmapPreviewState::default());
             kit.loading_tags.insert(key.to_owned());
-            kit.edit_buffers.insert_clean(format!("{key}|name"), "x".to_owned());
+            kit.edit_buffers
+                .insert_clean(format!("{key}|name"), "x".to_owned());
         }
 
         kit.drop_documents_except(Some("kept"));

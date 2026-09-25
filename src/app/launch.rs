@@ -136,7 +136,11 @@ pub(super) fn resolve_launch_tag_entries(
         let path = match crate::source::path_on_root(tags_root, &canonical) {
             Ok(Some(path)) => path,
             Ok(None) => {
-                errors.push(format!("{} is outside {}", canonical.display(), tags_root.display()));
+                errors.push(format!(
+                    "{} is outside {}",
+                    canonical.display(),
+                    tags_root.display()
+                ));
                 continue;
             }
             Err(error) => {
@@ -179,8 +183,8 @@ mod tests {
         std::fs::write(root.join("objects/a.model"), header).unwrap();
         let names = TagNameIndex::default();
 
-        let launched = resolve_launch_tag_entries(&root, &[PathBuf::from("objects/a.model")], &names)
-            .unwrap();
+        let launched =
+            resolve_launch_tag_entries(&root, &[PathBuf::from("objects/a.model")], &names).unwrap();
         let scanned =
             crate::source::scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
 

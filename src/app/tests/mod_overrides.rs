@@ -10,7 +10,7 @@
 use super::*;
 
 static PAKS: std::sync::LazyLock<&'static str> =
-        std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_paks()));
+    std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_paks()));
 
 /// The install these fixtures run against, or `None` when there isn't one.
 ///

@@ -23,19 +23,9 @@ pub(crate) fn h3ek_tags() -> PathBuf {
     root("BLAM_TEST_H3EK")
 }
 
-/// A Halo 4 (MCC) editing kit's `tags` folder.
-pub(crate) fn h4ek_tags() -> PathBuf {
-    root("BLAM_TEST_H4EK")
-}
-
 /// A Halo Reach (MCC) editing kit's `tags` folder.
 pub(crate) fn hrek_tags() -> PathBuf {
     root("BLAM_TEST_HREK")
-}
-
-/// A Halo CE (MCC) editing kit's `tags` folder.
-pub(crate) fn hceek_tags() -> PathBuf {
-    root("BLAM_TEST_HCEEK")
 }
 
 /// A Halo: Campaign Evolved install (the folder holding `Meteorite`).

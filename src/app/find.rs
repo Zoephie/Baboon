@@ -532,8 +532,7 @@ impl Baboon {
                 self.begin_scan_all_entries_with_label(ctx.clone(), "Indexing tags for Find...");
             }
             self.find.searching = true;
-            self.find.progress = self
-                .kits[self.active]
+            self.find.progress = self.kits[self.active]
                 .index_jobs
                 .entry_progress
                 .as_ref()
@@ -576,15 +575,16 @@ impl Baboon {
                     .unwrap_or(""),
                 open_keys.join("\u{1f}"),
             );
-            let fresh = (self.find.all_signature.as_deref() != Some(signature.as_str())).then(|| {
-                let closed_entries = entries
-                    .iter()
-                    .filter(|entry| !kit.parsed_tags.contains_key(&entry.key))
-                    .cloned()
-                    .collect::<Vec<_>>();
-                let order = entries.iter().map(|entry| entry.key.clone()).collect();
-                (closed_entries, order)
-            });
+            let fresh =
+                (self.find.all_signature.as_deref() != Some(signature.as_str())).then(|| {
+                    let closed_entries = entries
+                        .iter()
+                        .filter(|entry| !kit.parsed_tags.contains_key(&entry.key))
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    let order = entries.iter().map(|entry| entry.key.clone()).collect();
+                    (closed_entries, order)
+                });
             (signature, fresh)
         };
         if let Some((closed_entries, order)) = fresh {

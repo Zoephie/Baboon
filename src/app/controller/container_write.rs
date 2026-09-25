@@ -565,7 +565,10 @@ impl Baboon {
         lease: ContainerWriteLease,
         outcome: ContainerWriteOutcome,
     ) -> ContainerWriteReport {
-        debug_assert!(lease.unmapped.is_empty(), "an in-place lease unmaps nothing");
+        debug_assert!(
+            lease.unmapped.is_empty(),
+            "an in-place lease unmaps nothing"
+        );
         self.release_container_write_lease_inner(lease, outcome)
     }
 

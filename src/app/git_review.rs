@@ -469,16 +469,16 @@ impl Baboon {
         job: GitReviewJob,
         ctx: &egui::Context,
     ) {
-        let Some((source_root, definitions_root, game)) =
-            self.kits[kit_index].source.as_ref().and_then(|source| {
-                match &source.source {
-                    TagSource::LooseFolder {
-                        root,
-                        definitions_root,
-                        ..
-                    } => Some((root.clone(), definitions_root.clone(), source.game.clone())),
-                    _ => None,
-                }
+        let Some((source_root, definitions_root, game)) = self.kits[kit_index]
+            .source
+            .as_ref()
+            .and_then(|source| match &source.source {
+                TagSource::LooseFolder {
+                    root,
+                    definitions_root,
+                    ..
+                } => Some((root.clone(), definitions_root.clone(), source.game.clone())),
+                _ => None,
             })
         else {
             self.kits[kit_index].git_review.error =
@@ -756,5 +756,4 @@ mod tests {
         assert_eq!(app.kits[0].generation, generation, "no entry was added");
         assert_eq!(app.kits[0].source.as_ref().unwrap().entries.len(), 1);
     }
-
 }

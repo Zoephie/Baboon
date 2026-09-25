@@ -2575,7 +2575,11 @@ pub(in crate::app) fn block_index_target_labels(
         .and_then(|field| field.as_block());
     (0..target.len)
         .map(|index| {
-            block_element_dropdown_label(block.as_ref().and_then(|b| b.element(index)), names, index)
+            block_element_dropdown_label(
+                block.as_ref().and_then(|b| b.element(index)),
+                names,
+                index,
+            )
         })
         .collect()
 }
@@ -2642,7 +2646,9 @@ pub(in crate::app) fn draw_foundation_block_index_row(
             .and_then(|root| root.field_path(target_block_path))
             .and_then(|field| field.as_block());
         block_element_dropdown_label(
-            block.as_ref().and_then(|block| block.element(current as usize)),
+            block
+                .as_ref()
+                .and_then(|block| block.element(current as usize)),
             names,
             current as usize,
         )
@@ -2688,8 +2694,7 @@ pub(in crate::app) fn draw_foundation_block_index_row(
                 },
             );
             if let Some(delta) = wheel_delta {
-                if let Some(next) =
-                    combo_scroll_next_i64(current, -1, target.len as i64 - 1, delta)
+                if let Some(next) = combo_scroll_next_i64(current, -1, target.len as i64 - 1, delta)
                 {
                     new_index = Some(next);
                 }
@@ -2797,8 +2802,7 @@ mod palette_repro_tests {
         let mut failures = Vec::new();
 
         for (game, rel) in cases {
-            let tag_path = std::path::Path::new(crate::test_kits::tag_path(game, ""))
-                .join(rel);
+            let tag_path = std::path::Path::new(crate::test_kits::tag_path(game, "")).join(rel);
             if !tag_path.exists() {
                 eprintln!("skip {game}: {} missing", tag_path.display());
                 continue;
@@ -2828,7 +2832,11 @@ mod palette_repro_tests {
                                 )
                                 && target.path.contains("palette")
                             {
-                                return Some(block_index_target_labels(Some(root), &target, &names));
+                                return Some(block_index_target_labels(
+                                    Some(root),
+                                    &target,
+                                    &names,
+                                ));
                             }
                         }
                     }
@@ -2943,8 +2951,7 @@ mod palette_repro_tests {
         let mut checked = 0usize;
 
         for (game, rel, group_bytes) in cases {
-            let tag_path = std::path::Path::new(crate::test_kits::tag_path(game, ""))
-                .join(rel);
+            let tag_path = std::path::Path::new(crate::test_kits::tag_path(game, "")).join(rel);
             if !tag_path.exists() {
                 eprintln!("skip {game}: {} missing", tag_path.display());
                 continue;
@@ -2980,12 +2987,8 @@ mod palette_repro_tests {
                     };
                     for field in st.fields_all() {
                         if field.definition().block_index_target().is_some()
-                            && let Some(target) = block_index_target_options(
-                                &st,
-                                &field,
-                                Some(root),
-                                struct_path,
-                            )
+                            && let Some(target) =
+                                block_index_target_options(&st, &field, Some(root), struct_path)
                         {
                             return Some((target.path, target.len));
                         }
@@ -3051,8 +3054,7 @@ mod palette_repro_tests {
         let mut failures = Vec::new();
 
         for (game, rel, group_bytes) in cases {
-            let tag_path = std::path::Path::new(crate::test_kits::tag_path(game, ""))
-                .join(rel);
+            let tag_path = std::path::Path::new(crate::test_kits::tag_path(game, "")).join(rel);
             if !tag_path.exists() {
                 eprintln!("skip {game}: missing");
                 continue;
@@ -3138,7 +3140,7 @@ mod wheel_gesture_tests {
             });
         }
         let mut claimed = false;
-        ctx.run(
+        let _ = ctx.run(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,

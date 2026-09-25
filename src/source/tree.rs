@@ -1094,7 +1094,12 @@ mod tests {
         assert_eq!((refresh.added, refresh.updated, refresh.removed), (0, 0, 0));
     }
 
-    fn loose_source(root: &Path, game: &str, entries: Vec<TagEntry>, all: Vec<TagEntry>) -> LoadedSourceData {
+    fn loose_source(
+        root: &Path,
+        game: &str,
+        entries: Vec<TagEntry>,
+        all: Vec<TagEntry>,
+    ) -> LoadedSourceData {
         LoadedSourceData {
             label: "test".to_owned(),
             source: TagSource::LooseFolder {
@@ -1131,18 +1136,31 @@ mod tests {
         let scanned = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
         save_entry_index(&game, &root, &scanned).unwrap();
         let mut source = loose_source(&root, &game, scanned.clone(), scanned.clone());
-        let lazy_c = source.entries.iter().position(|e| e.display_path.ends_with("c.model")).unwrap();
+        let lazy_c = source
+            .entries
+            .iter()
+            .position(|e| e.display_path.ends_with("c.model"))
+            .unwrap();
 
         // A new tag (sorted into the middle of the full list), a rewritten one
         // (replaced in place), and a deleted one.
         write_fake_tag(&root.join("objects/B.model"), b"hlmt");
         write_fake_tag_with_padding(&root.join("objects/c.model"), b"hlmt", 8);
         fs::remove_file(root.join("objects/a.model")).unwrap();
-        let entry = |name: &str| loose_file_entry(&root, &root.join("objects").join(name), &names).unwrap().unwrap();
+        let entry = |name: &str| {
+            loose_file_entry(&root, &root.join("objects").join(name), &names)
+                .unwrap()
+                .unwrap()
+        };
         source.upsert_entry(entry("B.model"), &[]);
         source.upsert_entry(entry("c.model"), &[]);
         let replaced_in_place = source.entries[lazy_c].display_path.ends_with("c.model")
-            && source.entries.iter().filter(|e| e.display_path.ends_with("c.model")).count() == 1;
+            && source
+                .entries
+                .iter()
+                .filter(|e| e.display_path.ends_with("c.model"))
+                .count()
+                == 1;
         // A removal is allowed to shift the lazy list: it re-reads the tree.
         source.remove_entry(&scanned[0].key, &[]);
 
@@ -1156,8 +1174,16 @@ mod tests {
         remove_test_index(&check);
         fs::remove_dir_all(&root).unwrap();
 
-        let order: Vec<&str> = source.all_entries.iter().map(|e| e.display_path.as_str()).collect();
-        assert_eq!(order, ["objects/B.model", "objects/c.model"], "natural (case-insensitive) order");
+        let order: Vec<&str> = source
+            .all_entries
+            .iter()
+            .map(|e| e.display_path.as_str())
+            .collect();
+        assert_eq!(
+            order,
+            ["objects/B.model", "objects/c.model"],
+            "natural (case-insensitive) order"
+        );
         assert!(replaced_in_place, "a replaced entry keeps its slot, once");
         let keys = |entries: &[TagEntry]| entries.iter().map(|e| e.key.clone()).collect::<Vec<_>>();
         assert_eq!(keys(&indexed), keys(&rewritten));
@@ -1176,7 +1202,11 @@ mod tests {
         let mut entries = Vec::new();
         for _ in 0..2 {
             let mut tree = build_folder_directory_tree(&root).unwrap();
-            let node = tree.children.iter_mut().find(|node| node.label == "objects").unwrap();
+            let node = tree
+                .children
+                .iter_mut()
+                .find(|node| node.label == "objects")
+                .unwrap();
             load_folder_node_entries(&root, node, &mut entries, &names).unwrap();
             assert_eq!(node.entries.len(), 2);
         }
@@ -1197,12 +1227,23 @@ mod tests {
             location: TagEntryLocation::LooseFile(PathBuf::from(name)),
         };
         let mut source = LoadedSourceData {
-            source: TagSource::SingleFile { path: PathBuf::from("x") },
-            ..loose_source(Path::new("/unused"), "none", vec![entry("a"), entry("c")], Vec::new())
+            source: TagSource::SingleFile {
+                path: PathBuf::from("x"),
+            },
+            ..loose_source(
+                Path::new("/unused"),
+                "none",
+                vec![entry("a"), entry("c")],
+                Vec::new(),
+            )
         };
         source.upsert_entry(entry("B"), &[]);
         source.upsert_entry(entry("b2"), &[]);
-        let order: Vec<&str> = source.entries.iter().map(|e| e.display_path.as_str()).collect();
+        let order: Vec<&str> = source
+            .entries
+            .iter()
+            .map(|e| e.display_path.as_str())
+            .collect();
         assert_eq!(order, ["a", "B", "b2", "c"]);
     }
 
@@ -1252,13 +1293,24 @@ mod tests {
         let names = TagNameIndex::default();
         let before = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
         save_entry_index(&game, &root, &before).unwrap();
-        let key = |name: &str| before.iter().find(|e| e.display_path.ends_with(name)).unwrap().key.clone();
+        let key = |name: &str| {
+            before
+                .iter()
+                .find(|e| e.display_path.ends_with(name))
+                .unwrap()
+                .key
+                .clone()
+        };
 
         write_fake_tag_with_padding(&root.join("objects/b.model"), b"hlmt", 8);
         fs::remove_file(root.join("objects/c.model")).unwrap();
         write_fake_tag(&root.join("objects/d.model"), b"hlmt");
         let refresh = refresh_entry_index(&game, &root, &names).unwrap();
-        let mut touched: Vec<String> = refresh.touched.iter().map(|e| e.display_path.clone()).collect();
+        let mut touched: Vec<String> = refresh
+            .touched
+            .iter()
+            .map(|e| e.display_path.clone())
+            .collect();
         touched.sort();
 
         // Row by row, as the refresh worker writes them.
@@ -1282,7 +1334,10 @@ mod tests {
         assert_eq!(refresh.removed_keys, [key("c.model")]);
         let keys = |entries: &[TagEntry]| entries.iter().map(|e| e.key.clone()).collect::<Vec<_>>();
         assert_eq!(keys(&patched), keys(&rewritten));
-        assert!(!no_reference_index, "no reference index here, so none is started");
+        assert!(
+            !no_reference_index,
+            "no reference index here, so none is started"
+        );
     }
 
     /// One row that names no file must not cost the whole index: the loader

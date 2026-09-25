@@ -26,8 +26,8 @@ use blam_tags::iostore::container::writer::{
 };
 use blam_tags::iostore::object::archive::ExportContext;
 use blam_tags::iostore::object::edit::{
-    count_object_references, default_value_for_type, property_type_for_slot,
-    set_property_slot, validate_value_for_type,
+    count_object_references, default_value_for_type, property_type_for_slot, set_property_slot,
+    validate_value_for_type,
 };
 use blam_tags::iostore::object::export::{Export, ExportBlock, read_export_in, write_export_in};
 use blam_tags::iostore::object::hand_written as chimp_hw;
@@ -5516,7 +5516,11 @@ fn selected_texture_preview(
     export_index: Option<usize>,
 ) -> Option<&ChimpTexturePreview> {
     export_index
-        .and_then(|index| previews.iter().find(|texture| texture.export_index == index))
+        .and_then(|index| {
+            previews
+                .iter()
+                .find(|texture| texture.export_index == index)
+        })
         .or_else(|| previews.first())
 }
 
@@ -6650,7 +6654,12 @@ struct ChimpJsonLines {
 }
 
 impl ChimpJsonLines {
-    fn lines(&mut self, text: &str, font_id: &egui::FontId, dark_mode: bool) -> &[egui::text::LayoutJob] {
+    fn lines(
+        &mut self,
+        text: &str,
+        font_id: &egui::FontId,
+        dark_mode: bool,
+    ) -> &[egui::text::LayoutJob] {
         let key = (dark_mode, font_id.clone());
         if self.key.as_ref() != Some(&key) {
             self.lines =
@@ -6862,7 +6871,7 @@ fn draw_chimp_property_block(
                             if ui.button(label).on_hover_text(format!("{ty:?}")).clicked()
                                 && let Ok(value) = default_value_for_type(ty, usmap)
                                 && set_property_slot(block, class, name, array_index, value, usmap)
-                                .is_ok()
+                                    .is_ok()
                             {
                                 changed = true;
                                 added = true;
@@ -6899,15 +6908,7 @@ fn draw_chimp_property_block(
                     .unwrap_or_else(|| "Native field without a USMAP slot".to_owned()),
             );
             changed |= chimp_property_value_cell(ui, |ui| {
-                draw_chimp_value(
-                    ui,
-                    id,
-                    &mut entry.value,
-                    declared,
-                    names,
-                    usmap,
-                    depth,
-                )
+                draw_chimp_value(ui, id, &mut entry.value, declared, names, usmap, depth)
             })
             .inner;
         });
@@ -6919,7 +6920,11 @@ fn draw_chimp_property_block(
 /// A slot's declared type in an already-flattened schema: the rule
 /// `property_type_for_slot` applies, without flattening per call.
 fn declared_slot_type<'u>(
-    schema: &[(&'u blam_tags::iostore::object::usmap::UsmapProperty, u8, &'u str)],
+    schema: &[(
+        &'u blam_tags::iostore::object::usmap::UsmapProperty,
+        u8,
+        &'u str,
+    )],
     slot: blam_tags::iostore::object::value::SchemaSlot,
 ) -> Option<&'u PropertyType> {
     let (property, array_index, _) = schema.get(slot.index as usize)?;
@@ -10298,7 +10303,7 @@ mod tests {
             .documents
             .insert("/Game/Test/Thing".to_owned(), document);
         let ctx = egui::Context::default();
-        let mut due_at = |time: f64, app: &mut Baboon| {
+        let due_at = |time: f64, app: &mut Baboon| {
             let _ = ctx.run(
                 egui::RawInput {
                     time: Some(time),
@@ -10309,7 +10314,11 @@ mod tests {
             app.kits[0].chimp.documents["/Game/Test/Thing"].checkpoint_due
         };
 
-        assert_eq!(due_at(4.0, &mut app), Some(5.0), "still editing: nothing yet");
+        assert_eq!(
+            due_at(4.0, &mut app),
+            Some(5.0),
+            "still editing: nothing yet"
+        );
         assert_eq!(due_at(6.0, &mut app), None, "paused: checkpointed once");
     }
 
@@ -10348,8 +10357,9 @@ mod tests {
             }
             // The omitted-property menu lists the same slots the engine's
             // catalog does.
-            let catalog = blam_tags::iostore::object::edit::editable_schema_slots(&class.name, &usmap)
-                .unwrap();
+            let catalog =
+                blam_tags::iostore::object::edit::editable_schema_slots(&class.name, &usmap)
+                    .unwrap();
             assert_eq!(catalog.len(), schema.len());
             for ((name, slot, ty), (property, array_index, _)) in catalog.iter().zip(&schema) {
                 assert_eq!(
@@ -11481,7 +11491,10 @@ mod tests {
 
     #[test]
     fn chimp_search_matching_is_case_insensitive_without_allocating_per_package() {
-        assert!(contains_ignore_ascii_case("SM_SpiritDropShip_Body", "spirit"));
+        assert!(contains_ignore_ascii_case(
+            "SM_SpiritDropShip_Body",
+            "spirit"
+        ));
         assert!(contains_ignore_ascii_case("Texture2D", "texture2d"));
         assert!(!contains_ignore_ascii_case("StaticMesh", "skeletal"));
     }
@@ -11746,7 +11759,11 @@ mod tests {
         assert_eq!(
             document
                 .document_lines
-                .lines(&document.document_text, &egui::FontId::monospace(12.0), true)
+                .lines(
+                    &document.document_text,
+                    &egui::FontId::monospace(12.0),
+                    true
+                )
                 .len(),
             document.document_text.lines().count()
         );
@@ -11769,7 +11786,11 @@ mod tests {
         assert_eq!(
             document
                 .metadata_lines
-                .lines(&document.metadata_text, &egui::FontId::monospace(12.0), true)
+                .lines(
+                    &document.metadata_text,
+                    &egui::FontId::monospace(12.0),
+                    true
+                )
                 .len(),
             document.metadata_text.lines().count()
         );
@@ -12014,7 +12035,14 @@ mod tests {
         let directory = std::env::temp_dir().join(format!("baboon-dds-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&directory).unwrap();
         let output = directory.join("texture.dds");
-        write_chimp_texture(&world, &package, &output, ChimpTextureExport::default(), None).unwrap();
+        write_chimp_texture(
+            &world,
+            &package,
+            &output,
+            ChimpTextureExport::default(),
+            None,
+        )
+        .unwrap();
 
         let mut written: Vec<String> = std::fs::read_dir(&directory)
             .unwrap()
@@ -12220,7 +12248,9 @@ mod tests {
                 ChimpTextureExport {
                     format: fmt,
                     split_udim: split
-                }, None)
+                },
+                None
+            )
             .unwrap()
         );
         let mut names: Vec<_> = std::fs::read_dir(&directory)
@@ -12745,7 +12775,12 @@ mod fname_edit_tests {
     use blam_tags::iostore::package::name_map::{EMappedNameType, FNameMap};
 
     /// Draw one FName box for a frame of `events`.
-    fn frame(ctx: &egui::Context, events: Vec<egui::Event>, value: &mut FName, names: &mut FNameMap) -> bool {
+    fn frame(
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+        value: &mut FName,
+        names: &mut FNameMap,
+    ) -> bool {
         let input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -12768,7 +12803,8 @@ mod fname_edit_tests {
     #[test]
     fn typing_an_fname_interns_one_name_on_commit() {
         let ctx = egui::Context::default();
-        let mut names = FNameMap::create_from_names(EMappedNameType::Package, vec!["None".to_owned()]);
+        let mut names =
+            FNameMap::create_from_names(EMappedNameType::Package, vec!["None".to_owned()]);
         let mut value = FName::new(0, 0, "None");
         let before = names.len();
 
@@ -12781,12 +12817,24 @@ mod fname_edit_tests {
                 pressed,
                 modifiers: Default::default(),
             };
-            frame(&ctx, vec![egui::Event::PointerMoved(pointer), click(true), click(false)], &mut value, &mut names);
+            frame(
+                &ctx,
+                vec![
+                    egui::Event::PointerMoved(pointer),
+                    click(true),
+                    click(false),
+                ],
+                &mut value,
+                &mut names,
+            );
             if ctx.memory(|memory| memory.focused()).is_some() {
                 break;
             }
         }
-        assert!(ctx.memory(|memory| memory.focused()).is_some(), "the box never took focus");
+        assert!(
+            ctx.memory(|memory| memory.focused()).is_some(),
+            "the box never took focus"
+        );
 
         let key = |key, modifiers| egui::Event::Key {
             key,
@@ -12795,22 +12843,45 @@ mod fname_edit_tests {
             repeat: false,
             modifiers,
         };
-        let select_all = egui::Modifiers { command: true, ..Default::default() };
-        frame(&ctx, vec![key(egui::Key::A, select_all)], &mut value, &mut names);
+        let select_all = egui::Modifiers {
+            command: true,
+            ..Default::default()
+        };
+        frame(
+            &ctx,
+            vec![key(egui::Key::A, select_all)],
+            &mut value,
+            &mut names,
+        );
         let mut changes = 0;
         for letter in "Rocket".chars() {
-            if frame(&ctx, vec![egui::Event::Text(letter.to_string())], &mut value, &mut names) {
+            if frame(
+                &ctx,
+                vec![egui::Event::Text(letter.to_string())],
+                &mut value,
+                &mut names,
+            ) {
                 changes += 1;
             }
         }
         assert_eq!(names.len(), before, "nothing is interned while typing");
-        if frame(&ctx, vec![key(egui::Key::Enter, Default::default())], &mut value, &mut names) {
+        if frame(
+            &ctx,
+            vec![key(egui::Key::Enter, Default::default())],
+            &mut value,
+            &mut names,
+        ) {
             changes += 1;
         }
 
         assert_eq!(changes, 1, "one committed change");
         assert_eq!(value.to_string(), "Rocket");
-        assert_eq!(names.len(), before + 1, "exactly one new name: {:?}", names.names());
+        assert_eq!(
+            names.len(),
+            before + 1,
+            "exactly one new name: {:?}",
+            names.names()
+        );
     }
 }
 
@@ -12837,7 +12908,14 @@ mod texture_selection_tests {
         assert_eq!(pick(Some(5)), Some(5), "the selected texture");
         assert_eq!(pick(Some(2)), Some(2));
         assert_eq!(pick(None), Some(2), "nothing selected: the first texture");
-        assert_eq!(pick(Some(0)), Some(2), "a non-texture export selected: the first texture");
-        assert_eq!(selected_texture_preview(&[], Some(5)).map(|p| p.export_index), None);
+        assert_eq!(
+            pick(Some(0)),
+            Some(2),
+            "a non-texture export selected: the first texture"
+        );
+        assert_eq!(
+            selected_texture_preview(&[], Some(5)).map(|p| p.export_index),
+            None
+        );
     }
 }
