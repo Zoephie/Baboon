@@ -21,41 +21,23 @@ pub(in crate::app) fn extract_material_shader_source_entries(
     output: &Path,
 ) -> anyhow::Result<String> {
     fs::create_dir_all(output)?;
-    let mut total_written = 0usize;
-    let mut total_tags = 0usize;
-    let mut failures = Vec::new();
-
-    for entry in entries
-        .iter()
-        .filter(|entry| is_material_shader_group(entry.group_tag))
-    {
-        match write_material_shader_sources(source, entry, output) {
-            Ok(count) => {
-                total_written += count;
-                total_tags += 1;
-            }
-            Err(error) => failures.push(format!("{}: {error}", entry.display_path)),
-        }
-    }
-
-    if total_written == 0 && !failures.is_empty() {
-        anyhow::bail!(
-            "failed to extract material shader sources: {}",
-            failures.join("; ")
-        );
-    }
-    if total_written == 0 {
-        anyhow::bail!("no material shader sources found");
-    }
-
-    let mut message = format!(
-        "Extracted {total_written} source shader file(s) from {total_tags} material shader tag(s) to {}",
-        output.display()
-    );
-    if !failures.is_empty() {
-        message.push_str(&format!("; {} failed", failures.len()));
-    }
-    Ok(message)
+    export_each(
+        entries
+            .iter()
+            .filter(|entry| is_material_shader_group(entry.group_tag)),
+        |entry| write_material_shader_sources(source, entry, output),
+    )
+    .finish(
+        "no material shader sources found",
+        "failed to extract material shader sources",
+        |written, tags| {
+            format!(
+                "Extracted {written} source shader file(s) from {tags} material shader tag(s) \
+                 to {}",
+                output.display()
+            )
+        },
+    )
 }
 
 fn write_material_shader_sources(
@@ -135,31 +117,20 @@ pub(in crate::app) fn extract_hlsl_include_entries(
     output: &Path,
 ) -> anyhow::Result<String> {
     fs::create_dir_all(output)?;
-    let mut written = 0usize;
-    let mut failures = Vec::new();
-
-    for entry in entries.iter().filter(|entry| is_hlsl_include_tag(entry)) {
-        match write_hlsl_include_source(source, entry, output) {
-            Ok(_) => written += 1,
-            Err(error) => failures.push(format!("{}: {error}", entry.display_path)),
-        }
-    }
-
-    if written == 0 && !failures.is_empty() {
-        anyhow::bail!("failed to extract HLSL includes: {}", failures.join("; "));
-    }
-    if written == 0 {
-        anyhow::bail!("no HLSL includes found");
-    }
-
-    let mut message = format!(
-        "Extracted {written} HLSL include file(s) to {}",
-        output.display()
-    );
-    if !failures.is_empty() {
-        message.push_str(&format!("; {} failed", failures.len()));
-    }
-    Ok(message)
+    export_each(
+        entries.iter().filter(|entry| is_hlsl_include_tag(entry)),
+        |entry| write_hlsl_include_source(source, entry, output).map(|_| 1),
+    )
+    .finish(
+        "no HLSL includes found",
+        "failed to extract HLSL includes",
+        |written, _| {
+            format!(
+                "Extracted {written} HLSL include file(s) to {}",
+                output.display()
+            )
+        },
+    )
 }
 
 fn write_hlsl_include_source(
