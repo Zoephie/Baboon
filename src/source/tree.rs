@@ -1004,6 +1004,33 @@ mod tests {
         assert_eq!((refresh.added, refresh.updated, refresh.removed), (0, 0, 0));
     }
 
+    /// One row that names no file must not cost the whole index: the loader
+    /// used to return nothing at all, so every other tag was re-probed and the
+    /// reference index was lost with it.
+    #[test]
+    fn an_index_row_without_a_file_key_is_skipped_not_fatal() {
+        let root = temp_dir("index_bad_row");
+        let game = unique_game("index_bad_row");
+        fs::create_dir_all(root.join("objects")).unwrap();
+        write_fake_tag(&root.join("objects/a.model"), b"hlmt");
+        let names = TagNameIndex::default();
+        let entries = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        save_entry_index(&game, &root, &entries).unwrap();
+        // What New Tag and Blam Import used to register.
+        let mut bare = entries[0].clone();
+        bare.key = "objects/b.model".to_owned();
+        bare.display_path = "objects/b.model".to_owned();
+        assert!(upsert_entry_index_row(&game, &root, &bare).unwrap());
+
+        let loaded = load_entry_index(&game, &root);
+
+        remove_test_index(&game);
+        fs::remove_dir_all(&root).unwrap();
+        let loaded = loaded.expect("the good rows must still load");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].key, entries[0].key);
+    }
+
     /// With no index for the folder yet, a lone row would load back as a
     /// complete one-tag index, so the upsert must not create one.
     #[test]

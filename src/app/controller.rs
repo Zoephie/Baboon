@@ -1521,18 +1521,29 @@ impl Baboon {
             return;
         }
 
-        let display_path = output
-            .strip_prefix(&root)
-            .unwrap_or(output.as_path())
-            .to_string_lossy()
-            .replace('\\', "/");
-        let key = display_path.clone();
-        let entry = TagEntry {
-            key: key.clone(),
-            display_path,
-            group_tag: group.group_tag,
-            group_name: Some(group.name.clone()),
-            location: TagEntryLocation::LooseFile(output.clone()),
+        // Built the way the folder scan builds it, so the key is the scan's
+        // `file:` key: a bare display-path key cannot be read back out of the
+        // entry index, and a row carrying one made the whole index fail to load.
+        let names = self
+            .source()
+            .map(|source| source.names.clone())
+            .unwrap_or_default();
+        let entry = match loose_file_entry(&root, &output, &names) {
+            Ok(Some(entry)) => entry,
+            Ok(None) => {
+                self.new_tag_dialog.error = Some(format!(
+                    "Wrote {}, but it does not read back as a tag",
+                    output.display()
+                ));
+                return;
+            }
+            Err(error) => {
+                self.new_tag_dialog.error = Some(format!(
+                    "Wrote {}, but could not inspect it: {error:#}",
+                    output.display()
+                ));
+                return;
+            }
         };
         self.register_created_tag(entry, tag);
         self.new_tag_open = false;

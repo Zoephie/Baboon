@@ -18,6 +18,8 @@ struct BlamImportJob {
     asset_name: String,
     /// `definitions/<game>`, where the tag schemas live.
     schema_dir: PathBuf,
+    /// The source's names, so a filed tag's entry matches the folder scan's.
+    names: TagNameIndex,
     render: bool,
     prt: bool,
     collision: bool,
@@ -65,6 +67,11 @@ impl Baboon {
                 "This workspace's game is unknown, so no schemas can be chosen".to_owned();
             return;
         };
+        let names = self.kits[kit_index]
+            .source
+            .as_ref()
+            .map(|source| source.names.clone())
+            .unwrap_or_default();
         let asset_name = asset_rel
             .rsplit('/')
             .next()
@@ -77,6 +84,7 @@ impl Baboon {
             asset_rel,
             asset_name,
             schema_dir: locate_definitions_root().join(&game),
+            names,
             render: blam.import_render,
             prt: blam.import_prt,
             collision: blam.import_collision,
@@ -538,7 +546,6 @@ fn file_tag(
         .map_err(|error| format!("the built {group} would not serialise: {error}"))?;
     let reread = TagFile::read_from_bytes(&bytes)
         .map_err(|error| format!("the built {group} would not parse back: {error}"))?;
-    let display_path = format!("{}/{stem}.{group}", job.asset_rel);
     let output = job
         .tags_root
         .join(&job.asset_rel)
@@ -549,13 +556,12 @@ fn file_tag(
     }
     std::fs::write(&output, &bytes)
         .map_err(|error| format!("could not write {}: {error}", output.display()))?;
-    let entry = TagEntry {
-        key: display_path.clone(),
-        display_path,
-        group_tag: reread.header.group_tag,
-        group_name: Some(group.to_owned()),
-        location: TagEntryLocation::LooseFile(output),
-    };
+    // Built the way the folder scan builds it: a bare display-path key cannot
+    // be read back out of the entry index, and never matches a tab the user
+    // opened from the browser.
+    let entry = loose_file_entry(&job.tags_root, &output, &job.names)
+        .map_err(|error| format!("could not inspect {}: {error:#}", output.display()))?
+        .ok_or_else(|| format!("{} does not read back as a tag", output.display()))?;
     Ok((entry, reread))
 }
 
@@ -629,6 +635,7 @@ mod tests {
             asset_rel: asset.to_owned(),
             asset_name: "ghost_aa".to_owned(),
             schema_dir: locate_definitions_root().join("halo3_mcc"),
+            names: TagNameIndex::default(),
             render: true,
             prt: false,
             collision: true,
@@ -676,6 +683,7 @@ mod tests {
             asset_rel: "levels/test_level".to_owned(),
             asset_name: "test_level".to_owned(),
             schema_dir: locate_definitions_root().join("halo3_mcc"),
+            names: TagNameIndex::default(),
             render: false,
             prt: false,
             collision: false,
@@ -695,5 +703,42 @@ mod tests {
         );
         assert_written_and_rereadable(&created);
         std::fs::remove_dir_all(&scratch).unwrap();
+    }
+
+    /// A filed tag's entry must be the one the folder scan would make for the
+    /// same file. It used to be keyed by its bare display path, which the entry
+    /// index cannot read back and no browser-opened tab ever matches.
+    #[test]
+    fn a_filed_tag_is_keyed_like_the_folder_scan() {
+        let scratch = scratch_dir("blam-file-tag");
+        let tags_root = scratch.join("tags");
+        let schema_dir = locate_definitions_root().join("halo3_mcc");
+        let job = BlamImportJob {
+            data_dir: scratch.join("data/objects/test"),
+            tags_root: tags_root.clone(),
+            asset_rel: "objects/test".to_owned(),
+            asset_name: "test".to_owned(),
+            schema_dir: schema_dir.clone(),
+            names: TagNameIndex::default(),
+            render: false,
+            prt: false,
+            collision: false,
+            physics: false,
+            structure: false,
+        };
+        let tag = TagFile::new(schema_path(&schema_dir, "render_model").unwrap()).unwrap();
+
+        let (entry, _) = file_tag(&job, tag, "test", "render_model").unwrap();
+        let scanned = crate::source::scan_folder_subtree_entries(
+            &tags_root,
+            Path::new(""),
+            &TagNameIndex::default(),
+        )
+        .unwrap();
+
+        std::fs::remove_dir_all(&scratch).unwrap();
+        assert_eq!(scanned.len(), 1);
+        assert_eq!(entry.key, scanned[0].key);
+        assert_eq!(entry.display_path, scanned[0].display_path);
     }
 }

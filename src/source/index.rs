@@ -628,7 +628,13 @@ fn load_entry_index_from_db(
     let mut fingerprints = HashMap::new();
     for row in rows {
         let (entry, rel_path, fingerprint) = row.ok()?;
-        let entry = entry?;
+        // A row whose key names no file (older New Tag / Blam Import wrote bare
+        // display paths) is skipped, not fatal: failing here threw the whole
+        // index away over one tag. Its file is still on disk, so the next
+        // refresh finds it as added and writes it back with a proper key.
+        let Some(entry) = entry else {
+            continue;
+        };
         if !rel_path.is_empty()
             && let Some(fingerprint) = fingerprint
         {
