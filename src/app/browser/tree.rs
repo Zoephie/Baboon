@@ -2224,7 +2224,9 @@ pub(in crate::app) fn draw_entry(
     // Not `on_hover_text`: an egui tooltip would block the very drag this row
     // exists to start. See `hover_tooltip_beside_pointer`.
     let hover_label = native_display_path(&entry.display_path);
-    if entry.group_tag == u32::from_be_bytes(*b"bitm") {
+    // Only a hovered row asks for its thumbnail. Every bitmap row laid out
+    // used to, which read and decoded every bitmap in an expanded folder.
+    if entry.group_tag == u32::from_be_bytes(*b"bitm") && response.hovered() {
         match bitmap_hover_texture(ui, entry) {
             Some(Some(texture)) => {
                 paint_bitmap_hover_preview(ui, &response, &texture, &hover_label)
@@ -2819,6 +2821,66 @@ mod tests {
             group_name: None,
             location,
         }
+    }
+
+    /// Only a hovered bitmap row asks for its preview thumbnail. Every bitmap
+    /// row laid out used to, so expanding a folder read and decoded all of its
+    /// bitmaps in the background, and repainted until they were done.
+    #[test]
+    fn only_a_hovered_bitmap_row_requests_its_thumbnail() {
+        let entries: Vec<TagEntry> = (0..20)
+            .map(|index| TagEntry {
+                key: format!("file:bitmaps/b{index:02}.bitmap"),
+                display_path: format!("b{index:02}.bitmap"),
+                group_tag: u32::from_be_bytes(*b"bitm"),
+                group_name: Some("bitmap".to_owned()),
+                location: TagEntryLocation::LooseFile(PathBuf::from(format!("b{index:02}.bitmap"))),
+            })
+            .collect();
+        let tree = crate::source::build_tree(&entries);
+        let ctx = egui::Context::default();
+        let requests_with_pointer_at = |pointer: Option<egui::Pos2>| {
+            let mut requested = 0;
+            // Twice: hover is decided from the previous frame's layout.
+            for _ in 0..2 {
+                let input = egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(300.0, 900.0),
+                    )),
+                    events: pointer.map(egui::Event::PointerMoved).into_iter().collect(),
+                    ..Default::default()
+                };
+                let _ = ctx.run(input, |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let requests = crate::app::begin_bitmap_hovers(
+                            ui,
+                            std::sync::Arc::new(std::sync::Mutex::new(Default::default())),
+                        );
+                        draw_tree(
+                            ui,
+                            &tree,
+                            &entries,
+                            None,
+                            "",
+                            false,
+                            false,
+                            false,
+                            None,
+                            BrowserSort::Natural,
+                            false,
+                            None,
+                            false,
+                        );
+                        requested = requests.lock().unwrap().len();
+                    });
+                });
+            }
+            requested
+        };
+
+        assert_eq!(requests_with_pointer_at(Some(egui::pos2(290.0, 890.0))), 0);
+        assert_eq!(requests_with_pointer_at(Some(egui::pos2(60.0, 20.0))), 1);
     }
 
     /// Draw one browser tree and report how much vertical space it left unused.

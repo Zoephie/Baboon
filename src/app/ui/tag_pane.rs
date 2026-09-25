@@ -120,13 +120,8 @@ impl Baboon {
 
         let kit = &mut self.kits[kit_index];
         let kit_id = kit.id;
-        let bitmap_hover_requests = begin_bitmap_hovers(
-            ui,
-            KitStamp {
-                kit: kit_id,
-                generation: kit.generation,
-            },
-        );
+        let bitmap_hover_requests =
+            begin_bitmap_hovers(ui, Arc::clone(&kit.bitmap_browser.thumbnails));
         let source = kit.source.as_ref();
         let names = &kit.names;
 

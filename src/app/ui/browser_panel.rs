@@ -76,10 +76,7 @@ impl Baboon {
         let generation = self.kits[kit_index].generation;
         let bitmap_hover_requests = begin_bitmap_hovers(
             ui,
-            KitStamp {
-                kit: self.kits[kit_index].id,
-                generation,
-            },
+            Arc::clone(&self.kits[kit_index].bitmap_browser.thumbnails),
         );
         if pane.cached_generation != generation || pane.cached_source_len != source_len {
             if let Some(source) = self.kits[kit_index].source.as_mut() {
@@ -459,10 +456,7 @@ impl Baboon {
         );
         let bitmap_hover_requests = begin_bitmap_hovers(
             ui,
-            KitStamp {
-                kit: self.kits[kit_index].id,
-                generation: self.kits[kit_index].generation,
-            },
+            Arc::clone(&self.kits[kit_index].bitmap_browser.thumbnails),
         );
         let mut open_git_review = false;
         let kit = &mut self.kits[kit_index];

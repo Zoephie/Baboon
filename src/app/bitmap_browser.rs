@@ -36,7 +36,10 @@ const THUMBNAIL_EVICT_BATCH: usize = 128;
 
 #[derive(Clone)]
 struct BitmapHoverContext {
-    stamp: KitStamp,
+    /// The kit's thumbnail cache. Hover previews read it directly rather than
+    /// a copy in egui memory: those copies were keyed by kit generation, never
+    /// removed, and kept every texture alive past the cache's cap.
+    thumbnails: Arc<Mutex<ThumbnailCache>>,
     requests: Arc<Mutex<Vec<TagEntry>>>,
 }
 
@@ -44,19 +47,18 @@ fn bitmap_hover_context_id() -> egui::Id {
     egui::Id::new("bitmap_hover_context")
 }
 
-fn bitmap_hover_texture_id(stamp: KitStamp, key: &str) -> egui::Id {
-    egui::Id::new(("bitmap_hover_texture", stamp.kit.0, stamp.generation, key))
-}
-
 /// Start collecting hover-preview requests for the kit about to be drawn.
 /// Browser rows and tag-reference fields use the same context and cache.
-pub(in crate::app) fn begin_bitmap_hovers(ui: &Ui, stamp: KitStamp) -> Arc<Mutex<Vec<TagEntry>>> {
+pub(in crate::app) fn begin_bitmap_hovers(
+    ui: &Ui,
+    thumbnails: Arc<Mutex<ThumbnailCache>>,
+) -> Arc<Mutex<Vec<TagEntry>>> {
     let requests = Arc::new(Mutex::new(Vec::new()));
     ui.data_mut(|data| {
         data.insert_temp(
             bitmap_hover_context_id(),
             BitmapHoverContext {
-                stamp,
+                thumbnails,
                 requests: Arc::clone(&requests),
             },
         )
@@ -66,13 +68,19 @@ pub(in crate::app) fn begin_bitmap_hovers(ui: &Ui, stamp: KitStamp) -> Arc<Mutex
 
 /// Return a cached hover texture, or enqueue this entry for an asynchronous
 /// decode. The outer `Option` distinguishes "not decoded" from a cached miss.
+///
+/// Call it for a hovered widget only: a request is a tag read and a decode.
 pub(in crate::app) fn bitmap_hover_texture(
     ui: &Ui,
     entry: &TagEntry,
 ) -> Option<Option<egui::TextureHandle>> {
     let context = ui.data(|data| data.get_temp::<BitmapHoverContext>(bitmap_hover_context_id()))?;
-    let texture_id = bitmap_hover_texture_id(context.stamp, &entry.key);
-    if let Some(cached) = ui.data(|data| data.get_temp::<Option<egui::TextureHandle>>(texture_id)) {
+    if let Some(cached) = context
+        .thumbnails
+        .lock()
+        .ok()
+        .and_then(|mut thumbnails| thumbnails.get(&entry.key))
+    {
         return Some(cached);
     }
     if let Ok(mut requests) = context.requests.lock()
@@ -81,15 +89,6 @@ pub(in crate::app) fn bitmap_hover_texture(
         requests.push(entry.clone());
     }
     None
-}
-
-fn publish_bitmap_hover_texture(
-    ctx: &egui::Context,
-    stamp: KitStamp,
-    key: &str,
-    texture: Option<egui::TextureHandle>,
-) {
-    ctx.data_mut(|data| data.insert_temp(bitmap_hover_texture_id(stamp, key), texture));
 }
 
 /// Painter-only popup shared by browser drag sources and editable reference
@@ -178,7 +177,8 @@ pub(in crate::app) struct BitmapBrowserState {
     /// The query `matches` was computed for. Filtering tens of thousands of
     /// entries is cheap once and wasteful sixty times a second.
     matched_for: Option<String>,
-    thumbnails: ThumbnailCache,
+    /// Shared with hover previews, which read it from inside draw code.
+    pub(in crate::app) thumbnails: Arc<Mutex<ThumbnailCache>>,
     /// Keys with a decode job running, so a cell is not queued twice while its
     /// thread works.
     pending: HashSet<String>,
@@ -556,7 +556,12 @@ impl Baboon {
         let entry = browser.entries.get(entry_index)?;
         let (key, display_path) = (entry.key.clone(), entry.display_path.clone());
 
-        let texture = match browser.thumbnails.get(&key) {
+        let cached = browser
+            .thumbnails
+            .lock()
+            .ok()
+            .and_then(|mut thumbnails| thumbnails.get(&key));
+        let texture = match cached {
             Some(texture) => texture,
             None => {
                 // Not decoded yet. Ask for it, draw the placeholder, and let the
@@ -703,7 +708,9 @@ impl Baboon {
             browser.entries = entries;
             browser.entries_for = Some(generation);
             browser.matched_for = None;
-            browser.thumbnails.clear();
+            if let Ok(mut thumbnails) = browser.thumbnails.lock() {
+                thumbnails.clear();
+            }
             // A new source gets to ask for its own scan; the flag only exists
             // to stop the request repeating every frame within one source.
             browser.requested_scan = false;
@@ -804,8 +811,12 @@ impl Baboon {
 
         for entry in entries {
             let key = entry.key.clone();
-            if let Some(cached) = self.kits[kit_index].bitmap_browser.thumbnails.get(&key) {
-                publish_bitmap_hover_texture(ctx, stamp, &key, cached);
+            let cached = self.kits[kit_index]
+                .bitmap_browser
+                .thumbnails
+                .lock()
+                .is_ok_and(|thumbnails| thumbnails.contains(&key));
+            if cached {
                 continue;
             }
             if self.kits[kit_index].bitmap_browser.pending.len() >= MAX_DECODES_IN_FLIGHT {
@@ -859,8 +870,9 @@ impl Baboon {
             )),
             Err(_) => None,
         };
-        browser.thumbnails.insert(key.clone(), texture.clone());
-        publish_bitmap_hover_texture(ctx, stamp, &key, texture);
+        if let Ok(mut thumbnails) = browser.thumbnails.lock() {
+            thumbnails.insert(key, texture);
+        }
         false
     }
 }
