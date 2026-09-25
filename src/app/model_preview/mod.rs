@@ -385,18 +385,14 @@ pub(super) fn draw_model_preview_panel(
     }
 
     ui.scope(|ui| {
-        // The parse is synchronous; on the first frame for a tag, show a
-        // spinner, kick the (blocking) parse, and repaint so the decoded
-        // model appears next frame instead of a blank panel. (A future
-        // change can move the parse to a worker thread — see plan 1.9.)
-        let needs_load = state.needs_preview_load(&entry.key);
-        if needs_load {
+        // The parse runs on a worker; until it lands, show a spinner. The
+        // worker repaints when it finishes, so nothing here polls.
+        ensure_model_preview_loaded(tag, entry, names, source, state, ui.ctx());
+        if state.needs_preview_load(&entry.key) {
             ui.horizontal(|ui| {
                 ui.spinner();
                 ui.label(RichText::new("Loading model…").color(subtle_dark()));
             });
-            ensure_model_preview_loaded(tag, entry, names, source, state);
-            ui.ctx().request_repaint();
             return;
         }
 
@@ -702,11 +698,7 @@ pub(super) fn draw_model_preview_panel(
                                         )
                                         .clicked()
                                         {
-                                            state.loaded_key = None;
-                                            state.data = None;
-                                            ensure_model_preview_loaded(
-                                                tag, entry, names, source, state,
-                                            );
+                                            state.invalidate_load();
                                             reload_requested = true;
                                         }
                                     },
@@ -753,9 +745,7 @@ pub(super) fn draw_model_preview_panel(
                         if icon_text_button(ui, ButtonIcon::Refresh, "Refresh Model", true)
                             .clicked()
                         {
-                            state.loaded_key = None;
-                            state.data = None;
-                            ensure_model_preview_loaded(tag, entry, names, source, state);
+                            state.invalidate_load();
                             reload_requested = true;
                         }
                     });
@@ -767,8 +757,7 @@ pub(super) fn draw_model_preview_panel(
         }
         draw_animation_player(ui, state);
         if mutation_requested {
-            state.loaded_key = None;
-            state.data = None;
+            state.invalidate_load();
         } else if !reload_requested {
             state.data = restore_data.take();
         }

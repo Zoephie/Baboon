@@ -277,8 +277,7 @@ impl Baboon {
         }
         if applied.model_variants_changed {
             if let Some(preview) = kit.model_previews.get_mut(&key) {
-                preview.loaded_key = None;
-                preview.data = None;
+                preview.invalidate_load();
             }
         }
         // A color swatch was clicked: open the shared picker. Each popup

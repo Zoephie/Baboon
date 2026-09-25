@@ -38,41 +38,149 @@ impl PreviewLoadSettings {
     }
 }
 
+/// Drive the preview load for `entry`: land a finished worker's result, or
+/// start one when the state wants a preview it does not have.
+///
+/// The parse runs on a worker so a heavy model (or a scenario with its BSPs)
+/// no longer freezes the window. `TagFile` is not `Clone`, so the worker gets
+/// the document serialized and re-parses it; a tag that cannot make that
+/// round trip is parsed here instead, as before.
 pub(super) fn ensure_model_preview_loaded(
     model_tag: &TagFile,
     entry: &TagEntry,
     names: &TagNameIndex,
     source: Option<&TagSource>,
     state: &mut ModelPreviewState,
+    ctx: &egui::Context,
 ) {
+    if let Some(pending) = state.loading.take() {
+        let wanted = pending.key == entry.key
+            && pending.high_detail == state.high_detail
+            && pending.scenario_selection == state.scenario_bsp_selection;
+        if wanted {
+            match pending.receiver.try_recv() {
+                Ok(PreviewLoadOutcome::Loaded(result)) => {
+                    apply_model_preview_load(state, &pending.key, &pending, result);
+                    return;
+                }
+                Ok(PreviewLoadOutcome::Unparsed) => {}
+                Err(std::sync::mpsc::TryRecvError::Empty) => {
+                    state.loading = Some(pending);
+                    return;
+                }
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    let crashed =
+                        Err("Render model preview crashed while parsing this tag.".into());
+                    apply_model_preview_load(state, &pending.key, &pending, crashed);
+                    return;
+                }
+            }
+            // The worker could not re-parse the bytes: parse the open
+            // document here, as the preview always did before it moved.
+            #[cfg(test)]
+            UI_THREAD_LOADS.with(|count| count.set(count.get() + 1));
+            let settings = PreviewLoadSettings::of(state);
+            let result = load_model_preview_guarded(model_tag, entry, names, source, &settings);
+            apply_model_preview_load(state, &pending.key, &pending, result);
+            return;
+        }
+    }
     if !state.needs_preview_load(&entry.key) {
         return;
     }
-    state.loaded_key = Some(entry.key.clone());
-    state.loaded_high_detail = state.high_detail;
-    state.loaded_scenario_selection = state.scenario_bsp_selection.clone();
+    let settings = PreviewLoadSettings::of(state);
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let pending = PendingPreviewLoad {
+        key: entry.key.clone(),
+        high_detail: settings.high_detail,
+        scenario_selection: settings.scenario_selection.clone(),
+        receiver,
+    };
+    let Ok(bytes) = model_tag.write_to_bytes() else {
+        #[cfg(test)]
+        UI_THREAD_LOADS.with(|count| count.set(count.get() + 1));
+        let result = load_model_preview_guarded(model_tag, entry, names, source, &settings);
+        apply_model_preview_load(state, &entry.key.clone(), &pending, result);
+        return;
+    };
+    let (game, definitions_root) = match source {
+        Some(TagSource::LooseFolder {
+            game,
+            definitions_root,
+            ..
+        }) => (game.clone(), Some(definitions_root.clone())),
+        _ => (None, None),
+    };
+    let group_tag = model_tag.header.group_tag;
+    let (entry, names, source) = (entry.clone(), names.clone(), source.cloned());
+    let ctx = ctx.clone();
+    std::thread::spawn(move || {
+        let outcome = match crate::source::read_tag_from_bytes(
+            &bytes,
+            game.as_deref(),
+            definitions_root.as_deref(),
+            group_tag,
+        ) {
+            Ok(tag) => PreviewLoadOutcome::Loaded(load_model_preview_guarded(
+                &tag,
+                &entry,
+                &names,
+                source.as_ref(),
+                &settings,
+            )),
+            Err(_) => PreviewLoadOutcome::Unparsed,
+        };
+        let _ = sender.send(outcome);
+        ctx.request_repaint();
+    });
+    state.loading = Some(pending);
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Loads this thread ran itself instead of handing to a worker.
+    pub(super) static UI_THREAD_LOADS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+fn load_model_preview_guarded(
+    model_tag: &TagFile,
+    entry: &TagEntry,
+    names: &TagNameIndex,
+    source: Option<&TagSource>,
+    settings: &PreviewLoadSettings,
+) -> Result<ModelPreviewData, String> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        load_model_preview(model_tag, entry, names, source, settings)
+    }))
+    .map_err(|_| "Render model preview crashed while parsing this tag.".to_owned())
+    .and_then(|result| result)
+}
+
+/// Install a finished load as the state's preview, recording the request it
+/// answered so `needs_preview_load` agrees it is current.
+fn apply_model_preview_load(
+    state: &mut ModelPreviewState,
+    key: &str,
+    request: &PendingPreviewLoad,
+    result: Result<ModelPreviewData, String>,
+) {
+    state.loaded_key = Some(key.to_owned());
+    state.loaded_high_detail = request.high_detail;
+    state.loaded_scenario_selection = request.scenario_selection.clone();
     // A fresh base load orphans any overlay build in flight (its geometry id
     // no longer matches) and re-arms the request for the new data. Animation
     // playback resets with it: the pose is mapped to the old node order.
     state.overlays_pending = false;
     state.overlays_loaded = false;
     state.animation = PreviewAnimationPlayback::default();
-    let settings = PreviewLoadSettings::of(state);
-    state.data = Some(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            load_model_preview(model_tag, entry, names, source, &settings)
-        }))
-        .map_err(|_| "Render model preview crashed while parsing this tag.".to_owned())
-        .and_then(|result| result)
-        .map(|data| {
-            state.render_model_path = Some(data.render_model_path.clone());
-            // Auto-select the canonical variant (named `default`, else the first)
-            // so the preview opens showing a complete configured model.
-            let default_variant = default_variant_index(&data.variants);
-            reset_model_preview_selection(state, &data, default_variant);
-            data
-        }),
-    );
+    state.data = Some(result.map(|data| {
+        state.render_model_path = Some(data.render_model_path.clone());
+        // Auto-select the canonical variant (named `default`, else the first)
+        // so the preview opens showing a complete configured model.
+        let default_variant = default_variant_index(&data.variants);
+        reset_model_preview_selection(state, &data, default_variant);
+        data
+    }));
 }
 
 pub(super) fn load_model_preview(
@@ -2270,3 +2378,7 @@ mod ce_repro_tests {
 #[cfg(test)]
 #[path = "../tests/particle_model_preview.rs"]
 mod particle_model_preview;
+
+#[cfg(test)]
+#[path = "../tests/model_preview_worker.rs"]
+mod model_preview_worker;

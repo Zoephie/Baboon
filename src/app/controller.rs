@@ -7863,8 +7863,7 @@ impl Baboon {
     /// Drop derived previews for `key` in `kit`, after its document changed.
     pub(super) fn invalidate_tag_caches_in(&mut self, kit: usize, key: &str) {
         if let Some(preview) = self.kits[kit].model_previews.get_mut(key) {
-            preview.loaded_key = None;
-            preview.data = None;
+            preview.invalidate_load();
         }
         if let Some(bitmap) = self.kits[kit].bitmap_previews.get_mut(key) {
             bitmap.decoded = None;
@@ -8900,8 +8899,7 @@ impl Baboon {
                         .get_mut(&confirm.tag_key)
                 {
                     preview.selected_variant = None;
-                    preview.loaded_key = None;
-                    preview.data = None;
+                    preview.invalidate_load();
                 }
             }
         } else if do_cancel {

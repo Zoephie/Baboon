@@ -189,6 +189,10 @@ pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) loaded_key: Option<String>,
     pub(in crate::app) render_model_path: Option<String>,
     pub(in crate::app) data: Option<Result<ModelPreviewData, String>>,
+    /// A worker parsing the preview for the request it names. The panel
+    /// shows its spinner until the result lands; one that lands for a
+    /// request the state no longer wants is dropped.
+    pub(in crate::app) loading: Option<PendingPreviewLoad>,
     pub(in crate::app) active_tab: ModelTagPanelTab,
     pub(in crate::app) new_variant_name: String,
     pub(in crate::app) selected_variant: Option<usize>,
@@ -261,6 +265,7 @@ impl Default for ModelPreviewState {
             loaded_key: None,
             render_model_path: None,
             data: None,
+            loading: None,
             active_tab: ModelTagPanelTab::Fields,
             new_variant_name: String::new(),
             selected_variant: None,
@@ -293,7 +298,32 @@ impl Default for ModelPreviewState {
     }
 }
 
+/// What a preview-load worker was asked for, and where its answer arrives.
+pub(in crate::app) struct PendingPreviewLoad {
+    pub(in crate::app) key: String,
+    pub(in crate::app) high_detail: bool,
+    pub(in crate::app) scenario_selection: std::collections::BTreeSet<usize>,
+    pub(in crate::app) receiver: std::sync::mpsc::Receiver<PreviewLoadOutcome>,
+}
+
+/// A preview-load worker's answer.
+pub(in crate::app) enum PreviewLoadOutcome {
+    Loaded(Result<ModelPreviewData, String>),
+    /// The worker could not re-parse the serialized tag, so the panel parses
+    /// the open document on the UI thread instead.
+    Unparsed,
+}
+
 impl ModelPreviewState {
+    /// Forget the loaded preview and any load in flight, so the next frame
+    /// rebuilds from the document as it is now. Dropping the pending load
+    /// matters after an edit: its worker is parsing the bytes from before it.
+    pub(in crate::app) fn invalidate_load(&mut self) {
+        self.loaded_key = None;
+        self.data = None;
+        self.loading = None;
+    }
+
     /// Whether the cached preview no longer matches what the panel should
     /// show — a different tag, or a load-affecting setting that changed.
     /// One predicate for the panel's spinner gate and the loader's early
