@@ -408,15 +408,24 @@ pub(super) fn load_campaign_evolved_preview(
     ))
 }
 
-fn build_campaign_evolved_preview(
+/// A Campaign Evolved model's skeleton and Unreal render geometry, resolved
+/// the one way both its preview and its JMS export need.
+struct CeModelMeshes {
+    skel: TagFile,
+    variants: Vec<ModelVariantPreview>,
+    meshes: CeMeshes,
+    /// Where the geometry came from, for the preview's label.
+    render_path: String,
+}
+
+fn resolve_ce_model_meshes(
     model_tag: &TagFile,
     entry: &TagEntry,
     source: &TagSource,
     containers: &[MountedContainer],
     skel_ref: &str,
     high_detail: bool,
-) -> Result<ModelPreviewData, String> {
-    let _ = model_tag;
+) -> Result<CeModelMeshes, String> {
     // 1. Resolve the skeleton_model (node skeleton + markers + regions) through
     //    the container tag index — the same read the browser tree performs.
     let skel = source
@@ -426,7 +435,7 @@ fn build_campaign_evolved_preview(
     // 2. This model's package key, as DA_MeshSynchronization imports it
     //    (e.g. `objects/characters/elite_ai/elite_ai-model`).
     let TagEntryLocation::Container { rel_path, .. } = &entry.location else {
-        return Err("CE model preview requires a container entry.".to_owned());
+        return Err("A Campaign Evolved model needs a container entry.".to_owned());
     };
     let stem = rel_path.to_ascii_lowercase().replace('\\', "/");
     let stem = stem.strip_suffix(".ubulk").unwrap_or(&stem);
@@ -460,15 +469,15 @@ fn build_campaign_evolved_preview(
         }
         None => (CeMeshes::default(), String::new()),
     };
-    let (meshes, render_path) = if meshes.is_empty() {
+    let (mut meshes, render_path) = if meshes.is_empty() {
         let char_root = ce_find_character_root(containers, &model_key).ok_or_else(|| {
             // First-person hand/body models (GameGlobals FirstPersonHands /
             // FirstPersonBody) are a separate representation: no world
             // DA_MeshSynchronization imports them, and their geometry is
             // sourced through the FirstPerson weapon/equipment actors — which
-            // this world-model preview doesn't reconstruct.
+            // this world-model reconstruction doesn't rebuild.
             if is_first_person_model(&model_key) {
-                "First-person hand/body models aren't previewable here — their geometry is \
+                "First-person hand/body models can't be rebuilt here — their geometry is \
                  provided by the first-person weapon actors, not the world mesh-sync path."
                     .to_owned()
             } else {
@@ -489,7 +498,6 @@ fn build_campaign_evolved_preview(
     };
     // Human characters' heads come from a separate MetaHuman `Face` component
     // (DT_MetaHumanHeads), not the mesh-sync path — resolve and fuse it in.
-    let mut meshes = meshes;
     let head_node = ce_head_node_name(&skel);
     ce_add_metahuman_head(
         containers,
@@ -502,7 +510,23 @@ fn build_campaign_evolved_preview(
     if meshes.is_empty() {
         return Err("No UE meshes resolved for this model.".to_owned());
     }
-    let parts: Vec<UeMeshPart> = meshes
+    Ok(CeModelMeshes {
+        skel,
+        variants,
+        meshes,
+        render_path,
+    })
+}
+
+/// The resolved meshes as the part lists the cross-game builders take.
+fn ce_mesh_parts(
+    meshes: &CeMeshes,
+) -> (
+    Vec<UeMeshPart<'_>>,
+    Vec<UeStaticPart<'_>>,
+    Vec<UeWorldPart<'_>>,
+) {
+    let parts = meshes
         .skeletal
         .iter()
         .map(|(region, perm, name, mesh, mats)| UeMeshPart {
@@ -513,7 +537,7 @@ fn build_campaign_evolved_preview(
             material_names: mats.clone(),
         })
         .collect();
-    let static_parts: Vec<UeStaticPart> = meshes
+    let static_parts = meshes
         .statics
         .iter()
         .map(
@@ -529,7 +553,7 @@ fn build_campaign_evolved_preview(
             },
         )
         .collect();
-    let world_parts: Vec<UeWorldPart> = meshes
+    let world_parts = meshes
         .world
         .iter()
         .map(
@@ -544,6 +568,24 @@ fn build_campaign_evolved_preview(
             },
         )
         .collect();
+    (parts, static_parts, world_parts)
+}
+
+fn build_campaign_evolved_preview(
+    model_tag: &TagFile,
+    entry: &TagEntry,
+    source: &TagSource,
+    containers: &[MountedContainer],
+    skel_ref: &str,
+    high_detail: bool,
+) -> Result<ModelPreviewData, String> {
+    let CeModelMeshes {
+        skel,
+        variants,
+        meshes,
+        render_path,
+    } = resolve_ce_model_meshes(model_tag, entry, source, containers, skel_ref, high_detail)?;
+    let (parts, static_parts, world_parts) = ce_mesh_parts(&meshes);
 
     // 5. Reconstruct the cross-game RenderModel and run the standard pipeline.
     let (render_model, render_meshes) =
@@ -606,8 +648,8 @@ fn build_campaign_evolved_preview(
 
 /// Build a full-resolution JMS for a Campaign Evolved `hlmt` model by fusing
 /// its Unreal render geometry (skeletal + **Nanite** static pieces) onto the
-/// classic `skeleton_model` rig. Mirrors [`build_campaign_evolved_preview`]'s
-/// mesh resolution but loads the high-detail Nanite geometry and emits JMS —
+/// classic `skeleton_model` rig. Resolves the meshes as the preview does
+/// ([`resolve_ce_model_meshes`]) but at full Nanite detail, and emits JMS —
 /// the render-geometry half of model extraction (CE keeps render geometry in
 /// Unreal, so there's no `render_model` tag to walk).
 pub(in crate::app) fn campaign_evolved_render_jms(
@@ -619,99 +661,9 @@ pub(in crate::app) fn campaign_evolved_render_jms(
     let TagSource::IoStoreContainerSet { containers, .. } = source else {
         return Err("CE render extraction requires an IoStore container source.".to_owned());
     };
-    let skel = source
-        .read_container_tag_by_ref(u32::from_be_bytes(*b"skel"), skel_ref)
-        .map_err(|e| e.to_string())?;
-
-    let TagEntryLocation::Container { rel_path, .. } = &entry.location else {
-        return Err("CE render extraction requires a container entry.".to_owned());
-    };
-    let stem = rel_path.to_ascii_lowercase().replace('\\', "/");
-    let stem = stem.strip_suffix(".ubulk").unwrap_or(&stem);
-    let model_key = stem.rsplit("tags/").next().unwrap_or(stem).to_string();
-
-    let variants = read_model_variants(model_tag);
-    let mut needed: std::collections::BTreeSet<(String, String)> =
-        std::collections::BTreeSet::new();
-    for v in &variants {
-        for (region, perm) in &v.regions {
-            if !perm.is_empty() {
-                needed.insert((region.to_ascii_lowercase(), perm.to_ascii_lowercase()));
-            }
-        }
-    }
-
-    let meshes = match ce_load_meshsync_regions(containers, &model_key) {
-        Some(regions) => ce_collect_parts_from_regions(containers, &regions, &needed, true),
-        None => CeMeshes::default(),
-    };
-    let meshes = if meshes.is_empty() {
-        let char_root = ce_find_character_root(containers, &model_key)
-            .ok_or_else(|| "No MeshSynchronization data asset references this model.".to_owned())?;
-        CeMeshes {
-            skeletal: ce_load_variant_meshes(containers, &char_root, &needed),
-            ..Default::default()
-        }
-    } else {
-        meshes
-    };
-    let mut meshes = meshes;
-    let head_node = ce_head_node_name(&skel);
-    ce_add_metahuman_head(
-        containers,
-        &model_key,
-        &needed,
-        &head_node,
-        true,
-        &mut meshes,
-    );
-    if meshes.is_empty() {
-        return Err("No UE meshes resolved for this model.".to_owned());
-    }
-
-    let parts: Vec<UeMeshPart> = meshes
-        .skeletal
-        .iter()
-        .map(|(region, perm, name, mesh, mats)| UeMeshPart {
-            mesh: &**mesh,
-            region: region.clone(),
-            permutation: perm.clone(),
-            name: name.clone(),
-            material_names: mats.clone(),
-        })
-        .collect();
-    let static_parts: Vec<UeStaticPart> = meshes
-        .statics
-        .iter()
-        .map(
-            |(region, perm, name, mesh, bone, mats, xf, wa)| UeStaticPart {
-                mesh: &**mesh,
-                bone_name: bone.clone(),
-                region: region.clone(),
-                permutation: perm.clone(),
-                name: name.clone(),
-                material_names: mats.clone(),
-                rel_transform: *xf,
-                world_anchor: *wa,
-            },
-        )
-        .collect();
-    let world_parts: Vec<UeWorldPart> = meshes
-        .world
-        .iter()
-        .map(
-            |(region, perm, name, mesh, node, mats, anchor)| UeWorldPart {
-                mesh: &**mesh,
-                node_name: node.clone(),
-                head_anchor: *anchor,
-                region: region.clone(),
-                permutation: perm.clone(),
-                name: name.clone(),
-                material_names: mats.clone(),
-            },
-        )
-        .collect();
-
+    let CeModelMeshes { skel, meshes, .. } =
+        resolve_ce_model_meshes(model_tag, entry, source, containers, skel_ref, true)?;
+    let (parts, static_parts, world_parts) = ce_mesh_parts(&meshes);
     let mut jms =
         blam_tags::jms::JmsFile::from_ue_meshes(&parts, &static_parts, &world_parts, &skel)
             .map_err(|e| e.to_string())?;
