@@ -612,8 +612,11 @@ pub(super) struct ChimpState {
     pub(super) filter: String,
     filtered_for: Option<String>,
     filtered_archive_for: Option<Option<ChimpArchive>>,
-    filtered_packages: Vec<usize>,
-    filtered_files: Vec<usize>,
+    /// Shared, not owned: the package and file lists are drawn every frame
+    /// by closures that also mutate the app, so they took a copy of up to
+    /// ~104k indices per frame. Rebuilt in place through `Arc::make_mut`.
+    filtered_packages: Arc<Vec<usize>>,
+    filtered_files: Arc<Vec<usize>>,
     filtered_groups: BTreeMap<String, Vec<usize>>,
     content_tree: ChimpFolderNode,
     selected_archive: Option<ChimpArchive>,
@@ -1093,10 +1096,10 @@ impl ChimpState {
         let selected_archive = self.selected_archive;
         self.filtered_for = Some(query.clone());
         self.filtered_archive_for = Some(selected_archive);
-        self.filtered_packages.clear();
-        self.filtered_files.clear();
+        Arc::make_mut(&mut self.filtered_packages).clear();
+        Arc::make_mut(&mut self.filtered_files).clear();
         self.filtered_groups.clear();
-        self.filtered_packages.extend(
+        Arc::make_mut(&mut self.filtered_packages).extend(
             world
                 .packages()
                 .iter()
@@ -1130,7 +1133,7 @@ impl ChimpState {
                 })
                 .map(|(index, _)| index),
         );
-        self.filtered_files.extend(
+        Arc::make_mut(&mut self.filtered_files).extend(
             world
                 .pak_files()
                 .iter()
@@ -1159,7 +1162,7 @@ impl ChimpState {
                 .map(|(index, _)| index),
         );
         self.content_tree = ChimpFolderNode::default();
-        for &index in &self.filtered_packages {
+        for &index in self.filtered_packages.iter() {
             self.content_tree
                 .insert_package(index, &world.packages()[index].name);
             self.filtered_groups
@@ -1173,7 +1176,7 @@ impl ChimpState {
                 .or_default()
                 .push(index);
         }
-        for &index in &self.filtered_files {
+        for &index in self.filtered_files.iter() {
             self.content_tree
                 .insert_file(index, &world.pak_files()[index].path);
         }
@@ -1182,8 +1185,8 @@ impl ChimpState {
     fn reset_filter(&mut self) {
         self.filtered_for = None;
         self.filtered_archive_for = None;
-        self.filtered_packages.clear();
-        self.filtered_files.clear();
+        Arc::make_mut(&mut self.filtered_packages).clear();
+        Arc::make_mut(&mut self.filtered_files).clear();
         self.filtered_groups.clear();
         self.content_tree = ChimpFolderNode::default();
     }
@@ -3447,7 +3450,7 @@ impl Baboon {
             self.draw_chimp_groups(ui, ctx, &world, kit_index);
             return;
         }
-        let indices = self.kits[kit_index].chimp.filtered_packages.clone();
+        let indices = Arc::clone(&self.kits[kit_index].chimp.filtered_packages);
         let selected = self.kits[kit_index].chimp.selected_package.clone();
         let mut extract_texture = None;
         let mut extract_mesh = None;
@@ -3735,16 +3738,19 @@ impl Baboon {
         }
         let selected_package = self.kits[kit_index].chimp.selected_package.clone();
         let selected_file = self.kits[kit_index].chimp.selected_file.clone();
-        let package_types = self.kits[kit_index].chimp.package_types.clone();
+        // Borrowed, like the tree beside it: this used to clone the type of
+        // every mounted package (about 104k strings) every frame the default
+        // Folders tab was drawn, only to satisfy the borrow checker.
+        let chimp = &self.kits[kit_index].chimp;
         let clicked = egui::ScrollArea::vertical()
             .id_salt(("chimp_folders", self.kits[kit_index].id.0))
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 draw_chimp_folder_node(
                     ui,
-                    &self.kits[kit_index].chimp.content_tree,
+                    &chimp.content_tree,
                     world,
-                    &package_types,
+                    &chimp.package_types,
                     selected_package.as_deref(),
                     selected_file.as_deref(),
                     "",
@@ -3775,7 +3781,7 @@ impl Baboon {
     }
 
     fn draw_chimp_pak_files(&mut self, ui: &mut Ui, world: &World, kit_index: usize) {
-        let indices = self.kits[kit_index].chimp.filtered_files.clone();
+        let indices = Arc::clone(&self.kits[kit_index].chimp.filtered_files);
         let selected = self.kits[kit_index].chimp.selected_file.clone();
         egui::ScrollArea::vertical()
             .id_salt(("chimp_pak_files", self.kits[kit_index].id.0))
