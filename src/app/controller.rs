@@ -6070,7 +6070,7 @@ impl Baboon {
             return;
         };
 
-        let entries = match self.dependency_database_entries(&root) {
+        let entries = match self.dependency_database_entries() {
             Ok(entries) => entries,
             Err(error) => {
                 self.status = format!("Could not build dependency database: {error}");
@@ -6101,23 +6101,27 @@ impl Baboon {
         self.status = status;
     }
 
-    fn dependency_database_entries(&mut self, root: &Path) -> Result<Vec<TagEntry>, String> {
-        let kit_index = self.active;
-        if !matches!(
-            self.kits[kit_index].source.as_ref().map(|s| &s.source),
-            Some(TagSource::LooseFolder { .. })
-        ) {
+    /// Every tag in the loaded folder, for Fix Tag Dependencies to match
+    /// broken references against.
+    ///
+    /// This used to rescan the whole folder on the UI thread on every use,
+    /// even with the completed scan already in memory, then replace
+    /// `all_entries` without moving the kit generation and rewrite the whole
+    /// index. The completed scan is kept current by single-tag upserts and the
+    /// periodic refresh, so it is used as it is; before it exists, this says
+    /// so rather than blocking on a scan of its own.
+    fn dependency_database_entries(&self) -> Result<Vec<TagEntry>, String> {
+        let source = self.kits[self.active]
+            .source
+            .as_ref()
+            .ok_or_else(|| "no tag source is loaded".to_owned())?;
+        if !matches!(source.source, TagSource::LooseFolder { .. }) {
             return Err("load a loose editing-kit tags folder first".to_owned());
         }
-        let entries = scan_folder_subtree_entries(root, Path::new(""), &self.kits[kit_index].names)
-            .map_err(|error| error.to_string())?;
-        let Some(source) = self.kits[kit_index].source.as_mut() else {
-            return Err("no tag source is loaded".to_owned());
-        };
-        source.all_entries = entries;
-        source.group_tree = crate::source::build_group_tree(&source.all_entries);
-        if let Some(game) = source.game.as_deref() {
-            let _ = crate::source::save_entry_index(game, root, &source.all_entries);
+        if source.all_entries.is_empty() {
+            return Err(
+                "the tag index is still being built; try again once indexing finishes".to_owned(),
+            );
         }
         Ok(source.all_entries.clone())
     }
@@ -12191,5 +12195,64 @@ mod mod_output_tests {
             classify_overlay(true, shipped_kind, false),
             ModExportChange::Modified
         );
+    }
+}
+
+#[cfg(test)]
+mod dependency_database_tests {
+    use super::*;
+
+    fn loose(root: &Path, all_entries: Vec<TagEntry>) -> LoadedSourceData {
+        LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::LooseFolder {
+                root: root.to_path_buf(),
+                game: None,
+                definitions_root: PathBuf::new(),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries,
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+        }
+    }
+
+    /// Fix Tag Dependencies uses the completed scan it already has. It used to
+    /// rescan the whole folder on the UI thread every time.
+    #[test]
+    fn fix_dependencies_uses_the_completed_scan_without_rescanning() {
+        // An empty folder on disk: a rescan would find nothing.
+        let root = std::env::temp_dir().join(format!(
+            "baboon-fix-deps-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let known = TagEntry {
+            key: "file:objects/a.model".to_owned(),
+            display_path: "objects/a.model".to_owned(),
+            group_tag: u32::from_be_bytes(*b"hlmt"),
+            group_name: None,
+            location: TagEntryLocation::LooseFile(root.join("objects/a.model")),
+        };
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(loose(&root, vec![known]));
+        let scanned = app.dependency_database_entries().map(|entries| entries.len());
+
+        let mut unscanned = Baboon::for_test();
+        unscanned.install_loaded_source(loose(&root, Vec::new()));
+        let waiting = unscanned.dependency_database_entries().is_err();
+
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(scanned, Ok(1), "the in-memory scan, not a rescan of the empty folder");
+        assert!(waiting, "no scan yet: say so rather than scan on the UI thread");
     }
 }
