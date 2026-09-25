@@ -813,12 +813,15 @@ fn collect_block_index_edits(
             .flatten()
             .and_then(|target| {
                 *declared.entry(target.name().to_owned()).or_insert_with(|| {
-                    is_target(resolve_declared_block_target_path(
-                        tag_struct,
-                        root,
-                        struct_path,
-                        target.name(),
-                    ))
+                    is_target(
+                        declared_block_index_target(
+                            tag_struct,
+                            Some(root),
+                            struct_path,
+                            target.name(),
+                        )
+                        .map(|target| target.path),
+                    )
                 })
             });
         let state = declared_state.or_else(|| {
@@ -827,12 +830,10 @@ fn collect_block_index_edits(
                 .flatten()
                 .and_then(|key| {
                     *semantic.entry(key).or_insert_with(|| {
-                        is_target(resolve_semantic_block_target_path(
-                            tag_struct,
-                            root,
-                            struct_path,
-                            key,
-                        ))
+                        is_target(
+                            semantic_block_index_target(tag_struct, Some(root), struct_path, key)
+                                .map(|target| target.path),
+                        )
                     })
                 })
         });
@@ -910,58 +911,78 @@ fn path_is_within_target_element(
     range.contains(&index)
 }
 
-fn resolve_declared_block_target_path(
+/// The block a declared block-index field points into: the first sibling, or
+/// failing that the nearest ancestor's field, holding a block of the target
+/// definition.
+///
+/// The one rule for this, used both by the field's element dropdown and by
+/// the renumbering that follows an element insert, delete or move, so what
+/// the dropdown offers is what renumbering keeps pointing at. `root` is only
+/// needed to climb past the field's own struct.
+pub(in crate::app) fn declared_block_index_target(
     tag_struct: &blam_tags::TagStruct<'_>,
-    root: blam_tags::TagStruct<'_>,
+    root: Option<blam_tags::TagStruct<'_>>,
     struct_path: &str,
     target_definition: &str,
-) -> Option<String> {
-    find_sibling_block_path(tag_struct, struct_path, |field| {
+) -> Option<BlockIndexTarget> {
+    if target_definition.is_empty() {
+        return None;
+    }
+    find_block_target(tag_struct, root, struct_path, |field| {
         field
             .as_block()
             .is_some_and(|block| block.definition().name() == target_definition)
     })
-    .or_else(|| {
-        find_ancestor_block_path(root, struct_path, |field| {
-            field
-                .as_block()
-                .is_some_and(|block| block.definition().name() == target_definition)
-        })
-    })
 }
 
-fn resolve_semantic_block_target_path(
+/// The same for a plain short that older schemas use as an index, found by
+/// the block's cleaned field name (see `semantic_short_index_target_key`).
+///
+/// The dropdown used to search nested blocks here as well, inside whichever
+/// element was selected, and renumbering did not. Over every Halo 2, Halo 3
+/// and classic CE tag in the local kits (97,000) the nested search never chose
+/// a target: the only such shorts are classic CE's `nodes/parent node`, whose
+/// `nodes` block is the one directly above.
+pub(in crate::app) fn semantic_block_index_target(
     tag_struct: &blam_tags::TagStruct<'_>,
-    root: blam_tags::TagStruct<'_>,
+    root: Option<blam_tags::TagStruct<'_>>,
     struct_path: &str,
     target_key: &str,
-) -> Option<String> {
-    find_sibling_block_path(tag_struct, struct_path, |field| {
+) -> Option<BlockIndexTarget> {
+    find_block_target(tag_struct, root, struct_path, |field| {
         field.as_block().is_some() && clean_field_key(field.name()) == target_key
-    })
-    .or_else(|| {
-        find_ancestor_block_path(root, struct_path, |field| {
-            field.as_block().is_some() && clean_field_key(field.name()) == target_key
-        })
     })
 }
 
-fn find_sibling_block_path(
+fn find_block_target(
+    tag_struct: &blam_tags::TagStruct<'_>,
+    root: Option<blam_tags::TagStruct<'_>>,
+    struct_path: &str,
+    matches: impl Fn(&TagField<'_>) -> bool + Copy,
+) -> Option<BlockIndexTarget> {
+    find_sibling_block(tag_struct, struct_path, matches)
+        .or_else(|| find_ancestor_block(root?, struct_path, matches))
+}
+
+fn find_sibling_block(
     tag_struct: &blam_tags::TagStruct<'_>,
     struct_path: &str,
     matches: impl Fn(&TagField<'_>) -> bool,
-) -> Option<String> {
+) -> Option<BlockIndexTarget> {
     tag_struct
         .fields_all()
         .find(|field| matches(field))
-        .map(|field| append_field_path_for(struct_path, &field))
+        .map(|field| BlockIndexTarget {
+            path: append_field_path_for(struct_path, &field),
+            len: field.as_block().map_or(0, |block| block.len()),
+        })
 }
 
-fn find_ancestor_block_path(
+fn find_ancestor_block(
     root: blam_tags::TagStruct<'_>,
     struct_path: &str,
     matches: impl Fn(&TagField<'_>) -> bool + Copy,
-) -> Option<String> {
+) -> Option<BlockIndexTarget> {
     let mut current = struct_path;
     while !current.is_empty() {
         let parent = current.rsplit_once('/').map(|(path, _)| path).unwrap_or("");
@@ -970,8 +991,8 @@ fn find_ancestor_block_path(
         } else {
             root.descend(parent)?
         };
-        if let Some(path) = find_sibling_block_path(&ancestor, parent, matches) {
-            return Some(path);
+        if let Some(found) = find_sibling_block(&ancestor, parent, matches) {
+            return Some(found);
         }
         if parent.is_empty() {
             break;

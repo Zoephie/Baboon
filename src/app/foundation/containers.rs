@@ -200,14 +200,8 @@ pub(in crate::app) fn draw_fields_with_docs(
         // the element dropdown; `None` falls back to the numeric editor.
         let root = edit.root;
         let block_index = block_index_target_options(tag_struct, &field, root, path_prefix);
-        let semantic_short_index = semantic_short_index_target_options(
-            ui,
-            edit,
-            tag_struct,
-            &field,
-            root,
-            path_prefix,
-        );
+        let semantic_short_index =
+            semantic_short_index_target_options(tag_struct, &field, root, path_prefix);
         draw_field(
             ui,
             field,
@@ -2592,41 +2586,14 @@ pub(in crate::app) fn block_index_target_options(
     root: Option<TagStruct<'_>>,
     struct_path: &str,
 ) -> Option<BlockIndexTarget> {
-    let target_name = field.definition().block_index_target()?.name().to_owned();
-    if target_name.is_empty() {
-        return None;
-    }
-    // 1) The field's own struct (sibling block).
-    if let Some(found) = find_target_block(tag_struct, &target_name, struct_path) {
-        return Some(found);
-    }
-    // 2) Ancestors — walk parent structs up to the root.
-    let root = root?;
-    let mut current = struct_path;
-    while !current.is_empty() {
-        let parent = current.rsplit_once('/').map(|(p, _)| p).unwrap_or("");
-        let ancestor = if parent.is_empty() {
-            root
-        } else {
-            root.descend(parent)?
-        };
-        if let Some(found) = find_target_block(&ancestor, &target_name, parent) {
-            return Some(found);
-        }
-        if parent.is_empty() {
-            break;
-        }
-        current = parent;
-    }
-    None
+    let target = field.definition().block_index_target()?;
+    crate::app::editor::declared_block_index_target(tag_struct, root, struct_path, target.name())
 }
 
 /// Some classic schemas expose parent links as plain signed shorts instead of
 /// first-class block-index fields. Render only well-known parent references as
 /// dropdowns so ordinary counters/indices remain numeric.
 pub(in crate::app) fn semantic_short_index_target_options(
-    ui: &Ui,
-    edit: &FieldEditContext<'_>,
     tag_struct: &TagStruct<'_>,
     field: &TagField<'_>,
     root: Option<TagStruct<'_>>,
@@ -2636,9 +2603,7 @@ pub(in crate::app) fn semantic_short_index_target_options(
         return None;
     }
     let target_key = semantic_short_index_target_key(field.name())?;
-    find_target_block_by_clean_key(tag_struct, target_key, struct_path).or_else(|| {
-        find_ancestor_target_block_by_clean_key(ui, edit, root?, target_key, struct_path)
-    })
+    crate::app::editor::semantic_block_index_target(tag_struct, root, struct_path, target_key)
 }
 
 pub(in crate::app) fn semantic_short_index_target_key(field_name: &str) -> Option<&'static str> {
@@ -2648,125 +2613,6 @@ pub(in crate::app) fn semantic_short_index_target_key(field_name: &str) -> Optio
         "damage section" | "indirect damage section" => Some("damage sections"),
         _ => None,
     }
-}
-
-fn find_ancestor_target_block_by_clean_key(
-    ui: &Ui,
-    edit: &FieldEditContext<'_>,
-    root: TagStruct<'_>,
-    target_key: &str,
-    struct_path: &str,
-) -> Option<BlockIndexTarget> {
-    let mut current = Some(struct_path);
-    while let Some(path) = current {
-        let parent = path.rsplit_once('/').map(|(p, _)| p).unwrap_or("");
-        let ancestor = if parent.is_empty() {
-            root
-        } else {
-            root.descend(parent)?
-        };
-        if let Some(found) = find_target_block_by_clean_key(&ancestor, target_key, parent) {
-            return Some(found);
-        }
-        if let Some(found) =
-            find_nested_target_block_by_clean_key(ui, edit, &ancestor, target_key, parent, 4)
-        {
-            return Some(found);
-        }
-        current = (!parent.is_empty()).then_some(parent);
-    }
-    None
-}
-
-fn find_nested_target_block_by_clean_key(
-    ui: &Ui,
-    edit: &FieldEditContext<'_>,
-    tag_struct: &TagStruct<'_>,
-    target_key: &str,
-    struct_path: &str,
-    depth_left: usize,
-) -> Option<BlockIndexTarget> {
-    if depth_left == 0 {
-        return None;
-    }
-    for field in tag_struct.fields_all() {
-        let field_path = append_field_path_for(struct_path, &field);
-        if let Some(block) = field.as_block() {
-            if clean_field_key(field.name()) == target_key {
-                return Some(BlockIndexTarget {
-                    path: field_path,
-                    len: block.len(),
-                });
-            }
-            let count = block.len();
-            if count > 0 {
-                let selected = block_selected_index(ui, edit, &field_path, count);
-                if let Some(element) = block.element(selected) {
-                    let element_path = format!("{field_path}[{selected}]");
-                    if let Some(found) = find_nested_target_block_by_clean_key(
-                        ui,
-                        edit,
-                        &element,
-                        target_key,
-                        &element_path,
-                        depth_left - 1,
-                    ) {
-                        return Some(found);
-                    }
-                }
-            }
-        } else if let Some(nested) = field.as_struct() {
-            if let Some(found) = find_nested_target_block_by_clean_key(
-                ui,
-                edit,
-                &nested,
-                target_key,
-                &field_path,
-                depth_left - 1,
-            ) {
-                return Some(found);
-            }
-        }
-    }
-    None
-}
-
-fn find_target_block_by_clean_key(
-    tag_struct: &TagStruct<'_>,
-    target_key: &str,
-    struct_path: &str,
-) -> Option<BlockIndexTarget> {
-    for sibling in tag_struct.fields_all() {
-        if let Some(block) = sibling.as_block() {
-            if clean_field_key(sibling.name()) == target_key {
-                return Some(BlockIndexTarget {
-                    path: append_field_path_for(struct_path, &sibling),
-                    len: block.len(),
-                });
-            }
-        }
-    }
-    None
-}
-
-/// Find a block field whose definition name is `target_name` directly within
-/// `tag_struct`, returning `(element labels, full block path)`.
-fn find_target_block(
-    tag_struct: &TagStruct<'_>,
-    target_name: &str,
-    struct_path: &str,
-) -> Option<BlockIndexTarget> {
-    for sibling in tag_struct.fields_all() {
-        if let Some(block) = sibling.as_block() {
-            if block.definition().name() == target_name {
-                return Some(BlockIndexTarget {
-                    path: append_field_path_for(struct_path, &sibling),
-                    len: block.len(),
-                });
-            }
-        }
-    }
-    None
 }
 
 /// A block-index field rendered like Foundation: a dropdown of the target
