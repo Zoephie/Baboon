@@ -2213,29 +2213,22 @@ pub(in crate::app) fn draw_entry(
         .rsplit(['/', '\\'])
         .next()
         .unwrap_or(&entry.display_path);
-    let label = if show_prefixes {
-        format!("[tag] {leaf_label}")
-    } else {
-        leaf_label.to_owned()
-    };
-    // The row is a drag source: drag it onto a tag-reference cell to set the
-    // reference. Payload is our `DraggedTagRef` (what the ref-cell + shader-row
-    // drop targets expect); the row paints a tag icon + a cursor drag-preview.
-    let payload = DraggedTagRef {
-        group_tag: entry.group_tag,
-        input: entry_reference_input(entry),
-        rel_path: entry_rel_path(entry),
-        file_path: entry_loose_file(entry),
-    };
+    // Every expanded row runs this each frame, on screen or not, so what a
+    // row allocates waits until it is needed: the payload until a drag
+    // starts, the path until the row is hovered, the label until it is drawn.
     let row_size = Vec2::new(ui.available_width(), ui.spacing().interact_size.y);
     let (row_rect, response) = ui.allocate_exact_size(row_size, Sense::click_and_drag());
-    // Not `on_hover_text`: an egui tooltip would block the very drag this row
-    // exists to start. See `hover_tooltip_beside_pointer`.
-    let hover_label = native_display_path(&entry.display_path);
-    // Only a hovered row asks for its thumbnail. Every bitmap row laid out
-    // used to, which read and decoded every bitmap in an expanded folder.
-    if entry.group_tag == u32::from_be_bytes(*b"bitm") && response.hovered() {
-        match bitmap_hover_texture(ui, entry) {
+    if response.hovered() {
+        // Not `on_hover_text`: an egui tooltip would block the very drag this
+        // row exists to start. See `hover_tooltip_beside_pointer`.
+        let hover_label = native_display_path(&entry.display_path);
+        // Only a hovered row asks for its thumbnail. Every bitmap row laid
+        // out used to, which read and decoded every bitmap in an expanded
+        // folder.
+        match (entry.group_tag == u32::from_be_bytes(*b"bitm"))
+            .then(|| bitmap_hover_texture(ui, entry))
+            .flatten()
+        {
             Some(Some(texture)) => {
                 paint_bitmap_hover_preview(ui, &response, &texture, &hover_label)
             }
@@ -2243,10 +2236,19 @@ pub(in crate::app) fn draw_entry(
             // empty/unsupported bitmaps whose failed decode is cached.
             _ => hover_tooltip_beside_pointer(ui, &response, &hover_label),
         }
-    } else {
-        hover_tooltip_beside_pointer(ui, &response, &hover_label);
     }
-    response.dnd_set_drag_payload(payload);
+    // The row is a drag source: drag it onto a tag-reference cell to set the
+    // reference. Payload is our `DraggedTagRef` (what the ref-cell + shader-row
+    // drop targets expect); the row paints a tag icon + a cursor drag-preview.
+    // egui takes the payload only on the frame the drag starts.
+    if response.drag_started() {
+        response.dnd_set_drag_payload(DraggedTagRef {
+            group_tag: entry.group_tag,
+            input: entry_reference_input(entry),
+            rel_path: entry_rel_path(entry),
+            file_path: entry_loose_file(entry),
+        });
+    }
     if reveal_key == Some(entry.key.as_str()) {
         response.scroll_to_me(Some(egui::Align::Center));
     }
@@ -2271,6 +2273,11 @@ pub(in crate::app) fn draw_entry(
             Vec2::splat(icon_size),
         );
         paint_tag_icon_at(ui, entry.group_tag, icon_rect);
+        let label = if show_prefixes {
+            format!("[tag] {leaf_label}")
+        } else {
+            leaf_label.to_owned()
+        };
         ui.painter().text(
             row_rect.left_center() + Vec2::new(disclosure_offset + icon_size + 5.0, 0.0),
             Align2::LEFT_CENTER,
