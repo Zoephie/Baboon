@@ -4,6 +4,9 @@
 use super::recents::draw_recent_folders_menu;
 use super::*;
 
+/// How often a progress bar is redrawn while its job runs.
+const PROGRESS_REPAINT: std::time::Duration = std::time::Duration::from_millis(200);
+
 impl Baboon {
     pub(super) fn draw_root_ui(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if self.first_run_wizard.is_some() {
@@ -843,7 +846,10 @@ impl Baboon {
                         if ui.small_button("Cancel").clicked() {
                             job.cancel.store(true, Ordering::Relaxed);
                         }
-                        ctx.request_repaint();
+                        // A few times a second moves the bar and the estimate;
+                        // every frame kept the app at full frame rate for the
+                        // whole of a multi-minute extraction.
+                        ctx.request_repaint_after(PROGRESS_REPAINT);
                     }
                     if let Some(progress) = &self.folder_refactor {
                         ui.separator();
@@ -857,7 +863,9 @@ impl Baboon {
                             .desired_width(180.0)
                             .text(RichText::new(&progress.phase).color(text_dark()));
                         ui.add(bar);
-                        ctx.request_repaint();
+                        // An indeterminate bar asks for its own frames while
+                        // it animates.
+                        ctx.request_repaint_after(PROGRESS_REPAINT);
                     }
                     // Anchored to the right edge, out of the way of the status
                     // text and the progress bars that share this row. The
@@ -1285,12 +1293,6 @@ impl Baboon {
             if let Some(status) = self.audio.status.clone() {
                 self.status = status;
             }
-        }
-        // While the Wwise index builds off-thread, keep repainting so the drain
-        // loop polls it (the worker also pings on completion, but this covers
-        // the "loading…" status update).
-        if self.audio.is_busy() {
-            ctx.request_repaint();
         }
         self.process_pending_tool_import(ctx);
     }

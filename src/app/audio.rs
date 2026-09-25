@@ -691,12 +691,6 @@ impl AudioState {
         });
     }
 
-    /// True while a background Wwise index build is in flight (the caller should
-    /// keep requesting repaints so the drain loop polls it).
-    pub(super) fn is_busy(&self) -> bool {
-        self.wwise_loading.is_some()
-    }
-
     /// The current playback volume (linear, 0.0..=1.0), for the UI slider.
     pub(super) fn volume(&self) -> f32 {
         self.volume.0

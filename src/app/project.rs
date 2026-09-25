@@ -1586,6 +1586,11 @@ impl Baboon {
             };
             if fingerprint == project.last_saved_fingerprint && project.recovery_path.is_file() {
                 project.next_autosave_at = now + CAMPAIGN_PROJECT_AUTOSAVE_SECS;
+                // Nothing changed, and nothing can change without a frame of
+                // its own (input, or a worker's message), which checks again.
+                // Asking for a wake-up here kept an idle app capturing the
+                // project every 0.75 s for as long as it stayed open.
+                return;
             } else {
                 project.revision = project.revision.wrapping_add(1);
                 let revision = project.revision;
@@ -1626,7 +1631,12 @@ impl Baboon {
                 });
             }
         }
-        ctx.request_repaint_after(std::time::Duration::from_millis(750));
+        // Wake when the next check is due: an edit made in this frame must be
+        // saved even if nothing else happens after it.
+        if let Some(project) = self.kits[kit].campaign_project.as_ref() {
+            let wait = (project.next_autosave_at - now).max(0.0);
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(wait));
+        }
     }
 
     pub(super) fn handle_campaign_project_saved(
