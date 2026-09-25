@@ -3810,6 +3810,7 @@ impl Baboon {
                         cached_source_len: usize::MAX,
                         tree: TagTree::default(),
                         group_tree: TagTree::default(),
+                        group_tree_for: None,
                         filter_cache: FilterCache::default(),
                     });
                 let selected = self.kits[self.active].selected_key.clone();

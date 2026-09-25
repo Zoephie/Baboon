@@ -275,9 +275,15 @@ impl Baboon {
                         });
                 } else {
                     let entries = source.full_entry_set();
-                    if groups_mode {
+                    // Rebuilt when the entries change, not every frame: it walks
+                    // the whole index and allocates per entry. A loose folder's
+                    // full set only grows or is replaced, and either moves the
+                    // generation or the count.
+                    let built_for = (generation, entries.len());
+                    if groups_mode && pane.group_tree_for != Some(built_for) {
                         pane.group_tree =
                             crate::source::build_group_tree_beneath(entries, &pane.rel_path);
+                        pane.group_tree_for = Some(built_for);
                     }
                     let (tree, visible_entries) = if filter.is_empty() {
                         (

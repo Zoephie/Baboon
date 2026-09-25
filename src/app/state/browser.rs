@@ -133,6 +133,8 @@ pub(in crate::app) struct FolderBrowserState {
     pub(in crate::app) cached_source_len: usize,
     pub(in crate::app) tree: TagTree,
     pub(in crate::app) group_tree: TagTree,
+    /// The generation and entry count `group_tree` was built from.
+    pub(in crate::app) group_tree_for: Option<(u64, usize)>,
     pub(in crate::app) filter_cache: FilterCache,
 }
 
