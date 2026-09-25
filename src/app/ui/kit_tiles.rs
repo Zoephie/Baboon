@@ -57,7 +57,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
             .source
             .as_ref()
             .is_some_and(|source| matches!(&source.source, TagSource::IoStoreContainerSet { .. }));
-        if campaign_evolved && self.app.enable_chimp {
+        if campaign_evolved && self.app.prefs.enable_chimp {
             Frame::none()
                 .fill(menu_bar())
                 .inner_margin(egui::Margin {
@@ -151,7 +151,7 @@ impl egui_tiles::Behavior<KitId> for KitPaneBehavior<'_> {
         scroll_offset: &mut f32,
     ) {
         wheel_scroll_tab_bar(ui, scroll_offset);
-        let recents = self.app.recent_folders.clone();
+        let recents = self.app.prefs.recent_folders.clone();
         let menu_margin = Frame::menu(ui.style()).total_margin();
         let root_popup_width = 320.0 + menu_margin.left + menu_margin.right;
         let recent_popup_width = 240.0 + menu_margin.left + menu_margin.right;

@@ -537,7 +537,8 @@ fn draw_game_banner_header(
     let texture = app.workspace_banner_texture(ui.ctx(), game, profile_id);
     let title = profile_id
         .and_then(|id| {
-            app.custom_editing_kit_profiles
+            app.prefs
+                .custom_editing_kit_profiles
                 .iter()
                 .find(|profile| profile.id == id)
                 .map(|profile| profile.name.clone())
@@ -549,7 +550,7 @@ fn draw_game_banner_header(
                 game_platform_label(game)
             )
         });
-    let read_only = app.custom_editing_kit_profiles.iter().any(|profile| {
+    let read_only = app.prefs.custom_editing_kit_profiles.iter().any(|profile| {
         profile.read_only
             && profile.game != "haloce_evolved"
             && (profile_id == Some(profile.id.as_str())

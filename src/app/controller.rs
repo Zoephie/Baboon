@@ -1237,7 +1237,7 @@ impl Baboon {
         let kit = self.active_kit_id();
         let names = self.default_names.clone();
         let definitions_root = locate_definitions_root();
-        let ek_folder_aliases = self.ek_folder_aliases.clone();
+        let ek_folder_aliases = self.prefs.ek_folder_aliases.clone();
         let folder_info = match resolve_folder_root(&path, &ek_folder_aliases) {
             Ok(info) => info,
             Err(error) => {
@@ -1320,7 +1320,8 @@ impl Baboon {
             }
         });
         mounted.or_else(|| {
-            self.custom_editing_kit_profiles
+            self.prefs
+                .custom_editing_kit_profiles
                 .iter()
                 .filter(|profile| profile.game == "haloce_evolved")
                 .find_map(|profile| crate::source::find_paks_dir(&profile.root))
@@ -1404,14 +1405,16 @@ impl Baboon {
 
     pub(super) fn remember_recent_folder(&mut self, path: PathBuf) {
         let path = clean_recent_path(path);
-        self.recent_folders
+        self.prefs
+            .recent_folders
             .retain(|existing| !same_recent_path(existing, &path));
-        self.recent_folders.insert(0, path);
-        self.recent_folders.truncate(MAX_RECENT_FOLDERS);
+        self.prefs.recent_folders.insert(0, path);
+        self.prefs.recent_folders.truncate(MAX_RECENT_FOLDERS);
     }
 
     pub(super) fn remove_recent_folder(&mut self, path: &Path) {
-        self.recent_folders
+        self.prefs
+            .recent_folders
             .retain(|existing| !same_recent_path(existing, path));
     }
 
@@ -2227,7 +2230,8 @@ impl Baboon {
     }
 
     fn favorite_kit_index(&self, root: &Path) -> Option<usize> {
-        self.editing_kit_favorites
+        self.prefs
+            .editing_kit_favorites
             .iter()
             .position(|kit| same_recent_path(&kit.tags_root, root))
     }
@@ -2249,8 +2253,8 @@ impl Baboon {
             .as_ref()
             .map(|source| source.names.clone())
             .unwrap_or_else(|| self.kits[kit].names.clone());
-        let saved_paths = self.editing_kit_favorites[index].tags.clone();
-        let saved_folders = self.editing_kit_favorites[index].folders.clone();
+        let saved_paths = self.prefs.editing_kit_favorites[index].tags.clone();
+        let saved_folders = self.prefs.editing_kit_favorites[index].folders.clone();
         let mut missing = Vec::new();
         for relative_path in saved_paths {
             let path = root.join(&relative_path);
@@ -2271,7 +2275,7 @@ impl Baboon {
             }
         }
         if !missing.is_empty() || !missing_folders.is_empty() {
-            let favorites = &mut self.editing_kit_favorites[index];
+            let favorites = &mut self.prefs.editing_kit_favorites[index];
             favorites.tags.retain(|path| {
                 !missing
                     .iter()
@@ -2283,7 +2287,7 @@ impl Baboon {
                     .any(|missing| same_recent_path(missing, path))
             });
             if favorites.tags.is_empty() && favorites.folders.is_empty() {
-                self.editing_kit_favorites.remove(index);
+                self.prefs.editing_kit_favorites.remove(index);
             }
         }
     }
@@ -2311,14 +2315,14 @@ impl Baboon {
             return;
         };
         let index = self.favorite_kit_index(&root).unwrap_or_else(|| {
-            self.editing_kit_favorites.push(EditingKitFavorites {
+            self.prefs.editing_kit_favorites.push(EditingKitFavorites {
                 tags_root: clean_recent_path(root.clone()),
                 tags: Vec::new(),
                 folders: Vec::new(),
             });
-            self.editing_kit_favorites.len() - 1
+            self.prefs.editing_kit_favorites.len() - 1
         });
-        let kit = &mut self.editing_kit_favorites[index];
+        let kit = &mut self.prefs.editing_kit_favorites[index];
         if let Some(position) = kit
             .tags
             .iter()
@@ -2329,7 +2333,7 @@ impl Baboon {
                 .active_favorite_entries
                 .retain(|favorite| favorite.key != entry.key);
             if kit.tags.is_empty() && kit.folders.is_empty() {
-                self.editing_kit_favorites.remove(index);
+                self.prefs.editing_kit_favorites.remove(index);
             }
             self.status = format!("Removed {} from Favorites", entry.display_path);
         } else {
@@ -2355,14 +2359,14 @@ impl Baboon {
             return;
         }
         let index = self.favorite_kit_index(&root).unwrap_or_else(|| {
-            self.editing_kit_favorites.push(EditingKitFavorites {
+            self.prefs.editing_kit_favorites.push(EditingKitFavorites {
                 tags_root: clean_recent_path(root.clone()),
                 tags: Vec::new(),
                 folders: Vec::new(),
             });
-            self.editing_kit_favorites.len() - 1
+            self.prefs.editing_kit_favorites.len() - 1
         });
-        let favorites = &mut self.editing_kit_favorites[index];
+        let favorites = &mut self.prefs.editing_kit_favorites[index];
         if let Some(position) = favorites
             .folders
             .iter()
@@ -2373,7 +2377,7 @@ impl Baboon {
                 .active_favorite_folders
                 .retain(|current| !same_recent_path(current, &relative_path));
             if favorites.tags.is_empty() && favorites.folders.is_empty() {
-                self.editing_kit_favorites.remove(index);
+                self.prefs.editing_kit_favorites.remove(index);
             }
             self.status = format!("Removed {} from Favorites", relative_path.display());
         } else {
@@ -2400,11 +2404,11 @@ impl Baboon {
         };
         remap_favorite_paths(
             &root,
-            &mut self.editing_kit_favorites[index].tags,
+            &mut self.prefs.editing_kit_favorites[index].tags,
             old_to_new_keys,
         );
         let mut unique: Vec<PathBuf> = Vec::new();
-        self.editing_kit_favorites[index].tags.retain(|path| {
+        self.prefs.editing_kit_favorites[index].tags.retain(|path| {
             if unique
                 .iter()
                 .any(|existing| same_recent_path(existing, path))
@@ -2784,7 +2788,7 @@ impl Baboon {
         if !silent {
             self.status = "Checking for updates...".to_owned();
         }
-        let channel = self.update_channel;
+        let channel = self.prefs.update_channel;
         let tx = self.tx.clone();
         thread::spawn(move || {
             let result = fetch_latest_release(channel);
@@ -2795,7 +2799,7 @@ impl Baboon {
 
     /// Whether the automatic startup check should run.
     pub(super) fn should_check_updates_on_startup(&self) -> bool {
-        self.check_updates_on_startup
+        self.prefs.check_updates_on_startup
     }
 
     pub(super) fn begin_terminal_command(&mut self, ctx: egui::Context) {
@@ -3587,7 +3591,8 @@ impl Baboon {
                     let started = if let Some(profile) = profile_id
                         .as_deref()
                         .and_then(|id| {
-                            self.custom_editing_kit_profiles
+                            self.prefs
+                                .custom_editing_kit_profiles
                                 .iter()
                                 .find(|profile| profile.id == id)
                         })
@@ -3876,7 +3881,7 @@ impl Baboon {
                         filter: String::new(),
                         focus_search: false,
                         mode: BrowserMode::Folders,
-                        sort: self.default_browser_sort,
+                        sort: self.prefs.browser_sort,
                         cached_generation: u64::MAX,
                         cached_source_len: usize::MAX,
                         tree: TagTree::default(),
@@ -4484,7 +4489,7 @@ impl Baboon {
     /// in one go, and it should not be reachable by a stale request. The folder-
     /// scoped twin below carries no such gate, because it is bounded and aimed.
     pub(super) fn begin_extract_all_container_tags(&mut self, _ctx: egui::Context) {
-        if !self.expert_mode {
+        if !self.prefs.expert_mode {
             self.status = "Extracting all tags requires Expert mode".to_owned();
             return;
         }
@@ -4940,7 +4945,10 @@ impl Baboon {
         // shipping a change — so it is an expert-mode route now. Everyone else
         // gets the export, which is the supported one.
         if self.current_source_is_container() {
-            match container_save_route(self.expert_mode, self.confirm_container_overwrite) {
+            match container_save_route(
+                self.prefs.expert_mode,
+                self.prefs.confirm_container_overwrite,
+            ) {
                 ContainerSaveRoute::ExportReview => {
                     self.status = "Your change is kept in this workspace — export it as a mod to \
                                    put it in the game"
@@ -7988,38 +7996,7 @@ impl Baboon {
             // so a single-workspace session remembers its choice as before.
             browser_mode: self.kits[self.active].browser_mode,
             browser_sort: self.kits[self.active].browser_sort,
-            nested_default: self.nested_default,
-            show_browser_prefixes: self.show_browser_prefixes,
-            folders_before_tags: self.folders_before_tags,
-            double_click_to_open_tags: self.double_click_to_open_tags,
-            session_restore: self.session_restore,
-            update_channel: self.update_channel,
-            check_updates_on_startup: self.check_updates_on_startup,
-            show_block_sizes: self.show_block_sizes,
-            angles_in_degrees: self.angles_in_degrees,
-            scroll_to_cycle_dropdowns: self.scroll_to_cycle_dropdowns,
-            confirm_container_overwrite: self.confirm_container_overwrite,
-            confirm_runtime_poke: self.confirm_runtime_poke,
-            enable_chimp: self.enable_chimp,
-            chimp_output_dir: self.chimp_output_dir.clone(),
-            chimp_usmap_path: self.chimp_usmap_path.clone(),
-            expert_mode: self.expert_mode,
-            dark_mode: self.dark_mode,
-            ui_scale: self.ui_scale,
-            model_preview_size: self.model_preview_size,
-            bitmap_preview_view: self.bitmap_preview_view,
-            blender_path: self.blender_path.clone(),
-            editing_kit_paths: self.editing_kit_paths.clone(),
-            ek_folder_aliases: self.ek_folder_aliases.clone(),
-            custom_editing_kit_profiles: self.custom_editing_kit_profiles.clone(),
-            tool_commands_window_pos: self.tool_commands_window_pos,
-            tool_commands_window_size: Some(self.tool_commands_window_size),
-            tool_commands_left_width: self.tool_commands_left_width,
-            tool_commands_collapsed_categories: self.tool_commands_collapsed_categories.clone(),
-            recent_folders: self.recent_folders.clone(),
-            editing_kit_favorites: self.editing_kit_favorites.clone(),
-            custom_color_swatches: self.custom_color_swatches.clone(),
-            palette_last_dir: self.palette_last_dir.clone(),
+            ..self.prefs.clone()
         }
     }
 
@@ -8037,7 +8014,8 @@ impl Baboon {
                     TagSource::SingleFile { path } => Some(path.clone()),
                     _ => None,
                 });
-        self.custom_editing_kit_profiles
+        self.prefs
+            .custom_editing_kit_profiles
             .iter()
             .any(|profile| profile.is_read_only_for(kit.profile.as_ref(), root.as_deref()))
     }
@@ -8243,7 +8221,7 @@ impl Baboon {
     }
 
     pub(super) fn launch_blender(&mut self) {
-        let Some(path) = self.blender_path.clone() else {
+        let Some(path) = self.prefs.blender_path.clone() else {
             self.settings_open = true;
             self.status = "Set the Blender path in File > Settings first".to_owned();
             return;
@@ -8258,7 +8236,12 @@ impl Baboon {
 
     pub(super) fn choose_blender_path(&mut self) {
         let mut dialog = rfd::FileDialog::new().set_title("Select Blender Executable");
-        if let Some(path) = self.blender_path.as_ref().and_then(|path| path.parent()) {
+        if let Some(path) = self
+            .prefs
+            .blender_path
+            .as_ref()
+            .and_then(|path| path.parent())
+        {
             dialog = dialog.set_directory(path);
         }
         #[cfg(target_os = "windows")]
@@ -8266,7 +8249,7 @@ impl Baboon {
             dialog = dialog.add_filter("Executable", &["exe"]);
         }
         if let Some(path) = dialog.pick_file() {
-            self.blender_path = Some(path.clone());
+            self.prefs.blender_path = Some(path.clone());
             self.blender_path_input = path.display().to_string();
             self.status = format!("Blender path set to {}", path.display());
         }
@@ -8277,8 +8260,9 @@ impl Baboon {
         shortcut: EditingKitShortcut,
         ctx: egui::Context,
     ) {
-        let Some(path) = self.editing_kit_paths.get(shortcut.game).cloned() else {
+        let Some(path) = self.prefs.editing_kit_paths.get(shortcut.game).cloned() else {
             if let Some(profile) = self
+                .prefs
                 .custom_editing_kit_profiles
                 .iter()
                 .find(|profile| profile.game == shortcut.game)
@@ -8330,11 +8314,12 @@ impl Baboon {
             return;
         };
         let Some(path) = self
+            .prefs
             .custom_editing_kit_profiles
             .iter()
             .find(|profile| profile.game == shortcut.game)
             .map(|profile| profile.root.clone())
-            .or_else(|| self.editing_kit_paths.get(shortcut.game).cloned())
+            .or_else(|| self.prefs.editing_kit_paths.get(shortcut.game).cloned())
         else {
             self.status = format!(
                 "Command line: set the {} path in Settings before launching tags",
@@ -8505,7 +8490,7 @@ impl Baboon {
             format!("Select {} Editing Kit Folder", shortcut.label)
         };
         let mut dialog = rfd::FileDialog::new().set_title(title);
-        if let Some(path) = self.editing_kit_paths.get(shortcut.game) {
+        if let Some(path) = self.prefs.editing_kit_paths.get(shortcut.game) {
             if path.is_dir() {
                 dialog = dialog.set_directory(path);
             } else if let Some(parent) = path.parent().filter(|parent| parent.is_dir()) {
@@ -8513,7 +8498,8 @@ impl Baboon {
             }
         }
         if let Some(path) = dialog.pick_folder() {
-            self.editing_kit_paths
+            self.prefs
+                .editing_kit_paths
                 .insert(shortcut.game.to_owned(), path.clone());
             self.editing_kit_path_inputs
                 .insert(shortcut.game.to_owned(), path.display().to_string());
@@ -8527,9 +8513,11 @@ impl Baboon {
 
     pub(super) fn auto_detect_editing_kit_paths(&mut self) {
         let detected = detect_editing_kit_paths();
-        let previous = self.custom_editing_kit_profiles.clone();
-        let added =
-            add_standard_editing_kit_profiles(&mut self.custom_editing_kit_profiles, &detected);
+        let previous = self.prefs.custom_editing_kit_profiles.clone();
+        let added = add_standard_editing_kit_profiles(
+            &mut self.prefs.custom_editing_kit_profiles,
+            &detected,
+        );
         if added > 0 {
             let prefs = self.current_prefs();
             if let Err(error) = save_gui_prefs(
@@ -8537,7 +8525,7 @@ impl Baboon {
                 &self.terminal_open_games,
                 self.first_run_wizard.is_none(),
             ) {
-                self.custom_editing_kit_profiles = previous;
+                self.prefs.custom_editing_kit_profiles = previous;
                 self.status = error;
                 return;
             }
@@ -9092,13 +9080,13 @@ impl Baboon {
             }
             LastOpenedWindowsAction::Cancel { remember } => {
                 if remember {
-                    self.session_restore = SessionRestore::Never;
+                    self.prefs.session_restore = SessionRestore::Never;
                 }
                 self.last_opened_windows = None;
             }
             LastOpenedWindowsAction::Restore { kits, remember } => {
                 if remember {
-                    self.session_restore = SessionRestore::Always;
+                    self.prefs.session_restore = SessionRestore::Always;
                 }
                 self.last_opened_windows = None;
                 self.begin_last_session_restore(kits, ctx.clone());

@@ -16,7 +16,7 @@ impl Baboon {
         let mut do_overwrite = false;
         let mut do_export = false;
         let mut cancel = false;
-        let mut dont_ask = !self.confirm_container_overwrite;
+        let mut dont_ask = !self.prefs.confirm_container_overwrite;
         // Which container this would actually be written into. With a mod mounted
         // over the tag, that is the mod — not the game's shipped pak, which is
         // what this dialog used to promise in every case.
@@ -86,8 +86,8 @@ impl Baboon {
         } else if do_overwrite {
             self.overwrite_confirm = None;
             // Apply the opt-out only when the user commits to the overwrite.
-            if dont_ask && self.confirm_container_overwrite {
-                self.confirm_container_overwrite = false;
+            if dont_ask && self.prefs.confirm_container_overwrite {
+                self.prefs.confirm_container_overwrite = false;
                 self.persist_prefs_if_changed();
             }
             // Both actions write through the active kit's source. Return to the

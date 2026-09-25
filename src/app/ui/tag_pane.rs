@@ -52,7 +52,7 @@ impl Baboon {
         let picker_was_open = self.tag_reference_picker.is_some();
         let def_docs = self.def_docs_for_entry(kit_index, entry);
         let ce_sound = self.ce_sound_binding(kit_index, &key, entry);
-        let bitmap_preview_view = self.bitmap_preview_view;
+        let bitmap_preview_view = self.prefs.bitmap_preview_view;
 
         let Some(doc) = self.kits[kit_index].parsed_tags.remove(&key) else {
             if self.kits[kit_index].loading_tags.contains(&key) {
@@ -137,7 +137,7 @@ impl Baboon {
         // what makes it stick.
         let expand_all = kit.pending_expand.remove(&key);
         let sound_volume = self.audio.volume();
-        let expert_mode = self.expert_mode;
+        let expert_mode = self.prefs.expert_mode;
         // Borrow the kit's source as a plain field rather than through
         // `source()`: a method borrows all of `self`, and the context below
         // needs `&mut` on a dozen sibling fields. Going through `self.kits[i]`
@@ -169,7 +169,7 @@ impl Baboon {
             tag_reference_picker: &mut self.tag_reference_picker,
             status: Some(&mut self.status),
             editable: !kit_read_only && is_editable_tag(entry, &doc.tag),
-            show_block_sizes: self.show_block_sizes,
+            show_block_sizes: self.prefs.show_block_sizes,
             buffers: &mut kit.edit_buffers,
             pending: &mut ops.pending,
             block_ops: &mut ops.block_ops,
@@ -205,7 +205,7 @@ impl Baboon {
                 .as_ref()
                 .filter(|nav| nav.kit == kit_id && nav.tag_key == key),
             expand_all,
-            nested_default: self.nested_default,
+            nested_default: self.prefs.nested_default,
         };
 
         if is_bitmap_tag(entry) {
@@ -219,10 +219,10 @@ impl Baboon {
                 names,
                 &mut self.color_popup,
                 preview,
-                self.expert_mode,
+                self.prefs.expert_mode,
                 &mut edit_context,
             );
-            self.bitmap_preview_view = preview.view_settings();
+            self.prefs.bitmap_preview_view = preview.view_settings();
         } else {
             let mut local_model_preview;
             let model_preview = if is_previewable_geometry_group(entry.group_tag, names) {
@@ -246,8 +246,8 @@ impl Baboon {
                 &mut self.color_popup,
                 &mut self.function_popup,
                 model_preview,
-                &mut self.model_preview_size,
-                self.expert_mode,
+                &mut self.prefs.model_preview_size,
+                self.prefs.expert_mode,
                 &mut edit_context,
             );
         }
@@ -373,7 +373,7 @@ impl Baboon {
         let inline_left_width = pane_header_inline_left_width(available, action_width);
         let wide = inline_left_width.is_some();
         let left_width = inline_left_width.unwrap_or(available);
-        let title_height = if self.expert_mode {
+        let title_height = if self.prefs.expert_mode {
             48.0
         } else {
             PANE_HEADER_ICON_SIZE
@@ -411,7 +411,7 @@ impl Baboon {
                                 ui.label(
                                     RichText::new(title).size(15.0).strong().color(text_dark()),
                                 );
-                                if self.expert_mode {
+                                if self.prefs.expert_mode {
                                     ui.label(
                                         RichText::new(group_label(
                                             &self.kits[kit_index].names,

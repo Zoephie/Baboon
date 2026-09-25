@@ -10,8 +10,8 @@ const PROGRESS_REPAINT: std::time::Duration = std::time::Duration::from_millis(2
 impl Baboon {
     pub(super) fn draw_root_ui(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if self.first_run_wizard.is_some() {
-            ctx.set_zoom_factor(self.ui_scale);
-            set_dark_mode(self.dark_mode);
+            ctx.set_zoom_factor(self.prefs.ui_scale);
+            set_dark_mode(self.prefs.dark_mode);
             ctx.set_visuals(foundation_visuals());
             egui::CentralPanel::default().show(ctx, |_ui| {});
             self.draw_first_run_wizard(ctx);
@@ -187,7 +187,7 @@ impl Baboon {
         }
         let recent_action = right_opening_menu_button(ui, "Recent Folders", 280.0, |ui| {
             style_list_menu(ui);
-            draw_recent_folders_menu(ui, &self.recent_folders)
+            draw_recent_folders_menu(ui, &self.prefs.recent_folders)
         })
         .inner
         .flatten();
@@ -196,12 +196,12 @@ impl Baboon {
             self.apply_recent_action(action, ctx);
         }
         ui.separator();
-        let save_label = if self.enable_chimp && self.kits[self.active].surface == KitSurface::Chimp
-        {
-            "Save Chimp Changes...    Ctrl+S"
-        } else {
-            "Save Current Tag    Ctrl+S"
-        };
+        let save_label =
+            if self.prefs.enable_chimp && self.kits[self.active].surface == KitSurface::Chimp {
+                "Save Chimp Changes...    Ctrl+S"
+            } else {
+                "Save Current Tag    Ctrl+S"
+            };
         if icon_text_button(
             ui,
             ButtonIcon::Save,
@@ -284,7 +284,7 @@ impl Baboon {
             // that writes tens of thousands of files: useful
             // for getting the tag set out to diff or grep, and
             // not something to trip over while editing.
-            if self.expert_mode
+            if self.prefs.expert_mode
                 && ui
                     .add_enabled(
                         self.container_dump_job.is_none(),
@@ -629,19 +629,19 @@ impl Baboon {
             ui.close_menu();
         }
         ui.separator();
-        ui.checkbox(&mut self.show_browser_prefixes, "Show [tag]/[folder]");
-        ui.checkbox(&mut self.show_block_sizes, "Show block sizes");
-        ui.checkbox(&mut self.angles_in_degrees, "Angles in degrees")
+        ui.checkbox(&mut self.prefs.show_browser_prefixes, "Show [tag]/[folder]");
+        ui.checkbox(&mut self.prefs.show_block_sizes, "Show block sizes");
+        ui.checkbox(&mut self.prefs.angles_in_degrees, "Angles in degrees")
             .on_hover_text(
                 "Angle fields hold radians on disk. Guerilla and the other Halo \
                  tools show them in degrees, and so does Baboon — turn this off to \
                  read and type the stored radians instead.",
             );
         ui.checkbox(
-            &mut self.scroll_to_cycle_dropdowns,
+            &mut self.prefs.scroll_to_cycle_dropdowns,
             "Scroll wheel cycles dropdowns",
         );
-        ui.checkbox(&mut self.expert_mode, "Expert mode");
+        ui.checkbox(&mut self.prefs.expert_mode, "Expert mode");
         ui.separator();
         let terminal_enabled = self.kits[self.active].terminal_work_dir.is_some();
         if ui
@@ -703,7 +703,7 @@ impl Baboon {
     fn draw_editing_kits_menu(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         ui.set_min_width(EDITING_KIT_MENU_MIN_WIDTH);
         let entries = visible_editing_kit_menu_entries(
-            &self.custom_editing_kit_profiles,
+            &self.prefs.custom_editing_kit_profiles,
             &self.editing_kit_validation,
         );
         let total_rows = entries.len();
@@ -744,6 +744,7 @@ impl Baboon {
                 EditingKitMenuEntry::BuiltIn(shortcut) => {
                     let texture = self.game_banner_texture(ui.ctx(), shortcut.game).cloned();
                     let configured_path = self
+                        .prefs
                         .editing_kit_paths
                         .get(shortcut.game)
                         .expect("validated built-in path");
@@ -1204,8 +1205,8 @@ impl Baboon {
         if let Some(result) = draw_color_popup(
             ctx,
             &mut self.color_popup,
-            &mut self.custom_color_swatches,
-            &mut self.palette_last_dir,
+            &mut self.prefs.custom_color_swatches,
+            &mut self.prefs.palette_last_dir,
         ) {
             // Apply to the kit the picker was opened from. A closed kit drops
             // the edit rather than letting it land somewhere else.
@@ -1334,7 +1335,8 @@ impl Baboon {
     pub(super) fn run_deferred_file_action(&mut self, ctx: &egui::Context) {
         match self.deferred_file_action.take() {
             Some(DeferredFileAction::SaveCurrentTag)
-                if self.enable_chimp && self.kits[self.active].surface == KitSurface::Chimp =>
+                if self.prefs.enable_chimp
+                    && self.kits[self.active].surface == KitSurface::Chimp =>
             {
                 self.open_chimp_save_dialog(self.active)
             }
@@ -1354,7 +1356,8 @@ impl Baboon {
             Some(DeferredFileAction::PokeCurrentTag) => self.begin_poke_current_tag(ctx.clone()),
             Some(DeferredFileAction::Close(action)) => self.request_close_action(action, ctx),
             Some(DeferredFileAction::CloseCurrentTab)
-                if self.enable_chimp && self.kits[self.active].surface == KitSurface::Chimp =>
+                if self.prefs.enable_chimp
+                    && self.kits[self.active].surface == KitSurface::Chimp =>
             {
                 if let Some(package) = self.kits[self.active].chimp.selected_package.clone() {
                     let kit = self.active;
@@ -1390,16 +1393,16 @@ impl Baboon {
     fn prepare_root_frame(&mut self, ctx: &egui::Context) {
         self.process_worker_messages(ctx);
         self.expire_status(ctx);
-        ctx.set_zoom_factor(self.ui_scale);
+        ctx.set_zoom_factor(self.prefs.ui_scale);
         self.handle_pixels_per_point_change(ctx);
         self.maybe_refresh_entry_index(ctx.clone());
-        set_dark_mode(self.dark_mode);
+        set_dark_mode(self.prefs.dark_mode);
         // Pushed the same way and for the same reason as the theme: the two
         // halves of the angle conversion are free functions on opposite sides
         // of the frame, and neither can reach `Baboon`.
-        crate::format::set_angles_in_degrees(self.angles_in_degrees);
+        crate::format::set_angles_in_degrees(self.prefs.angles_in_degrees);
         ctx.set_visuals(foundation_visuals());
-        set_combo_scroll_cycle_enabled(ctx, self.scroll_to_cycle_dropdowns);
+        set_combo_scroll_cycle_enabled(ctx, self.prefs.scroll_to_cycle_dropdowns);
         // Opened before any pane draws and settled after the last one, so a
         // dropdown can only claim a gesture on the frame it began.
         begin_wheel_gesture(ctx);

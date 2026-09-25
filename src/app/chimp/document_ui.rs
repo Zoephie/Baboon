@@ -313,7 +313,7 @@ impl Baboon {
 
         // Read before the document borrow: `document` borrows this kit, and the
         // preference lives on the application.
-        let expert = self.expert_mode;
+        let expert = self.prefs.expert_mode;
         let mut scan_referrers = false;
         let world = match &self.kits[kit_index].chimp.mount {
             ChimpMount::Ready(world) => world.clone(),
@@ -384,7 +384,7 @@ impl Baboon {
                 false
             }
             ChimpDocumentView::Texture => {
-                draw_chimp_texture_preview(ui, document, &mut self.bitmap_preview_view);
+                draw_chimp_texture_preview(ui, document, &mut self.prefs.bitmap_preview_view);
                 false
             }
             ChimpDocumentView::Mesh => {

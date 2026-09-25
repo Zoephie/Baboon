@@ -8,7 +8,7 @@ impl Baboon {
         if self.tag_reference_picker.is_none() {
             return;
         }
-        let expert_mode = self.expert_mode;
+        let expert_mode = self.prefs.expert_mode;
         // The catalog has to come from the kit the picker was opened from, the
         // same kit its selection is applied to — otherwise it would offer
         // another game's tags to pick from.

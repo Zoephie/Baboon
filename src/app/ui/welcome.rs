@@ -144,9 +144,9 @@ impl Baboon {
         }
 
         let mut action = None;
-        let recents = self.recent_folders.clone();
+        let recents = self.prefs.recent_folders.clone();
         let editing_kits = visible_editing_kit_menu_entries(
-            &self.custom_editing_kit_profiles,
+            &self.prefs.custom_editing_kit_profiles,
             &self.editing_kit_validation,
         );
 
@@ -334,6 +334,7 @@ impl Baboon {
                                                                     )
                                                                     .cloned();
                                                                 let path = self
+                                                                    .prefs
                                                                     .editing_kit_paths
                                                                     .get(shortcut.game)
                                                                     .cloned();
@@ -570,7 +571,7 @@ impl Baboon {
                 self.status = format!("Removed {} from recent folders", path.display());
             }
             Some(WelcomeAction::ForgetAllRecents) => {
-                self.recent_folders.clear();
+                self.prefs.recent_folders.clear();
                 self.status = "Cleared recent folders".to_owned();
             }
             Some(WelcomeAction::LoadKit(shortcut)) => {

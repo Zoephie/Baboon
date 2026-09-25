@@ -1837,3 +1837,7 @@ mod session_tests {
         assert!(session.kits[0].has_project, "the kit is still restored");
     }
 }
+
+#[cfg(test)]
+#[path = "tests/prefs_round_trip.rs"]
+mod prefs_round_trip;

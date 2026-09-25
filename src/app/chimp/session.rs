@@ -36,8 +36,9 @@ impl Baboon {
             return;
         }
 
-        self.chimp_usmap_path = path;
+        self.prefs.chimp_usmap_path = path;
         self.chimp_usmap_path_input = self
+            .prefs
             .chimp_usmap_path
             .as_ref()
             .map(|path| path.display().to_string())
@@ -58,7 +59,7 @@ impl Baboon {
             self.kits[index].chimp = ChimpState::default();
             self.begin_chimp_mount(index, ctx.clone());
         }
-        self.status = match &self.chimp_usmap_path {
+        self.status = match &self.prefs.chimp_usmap_path {
             Some(path) if remount.is_empty() => {
                 format!("Chimp USMAP set to {}", path.display())
             }
@@ -81,6 +82,7 @@ impl Baboon {
             .set_title("Select Chimp USMAP")
             .add_filter("Unreal mappings", &["usmap"]);
         if let Some(directory) = self
+            .prefs
             .chimp_usmap_path
             .as_ref()
             .and_then(|path| path.parent())
@@ -117,7 +119,7 @@ impl Baboon {
     }
 
     pub(in crate::app) fn begin_chimp_mount(&mut self, kit_index: usize, ctx: egui::Context) {
-        if !self.enable_chimp {
+        if !self.prefs.enable_chimp {
             return;
         }
         let Some(source) = self.kits.get(kit_index).and_then(|kit| kit.source.as_ref()) else {
@@ -131,7 +133,7 @@ impl Baboon {
             generation: self.kits[kit_index].generation,
         };
         let root = root.clone();
-        let usmap_path = self.chimp_usmap_path.clone();
+        let usmap_path = self.prefs.chimp_usmap_path.clone();
         self.kits[kit_index].chimp.mount = ChimpMount::Loading;
         let tx = self.tx.clone();
         thread::spawn(move || {

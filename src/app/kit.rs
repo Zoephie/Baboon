@@ -441,8 +441,8 @@ impl Baboon {
     fn empty_kit(&mut self) -> Kit {
         let id = self.next_kit_id();
         Kit {
-            browser_mode: self.default_browser_mode,
-            browser_sort: self.default_browser_sort,
+            browser_mode: self.prefs.browser_mode,
+            browser_sort: self.prefs.browser_sort,
             ..Kit::empty(id, self.default_names.clone())
         }
     }

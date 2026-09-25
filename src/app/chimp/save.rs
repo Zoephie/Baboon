@@ -30,7 +30,8 @@ impl Baboon {
             _ => return None,
         };
         Some(
-            self.chimp_output_dir
+            self.prefs
+                .chimp_output_dir
                 .clone()
                 .unwrap_or_else(|| root.clone()),
         )
@@ -219,7 +220,7 @@ impl Baboon {
         };
         let mut close = false;
         let mut action = None;
-        let expert_mode = self.expert_mode;
+        let expert_mode = self.prefs.expert_mode;
         let dialog = self.kits[kit_index]
             .chimp
             .save_dialog
@@ -367,7 +368,7 @@ impl Baboon {
         }
         match action {
             Some(ChimpSaveAction::Export(output)) => {
-                self.chimp_output_dir = output.parent().map(Path::to_path_buf);
+                self.prefs.chimp_output_dir = output.parent().map(Path::to_path_buf);
                 let action = ChimpSaveAction::Export(output);
                 if !self.begin_chimp_write(kit_index, action, pending_close_action.clone(), ctx)
                     && let Some(action) = pending_close_action
@@ -378,7 +379,7 @@ impl Baboon {
             // Guarded here as well as in the dialog: this is the one action in
             // the app that edits the installed game's own containers, and it
             // should not be reachable by any route expert mode has not opened.
-            Some(ChimpSaveAction::Overwrite) if !self.expert_mode => {
+            Some(ChimpSaveAction::Overwrite) if !self.prefs.expert_mode => {
                 self.status =
                     "Overwriting the game's own PAKs needs expert mode — save this as a mod \
                      instead"

@@ -2654,7 +2654,7 @@ impl Baboon {
     /// the preflight plan is shown for confirmation first is the user's
     /// `confirm_runtime_poke` preference, not a property of how it was invoked.
     pub(super) fn begin_poke_current_tag(&mut self, ctx: egui::Context) {
-        if !self.confirm_runtime_poke {
+        if !self.prefs.confirm_runtime_poke {
             self.begin_poke_current_tag_direct(ctx);
             return;
         }
@@ -2877,7 +2877,7 @@ impl Baboon {
     }
 
     pub(super) fn draw_poke_window(&mut self, ctx: &egui::Context) {
-        let mut dont_ask = !self.confirm_runtime_poke;
+        let mut dont_ask = !self.prefs.confirm_runtime_poke;
         let Some(dialog) = self.poke_dialog.as_ref() else {
             return;
         };
@@ -2972,8 +2972,8 @@ impl Baboon {
         } else if confirm {
             // Apply the opt-out only when the user commits to the poke, so
             // cancelling out of the dialog never disarms the next one.
-            if dont_ask && self.confirm_runtime_poke {
-                self.confirm_runtime_poke = false;
+            if dont_ask && self.prefs.confirm_runtime_poke {
+                self.prefs.confirm_runtime_poke = false;
                 self.persist_prefs_if_changed();
             }
             self.confirm_poke(ctx.clone());

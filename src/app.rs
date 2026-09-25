@@ -201,23 +201,6 @@ pub struct Baboon {
     native_template_cache: Option<NativeTemplateCache>,
     /// Modeless find-in-tag dialog and its exact occurrence list.
     find: FindDialogState,
-    /// Browser view a newly opened workspace starts in. The live setting is
-    /// [`Kit::browser_mode`] — each workspace keeps its own — and this is the
-    /// saved default they are seeded from.
-    default_browser_mode: BrowserMode,
-    default_browser_sort: BrowserSort,
-    /// How nested groups, structs and blocks in the tag editor start out.
-    nested_default: NestedDefault,
-    show_browser_prefixes: bool,
-    folders_before_tags: bool,
-    double_click_to_open_tags: bool,
-    /// Persisted policy controlling whether prior windows are restored, asked
-    /// about, or deliberately ignored at startup.
-    session_restore: SessionRestore,
-    /// Which build track update checks look at — stable releases or the
-    /// rolling development build.
-    update_channel: UpdateChannel,
-    check_updates_on_startup: bool,
     /// The most recent check's result, kept only while it is actually an
     /// update. The status line expires on a timer, so this is what keeps the
     /// news reachable after a silent startup check.
@@ -225,34 +208,17 @@ pub struct Baboon {
     /// The most recent successful check, update or not, so Settings can report
     /// the outcome after the status line has expired.
     last_update_check: Option<UpdateCheckResult>,
-    show_block_sizes: bool,
-    /// Mirrors [`crate::format::angles_in_degrees`], which is where the
-    /// formatters actually read it; this field is what gets persisted and
-    /// what the checkboxes bind to.
-    angles_in_degrees: bool,
-    scroll_to_cycle_dropdowns: bool,
-    /// Warn before Save overwrites Campaign Evolved pak files in place.
-    confirm_container_overwrite: bool,
-    /// Show the preflight plan and wait for confirmation before a runtime poke.
-    confirm_runtime_poke: bool,
-    /// Whether the CE-only Unreal package workspace is visible and mounted.
-    enable_chimp: bool,
-    /// Optional directory for Chimp's non-destructive `_P` output.
-    chimp_output_dir: Option<PathBuf>,
-    /// Optional external Unreal mappings used when Chimp mounts CE packages.
-    chimp_usmap_path: Option<PathBuf>,
     chimp_usmap_path_input: String,
-    expert_mode: bool,
-    dark_mode: bool,
-    ui_scale: f32,
     pending_ui_scale: f32,
-    model_preview_size: f32,
-    bitmap_preview_view: BitmapPreviewViewSettings,
-    ek_folder_aliases: Vec<EkFolderAlias>,
-    custom_editing_kit_profiles: Vec<CustomEditingKitProfile>,
     editing_kit_validation: EditingKitValidationCache,
     custom_editing_kit_draft: Option<CustomEditingKitDraft>,
     custom_editing_kit_removal: Option<CustomEditingKitRemoval>,
+    /// The live preferences: what Settings edits and every reader consults.
+    /// `browser_mode` / `browser_sort` here are only the seed a new workspace
+    /// starts from — each kit keeps its own — and [`Baboon::current_prefs`]
+    /// takes the focused kit's when it writes them out.
+    prefs: GuiPrefs,
+    /// What was last written to disk, so an unchanged frame writes nothing.
     saved_prefs: GuiPrefs,
     first_run_wizard: Option<FirstRunWizardState>,
     settings_open: bool,
@@ -338,15 +304,7 @@ pub struct Baboon {
     tag_compat: TagCompatUiState,
     map_names_game_tab: MapNamesGameTab,
     tool_commands: ToolCommandsUiState,
-    tool_commands_window_pos: Option<egui::Pos2>,
-    tool_commands_window_size: Vec2,
-    tool_commands_left_width: f32,
-    tool_commands_collapsed_categories: HashSet<String>,
-    recent_folders: Vec<PathBuf>,
-    editing_kit_favorites: Vec<EditingKitFavorites>,
-    blender_path: Option<PathBuf>,
     blender_path_input: String,
-    editing_kit_paths: HashMap<String, PathBuf>,
     editing_kit_path_inputs: HashMap<String, String>,
     editing_kit_path_attention: Option<String>,
     /// One cross-frame edit popup at a time; its embedded tag/path identity
@@ -368,8 +326,6 @@ pub struct Baboon {
     color_popup_kit: Option<KitId>,
     function_popup_kit: Option<KitId>,
     tag_reference_picker_kit: Option<KitId>,
-    custom_color_swatches: Vec<Option<[u8; 4]>>,
-    palette_last_dir: Option<PathBuf>,
     /// Function editor snapshot and write targets captured when the popup opens.
     function_popup: Option<FunctionPopup>,
     query_results: Option<TagQueryResults>,
@@ -561,6 +517,15 @@ impl Baboon {
             &prefs.editing_kit_paths,
             &prefs.custom_editing_kit_profiles,
         );
+        // What the file holds, brought into range. `saved_prefs` keeps the
+        // file's own values, so a correction here is written back once.
+        let mut live_prefs = prefs.clone();
+        live_prefs
+            .tool_commands_window_size
+            .get_or_insert(DEFAULT_TOOL_COMMANDS_WINDOW_SIZE);
+        live_prefs.tool_commands_left_width = live_prefs
+            .tool_commands_left_width
+            .max(MIN_TOOL_COMMANDS_LEFT_WIDTH);
         Self {
             window_state,
             default_names: names.clone(),
@@ -580,42 +545,19 @@ impl Baboon {
             cache_import_dialog: None,
             native_template_cache: None,
             find: FindDialogState::default(),
-            default_browser_mode: prefs.browser_mode,
-            default_browser_sort: prefs.browser_sort,
-            nested_default: prefs.nested_default,
-            show_browser_prefixes: prefs.show_browser_prefixes,
-            folders_before_tags: prefs.folders_before_tags,
-            double_click_to_open_tags: prefs.double_click_to_open_tags,
-            session_restore: prefs.session_restore,
-            update_channel: prefs.update_channel,
-            check_updates_on_startup: prefs.check_updates_on_startup,
             available_update: None,
             last_update_check: None,
-            show_block_sizes: prefs.show_block_sizes,
-            angles_in_degrees: prefs.angles_in_degrees,
-            scroll_to_cycle_dropdowns: prefs.scroll_to_cycle_dropdowns,
-            confirm_container_overwrite: prefs.confirm_container_overwrite,
-            confirm_runtime_poke: prefs.confirm_runtime_poke,
-            enable_chimp: prefs.enable_chimp,
-            chimp_output_dir: prefs.chimp_output_dir.clone(),
-            chimp_usmap_path: prefs.chimp_usmap_path.clone(),
             chimp_usmap_path_input: prefs
                 .chimp_usmap_path
                 .as_ref()
                 .map(|path| path.display().to_string())
                 .unwrap_or_default(),
-            expert_mode: prefs.expert_mode,
-            dark_mode: prefs.dark_mode,
-            ui_scale: prefs.ui_scale,
             pending_ui_scale: prefs.ui_scale,
-            model_preview_size: prefs.model_preview_size,
-            bitmap_preview_view: prefs.bitmap_preview_view,
-            ek_folder_aliases: prefs.ek_folder_aliases.clone(),
-            custom_editing_kit_profiles: prefs.custom_editing_kit_profiles.clone(),
             editing_kit_validation,
             custom_editing_kit_draft: None,
             custom_editing_kit_removal: None,
             saved_prefs: prefs.clone(),
+            prefs: live_prefs,
             first_run_wizard,
             settings_open: false,
             settings_tab: SettingsTab::Startup,
@@ -660,25 +602,13 @@ impl Baboon {
             tag_compat: TagCompatUiState::default(),
             map_names_game_tab: MapNamesGameTab::HaloCe,
             tool_commands: ToolCommandsUiState::default(),
-            tool_commands_window_pos: prefs.tool_commands_window_pos,
-            tool_commands_window_size: prefs
-                .tool_commands_window_size
-                .unwrap_or(DEFAULT_TOOL_COMMANDS_WINDOW_SIZE),
-            tool_commands_left_width: prefs
-                .tool_commands_left_width
-                .max(MIN_TOOL_COMMANDS_LEFT_WIDTH),
-            tool_commands_collapsed_categories: prefs.tool_commands_collapsed_categories.clone(),
-            recent_folders: prefs.recent_folders.clone(),
-            editing_kit_favorites: prefs.editing_kit_favorites.clone(),
             editing_kit_path_inputs: editing_kit_path_inputs(&prefs.editing_kit_paths),
-            editing_kit_paths: prefs.editing_kit_paths.clone(),
             editing_kit_path_attention: None,
             blender_path_input: prefs
                 .blender_path
                 .as_ref()
                 .map(|path| path.display().to_string())
                 .unwrap_or_default(),
-            blender_path: prefs.blender_path,
             deferred_file_action: None,
             restoring_kits: HashSet::new(),
             restored_active_kit: None,
@@ -686,8 +616,6 @@ impl Baboon {
             color_popup_kit: None,
             function_popup_kit: None,
             tag_reference_picker_kit: None,
-            custom_color_swatches: prefs.custom_color_swatches.clone(),
-            palette_last_dir: prefs.palette_last_dir.clone(),
             function_popup: None,
             query_results: None,
             pending_ref_jump: None,
@@ -852,7 +780,8 @@ impl Baboon {
         profile_id: Option<&str>,
     ) -> Option<egui::TextureHandle> {
         let profile = profile_id.and_then(|profile_id| {
-            self.custom_editing_kit_profiles
+            self.prefs
+                .custom_editing_kit_profiles
                 .iter()
                 .find(|profile| profile.id == profile_id)
                 .cloned()

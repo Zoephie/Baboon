@@ -732,7 +732,7 @@ pub(super) fn draw_tag_diff_list(
 impl Baboon {
     fn comparison_kits(&self, game: &str, current_root: &Path) -> Vec<ComparisonKit> {
         let mut kits = Vec::new();
-        for profile in &self.custom_editing_kit_profiles {
+        for profile in &self.prefs.custom_editing_kit_profiles {
             if profile.game != game {
                 continue;
             }
@@ -792,7 +792,8 @@ impl Baboon {
             .profile
             .as_ref()
             .and_then(|identity| {
-                self.custom_editing_kit_profiles
+                self.prefs
+                    .custom_editing_kit_profiles
                     .iter()
                     .find(|profile| profile.id == identity.id)
             })

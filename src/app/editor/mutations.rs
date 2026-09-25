@@ -1809,7 +1809,7 @@ mod apply_doc_ops_tests {
             id: profile.id.clone(),
             name: profile.name.clone(),
         });
-        app.custom_editing_kit_profiles = vec![profile];
+        app.prefs.custom_editing_kit_profiles = vec![profile];
         let before = value(&app);
 
         let applied = app.apply_doc_ops(0, KEY, "Edit color", set("7"), UndoStep::Own);

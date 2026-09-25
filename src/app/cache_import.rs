@@ -460,6 +460,7 @@ impl Baboon {
             target_game,
             target_tags_root,
             kit_roots: self
+                .prefs
                 .editing_kit_paths
                 .iter()
                 .map(|(game, root)| (game.clone(), import_tags_root(root)))

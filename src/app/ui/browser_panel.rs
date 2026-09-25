@@ -142,9 +142,9 @@ impl Baboon {
                 })
             })
             .unwrap_or_default();
-        let mut show_browser_prefixes = self.show_browser_prefixes;
-        let mut folders_before_tags = self.folders_before_tags;
-        let double_click_to_open = self.double_click_to_open_tags;
+        let mut show_browser_prefixes = self.prefs.show_browser_prefixes;
+        let mut folders_before_tags = self.prefs.folders_before_tags;
+        let double_click_to_open = self.prefs.double_click_to_open_tags;
         let search_hint = folder_browser_search_hint(&pane.label);
         let mut action = None;
         let mut need_scan = false;
@@ -346,8 +346,8 @@ impl Baboon {
 
         self.queue_bitmap_hover_thumbnails(kit_index, &bitmap_hover_requests, ctx);
 
-        self.show_browser_prefixes = show_browser_prefixes;
-        self.folders_before_tags = folders_before_tags;
+        self.prefs.show_browser_prefixes = show_browser_prefixes;
+        self.prefs.folders_before_tags = folders_before_tags;
 
         action = match action {
             Some(BrowserAction::OpenFolderBrowser {
@@ -499,8 +499,8 @@ impl Baboon {
                     ui,
                     &mut kit.browser_mode,
                     &mut kit.browser_sort,
-                    &mut self.show_browser_prefixes,
-                    &mut self.folders_before_tags,
+                    &mut self.prefs.show_browser_prefixes,
+                    &mut self.prefs.folders_before_tags,
                 );
                 if groups_clicked
                     && matches!(source.source, TagSource::LooseFolder { .. })
@@ -522,9 +522,9 @@ impl Baboon {
             let selected = kit.selected_key.clone();
             let filter = kit.filter.trim().to_owned();
             let mode = kit.browser_mode;
-            let show_prefixes = self.show_browser_prefixes;
-            let folders_before_tags = self.folders_before_tags;
-            let double_click_to_open = self.double_click_to_open_tags;
+            let show_prefixes = self.prefs.show_browser_prefixes;
+            let folders_before_tags = self.prefs.folders_before_tags;
+            let double_click_to_open = self.prefs.double_click_to_open_tags;
             let mut status_update = None;
             // Groups and filtered Folders use all_entries (background
             // scan) so every tag is visible, not just visited folders.

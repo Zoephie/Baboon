@@ -91,7 +91,7 @@ impl Baboon {
             // mounts eagerly when enabled so it is ready if the user selects
             // it, but loading a project must not switch surfaces implicitly.
             self.kits[installed].surface = campaign_evolved_surface_on_load();
-            if self.enable_chimp {
+            if self.prefs.enable_chimp {
                 self.begin_chimp_mount(installed, ctx.clone());
             }
         }

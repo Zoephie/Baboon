@@ -622,7 +622,7 @@ impl Baboon {
                 } => Some(definitions_root.clone()),
                 _ => None,
             });
-        let expert_mode = self.expert_mode;
+        let expert_mode = self.prefs.expert_mode;
         // Mods installed under `Paks` are mounted like any other container, so
         // they serve their tags in place of the game's. Both facts below follow
         // from that and neither was visible: comparisons here are against the

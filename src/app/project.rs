@@ -1955,7 +1955,7 @@ impl Baboon {
         };
         let source_path = if crate::source::find_paks_dir(&snapshot.source_path).is_some() {
             snapshot.source_path.clone()
-        } else if let Some(configured) = self.editing_kit_paths.get("haloce_evolved")
+        } else if let Some(configured) = self.prefs.editing_kit_paths.get("haloce_evolved")
             && crate::source::find_paks_dir(configured).is_some()
         {
             configured.clone()

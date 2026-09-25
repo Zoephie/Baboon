@@ -33,7 +33,7 @@ impl Baboon {
                 self.available_update = None;
                 self.last_update_check = None;
                 if !silent {
-                    self.status = update_check_error_status(self.update_channel, &error);
+                    self.status = update_check_error_status(self.prefs.update_channel, &error);
                 }
             }
         }
