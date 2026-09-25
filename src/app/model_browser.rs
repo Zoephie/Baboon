@@ -606,10 +606,12 @@ impl Baboon {
                 .cloned()
                 .collect();
             let browser = &mut self.kits[kit_index].model_browser;
+            let listed: HashSet<&str> = entries.iter().map(|entry| entry.key.as_str()).collect();
+            browser.thumbnails.revalidate(|key| listed.contains(key));
+            drop(listed);
             browser.entries = entries;
             browser.entries_for = Some(generation);
             browser.matched_for = None;
-            browser.thumbnails.clear();
             browser.requested_scan = false;
         }
 

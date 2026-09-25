@@ -226,6 +226,15 @@ pub(in crate::app) struct ThumbnailCache {
 struct Thumbnail {
     texture: Option<egui::TextureHandle>,
     used: u64,
+    /// The loose file's modified time when this was decoded; `None` for tags
+    /// that live in a pak or cache, which do not change underneath.
+    modified: Option<std::time::SystemTime>,
+}
+
+/// A loose tag's modified time, from its `file:` key.
+fn loose_tag_modified(key: &str) -> Option<std::time::SystemTime> {
+    let path = key.strip_prefix("file:")?;
+    std::fs::metadata(path).ok()?.modified().ok()
 }
 
 impl ThumbnailCache {
@@ -244,7 +253,15 @@ impl ThumbnailCache {
     pub(in crate::app) fn insert(&mut self, key: String, texture: Option<egui::TextureHandle>) {
         self.clock += 1;
         let used = self.clock;
-        self.entries.insert(key, Thumbnail { texture, used });
+        let modified = loose_tag_modified(&key);
+        self.entries.insert(
+            key,
+            Thumbnail {
+                texture,
+                used,
+                modified,
+            },
+        );
         if self.entries.len() > THUMBNAIL_CACHE_CAP {
             self.evict_oldest();
         }
@@ -264,6 +281,17 @@ impl ThumbnailCache {
 
     pub(in crate::app) fn clear(&mut self) {
         self.entries.clear();
+    }
+
+    /// Keep what is still right after the kit's entries changed: a thumbnail
+    /// whose tag is still listed and whose file has not been modified since it
+    /// was decoded. The libraries used to clear everything on any generation
+    /// bump (a save elsewhere, a rename, the periodic refresh noticing one
+    /// file) and re-read and re-decode every visible thumbnail.
+    pub(in crate::app) fn revalidate(&mut self, still_listed: impl Fn(&str) -> bool) {
+        self.entries.retain(|key, thumbnail| {
+            still_listed(key) && loose_tag_modified(key) == thumbnail.modified
+        });
     }
 }
 
@@ -705,12 +733,14 @@ impl Baboon {
                 .cloned()
                 .collect();
             let browser = &mut self.kits[kit_index].bitmap_browser;
+            let listed: HashSet<&str> = entries.iter().map(|entry| entry.key.as_str()).collect();
+            if let Ok(mut thumbnails) = browser.thumbnails.lock() {
+                thumbnails.revalidate(|key| listed.contains(key));
+            }
+            drop(listed);
             browser.entries = entries;
             browser.entries_for = Some(generation);
             browser.matched_for = None;
-            if let Ok(mut thumbnails) = browser.thumbnails.lock() {
-                thumbnails.clear();
-            }
             // A new source gets to ask for its own scan; the flag only exists
             // to stop the request repeating every frame within one source.
             browser.requested_scan = false;
@@ -961,6 +991,49 @@ mod stale_result_tests {
             .unwrap()
             .contains("file:a.bitmap");
         assert!(!cached, "the stale result itself is not kept");
+    }
+
+    /// A generation bump keeps the thumbnails that are still right: listed
+    /// and unmodified. Everything used to be thrown away and decoded again.
+    #[test]
+    fn a_generation_bump_keeps_thumbnails_that_are_still_right() {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-thumb-revalidate-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let set_time = |path: &Path, seconds: u64| {
+            std::fs::File::options()
+                .write(true)
+                .open(path)
+                .unwrap()
+                .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(seconds))
+                .unwrap();
+        };
+        let (same, changed, gone) = (root.join("same.bitmap"), root.join("changed.bitmap"), root.join("gone.bitmap"));
+        for path in [&same, &changed, &gone] {
+            std::fs::write(path, b"bitmap").unwrap();
+            set_time(path, 1_000_000);
+        }
+        let key = |path: &Path| format!("file:{}", path.display());
+        let mut cache = ThumbnailCache::default();
+        for listed in [key(&same), key(&changed), key(&gone), "ublock:0:pak.bitmap".to_owned()] {
+            cache.insert(listed, None);
+        }
+        set_time(&changed, 2_000_000);
+
+        let listed = [key(&same), key(&changed), "ublock:0:pak.bitmap".to_owned()];
+        cache.revalidate(|candidate| listed.iter().any(|key| key == candidate));
+
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(cache.contains(&key(&same)), "unchanged: kept");
+        assert!(!cache.contains(&key(&changed)), "modified since it was decoded: dropped");
+        assert!(!cache.contains(&key(&gone)), "no longer listed: dropped");
+        assert!(cache.contains("ublock:0:pak.bitmap"), "a pak tag cannot change: kept");
     }
 
     /// Same for a model preview's texture resolve: a stale result left
