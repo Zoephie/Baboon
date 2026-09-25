@@ -402,6 +402,8 @@ pub struct Baboon {
     /// keep the terminal open. Persisted in prefs.json and restored per kit.
     terminal_open_games: HashSet<String>,
     saved_terminal_open_games: HashSet<String>,
+    /// When the per-frame prefs check next runs (egui time).
+    prefs_next_check_at: f64,
     /// Modal close transaction; the pending action is executed only after every
     /// selected dirty document has been saved or discard is confirmed.
     save_changes_prompt: SaveChangesPrompt,
@@ -724,6 +726,7 @@ impl Baboon {
                 scroll_to_bottom: false,
             },
             saved_terminal_open_games: terminal_open_games.clone(),
+            prefs_next_check_at: 0.0,
             terminal_open_games,
             save_changes_prompt: SaveChangesPrompt::default(),
             last_opened_windows,

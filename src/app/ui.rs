@@ -1073,6 +1073,9 @@ impl eframe::App for Baboon {
         // A quit that never asks the window to close (macOS Cmd+Q) skips the
         // close request, which is where waiting checkpoints are otherwise flushed.
         self.flush_all_chimp_checkpoints();
+        // The per-frame prefs write is throttled; whatever changed in the last
+        // second would otherwise be lost.
+        self.persist_prefs_if_changed();
         self.window_state.persist_now();
         self.persist_session_on_exit();
     }

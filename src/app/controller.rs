@@ -8953,17 +8953,49 @@ impl Baboon {
     }
 
     pub(super) fn persist_prefs_if_changed(&mut self) {
+        let _ = self.try_persist_prefs();
+    }
+
+    /// Write prefs if they changed; whether a write failed.
+    fn try_persist_prefs(&mut self) -> bool {
         let prefs = self.current_prefs();
         if prefs == self.saved_prefs && self.terminal_open_games == self.saved_terminal_open_games {
-            return;
+            return false;
         }
         match save_gui_prefs(&prefs, &self.terminal_open_games, true) {
             Ok(()) => {
                 self.saved_prefs = prefs;
                 self.saved_terminal_open_games = self.terminal_open_games.clone();
+                false
             }
-            Err(error) => self.status = error,
+            Err(error) => {
+                self.status = error;
+                true
+            }
         }
+    }
+
+    /// The per-frame prefs check, at most once a second.
+    ///
+    /// It ran every frame: a full GuiPrefs rebuilt (recents, favorites, kit
+    /// profiles and swatches cloned) just to compare, and while a window, the
+    /// UI-scale slider or a splitter was being dragged the value changed every
+    /// frame, so prefs.json was rewritten at the frame rate. A failed write was
+    /// retried, and reported, every frame too. Explicit calls (settings, runtime
+    /// poke) still write at once, and exit flushes whatever is pending.
+    pub(super) fn persist_prefs_throttled(&mut self, now: f64) {
+        const CHECK_INTERVAL: f64 = 1.0;
+        const RETRY_AFTER_FAILURE: f64 = 10.0;
+        if now < self.prefs_next_check_at {
+            return;
+        }
+        let failed = self.try_persist_prefs();
+        self.prefs_next_check_at = now
+            + if failed {
+                RETRY_AFTER_FAILURE
+            } else {
+                CHECK_INTERVAL
+            };
     }
 }
 
@@ -12690,5 +12722,24 @@ mod saved_tag_index_tests {
         assert!(saved.is_ok(), "{saved:?}");
         assert!(!refresh.unwrap().changed, "the refresh finds the save already indexed");
         assert_eq!(referrers, Some(vec![entry.key.clone()]));
+    }
+}
+
+#[cfg(test)]
+mod prefs_throttle_tests {
+    use super::*;
+
+    /// The per-frame prefs check runs at most once a second. It ran every
+    /// frame, and wrote prefs.json every frame while a slider was dragged.
+    #[test]
+    fn the_per_frame_prefs_check_runs_once_a_second() {
+        // Unchanged prefs, so nothing is written: this only watches the clock.
+        let mut app = Baboon::for_test();
+        app.persist_prefs_throttled(10.0);
+        assert_eq!(app.prefs_next_check_at, 11.0);
+        app.persist_prefs_throttled(10.5);
+        assert_eq!(app.prefs_next_check_at, 11.0, "inside the second: skipped");
+        app.persist_prefs_throttled(11.2);
+        assert_eq!(app.prefs_next_check_at, 12.2);
     }
 }

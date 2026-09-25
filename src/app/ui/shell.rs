@@ -1184,7 +1184,7 @@ impl Baboon {
                 self.draw_kit_tiles(ui, ctx);
             });
         self.draw_auxiliary_windows(ctx);
-        self.persist_prefs_if_changed();
+        self.persist_prefs_throttled(ctx.input(|input| input.time));
         // Every kit, not just the active one: a background kit's sidecar can be
         // dirty from edits made before the user switched away.
         for kit in &mut self.kits {
