@@ -925,6 +925,12 @@ impl Baboon {
             if let Some(keyword) = remove {
                 self.kits[kit_index].keywords.remove(tag_key, &keyword);
             }
+            // The draft is this pane's own. It used to be one field on the app,
+            // so text typed into one pane's box showed in every other pane.
+            let draft_id = ui.make_persistent_id(("keyword_input", tag_key));
+            let mut draft = ui
+                .data_mut(|data| data.get_temp::<String>(draft_id))
+                .unwrap_or_default();
             let keyword_field = Frame::none()
                 .fill(foundation_input())
                 .rounding(egui::Rounding::same(BUTTON_HEIGHT / 2.0))
@@ -935,7 +941,7 @@ impl Baboon {
                     ui.set_height(20.0);
                     ui.horizontal(|ui| {
                         let resp = ui.add(
-                            egui::TextEdit::singleline(&mut self.keyword_input)
+                            egui::TextEdit::singleline(&mut draft)
                                 .hint_text(placeholder_text("add keyword"))
                                 .desired_width(120.0)
                                 .frame(false),
@@ -971,12 +977,13 @@ impl Baboon {
                 ),
             );
             let submitted = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if (add_clicked || submitted) && !self.keyword_input.trim().is_empty() {
+            if (add_clicked || submitted) && !draft.trim().is_empty() {
                 self.kits[kit_index]
                     .keywords
-                    .add(tag_key, &self.keyword_input);
-                self.keyword_input.clear();
+                    .add(tag_key, &draft);
+                draft.clear();
             }
+            ui.data_mut(|data| data.insert_temp(draft_id, draft));
         });
     }
 }
@@ -1078,5 +1085,41 @@ impl eframe::App for Baboon {
         self.persist_prefs_if_changed();
         self.window_state.persist_now();
         self.persist_session_on_exit();
+    }
+}
+
+#[cfg(test)]
+mod keyword_draft_tests {
+    use super::*;
+
+    /// Two panes showing the same tag keep their own keyword drafts. The draft
+    /// used to be one field on the app, shared by every pane in every kit.
+    #[test]
+    fn each_pane_keeps_its_own_keyword_draft() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::app::foundation_fonts());
+        let mut app = Baboon::for_test();
+        let mut draft_ids = Vec::new();
+        let mut frame = |app: &mut Baboon, draft_ids: &mut Vec<egui::Id>| {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    draft_ids.clear();
+                    for pane in ["pane a", "pane b"] {
+                        ui.push_id(pane, |ui| {
+                            app.draw_keyword_bar(ui, 0, "file:crate.model");
+                            draft_ids.push(ui.make_persistent_id(("keyword_input", "file:crate.model")));
+                        });
+                    }
+                });
+            });
+        };
+
+        frame(&mut app, &mut draft_ids);
+        ctx.data_mut(|data| data.insert_temp(draft_ids[0], "rocket".to_owned()));
+        frame(&mut app, &mut draft_ids);
+
+        let draft = |id: egui::Id| ctx.data_mut(|data| data.get_temp::<String>(id)).unwrap_or_default();
+        assert_eq!(draft(draft_ids[0]), "rocket");
+        assert_eq!(draft(draft_ids[1]), "", "the other pane's box is untouched");
     }
 }

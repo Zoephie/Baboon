@@ -372,7 +372,6 @@ pub struct Baboon {
     /// "Compare Tags" (Tag Diff) window state.
     tag_diff: Option<TagDiffState>,
     content_explorer: Option<ContentExplorer>,
-    keyword_input: String,
     keyword_chooser_open: bool,
     reveal_target: Option<RevealRequest>,
     field_value_search_open: bool,
@@ -694,7 +693,6 @@ impl Baboon {
             ref_jump_loading: HashSet::new(),
             tag_diff: None,
             content_explorer: None,
-            keyword_input: String::new(),
             keyword_chooser_open: false,
             reveal_target: None,
             field_value_search_open: false,
