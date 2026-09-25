@@ -2032,9 +2032,12 @@ fn push_h2_template_reference_edit(
     });
 
     if let Some(tags_root) = edit.tags_root {
-        if let Some(allowed_parameter_names) =
-            h2_template_parameter_names_from_reference(tags_root, &normalized)
-        {
+        if let Some(allowed_parameter_names) = h2_template_parameter_names_from_reference(
+            tags_root,
+            edit.game,
+            edit.definitions_root,
+            &normalized,
+        ) {
             edit.h2_shader_param_ops
                 .push(H2ShaderParamOp::SwitchTemplate {
                     parameters_block_path: "parameters".to_owned(),
@@ -2044,24 +2047,29 @@ fn push_h2_template_reference_edit(
     }
 }
 
+/// The parameter names the template `reference` declares, read with the
+/// loader the H2 shader grid uses.
+///
+/// This used to read the file itself: it joined a backslash-separated path
+/// onto the tags root, which names no file on macOS or Linux, and assumed the
+/// Halo 2 definitions and a classic header. Switching a template there never
+/// pruned the parameters the new one lacks.
 fn h2_template_parameter_names_from_reference(
     tags_root: &std::path::Path,
+    game: Option<&str>,
+    definitions_root: Option<&std::path::Path>,
     reference: &str,
 ) -> Option<Vec<String>> {
-    let rel = reference.replace('/', "\\");
-    let path = tags_root.join(format!("{rel}.shader_template"));
-    h2_template_parameter_names_from_file(&path)
-}
-
-fn h2_template_parameter_names_from_file(path: &std::path::Path) -> Option<Vec<String>> {
-    let bytes = std::fs::read(path).ok()?;
-    blam_tags::classic::ClassicHeader::parse(&bytes)?;
-    let schema_path = locate_definitions_root()
-        .join("halo2_mcc")
-        .join("shader_template.json");
-    let layout = blam_tags::TagLayout::from_json(schema_path).ok()?;
-    let tag = blam_tags::classic::read_classic_tag_file(&bytes, layout).ok()?;
-    Some(h2_template_parameter_names(tag.root()))
+    let source = TagSource::LooseFolder {
+        root: tags_root.to_path_buf(),
+        game: Some(game.unwrap_or("halo2_mcc").to_owned()),
+        definitions_root: definitions_root
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(locate_definitions_root),
+    };
+    let template =
+        load_referenced_tag_from_source(&source, reference, "shader_template", b"stem").ok()?;
+    Some(h2_template_parameter_names(template.root()))
 }
 
 fn h2_template_parameter_names(root: TagStruct<'_>) -> Vec<String> {
@@ -2284,5 +2292,44 @@ mod reference_cell_tests {
         // read-only tag — which only the bitmap cell used to refuse.
         assert!(drop_onto(structural(), &bitmap, true).is_empty());
         assert!(drop_onto(ShaderRowEditKind::ShaderTemplateRef, &template, false).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod h2_template_switch_tests {
+    use super::*;
+    use crate::app::foundation::extracted_tests::tests::with_test_edit_context;
+
+    /// Switching an H2 shader's template queues the new template's parameter
+    /// names, so parameters it lacks are pruned. This read the template off a
+    /// backslash-joined path, which found nothing outside Windows.
+    #[test]
+    fn switching_a_template_reads_its_parameters() {
+        let root = crate::test_kits::h2ek_tags();
+        let reference = "shaders/shader_templates/water/water_static";
+        if !root.join(format!("{reference}.shader_template")).is_file() {
+            eprintln!("skipping: {reference} not present under {}", root.display());
+            return;
+        }
+        let row_edit = ShaderRowEdit {
+            path: "template".to_owned(),
+            current: String::new(),
+            kind: ShaderRowEditKind::ShaderTemplateRef,
+        };
+        let root: &'static std::path::Path = std::path::Path::new(crate::test_kits::leak(root));
+        with_test_edit_context(|edit| {
+            edit.tags_root = Some(root);
+            edit.game = Some("halo2_mcc");
+            push_h2_template_reference_edit(edit, &row_edit, reference.to_owned());
+            let names = edit.h2_shader_param_ops.iter().find_map(|op| match op {
+                H2ShaderParamOp::SwitchTemplate {
+                    allowed_parameter_names,
+                    ..
+                } => Some(allowed_parameter_names.clone()),
+                _ => None,
+            });
+            let names = names.expect("the template's parameters were read");
+            assert!(!names.is_empty());
+        });
     }
 }
