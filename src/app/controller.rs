@@ -5117,13 +5117,33 @@ impl Baboon {
             };
             (root.clone(), m.utoc_path.clone(), m.archive.clone())
         };
+        // The same lease Duplicate, Rename and Delete take: it refuses a second
+        // write to this container while one is in flight (from this workspace
+        // or another on the same install). This path wrote without it.
+        let lease = match self.acquire_container_write_lease(
+            &utoc_path,
+            ContainerWriteMode::AppendInPlace,
+        ) {
+            Ok(lease) => lease,
+            Err(failure) => {
+                self.status = failure.to_string();
+                return;
+            }
+        };
         // Resolve against the MOUNTED archive, not a fresh handle: an override
         // container (an exported mod the user then reloaded) ships no directory
         // index, and only the mounted handle has the rebuilt file list that can
         // name `rel_path`.
-        if let Err(e) = blam_tags::iostore::writer::overwrite_tag_in_place_with(
+        let written = blam_tags::iostore::writer::overwrite_tag_in_place_with(
             &archive, &utoc_path, &rel_path, &bytes,
-        ) {
+        );
+        let outcome = if written.is_ok() {
+            ContainerWriteOutcome::Committed
+        } else {
+            ContainerWriteOutcome::Unchanged
+        };
+        self.release_in_place_lease(lease, outcome);
+        if let Err(e) = written {
             // A mod exported by an older build carries the tag alone, so there
             // is no `.uasset` chunk to rewrite the declared length into and
             // nothing can be added to a container in place.

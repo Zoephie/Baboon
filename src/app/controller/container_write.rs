@@ -557,6 +557,18 @@ impl Baboon {
         remount.len()
     }
 
+    /// Release a lease without restarting idled Unreal package workspaces.
+    /// Only right for an [`ContainerWriteMode::AppendInPlace`] lease, which
+    /// unmaps nothing and so has nothing to restart.
+    pub(in crate::app) fn release_in_place_lease(
+        &mut self,
+        lease: ContainerWriteLease,
+        outcome: ContainerWriteOutcome,
+    ) -> ContainerWriteReport {
+        debug_assert!(lease.unmapped.is_empty(), "an in-place lease unmaps nothing");
+        self.release_container_write_lease_inner(lease, outcome)
+    }
+
     /// The part of the release that needs no `egui::Context`, so the acquire
     /// path can undo itself without threading one through. Chimp remounts are
     /// queued for the caller above rather than started here.
