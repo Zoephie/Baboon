@@ -129,7 +129,7 @@ mod slashed_field_names {
     #[test]
     fn enabling_a_bool_shader_parameter_writes_it() {
         let path = std::path::Path::new(
-            "/Users/camden/Halo/halo3_mcc/tags/objects/characters/brute/shaders/armor_lights.shader",
+            crate::test_kits::tag_path("halo3_mcc", "objects/characters/brute/shaders/armor_lights.shader"),
         );
         if !path.exists() {
             eprintln!("skipping: no H3 editing kit");

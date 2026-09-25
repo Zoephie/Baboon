@@ -9,7 +9,8 @@
 
 use super::*;
 
-const PAKS: &str = "/Users/camden/Halo/halo-campaign-evolved_pc/Meteorite/Content/Paks";
+static PAKS: std::sync::LazyLock<&'static str> =
+        std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_paks()));
 
 /// The install these fixtures run against, or `None` when there isn't one.
 ///
@@ -19,7 +20,7 @@ const PAKS: &str = "/Users/camden/Halo/halo-campaign-evolved_pc/Meteorite/Conten
 fn paks() -> Option<std::path::PathBuf> {
     let path = std::env::var_os("BABOON_CE_PAKS")
         .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| std::path::PathBuf::from(PAKS));
+        .unwrap_or_else(|| std::path::PathBuf::from(*PAKS));
     if !path.exists() {
         eprintln!(
             "skipping: Campaign Evolved not present at {}",

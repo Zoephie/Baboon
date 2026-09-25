@@ -11482,7 +11482,8 @@ fn read_entry_dependencies(
 mod container_dependency_tests {
     use super::*;
 
-    const CE_PAKS: &str = "/Users/camden/Halo/halo-campaign-evolved_pc/Meteorite/Content/Paks";
+    static CE_PAKS: std::sync::LazyLock<&'static str> =
+        std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_paks()));
 
     fn find_entry<'a>(
         loaded: &'a crate::source::LoadedSourceData,
@@ -11509,7 +11510,7 @@ mod container_dependency_tests {
     /// entry display paths built from the pak directory. Skips without the paks.
     #[test]
     fn campaign_evolved_container_tags_report_their_dependencies() {
-        let paks = PathBuf::from(CE_PAKS);
+        let paks = PathBuf::from(*CE_PAKS);
         if !paks.exists() {
             eprintln!("skip: CE paks not found");
             return;
@@ -11560,7 +11561,7 @@ mod container_dependency_tests {
     #[test]
     #[ignore = "parses all ~12k Campaign Evolved tags"]
     fn campaign_evolved_full_reference_index_resolves_referrers() {
-        let paks = PathBuf::from(CE_PAKS);
+        let paks = PathBuf::from(*CE_PAKS);
         if !paks.exists() {
             eprintln!("skip: CE paks not found");
             return;

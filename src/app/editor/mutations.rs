@@ -1459,7 +1459,8 @@ mod campaign_evolved_field_paths {
     use crate::source::{load_iostore_container_set, read_entry};
     use std::path::{Path, PathBuf};
 
-    const PAKS: &str = "/Users/camden/Halo/halo-campaign-evolved_pc/Meteorite/Content/Paks";
+    static PAKS: std::sync::LazyLock<&'static str> =
+        std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_paks()));
 
     /// Mirrors how the editor builds paths: the inherited-parent chain
     /// contributes a name-only prefix, leaves add `name#ordinal`.
@@ -1495,13 +1496,13 @@ mod campaign_evolved_field_paths {
 
     #[test]
     fn every_ui_field_path_resolves_on_campaign_evolved_vehicles() {
-        if !Path::new(PAKS).exists() {
-            eprintln!("skipping: {PAKS} not present");
+        if !Path::new(*PAKS).exists() {
+            eprintln!("skipping: {} not present", *PAKS);
             return;
         }
         let defs = Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
         let names = crate::format::TagNameIndex::load_from_definitions(&defs);
-        let loaded = load_iostore_container_set(PathBuf::from(PAKS), &names, &defs).expect("mount");
+        let loaded = load_iostore_container_set(PathBuf::from(*PAKS), &names, &defs).expect("mount");
         let vehicles: Vec<_> = loaded
             .entries
             .iter()

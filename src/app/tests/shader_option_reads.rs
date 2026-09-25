@@ -5,7 +5,8 @@
 //! surfaces. That made three of the H3 kit's own option tags unreadable, and in a
 //! GUI an unreadable option tag is a dead process rather than a message.
 
-const H3_SHADERS: &str = "/Users/camden/Halo/halo3_mcc/tags/shaders";
+static H3_SHADERS: std::sync::LazyLock<&'static str> =
+    std::sync::LazyLock::new(|| crate::test_kits::tag_path("halo3_mcc", "shaders"));
 
 /// Every `render_method_option` in the kit must decode through the typed reader
 /// the shader grid uses. Named tags are called out because they are the ones that
@@ -13,7 +14,7 @@ const H3_SHADERS: &str = "/Users/camden/Halo/halo3_mcc/tags/shaders";
 /// shader that happens to use them.
 #[test]
 fn every_shipped_h3_shader_option_decodes() {
-    let root = std::path::Path::new(H3_SHADERS);
+    let root = std::path::Path::new(*H3_SHADERS);
     if !root.exists() {
         eprintln!("skipping: no H3 editing kit");
         return;

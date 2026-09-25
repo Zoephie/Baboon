@@ -9,6 +9,8 @@ mod app;
 mod format;
 mod source;
 mod storage;
+#[cfg(test)]
+mod test_kits;
 mod tool_commands;
 mod window_state;
 

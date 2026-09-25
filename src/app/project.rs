@@ -2558,15 +2558,16 @@ mod tests {
     /// nothing.
     #[test]
     fn container_tag_identities_are_unique() {
-        const PAKS: &str = "/Users/camden/Halo/halo-campaign-evolved_pc/Meteorite/Content/Paks";
-        if !std::path::Path::new(PAKS).exists() {
+        static PAKS: std::sync::LazyLock<&'static str> =
+        std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_paks()));
+        if !std::path::Path::new(*PAKS).exists() {
             eprintln!("skipping: Campaign Evolved not present");
             return;
         }
         let defs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
         let names = crate::format::TagNameIndex::load_from_definitions(&defs);
         let loaded = crate::source::load_iostore_container_set(
-            std::path::PathBuf::from(PAKS),
+            std::path::PathBuf::from(*PAKS),
             &names,
             &defs,
         )

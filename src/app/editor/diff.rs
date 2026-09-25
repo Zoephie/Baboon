@@ -808,16 +808,17 @@ mod base_path_tests {
 mod deletion_repro_tests {
     use super::*;
 
-    const PAKS: &str = "/Users/camden/Halo/halo-campaign-evolved_pc/Meteorite/Content/Paks";
+    static PAKS: std::sync::LazyLock<&'static str> =
+        std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_paks()));
 
     fn read_a15() -> Option<TagFile> {
-        if !std::path::Path::new(PAKS).exists() {
+        if !std::path::Path::new(*PAKS).exists() {
             return None;
         }
         let defs = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
         let names = crate::format::TagNameIndex::load_from_definitions(&defs);
         let loaded = crate::source::load_iostore_container_set(
-            std::path::PathBuf::from(PAKS),
+            std::path::PathBuf::from(*PAKS),
             &names,
             &defs,
         )
