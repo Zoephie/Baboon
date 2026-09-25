@@ -2556,7 +2556,7 @@ impl Baboon {
             // been closed — overwriting the game's paks in place is the last
             // thing that should land on whichever game is focused by now.
             if self.focus_navigation_kit(kit) {
-                self.overwrite_current_tag_in_place(&key);
+                self.begin_overwrite_current_tag_in_place(&key, ctx);
             }
         } else if do_export {
             self.overwrite_confirm = None;

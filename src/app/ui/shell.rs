@@ -1331,7 +1331,7 @@ impl Baboon {
             {
                 self.open_chimp_save_dialog(self.active)
             }
-            Some(DeferredFileAction::SaveCurrentTag) => self.save_current_tag(),
+            Some(DeferredFileAction::SaveCurrentTag) => self.save_current_tag(ctx),
             Some(DeferredFileAction::SaveProject) => {
                 let (kit, now) = (self.active, ctx.input(|input| input.time));
                 self.save_campaign_project_file(kit, now);

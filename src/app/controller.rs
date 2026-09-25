@@ -471,6 +471,68 @@ fn mod_output_path(output: PathBuf) -> PathBuf {
     parent.join(MODS_DIR).join(folder).join(file_name)
 }
 
+
+/// An in-place container overwrite, as the worker needs it.
+#[derive(Clone)]
+pub(in crate::app) struct InPlaceOverwriteJob {
+    stamp: KitStamp,
+    key: String,
+    /// The document's dirty revision when it was serialized.
+    dirty_revision: u64,
+    root: PathBuf,
+    containers: Vec<crate::source::MountedContainer>,
+    container_idx: usize,
+    utoc_path: PathBuf,
+    rel_path: String,
+    bytes: Vec<u8>,
+}
+
+/// What an in-place overwrite did.
+pub(in crate::app) struct InPlaceOverwrite {
+    write: Result<(), String>,
+    /// The container reopened after a successful write, so later reads see it.
+    reopened: Option<Result<blam_tags::iostore::IoStoreArchive, String>>,
+    /// Whether the container's files may have changed.
+    touched: bool,
+}
+
+impl InPlaceOverwrite {
+    fn outcome(&self) -> ContainerWriteOutcome {
+        if self.touched {
+            ContainerWriteOutcome::Committed
+        } else {
+            ContainerWriteOutcome::Unchanged
+        }
+    }
+}
+
+/// Write the tag into its container and reopen it. No UI state: runs on a
+/// worker, or inline for the close prompt.
+fn run_in_place_overwrite(job: &InPlaceOverwriteJob) -> InPlaceOverwrite {
+    // Resolve against the MOUNTED archive, not a fresh handle: an override
+    // container (an exported mod the user then reloaded) ships no directory
+    // index, and only the mounted handle has the rebuilt file list that can
+    // name `rel_path`.
+    let archive = &job.containers[job.container_idx].archive;
+    let write = blam_tags::iostore::writer::overwrite_tag_in_place_with(
+        archive,
+        &job.utoc_path,
+        &job.rel_path,
+        &job.bytes,
+    )
+    .map_err(|error| error.to_string());
+    let touched = write.is_ok();
+    let reopened = touched.then(|| {
+        crate::source::reopen_container_archive(&job.root, &job.containers, job.container_idx)
+            .map_err(|error| error.to_string())
+    });
+    InPlaceOverwrite {
+        write,
+        reopened,
+        touched,
+    }
+}
+
 /// What Save does with an edited Campaign Evolved container tag.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ContainerSaveRoute {
@@ -993,6 +1055,9 @@ impl Baboon {
                     lease,
                     result,
                 } => self.handle_container_rename_finished(stamp, lease, result, ctx),
+                WorkerMessage::InPlaceOverwriteFinished { job, lease, written } => {
+                    self.handle_in_place_overwrite_finished(*job, lease, written)
+                }
                 WorkerMessage::ContainerDeleteFinished {
                     stamp,
                     lease,
@@ -4851,7 +4916,7 @@ impl Baboon {
         Some((source, entry))
     }
 
-    pub(super) fn save_current_tag(&mut self) {
+    pub(super) fn save_current_tag(&mut self, ctx: &egui::Context) {
         if self.refuse_read_only_edit(self.active) {
             return;
         }
@@ -4886,7 +4951,9 @@ impl Baboon {
                         key,
                     });
                 }
-                ContainerSaveRoute::OverwriteInPlace => self.overwrite_current_tag_in_place(&key),
+                ContainerSaveRoute::OverwriteInPlace => {
+                    self.begin_overwrite_current_tag_in_place(&key, ctx)
+                }
             }
             return;
         }
@@ -5074,16 +5141,82 @@ impl Baboon {
         }
     }
 
-    /// Overwrite the current container tag inside its own pak, in place.
-    /// **Destructive** — modifies the shipped game files. Only reached after the
-    /// user confirms the overwrite dialog.
+    /// Overwrite the current container tag inside its own pak, in place, and
+    /// wait for it. **Destructive** — modifies the shipped game files.
+    ///
+    /// For the close prompt's Save, which reads the result off the document's
+    /// dirty flag before it lets the app or workspace close. Everything else
+    /// uses [`Self::begin_overwrite_current_tag_in_place`].
     pub(super) fn overwrite_current_tag_in_place(&mut self, key: &str) {
-        if self.refuse_read_only_edit(self.active) {
+        let Some((job, lease)) = self.prepare_in_place_overwrite(key) else {
             return;
+        };
+        let written = run_in_place_overwrite(&job);
+        self.release_in_place_lease(lease, written.outcome());
+        self.finish_in_place_overwrite(job, written);
+    }
+
+    /// The same, with the write and the pak reopen on a worker. Only reached
+    /// after the user confirms the overwrite, or has turned that off.
+    pub(super) fn begin_overwrite_current_tag_in_place(&mut self, key: &str, ctx: &egui::Context) {
+        let Some((job, lease)) = self.prepare_in_place_overwrite(key) else {
+            return;
+        };
+        let lease = self.park_container_write_lease(lease);
+        self.status = format!("Saving into {}…", job.utoc_path.display());
+        let panic_job = job.clone();
+        spawn_worker(
+            &self.tx,
+            ctx,
+            move || {
+                let written = run_in_place_overwrite(&job);
+                WorkerMessage::InPlaceOverwriteFinished {
+                    job: Box::new(job),
+                    lease,
+                    written,
+                }
+            },
+            move |error| WorkerMessage::InPlaceOverwriteFinished {
+                job: Box::new(panic_job),
+                lease,
+                // A panic may have come after the write: remount rather than
+                // trust the TOCs.
+                written: InPlaceOverwrite {
+                    write: Err(error),
+                    reopened: None,
+                    touched: true,
+                },
+            },
+        );
+    }
+
+    /// Applies `WorkerMessage::InPlaceOverwriteFinished`.
+    pub(super) fn handle_in_place_overwrite_finished(
+        &mut self,
+        job: InPlaceOverwriteJob,
+        lease: ContainerLeaseId,
+        written: InPlaceOverwrite,
+    ) -> bool {
+        if let Some(lease) = self.take_container_write_lease(lease) {
+            self.release_in_place_lease(lease, written.outcome());
+        }
+        self.finish_in_place_overwrite(job, written);
+        false
+    }
+
+    /// Everything the in-place overwrite needs from the UI thread: the tag
+    /// serialized (a `TagFile` cannot be cloned), the container, and the write
+    /// lease Duplicate, Rename and Delete take on the same files.
+    fn prepare_in_place_overwrite(
+        &mut self,
+        key: &str,
+    ) -> Option<(InPlaceOverwriteJob, ContainerWriteLease)> {
+        if self.refuse_read_only_edit(self.active) {
+            return None;
         }
         let Some(entry) = self.entry_for_key(key).cloned() else {
             self.status = "Tag is no longer in the source".to_owned();
-            return;
+            return None;
         };
         let TagEntryLocation::Container {
             container,
@@ -5091,70 +5224,77 @@ impl Baboon {
         } = &entry.location
         else {
             self.status = "Not a Campaign Evolved container tag".to_owned();
-            return;
+            return None;
         };
         let container_idx = *container;
         let rel_path = rel_path.clone();
         let Some(doc) = self.kits[self.active].parsed_tags.get(key) else {
             self.status = "Load the tag before saving".to_owned();
-            return;
+            return None;
         };
+        let dirty_revision = doc.dirty.revision();
         let bytes = match doc.tag.write_to_bytes() {
             Ok(b) => b,
             Err(e) => {
                 self.status = format!("Failed to serialize tag: {e}");
-                return;
+                return None;
             }
         };
-        let (root, utoc_path, archive) = {
+        let (root, containers) = {
             let Some(source) = self.source() else {
                 self.status = "No source loaded".to_owned();
-                return;
+                return None;
             };
             let TagSource::IoStoreContainerSet {
                 root, containers, ..
             } = &source.source
             else {
                 self.status = "Source is not a container".to_owned();
-                return;
+                return None;
             };
-            let Some(m) = containers.get(container_idx) else {
-                self.status = "Container provenance is stale".to_owned();
-                return;
-            };
-            (root.clone(), m.utoc_path.clone(), m.archive.clone())
+            (root.clone(), containers.clone())
+        };
+        let Some(utoc_path) = containers.get(container_idx).map(|m| m.utoc_path.clone()) else {
+            self.status = "Container provenance is stale".to_owned();
+            return None;
         };
         // The same lease Duplicate, Rename and Delete take: it refuses a second
         // write to this container while one is in flight (from this workspace
-        // or another on the same install). This path wrote without it.
-        let lease = match self.acquire_container_write_lease(
-            &utoc_path,
-            ContainerWriteMode::AppendInPlace,
-        ) {
+        // or another on the same install).
+        let lease = match self
+            .acquire_container_write_lease(&utoc_path, ContainerWriteMode::AppendInPlace)
+        {
             Ok(lease) => lease,
             Err(failure) => {
                 self.status = failure.to_string();
-                return;
+                return None;
             }
         };
-        // Resolve against the MOUNTED archive, not a fresh handle: an override
-        // container (an exported mod the user then reloaded) ships no directory
-        // index, and only the mounted handle has the rebuilt file list that can
-        // name `rel_path`.
-        let written = blam_tags::iostore::writer::overwrite_tag_in_place_with(
-            &archive, &utoc_path, &rel_path, &bytes,
-        );
-        let outcome = if written.is_ok() {
-            ContainerWriteOutcome::Committed
-        } else {
-            ContainerWriteOutcome::Unchanged
-        };
-        self.release_in_place_lease(lease, outcome);
-        if let Err(e) = written {
+        Some((
+            InPlaceOverwriteJob {
+                stamp: self.kit_stamp(),
+                key: key.to_owned(),
+                dirty_revision,
+                root,
+                containers,
+                container_idx,
+                utoc_path,
+                rel_path,
+                bytes,
+            },
+            lease,
+        ))
+    }
+
+    /// Install the reopened pak and report. The document is marked clean only
+    /// if it was not edited while the write ran: the bytes on disk are the
+    /// ones serialized before it started.
+    fn finish_in_place_overwrite(&mut self, job: InPlaceOverwriteJob, written: InPlaceOverwrite) {
+        if let Err(e) = written.write {
             // A mod exported by an older build carries the tag alone, so there
             // is no `.uasset` chunk to rewrite the declared length into and
             // nothing can be added to a container in place.
-            let hint = if e.to_string().contains("no paired .uasset") {
+            let hint = if e.contains("no paired .uasset") {
                 " — export this mod again instead of saving into it"
             } else {
                 ""
@@ -5162,35 +5302,39 @@ impl Baboon {
             self.status = format!("Overwrite failed: {e}{hint}");
             return;
         }
-        drop(archive);
-        // Hot-swap the pak's archive so subsequent reads see the new bytes.
-        let containers = match self.source().map(|s| &s.source) {
-            Some(TagSource::IoStoreContainerSet { containers, .. }) => containers.clone(),
-            _ => Vec::new(),
+        let Some(kit) = self.resolve_stamp(job.stamp) else {
+            self.status = format!(
+                "Saved into {}, but the workspace changed meanwhile; reload it to see the tag",
+                job.utoc_path.display()
+            );
+            return;
         };
-        let reload_error =
-            match crate::source::reopen_container_archive(&root, &containers, container_idx) {
-                Ok(a) => {
-                    if let Some(source) = self.source_mut()
-                        && let TagSource::IoStoreContainerSet { containers, .. } =
-                            &mut source.source
-                        && let Some(m) = containers.get_mut(container_idx)
-                    {
-                        m.archive = std::sync::Arc::new(a);
-                    }
-                    None
+        let mut reload_error = None;
+        match written.reopened {
+            Some(Ok(archive)) => {
+                // Only onto the container the write was for.
+                if let Some(source) = self.kits[kit].source.as_mut()
+                    && let TagSource::IoStoreContainerSet { containers, .. } = &mut source.source
+                    && let Some(m) = containers.get_mut(job.container_idx)
+                    && m.utoc_path == job.utoc_path
+                {
+                    m.archive = std::sync::Arc::new(archive);
                 }
-                Err(e) => Some(e),
-            };
-        if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(key) {
+            }
+            Some(Err(error)) => reload_error = Some(error),
+            None => {}
+        }
+        if let Some(doc) = self.kits[kit].parsed_tags.get_mut(&job.key)
+            && doc.dirty.revision() == job.dirty_revision
+        {
             doc.dirty.clear();
         }
         self.status = match reload_error {
             Some(e) => format!(
                 "Saved into {}, but reloading the pak failed: {e}",
-                utoc_path.display()
+                job.utoc_path.display()
             ),
-            None => format!("Saved into {} (game files modified)", utoc_path.display()),
+            None => format!("Saved into {} (game files modified)", job.utoc_path.display()),
         };
     }
 
@@ -12731,5 +12875,77 @@ mod prefs_throttle_tests {
         assert_eq!(app.prefs_next_check_at, 11.0, "inside the second: skipped");
         app.persist_prefs_throttled(11.2);
         assert_eq!(app.prefs_next_check_at, 12.2);
+    }
+}
+
+#[cfg(test)]
+mod in_place_overwrite_tests {
+    use super::*;
+
+    fn job(app: &Baboon, dirty_revision: u64) -> InPlaceOverwriteJob {
+        InPlaceOverwriteJob {
+            stamp: app.kit_stamp(),
+            key: "tag".to_owned(),
+            dirty_revision,
+            root: PathBuf::new(),
+            containers: Vec::new(),
+            container_idx: 0,
+            utoc_path: std::env::temp_dir().join("baboon-in-place-test/pakchunk0-Windows.utoc"),
+            rel_path: String::new(),
+            bytes: Vec::new(),
+        }
+    }
+
+    fn saved() -> InPlaceOverwrite {
+        InPlaceOverwrite {
+            write: Ok(()),
+            reopened: None,
+            touched: true,
+        }
+    }
+
+    /// The write runs on a worker from bytes serialized before it started.
+    /// An edit made meanwhile is not in them, so the tag stays dirty.
+    #[test]
+    fn a_tag_edited_during_its_save_stays_dirty() {
+        let mut app = Baboon::for_test();
+        let tag = TagFile::new(crate::app::test_definition_path("halo4_mcc/camera_track.json"))
+            .unwrap();
+        app.kits[0]
+            .parsed_tags
+            .insert("tag".to_owned(), TagDocument::modified(tag));
+        let at_save = app.kits[0].parsed_tags["tag"].dirty.revision();
+
+        app.kits[0].parsed_tags.get_mut("tag").unwrap().dirty.touch();
+        app.finish_in_place_overwrite(job(&app, at_save), saved());
+        assert!(app.kits[0].parsed_tags["tag"].dirty.is_set(), "edited mid-save");
+
+        let now = app.kits[0].parsed_tags["tag"].dirty.revision();
+        app.finish_in_place_overwrite(job(&app, now), saved());
+        assert!(!app.kits[0].parsed_tags["tag"].dirty.is_set(), "saved as it stands");
+    }
+
+    /// The worker's lease is released whatever the write did, or the
+    /// container refuses every later write.
+    #[test]
+    fn a_failed_in_place_overwrite_releases_its_lease() {
+        let mut app = Baboon::for_test();
+        let job = job(&app, 0);
+        let lease = app
+            .acquire_container_write_lease(&job.utoc_path, ContainerWriteMode::AppendInPlace)
+            .unwrap();
+        let lease = app.park_container_write_lease(lease);
+        let failed = InPlaceOverwrite {
+            write: Err("no paired .uasset".to_owned()),
+            reopened: None,
+            touched: false,
+        };
+        let utoc = job.utoc_path.clone();
+        app.handle_in_place_overwrite_finished(job, lease, failed);
+        assert!(app.status.contains("export this mod again"), "{}", app.status);
+        let again = app
+            .acquire_container_write_lease(&utoc, ContainerWriteMode::AppendInPlace)
+            .expect("the container is writable again");
+        app.release_in_place_lease(again, ContainerWriteOutcome::Unchanged);
     }
 }

@@ -2,6 +2,7 @@
 //! It owns passive cross-frame state and operation messages; rendering and workflow execution belong to UI and controller modules.
 
 use super::*;
+use crate::app::controller::{InPlaceOverwrite, InPlaceOverwriteJob};
 use crate::app::ui::tag_compare::TagCompareGitUpdate;
 
 /// Completed in-place Campaign Evolved duplicate, ready for UI-thread source
@@ -242,6 +243,12 @@ pub(in crate::app) enum WorkerMessage {
         /// failure path as well as the success one.
         lease: ContainerLeaseId,
         result: Result<ContainerRenameResult, String>,
+    },
+    /// A tag written into its own container on a worker.
+    InPlaceOverwriteFinished {
+        job: Box<InPlaceOverwriteJob>,
+        lease: ContainerLeaseId,
+        written: InPlaceOverwrite,
     },
     ContainerDeleteFinished {
         stamp: KitStamp,
