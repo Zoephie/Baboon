@@ -282,7 +282,9 @@ fn refresh_entry_index_from_cache(
     // more often, did them one at a time.
     let mut paths = Vec::new();
     for item in WalkDir::new(root).follow_links(false) {
-        let item = item?;
+        let Some(item) = crate::source::walk_item(item)? else {
+            continue;
+        };
         if !item.file_type().is_file() {
             continue;
         }
@@ -311,7 +313,14 @@ fn refresh_entry_index_from_cache(
                 for path in chunk {
                     let rel = path.strip_prefix(root).unwrap_or(path.as_path());
                     let rel_key = normalize_rel_path(rel);
-                    let fingerprint = file_fingerprint(path)?;
+                    // A file that vanished since the walk, or is locked, is
+                    // left out rather than failing the refresh; seen-but-absent
+                    // counts it as removed, which is what it now is.
+                    let fingerprint = match file_fingerprint(path) {
+                        Ok(fingerprint) => fingerprint,
+                        Err(error) if crate::source::skippable_file_error(&error) => continue,
+                        Err(error) => return Err(error),
+                    };
                     if let (Some(cached), Some(current)) =
                         (cached_by_rel.get(&rel_key), fingerprint.as_ref())
                         && cached_fingerprints
@@ -322,7 +331,12 @@ fn refresh_entry_index_from_cache(
                         continue;
                     }
                     let known = cached_by_rel.contains_key(&rel_key);
-                    match loose_file_entry(root, path, names)? {
+                    let probed = match loose_file_entry(root, path, names) {
+                        Ok(probed) => probed,
+                        Err(error) if crate::source::skippable_file_error(&error) => continue,
+                        Err(error) => return Err(error),
+                    };
+                    match probed {
                         Some(entry) => {
                             if known {
                                 updated.fetch_add(1, Ordering::Relaxed);

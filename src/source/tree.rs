@@ -337,6 +337,47 @@ pub fn load_folder_node_entries(
     Ok(())
 }
 
+/// Whether a per-file error means the file went away or cannot be opened,
+/// which a scan skips, rather than something wrong with the scan itself.
+///
+/// A temp file deleted between the walk and the read, or a tag locked by
+/// tool.exe, used to fail the whole scan (or the 30-second refresh) over one
+/// file.
+pub(crate) fn skippable_file_error(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io| skippable_io_error(io.kind()))
+    })
+}
+
+fn skippable_io_error(kind: std::io::ErrorKind) -> bool {
+    matches!(
+        kind,
+        std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+    )
+}
+
+/// A walk entry, or `None` for one below the root that vanished or cannot be
+/// read. An error on the root itself still fails: an unreadable tags folder is
+/// not an empty one.
+pub(crate) fn walk_item(
+    item: std::result::Result<walkdir::DirEntry, walkdir::Error>,
+) -> Result<Option<walkdir::DirEntry>> {
+    match item {
+        Ok(item) => Ok(Some(item)),
+        Err(error)
+            if error.depth() > 0
+                && error
+                    .io_error()
+                    .is_some_and(|io| skippable_io_error(io.kind())) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
 /// Recursively scans one source-relative subtree without progress reporting.
 pub fn scan_folder_subtree_entries(
     root: &Path,
@@ -361,7 +402,9 @@ where
     let folder = root.join(rel_path);
     let mut paths = Vec::new();
     for item in WalkDir::new(&folder).follow_links(false) {
-        let item = item?;
+        let Some(item) = walk_item(item)? else {
+            continue;
+        };
         if !item.file_type().is_file() {
             continue;
         }
@@ -393,7 +436,12 @@ where
             handles.push(scope.spawn(move || -> Result<Vec<(PathBuf, u32)>> {
                 let mut chunk_entries = Vec::new();
                 for path in chunk {
-                    if let Some(group_tag) = probe_tag_group(path)? {
+                    let probed = match probe_tag_group(path) {
+                        Ok(probed) => probed,
+                        Err(error) if skippable_file_error(&error) => None,
+                        Err(error) => return Err(error),
+                    };
+                    if let Some(group_tag) = probed {
                         matched.fetch_add(1, Ordering::Relaxed);
                         chunk_entries.push((path.clone(), group_tag));
                     }
@@ -1151,6 +1199,37 @@ mod tests {
         source.upsert_entry(entry("b2"), &[]);
         let order: Vec<&str> = source.entries.iter().map(|e| e.display_path.as_str()).collect();
         assert_eq!(order, ["a", "B", "b2", "c"]);
+    }
+
+    /// A tag that cannot be opened (locked by another program, or unreadable)
+    /// is left out of a scan and a refresh; it used to fail both outright.
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_tag_is_skipped_not_fatal() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = temp_dir("unreadable_tag");
+        let game = unique_game("unreadable_tag");
+        fs::create_dir_all(root.join("objects")).unwrap();
+        write_fake_tag(&root.join("objects/a.model"), b"hlmt");
+        write_fake_tag(&root.join("objects/b.model"), b"hlmt");
+        let names = TagNameIndex::default();
+        let before = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        save_entry_index(&game, &root, &before).unwrap();
+        let locked = root.join("objects/b.model");
+        // Rewritten, so the refresh has to read it, then made unreadable.
+        write_fake_tag_with_padding(&locked, b"hlmt", 4);
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let scanned = scan_folder_subtree_entries(&root, Path::new(""), &names);
+        let refreshed = refresh_entry_index(&game, &root, &names);
+
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o644)).unwrap();
+        remove_test_index(&game);
+        fs::remove_dir_all(&root).unwrap();
+        let scanned = scanned.expect("the scan survives one unreadable tag");
+        assert_eq!(scanned.len(), 1);
+        let refreshed = refreshed.expect("so does the refresh");
+        assert_eq!(refreshed.entries.len(), 1);
     }
 
     /// One row that names no file must not cost the whole index: the loader
