@@ -230,6 +230,9 @@ pub(super) struct ChimpTextureExportPrompt {
     pub(super) kit: KitId,
     pub(super) package: String,
     pub(super) export: ChimpTextureExport,
+    /// The export the open document has selected. The extraction loads the
+    /// package afresh, so without this it could only ever see export 0.
+    pub(super) export_index: Option<usize>,
 }
 
 impl ChimpTextureExportPrompt {
@@ -5132,11 +5135,17 @@ impl Baboon {
         if !matches!(self.kits[kit_index].chimp.mount, ChimpMount::Ready(_)) {
             return;
         }
+        let export_index = self.kits[kit_index]
+            .chimp
+            .documents
+            .get(package)
+            .map(|document| document.selected_export);
         self.chimp_texture_export_prompt = Some(ChimpTextureExportPrompt {
             kit: self.kits[kit_index].id,
             package: package.to_owned(),
             // DDS and split UDIM: the pair that round-trips into Unreal.
             export: ChimpTextureExport::default(),
+            export_index,
         });
     }
 
@@ -5150,6 +5159,7 @@ impl Baboon {
             kit,
             package,
             export,
+            export_index,
         } = prompt;
         let format = export.format;
         let leaf = package.rsplit('/').next().unwrap_or("texture").to_owned();
@@ -5172,7 +5182,7 @@ impl Baboon {
         let tx = self.tx.clone();
         self.status = format!("Extracting {package}…");
         thread::spawn(move || {
-            let result = write_chimp_texture(&world, &package, &path, export);
+            let result = write_chimp_texture(&world, &package, &path, export, export_index);
             let _ = tx.send(WorkerMessage::ExportFinished(result));
             ctx.request_repaint();
         });
@@ -5490,7 +5500,7 @@ fn write_chimp_mesh_textures(
             created = true;
         }
         let output = directory.join(format!("{leaf}.{}", options.format.extension()));
-        match write_chimp_texture(world, &package, &output, options) {
+        match write_chimp_texture(world, &package, &output, options, None) {
             Ok(_) => written += 1,
             Err(error) => failures.push(error),
         }
@@ -5498,25 +5508,32 @@ fn write_chimp_mesh_textures(
     (written, failures)
 }
 
-/// The texture surfaces of the export the user has selected.
+/// The texture surfaces of `export_index`, or of the first Texture2D when it
+/// names none (or names an export that is not a texture).
 ///
-/// Export used to take whichever Texture2D export happened to decode first,
-/// which is the wrong one whenever a package holds more than one and the combo
-/// box is pointing at another.
+/// The index has to be passed in: the export loads the package afresh, and a
+/// fresh document's own selection is always export 0, so reading it here
+/// exported the first texture whatever the combo box pointed at.
 fn chimp_selected_surfaces<'a>(
     document: &'a ChimpDocument,
     package: &str,
+    export_index: Option<usize>,
 ) -> Result<&'a Texture2dSurfaces, String> {
-    let selected = document
-        .texture_previews
-        .iter()
-        .find(|texture| texture.export_index == document.selected_export)
-        .or_else(|| document.texture_previews.first())
+    let selected = selected_texture_preview(&document.texture_previews, export_index)
         .ok_or_else(|| format!("{package} has no Texture2D export"))?;
     selected
         .surfaces
         .as_ref()
         .map_err(|error| format!("{package}: {error}"))
+}
+
+fn selected_texture_preview(
+    previews: &[ChimpTexturePreview],
+    export_index: Option<usize>,
+) -> Option<&ChimpTexturePreview> {
+    export_index
+        .and_then(|index| previews.iter().find(|texture| texture.export_index == index))
+        .or_else(|| previews.first())
 }
 
 /// How a Texture2D should be written out.
@@ -5550,10 +5567,11 @@ fn write_chimp_texture(
     package: &str,
     output: &Path,
     options: ChimpTextureExport,
+    export_index: Option<usize>,
 ) -> Result<String, String> {
     let ChimpTextureExport { format, split_udim } = options;
     let document = load_chimp_document(world, package)?;
-    let surfaces = chimp_selected_surfaces(&document, package)?;
+    let surfaces = chimp_selected_surfaces(&document, package, export_index)?;
     let stem = output
         .file_stem()
         .map(|stem| stem.to_string_lossy().into_owned())
@@ -11363,6 +11381,7 @@ mod tests {
                 format: ChimpTextureFormat::Tiff,
                 ..Default::default()
             },
+            None,
         )
         .unwrap();
         let written: Vec<_> = std::fs::read_dir(&directory)
@@ -11397,7 +11416,7 @@ mod tests {
             .find(|name| name.to_ascii_lowercase().ends_with("t_elite_minor_armor_n"))
             .expect("elite minor armour normal");
         let document = load_chimp_document(&world, &package).unwrap();
-        let surfaces = chimp_selected_surfaces(&document, &package).unwrap();
+        let surfaces = chimp_selected_surfaces(&document, &package, None).unwrap();
         assert_eq!(
             (surfaces.width_in_blocks, surfaces.height_in_blocks),
             (3, 2)
@@ -11423,6 +11442,7 @@ mod tests {
                 format: ChimpTextureFormat::Png,
                 ..Default::default()
             },
+            None,
         )
         .unwrap();
         let side = |name: &str| {
@@ -11464,7 +11484,7 @@ mod tests {
             .unwrap_or_else(|| panic!("no Texture2D package ending in {target:?}"));
 
         let document = load_chimp_document(&world, &package).unwrap();
-        let surfaces = chimp_selected_surfaces(&document, &package).unwrap();
+        let surfaces = chimp_selected_surfaces(&document, &package, None).unwrap();
         assert!(surfaces.is_virtual, "{package} should be a virtual texture");
         assert!(surfaces.is_udim(), "{package} should be a UDIM set");
         // Tiles were cropped in block space, so the surface is still compressed.
@@ -11473,7 +11493,7 @@ mod tests {
         let directory = std::env::temp_dir().join(format!("baboon-dds-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&directory).unwrap();
         let output = directory.join("texture.dds");
-        write_chimp_texture(&world, &package, &output, ChimpTextureExport::default()).unwrap();
+        write_chimp_texture(&world, &package, &output, ChimpTextureExport::default(), None).unwrap();
 
         let mut written: Vec<String> = std::fs::read_dir(&directory)
             .unwrap()
@@ -11524,6 +11544,7 @@ mod tests {
                     format,
                     ..Default::default()
                 },
+                None,
             )
             .unwrap();
             let mut flat: Vec<String> = std::fs::read_dir(&directory)
@@ -11556,7 +11577,7 @@ mod tests {
             .find(|name| name.to_ascii_lowercase().ends_with("t_elite_minor_armor_n"))
             .expect("elite minor armour normal");
         let document = load_chimp_document(&world, &package).unwrap();
-        let surfaces = chimp_selected_surfaces(&document, &package).unwrap();
+        let surfaces = chimp_selected_surfaces(&document, &package, None).unwrap();
         assert!(surfaces.is_udim());
 
         let directory =
@@ -11570,6 +11591,7 @@ mod tests {
                 format: ChimpTextureFormat::Png,
                 split_udim: false,
             },
+            None,
         )
         .unwrap();
         let written: Vec<_> = std::fs::read_dir(&directory)
@@ -11677,8 +11699,7 @@ mod tests {
                 ChimpTextureExport {
                     format: fmt,
                     split_udim: split
-                }
-            )
+                }, None)
             .unwrap()
         );
         let mut names: Vec<_> = std::fs::read_dir(&directory)
@@ -11725,7 +11746,7 @@ mod tests {
             .find(|name| name.to_ascii_lowercase().ends_with(&target))
             .unwrap_or_else(|| panic!("no package ending in {target:?}"));
         let document = load_chimp_document(&world, &package).unwrap();
-        let surfaces = chimp_selected_surfaces(&document, &package).unwrap();
+        let surfaces = chimp_selected_surfaces(&document, &package, None).unwrap();
         let data = chimp_texture_mip_data(surfaces, 0, level).unwrap();
         println!(
             "{package}: {}x{} {} ({})",
@@ -12269,5 +12290,33 @@ mod fname_edit_tests {
         assert_eq!(changes, 1, "one committed change");
         assert_eq!(value.to_string(), "Rocket");
         assert_eq!(names.len(), before + 1, "exactly one new name: {:?}", names.names());
+    }
+}
+
+#[cfg(test)]
+mod texture_selection_tests {
+    use super::*;
+
+    fn preview(export_index: usize) -> ChimpTexturePreview {
+        ChimpTexturePreview {
+            export_index,
+            preview: BitmapPreviewState::default(),
+            surfaces: Err(format!("export {export_index}")),
+        }
+    }
+
+    /// The export the user picked is the one that gets written. A package with
+    /// two Texture2D exports used to export the first whatever was selected,
+    /// because the selection was read off a freshly loaded document.
+    #[test]
+    fn texture_export_writes_the_selected_texture() {
+        let previews = [preview(2), preview(5)];
+        let pick = |index| selected_texture_preview(&previews, index).map(|p| p.export_index);
+
+        assert_eq!(pick(Some(5)), Some(5), "the selected texture");
+        assert_eq!(pick(Some(2)), Some(2));
+        assert_eq!(pick(None), Some(2), "nothing selected: the first texture");
+        assert_eq!(pick(Some(0)), Some(2), "a non-texture export selected: the first texture");
+        assert_eq!(selected_texture_preview(&[], Some(5)).map(|p| p.export_index), None);
     }
 }
