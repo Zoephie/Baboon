@@ -64,6 +64,7 @@ fn git_review_header_actions(
     });
 }
 
+#[derive(Clone)]
 struct GitHubDesktopLauncher {
     program: PathBuf,
     arguments: Vec<&'static str>,
@@ -637,16 +638,22 @@ fn tag_change_row(ui: &mut Ui, file: &GitReviewFile, selected: bool) -> egui::Re
 
 impl Baboon {
     pub(super) fn draw_git_review(&mut self, ui: &mut Ui, kit_index: usize) {
+        // Borrowed for the draw, which reads the review and writes only locals:
+        // the commit list, the change list and a diff of up to 5,000 rows used
+        // to be copied out every frame.
         let state = &self.kits[kit_index].git_review;
         let branch = state.branch.clone();
         let repo = state.repo_root.clone();
-        let github_desktop = github_desktop_launcher();
-        let commits = state.commits.clone();
-        let files = state.files.clone();
+        // Looking for GitHub Desktop stats the disk (on macOS, every folder on
+        // PATH), so it is asked once a second rather than every frame.
+        let github_desktop =
+            recheck_cached(ui.ctx(), "github_desktop_launcher", github_desktop_launcher);
+        let commits = &state.commits;
+        let files = &state.files;
         let selection = state.selection.clone();
-        let revision_title = selected_revision_title(&selection, &commits);
+        let revision_title = selected_revision_title(&selection, commits);
         let selected_path = state.selected_path.clone();
-        let results = state.results.clone();
+        let results = &state.results;
         let error = state.error.clone();
         let loading = state.loading;
         let local_count = state.local_files.len();
