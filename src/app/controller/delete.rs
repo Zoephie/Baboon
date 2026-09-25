@@ -617,7 +617,7 @@ impl Baboon {
             ) {
                 Arc::make_mut(index).remove(&key);
             }
-            Arc::make_mut(packages).remove(&result.package.to_ascii_lowercase());
+            Arc::make_mut(packages).remove(&result.package, result.target_container);
             if !result.is_mod {
                 Arc::make_mut(shipped).remove(&result.ubulk_path);
             }

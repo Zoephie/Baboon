@@ -273,7 +273,10 @@ impl ContainerTagIndex {
 /// resolvable.
 #[derive(Clone, Default)]
 pub struct ContainerPackageIndex {
-    by_package: HashMap<String, (usize, String)>,
+    /// Every container providing each package, in container (mount) order.
+    /// The last is the one that is read, as it is for tags: a mod mounts after
+    /// the game and overrides what it ships.
+    by_package: HashMap<String, Vec<(usize, String)>>,
 }
 
 /// Cooked container path → UE package name, e.g.
@@ -288,26 +291,43 @@ pub fn container_package_name(path: &str) -> Option<String> {
 }
 
 impl ContainerPackageIndex {
-    /// Record a cooked package. First insert wins so the mount order that
-    /// already governs tag layering governs packages too.
+    /// Record that `container` provides a cooked package, replacing what that
+    /// container provided before.
+    ///
+    /// The latest-mounted container wins, as it does for tags. This used to
+    /// keep the first insert, which is the base game: a mod's copy of a
+    /// package was ignored, so a modded tag read its `.ubulk` from the mod and
+    /// its `.uasset` wrapper from the game.
     pub fn insert(&mut self, package: String, container: usize, rel_path: String) {
-        self.by_package
-            .entry(package)
-            .or_insert((container, rel_path));
+        let layers = self.by_package.entry(package).or_default();
+        layers.retain(|(existing, _)| *existing != container);
+        let at = layers.partition_point(|(existing, _)| *existing < container);
+        layers.insert(at, (container, rel_path));
     }
 
     /// Resolve a `/Game/...` package name (any case) to its container payload.
     pub fn lookup(&self, package: &str) -> Option<(usize, &str)> {
         self.by_package
             .get(&package.to_ascii_lowercase())
+            .and_then(|layers| layers.last())
             .map(|(c, p)| (*c, p.as_str()))
     }
 
-    /// Forget a package that no longer exists in any mounted container.
-    pub fn remove(&mut self, package: &str) -> bool {
-        self.by_package
-            .remove(&package.to_ascii_lowercase())
-            .is_some()
+    /// Forget that `container` provides a package. Another container that
+    /// also provides it — the game under a mod's deleted override — is read
+    /// from then on.
+    pub fn remove(&mut self, package: &str, container: usize) -> bool {
+        let key = package.to_ascii_lowercase();
+        let Some(layers) = self.by_package.get_mut(&key) else {
+            return false;
+        };
+        let before = layers.len();
+        layers.retain(|(existing, _)| *existing != container);
+        let removed = layers.len() != before;
+        if layers.is_empty() {
+            self.by_package.remove(&key);
+        }
+        removed
     }
 
     /// Number of indexed packages. Part of the type's surface and asserted on
@@ -896,5 +916,31 @@ mod entry_key_hint_tests {
             assert_eq!(found(&source, "k999"), Some("k999"));
         }
         assert_eq!(KEY_SCANS.with(std::cell::Cell::get), before);
+    }
+
+    /// Packages layer as tags do: the last-mounted container is read, and
+    /// removing one container's copy leaves the others.
+    #[test]
+    fn a_mods_package_overrides_the_games_until_it_is_deleted() {
+        const PACKAGE: &str = "/game/tags/sound/x-sound";
+        let mut packages = ContainerPackageIndex::default();
+        packages.insert(PACKAGE.to_owned(), 0, "Game/x-sound.uasset".to_owned());
+        packages.insert(PACKAGE.to_owned(), 5, "Mod/x-sound.uasset".to_owned());
+        assert_eq!(
+            packages.lookup("/Game/Tags/Sound/X-Sound"),
+            Some((5, "Mod/x-sound.uasset"))
+        );
+
+        // A rename inside the game's container rewrites its copy, beneath the
+        // mod's.
+        packages.insert(PACKAGE.to_owned(), 0, "Game/renamed.uasset".to_owned());
+        assert_eq!(packages.lookup(PACKAGE), Some((5, "Mod/x-sound.uasset")));
+
+        assert!(packages.remove(PACKAGE, 5), "the mod's copy is deleted");
+        assert_eq!(packages.lookup(PACKAGE), Some((0, "Game/renamed.uasset")));
+        assert!(!packages.remove(PACKAGE, 5));
+        assert!(packages.remove(PACKAGE, 0));
+        assert_eq!(packages.lookup(PACKAGE), None);
+        assert!(packages.is_empty());
     }
 }

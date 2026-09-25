@@ -467,16 +467,11 @@ pub(in crate::app) fn apply_container_rename_source_state(
             request.new_ubulk_path.to_owned(),
         );
 
-        // Both removes have to come first, because `ContainerPackageIndex`
-        // is first-insert-wins: an insert over a row that is already there does
-        // nothing at all. The old package's row is now a tombstone, and a row
-        // already sitting at the destination is stale by construction — the
-        // chunks the write just placed there are the newest thing that has ever
-        // been at that package path in this container. Neither may survive an
-        // insert that silently declines to happen.
+        // This container no longer provides the old package; what it provides
+        // at the new one replaces anything it had there. Other containers'
+        // copies of either are untouched.
         let packages = Arc::make_mut(packages);
-        packages.remove(request.old_package);
-        packages.remove(request.new_package);
+        packages.remove(request.old_package, request.container);
         packages.insert(
             request.new_package.to_ascii_lowercase(),
             request.container,
