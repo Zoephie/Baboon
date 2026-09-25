@@ -1239,6 +1239,8 @@ pub(super) fn load_chimp_document(world: &World, package: &str) -> Result<ChimpD
 /// work against the 1ms the exports themselves take. Reading a level is 2,334
 /// cells, so the difference is a quarter of an hour against seconds.
 pub(super) struct ChimpPackage {
+    pub(super) provider: PackageProvider,
+    pub(super) bytes: Vec<u8>,
     pub(super) header: FZenPackageHeader,
     pub(super) exports: Vec<ChimpExport>,
 }
@@ -1257,7 +1259,80 @@ pub(super) fn load_chimp_package(world: &World, package: &str) -> Result<ChimpPa
         .read_provider(&provider)
         .map_err(|error| error.to_string())?;
     let (header, _, exports) = decode_chimp_exports(world, &provider, &bytes)?;
-    Ok(ChimpPackage { header, exports })
+    Ok(ChimpPackage {
+        provider,
+        bytes,
+        header,
+        exports,
+    })
+}
+
+/// A package's Texture2D exports, decoded to surfaces, and nothing else.
+///
+/// What a texture export needs. A full document also decodes any mesh — a
+/// Nanite decode for a static mesh — and renders both text panes, all of which
+/// an export throws away.
+fn load_chimp_texture_previews(
+    world: &World,
+    package: &str,
+) -> Result<Vec<ChimpTexturePreview>, String> {
+    let record = world
+        .package(package)
+        .ok_or_else(|| format!("{package} is not mounted"))?;
+    let provider = record
+        .active_provider()
+        .cloned()
+        .ok_or_else(|| format!("{package} has no active provider"))?;
+    let bytes = world
+        .read_provider(&provider)
+        .map_err(|error| error.to_string())?;
+    let (header, payloads, exports) = decode_chimp_exports(world, &provider, &bytes)?;
+    Ok(chimp_texture_previews_for(
+        world, &provider, &bytes, &header, &payloads, &exports,
+    ))
+}
+
+/// Decode a package's Texture2D exports, given its decoded front half.
+fn chimp_texture_previews_for(
+    world: &World,
+    provider: &PackageProvider,
+    bytes: &[u8],
+    header: &FZenPackageHeader,
+    payloads: &[Vec<u8>],
+    exports: &[ChimpExport],
+) -> Vec<ChimpTexturePreview> {
+    if !exports
+        .iter()
+        .any(|export| export.class.as_deref() == Some("Texture2D"))
+    {
+        return Vec::new();
+    }
+    let names = header.name_map.copy_raw_names();
+    let resolver = world.resolver(header, bytes, &names);
+    let bulk: Vec<(i64, i64)> = header
+        .bulk_data
+        .iter()
+        .map(|entry| (entry.serial_offset, entry.serial_size))
+        .collect();
+    decode_chimp_texture_previews(
+        world, provider, header, payloads, &names, &resolver, &bulk, exports,
+    )
+}
+
+/// Which kind of mesh a package holds, if any, by its exports' classes.
+fn chimp_mesh_kind(exports: &[ChimpExport]) -> Option<ChimpMeshKind> {
+    let has = |class: &str| {
+        exports
+            .iter()
+            .any(|export| export.class.as_deref() == Some(class))
+    };
+    if has("SkeletalMesh") {
+        Some(ChimpMeshKind::Skeletal)
+    } else if has("StaticMesh") {
+        Some(ChimpMeshKind::Static)
+    } else {
+        None
+    }
 }
 
 /// The shared front half of loading a package: header, payloads, exports.
@@ -1325,16 +1400,8 @@ fn decode_chimp_document(
     bytes: Vec<u8>,
 ) -> Result<ChimpDocument, String> {
     let (header, payloads, exports) = decode_chimp_exports(world, &provider, &bytes)?;
-    let names = header.name_map.copy_raw_names();
-    let resolver = world.resolver(&header, &bytes, &names);
-    let bulk: Vec<(i64, i64)> = header
-        .bulk_data
-        .iter()
-        .map(|entry| (entry.serial_offset, entry.serial_size))
-        .collect();
-    let texture_previews = decode_chimp_texture_previews(
-        world, &provider, &header, &payloads, &names, &resolver, &bulk, &exports,
-    );
+    let texture_previews =
+        chimp_texture_previews_for(world, &provider, &bytes, &header, &payloads, &exports);
     let (mesh_kind, mesh_preview, mesh_preview_state) =
         decode_chimp_mesh_preview(world, &provider, &bytes, &header, &exports);
     let initial_view = if !texture_previews.is_empty() {
@@ -1412,19 +1479,7 @@ fn decode_chimp_mesh_preview(
     Option<Result<ModelPreviewData, String>>,
     ModelPreviewState,
 ) {
-    let kind = if exports
-        .iter()
-        .any(|export| export.class.as_deref() == Some("SkeletalMesh"))
-    {
-        Some(ChimpMeshKind::Skeletal)
-    } else if exports
-        .iter()
-        .any(|export| export.class.as_deref() == Some("StaticMesh"))
-    {
-        Some(ChimpMeshKind::Static)
-    } else {
-        None
-    };
+    let kind = chimp_mesh_kind(exports);
     let preview = kind.map(|kind| {
         let header_size = header.summary.header_size as usize;
         let preview = match kind {
@@ -5325,7 +5380,7 @@ fn chimp_mesh_texture_packages(world: &World, header: &FZenPackageHeader) -> Vec
         .iter()
         .filter(|path| is_chimp_material_package(path))
     {
-        let Ok(document) = load_chimp_document(world, material) else {
+        let Ok(document) = load_chimp_package(world, material) else {
             continue;
         };
         for candidate in &document.header.imported_package_names {
@@ -5364,10 +5419,13 @@ fn write_chimp_mesh_textures(
         {
             continue;
         }
-        let Ok(document) = load_chimp_document(world, &package) else {
+        // Decoded once, here, and written from the same surfaces: this used
+        // to decode a whole document to find out whether it was a texture,
+        // then load and decode it all again to write it.
+        let Ok(previews) = load_chimp_texture_previews(world, &package) else {
             continue;
         };
-        if document.texture_previews.is_empty() {
+        if previews.is_empty() {
             continue;
         }
         if !created {
@@ -5378,7 +5436,7 @@ fn write_chimp_mesh_textures(
             created = true;
         }
         let output = directory.join(format!("{leaf}.{}", options.format.extension()));
-        match write_chimp_texture(world, &package, &output, options, None) {
+        match write_chimp_texture_previews(&previews, &package, &output, options, None) {
             Ok(_) => written += 1,
             Err(error) => failures.push(error),
         }
@@ -5412,11 +5470,11 @@ fn chimp_document_container_label(
 /// fresh document's own selection is always export 0, so reading it here
 /// exported the first texture whatever the combo box pointed at.
 fn chimp_selected_surfaces<'a>(
-    document: &'a ChimpDocument,
+    previews: &'a [ChimpTexturePreview],
     package: &str,
     export_index: Option<usize>,
 ) -> Result<&'a Texture2dSurfaces, String> {
-    let selected = selected_texture_preview(&document.texture_previews, export_index)
+    let selected = selected_texture_preview(previews, export_index)
         .ok_or_else(|| format!("{package} has no Texture2D export"))?;
     selected
         .surfaces
@@ -5466,9 +5524,20 @@ fn write_chimp_texture(
     options: ChimpTextureExport,
     export_index: Option<usize>,
 ) -> Result<String, String> {
+    let previews = load_chimp_texture_previews(world, package)?;
+    write_chimp_texture_previews(&previews, package, output, options, export_index)
+}
+
+/// Write the chosen texture out of already-decoded previews.
+fn write_chimp_texture_previews(
+    previews: &[ChimpTexturePreview],
+    package: &str,
+    output: &Path,
+    options: ChimpTextureExport,
+    export_index: Option<usize>,
+) -> Result<String, String> {
     let ChimpTextureExport { format, split_udim } = options;
-    let document = load_chimp_document(world, package)?;
-    let surfaces = chimp_selected_surfaces(&document, package, export_index)?;
+    let surfaces = chimp_selected_surfaces(previews, package, export_index)?;
     let stem = output
         .file_stem()
         .map(|stem| stem.to_string_lossy().into_owned())
@@ -5808,9 +5877,10 @@ fn write_chimp_mesh(
     textures: ChimpTextureScope,
     texture_export: ChimpTextureExport,
 ) -> Result<String, String> {
-    let document = load_chimp_document(world, package)?;
-    let kind = document
-        .mesh_kind
+    // Exports only: the document's own mesh preview would decode the same
+    // geometry a second time, and render text panes nothing reads.
+    let document = load_chimp_package(world, package)?;
+    let kind = chimp_mesh_kind(&document.exports)
         .ok_or_else(|| format!("{package} is not a StaticMesh or SkeletalMesh"))?;
     let materials = chimp_material_names(&document.header);
     let mut writer = std::io::BufWriter::new(
@@ -5820,7 +5890,7 @@ fn write_chimp_mesh(
     match kind {
         ChimpMeshKind::Skeletal => {
             let mesh = SkeletalMesh::from_package(
-                &document.original,
+                &document.bytes,
                 &document.header.name_map.copy_raw_names(),
                 document.header.summary.header_size as usize,
             )
@@ -5852,7 +5922,7 @@ fn write_chimp_mesh(
                 .ok()
                 .and_then(|chunk| archive.read_bulk_for(chunk, 0).ok());
             let mesh = StaticMesh::from_package_preferring_nanite(
-                &document.original,
+                &document.bytes,
                 document.header.summary.header_size as usize,
                 bulk.as_deref(),
             )
@@ -10129,6 +10199,27 @@ mod tests {
         assert_eq!(due_at(6.0, &mut app), None, "paused: checkpointed once");
     }
 
+    /// The exporters read the mesh kind straight off the exports now, not off
+    /// a document's preview. A skeletal mesh package also carries static
+    /// pieces, and is still skeletal.
+    #[test]
+    fn a_packages_mesh_kind_is_read_from_its_export_classes() {
+        let export = |class: &str| ChimpExport {
+            object: class.to_owned(),
+            class: Some(class.to_owned()),
+            decoded: Err(String::new()),
+        };
+        assert_eq!(chimp_mesh_kind(&[export("Texture2D")]), None);
+        assert_eq!(
+            chimp_mesh_kind(&[export("Material"), export("StaticMesh")]),
+            Some(ChimpMeshKind::Static)
+        );
+        assert_eq!(
+            chimp_mesh_kind(&[export("StaticMesh"), export("SkeletalMesh")]),
+            Some(ChimpMeshKind::Skeletal)
+        );
+    }
+
     /// A save rebuilds packages on the UI thread and writes them on a worker.
     /// An edit that lands in between is not in what was written, so that
     /// package has to stay dirty — and keep its own payloads.
@@ -11587,7 +11678,7 @@ mod tests {
             .find(|name| name.to_ascii_lowercase().ends_with("t_elite_minor_armor_n"))
             .expect("elite minor armour normal");
         let document = load_chimp_document(&world, &package).unwrap();
-        let surfaces = chimp_selected_surfaces(&document, &package, None).unwrap();
+        let surfaces = chimp_selected_surfaces(&document.texture_previews, &package, None).unwrap();
         assert_eq!(
             (surfaces.width_in_blocks, surfaces.height_in_blocks),
             (3, 2)
@@ -11655,7 +11746,7 @@ mod tests {
             .unwrap_or_else(|| panic!("no Texture2D package ending in {target:?}"));
 
         let document = load_chimp_document(&world, &package).unwrap();
-        let surfaces = chimp_selected_surfaces(&document, &package, None).unwrap();
+        let surfaces = chimp_selected_surfaces(&document.texture_previews, &package, None).unwrap();
         assert!(surfaces.is_virtual, "{package} should be a virtual texture");
         assert!(surfaces.is_udim(), "{package} should be a UDIM set");
         // Tiles were cropped in block space, so the surface is still compressed.
@@ -11748,7 +11839,7 @@ mod tests {
             .find(|name| name.to_ascii_lowercase().ends_with("t_elite_minor_armor_n"))
             .expect("elite minor armour normal");
         let document = load_chimp_document(&world, &package).unwrap();
-        let surfaces = chimp_selected_surfaces(&document, &package, None).unwrap();
+        let surfaces = chimp_selected_surfaces(&document.texture_previews, &package, None).unwrap();
         assert!(surfaces.is_udim());
 
         let directory =
@@ -11917,7 +12008,7 @@ mod tests {
             .find(|name| name.to_ascii_lowercase().ends_with(&target))
             .unwrap_or_else(|| panic!("no package ending in {target:?}"));
         let document = load_chimp_document(&world, &package).unwrap();
-        let surfaces = chimp_selected_surfaces(&document, &package, None).unwrap();
+        let surfaces = chimp_selected_surfaces(&document.texture_previews, &package, None).unwrap();
         let data = chimp_texture_mip_data(surfaces, 0, level).unwrap();
         println!(
             "{package}: {}x{} {} ({})",

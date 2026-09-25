@@ -59,7 +59,7 @@ pub(in crate::app) enum MeshDetail {
 /// the surface arrives connected rather than as loose patches.
 fn decode_mesh(
     world: &World,
-    document: &ChimpDocument,
+    document: &ChimpPackage,
     detail: MeshDetail,
 ) -> Result<StaticMesh, String> {
     decode_mesh_raw(world, document, detail).map(|mesh| weld(&mesh).0)
@@ -67,12 +67,12 @@ fn decode_mesh(
 
 fn decode_mesh_raw(
     world: &World,
-    document: &ChimpDocument,
+    document: &ChimpPackage,
     detail: MeshDetail,
 ) -> Result<StaticMesh, String> {
     let header_size = document.header.summary.header_size as usize;
     match detail {
-        MeshDetail::Fallback => StaticMesh::from_package(&document.original, header_size),
+        MeshDetail::Fallback => StaticMesh::from_package(&document.bytes, header_size),
         MeshDetail::Nanite => {
             // Nanite geometry is streamed from the package's bulk data, so the
             // decoder needs it alongside the package itself.
@@ -82,7 +82,7 @@ fn decode_mesh_raw(
                 .ok()
                 .and_then(|chunk| archive.read_bulk_for(chunk, 0).ok());
             StaticMesh::from_package_preferring_nanite(
-                &document.original,
+                &document.bytes,
                 header_size,
                 bulk.as_deref(),
             )
@@ -792,7 +792,10 @@ fn load_prototype(
     taken: &mut HashSet<String>,
 ) -> Option<Prototype> {
     let leaf = package.rsplit('/').next().unwrap_or("mesh");
-    let (document, mesh) = load_chimp_document(world, package)
+    // The package, not an editor document: a document decodes its own mesh
+    // preview (Nanite for a static mesh) and renders text panes, and the
+    // mesh is decoded again just below.
+    let (document, mesh) = load_chimp_package(world, package)
         .and_then(|document| decode_mesh(world, &document, detail).map(|mesh| (document, mesh)))
         .ok()?;
     // The mesh's own material, resolved the same way the material list written
@@ -1268,7 +1271,7 @@ mod census {
             let leaf = package.rsplit('/').next().unwrap_or("mesh");
             // The undecorated decode, so the weld's effect is what is being
             // measured rather than something already applied.
-            let decoded = load_chimp_document(&world, package)
+            let decoded = load_chimp_package(&world, package)
                 .and_then(|document| decode_mesh_raw(&world, &document, MeshDetail::Nanite));
             let Ok(mesh) = decoded else {
                 unreadable += 1;
@@ -1477,7 +1480,7 @@ mod sample_export {
             // `meshes` only ever grows, and in first-seen order, so everything
             // past the high-water mark is new to this cell.
             while counted < scene.meshes.len() {
-                triangles += load_chimp_document(&world, &scene.meshes[counted])
+                triangles += load_chimp_package(&world, &scene.meshes[counted])
                     .and_then(|mesh_document| decode_mesh(&world, &mesh_document, detail))
                     .map(|mesh| mesh.indices.len() / 3)
                     .unwrap_or(0);
