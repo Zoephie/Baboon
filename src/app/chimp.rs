@@ -1118,13 +1118,13 @@ impl ChimpState {
                         .package_types
                         .get(*index)
                         .and_then(Option::as_deref)
-                        .is_some_and(|kind| chimp_contains_query(kind, &query));
+                        .is_some_and(|kind| contains_ignore_ascii_case(kind, &query));
                     archive_matches
                         && (query.is_empty()
                             || type_matches
-                            || chimp_contains_query(&package.name, &query)
+                            || contains_ignore_ascii_case(&package.name, &query)
                             || package.providers.iter().any(|provider| {
-                                chimp_contains_query(
+                                contains_ignore_ascii_case(
                                     &world.containers()[provider.container]
                                         .path
                                         .to_string_lossy(),
@@ -1150,9 +1150,9 @@ impl ChimpState {
                     };
                     archive_matches
                         && (query.is_empty()
-                            || chimp_contains_query(&file.path, &query)
+                            || contains_ignore_ascii_case(&file.path, &query)
                             || file.providers.iter().any(|provider| {
-                                chimp_contains_query(
+                                contains_ignore_ascii_case(
                                     &world.pak_containers()[provider.container]
                                         .path
                                         .to_string_lossy(),
@@ -1195,15 +1195,6 @@ impl ChimpState {
 
 fn chimp_tree_id(kit: KitId) -> egui::Id {
     egui::Id::new(("chimp_document_tree", kit.0))
-}
-
-fn chimp_contains_query(value: &str, query: &str) -> bool {
-    let needle = query.as_bytes();
-    needle.is_empty()
-        || value
-            .as_bytes()
-            .windows(needle.len())
-            .any(|window| window.eq_ignore_ascii_case(needle))
 }
 
 fn chimp_tint_toward(base: Color32, accent: Color32, amount: f32) -> Color32 {
@@ -9251,7 +9242,7 @@ fn draw_chimp_header_sections(
                         .iter()
                         .enumerate()
                         .filter(|(_, name)| {
-                            filter.is_empty() || chimp_contains_query(name, &filter)
+                            filter.is_empty() || contains_ignore_ascii_case(name, &filter)
                         })
                         .map(|(index, _)| index)
                         .collect();
@@ -10434,7 +10425,7 @@ mod tests {
         for filter in ["", "hog", "warthog_c", "/game/", "éclair", "clair_m", "zzz"] {
             for name in names {
                 assert_eq!(
-                    chimp_contains_query(name, filter),
+                    contains_ignore_ascii_case(name, filter),
                     name.to_ascii_lowercase().contains(filter),
                     "{name:?} / {filter:?}"
                 );
@@ -11490,9 +11481,9 @@ mod tests {
 
     #[test]
     fn chimp_search_matching_is_case_insensitive_without_allocating_per_package() {
-        assert!(chimp_contains_query("SM_SpiritDropShip_Body", "spirit"));
-        assert!(chimp_contains_query("Texture2D", "texture2d"));
-        assert!(!chimp_contains_query("StaticMesh", "skeletal"));
+        assert!(contains_ignore_ascii_case("SM_SpiritDropShip_Body", "spirit"));
+        assert!(contains_ignore_ascii_case("Texture2D", "texture2d"));
+        assert!(!contains_ignore_ascii_case("StaticMesh", "skeletal"));
     }
 
     #[test]

@@ -29,6 +29,17 @@ pub(in crate::app) fn lazy_node_matches(
             .any(|child| lazy_node_matches(child, entries, filter))
 }
 
+/// Whether `haystack` contains `needle`, ignoring ASCII case, without
+/// lowercasing a copy of either. For filters that test every row, every frame.
+pub(in crate::app) fn contains_ignore_ascii_case(haystack: &str, needle: &str) -> bool {
+    let needle = needle.as_bytes();
+    needle.is_empty()
+        || haystack
+            .as_bytes()
+            .windows(needle.len())
+            .any(|window| window.eq_ignore_ascii_case(needle))
+}
+
 pub(in crate::app) fn entry_matches(entry: &TagEntry, filter: &str) -> bool {
     if filter.is_empty() {
         return true;
