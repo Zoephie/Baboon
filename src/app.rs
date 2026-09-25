@@ -460,6 +460,10 @@ pub struct Baboon {
     /// Lazily-computed occurrences per expanded referrer row. A present-but-empty
     /// vec means "walked, none found"; absence means "not yet walked (loading)".
     ref_jump_occurrences: HashMap<usize, Vec<RefOccurrence>>,
+    /// Referrer rows whose occurrences a worker is computing. The tag is read
+    /// and walked off the UI thread and never cached as a document: it is not
+    /// open, so there is no tab to keep it for.
+    ref_jump_loading: HashSet<usize>,
 }
 
 impl Baboon {
@@ -498,7 +502,6 @@ impl Baboon {
         cc.egui_ctx.set_visuals(foundation_visuals());
         let names = TagNameIndex::load_from_definitions(&locate_definitions_root());
         names.publish_as_process_group_names();
-        let (tx, rx) = mpsc::channel();
         let last_session = (!suppress_startup_popups && first_run_wizard.is_none())
             .then(load_last_session)
             .flatten()
@@ -515,11 +518,53 @@ impl Baboon {
             // Start fresh — never reopen, never ask.
             SessionRestore::Never => (None, None),
         };
+        let mut app = Self::assemble(
+            &cc.egui_ctx,
+            window_state,
+            prefs,
+            terminal_open_games,
+            first_run_wizard,
+            names,
+            last_opened_windows,
+        );
+        if let Some(kits) = auto_restore_session {
+            app.begin_last_session_restore(kits, cc.egui_ctx.clone());
+        }
+        match startup_arguments {
+            StartupArguments::Normal => {}
+            StartupArguments::Launch(launch) => {
+                app.begin_command_line_launch(launch, cc.egui_ctx.clone())
+            }
+            StartupArguments::Invalid(error) => {
+                app.status = format!("Command line: {error}");
+            }
+        }
+        if app.should_check_updates_on_startup() {
+            app.begin_check_for_updates(cc.egui_ctx.clone(), true);
+        }
+        app
+    }
+
+    /// The app built from state already loaded. Split from [`Baboon::new`],
+    /// which owns the side effects — context setup, reading prefs and the last
+    /// session off disk, startup restores and update checks — so tests can
+    /// build an app without any of them.
+    #[allow(clippy::too_many_arguments)]
+    fn assemble(
+        ctx: &egui::Context,
+        window_state: crate::window_state::WindowStateTracker,
+        prefs: GuiPrefs,
+        terminal_open_games: HashSet<String>,
+        first_run_wizard: Option<FirstRunWizardState>,
+        names: TagNameIndex,
+        last_opened_windows: Option<LastOpenedWindowsPrompt>,
+    ) -> Self {
+        let (tx, rx) = mpsc::channel();
         let editing_kit_validation = EditingKitValidationCache::new(
             &prefs.editing_kit_paths,
             &prefs.custom_editing_kit_profiles,
         );
-        let mut app = Self {
+        Self {
             window_state,
             default_names: names.clone(),
             tx,
@@ -610,7 +655,7 @@ impl Baboon {
             about_open: false,
             help_panel_tab: HelpPanelTab::About,
             help_docs: HelpDocsState::load(),
-            tutorials: TutorialsState::load(&cc.egui_ctx),
+            tutorials: TutorialsState::load(&ctx),
             tutorials_game: "haloce_evolved".to_owned(),
             tutorials_category: TutorialCategory::ThreeD,
             script_docs: ScriptDocsUiState::default(),
@@ -652,6 +697,7 @@ impl Baboon {
             field_nav: None,
             ref_jump_expanded: HashSet::new(),
             ref_jump_occurrences: HashMap::new(),
+            ref_jump_loading: HashSet::new(),
             tag_diff: None,
             content_explorer: None,
             keyword_input: String::new(),
@@ -704,17 +750,17 @@ impl Baboon {
             tag_reference_picker: None,
             pending_tool_import: None,
             blender_icon: load_ico_texture(
-                &cc.egui_ctx,
+                &ctx,
                 "blender_icon",
                 include_bytes!("../assets/Quick access/blender.ico"),
             ),
             sapien_icon: load_ico_texture(
-                &cc.egui_ctx,
+                &ctx,
                 "sapien_icon",
                 include_bytes!("../assets/Quick access/sapien.ico"),
             ),
             tag_test_icon: load_ico_texture(
-                &cc.egui_ctx,
+                &ctx,
                 "tag_test_icon",
                 include_bytes!("../assets/Quick access/tag_test.ico"),
             ),
@@ -722,25 +768,24 @@ impl Baboon {
             game_emblem_textures: HashMap::new(),
             custom_editing_kit_textures: HashMap::new(),
             custom_editing_kit_texture_failures: HashSet::new(),
-            last_pixels_per_point: cc.egui_ctx.pixels_per_point(),
+            last_pixels_per_point: ctx.pixels_per_point(),
             block_clipboard: None,
-        };
-        if let Some(kits) = auto_restore_session {
-            app.begin_last_session_restore(kits, cc.egui_ctx.clone());
         }
-        match startup_arguments {
-            StartupArguments::Normal => {}
-            StartupArguments::Launch(launch) => {
-                app.begin_command_line_launch(launch, cc.egui_ctx.clone())
-            }
-            StartupArguments::Invalid(error) => {
-                app.status = format!("Command line: {error}");
-            }
-        }
-        if app.should_check_updates_on_startup() {
-            app.begin_check_for_updates(cc.egui_ctx.clone(), true);
-        }
-        app
+    }
+
+    /// An app with default prefs and no kits, for tests. Prefs and the last
+    /// session are not read, and building it writes nothing.
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        Self::assemble(
+            &egui::Context::default(),
+            crate::window_state::WindowStateTracker::for_test(),
+            GuiPrefs::default(),
+            HashSet::new(),
+            None,
+            TagNameIndex::default(),
+            None,
+        )
     }
 
     fn game_banner_texture(

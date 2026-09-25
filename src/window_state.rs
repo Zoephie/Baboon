@@ -376,6 +376,12 @@ pub(crate) struct WindowStateTracker {
 }
 
 impl WindowStateTracker {
+    /// A tracker that persists nowhere, for tests that need an app.
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        Self::new(None, Vec::new(), None)
+    }
+
     fn new(
         path: Option<PathBuf>,
         monitors: Vec<MonitorGeometry>,

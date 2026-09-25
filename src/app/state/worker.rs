@@ -116,6 +116,15 @@ pub(in crate::app) enum WorkerMessage {
         key: String,
         result: Result<TagFile, String>,
     },
+    /// Where one unopened referrer points at the "References to" target, read
+    /// and walked off the UI thread.
+    RefJumpOccurrences {
+        kit: KitId,
+        index: usize,
+        key: String,
+        target: (u32, String),
+        result: Result<Vec<RefOccurrence>, String>,
+    },
     /// One Bitmap Library thumbnail, decoded off the UI thread.
     BitmapThumbnailDecoded {
         stamp: KitStamp,

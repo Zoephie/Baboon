@@ -937,6 +937,13 @@ impl Baboon {
                 WorkerMessage::TagLoaded { kit, key, result } => {
                     self.handle_tag_loaded(kit, key, result)
                 }
+                WorkerMessage::RefJumpOccurrences {
+                    kit,
+                    index,
+                    key,
+                    target,
+                    result,
+                } => self.handle_ref_jump_occurrences(kit, index, key, target, result),
                 WorkerMessage::BitmapReimportFinished { kit, key, result } => {
                     self.handle_bitmap_reimport_finished(kit, key, result)
                 }
@@ -6763,6 +6770,7 @@ impl Baboon {
         // Fresh query — drop any expander state from a previous references popup.
         self.ref_jump_expanded.clear();
         self.ref_jump_occurrences.clear();
+        self.ref_jump_loading.clear();
         let title = format!("References to {}", entry.display_path.replace('\\', "/"));
         // The referenced tag's dependency path, so a clicked row can jump to the
         // exact field that points here.
@@ -6916,26 +6924,78 @@ impl Baboon {
 
         let target = normalize_ref(&rel_path);
         for (index, key) in pending {
-            match self.kits[self.active].parsed_tags.get(&key) {
-                Some(doc) => {
-                    let mut refs = Vec::new();
-                    collect_tag_references(doc.tag.root(), "", &mut refs);
-                    let occurrences = refs
-                        .into_iter()
-                        .filter(|reference| {
-                            reference.group_tag == group_tag
-                                && normalize_ref(&reference.rel_path) == target
-                        })
-                        .map(|reference| RefOccurrence {
-                            label: occurrence_label(&reference.field_path),
-                            field_path: reference.field_path,
-                        })
-                        .collect();
-                    self.ref_jump_occurrences.insert(index, occurrences);
-                }
-                None => self.ensure_tag_loading(key.clone(), ctx.clone()),
+            if let Some(doc) = self.kits[self.active].parsed_tags.get(&key) {
+                let occurrences = ref_occurrences_in(&doc.tag, group_tag, &target);
+                self.ref_jump_occurrences.insert(index, occurrences);
+                continue;
             }
+            // Not open: read and walk it on a worker. This used to go through
+            // the tab loader, which drops results for tags without a tab, so
+            // the row asked again as soon as each load finished — forever.
+            if !self.ref_jump_loading.insert(index) {
+                continue;
+            }
+            let Some(entry) = self.entry_for_key(&key).cloned() else {
+                self.ref_jump_loading.remove(&index);
+                self.ref_jump_occurrences.insert(index, Vec::new());
+                continue;
+            };
+            let Some(source_kind) = self.source().map(|source| source.source.clone()) else {
+                self.ref_jump_loading.remove(&index);
+                continue;
+            };
+            let tx = self.tx.clone();
+            let kit = self.active_kit_id();
+            // The popup's own target, as `handle_ref_jump_occurrences` compares
+            // it; the walk matches against the normalized form.
+            let query_target = (group_tag, rel_path.clone());
+            let normalized = target.clone();
+            let ctx = ctx.clone();
+            thread::spawn(move || {
+                let target = query_target;
+                let result = read_entry(&source_kind, &entry)
+                    .map(|tag| ref_occurrences_in(&tag, target.0, &normalized))
+                    .map_err(|error| format!("{error:#}"));
+                let _ = tx.send(WorkerMessage::RefJumpOccurrences {
+                    kit,
+                    index,
+                    key,
+                    target,
+                    result,
+                });
+                ctx.request_repaint();
+            });
         }
+    }
+
+    /// Applies `WorkerMessage::RefJumpOccurrences`. Dropped unless the popup
+    /// still shows the same target with the same tag in that row.
+    pub(super) fn handle_ref_jump_occurrences(
+        &mut self,
+        kit: KitId,
+        index: usize,
+        key: String,
+        target: (u32, String),
+        result: Result<Vec<RefOccurrence>, String>,
+    ) -> bool {
+        self.ref_jump_loading.remove(&index);
+        let current = kit == self.active_kit_id()
+            && self.query_results.as_ref().is_some_and(|results| {
+                results.ref_target.as_ref() == Some(&target)
+                    && results.entries.get(index).is_some_and(|entry| entry.key == key)
+            });
+        if !current {
+            return true;
+        }
+        let occurrences = match result {
+            Ok(occurrences) => occurrences,
+            Err(error) => {
+                self.status = format!("Could not read the referring tag: {error}");
+                Vec::new()
+            }
+        };
+        self.ref_jump_occurrences.insert(index, occurrences);
+        false
     }
 
     /// Explain why a reference lookup found no index, tailored to whether one is
@@ -8900,6 +8960,10 @@ mod browser_refresh_tests;
 mod save_changes_prompt_tests;
 
 #[cfg(test)]
+#[path = "tests/ref_jump.rs"]
+mod ref_jump_tests;
+
+#[cfg(test)]
 #[path = "tests/mod_overrides.rs"]
 mod mod_override_tests;
 
@@ -10092,6 +10156,22 @@ fn fix_tag_dependencies_in_tag(
 
     report.lines.push(report.status());
     report
+}
+
+/// Where `tag` points at the reference `(group_tag, target)`, one row per
+/// referencing field. `target` is already normalized.
+fn ref_occurrences_in(tag: &TagFile, group_tag: u32, target: &str) -> Vec<RefOccurrence> {
+    let mut refs = Vec::new();
+    collect_tag_references(tag.root(), "", &mut refs);
+    refs.into_iter()
+        .filter(|reference| {
+            reference.group_tag == group_tag && normalize_ref(&reference.rel_path) == target
+        })
+        .map(|reference| RefOccurrence {
+            label: occurrence_label(&reference.field_path),
+            field_path: reference.field_path,
+        })
+        .collect()
 }
 
 fn collect_tag_references(
