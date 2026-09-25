@@ -304,6 +304,8 @@ pub struct Baboon {
     last_mod_export_name: Option<String>,
     /// Kit ids with an in-place delete worker currently running.
     container_delete_running: HashSet<KitId>,
+    /// Kits with a Chimp save running, and the close to run once it lands.
+    chimp_writes: HashMap<KitId, Option<PendingCloseAction>>,
     /// Every Campaign Evolved tag this installation created by duplicating
     /// another. Deletion is limited to what is recorded here, because a copy is
     /// otherwise indistinguishable from a tag the game shipped.
@@ -636,6 +638,7 @@ impl Baboon {
             chimp_level_job: None,
             last_mod_export_name: None,
             container_delete_running: HashSet::new(),
+            chimp_writes: HashMap::new(),
             created_tags: CreatedTagLedger::load(),
             clear_stash_confirm: None,
             chimp_discard_prompt: None,

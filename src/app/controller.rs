@@ -928,6 +928,23 @@ impl Baboon {
                     package,
                     scan,
                 } => self.handle_chimp_referrers_scanned(stamp, package, scan),
+                WorkerMessage::ChimpModBuilt {
+                    kit,
+                    output,
+                    temporary,
+                    written,
+                    result,
+                } => self.handle_chimp_mod_built(kit, output, temporary, written, result, ctx),
+                WorkerMessage::ChimpSourcesOverwritten {
+                    kit,
+                    leases,
+                    containers,
+                    touched,
+                    written,
+                    result,
+                } => self.handle_chimp_sources_overwritten(
+                    kit, leases, containers, touched, written, result, ctx,
+                ),
                 WorkerMessage::ChimpPackageLoaded {
                     stamp,
                     package,
@@ -3153,6 +3170,21 @@ impl Baboon {
             || self.chimp_discard_prompt.is_some()
             || self.has_chimp_save_dialog()
         {
+            return;
+        }
+        // A Chimp save is writing containers on a worker. The close waits
+        // for it and runs from its completion, like a close the save dialog
+        // was opened for.
+        let writing = match &action {
+            PendingCloseAction::CloseApp => self.chimp_writes.keys().next().copied(),
+            PendingCloseAction::CloseKit(id) => {
+                self.chimp_writes.contains_key(id).then_some(*id)
+            }
+            _ => None,
+        };
+        if let Some(kit) = writing {
+            self.chimp_writes.insert(kit, Some(action));
+            self.status = "Closing once the Chimp save finishes…".to_owned();
             return;
         }
         // The save prompt and every save path below it address documents by

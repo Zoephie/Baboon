@@ -98,6 +98,24 @@ pub(in crate::app) enum WorkerMessage {
         stamp: KitStamp,
         index: ChimpTypeIndex,
     },
+    /// A Chimp mod container built and checked at `temporary`, to be
+    /// installed over `output` on the UI thread.
+    ChimpModBuilt {
+        kit: KitId,
+        output: PathBuf,
+        temporary: PathBuf,
+        written: Vec<ChimpWritten>,
+        result: Result<(), String>,
+    },
+    /// Chimp packages written into their own source containers.
+    ChimpSourcesOverwritten {
+        kit: KitId,
+        leases: Vec<ContainerLeaseId>,
+        containers: usize,
+        touched: bool,
+        written: Vec<ChimpWritten>,
+        result: Result<(), String>,
+    },
     ChimpPackageLoaded {
         stamp: KitStamp,
         package: String,

@@ -744,7 +744,7 @@ impl Baboon {
         let workspace = self.workspace_label(kit_index);
         let kit_id = self.kits[kit_index].id;
         let mut remaining = unattributed;
-        let tracked: [(&'static str, bool); 7] = [
+        let tracked: [(&'static str, bool); 8] = [
             ("a bulk tag extraction", self.container_dump_job.is_some()),
             (
                 "a tag duplicate",
@@ -755,6 +755,7 @@ impl Baboon {
                 self.container_delete_running.contains(&kit_id),
             ),
             ("a level export", self.chimp_level_job.is_some()),
+            ("a Chimp save", self.chimp_writes.contains_key(&kit_id)),
             ("a runtime poke", self.poke_direct_running),
             (
                 "the field-value index build",

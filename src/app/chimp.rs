@@ -698,6 +698,9 @@ pub(super) struct ChimpDocument {
     /// edit and pushed back by the next one, so a burst of edits checkpoints
     /// once, after it stops.
     checkpoint_due: Option<f64>,
+    /// Counts edits. A save records it when it rebuilds the package and, when
+    /// it finishes, clears `dirty` only if no edit landed while it ran.
+    pub(super) edits: u64,
 }
 
 /// How long edits must pause before a Chimp document's recovery checkpoint.
@@ -1371,6 +1374,7 @@ fn decode_chimp_document(
         referrers: ChimpReferrerState::Idle,
         orphaned: false,
         checkpoint_due: None,
+        edits: 0,
     };
     refresh_chimp_document_text(&mut document);
     refresh_chimp_metadata_text(&mut document, world);
@@ -3083,6 +3087,9 @@ impl Baboon {
         kit_index: usize,
         packages: &[String],
     ) -> Result<usize, String> {
+        if self.chimp_writes.contains_key(&self.kits[kit_index].id) {
+            return Err("A Chimp save is still running; discard once it finishes".to_owned());
+        }
         let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
             return Err(
                 "Chimp is not mounted; the original package data is unavailable".to_owned(),
@@ -3983,6 +3990,7 @@ impl Baboon {
         let mut extract_json = false;
         let mut extract_export = false;
         {
+            let writing = self.chimp_writes.contains_key(&self.kits[kit_index].id);
             let document = self.kits[kit_index]
                 .chimp
                 .documents
@@ -3992,7 +4000,10 @@ impl Baboon {
                 ui.heading(&document.package);
                 ui.separator();
                 save_mod = ui
-                    .add_enabled(document.dirty, egui::Button::new("Save Chimp changes…"))
+                    .add_enabled(
+                        document.dirty && !writing,
+                        egui::Button::new("Save Chimp changes…"),
+                    )
                     .on_hover_text("Save every modified Chimp package in one operation")
                     .clicked();
                 extract_package = ui.button("Extract package…").clicked();
@@ -4156,6 +4167,7 @@ impl Baboon {
         };
         if changed {
             document.dirty = true;
+            document.edits += 1;
             document.document_text_dirty = true;
             document.metadata_text_dirty = true;
             // Reference counts are derived from the same header the metadata
@@ -4513,8 +4525,10 @@ impl Baboon {
         match action {
             Some(ChimpSaveAction::Export(output)) => {
                 self.chimp_output_dir = output.parent().map(Path::to_path_buf);
-                self.export_chimp_mod_to(kit_index, output, ctx.clone());
-                if let Some(action) = pending_close_action {
+                let action = ChimpSaveAction::Export(output);
+                if !self.begin_chimp_write(kit_index, action, pending_close_action.clone(), ctx)
+                    && let Some(action) = pending_close_action
+                {
                     self.finish_chimp_close_after_save(kit_index, action, ctx);
                 }
             }
@@ -4528,8 +4542,10 @@ impl Baboon {
                         .to_owned();
             }
             Some(ChimpSaveAction::Overwrite) => {
-                self.overwrite_all_dirty_chimp_packages(kit_index, ctx.clone());
-                if let Some(action) = pending_close_action {
+                let action = ChimpSaveAction::Overwrite;
+                if !self.begin_chimp_write(kit_index, action, pending_close_action.clone(), ctx)
+                    && let Some(action) = pending_close_action
+                {
                     self.finish_chimp_close_after_save(kit_index, action, ctx);
                 }
             }
@@ -4556,124 +4572,274 @@ impl Baboon {
         }
     }
 
-    fn export_chimp_mod_to(&mut self, kit_index: usize, output: PathBuf, ctx: egui::Context) {
-        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
-            return;
-        };
-        let world = world.clone();
+    /// Rebuild every dirty package in the kit, recording the edit count each
+    /// was rebuilt at.
+    fn rebuild_dirty_chimp_documents(
+        &self,
+        kit_index: usize,
+        world: &World,
+    ) -> Result<Vec<ChimpRebuilt>, String> {
         let mut rebuilt = Vec::new();
-        for (document_key, document) in self.kits[kit_index]
+        for (package, document) in self.kits[kit_index]
             .chimp
             .documents
             .iter()
             .filter(|(_, document)| document.dirty)
         {
-            match rebuild_chimp_document(&world, document) {
-                Ok((bytes, store)) => rebuilt.push((
-                    document_key.clone(),
-                    document.provider.clone(),
-                    bytes,
-                    store,
-                )),
-                Err(error) => {
-                    self.status = error;
-                    return;
+            let (bytes, store) = rebuild_chimp_document(world, document)?;
+            rebuilt.push(ChimpRebuilt {
+                package: package.clone(),
+                provider: document.provider.clone(),
+                bytes,
+                store,
+                edits: document.edits,
+            });
+        }
+        Ok(rebuilt)
+    }
+
+    /// Start a Chimp save. Returns false when nothing was started, in which
+    /// case a pending close is the caller's to settle now; otherwise it is
+    /// kept with the write and settled when the write finishes.
+    ///
+    /// The packages are rebuilt here, because the documents live on this
+    /// thread. The container work — building and re-reading a mod container,
+    /// or appending to the game's own — runs on a worker.
+    fn begin_chimp_write(
+        &mut self,
+        kit_index: usize,
+        action: ChimpSaveAction,
+        pending_close: Option<PendingCloseAction>,
+        ctx: &egui::Context,
+    ) -> bool {
+        let kit = self.kits[kit_index].id;
+        if self.chimp_writes.contains_key(&kit) {
+            self.status = "A Chimp save is already running".to_owned();
+            return false;
+        }
+        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
+            return false;
+        };
+        let world = world.clone();
+        let rebuilt = match self.rebuild_dirty_chimp_documents(kit_index, &world) {
+            Ok(rebuilt) => rebuilt,
+            Err(error) => {
+                self.status = error;
+                return false;
+            }
+        };
+        if rebuilt.is_empty() {
+            self.status = "Chimp has no modified packages to save".to_owned();
+            return false;
+        }
+        match action {
+            ChimpSaveAction::Export(output) => {
+                if let Some(parent) = output.parent()
+                    && let Err(error) = fs::create_dir_all(parent)
+                {
+                    self.status = format!("Could not create {}: {error}", parent.display());
+                    return false;
                 }
+                self.status = format!("Building {}…", output.display());
+                let panic_output = output.clone();
+                spawn_worker(
+                    &self.tx,
+                    ctx,
+                    move || {
+                        let temporary = chimp_staging_utoc(&output);
+                        let result = build_chimp_mod(&world, &rebuilt, &temporary);
+                        WorkerMessage::ChimpModBuilt {
+                            kit,
+                            output,
+                            temporary,
+                            written: rebuilt.into_iter().map(ChimpWritten::from).collect(),
+                            result,
+                        }
+                    },
+                    move |error| WorkerMessage::ChimpModBuilt {
+                        kit,
+                        temporary: chimp_staging_utoc(&panic_output),
+                        output: panic_output,
+                        written: Vec::new(),
+                        result: Err(error),
+                    },
+                );
+            }
+            ChimpSaveAction::Overwrite => {
+                let mut groups: BTreeMap<usize, Vec<ChimpRebuilt>> = BTreeMap::new();
+                for package in rebuilt {
+                    groups
+                        .entry(package.provider.container)
+                        .or_default()
+                        .push(package);
+                }
+                // The lease Duplicate, Rename and Delete take on the same
+                // files: it refuses a tag-side write to any of these
+                // containers while this one runs, and remounts every Chimp
+                // workspace whose parsed TOCs the write makes stale.
+                let mut leases = Vec::new();
+                for &container in groups.keys() {
+                    let utoc = world.containers()[container].path.clone();
+                    match self
+                        .acquire_container_write_lease(&utoc, ContainerWriteMode::AppendInPlace)
+                    {
+                        Ok(lease) => leases.push(self.park_container_write_lease(lease)),
+                        Err(failure) => {
+                            for id in leases {
+                                if let Some(lease) = self.take_container_write_lease(id) {
+                                    self.release_in_place_lease(
+                                        lease,
+                                        ContainerWriteOutcome::Unchanged,
+                                    );
+                                }
+                            }
+                            self.status = failure.to_string();
+                            return false;
+                        }
+                    }
+                }
+                self.status = format!("Overwriting {} source container(s)…", groups.len());
+                let panic_leases = leases.clone();
+                spawn_worker(
+                    &self.tx,
+                    ctx,
+                    move || {
+                        let containers = groups.len();
+                        let (touched, result) = overwrite_chimp_sources(&world, &groups);
+                        WorkerMessage::ChimpSourcesOverwritten {
+                            kit,
+                            leases,
+                            containers,
+                            touched,
+                            written: groups
+                                .into_values()
+                                .flatten()
+                                .map(ChimpWritten::from)
+                                .collect(),
+                            result,
+                        }
+                    },
+                    // A panic mid-write may have appended; say so, so the
+                    // lease remounts Chimp rather than trusting its TOCs.
+                    move |error| WorkerMessage::ChimpSourcesOverwritten {
+                        kit,
+                        leases: panic_leases,
+                        containers: 0,
+                        touched: true,
+                        written: Vec::new(),
+                        result: Err(error),
+                    },
+                );
             }
         }
-        if rebuilt.is_empty() {
-            self.status = "Chimp has no modified packages to build".to_owned();
-            return;
+        self.chimp_writes.insert(kit, pending_close);
+        true
+    }
+
+    /// Clear `dirty` on the written packages that were not edited while the
+    /// write ran, and drop their recovery checkpoints. A package edited in the
+    /// meantime stays dirty: what was written is not what it now holds.
+    fn settle_chimp_written(
+        &mut self,
+        kit_index: usize,
+        written: &[ChimpWritten],
+        reread_payloads: bool,
+    ) -> Result<(), String> {
+        let mut clean = Vec::new();
+        for write in written {
+            let Some(document) = self.kits[kit_index].chimp.documents.get_mut(&write.package)
+            else {
+                continue;
+            };
+            if reread_payloads {
+                // What is on disk now, whether or not the document has moved
+                // on: it is the baseline a discard returns to.
+                document.original = write.bytes.clone();
+            }
+            if document.edits != write.edits {
+                continue;
+            }
+            if reread_payloads && let Ok(payloads) = read_payloads(&document.header, &write.bytes) {
+                document.payloads = payloads;
+            }
+            clean.push(write.package.clone());
         }
-        if let Some(parent) = output.parent()
-            && let Err(error) = fs::create_dir_all(parent)
-        {
-            self.status = format!("Could not create {}: {error}", parent.display());
-            return;
+        self.clear_chimp_recovery_packages(kit_index, &clean)?;
+        for package in &clean {
+            if let Some(document) = self.kits[kit_index].chimp.documents.get_mut(package) {
+                document.dirty = false;
+            }
         }
-        let temporary = output.with_file_name(format!(
-            "{}.building.utoc",
-            output
-                .file_stem()
-                .and_then(|stem| stem.to_str())
-                .unwrap_or("Chimp_P")
-        ));
-        let overrides: Vec<PackageOverride<'_>> = rebuilt
-            .iter()
-            .map(|(_, provider, bytes, store)| PackageOverride {
-                archive: &world.archives()[provider.container],
-                uasset_path: &provider.entry_path,
-                bytes: bytes.clone(),
-                store: store.clone(),
-            })
-            .collect();
-        let override_count = overrides.len();
-        let built_packages: Vec<String> = rebuilt
-            .iter()
-            .map(|(package, _, _, _)| package.clone())
-            .collect();
-        let written = write_package_mod_container(&overrides, &temporary);
-        drop(overrides);
-        if let Err(error) = written {
-            remove_chimp_triplet(&temporary);
+        Ok(())
+    }
+
+    /// Run the close a save was started for, now that the save has settled.
+    fn finish_chimp_write(&mut self, kit: KitId, ctx: &egui::Context) {
+        let pending = self.chimp_writes.remove(&kit).flatten();
+        if let (Some(action), Some(kit_index)) = (pending, self.kit_index(kit)) {
+            self.finish_chimp_close_after_save(kit_index, action, ctx);
+        }
+    }
+
+    /// Applies `WorkerMessage::ChimpModBuilt`: install the validated staging
+    /// container over the output.
+    pub(super) fn handle_chimp_mod_built(
+        &mut self,
+        kit: KitId,
+        output: PathBuf,
+        temporary: PathBuf,
+        written: Vec<ChimpWritten>,
+        result: Result<(), String>,
+        ctx: &egui::Context,
+    ) -> bool {
+        self.install_chimp_mod(kit, &output, &temporary, &written, result, ctx);
+        self.finish_chimp_write(kit, ctx);
+        false
+    }
+
+    fn install_chimp_mod(
+        &mut self,
+        kit: KitId,
+        output: &Path,
+        temporary: &Path,
+        written: &[ChimpWritten],
+        result: Result<(), String>,
+        ctx: &egui::Context,
+    ) {
+        if let Err(error) = result {
+            remove_chimp_triplet(temporary);
             self.status = format!("Could not build {}: {error}", output.display());
             return;
         }
-        let validation = (|| -> Result<(), String> {
-            let archive = blam_tags::iostore::IoStoreArchive::open(&temporary)
-                .map_err(|error| format!("Could not reopen temporary mod: {error}"))?;
-            for (_, provider, bytes, _) in &rebuilt {
-                let source = &world.archives()[provider.container];
-                let source_index = source
-                    .chunk_index_for(&provider.entry_path)
-                    .map_err(|error| error.to_string())?;
-                let chunk_id = source
-                    .chunk_id(source_index)
-                    .map_err(|error| error.to_string())?;
-                let saved_index = archive
-                    .find_chunk(&chunk_id)
-                    .ok_or_else(|| format!("Temporary mod is missing {}", provider.entry_path))?;
-                let saved = archive
-                    .read_chunk(saved_index)
-                    .map_err(|error| error.to_string())?;
-                if saved != *bytes {
-                    return Err(format!(
-                        "Temporary mod did not preserve {} exactly",
-                        provider.entry_path
-                    ));
-                }
-            }
-            Ok(())
-        })();
-        if let Err(error) = validation {
-            remove_chimp_triplet(&temporary);
-            self.status = error;
+        let Some(kit_index) = self.kit_index(kit) else {
+            remove_chimp_triplet(temporary);
             return;
-        }
-
+        };
         // The active Chimp World (and possibly Baboon's tag mount, and possibly
         // a second workspace on the same install) can have the existing output
         // memory-mapped. The replacement is finished at a staging path first;
         // taking the lease idles every Chimp mount that covers it, unmapping
         // drops the tag mounts, and only then is the triplet swapped with a
         // rollback copy. The shipped game containers are never touched.
-        drop(world);
         let mut lease =
-            match self.acquire_container_write_lease(&output, ContainerWriteMode::Replace) {
+            match self.acquire_container_write_lease(output, ContainerWriteMode::Replace) {
                 Ok(lease) => lease,
                 Err(failure) => {
-                    remove_chimp_triplet(&temporary);
+                    remove_chimp_triplet(temporary);
                     self.status = failure.to_string();
                     return;
                 }
             };
         if let Err(failure) = self.unmap_leased_containers(&mut lease) {
-            remove_chimp_triplet(&temporary);
+            remove_chimp_triplet(temporary);
             self.status = failure.to_string();
-            self.release_container_write_lease(lease, ContainerWriteOutcome::Unchanged, &ctx);
+            self.release_container_write_lease(lease, ContainerWriteOutcome::Unchanged, ctx);
             return;
         }
-        let replaced = replace_chimp_triplet(&temporary, &output);
+        let replaced = replace_chimp_triplet(temporary, output);
+        // Remounting is the lease's job — it knows which workspaces it idled,
+        // which is not necessarily this one: an output outside the game's
+        // `Paks` was never mapped and never needed idling.
         let report = self.release_container_write_lease(
             lease,
             if replaced.is_ok() {
@@ -4681,167 +4847,78 @@ impl Baboon {
             } else {
                 ContainerWriteOutcome::Unchanged
             },
-            &ctx,
+            ctx,
         );
-        let reopen_failures = report.reopen_failures;
-        match replaced {
-            Ok(()) => {
-                if let Err(error) = self.clear_chimp_recovery_packages(kit_index, &built_packages) {
-                    self.status = format!(
-                        "Built {} but could not clear Chimp recovery: {error}",
-                        output.display()
-                    );
-                    return;
-                }
-                for (package, _, _, _) in rebuilt {
-                    if let Some(document) = self.kits[kit_index].chimp.documents.get_mut(&package) {
-                        document.dirty = false;
-                    }
-                }
-                self.status = format!(
-                    "Built {} modified Unreal package(s) into {}",
-                    override_count,
-                    output.display()
-                );
-                if !reopen_failures.is_empty() {
-                    self.status.push_str(&format!(
-                        "; {} tag mount(s) could not be reopened",
-                        reopen_failures.len()
-                    ));
-                }
-            }
-            Err(error) => {
-                self.status = format!("Could not install {}: {error}", output.display());
-            }
-        }
-        // Remounting is the lease's job now — it knows which workspaces it
-        // idled, which is not necessarily this one: an output outside the
-        // game's `Paks` was never mapped and never needed idling.
-        let _ = ctx;
-    }
-
-    fn overwrite_all_dirty_chimp_packages(&mut self, kit_index: usize, ctx: egui::Context) {
-        let ChimpMount::Ready(world) = &self.kits[kit_index].chimp.mount else {
-            return;
-        };
-        let world = world.clone();
-        let mut rebuilt = Vec::new();
-        for (document_key, document) in self.kits[kit_index]
-            .chimp
-            .documents
-            .iter()
-            .filter(|(_, document)| document.dirty)
-        {
-            match rebuild_chimp_document(&world, document) {
-                Ok((bytes, store)) => rebuilt.push((
-                    document_key.clone(),
-                    document.provider.clone(),
-                    bytes,
-                    store,
-                )),
-                Err(error) => {
-                    self.status = error;
-                    return;
-                }
-            }
-        }
-        if rebuilt.is_empty() {
-            self.status = "Chimp has no modified packages to overwrite".to_owned();
+        if let Err(error) = replaced {
+            self.status = format!("Could not install {}: {error}", output.display());
             return;
         }
-
-        let mut groups: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
-        for (index, (_, provider, _, _)) in rebuilt.iter().enumerate() {
-            groups.entry(provider.container).or_default().push(index);
-        }
-        let mut originals = BTreeMap::new();
-        for &container in groups.keys() {
-            let path = world.containers()[container].path.clone();
-            match fs::read(&path) {
-                Ok(bytes) => {
-                    originals.insert(container, (path, bytes));
-                }
-                Err(error) => {
-                    self.status =
-                        format!("Could not stage rollback for {}: {error}", path.display());
-                    return;
-                }
-            }
-        }
-
-        let mut failure = None;
-        for (&container, indices) in &groups {
-            let replacements: Vec<_> = indices
-                .iter()
-                .map(|&index| {
-                    let (_, provider, bytes, store) = &rebuilt[index];
-                    PackageReplacement {
-                        uasset_path: &provider.entry_path,
-                        rebuilt_bytes: bytes,
-                        store,
-                    }
-                })
-                .collect();
-            let path = &originals[&container].0;
-            if let Err(error) =
-                overwrite_packages_in_place_with(&world.archives()[container], path, &replacements)
-            {
-                failure = Some(format!("Could not overwrite {}: {error}", path.display()));
-                break;
-            }
-        }
-
-        if let Some(mut error) = failure {
-            let mut rollback_failures = Vec::new();
-            for (path, bytes) in originals.values() {
-                if let Err(rollback_error) = fs::write(path, bytes) {
-                    rollback_failures.push(format!("{}: {rollback_error}", path.display()));
-                }
-            }
-            if !rollback_failures.is_empty() {
-                error.push_str(&format!(
-                    "; rollback also failed for {}",
-                    rollback_failures.join(", ")
-                ));
-            }
-            self.status = error;
-            drop(world);
-            self.begin_chimp_mount(kit_index, ctx);
-            return;
-        }
-
-        let packages: Vec<String> = rebuilt
-            .iter()
-            .map(|(package, _, _, _)| package.clone())
-            .collect();
-        for (package, _, bytes, _) in rebuilt {
-            if let Some(document) = self.kits[kit_index].chimp.documents.get_mut(&package) {
-                if let Ok(payloads) = read_payloads(&document.header, &bytes) {
-                    document.payloads = payloads;
-                }
-                document.original = bytes;
-            }
-        }
-        if let Err(error) = self.clear_chimp_recovery_packages(kit_index, &packages) {
+        if let Err(error) = self.settle_chimp_written(kit_index, written, false) {
             self.status = format!(
-                "Overwrote the source packages, but could not clear Chimp recovery: {error}"
+                "Built {} but could not clear Chimp recovery: {error}",
+                output.display()
             );
-            drop(world);
-            self.begin_chimp_mount(kit_index, ctx);
             return;
-        }
-        for package in &packages {
-            if let Some(document) = self.kits[kit_index].chimp.documents.get_mut(package) {
-                document.dirty = false;
-            }
         }
         self.status = format!(
-            "Overwrote {} modified Unreal package(s) across {} source container(s)",
-            packages.len(),
-            groups.len()
+            "Built {} modified Unreal package(s) into {}",
+            written.len(),
+            output.display()
         );
-        drop(world);
-        self.begin_chimp_mount(kit_index, ctx);
+        if !report.reopen_failures.is_empty() {
+            self.status.push_str(&format!(
+                "; {} tag mount(s) could not be reopened",
+                report.reopen_failures.len()
+            ));
+        }
+    }
+
+    /// Applies `WorkerMessage::ChimpSourcesOverwritten`.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn handle_chimp_sources_overwritten(
+        &mut self,
+        kit: KitId,
+        leases: Vec<ContainerLeaseId>,
+        containers: usize,
+        touched: bool,
+        written: Vec<ChimpWritten>,
+        result: Result<(), String>,
+        ctx: &egui::Context,
+    ) -> bool {
+        // Released before anything else can return: a lease that outlived its
+        // write would refuse every later write to these containers. Releasing
+        // a touched one remounts every Chimp workspace covering it, this one
+        // included, since each holds its own parsed copy of the TOC.
+        let outcome = if touched {
+            ContainerWriteOutcome::Committed
+        } else {
+            ContainerWriteOutcome::Unchanged
+        };
+        for id in leases {
+            if let Some(lease) = self.take_container_write_lease(id) {
+                self.release_in_place_lease(lease, outcome);
+            }
+        }
+        self.drain_pending_chimp_remounts(ctx);
+        match (result, self.kit_index(kit)) {
+            (Err(error), _) => self.status = error,
+            (Ok(()), None) => {}
+            (Ok(()), Some(kit_index)) => {
+                self.status = match self.settle_chimp_written(kit_index, &written, true) {
+                    Ok(()) => format!(
+                        "Overwrote {} modified Unreal package(s) across {containers} source \
+                         container(s)",
+                        written.len()
+                    ),
+                    Err(error) => format!(
+                        "Overwrote the source packages, but could not clear Chimp recovery: \
+                         {error}"
+                    ),
+                };
+            }
+        }
+        self.finish_chimp_write(kit, ctx);
+        false
     }
 
     fn extract_chimp_package(&mut self, kit_index: usize, package: &str) {
@@ -6061,6 +6138,150 @@ fn chimp_existing_triplet(path: &Path) -> Vec<String> {
                 .to_owned()
         })
         .collect()
+}
+
+/// One dirty package, rebuilt for a save.
+pub(super) struct ChimpRebuilt {
+    package: String,
+    provider: PackageProvider,
+    bytes: Vec<u8>,
+    store: blam_tags::iostore::container::header::StoreEntry,
+    /// The document's [`ChimpDocument::edits`] when it was rebuilt.
+    edits: u64,
+}
+
+/// What a finished save reports back about one package.
+pub(in crate::app) struct ChimpWritten {
+    package: String,
+    bytes: Vec<u8>,
+    edits: u64,
+}
+
+impl From<ChimpRebuilt> for ChimpWritten {
+    fn from(rebuilt: ChimpRebuilt) -> Self {
+        Self {
+            package: rebuilt.package,
+            bytes: rebuilt.bytes,
+            edits: rebuilt.edits,
+        }
+    }
+}
+
+/// Where a mod container is built before it replaces `output`.
+fn chimp_staging_utoc(output: &Path) -> PathBuf {
+    output.with_file_name(format!(
+        "{}.building.utoc",
+        output
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .unwrap_or("Chimp_P")
+    ))
+}
+
+/// Build the rebuilt packages into a mod container at `temporary` and read
+/// every one back to check it survived exactly. Runs on a worker.
+fn build_chimp_mod(
+    world: &World,
+    rebuilt: &[ChimpRebuilt],
+    temporary: &Path,
+) -> Result<(), String> {
+    let overrides: Vec<PackageOverride<'_>> = rebuilt
+        .iter()
+        .map(|package| PackageOverride {
+            archive: &world.archives()[package.provider.container],
+            uasset_path: &package.provider.entry_path,
+            bytes: package.bytes.clone(),
+            store: package.store.clone(),
+        })
+        .collect();
+    write_package_mod_container(&overrides, temporary).map_err(|error| error.to_string())?;
+    drop(overrides);
+    let archive = blam_tags::iostore::IoStoreArchive::open(temporary)
+        .map_err(|error| format!("Could not reopen temporary mod: {error}"))?;
+    for package in rebuilt {
+        let provider = &package.provider;
+        let source = &world.archives()[provider.container];
+        let source_index = source
+            .chunk_index_for(&provider.entry_path)
+            .map_err(|error| error.to_string())?;
+        let chunk_id = source
+            .chunk_id(source_index)
+            .map_err(|error| error.to_string())?;
+        let saved_index = archive
+            .find_chunk(&chunk_id)
+            .ok_or_else(|| format!("Temporary mod is missing {}", provider.entry_path))?;
+        let saved = archive
+            .read_chunk(saved_index)
+            .map_err(|error| error.to_string())?;
+        if saved != package.bytes {
+            return Err(format!(
+                "Temporary mod did not preserve {} exactly",
+                provider.entry_path
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Overwrite the rebuilt packages inside their own source containers,
+/// restoring every `.utoc` if any container fails. Runs on a worker. The flag
+/// says whether any container was written to, rollback or not.
+fn overwrite_chimp_sources(
+    world: &World,
+    groups: &BTreeMap<usize, Vec<ChimpRebuilt>>,
+) -> (bool, Result<(), String>) {
+    let mut originals = BTreeMap::new();
+    for &container in groups.keys() {
+        let path = world.containers()[container].path.clone();
+        match fs::read(&path) {
+            Ok(bytes) => {
+                originals.insert(container, (path, bytes));
+            }
+            Err(error) => {
+                return (
+                    false,
+                    Err(format!(
+                        "Could not stage rollback for {}: {error}",
+                        path.display()
+                    )),
+                );
+            }
+        }
+    }
+    let mut failure = None;
+    for (&container, packages) in groups {
+        let replacements: Vec<_> = packages
+            .iter()
+            .map(|package| PackageReplacement {
+                uasset_path: &package.provider.entry_path,
+                rebuilt_bytes: &package.bytes,
+                store: &package.store,
+            })
+            .collect();
+        let path = &originals[&container].0;
+        if let Err(error) =
+            overwrite_packages_in_place_with(&world.archives()[container], path, &replacements)
+        {
+            failure = Some(format!("Could not overwrite {}: {error}", path.display()));
+            break;
+        }
+    }
+    let Some(mut error) = failure else {
+        return (true, Ok(()));
+    };
+    let mut rollback_failures = Vec::new();
+    for (path, bytes) in originals.values() {
+        if let Err(rollback_error) = fs::write(path, bytes) {
+            rollback_failures.push(format!("{}: {rollback_error}", path.display()));
+        }
+    }
+    if !rollback_failures.is_empty() {
+        error.push_str(&format!(
+            "; rollback also failed for {}",
+            rollback_failures.join(", ")
+        ));
+    }
+    (true, Err(error))
 }
 
 fn remove_chimp_triplet(path: &Path) {
@@ -9877,6 +10098,7 @@ mod tests {
             referrers: ChimpReferrerState::Idle,
             orphaned: false,
             checkpoint_due: None,
+            edits: 0,
         }
     }
 
@@ -9905,6 +10127,99 @@ mod tests {
 
         assert_eq!(due_at(4.0, &mut app), Some(5.0), "still editing: nothing yet");
         assert_eq!(due_at(6.0, &mut app), None, "paused: checkpointed once");
+    }
+
+    /// A save rebuilds packages on the UI thread and writes them on a worker.
+    /// An edit that lands in between is not in what was written, so that
+    /// package has to stay dirty — and keep its own payloads.
+    #[test]
+    fn a_package_edited_during_a_save_stays_dirty() {
+        let mut app = Baboon::for_test();
+        for (package, edits) in [("/Game/A", 1), ("/Game/B", 2)] {
+            let mut document = rename_fixture();
+            document.package = package.to_owned();
+            document.dirty = true;
+            document.edits = edits;
+            app.kits[0]
+                .chimp
+                .documents
+                .insert(package.to_owned(), document);
+        }
+        let payloads_before = app.kits[0].chimp.documents["/Game/B"].payloads.clone();
+        // Both were rebuilt at one edit; B took a second while the write ran.
+        let written = ["/Game/A", "/Game/B"].map(|package| ChimpWritten {
+            package: package.to_owned(),
+            bytes: vec![7; 4],
+            edits: 1,
+        });
+        app.settle_chimp_written(0, &written, true).unwrap();
+
+        let documents = &app.kits[0].chimp.documents;
+        assert!(!documents["/Game/A"].dirty, "written as it stands: clean");
+        assert!(documents["/Game/B"].dirty, "edited mid-save: still dirty");
+        assert_eq!(documents["/Game/B"].payloads, payloads_before);
+        assert_eq!(
+            documents["/Game/B"].original,
+            vec![7; 4],
+            "the discard baseline is what is on disk now"
+        );
+    }
+
+    /// Closing a workspace while its Chimp save runs used to be moot — the
+    /// save blocked the UI. Now the close waits and runs when the save lands.
+    #[test]
+    fn a_close_during_a_chimp_save_waits_for_it() {
+        let mut app = Baboon::for_test();
+        let kit = app.kits[0].id;
+        app.chimp_writes.insert(kit, None);
+        let ctx = egui::Context::default();
+        app.request_close_action(PendingCloseAction::CloseKit(kit), &ctx);
+        assert!(app.kit_index(kit).is_some(), "the close waits for the save");
+        assert!(matches!(
+            app.chimp_writes.get(&kit),
+            Some(Some(PendingCloseAction::CloseKit(_)))
+        ));
+
+        let output = std::env::temp_dir().join("baboon-chimp-close-test/Mod_P.utoc");
+        app.handle_chimp_mod_built(
+            kit,
+            output.clone(),
+            chimp_staging_utoc(&output),
+            Vec::new(),
+            Err("stopped".to_owned()),
+            &ctx,
+        );
+        assert!(app.chimp_writes.is_empty());
+        assert!(app.kit_index(kit).is_none(), "and runs once it lands");
+    }
+
+    /// The overwrite's leases are parked for the worker. A failed write has
+    /// to give them back, or every later write to those containers is refused.
+    #[test]
+    fn a_failed_source_overwrite_releases_its_leases() {
+        let mut app = Baboon::for_test();
+        let kit = app.kits[0].id;
+        let utoc = std::env::temp_dir().join("baboon-chimp-lease-test/pakchunk0-Windows.utoc");
+        let lease = app
+            .acquire_container_write_lease(&utoc, ContainerWriteMode::AppendInPlace)
+            .unwrap();
+        let id = app.park_container_write_lease(lease);
+        app.chimp_writes.insert(kit, None);
+        app.handle_chimp_sources_overwritten(
+            kit,
+            vec![id],
+            1,
+            false,
+            Vec::new(),
+            Err("could not overwrite".to_owned()),
+            &egui::Context::default(),
+        );
+        assert_eq!(app.status, "could not overwrite");
+        assert!(app.chimp_writes.is_empty());
+        let again = app
+            .acquire_container_write_lease(&utoc, ContainerWriteMode::AppendInPlace)
+            .expect("the container is writable again");
+        app.release_in_place_lease(again, ContainerWriteOutcome::Unchanged);
     }
 
     /// An orphaned document's stored container index addresses a list that a
