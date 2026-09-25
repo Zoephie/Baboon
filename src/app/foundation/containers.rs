@@ -1545,6 +1545,52 @@ pub(in crate::app) fn jump_target_id() -> egui::Id {
     egui::Id::new("foundation_jump_to_block")
 }
 
+const BLOCK_JUMP_SCROLL_LEAD: f32 = 80.0;
+const BLOCK_JUMP_HIGHLIGHT_SECONDS: f64 = 1.25;
+
+/// Give the destination some visual context instead of pinning its header to
+/// the very top edge. The leading area is roughly two ordinary field rows.
+fn block_jump_scroll_rect(header: egui::Rect) -> egui::Rect {
+    egui::Rect::from_min_max(
+        egui::pos2(header.left(), header.top() - BLOCK_JUMP_SCROLL_LEAD),
+        header.max,
+    )
+}
+
+/// Field paths produced by the renderer include exact `#ordinal` suffixes,
+/// while a few older callers still provide readable paths without them.
+/// Preserve concrete element indices while accepting either spelling.
+fn block_paths_match(left: &str, right: &str) -> bool {
+    strip_field_ordinals(left) == strip_field_ordinals(right)
+}
+
+fn strip_field_ordinals(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    let mut ordinal = false;
+    for ch in path.chars() {
+        match ch {
+            '#' => ordinal = true,
+            '/' | '[' if ordinal => {
+                ordinal = false;
+                out.push(ch);
+            }
+            _ if ordinal => {}
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+fn block_jump_opens_path(target: &str, candidate: &str) -> bool {
+    let target = strip_node_indices(target);
+    let candidate = strip_node_indices(candidate);
+    candidate.is_empty()
+        || target == candidate
+        || (target.len() > candidate.len()
+            && target.starts_with(&candidate)
+            && target.as_bytes()[candidate.len()] == b'/')
+}
+
 /// egui-memory key holding the exact (indexed) field path that a pending
 /// reference-jump should scroll into view and pulse on the next frame. Consumed
 /// by [`draw_field`] when it draws the matching leaf.
@@ -1622,6 +1668,16 @@ pub(in crate::app) fn draw_foundation_block_control(
     if let Some(open) = open_override {
         state.set_open(open && count > 0);
     }
+    // A block-index "Go to" can target a block hidden under one or more
+    // collapsed containers. Force every ancestor and the target block itself
+    // open until the target header consumes the one-shot jump below.
+    let pending_jump = ui.data(|data| data.get_temp::<String>(jump_target_id()));
+    if pending_jump
+        .as_deref()
+        .is_some_and(|target| block_jump_opens_path(target, path_salt))
+    {
+        state.set_open(count > 0);
+    }
     if count == 0 && state.is_open() {
         state.set_open(false);
     }
@@ -1633,15 +1689,38 @@ pub(in crate::app) fn draw_foundation_block_control(
     let header_fill = foundation_block_bar();
     let header_background = ui.painter().add(egui::Shape::Noop);
 
+    let jump_highlight_id = ui.make_persistent_id((
+        "foundation_block_jump_highlight",
+        view_scope,
+        tag_key,
+        path_salt,
+        depth,
+        name,
+    ));
+    let now = ui.input(|input| input.time);
+
     // 3.4 jump-to-parent: if a child's "↑" targeted this block last frame, bring
     // its header into view (and clear the pending target).
-    if ui
-        .data(|d| d.get_temp::<String>(jump_target_id()))
+    if pending_jump
         .as_deref()
-        == Some(path_salt)
+        .is_some_and(|target| block_paths_match(target, path_salt))
     {
-        ui.scroll_to_rect(row_rect, Some(egui::Align::Center));
-        ui.data_mut(|d| d.remove::<String>(jump_target_id()));
+        ui.scroll_to_rect(block_jump_scroll_rect(row_rect), Some(egui::Align::Min));
+        ui.data_mut(|d| {
+            d.remove::<String>(jump_target_id());
+            d.insert_temp(jump_highlight_id, now + BLOCK_JUMP_HIGHLIGHT_SECONDS);
+        });
+        ui.ctx().request_repaint();
+    }
+
+    let jump_highlight_strength = ui
+        .data(|data| data.get_temp::<f64>(jump_highlight_id))
+        .map(|until| ((until - now) / BLOCK_JUMP_HIGHLIGHT_SECONDS).clamp(0.0, 1.0))
+        .unwrap_or(0.0);
+    if jump_highlight_strength > 0.0 {
+        ui.ctx().request_repaint();
+    } else {
+        ui.data_mut(|data| data.remove::<f64>(jump_highlight_id));
     }
 
     // At-capacity / empty gating mirrors Guerilla's enable rules.
@@ -1682,12 +1761,37 @@ pub(in crate::app) fn draw_foundation_block_control(
         let block_title = foundation_block_title(name);
         let (name_rect, name_label) =
             ui.allocate_exact_size(Vec2::new(190.0, 20.0), Sense::click());
+        let block_title_font = bold_font(12.5);
+        if jump_highlight_strength > 0.0 {
+            let galley = ui.painter().layout_no_wrap(
+                block_title.clone(),
+                block_title_font.clone(),
+                foundation_block_text(),
+            );
+            let highlight_rect = egui::Rect::from_center_size(
+                egui::pos2(
+                    name_rect.left() + galley.size().x * 0.5,
+                    name_rect.center().y,
+                ),
+                galley.size() + Vec2::new(7.0, 4.0),
+            );
+            ui.painter().rect_filled(
+                highlight_rect,
+                2.0,
+                Color32::from_rgba_unmultiplied(
+                    255,
+                    220,
+                    70,
+                    (180.0 * jump_highlight_strength) as u8,
+                ),
+            );
+        }
         paint_findable_text(
             ui,
             name_rect.left_center(),
             Align2::LEFT_CENTER,
             &block_title,
-            bold_font(12.5),
+            block_title_font,
             foundation_block_text(),
             FindTargetKind::Block,
         );
@@ -2429,7 +2533,7 @@ pub(in crate::app) fn draw_foundation_bar(
 }
 
 /// The signed index held by any block-index value variant.
-pub(super) fn block_index_value(value: &TagFieldData) -> Option<i64> {
+pub(in crate::app) fn block_index_value(value: &TagFieldData) -> Option<i64> {
     match value {
         TagFieldData::CharBlockIndex(v) | TagFieldData::CustomCharBlockIndex(v) => Some(*v as i64),
         TagFieldData::ShortBlockIndex(v) | TagFieldData::CustomShortBlockIndex(v) => {
@@ -2503,7 +2607,7 @@ pub(in crate::app) fn semantic_short_index_target_options(
     })
 }
 
-pub(super) fn semantic_short_index_target_key(field_name: &str) -> Option<&'static str> {
+pub(in crate::app) fn semantic_short_index_target_key(field_name: &str) -> Option<&'static str> {
     match clean_field_key(field_name).as_str() {
         "parent variant" | "variant" => Some("variants"),
         "parent node" => Some("nodes"),
@@ -2554,7 +2658,7 @@ fn find_nested_target_block_by_clean_key(
         return None;
     }
     for field in tag_struct.fields_all() {
-        let field_path = append_field_path(struct_path, field.name());
+        let field_path = append_field_path_for(struct_path, &field);
         if let Some(block) = field.as_block() {
             if clean_field_key(field.name()) == target_key {
                 let labels = (0..block.len())
@@ -2609,7 +2713,7 @@ fn find_target_block_by_clean_key(
                 let labels = (0..block.len())
                     .map(|i| block_element_dropdown_label(block.element(i), names, i))
                     .collect();
-                return Some((labels, append_field_path(struct_path, sibling.name())));
+                return Some((labels, append_field_path_for(struct_path, &sibling)));
             }
         }
     }
@@ -2630,7 +2734,7 @@ fn find_target_block(
                 let labels = (0..block.len())
                     .map(|i| block_element_dropdown_label(block.element(i), names, i))
                     .collect();
-                return Some((labels, append_field_path(struct_path, sibling.name())));
+                return Some((labels, append_field_path_for(struct_path, &sibling)));
             }
         }
     }
@@ -2714,21 +2818,23 @@ pub(in crate::app) fn draw_foundation_block_index_row(
 
         // "Go to" the referenced element: scroll to the target block and select
         // the element (reuses the 3.4 jump-to-block scroll mechanism).
-        let go_to = ui.add_enabled(
+        let go_to_tooltip = format!("Go to referenced element\n{target_block_path}[{current}]");
+        let go_to = icon_button(
+            ui,
+            ButtonIcon::JumpTo,
+            &go_to_tooltip,
             in_range,
-            egui::Button::new(RichText::new("↳").color(text_dark()))
-                .min_size(Vec2::new(54.0, 20.0)),
+            text_dark(),
         );
         let go_to = if in_range {
-            go_to.on_hover_text(format!(
-                "Go to referenced element\n{target_block_path}[{current}]"
-            ))
+            go_to
         } else {
             go_to.on_disabled_hover_text("No referenced element (index is <none>)")
         };
         if go_to.clicked() {
             ui.data_mut(|d| d.insert_temp(jump_target_id(), target_block_path.to_owned()));
             set_block_selected_index(ui, edit, target_block_path, current as usize);
+            ui.ctx().request_repaint();
         }
     });
 }
@@ -2736,6 +2842,52 @@ pub(in crate::app) fn draw_foundation_block_index_row(
 #[cfg(test)]
 mod palette_repro_tests {
     use super::*;
+
+    #[test]
+    fn block_jump_matches_exact_paths_and_opens_ancestors() {
+        let target = "regions#4[2]/permutations#7";
+        assert!(block_paths_match(target, "regions[2]/permutations"));
+        assert!(!block_paths_match(target, "regions[1]/permutations"));
+        assert!(block_jump_opens_path(target, "regions#4"));
+        assert!(block_jump_opens_path(target, target));
+        assert!(!block_jump_opens_path(target, "materials#5"));
+    }
+
+    #[test]
+    fn block_jump_scroll_keeps_two_rows_of_leading_context() {
+        let header = egui::Rect::from_min_size(
+            egui::pos2(12.0, 240.0),
+            egui::vec2(600.0, 40.0),
+        );
+        let target = block_jump_scroll_rect(header);
+
+        assert_eq!(target.top(), 160.0);
+        assert_eq!(target.bottom(), header.bottom());
+        assert_eq!(target.left(), header.left());
+        assert_eq!(target.right(), header.right());
+    }
+
+    #[test]
+    fn block_index_target_uses_the_renderers_exact_widget_path() {
+        let tag = TagFile::new(crate::app::test_definition_path(
+            "haloreach_mcc/test_tag.json",
+        ))
+        .unwrap();
+        let root = tag.root();
+        let index = root
+            .fields_all()
+            .find(|field| field.name() == "short block index")
+            .unwrap();
+        let (_, target) =
+            block_index_target_options(&root, &index, &TagNameIndex::default(), Some(root), "")
+                .unwrap();
+
+        assert!(target.contains('#'), "target should carry an exact ordinal");
+        assert!(
+            root.field_path(&target).is_some(),
+            "target path should resolve exactly"
+        );
+    }
 
     /// Reproduction probe for "a tag added to the scenario vehicle palette does
     /// not appear in the vehicles block's dropdown until save + reopen".

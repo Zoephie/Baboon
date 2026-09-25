@@ -400,6 +400,20 @@ pub(in crate::app) fn apply_one_block_op(
     tag: &mut TagFile,
     op: &BlockOp,
 ) -> Result<String, String> {
+    let remap = block_element_remap(tag, op)?;
+    let message = apply_one_block_structure_op(tag, op)?;
+
+    // Repair index-based links only after the structural operation succeeds.
+    // The walker sees references inside moved, duplicated, or pasted elements
+    // at their new paths and adjusts those along with every outside reference.
+    if let Some(remap) = remap {
+        remap_block_index_references(tag, &op.path, &remap)?;
+    }
+
+    Ok(message)
+}
+
+fn apply_one_block_structure_op(tag: &mut TagFile, op: &BlockOp) -> Result<String, String> {
     let mut root = tag.root_mut();
     let mut field = root
         .field_path_mut(&op.path)
@@ -474,6 +488,535 @@ pub(in crate::app) fn apply_one_block_op(
         };
     }
     Err("field is not a block or array".to_owned())
+}
+
+/// An old block index to its new position. `None` means that the old element no
+/// longer exists. Keeping this as a general mapping (rather than baking insert
+/// and delete arithmetic into the walker) also gives a future block-table
+/// reorder operation exactly the primitive it will need.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct BlockElementRemap {
+    old_to_new: Vec<Option<usize>>,
+    /// Fresh clipboard/default elements were not part of the old ordering, so
+    /// their authored index values must not be interpreted through old_to_new.
+    excluded_new_elements: Option<std::ops::Range<usize>>,
+}
+
+impl BlockElementRemap {
+    fn inserted(old_len: usize, at: usize, count: usize) -> Self {
+        Self {
+            old_to_new: (0..old_len)
+                .map(|old| Some(if old >= at { old + count } else { old }))
+                .collect(),
+            excluded_new_elements: None,
+        }
+    }
+
+    fn deleted(old_len: usize, at: usize) -> Self {
+        Self {
+            old_to_new: (0..old_len)
+                .map(|old| match old.cmp(&at) {
+                    std::cmp::Ordering::Less => Some(old),
+                    std::cmp::Ordering::Equal => None,
+                    std::cmp::Ordering::Greater => Some(old - 1),
+                })
+                .collect(),
+            excluded_new_elements: None,
+        }
+    }
+
+    fn replaced(old_len: usize, at: usize, replacement_count: usize) -> Self {
+        Self {
+            old_to_new: (0..old_len)
+                .map(|old| {
+                    if old < at {
+                        Some(old)
+                    } else if old == at {
+                        (replacement_count > 0).then_some(at)
+                    } else {
+                        Some(old + replacement_count - 1)
+                    }
+                })
+                .collect(),
+            excluded_new_elements: None,
+        }
+    }
+
+    fn removed_all(old_len: usize) -> Self {
+        Self {
+            old_to_new: vec![None; old_len],
+            excluded_new_elements: None,
+        }
+    }
+
+    fn excluding_new_elements(mut self, range: std::ops::Range<usize>) -> Self {
+        self.excluded_new_elements = Some(range);
+        self
+    }
+
+    fn map(&self, old: i64) -> Option<Option<usize>> {
+        usize::try_from(old)
+            .ok()
+            .and_then(|old| self.old_to_new.get(old).copied())
+    }
+}
+
+/// Validate a structural operation and describe how it moves the old entries.
+/// Appending does not move any old index, so it needs no remap.
+fn block_element_remap(tag: &TagFile, op: &BlockOp) -> Result<Option<BlockElementRemap>, String> {
+    let field = tag
+        .root()
+        .field_path(&op.path)
+        .ok_or_else(|| "block path no longer resolves".to_owned())?;
+    // Arrays are fixed-count and their only supported operation replaces an
+    // element in place, so no index can move.
+    let Some(block) = field.as_block() else {
+        return Ok(None);
+    };
+    let len = block.len();
+
+    let remap = match &op.kind {
+        BlockOpKind::Add => None,
+        BlockOpKind::Insert(at) => {
+            if *at > len {
+                return Err(format!(
+                    "index {at} is out of range for block of length {len}"
+                ));
+            }
+            Some(BlockElementRemap::inserted(len, *at, 1).excluding_new_elements(*at..*at + 1))
+        }
+        BlockOpKind::Duplicate(at) | BlockOpKind::Delete(at) => {
+            if *at >= len {
+                return Err(format!(
+                    "index {at} is out of range for block of length {len}"
+                ));
+            }
+            if matches!(op.kind, BlockOpKind::Duplicate(_)) {
+                Some(BlockElementRemap::inserted(len, at + 1, 1))
+            } else {
+                Some(BlockElementRemap::deleted(len, *at))
+            }
+        }
+        BlockOpKind::DeleteAll => Some(BlockElementRemap::removed_all(len)),
+        BlockOpKind::Paste { at, elements } => {
+            if *at > len {
+                return Err(format!(
+                    "index {at} is out of range for block of length {len}"
+                ));
+            }
+            (!elements.is_empty()).then(|| {
+                BlockElementRemap::inserted(len, *at, elements.len())
+                    .excluding_new_elements(*at..*at + elements.len())
+            })
+        }
+        BlockOpKind::ReplaceElement { at, elements } => {
+            if *at >= len {
+                return Err(format!(
+                    "index {at} is out of range for block of length {len}"
+                ));
+            }
+            Some(
+                BlockElementRemap::replaced(len, *at, elements.len())
+                    .excluding_new_elements(*at..*at + elements.len()),
+            )
+        }
+        // A wholesale replacement has no defensible identity correspondence.
+        // References to old entries are therefore cleared instead of silently
+        // retargeted to unrelated pasted entries.
+        BlockOpKind::ReplaceBlock { elements } => {
+            Some(BlockElementRemap::removed_all(len).excluding_new_elements(0..elements.len()))
+        }
+    };
+    Ok(remap)
+}
+
+#[derive(Debug)]
+struct BlockIndexEdit {
+    path: String,
+    value: i64,
+}
+
+fn remap_block_index_references(
+    tag: &mut TagFile,
+    target_path: &str,
+    remap: &BlockElementRemap,
+) -> Result<usize, String> {
+    let root = tag.root();
+    let target_path = path_without_field_ordinals(target_path);
+    let mut edits = Vec::new();
+    collect_block_index_edits(&root, "", root, &target_path, remap, &mut edits);
+
+    for edit in &edits {
+        apply_field_edit(tag, &edit.path, &edit.value.to_string())?;
+    }
+    Ok(edits.len())
+}
+
+fn collect_block_index_edits(
+    tag_struct: &blam_tags::TagStruct<'_>,
+    struct_path: &str,
+    root: blam_tags::TagStruct<'_>,
+    target_path: &str,
+    remap: &BlockElementRemap,
+    edits: &mut Vec<BlockIndexEdit>,
+) {
+    for field in tag_struct.fields_all() {
+        let field_path = append_field_path_for(struct_path, &field);
+        let is_new_element = remap
+            .excluded_new_elements
+            .as_ref()
+            .is_some_and(|range| path_is_within_target_element(struct_path, target_path, range));
+
+        let declared_target = (!is_new_element)
+            .then(|| field.definition().block_index_target())
+            .flatten()
+            .and_then(|target| {
+                resolve_declared_block_target_path(tag_struct, root, struct_path, target.name())
+            });
+        let semantic_target = (!is_new_element && field.field_type() == TagFieldType::ShortInteger)
+            .then(|| semantic_short_index_target_key(field.name()))
+            .flatten()
+            .and_then(|key| resolve_semantic_block_target_path(tag_struct, root, struct_path, key));
+
+        let resolved_target = declared_target.or(semantic_target);
+        if resolved_target
+            .as_deref()
+            .map(path_without_field_ordinals)
+            .as_deref()
+            == Some(target_path)
+        {
+            let old = if field.field_type() == TagFieldType::ShortInteger {
+                match field.value() {
+                    Some(TagFieldData::ShortInteger(value)) => Some(value as i64),
+                    _ => None,
+                }
+            } else {
+                field.value().as_ref().and_then(block_index_value)
+            };
+            if let Some(old) = old
+                && let Some(mapped) = remap.map(old)
+            {
+                let new = mapped.map(|index| index as i64).unwrap_or(-1);
+                if new != old {
+                    edits.push(BlockIndexEdit {
+                        path: field_path.clone(),
+                        value: new,
+                    });
+                }
+            }
+        }
+
+        if let Some(block) = field.as_block() {
+            for (index, element) in block.iter().enumerate() {
+                collect_block_index_edits(
+                    &element,
+                    &format!("{field_path}[{index}]"),
+                    root,
+                    target_path,
+                    remap,
+                    edits,
+                );
+            }
+        } else if let Some(array) = field.as_array() {
+            for (index, element) in array.iter().enumerate() {
+                collect_block_index_edits(
+                    &element,
+                    &format!("{field_path}[{index}]"),
+                    root,
+                    target_path,
+                    remap,
+                    edits,
+                );
+            }
+        } else if let Some(nested) = field.as_struct() {
+            collect_block_index_edits(&nested, &field_path, root, target_path, remap, edits);
+        }
+    }
+}
+
+fn path_is_within_target_element(
+    struct_path: &str,
+    target_path: &str,
+    range: &std::ops::Range<usize>,
+) -> bool {
+    let normalized = path_without_field_ordinals(struct_path);
+    let Some(suffix) = normalized.strip_prefix(target_path) else {
+        return false;
+    };
+    let Some(index) = suffix
+        .strip_prefix('[')
+        .and_then(|suffix| suffix.split_once(']'))
+        .and_then(|(index, _)| index.parse::<usize>().ok())
+    else {
+        return false;
+    };
+    range.contains(&index)
+}
+
+fn resolve_declared_block_target_path(
+    tag_struct: &blam_tags::TagStruct<'_>,
+    root: blam_tags::TagStruct<'_>,
+    struct_path: &str,
+    target_definition: &str,
+) -> Option<String> {
+    find_sibling_block_path(tag_struct, struct_path, |field| {
+        field
+            .as_block()
+            .is_some_and(|block| block.definition().name() == target_definition)
+    })
+    .or_else(|| {
+        find_ancestor_block_path(root, struct_path, |field| {
+            field
+                .as_block()
+                .is_some_and(|block| block.definition().name() == target_definition)
+        })
+    })
+}
+
+fn resolve_semantic_block_target_path(
+    tag_struct: &blam_tags::TagStruct<'_>,
+    root: blam_tags::TagStruct<'_>,
+    struct_path: &str,
+    target_key: &str,
+) -> Option<String> {
+    find_sibling_block_path(tag_struct, struct_path, |field| {
+        field.as_block().is_some() && clean_field_key(field.name()) == target_key
+    })
+    .or_else(|| {
+        find_ancestor_block_path(root, struct_path, |field| {
+            field.as_block().is_some() && clean_field_key(field.name()) == target_key
+        })
+    })
+}
+
+fn find_sibling_block_path(
+    tag_struct: &blam_tags::TagStruct<'_>,
+    struct_path: &str,
+    matches: impl Fn(&TagField<'_>) -> bool,
+) -> Option<String> {
+    tag_struct
+        .fields_all()
+        .find(|field| matches(field))
+        .map(|field| append_field_path_for(struct_path, &field))
+}
+
+fn find_ancestor_block_path(
+    root: blam_tags::TagStruct<'_>,
+    struct_path: &str,
+    matches: impl Fn(&TagField<'_>) -> bool + Copy,
+) -> Option<String> {
+    let mut current = struct_path;
+    while !current.is_empty() {
+        let parent = current.rsplit_once('/').map(|(path, _)| path).unwrap_or("");
+        let ancestor = if parent.is_empty() {
+            root
+        } else {
+            root.descend(parent)?
+        };
+        if let Some(path) = find_sibling_block_path(&ancestor, parent, matches) {
+            return Some(path);
+        }
+        if parent.is_empty() {
+            break;
+        }
+        current = parent;
+    }
+    None
+}
+
+/// Normalize exact field paths for comparison while retaining concrete block
+/// element subscripts. Rendered paths carry `#ordinal`; hand-authored block ops
+/// often do not, but both resolve to the same field.
+fn path_without_field_ordinals(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    let mut ordinal = false;
+    for ch in path.chars() {
+        match ch {
+            '#' => ordinal = true,
+            '/' | '[' if ordinal => {
+                ordinal = false;
+                out.push(ch);
+            }
+            _ if ordinal => {}
+            _ => out.push(ch),
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod block_index_remap_tests {
+    use super::*;
+
+    fn test_tag() -> TagFile {
+        TagFile::new(crate::app::test_definition_path(
+            "haloreach_mcc/test_tag.json",
+        ))
+        .expect("load test-tag definition")
+    }
+
+    fn add_basic_elements(tag: &mut TagFile, count: usize) {
+        for _ in 0..count {
+            apply_one_block_op(
+                tag,
+                &BlockOp {
+                    path: "basic block".to_owned(),
+                    kind: BlockOpKind::Add,
+                },
+            )
+            .expect("add basic block element");
+        }
+    }
+
+    fn set_test_indices(tag: &mut TagFile, char_index: i64, short_index: i64, long_index: i64) {
+        apply_field_edit(tag, "char block index", &char_index.to_string()).unwrap();
+        apply_field_edit(tag, "short block index", &short_index.to_string()).unwrap();
+        apply_field_edit(tag, "long block index", &long_index.to_string()).unwrap();
+    }
+
+    fn test_indices(tag: &TagFile) -> [i128; 3] {
+        let root = tag.root();
+        [
+            root.read_int_any("char block index").unwrap(),
+            root.read_int_any("short block index").unwrap(),
+            root.read_int_any("long block index").unwrap(),
+        ]
+    }
+
+    #[test]
+    fn insert_and_delete_preserve_declared_block_index_targets() {
+        let mut tag = test_tag();
+        add_basic_elements(&mut tag, 3);
+        set_test_indices(&mut tag, 0, 1, 2);
+
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "basic block".to_owned(),
+                kind: BlockOpKind::Insert(1),
+            },
+        )
+        .unwrap();
+        assert_eq!(test_indices(&tag), [0, 2, 3]);
+
+        // Removing the newly inserted element restores every old position.
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "basic block".to_owned(),
+                kind: BlockOpKind::Delete(1),
+            },
+        )
+        .unwrap();
+        assert_eq!(test_indices(&tag), [0, 1, 2]);
+
+        // A reference to the removed entry becomes <none>; later references
+        // move down while earlier references remain unchanged.
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "basic block".to_owned(),
+                kind: BlockOpKind::Delete(1),
+            },
+        )
+        .unwrap();
+        assert_eq!(test_indices(&tag), [0, -1, 1]);
+    }
+
+    #[test]
+    fn duplicate_shifts_only_entries_after_the_copy_source() {
+        let mut tag = test_tag();
+        add_basic_elements(&mut tag, 3);
+        set_test_indices(&mut tag, 0, 1, 2);
+
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "basic block".to_owned(),
+                kind: BlockOpKind::Duplicate(1),
+            },
+        )
+        .unwrap();
+        assert_eq!(test_indices(&tag), [0, 1, 3]);
+    }
+
+    #[test]
+    fn general_mapping_is_ready_for_future_reordering() {
+        let mut tag = test_tag();
+        add_basic_elements(&mut tag, 3);
+        set_test_indices(&mut tag, 0, 1, 2);
+
+        // Future table reorder: old [0, 1, 2] becomes new [2, 0, 1].
+        let remap = BlockElementRemap {
+            old_to_new: vec![Some(2), Some(0), Some(1)],
+            excluded_new_elements: None,
+        };
+        assert_eq!(
+            remap_block_index_references(&mut tag, "basic block", &remap).unwrap(),
+            3
+        );
+        assert_eq!(test_indices(&tag), [2, 0, 1]);
+    }
+
+    #[test]
+    fn nested_declared_reference_resolves_its_ancestor_target() {
+        let mut tag =
+            TagFile::new(crate::app::test_definition_path("halo2_mcc/model.json")).unwrap();
+        add_elements_at(&mut tag, "variants", 3);
+        add_elements_at(&mut tag, "variants[0]/regions", 1);
+        apply_field_edit(&mut tag, "variants[0]/regions[0]/parent variant", "2").unwrap();
+
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "variants".to_owned(),
+                kind: BlockOpKind::Insert(1),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            tag.root()
+                .descend("variants[0]/regions[0]")
+                .and_then(|region| region.read_int_any("parent variant")),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn classic_semantic_parent_node_reference_is_remapped() {
+        let mut tag =
+            TagFile::new(crate::app::test_definition_path("haloce_mcc/model.json")).unwrap();
+        add_elements_at(&mut tag, "nodes", 3);
+        apply_field_edit(&mut tag, "nodes[0]/parent node", "2").unwrap();
+
+        apply_one_block_op(
+            &mut tag,
+            &BlockOp {
+                path: "nodes".to_owned(),
+                kind: BlockOpKind::Insert(1),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            tag.root()
+                .descend("nodes[0]")
+                .and_then(|node| node.read_int_any("parent node")),
+            Some(3)
+        );
+    }
+
+    fn add_elements_at(tag: &mut TagFile, path: &str, count: usize) {
+        for _ in 0..count {
+            apply_one_block_op(
+                tag,
+                &BlockOp {
+                    path: path.to_owned(),
+                    kind: BlockOpKind::Add,
+                },
+            )
+            .unwrap();
+        }
+    }
 }
 
 /// Insert `elements` consecutively starting at `at`, preserving their order.
