@@ -308,23 +308,44 @@ pub(in crate::app) fn apply_one_h2_shader_param_op(
             animation_type_index,
             initial_function_data,
         } => {
-            let parameter_index = ensure_h2_shader_parameter(
+            let parameter = ensure_h2_shader_parameter(
                 tag,
                 parameters_block_path,
                 parameter_name,
                 *parameter_type_index,
             )?;
-            let animation_index = ensure_h2_animation_property(
-                tag,
-                parameters_block_path,
-                parameter_index,
-                *animation_type_index,
-            )?;
-            let data_path = format!(
-                "{}[{}]/animation properties[{}]/function/data",
-                parameters_block_path, parameter_index, animation_index
-            );
-            replace_halo2_function_byte_block(tag, &data_path, initial_function_data)?;
+            let mut animation = None;
+            let result = (|| {
+                let property = ensure_h2_animation_property(
+                    tag,
+                    parameters_block_path,
+                    parameter.index,
+                    *animation_type_index,
+                )?;
+                animation = Some(property);
+                let data_path = format!(
+                    "{}[{}]/animation properties[{}]/function/data",
+                    parameters_block_path, parameter.index, property.index
+                );
+                replace_halo2_function_byte_block(tag, &data_path, initial_function_data)
+            })();
+            if result.is_err() {
+                // Remove whatever this op made, outermost first: deleting a
+                // created parameter takes its animation properties with it.
+                if parameter.created {
+                    delete_block_element(tag, parameters_block_path, parameter.index);
+                } else if let Some(property) = animation.filter(|property| property.created) {
+                    delete_block_element(
+                        tag,
+                        &format!(
+                            "{parameters_block_path}[{}]/animation properties",
+                            parameter.index
+                        ),
+                        property.index,
+                    );
+                }
+            }
+            result?;
             Ok(format!(
                 "Created H2 function row '{}' type {}",
                 parameter_name, animation_type_index
@@ -341,7 +362,7 @@ pub(in crate::app) fn apply_one_h2_shader_param_op(
             field,
             input,
         } => {
-            let index = ensure_h2_shader_parameter(
+            let parameter = ensure_h2_shader_parameter(
                 tag,
                 parameters_block_path,
                 parameter_name,
@@ -350,10 +371,17 @@ pub(in crate::app) fn apply_one_h2_shader_param_op(
             let path = format!(
                 "{}[{}]/{}",
                 parameters_block_path,
-                index,
+                parameter.index,
                 escape_field_path_segment(field)
             );
-            apply_field_edit(tag, &path, input)?;
+            // A value that does not parse must not leave behind the empty
+            // parameter created to hold it.
+            if let Err(error) = apply_field_edit(tag, &path, input) {
+                if parameter.created {
+                    delete_block_element(tag, parameters_block_path, parameter.index);
+                }
+                return Err(error);
+            }
             Ok(format!(
                 "Edited H2 parameter '{}' {}",
                 parameter_name, field
@@ -409,22 +437,30 @@ fn ensure_h2_shader_parameter(
     parameters_block_path: &str,
     parameter_name: &str,
     parameter_type_index: i32,
-) -> Result<usize, String> {
+) -> Result<Ensured, String> {
     if let Some(index) = h2_shader_parameter_index(tag, parameters_block_path, parameter_name) {
-        return Ok(index);
+        return Ok(Ensured {
+            index,
+            created: false,
+        });
     }
-    let index = add_block_element(tag, parameters_block_path)?;
-    apply_field_edit(
-        tag,
-        &format!("{parameters_block_path}[{index}]/name"),
-        parameter_name,
-    )?;
-    apply_field_edit(
-        tag,
-        &format!("{parameters_block_path}[{index}]/type"),
-        &parameter_type_index.to_string(),
-    )?;
-    Ok(index)
+    let index = with_new_element(tag, parameters_block_path, |tag, index| {
+        apply_field_edit(
+            tag,
+            &format!("{parameters_block_path}[{index}]/name"),
+            parameter_name,
+        )?;
+        apply_field_edit(
+            tag,
+            &format!("{parameters_block_path}[{index}]/type"),
+            &parameter_type_index.to_string(),
+        )?;
+        Ok(index)
+    })?;
+    Ok(Ensured {
+        index,
+        created: true,
+    })
 }
 
 fn h2_shader_parameter_index(
@@ -446,21 +482,29 @@ fn ensure_h2_animation_property(
     parameters_block_path: &str,
     parameter_index: usize,
     animation_type_index: i32,
-) -> Result<usize, String> {
+) -> Result<Ensured, String> {
     let animation_block_path =
         format!("{parameters_block_path}[{parameter_index}]/animation properties");
     if let Some(index) =
         h2_animation_property_index(tag, &animation_block_path, animation_type_index)
     {
-        return Ok(index);
+        return Ok(Ensured {
+            index,
+            created: false,
+        });
     }
-    let index = add_block_element(tag, &animation_block_path)?;
-    apply_field_edit(
-        tag,
-        &format!("{animation_block_path}[{index}]/type"),
-        &animation_type_index.to_string(),
-    )?;
-    Ok(index)
+    let index = with_new_element(tag, &animation_block_path, |tag, index| {
+        apply_field_edit(
+            tag,
+            &format!("{animation_block_path}[{index}]/type"),
+            &animation_type_index.to_string(),
+        )?;
+        Ok(index)
+    })?;
+    Ok(Ensured {
+        index,
+        created: true,
+    })
 }
 
 fn h2_animation_property_index(
@@ -1209,12 +1253,11 @@ pub(in crate::app) fn apply_model_variant_ops(
 
 fn apply_one_model_variant_op(tag: &mut TagFile, op: &ModelVariantOp) -> Result<String, String> {
     match op {
-        ModelVariantOp::Create { name, regions } => {
-            let variant_index = add_block_element(tag, "variants")?;
-            apply_field_edit(tag, &format!("variants[{variant_index}]/name"), name)?;
-            write_model_variant_regions(tag, variant_index, regions)?;
+        ModelVariantOp::Create { name, regions } => with_new_element(tag, "variants", |tag, index| {
+            apply_field_edit(tag, &format!("variants[{index}]/name"), name)?;
+            write_model_variant_regions(tag, index, regions)?;
             Ok(format!("Created model variant '{name}'"))
-        }
+        }),
         ModelVariantOp::Update {
             variant_index,
             regions,
@@ -1288,6 +1331,42 @@ pub(in crate::app) fn add_block_element(tag: &mut TagFile, path: &str) -> Result
     Ok(block.add_element())
 }
 
+/// Add an element to the block at `path` and fill it with `fill`. If filling
+/// fails, the element is deleted again, so a failed op leaves the tag as it
+/// found it.
+///
+/// Ops that add an element and then write its fields used to stop at the
+/// first failed write and leave the half-built element behind. Their callers
+/// only mark the document dirty on success, so that element was an unsaved
+/// change nothing knew about.
+fn with_new_element<T>(
+    tag: &mut TagFile,
+    path: &str,
+    fill: impl FnOnce(&mut TagFile, usize) -> Result<T, String>,
+) -> Result<T, String> {
+    let index = add_block_element(tag, path)?;
+    fill(tag, index).inspect_err(|_| delete_block_element(tag, path, index))
+}
+
+/// Undo an element added by this module. Best effort: it runs on a path that
+/// is already reporting an error.
+fn delete_block_element(tag: &mut TagFile, path: &str, index: usize) {
+    let mut root = tag.root_mut();
+    if let Some(mut field) = root.field_path_mut(path)
+        && let Some(mut block) = field.as_block_mut()
+    {
+        let _ = block.delete_element(index);
+    }
+}
+
+/// An element found by name, or created because it was missing. A caller that
+/// fails later removes it only if it made it.
+#[derive(Clone, Copy)]
+struct Ensured {
+    index: usize,
+    created: bool,
+}
+
 fn clear_block(tag: &mut TagFile, path: &str) -> Result<(), String> {
     let mut root = tag.root_mut();
     let mut field = root
@@ -1304,83 +1383,47 @@ pub(in crate::app) fn apply_one_shader_param_op(
     tag: &mut TagFile,
     op: &ShaderParamOp,
 ) -> Result<String, String> {
-    // Step 1: append a new element to the parameters block.
-    let new_idx = {
-        let mut root = tag.root_mut();
-        let mut field = root
-            .field_path_mut(&op.parameters_block_path)
-            .ok_or_else(|| format!("parameters block not found: {}", op.parameters_block_path))?;
-        let mut block = field
-            .as_block_mut()
-            .ok_or_else(|| format!("not a block: {}", op.parameters_block_path))?;
-        block.add_element()
-    };
-
-    // Step 2: write parameter name.
-    let name_path = format!("{}[{}]/parameter name", op.parameters_block_path, new_idx);
-    apply_field_edit(tag, &name_path, &op.parameter_name)?;
-
-    // Step 3: initialise requested fields.
-    for initial in &op.initial_fields {
-        let field = escape_field_path_segment(&initial.field);
-        let field_path = format!("{}[{}]/{}", op.parameters_block_path, new_idx, field);
-        apply_field_edit(tag, &field_path, &initial.input)?;
-    }
-
-    for animated in &op.animated_parameters {
-        let animated_block_path = format!(
-            "{}[{}]/animated parameters",
-            op.parameters_block_path, new_idx
-        );
-        apply_one_shader_op(
-            tag,
-            &ShaderOp {
-                animated_block_path,
-                output_type_index: animated.output_type_index,
-                initial_function_hex: animated.initial_function_hex.clone(),
-            },
-        )?;
-    }
-
-    Ok(format!(
-        "Created parameter '{}' at {}[{}]",
-        op.parameter_name, op.parameters_block_path, new_idx
-    ))
+    let block_path = &op.parameters_block_path;
+    with_new_element(tag, block_path, |tag, new_idx| {
+        let name_path = format!("{block_path}[{new_idx}]/parameter name");
+        apply_field_edit(tag, &name_path, &op.parameter_name)?;
+        for initial in &op.initial_fields {
+            let field = escape_field_path_segment(&initial.field);
+            apply_field_edit(tag, &format!("{block_path}[{new_idx}]/{field}"), &initial.input)?;
+        }
+        for animated in &op.animated_parameters {
+            apply_one_shader_op(
+                tag,
+                &ShaderOp {
+                    animated_block_path: format!("{block_path}[{new_idx}]/animated parameters"),
+                    output_type_index: animated.output_type_index,
+                    initial_function_hex: animated.initial_function_hex.clone(),
+                },
+            )?;
+        }
+        Ok(format!(
+            "Created parameter '{}' at {block_path}[{new_idx}]",
+            op.parameter_name
+        ))
+    })
 }
 
 pub(in crate::app) fn apply_one_shader_op(
     tag: &mut TagFile,
     op: &ShaderOp,
 ) -> Result<String, String> {
-    // Step 1: append one element to the animated-parameters block and capture its index.
-    let new_idx = {
-        let mut root = tag.root_mut();
-        let mut field = root
-            .field_path_mut(&op.animated_block_path)
-            .ok_or_else(|| {
-                format!(
-                    "animated params block not found: {}",
-                    op.animated_block_path
-                )
-            })?;
-        let mut block = field
-            .as_block_mut()
-            .ok_or_else(|| format!("not a block: {}", op.animated_block_path))?;
-        block.add_element()
-    };
-
-    // Step 2: set the output `type` field on the newly created element.
-    let type_path = format!("{}[{}]/type", op.animated_block_path, new_idx);
-    apply_field_edit(tag, &type_path, &op.output_type_index.to_string())?;
-
-    // Step 3: write the initial `mapping_function` blob into `function/data`.
-    let data_path = format!("{}[{}]/function/data", op.animated_block_path, new_idx);
-    apply_field_edit(tag, &data_path, &op.initial_function_hex)?;
-
-    Ok(format!(
-        "Added animated parameter (type {}) at {}[{}]",
-        op.output_type_index, op.animated_block_path, new_idx
-    ))
+    let block_path = &op.animated_block_path;
+    with_new_element(tag, block_path, |tag, new_idx| {
+        let type_path = format!("{block_path}[{new_idx}]/type");
+        apply_field_edit(tag, &type_path, &op.output_type_index.to_string())?;
+        // The initial `mapping_function` blob goes into `function/data`.
+        let data_path = format!("{block_path}[{new_idx}]/function/data");
+        apply_field_edit(tag, &data_path, &op.initial_function_hex)?;
+        Ok(format!(
+            "Added animated parameter (type {}) at {block_path}[{new_idx}]",
+            op.output_type_index
+        ))
+    })
 }
 
 #[cfg(test)]
@@ -1461,6 +1504,63 @@ mod campaign_evolved_field_paths {
             eprintln!("  {tagname}  ->  {p}");
         }
         assert!(broken.is_empty(), "{} unresolvable paths", broken.len());
+    }
+}
+
+#[cfg(test)]
+mod rollback_tests {
+    use super::*;
+
+    const PARAMETERS: &str = "render_method/parameters";
+
+    fn parameter_count(tag: &TagFile) -> usize {
+        tag.root()
+            .field_path(PARAMETERS)
+            .and_then(|field| field.as_block())
+            .map(|block| block.len())
+            .expect("a Halo 3 shader has a parameters block")
+    }
+
+    /// A value typed into a new scalar row that does not parse must fail the
+    /// whole op. It used to fail only its last step, leaving the parameter it
+    /// had just added — named, empty, and unknown to the dirty flag.
+    #[test]
+    fn a_failed_shader_parameter_op_leaves_no_parameter_behind() {
+        let schema = locate_definitions_root().join("halo3_mcc/shader.json");
+        let mut tag = TagFile::new(schema).unwrap();
+        let before = parameter_count(&tag);
+
+        let result = apply_one_shader_param_op(
+            &mut tag,
+            &ShaderParamOp {
+                parameters_block_path: PARAMETERS.to_owned(),
+                parameter_name: "specular_coefficient".to_owned(),
+                initial_fields: vec![ShaderParamInitialField {
+                    field: "real".to_owned(),
+                    input: "not a number".to_owned(),
+                }],
+                animated_parameters: Vec::new(),
+            },
+        );
+
+        assert!(result.is_err());
+        assert_eq!(parameter_count(&tag), before);
+
+        // And the same op with a value that parses still adds one.
+        apply_one_shader_param_op(
+            &mut tag,
+            &ShaderParamOp {
+                parameters_block_path: PARAMETERS.to_owned(),
+                parameter_name: "specular_coefficient".to_owned(),
+                initial_fields: vec![ShaderParamInitialField {
+                    field: "real".to_owned(),
+                    input: "0.5".to_owned(),
+                }],
+                animated_parameters: Vec::new(),
+            },
+        )
+        .unwrap();
+        assert_eq!(parameter_count(&tag), before + 1);
     }
 }
 
