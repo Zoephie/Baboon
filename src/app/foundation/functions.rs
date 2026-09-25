@@ -11,6 +11,20 @@ pub(in crate::app) fn draw_foundation_function_row(
     path: &str,
     edit: &mut FieldEditContext<'_>,
 ) {
+    let key = function_row_key(ui, function, &meta.label, depth, edit.editable);
+    draw_function_row_unless_offscreen(ui, ("function_row", path), key, |ui| {
+        draw_foundation_function_row_contents(ui, meta, function, depth, path, edit);
+    });
+}
+
+fn draw_foundation_function_row_contents(
+    ui: &mut Ui,
+    meta: &FieldDisplayMeta,
+    function: &TagFunction,
+    depth: usize,
+    path: &str,
+    edit: &mut FieldEditContext<'_>,
+) {
     ui.horizontal_top(|ui| {
         ui.add_space(depth as f32 * 12.0);
         foundation_label_cell(ui, &meta.label, meta.help.as_deref());
@@ -47,6 +61,8 @@ pub(in crate::app) fn draw_foundation_function_row(
                         }
                     });
                     ui.add_space(4.0);
+                    #[cfg(test)]
+                    FUNCTION_PREVIEWS_BUILT.with(|count| count.set(count.get() + 1));
                     ui.push_id(("function", path), |ui| {
                         // Inline preview is always read-only; the editable
                         // editor lives in the f() popup.
@@ -91,6 +107,20 @@ fn draw_foundation_wrapped_function_row(
     depth: usize,
     edit: &mut FieldEditContext<'_>,
 ) {
+    let key = function_row_key(ui, &view.function, &label, depth, edit.editable);
+    let id_source = ("wrapped_function_row", data_path_id(&view).to_owned());
+    draw_function_row_unless_offscreen(ui, id_source, key, |ui| {
+        draw_foundation_wrapped_function_row_contents(ui, label, view, depth, edit);
+    });
+}
+
+fn draw_foundation_wrapped_function_row_contents(
+    ui: &mut Ui,
+    label: String,
+    view: FunctionView,
+    depth: usize,
+    edit: &mut FieldEditContext<'_>,
+) {
     ui.horizontal_top(|ui| {
         ui.add_space(depth as f32 * 12.0);
         foundation_label_cell(ui, &label, None);
@@ -123,6 +153,8 @@ fn draw_foundation_wrapped_function_row(
                         }
                     });
                     ui.add_space(4.0);
+                    #[cfg(test)]
+                    FUNCTION_PREVIEWS_BUILT.with(|count| count.set(count.get() + 1));
                     ui.push_id(("wrapped_function", data_path_id(&view)), |ui| {
                         let mut preview = view.clone();
                         let (mut graph, mut point, mut no_popup) = (0usize, 0usize, None);
@@ -138,6 +170,88 @@ fn draw_foundation_wrapped_function_row(
                 });
             });
     });
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Read-only function previews this thread built.
+    pub(in crate::app) static FUNCTION_PREVIEWS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    /// Off draws every function row, as the editor did before it culled any.
+    pub(in crate::app) static FUNCTION_ROWS_CULLED: std::cell::Cell<bool> = const { std::cell::Cell::new(true) };
+}
+
+#[cfg(test)]
+fn function_rows_culled() -> bool {
+    FUNCTION_ROWS_CULLED.with(|culled| culled.get())
+}
+
+#[cfg(not(test))]
+fn function_rows_culled() -> bool {
+    true
+}
+
+/// Everything a function row's height depends on: the function itself, what
+/// the row shows around it, and the space it is laid out in.
+fn function_row_key(
+    ui: &Ui,
+    function: &TagFunction,
+    label: &str,
+    depth: usize,
+    editable: bool,
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    function.to_bytes().hash(&mut hasher);
+    (function.encoding() == FunctionEncoding::H2).hash(&mut hasher);
+    label.hash(&mut hasher);
+    depth.hash(&mut hasher);
+    editable.hash(&mut hasher);
+    // The viewport's width, not `available_width`: a scroll area's content
+    // grows to the widest row laid out so far, so that one depends on which
+    // rows above were culled.
+    ui.clip_rect().width().to_bits().hash(&mut hasher);
+    ui.ctx().pixels_per_point().to_bits().hash(&mut hasher);
+    hasher.finish()
+}
+
+/// Draw a function row, unless the height it had when last drawn puts all of
+/// it outside the clip rect: then reserve that height instead. Each row
+/// builds a full read-only function editor, graphs sampled and all, so a tag
+/// with many functions paid for every one of them each frame, on screen or
+/// not.
+///
+/// The height is reused only under the same `key`, so a function edited
+/// while its row is off screen (the f() popup outlives the row) is measured
+/// again.
+fn draw_function_row_unless_offscreen(
+    ui: &mut Ui,
+    id_source: impl std::hash::Hash,
+    key: u64,
+    draw: impl FnOnce(&mut Ui),
+) {
+    let top_down = ui.layout().main_dir() == egui::Direction::TopDown;
+    if !top_down {
+        draw(ui);
+        return;
+    }
+    let id = ui.make_persistent_id(id_source);
+    let spacing = ui.spacing().item_spacing.y;
+    if function_rows_culled()
+        && let Some((cached_key, height)) = ui.data(|data| data.get_temp::<(u64, f32)>(id))
+        && cached_key == key
+        && height > spacing
+    {
+        let rect =
+            egui::Rect::from_min_size(ui.cursor().min, egui::vec2(ui.available_width(), height));
+        if !ui.is_rect_visible(rect) {
+            ui.allocate_space(egui::vec2(0.0, height - spacing));
+            return;
+        }
+    }
+    let top = ui.cursor().top();
+    draw(ui);
+    let height = ui.cursor().top() - top;
+    ui.data_mut(|data| data.insert_temp(id, (key, height)));
 }
 
 fn data_path_id(view: &FunctionView) -> &str {
@@ -224,3 +338,7 @@ pub(in crate::app) fn draw_foundation_enum_row(
         draw_field_help(ui, meta);
     });
 }
+
+#[cfg(test)]
+#[path = "../tests/function_row_culling.rs"]
+mod function_row_culling;
