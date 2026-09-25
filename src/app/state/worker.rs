@@ -381,6 +381,11 @@ pub(in crate::app) enum WorkerMessage {
     },
     // Background reverse-dependency index build finished; the stamp guards
     // against staleness after a source reload.
+    /// A whole-source listing from the Tools menu, read off the UI thread.
+    SourceListingReady {
+        stamp: KitStamp,
+        results: TagQueryResults,
+    },
     ReverseDependenciesBuilt {
         stamp: KitStamp,
         index: ReverseDependencyIndex,

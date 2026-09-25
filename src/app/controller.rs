@@ -879,6 +879,9 @@ impl Baboon {
                     }
                     false
                 }
+                WorkerMessage::SourceListingReady { stamp, results } => {
+                    self.handle_source_listing_ready(stamp, results)
+                }
                 WorkerMessage::ReverseDependenciesBuilt {
                     stamp,
                     index,
@@ -7108,157 +7111,37 @@ impl Baboon {
         Ok(source.full_entry_set())
     }
 
-    pub(super) fn show_map_ids(&mut self) {
-        let listed = match self.listing_entries() {
-            Ok(listed) => listed,
-            Err(note) => {
-                self.query_results = Some(TagQueryResults {
-                    kit: self.active_kit_id(),
-                    title: "Scenario map IDs".to_owned(),
-                    entries: Vec::new(),
-                    annotations: Vec::new(),
-                    note: Some(note),
-                    ref_target: None,
-                });
-                return;
-            }
-        };
-        let Some(source) = self.source() else {
-            return;
-        };
-        let mut entries = Vec::new();
-        let mut annotations = Vec::new();
-        for entry in listed {
-            if &entry.group_tag.to_be_bytes() != b"scnr" {
-                continue;
-            }
-            let Ok(tag) = crate::source::read_entry(&source.source, entry) else {
-                continue;
-            };
-            let root = tag.root();
-            if let Some(id) = root.read_int_any("map id") {
-                // `map name` carries a `#tooltip` suffix in Reach/H4, so resolve
-                // it via the cleaned-name lookup rather than an exact match.
-                let name = find_full_field_name(&root, "map name")
-                    .and_then(|full| root.read_string_id(full))
-                    .unwrap_or_default();
-                annotations.push(if name.is_empty() {
-                    format!("map id {id}")
-                } else {
-                    format!("map id {id}  ({name})")
-                });
-                entries.push(entry.clone());
-            }
-        }
-        let note = entries.is_empty().then(|| {
-            "No scenario map IDs found (scnr tags only; classic Halo 2 stores them elsewhere)."
-                .to_owned()
-        });
-        self.query_results = Some(TagQueryResults {
-            kit: self.active_kit_id(),
-            title: format!("Scenario map IDs ({})", entries.len()),
-            entries,
-            annotations,
-            note,
-            ref_target: None,
-        });
-    }
-
-    /// Scan every `snd!` tag once, reading its `sound class` + `compression`
-    /// enum names. Shared by the class-listing and uncompressed-listing tools.
-    /// Returns `(class, compression, entry)` triples, or `None` if no source.
-    fn scan_sound_tags(&self) -> Result<Vec<(String, String, TagEntry)>, String> {
-        let listed = self.listing_entries()?;
-        let source = self.source().ok_or_else(|| "No source loaded.".to_owned())?;
-        let mut rows = Vec::new();
-        for entry in listed {
-            if &entry.group_tag.to_be_bytes() != b"snd!" {
-                continue;
-            }
-            let Ok(tag) = crate::source::read_entry(&source.source, entry) else {
-                continue;
-            };
-            let root = tag.root();
-            let class = find_full_field_name(&root, "sound class")
-                .and_then(|full| root.read_enum_name(full))
-                .filter(|value| !value.is_empty())
-                .unwrap_or_else(|| "(none)".to_owned());
-            let compression = find_full_field_name(&root, "compression")
-                .and_then(|full| root.read_enum_name(full))
-                .unwrap_or_default();
-            rows.push((class, compression, entry.clone()));
-        }
-        Ok(rows)
+    /// List every scenario's map id (and name, where it has one).
+    pub(super) fn show_map_ids(&mut self, ctx: &egui::Context) {
+        self.show_source_listing(SourceListing::MapIds, ctx);
     }
 
     /// List every `snd!` tag annotated with its sound class + compression, with a
     /// per-class count summary (mirrors `count-class-sounds` /
     /// `count-all-class-sounds`).
-    pub(super) fn show_sounds_by_class(&mut self) {
-        let title = "Sounds by class";
-        let mut rows = match self.scan_sound_tags() {
-            Ok(rows) => rows,
-            Err(note) => {
-                self.query_results = Some(TagQueryResults {
-                    kit: self.active_kit_id(),
-                    title: title.to_owned(),
-                    entries: Vec::new(),
-                    annotations: Vec::new(),
-                    note: Some(note),
-                    ref_target: None,
-                });
-                return;
-            }
-        };
-        rows.sort_by(|a, b| {
-            a.0.cmp(&b.0)
-                .then_with(|| a.2.display_path.cmp(&b.2.display_path))
-        });
-        let mut counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
-        for (class, _, _) in &rows {
-            *counts.entry(class.as_str()).or_default() += 1;
-        }
-        let entries: Vec<TagEntry> = rows.iter().map(|(_, _, e)| e.clone()).collect();
-        let annotations: Vec<String> = rows
-            .iter()
-            .map(|(class, comp, _)| {
-                if comp.is_empty() {
-                    format!("[{class}]")
-                } else {
-                    format!("[{class}] {comp}")
-                }
-            })
-            .collect();
-        let note = if entries.is_empty() {
-            Some("No sound tags found.".to_owned())
-        } else {
-            let summary = counts
-                .iter()
-                .map(|(k, v)| format!("{k}: {v}"))
-                .collect::<Vec<_>>()
-                .join(", ");
-            Some(format!("{} class(es) \u{2014} {summary}", counts.len()))
-        };
-        self.query_results = Some(TagQueryResults {
-            kit: self.active_kit_id(),
-            title: format!("{title} ({})", entries.len()),
-            entries,
-            annotations,
-            note,
-            ref_target: None,
-        });
+    pub(super) fn show_sounds_by_class(&mut self, ctx: &egui::Context) {
+        self.show_source_listing(SourceListing::SoundsByClass, ctx);
     }
 
     /// List `snd!` tags stored uncompressed (compression name contains "none"),
     /// mirroring `dump-uncompressed-sounds`.
-    pub(super) fn show_uncompressed_sounds(&mut self) {
-        let title = "Uncompressed sounds";
-        let rows = match self.scan_sound_tags() {
-            Ok(rows) => rows,
+    pub(super) fn show_uncompressed_sounds(&mut self, ctx: &egui::Context) {
+        self.show_source_listing(SourceListing::UncompressedSounds, ctx);
+    }
+
+    /// Run a whole-source listing on a worker and show it when it lands.
+    ///
+    /// These read every scenario or sound tag in the source, which for sounds
+    /// is thousands of full tag parses, and they used to do it on the UI
+    /// thread. The results window says what it is reading meanwhile.
+    fn show_source_listing(&mut self, listing: SourceListing, ctx: &egui::Context) {
+        let kit = self.active_kit_id();
+        let entries = match self.listing_entries() {
+            Ok(entries) => entries.to_vec(),
             Err(note) => {
                 self.query_results = Some(TagQueryResults {
-                    kit: self.active_kit_id(),
-                    title: title.to_owned(),
+                    kit,
+                    title: listing.title().to_owned(),
                     entries: Vec::new(),
                     annotations: Vec::new(),
                     note: Some(note),
@@ -7267,27 +7150,56 @@ impl Baboon {
                 return;
             }
         };
-        let mut hits: Vec<(String, String, TagEntry)> = rows
-            .into_iter()
-            .filter(|(_, comp, _)| comp.to_ascii_lowercase().contains("none"))
-            .collect();
-        hits.sort_by(|a, b| a.2.display_path.cmp(&b.2.display_path));
-        let entries: Vec<TagEntry> = hits.iter().map(|(_, _, e)| e.clone()).collect();
-        let annotations: Vec<String> = hits
+        let Some(source) = self.source().map(|source| source.source.clone()) else {
+            return;
+        };
+        let wanted = listing.group();
+        let count = entries
             .iter()
-            .map(|(class, comp, _)| format!("{comp}  [{class}]"))
-            .collect();
-        let note = entries
-            .is_empty()
-            .then(|| "No uncompressed sound tags found.".to_owned());
+            .filter(|entry| entry.group_tag.to_be_bytes() == *wanted)
+            .count();
         self.query_results = Some(TagQueryResults {
-            kit: self.active_kit_id(),
-            title: format!("{title} ({})", entries.len()),
-            entries,
-            annotations,
-            note,
+            kit,
+            title: listing.title().to_owned(),
+            entries: Vec::new(),
+            annotations: Vec::new(),
+            note: Some(format!("Reading {count} tag(s)…")),
             ref_target: None,
         });
+        let stamp = self.kit_stamp();
+        spawn_worker(
+            &self.tx,
+            ctx,
+            move || WorkerMessage::SourceListingReady {
+                stamp,
+                results: build_source_listing(listing, &source, &entries, stamp.kit),
+            },
+            move |error| WorkerMessage::SourceListingReady {
+                stamp,
+                results: TagQueryResults {
+                    kit: stamp.kit,
+                    title: listing.title().to_owned(),
+                    entries: Vec::new(),
+                    annotations: Vec::new(),
+                    note: Some(error),
+                    ref_target: None,
+                },
+            },
+        );
+    }
+
+    /// Applies `WorkerMessage::SourceListingReady` if its kit still has the
+    /// source it was read from.
+    pub(super) fn handle_source_listing_ready(
+        &mut self,
+        stamp: KitStamp,
+        results: TagQueryResults,
+    ) -> bool {
+        if self.resolve_stamp(stamp).is_none() {
+            return true;
+        }
+        self.query_results = Some(results);
+        false
     }
 
     /// Locate a tag in the browser tree: switch to Folders mode, clear the
@@ -10336,6 +10248,34 @@ mod listing_entries_tests {
         assert_eq!(app.listing_entries().map(<[TagEntry]>::len), Ok(1));
     }
 
+    /// A listing reads its tags on a worker: the window says it is reading,
+    /// and the listing arrives with the worker's message.
+    #[test]
+    fn a_source_listing_is_read_off_the_ui_thread() {
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(source(
+            TagSource::SingleFile {
+                path: PathBuf::from("/kit/tags/a.sound"),
+            },
+            vec![sound()],
+        ));
+        let ctx = egui::Context::default();
+
+        app.show_sounds_by_class(&ctx);
+        let waiting = app.query_results.as_ref().and_then(|results| results.note.clone());
+        let message = app
+            .rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the listing worker answers");
+        app.tx.send(message).unwrap();
+        app.process_worker_messages(&ctx);
+
+        assert_eq!(waiting.as_deref(), Some("Reading 1 tag(s)…"));
+        let results = app.query_results.expect("results");
+        assert_eq!(results.title, "Sounds by class (0)", "the one sound is unreadable");
+        assert_eq!(results.note.as_deref(), Some("No sound tags found."));
+    }
+
     /// A loose folder mid-scan has only the folders browsed so far. Saying
     /// "none found" from that is wrong; saying the index is not ready is not.
     #[test]
@@ -10387,6 +10327,163 @@ mod tsv_paste_summary_tests {
             "Pasted 1 cell(s) across 1 row(s) — 3 extra row(s) ignored (block has 1 elements; add more first)"
         );
     }
+}
+
+/// The whole-source listings in the Tools menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SourceListing {
+    MapIds,
+    SoundsByClass,
+    UncompressedSounds,
+}
+
+impl SourceListing {
+    fn title(self) -> &'static str {
+        match self {
+            Self::MapIds => "Scenario map IDs",
+            Self::SoundsByClass => "Sounds by class",
+            Self::UncompressedSounds => "Uncompressed sounds",
+        }
+    }
+
+    fn group(self) -> &'static [u8; 4] {
+        match self {
+            Self::MapIds => b"scnr",
+            Self::SoundsByClass | Self::UncompressedSounds => b"snd!",
+        }
+    }
+}
+
+/// Read every tag a listing is about and build its results. Runs on a worker.
+fn build_source_listing(
+    listing: SourceListing,
+    source: &TagSource,
+    entries: &[TagEntry],
+    kit: KitId,
+) -> TagQueryResults {
+    let (entries, annotations, note) = match listing {
+        SourceListing::MapIds => listing_map_ids(source, entries),
+        SourceListing::SoundsByClass => listing_sounds_by_class(scan_sound_tags(source, entries)),
+        SourceListing::UncompressedSounds => {
+            listing_uncompressed_sounds(scan_sound_tags(source, entries))
+        }
+    };
+    TagQueryResults {
+        kit,
+        title: format!("{} ({})", listing.title(), entries.len()),
+        entries,
+        annotations,
+        note,
+        ref_target: None,
+    }
+}
+
+type ListingRows = (Vec<TagEntry>, Vec<String>, Option<String>);
+
+fn listing_map_ids(source: &TagSource, listed: &[TagEntry]) -> ListingRows {
+    let mut entries = Vec::new();
+    let mut annotations = Vec::new();
+    for entry in listed {
+        if &entry.group_tag.to_be_bytes() != b"scnr" {
+            continue;
+        }
+        let Ok(tag) = crate::source::read_entry(source, entry) else {
+            continue;
+        };
+        let root = tag.root();
+        if let Some(id) = root.read_int_any("map id") {
+            // `map name` carries a `#tooltip` suffix in Reach/H4, so resolve
+            // it via the cleaned-name lookup rather than an exact match.
+            let name = find_full_field_name(&root, "map name")
+                .and_then(|full| root.read_string_id(full))
+                .unwrap_or_default();
+            annotations.push(if name.is_empty() {
+                format!("map id {id}")
+            } else {
+                format!("map id {id}  ({name})")
+            });
+            entries.push(entry.clone());
+        }
+    }
+    let note = entries.is_empty().then(|| {
+        "No scenario map IDs found (scnr tags only; classic Halo 2 stores them elsewhere)."
+            .to_owned()
+    });
+    (entries, annotations, note)
+}
+
+/// Every `snd!` tag's `sound class` and `compression` enum names, as
+/// `(class, compression, entry)`. Shared by both sound listings.
+fn scan_sound_tags(source: &TagSource, listed: &[TagEntry]) -> Vec<(String, String, TagEntry)> {
+    let mut rows = Vec::new();
+    for entry in listed {
+        if &entry.group_tag.to_be_bytes() != b"snd!" {
+            continue;
+        }
+        let Ok(tag) = crate::source::read_entry(source, entry) else {
+            continue;
+        };
+        let root = tag.root();
+        let class = find_full_field_name(&root, "sound class")
+            .and_then(|full| root.read_enum_name(full))
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "(none)".to_owned());
+        let compression = find_full_field_name(&root, "compression")
+            .and_then(|full| root.read_enum_name(full))
+            .unwrap_or_default();
+        rows.push((class, compression, entry.clone()));
+    }
+    rows
+}
+
+fn listing_sounds_by_class(mut rows: Vec<(String, String, TagEntry)>) -> ListingRows {
+    rows.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then_with(|| a.2.display_path.cmp(&b.2.display_path))
+    });
+    let mut counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for (class, _, _) in &rows {
+        *counts.entry(class.as_str()).or_default() += 1;
+    }
+    let entries: Vec<TagEntry> = rows.iter().map(|(_, _, e)| e.clone()).collect();
+    let annotations: Vec<String> = rows
+        .iter()
+        .map(|(class, comp, _)| {
+            if comp.is_empty() {
+                format!("[{class}]")
+            } else {
+                format!("[{class}] {comp}")
+            }
+        })
+        .collect();
+    let note = if entries.is_empty() {
+        Some("No sound tags found.".to_owned())
+    } else {
+        let summary = counts
+            .iter()
+            .map(|(k, v)| format!("{k}: {v}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Some(format!("{} class(es) \u{2014} {summary}", counts.len()))
+    };
+    (entries, annotations, note)
+}
+
+fn listing_uncompressed_sounds(rows: Vec<(String, String, TagEntry)>) -> ListingRows {
+    let mut hits: Vec<(String, String, TagEntry)> = rows
+        .into_iter()
+        .filter(|(_, comp, _)| comp.to_ascii_lowercase().contains("none"))
+        .collect();
+    hits.sort_by(|a, b| a.2.display_path.cmp(&b.2.display_path));
+    let entries: Vec<TagEntry> = hits.iter().map(|(_, _, e)| e.clone()).collect();
+    let annotations: Vec<String> = hits
+        .iter()
+        .map(|(class, comp, _)| format!("{comp}  [{class}]"))
+        .collect();
+    let note = entries
+        .is_empty()
+        .then(|| "No uncompressed sound tags found.".to_owned());
+    (entries, annotations, note)
 }
 
 /// Where `tag` points at the reference `(group_tag, target)`, one row per

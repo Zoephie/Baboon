@@ -506,15 +506,15 @@ impl Baboon {
                         }
                         if ui.button("List Scenario Map IDs...").clicked() {
                             ui.close_menu();
-                            self.show_map_ids();
+                            self.show_map_ids(ctx);
                         }
                         if ui.button("List Sounds by Class...").clicked() {
                             ui.close_menu();
-                            self.show_sounds_by_class();
+                            self.show_sounds_by_class(ctx);
                         }
                         if ui.button("List Uncompressed Sounds...").clicked() {
                             ui.close_menu();
-                            self.show_uncompressed_sounds();
+                            self.show_uncompressed_sounds(ctx);
                         }
                         if ui.button("Search Field Values...").clicked() {
                             ui.close_menu();
