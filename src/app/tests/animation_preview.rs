@@ -86,10 +86,10 @@ fn a_bind_pose_animation_skins_every_node_to_identity() {
     let frame = bind_pose_frame(&nodes);
     let data = preview_with_nodes(nodes);
     let mut state = ModelPreviewState::default();
-    state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose {
-        animation_index: 0,
-        frames: vec![frame],
-    }));
+    state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose::new(
+        0,
+        vec![frame],
+    )));
 
     let rows = animation_skinning_rows(&data, &state).expect("skinning rows");
     assert_eq!(rows.len(), 2 * 3);
@@ -119,10 +119,10 @@ fn a_translated_root_moves_the_skin_by_the_delta() {
     frame[0].translation[0] += 0.5;
     let data = preview_with_nodes(nodes);
     let mut state = ModelPreviewState::default();
-    state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose {
-        animation_index: 0,
-        frames: vec![frame],
-    }));
+    state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose::new(
+        0,
+        vec![frame],
+    )));
 
     let rows = animation_skinning_rows(&data, &state).expect("skinning rows");
     // Root: identity rotation part relative to bind, translation +0.5 in x.
@@ -144,10 +144,10 @@ fn armature_positions_follow_the_current_animation_pose() {
     frame[0].translation[0] += 0.5;
     let data = preview_with_nodes(nodes);
     let mut state = ModelPreviewState::default();
-    state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose {
-        animation_index: 0,
-        frames: vec![frame],
-    }));
+    state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose::new(
+        0,
+        vec![frame],
+    )));
     let animated = armature_node_positions(&data, &state);
 
     assert_eq!(animated.len(), 2);
@@ -167,10 +167,10 @@ fn stop_restores_bind_pose_without_unloading_the_animation() {
     let data = preview_with_nodes(nodes);
     let mut state = ModelPreviewState::default();
     state.animation.selected = Some(2);
-    state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose {
-        animation_index: 2,
-        frames: vec![frame],
-    }));
+    state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose::new(
+        2,
+        vec![frame],
+    )));
     state.animation.stopped = true;
 
     assert!(animation_skinning_rows(&data, &state).is_none());
@@ -187,10 +187,10 @@ fn a_node_missing_from_the_pose_stays_at_bind() {
     let frame = vec![bind_pose_frame(&nodes)[0]]; // only the root
     let data = preview_with_nodes(nodes);
     let mut state = ModelPreviewState::default();
-    state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose {
-        animation_index: 0,
-        frames: vec![frame],
-    }));
+    state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose::new(
+        0,
+        vec![frame],
+    )));
 
     let rows = animation_skinning_rows(&data, &state).expect("skinning rows");
     assert!(

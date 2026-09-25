@@ -66,6 +66,42 @@ pub(crate) struct PreviewAnimationPose {
     pub animation_index: usize,
     /// `frames[frame][preview_node]`, parent-local.
     pub frames: Vec<Vec<PreviewNodeTransform>>,
+    /// How far any frame can carry a node from the model origin; see
+    /// [`PreviewAnimationPose::new`]. Worked out once here: the camera needs
+    /// it every frame, and it walks every node of every frame.
+    pub reach: f32,
+}
+
+impl PreviewAnimationPose {
+    pub fn new(animation_index: usize, frames: Vec<Vec<PreviewNodeTransform>>) -> Self {
+        let reach = pose_reach_bound(&frames);
+        Self {
+            animation_index,
+            frames,
+            reach,
+        }
+    }
+}
+
+/// How far a decoded pose can carry any node from the model origin, as the
+/// largest per-frame sum of local translation norms (rotations preserve
+/// norms, so a chain can never reach further than its links laid end to end),
+/// stretched by the frame's largest scale. Loose on purpose: it only sizes
+/// the depth window, where slack costs precision and a tight miss costs
+/// geometry.
+fn pose_reach_bound(frames: &[Vec<PreviewNodeTransform>]) -> f32 {
+    let mut reach = 0.0f32;
+    for frame in frames {
+        let mut total = 0.0f32;
+        let mut max_scale = 1.0f32;
+        for transform in frame {
+            let [x, y, z] = transform.translation;
+            total += (x * x + y * y + z * z).sqrt();
+            max_scale = max_scale.max(transform.scale.abs());
+        }
+        reach = reach.max(total * max_scale);
+    }
+    if reach.is_finite() { reach } else { 0.0 }
 }
 
 /// Cross-frame playback state, one per previewed document.
@@ -520,10 +556,10 @@ impl Baboon {
                             .collect()
                     })
                     .collect();
-                state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose {
+                state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose::new(
                     animation_index,
                     frames,
-                }));
+                )));
                 state.animation.time = 0.0;
                 state.animation.playing = true;
                 state.animation.stopped = false;

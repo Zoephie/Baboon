@@ -627,27 +627,6 @@ const PREVIEW_RENDER_DISTANCE: f32 = 8.0;
 /// limits — the practical floor is 1024 vec4.
 pub(in crate::app) const MAX_PREVIEW_BONES: usize = 256;
 
-/// How far a decoded pose can carry any node from the model origin, as the
-/// largest per-frame sum of local translation norms (rotations preserve
-/// norms, so a chain can never reach further than its links laid end to end),
-/// stretched by the frame's largest scale. Loose on purpose: it only sizes
-/// the depth window, where slack costs precision and a tight miss costs
-/// geometry.
-fn pose_reach_bound(pose: &PreviewAnimationPose) -> f32 {
-    let mut reach = 0.0f32;
-    for frame in &pose.frames {
-        let mut total = 0.0f32;
-        let mut max_scale = 1.0f32;
-        for transform in frame {
-            let [x, y, z] = transform.translation;
-            total += (x * x + y * y + z * z).sqrt();
-            max_scale = max_scale.max(transform.scale.abs());
-        }
-        reach = reach.max(total * max_scale);
-    }
-    if reach.is_finite() { reach } else { 0.0 }
-}
-
 struct ModelGpuFrame {
     preview: Arc<RenderModelPreview>,
     geometry_id: u64,
@@ -1601,21 +1580,15 @@ mod gpu_renderer_tests {
                 },
             ]
         };
-        let pose = PreviewAnimationPose {
-            animation_index: 0,
-            frames: vec![frame(0.0), frame(3.0)],
-        };
-        let reach = pose_reach_bound(&pose);
+        let pose = PreviewAnimationPose::new(0, vec![frame(0.0), frame(3.0)]);
+        let reach = pose.reach;
         let travelled = (3.0f32 * 3.0 + 0.9 * 0.9).sqrt() + 0.25;
         assert!(
             reach >= travelled - 1e-4,
             "reach {reach} misses the travelled frame {travelled}"
         );
-        let empty = PreviewAnimationPose {
-            animation_index: 0,
-            frames: Vec::new(),
-        };
-        assert_eq!(pose_reach_bound(&empty), 0.0);
+        let empty = PreviewAnimationPose::new(0, Vec::new());
+        assert_eq!(empty.reach, 0.0);
     }
 
     /// The extended render distance must clip exactly at its declared bounds
@@ -2148,7 +2121,7 @@ impl PreviewCamera {
             .animation
             .pose
             .as_deref()
-            .map(pose_reach_bound)
+            .map(|pose| pose.reach)
             .unwrap_or(0.0);
         Self {
             rect,
