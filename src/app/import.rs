@@ -108,6 +108,7 @@ pub(in crate::app) enum ConversionOutcome {
 }
 
 impl ConversionOutcome {
+    #[cfg(test)]
     /// The audited fields this conversion gives up, empty unless it is lossy.
     pub(in crate::app) fn losses(&self) -> &[String] {
         match self {

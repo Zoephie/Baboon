@@ -14,6 +14,7 @@ use serde::Serialize;
 
 const DUPLICATE_BACKUP_SUFFIX: &str = ".baboon-duplicate-backup";
 const DUPLICATE_BACKUP_MANIFEST_TAIL: &str = ".manifest.json";
+#[cfg(test)]
 const DUPLICATE_BACKUP_MANIFEST_SUFFIX: &str = ".baboon-duplicate-backup.manifest.json";
 const DUPLICATE_BACKUP_VERSION: u32 = 1;
 /// How many immutable backups may pile up beside one container before Baboon

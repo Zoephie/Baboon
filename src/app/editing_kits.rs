@@ -176,6 +176,7 @@ pub(super) fn validate_builtin_editing_kit(
         .unwrap_or_else(EditingKitPathStatus::Invalid)
 }
 
+#[cfg(test)]
 pub(super) fn validate_custom_editing_kit_layout(path: &Path) -> Result<EditingKitLayout, String> {
     validate_loose_editing_kit_layout(path, true)
 }
@@ -348,6 +349,7 @@ pub(super) fn resolve_custom_icon_path(relative: &Path) -> Result<PathBuf, Strin
     resolve_custom_icon_path_in_roots(&crate::storage::data_path(""), legacy.as_deref(), relative)
 }
 
+#[cfg(test)]
 fn resolve_custom_icon_path_at(base: &Path, relative: &Path) -> Result<PathBuf, String> {
     resolve_custom_icon_path_in_roots(base, None, relative)
 }
@@ -481,6 +483,7 @@ pub(super) fn remove_unreferenced_custom_icon(
     )
 }
 
+#[cfg(test)]
 fn remove_unreferenced_custom_icon_at(
     base: &Path,
     relative: &Path,

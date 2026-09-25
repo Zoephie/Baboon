@@ -2077,42 +2077,6 @@ impl Baboon {
         )
     }
 
-    /// Read the `.uasset` a new tag donates its package structure from.
-    ///
-    /// The donor recorded on the entry is a *hint*, not a fact: container
-    /// indices are positional, so a remount reorders them and a tag stashed in a
-    /// project outlives the index it was created against. Re-resolving on a miss
-    /// is what keeps such a tag saveable instead of failing with "template
-    /// container is stale".
-    fn read_new_container_template(
-        &self,
-        template_container: usize,
-        template_rel: &str,
-        group_tag: u32,
-    ) -> Result<Vec<u8>, String> {
-        let Some(source) = self.source() else {
-            return Err("No source loaded".to_owned());
-        };
-        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
-            return Err("Source is not a container".to_owned());
-        };
-        if let Some(bytes) = containers
-            .get(template_container)
-            .and_then(|mounted| mounted.archive.read(template_rel).ok())
-        {
-            return Ok(bytes);
-        }
-        let (container, rel) = self
-            .find_container_template(group_tag)
-            .ok_or_else(|| "No tag in the mounted paks can donate a package template".to_owned())?;
-        containers
-            .get(container)
-            .ok_or_else(|| "Template container is stale".to_owned())?
-            .archive
-            .read(&rel)
-            .map_err(|e| format!("Failed to read template .uasset: {e}"))
-    }
-
     /// Register an in-memory (unsaved) container tag: insert it into the browser
     /// entries, rebuild the folder + group trees so it shows up, open it in a
     /// **dirty** tab, and select it. Used by New Tag and Import for CE.

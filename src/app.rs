@@ -25,7 +25,7 @@ use blam_tags::render_method::{
 use blam_tags::{
     AssFile, Bitmap, ColorGraphType, CurvePointMode, CurveSegmentType, Endian,
     FoundationMasterType as EngineMasterType, FunctionFlags, FunctionKind, FunctionType, JmsFile,
-    PERIODIC_FUNCTIONS, PeriodicParams, RenderModel, StringIdData, TRANSITION_FUNCTIONS, TagBlock,
+    PeriodicParams, RenderModel, StringIdData, TagBlock,
     TagField, TagFieldData, TagFieldType, TagFile, TagFunction, TagFunctionEditor, BlobFunction, FunctionEncoding, H2Function, SchemaEnum,
     TagReferenceData, TagResource, TagResourceKind, TagStruct, TransitionParams, format_group_tag,
     parse_group_tag,

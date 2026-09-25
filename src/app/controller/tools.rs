@@ -87,6 +87,7 @@ where
     detected
 }
 
+#[cfg(test)]
 pub(super) fn apply_detected_editing_kit_paths(
     editing_kit_paths: &mut HashMap<String, PathBuf>,
     editing_kit_path_inputs: &mut HashMap<String, String>,

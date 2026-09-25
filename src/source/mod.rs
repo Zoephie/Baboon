@@ -193,10 +193,12 @@ impl ShippedTagIndex {
             .is_some()
     }
 
+    #[cfg(test)]
     pub fn len(&self) -> usize {
         self.by_path.len()
     }
 
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.by_path.is_empty()
     }
