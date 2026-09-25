@@ -130,6 +130,36 @@ pub(in crate::app) fn draw_tag_reference_catalog_picker_contents(
     picked
 }
 
+/// [`reference_target_missing`], answered from egui memory for a couple of
+/// seconds at a time.
+///
+/// Reference rows are redrawn every frame, and each one checked its target
+/// with a filesystem stat every time: dozens of stats a frame on a tag full
+/// of references, and a stall per frame on a slow or network drive. A file
+/// created or deleted outside shows up within the recheck interval.
+pub(in crate::app) fn reference_target_missing_cached(
+    ui: &Ui,
+    names: Option<&TagNameIndex>,
+    tags_root: Option<&Path>,
+    group_tag: u32,
+    rel_path: &str,
+) -> bool {
+    const RECHECK_SECONDS: f64 = 2.0;
+    let Some(root) = tags_root else {
+        return false;
+    };
+    let key = egui::Id::new(("reference_target_missing", root, group_tag, rel_path));
+    let now = ui.input(|input| input.time);
+    if let Some((missing, checked_at)) = ui.data(|data| data.get_temp::<(bool, f64)>(key))
+        && now - checked_at < RECHECK_SECONDS
+    {
+        return missing;
+    }
+    let missing = reference_target_missing(names, tags_root, group_tag, rel_path);
+    ui.data_mut(|data| data.insert_temp(key, (missing, now)));
+    missing
+}
+
 pub(in crate::app) fn reference_target_missing(
     names: Option<&TagNameIndex>,
     tags_root: Option<&Path>,
@@ -240,7 +270,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
             let icon_group = tag_reference_value_icon_group(meta, target.as_ref(), &draft.text);
             // A non-empty reference whose target file is absent on disk.
             let missing = target.as_ref().is_some_and(|(group, rel)| {
-                reference_target_missing(edit.names, edit.tags_root, *group, rel)
+                reference_target_missing_cached(ui, edit.names, edit.tags_root, *group, rel)
             });
             let is_bitmap_reference = icon_group == Some(u32::from_be_bytes(*b"bitm"));
             let value_response = if editable {

@@ -191,6 +191,56 @@ mod tests {
         );
     }
 
+    /// A reference row's "missing on disk" check is answered from memory for a
+    /// couple of seconds, not by a stat every frame, and still notices a file
+    /// that disappears once that interval has passed.
+    #[test]
+    fn reference_rows_recheck_their_target_every_couple_of_seconds() {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-ref-missing-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("objects")).unwrap();
+        let file = root.join("objects/crate.bitmap");
+        std::fs::write(&file, []).unwrap();
+        let bitmap = u32::from_be_bytes(*b"bitm");
+        let ctx = egui::Context::default();
+        let check_at = |time: f64| {
+            let mut missing = None;
+            let _ = ctx.run(
+                egui::RawInput {
+                    time: Some(time),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        missing = Some(reference_target_missing_cached(
+                            ui,
+                            None,
+                            Some(&root),
+                            bitmap,
+                            "objects\\crate",
+                        ));
+                    });
+                },
+            );
+            missing.unwrap()
+        };
+
+        assert!(!check_at(10.0));
+        std::fs::remove_file(&file).unwrap();
+        let within = check_at(11.0);
+        let after = check_at(12.5);
+
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(!within, "within the interval the remembered answer stands (no stat)");
+        assert!(after, "after it, the missing file is noticed");
+    }
+
     fn with_test_edit_context(assertion: impl FnOnce(&mut FieldEditContext<'_>)) {
         let definitions_root = locate_definitions_root();
         let mut buffers = EditDrafts::default();

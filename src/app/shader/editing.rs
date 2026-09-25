@@ -1231,7 +1231,13 @@ pub(in crate::app) fn draw_shader_editable_value(
             let mut draft = edit.buffers.take(&buffer_key, &current);
             // Flag a referenced bitmap that is missing on disk (red text).
             let missing = open_enabled
-                && reference_target_missing(edit.names, edit.tags_root, *group_tag, &open_ref);
+                && reference_target_missing_cached(
+                    ui,
+                    edit.names,
+                    edit.tags_root,
+                    *group_tag,
+                    &open_ref,
+                );
             let text_color = if missing {
                 REFERENCE_MISSING_COLOR
             } else {
