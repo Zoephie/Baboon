@@ -786,39 +786,32 @@ fn is_first_person_model(model_key: &str) -> bool {
 }
 
 fn ce_find_character_root(containers: &[MountedContainer], model_key: &str) -> Option<String> {
-    for c in containers {
-        for e in c.archive.entries() {
-            let norm = e.path.to_ascii_lowercase().replace('\\', "/");
-            if !(norm.ends_with(".uasset") && norm.contains("meshsync")) {
-                continue;
-            }
-            let Ok(bytes) = c.archive.read(&e.path) else {
-                continue;
-            };
-            let Ok(hdr) = FZenPackageHeader::deserialize(
-                &mut Cursor::new(&bytes[..]),
-                None,
-                CE_CV,
-                CE_HV,
-                None,
-            ) else {
-                continue;
-            };
-            let hit = hdr.imported_package_names.iter().any(|p| {
-                p.to_ascii_lowercase()
-                    .replace('\\', "/")
-                    .ends_with(model_key)
-            });
-            if !hit {
-                continue;
-            }
-            // Char folder = the dir holding this DA's `Common/` subfolder
-            // (or the DA's own dir when it isn't under a `Common/`).
-            return norm
-                .rsplit_once("/common/")
-                .map(|(root, _)| root.to_string())
-                .or_else(|| norm.rsplit_once('/').map(|(root, _)| root.to_string()));
+    let index = ce_path_index(containers);
+    for (norm, container, entry) in &index.mesh_sync {
+        let c = &containers[*container];
+        let e = &c.archive.entries()[*entry];
+        let Ok(bytes) = c.archive.read(&e.path) else {
+            continue;
+        };
+        let Ok(hdr) =
+            FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None)
+        else {
+            continue;
+        };
+        let hit = hdr.imported_package_names.iter().any(|p| {
+            p.to_ascii_lowercase()
+                .replace('\\', "/")
+                .ends_with(model_key)
+        });
+        if !hit {
+            continue;
         }
+        // Char folder = the dir holding this DA's `Common/` subfolder
+        // (or the DA's own dir when it isn't under a `Common/`).
+        return norm
+            .rsplit_once("/common/")
+            .map(|(root, _)| root.to_string())
+            .or_else(|| norm.rsplit_once('/').map(|(root, _)| root.to_string()));
     }
     None
 }
@@ -874,6 +867,75 @@ struct CeMeshSyncIndex {
 /// keep it for the life of the mount rather than rebuilding per preview.
 static CE_INDEX_CACHE: LazyLock<Mutex<HashMap<String, Arc<CeMeshSyncIndex>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Every `.uasset` in a mounted container set, found by name without a scan.
+struct CePathIndex {
+    /// Lowercased file name (`sk_foo.uasset`) → `(container, entry)`, in the
+    /// order a scan of containers then entries meets them, so the first match
+    /// is the one a linear scan would have found.
+    by_file_name: HashMap<String, Vec<(usize, usize)>>,
+    /// The mesh-sync assets (lowercased, `/`-separated paths), in scan order.
+    mesh_sync: Vec<(String, usize, usize)>,
+}
+
+/// Cache of [`CePathIndex`], keyed like [`CE_INDEX_CACHE`].
+static CE_PATH_INDEX_CACHE: LazyLock<Mutex<HashMap<String, Arc<CePathIndex>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// A container set's identity: its `.utoc` paths.
+fn ce_container_set_key(containers: &[MountedContainer]) -> String {
+    containers
+        .iter()
+        .map(|c| c.utoc_path.display().to_string())
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn build_ce_path_index(containers: &[MountedContainer]) -> CePathIndex {
+    index_ce_paths(containers.iter().enumerate().flat_map(|(container, c)| {
+        c.archive
+            .entries()
+            .iter()
+            .enumerate()
+            .map(move |(entry, e)| (container, entry, e.path.as_str()))
+    }))
+}
+
+/// Index `(container, entry, path)` in the order given.
+fn index_ce_paths<'p>(paths: impl Iterator<Item = (usize, usize, &'p str)>) -> CePathIndex {
+    let mut by_file_name: HashMap<String, Vec<(usize, usize)>> = HashMap::new();
+    let mut mesh_sync = Vec::new();
+    for (container, entry, path) in paths {
+        let norm = path.to_ascii_lowercase().replace('\\', "/");
+        if !norm.ends_with(".uasset") {
+            continue;
+        }
+        let file_name = norm.rsplit('/').next().unwrap_or(&norm).to_owned();
+        by_file_name
+            .entry(file_name)
+            .or_default()
+            .push((container, entry));
+        if norm.contains("meshsync") {
+            mesh_sync.push((norm, container, entry));
+        }
+    }
+    CePathIndex {
+        by_file_name,
+        mesh_sync,
+    }
+}
+
+/// The cached path index for this container set (built on first use).
+fn ce_path_index(containers: &[MountedContainer]) -> Arc<CePathIndex> {
+    let key = ce_container_set_key(containers);
+    let mut cache = CE_PATH_INDEX_CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    cache
+        .entry(key)
+        .or_insert_with(|| Arc::new(build_ce_path_index(containers)))
+        .clone()
+}
 
 /// Parse a package's Zen header cheaply — decode only the header prefix (name
 /// map + import/export tables live at the front, before the bulky export data),
@@ -988,11 +1050,7 @@ fn build_ce_mesh_sync_index(containers: &[MountedContainer]) -> CeMeshSyncIndex 
 
 /// The cached mesh-sync index for this container set (built on first use).
 fn ce_mesh_sync_index(containers: &[MountedContainer]) -> Arc<CeMeshSyncIndex> {
-    let key = containers
-        .iter()
-        .map(|c| c.utoc_path.display().to_string())
-        .collect::<Vec<_>>()
-        .join("|");
+    let key = ce_container_set_key(containers);
     // Held for the whole build, so a preview that asks while the prewarm is
     // running waits for it instead of scanning every header a second time. A
     // build that panicked poisons the lock; the map it guards is still sound.
@@ -1017,6 +1075,7 @@ fn ce_mesh_sync_index(containers: &[MountedContainer]) -> Arc<CeMeshSyncIndex> {
 pub(in crate::app) fn prewarm_ce_mesh_sync_index(containers: Vec<MountedContainer>) {
     std::thread::spawn(move || {
         let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ce_path_index(&containers);
             ce_mesh_sync_index(&containers);
         }));
     });
@@ -1093,26 +1152,14 @@ fn ce_metahuman_tables(containers: &[MountedContainer]) -> Arc<CeMetaHumanTables
 /// Find a `.uasset` by its exact basename (no extension), returning `(container
 /// index, bytes)`. Used for the singleton MetaHuman data tables / row structs.
 fn ce_find_uasset_by_basename(containers: &[MountedContainer], basename: &str) -> Option<Vec<u8>> {
-    let want = basename.to_ascii_lowercase();
-    for c in containers {
-        for e in c.archive.entries() {
-            let p = e.path.to_ascii_lowercase();
-            if !p.ends_with(".uasset") {
-                continue;
-            }
-            let base = p
-                .rsplit('/')
-                .next()
-                .unwrap_or(&p)
-                .trim_end_matches(".uasset");
-            if base == want {
-                if let Ok(bytes) = c.archive.read(&e.path) {
-                    return Some(bytes);
-                }
-            }
-        }
-    }
-    None
+    let index = ce_path_index(containers);
+    let candidates = index
+        .by_file_name
+        .get(&format!("{}.uasset", basename.to_ascii_lowercase()))?;
+    candidates.iter().find_map(|&(container, entry)| {
+        let c = &containers[container];
+        c.archive.read(&c.archive.entries()[entry].path).ok()
+    })
 }
 
 /// Export[0]'s serial byte slice within a package.
@@ -1817,30 +1864,57 @@ fn ce_collect_parts_from_regions(
     out
 }
 
-/// Read a `.uasset` by its UE package path (`/Game/Characters/.../SK_Foo`),
-/// matching the container entry whose path ends with the corresponding
-/// `Content/...SK_Foo.uasset` tail.
+/// The `.uasset` entries of a UE package path (`/Game/Characters/.../SK_Foo`):
+/// those whose path ends with the corresponding `/...SK_Foo.uasset` tail, in
+/// the order a scan of every container meets them.
+///
+/// Answered from the file-name index: a path with that tail has the tail's
+/// last segment as its file name, so only those few entries are compared.
+/// This used to lowercase and rewrite every path in the install, several
+/// times per mesh.
+fn ce_package_entries<'c>(
+    containers: &'c [MountedContainer],
+    package: &str,
+) -> impl Iterator<Item = (&'c MountedContainer, &'c blam_tags::iostore::Entry)> {
+    let (file_name, suffix) = ce_package_file_name_and_suffix(package);
+    let candidates = ce_path_index(containers)
+        .by_file_name
+        .get(&file_name)
+        .cloned()
+        .unwrap_or_default();
+    candidates
+        .into_iter()
+        .filter_map(move |(container, entry)| {
+            let c = &containers[container];
+            let e = &c.archive.entries()[entry];
+            e.path
+                .to_ascii_lowercase()
+                .replace('\\', "/")
+                .ends_with(&suffix)
+                .then_some((c, e))
+        })
+}
+
+/// A package path's `.uasset` file name, and the path tail a matching entry
+/// ends with: `/Game/A/SK_Foo` → (`sk_foo.uasset`, `/a/sk_foo.uasset`).
+fn ce_package_file_name_and_suffix(package: &str) -> (String, String) {
+    let tail = package.to_ascii_lowercase().replace('\\', "/");
+    let tail = tail.strip_prefix("/game/").unwrap_or(&tail);
+    let file_name = format!("{}.uasset", tail.rsplit('/').next().unwrap_or(tail));
+    (file_name, format!("/{tail}.uasset"))
+}
+
+/// Read a `.uasset` by its UE package path; see [`ce_package_entries`].
 fn ce_read_uasset_by_package(
     containers: &[MountedContainer],
     package: &str,
 ) -> Option<(String, Vec<u8>)> {
-    let tail = package.to_ascii_lowercase().replace('\\', "/");
-    let tail = tail.strip_prefix("/game/").unwrap_or(&tail);
-    let suffix = format!("/{tail}.uasset");
-    for c in containers {
-        for e in c.archive.entries() {
-            if e.path
-                .to_ascii_lowercase()
-                .replace('\\', "/")
-                .ends_with(&suffix)
-            {
-                if let Ok(bytes) = c.archive.read(&e.path) {
-                    return Some((e.path.clone(), bytes));
-                }
-            }
-        }
-    }
-    None
+    ce_package_entries(containers, package).find_map(|(c, e)| {
+        c.archive
+            .read(&e.path)
+            .ok()
+            .map(|bytes| (e.path.clone(), bytes))
+    })
 }
 
 /// Read the sibling `.ubulk` (Nanite streaming pages) for a package, matched
@@ -1848,21 +1922,8 @@ fn ce_read_uasset_by_package(
 /// directory index — it shares the package's chunk id with the BulkData type,
 /// fetched via [`IoStoreArchive::read_bulk_for`].
 fn ce_read_bulk_by_package(containers: &[MountedContainer], package: &str) -> Option<Vec<u8>> {
-    let tail = package.to_ascii_lowercase().replace('\\', "/");
-    let tail = tail.strip_prefix("/game/").unwrap_or(&tail);
-    let suffix = format!("/{tail}.uasset");
-    for c in containers {
-        for e in c.archive.entries() {
-            if e.path
-                .to_ascii_lowercase()
-                .replace('\\', "/")
-                .ends_with(&suffix)
-            {
-                return c.archive.read_bulk_for(e.chunk_index, 0).ok();
-            }
-        }
-    }
-    None
+    let (c, e) = ce_package_entries(containers, package).next()?;
+    c.archive.read_bulk_for(e.chunk_index, 0).ok()
 }
 
 /// Variant-driven mesh loading: for each `(region, permutation)` the hlmt's
@@ -2044,6 +2105,108 @@ mod ce_repro_tests {
         assert_eq!(target.vertices[1].uvs[0].y, -0.5);
         assert_eq!(target.vertices[2].uvs[0].x, 3.0);
         assert_eq!(target.vertices[2].uvs[0].y, 1.5);
+    }
+
+    /// The index narrows a package lookup to entries with its file name, then
+    /// keeps the linear scan's rule and order. Checked against that scan over
+    /// paths built to trip it: case, backslashes, a plugin's copy of the same
+    /// file, a longer name sharing the tail, and a `.ubulk` beside the asset.
+    #[test]
+    fn a_package_lookup_through_the_index_finds_what_a_scan_found() {
+        let paths = [
+            (0, 0, "Meteorite/Content/A/SK_Foo.ubulk"),
+            (0, 1, "Meteorite/Plugins/P/Content/A/SK_Foo.uasset"),
+            (0, 2, "Meteorite/Content/A/SK_Foo.uasset"),
+            (1, 0, "Meteorite\\Content\\B\\sk_foo.uasset"),
+            (1, 1, "Meteorite/Content/B/XSK_Foo.uasset"),
+            (1, 2, "Meteorite/Content/MeshSync/DA_Foo.uasset"),
+        ];
+        let index = index_ce_paths(paths.iter().copied());
+        let normalized = |path: &str| path.to_ascii_lowercase().replace('\\', "/");
+        for package in [
+            "/Game/A/SK_Foo",
+            "/Game/B/SK_FOO",
+            "/Game/SK_Foo",
+            "/Game/Nope",
+            "/Game/B/Foo",
+        ] {
+            let (file_name, suffix) = ce_package_file_name_and_suffix(package);
+            let indexed = index
+                .by_file_name
+                .get(&file_name)
+                .into_iter()
+                .flatten()
+                .find(|&&(c, e)| {
+                    let path = paths.iter().find(|p| (p.0, p.1) == (c, e)).unwrap().2;
+                    normalized(path).ends_with(&suffix)
+                })
+                .copied();
+            let scanned = paths
+                .iter()
+                .find(|p| normalized(p.2).ends_with(&suffix))
+                .map(|p| (p.0, p.1));
+            assert_eq!(indexed, scanned, "{package}");
+        }
+        assert_eq!(index.mesh_sync.len(), 1);
+    }
+
+    /// The indexed package lookups find exactly the entry the linear scans
+    /// they replaced did, sampled across a real install.
+    #[test]
+    fn indexed_package_lookups_match_a_linear_scan() {
+        let paks = crate::test_kits::ce_paks();
+        if !paks.is_dir() {
+            eprintln!(
+                "skipping: Campaign Evolved not present at {}",
+                paks.display()
+            );
+            return;
+        }
+        let loaded = crate::source::load_iostore_container_set(
+            paks,
+            &TagNameIndex::default(),
+            crate::test_kits::definitions(),
+        )
+        .expect("mount Campaign Evolved");
+        let TagSource::IoStoreContainerSet { containers, .. } = &loaded.source else {
+            panic!("not a container set");
+        };
+        // What `ce_read_uasset_by_package` did before the index.
+        let scan = |package: &str| {
+            let tail = package.to_ascii_lowercase().replace('\\', "/");
+            let tail = tail.strip_prefix("/game/").unwrap_or(&tail).to_owned();
+            let suffix = format!("/{tail}.uasset");
+            containers.iter().find_map(|c| {
+                c.archive
+                    .entries()
+                    .iter()
+                    .find(|e| {
+                        e.path
+                            .to_ascii_lowercase()
+                            .replace('\\', "/")
+                            .ends_with(&suffix)
+                    })
+                    .map(|e| e.path.clone())
+            })
+        };
+        let assets: Vec<String> = containers
+            .iter()
+            .flat_map(|c| c.archive.entries().iter().map(|e| e.path.clone()))
+            .filter(|path| path.to_ascii_lowercase().ends_with(".uasset"))
+            .collect();
+        let mut compared = 0;
+        for path in assets.iter().step_by(500) {
+            let Some((_, rest)) = path.split_once("/Content/") else {
+                continue;
+            };
+            let package = format!("/Game/{}", rest.trim_end_matches(".uasset"));
+            let found = ce_package_entries(containers, &package)
+                .next()
+                .map(|(_, e)| e.path.clone());
+            assert_eq!(found, scan(&package), "{package}");
+            compared += 1;
+        }
+        assert!(compared > 50, "compared only {compared} packages");
     }
 
     /// Runs the exact app CE-preview path against the optional `CE_PAKS`
