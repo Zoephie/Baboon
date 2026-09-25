@@ -74,9 +74,9 @@ pub(super) struct Kit {
     /// The Bitmap Library tab's state: its search, its grid size, and its
     /// own bounded thumbnail cache — deliberately not `bitmap_previews`,
     /// which is unbounded and holds full-resolution images.
-    pub(super) bitmap_browser: BitmapBrowserState,
+    pub(super) bitmap_browser: ThumbnailLibrary<Bitmaps>,
     /// The Model Library tab's state, the same shape for the same reasons.
-    pub(super) model_browser: ModelBrowserState,
+    pub(super) model_browser: ThumbnailLibrary<Models>,
     /// Read-only repository history and working-tree browser.
     pub(super) git_review: GitReviewState,
     pub(super) model_previews: HashMap<String, ModelPreviewState>,
@@ -220,8 +220,8 @@ impl Kit {
             tag_tree: egui_tiles::Tree::empty(tag_tree_id(id)),
             edit_buffers: EditDrafts::default(),
             bitmap_previews: HashMap::new(),
-            bitmap_browser: BitmapBrowserState::default(),
-            model_browser: ModelBrowserState::default(),
+            bitmap_browser: ThumbnailLibrary::default(),
+            model_browser: ThumbnailLibrary::default(),
             git_review: GitReviewState::default(),
             model_previews: HashMap::new(),
             rmdf_cache: HashMap::new(),

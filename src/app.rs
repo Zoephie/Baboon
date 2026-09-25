@@ -129,6 +129,8 @@ mod button_icons;
 use button_icons::*;
 mod editor;
 use editor::*;
+mod thumbnail_library;
+use thumbnail_library::*;
 mod bitmap_browser;
 use bitmap_browser::*;
 mod model_browser;

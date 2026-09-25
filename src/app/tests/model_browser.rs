@@ -1,8 +1,8 @@
 //! The Model Library's non-drawing halves: which tags it lists, which tag a
 //! double-click resolves to, and what its rasterizer draws.
 //!
-//! The grid itself needs a GPU context to say anything useful, and its
-//! arithmetic and cache are the Bitmap Library's — covered there. What is
+//! The grid, its arithmetic and its cache are `thumbnail_library`'s, shared
+//! with the Bitmap Library and covered with it. What is
 //! covered here is what this library adds: the render-model predicate, the
 //! render_model → `.model` owner resolution, and the CPU rasterizer that must
 //! never panic on the geometry a shipped tag can hold.

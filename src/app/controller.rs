@@ -1133,10 +1133,10 @@ impl Baboon {
                     textures,
                 } => self.handle_model_textures_resolved(stamp, key, textures_id, textures),
                 WorkerMessage::BitmapThumbnailDecoded { stamp, key, result } => {
-                    self.handle_bitmap_thumbnail_decoded(stamp, key, result, ctx)
+                    self.handle_thumbnail_ready::<Bitmaps>(stamp, key, result, ctx)
                 }
                 WorkerMessage::ModelThumbnailRendered { stamp, key, result } => {
-                    self.handle_model_thumbnail_rendered(stamp, key, result, ctx)
+                    self.handle_thumbnail_ready::<Models>(stamp, key, result, ctx)
                 }
                 WorkerMessage::ModelOverlaysBuilt {
                     stamp,
