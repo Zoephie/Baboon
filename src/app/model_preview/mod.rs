@@ -30,6 +30,8 @@ pub(in crate::app) use materials::*;
 // Re-exported for the Model Library (`model_browser`), whose worker rasterizes
 // the same geometry with the same flat palette into grid thumbnails.
 pub(in crate::app) use loading::build_render_preview;
+// Started by the source loader when a Campaign Evolved install mounts.
+pub(in crate::app) use loading::prewarm_ce_mesh_sync_index;
 pub(in crate::app) use renderer::material_color;
 use renderer::*;
 use variants::*;

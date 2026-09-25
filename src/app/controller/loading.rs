@@ -80,6 +80,11 @@ impl Baboon {
             .as_ref()
             .is_some_and(|source| matches!(&source.source, TagSource::IoStoreContainerSet { .. }));
         if campaign_evolved {
+            if let Some(TagSource::IoStoreContainerSet { containers, .. }) =
+                self.kits[installed].source.as_ref().map(|source| &source.source)
+            {
+                crate::app::model_preview::prewarm_ce_mesh_sync_index(containers.clone());
+            }
             // Tags is the primary Campaign Evolved workspace. Chimp still
             // mounts eagerly when enabled so it is ready if the user selects
             // it, but loading a project must not switch surfaces implicitly.

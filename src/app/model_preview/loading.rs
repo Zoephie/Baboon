@@ -993,13 +993,33 @@ fn ce_mesh_sync_index(containers: &[MountedContainer]) -> Arc<CeMeshSyncIndex> {
         .map(|c| c.utoc_path.display().to_string())
         .collect::<Vec<_>>()
         .join("|");
-    let mut cache = CE_INDEX_CACHE.lock().unwrap();
+    // Held for the whole build, so a preview that asks while the prewarm is
+    // running waits for it instead of scanning every header a second time. A
+    // build that panicked poisons the lock; the map it guards is still sound.
+    let mut cache = CE_INDEX_CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(idx) = cache.get(&key) {
         return idx.clone();
     }
     let idx = Arc::new(build_ce_mesh_sync_index(containers));
     cache.insert(key, idx.clone());
     idx
+}
+
+/// Build a Campaign Evolved container set's mesh-sync index in the background
+/// as soon as it is mounted.
+///
+/// The first model preview used to build it on the UI thread, which scans
+/// every package header in the install: about five seconds with the app
+/// frozen. Built here, the first preview finds it ready (or waits on this
+/// build rather than starting its own).
+pub(in crate::app) fn prewarm_ce_mesh_sync_index(containers: Vec<MountedContainer>) {
+    std::thread::spawn(move || {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ce_mesh_sync_index(&containers);
+        }));
+    });
 }
 
 // ---------------------------------------------------------------------------
