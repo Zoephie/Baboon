@@ -3954,14 +3954,14 @@ impl Baboon {
             .documents
             .get_mut(&package)
             .expect("checked above");
-        let container = &world.containers()[document.provider.container];
+        let container = chimp_document_container_label(document, world.containers());
         ui.label(
             RichText::new(format!(
                 "{} exports • {} imports • {} bytes • {}",
                 document.header.export_map.len(),
                 document.header.import_map.len(),
                 document.original.len(),
-                container.path.display()
+                container
             ))
             .color(subtle_dark()),
         );
@@ -5506,6 +5506,25 @@ fn write_chimp_mesh_textures(
         }
     }
     (written, failures)
+}
+
+/// Where a document's package is served from, for its header line.
+///
+/// An orphaned document keeps the container index it had before a remount,
+/// and that index now addresses a different list: it can name the wrong
+/// container, or run past the end if the list shrank, which indexing with it
+/// directly turned into a panic every frame the pane was drawn.
+fn chimp_document_container_label(
+    document: &ChimpDocument,
+    containers: &[blam_tags::iostore::world::WorldContainer],
+) -> String {
+    if document.orphaned {
+        return "(no container)".to_owned();
+    }
+    containers
+        .get(document.provider.container)
+        .map(|container| container.path.display().to_string())
+        .unwrap_or_else(|| "(no container)".to_owned())
 }
 
 /// The texture surfaces of `export_index`, or of the first Texture2D when it
@@ -10081,6 +10100,38 @@ mod tests {
             referrers: ChimpReferrerState::Idle,
             orphaned: false,
         }
+    }
+
+    /// An orphaned document's stored container index addresses a list that a
+    /// remount may have shrunk: the header line indexed with it directly, a
+    /// panic on every frame the pane was drawn.
+    #[test]
+    fn an_orphaned_documents_header_names_no_container() {
+        let container = |index: usize| blam_tags::iostore::world::WorldContainer {
+            index,
+            path: PathBuf::from(format!("pakchunk{index}.utoc")),
+            read_order: index as u32,
+            recovered_directory_index: false,
+            package_count: 1,
+        };
+        let mut document = rename_fixture();
+        document.provider.container = 3;
+        document.orphaned = true;
+        assert_eq!(
+            chimp_document_container_label(&document, &[container(0)]),
+            "(no container)"
+        );
+        document.provider.container = 0;
+        assert_eq!(
+            chimp_document_container_label(&document, &[container(0)]),
+            "(no container)",
+            "an orphan's old index names some other container now"
+        );
+        document.orphaned = false;
+        assert_eq!(
+            chimp_document_container_label(&document, &[container(0)]),
+            "pakchunk0.utoc"
+        );
     }
 
     /// The package's own name is its identity, and the chunk that serves it is
