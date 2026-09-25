@@ -667,10 +667,10 @@ pub(super) struct ChimpDocument {
     pub(super) dirty: bool,
     view: ChimpDocumentView,
     document_text: String,
-    document_line_numbers: String,
+    document_lines: ChimpJsonLines,
     document_text_dirty: bool,
     metadata_text: String,
-    metadata_line_numbers: String,
+    metadata_lines: ChimpJsonLines,
     metadata_text_dirty: bool,
     /// Who references each name-map entry and each import slot.
     ///
@@ -1426,10 +1426,10 @@ fn decode_chimp_document(
         dirty: false,
         view: initial_view,
         document_text: String::new(),
-        document_line_numbers: String::new(),
+        document_lines: ChimpJsonLines::default(),
         document_text_dirty: true,
         metadata_text: String::new(),
-        metadata_line_numbers: String::new(),
+        metadata_lines: ChimpJsonLines::default(),
         metadata_text_dirty: true,
         header_usage: None,
         header_name_filter: String::new(),
@@ -4147,7 +4147,7 @@ impl Baboon {
                     "Decoded Unreal package document",
                     "Copy JSON",
                     &document.document_text,
-                    &document.document_line_numbers,
+                    &mut document.document_lines,
                 );
                 false
             }
@@ -4215,7 +4215,7 @@ impl Baboon {
                     "Decoded package metadata",
                     "Copy metadata JSON",
                     &document.metadata_text,
-                    &document.metadata_line_numbers,
+                    &mut document.metadata_lines,
                 );
                 false
             }
@@ -6505,34 +6505,6 @@ impl ChimpJsonPalette {
     }
 }
 
-#[derive(Default)]
-struct ChimpJsonHighlighter;
-
-impl egui::util::cache::ComputerMut<(&egui::FontId, &str, bool), egui::text::LayoutJob>
-    for ChimpJsonHighlighter
-{
-    fn compute(
-        &mut self,
-        (font_id, text, dark_mode): (&egui::FontId, &str, bool),
-    ) -> egui::text::LayoutJob {
-        chimp_json_layout_job(text, font_id.clone(), dark_mode)
-    }
-}
-
-fn chimp_json_highlight(ui: &Ui, text: &str) -> egui::text::LayoutJob {
-    type HighlightCache =
-        egui::util::cache::FrameCache<egui::text::LayoutJob, ChimpJsonHighlighter>;
-
-    let font_id = TextStyle::Monospace.resolve(ui.style());
-    let dark_mode = ui.visuals().dark_mode;
-    ui.ctx().memory_mut(|memory| {
-        memory
-            .caches
-            .cache::<HighlightCache>()
-            .get((&font_id, text, dark_mode))
-    })
-}
-
 fn chimp_json_layout_job(
     text: &str,
     font_id: egui::FontId,
@@ -6635,13 +6607,64 @@ fn chimp_json_layout_job(
     job
 }
 
-fn chimp_line_numbers(text: &str) -> String {
-    let count = text.lines().count().max(1);
-    let width = count.to_string().len();
-    (1..=count)
-        .map(|line| format!("{line:>width$}"))
-        .collect::<Vec<_>>()
-        .join("\n")
+/// A JSON pane's text, highlighted and split into one layout job per line.
+///
+/// Built the first time the pane is drawn and again only when the theme or
+/// font changes; replacing the text resets it. The pane draws just the lines
+/// in view from it. It used to hand egui the whole document as one label every
+/// frame, which for a 100,000-line package was 18 ms a frame in a release
+/// build, spent hashing, copying and laying out text nobody could see.
+#[derive(Default)]
+struct ChimpJsonLines {
+    key: Option<(bool, egui::FontId)>,
+    lines: Vec<egui::text::LayoutJob>,
+}
+
+impl ChimpJsonLines {
+    fn lines(&mut self, text: &str, font_id: &egui::FontId, dark_mode: bool) -> &[egui::text::LayoutJob] {
+        let key = (dark_mode, font_id.clone());
+        if self.key.as_ref() != Some(&key) {
+            self.lines =
+                split_layout_job_lines(&chimp_json_layout_job(text, font_id.clone(), dark_mode));
+            self.key = Some(key);
+        }
+        &self.lines
+    }
+}
+
+/// Split a single-block layout job at its newlines, keeping every section's
+/// format. The highlighter works over the whole text because a key's colour
+/// carries onto the values on the lines after it; splitting after it keeps
+/// that. Counts lines as `str::lines` does, with at least one.
+fn split_layout_job_lines(job: &egui::text::LayoutJob) -> Vec<egui::text::LayoutJob> {
+    let new_line = || {
+        let mut line = egui::text::LayoutJob::default();
+        line.wrap.max_width = f32::INFINITY;
+        line
+    };
+    let mut lines = Vec::new();
+    let mut current = new_line();
+    for section in &job.sections {
+        let mut text = &job.text[section.byte_range.clone()];
+        loop {
+            let (piece, rest) = match text.find('\n') {
+                Some(end) => (&text[..end], Some(&text[end + 1..])),
+                None => (text, None),
+            };
+            if !piece.is_empty() {
+                current.append(piece, 0.0, section.format.clone());
+            }
+            let Some(rest) = rest else {
+                break;
+            };
+            lines.push(std::mem::replace(&mut current, new_line()));
+            text = rest;
+        }
+    }
+    if !current.text.is_empty() || lines.is_empty() {
+        lines.push(current);
+    }
+    lines
 }
 
 fn draw_chimp_json_document(
@@ -6650,57 +6673,56 @@ fn draw_chimp_json_document(
     title: &str,
     copy_label: &str,
     text: &str,
-    line_numbers: &str,
+    lines: &mut ChimpJsonLines,
 ) {
+    let font_id = TextStyle::Monospace.resolve(ui.style());
+    let lines = lines.lines(text, &font_id, ui.visuals().dark_mode);
     ui.horizontal(|ui| {
         ui.label(RichText::new(title).strong().color(subtle_dark()));
         if ui.small_button(copy_label).clicked() {
             ui.output_mut(|output| output.copied_text = text.to_owned());
         }
         ui.label(
-            RichText::new(format!("{} lines", text.lines().count().max(1)))
+            RichText::new(format!("{} lines", lines.len()))
                 .small()
                 .color(subtle_dark()),
         );
     });
-    egui::ScrollArea::both()
-        .id_salt(id)
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            let highlighted = chimp_json_highlight(ui, text);
-            let font_id = TextStyle::Monospace.resolve(ui.style());
-            ui.spacing_mut().item_spacing.x = 0.0;
-            ui.horizontal_top(|ui| {
-                Frame::none()
-                    .fill(ui.visuals().faint_bg_color)
-                    .inner_margin(egui::Margin {
-                        left: 6.0,
-                        right: 8.0,
-                        top: 4.0,
-                        bottom: 4.0,
-                    })
-                    .show(ui, |ui| {
+    let row_height = ui.fonts(|fonts| fonts.row_height(&font_id));
+    let digits = lines.len().to_string().len();
+    let gutter_width = ui.fonts(|fonts| fonts.glyph_width(&font_id, '0')) * digits as f32 + 14.0;
+    let gutter_fill = ui.visuals().faint_bg_color;
+    let number_color = ui.visuals().weak_text_color();
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
+        egui::ScrollArea::both()
+            .id_salt(id)
+            .auto_shrink([false, false])
+            .show_rows(ui, row_height, lines.len(), |ui, rows| {
+                for index in rows {
+                    ui.horizontal(|ui| {
+                        let (gutter, _) = ui.allocate_exact_size(
+                            egui::vec2(gutter_width, row_height),
+                            Sense::hover(),
+                        );
+                        ui.painter().rect_filled(gutter, 0.0, gutter_fill);
+                        ui.painter().text(
+                            gutter.right_center() - egui::vec2(8.0, 0.0),
+                            egui::Align2::RIGHT_CENTER,
+                            index + 1,
+                            font_id.clone(),
+                            number_color,
+                        );
+                        ui.add_space(8.0);
                         ui.add(
-                            egui::Label::new(
-                                RichText::new(line_numbers)
-                                    .font(font_id.clone())
-                                    .color(ui.visuals().weak_text_color()),
-                            )
-                            .selectable(false),
+                            egui::Label::new(lines[index].clone())
+                                .selectable(true)
+                                .wrap_mode(egui::TextWrapMode::Extend),
                         );
                     });
-                Frame::none()
-                    .inner_margin(egui::Margin {
-                        left: 8.0,
-                        right: 8.0,
-                        top: 4.0,
-                        bottom: 4.0,
-                    })
-                    .show(ui, |ui| {
-                        ui.add(egui::Label::new(highlighted).selectable(true));
-                    });
+                }
             });
-        });
+    });
 }
 
 fn draw_chimp_export_editor(ui: &mut Ui, document: &mut ChimpDocument, usmap: &Usmap) -> bool {
@@ -8815,7 +8837,7 @@ fn chimp_metadata_json(document: &ChimpDocument, world: &World) -> Value {
 fn refresh_chimp_document_text(document: &mut ChimpDocument) {
     document.document_text = serde_json::to_string_pretty(&chimp_document_json(document))
         .unwrap_or_else(|error| format!("Could not render package document: {error}"));
-    document.document_line_numbers = chimp_line_numbers(&document.document_text);
+    document.document_lines = ChimpJsonLines::default();
     document.document_text_dirty = false;
 }
 
@@ -9987,7 +10009,7 @@ fn import_slot_display(slot: &ImportSlot, world: &World) -> (String, String) {
 fn refresh_chimp_metadata_text(document: &mut ChimpDocument, world: &World) {
     document.metadata_text = serde_json::to_string_pretty(&chimp_metadata_json(document, world))
         .unwrap_or_else(|error| format!("Could not render package metadata: {error}"));
-    document.metadata_line_numbers = chimp_line_numbers(&document.metadata_text);
+    document.metadata_lines = ChimpJsonLines::default();
     document.metadata_text_dirty = false;
 }
 
@@ -10193,10 +10215,10 @@ mod tests {
             dirty: false,
             view: ChimpDocumentView::Header,
             document_text: String::new(),
-            document_line_numbers: String::new(),
+            document_lines: ChimpJsonLines::default(),
             document_text_dirty: false,
             metadata_text: String::new(),
-            metadata_line_numbers: String::new(),
+            metadata_lines: ChimpJsonLines::default(),
             metadata_text_dirty: false,
             header_usage: None,
             header_name_filter: String::new(),
@@ -10297,6 +10319,43 @@ mod tests {
         usmap.enums.swap(0, last);
         assert_eq!(usmap_enum(&usmap, &name).unwrap().name, name);
         assert!(usmap_enum(&usmap, "NoSuchEnumAnywhere").is_none());
+    }
+
+    /// Frame time of the JSON pane on a 100,000-line document. Run with
+    /// `--release --ignored --nocapture`. The single-label pane took 18 ms a
+    /// frame; the row-virtualized one takes about 60 µs.
+    #[test]
+    #[ignore]
+    fn bench_json_viewer_frame() {
+        let mut text = String::from("{\n");
+        let mut lines = ChimpJsonLines::default();
+        for i in 0..100_000 {
+            text.push_str(&format!("  \"Key{i}\": \"/Game/Some/Path/Asset_{i}\",\n"));
+        }
+        text.push('}');
+        eprintln!("text {} bytes", text.len());
+        let ctx = egui::Context::default();
+        let mut frame = |ctx: &egui::Context| {
+            let started = std::time::Instant::now();
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1600.0, 1000.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        draw_chimp_json_document(ui, "bench", "t", "c", &text, &mut lines);
+                    });
+                },
+            );
+            started.elapsed()
+        };
+        for i in 0..6 {
+            eprintln!("frame {i}: {:?}", frame(&ctx));
+        }
     }
 
     /// The exporters read the mesh kind straight off the exports now, not off
@@ -11458,8 +11517,27 @@ mod tests {
     #[test]
     fn json_documents_have_line_numbers_and_semantic_colours() {
         let text = "{\n  \"Name\": \"Probe\",\n  \"ObjectPath\": \"/Game/Probe.0\",\n  \"Count\": 3,\n  \"Enabled\": true,\n  \"Missing\": null\n}";
-        assert_eq!(chimp_line_numbers(text), "1\n2\n3\n4\n5\n6\n7");
         let job = chimp_json_layout_job(text, egui::FontId::monospace(12.0), true);
+        let lines = split_layout_job_lines(&job);
+        assert_eq!(lines.len(), 7);
+        for (line, expected) in lines.iter().zip(text.lines()) {
+            assert_eq!(line.text, expected);
+        }
+        // Split, every piece keeps the colour it had in the whole document.
+        let pieces = |jobs: &[&egui::text::LayoutJob]| {
+            jobs.iter()
+                .flat_map(|job| {
+                    job.sections.iter().flat_map(|section| {
+                        job.text[section.byte_range.clone()]
+                            .split('\n')
+                            .filter(|piece| !piece.is_empty())
+                            .map(|piece| (piece.to_owned(), section.format.color))
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(pieces(&lines.iter().collect::<Vec<_>>()), pieces(&[&job]));
         assert_eq!(job.text, text);
         let mut colors = Vec::new();
         for section in &job.sections {
@@ -11569,7 +11647,7 @@ mod tests {
             .expect("a /Game package")
             .name
             .clone();
-        let document = load_chimp_document(&world, &package).unwrap();
+        let mut document = load_chimp_document(&world, &package).unwrap();
         assert_eq!(document.view, ChimpDocumentView::Document);
         assert!(!document.document_text_dirty);
         assert!(
@@ -11591,7 +11669,10 @@ mod tests {
         assert!(export.get("Name").is_some());
         assert!(export.get("Properties").is_some());
         assert_eq!(
-            document.document_line_numbers.lines().count(),
+            document
+                .document_lines
+                .lines(&document.document_text, &egui::FontId::monospace(12.0), true)
+                .len(),
             document.document_text.lines().count()
         );
         let metadata: Value =
@@ -11611,7 +11692,10 @@ mod tests {
                 .is_some_and(|providers| !providers.is_empty())
         );
         assert_eq!(
-            document.metadata_line_numbers.lines().count(),
+            document
+                .metadata_lines
+                .lines(&document.metadata_text, &egui::FontId::monospace(12.0), true)
+                .len(),
             document.metadata_text.lines().count()
         );
         let (bytes, store) = rebuild_chimp_document(&world, &document).unwrap();
