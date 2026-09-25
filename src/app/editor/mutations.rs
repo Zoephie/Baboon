@@ -790,31 +790,55 @@ fn collect_block_index_edits(
     remap: &BlockElementRemap,
     edits: &mut Vec<BlockIndexEdit>,
 ) {
-    for field in tag_struct.fields_all() {
-        let field_path = append_field_path_for(struct_path, &field);
-        let is_new_element = remap
-            .excluded_new_elements
-            .as_ref()
-            .is_some_and(|range| path_is_within_target_element(struct_path, target_path, range));
+    // Everything here depends on the struct, not the field, so it is worked
+    // out once per struct. It used to be redone for every field of the tag on
+    // every structural block edit, target resolution included, and that
+    // resolution descends from the root once per ancestor.
+    let is_new_element = remap
+        .excluded_new_elements
+        .as_ref()
+        .is_some_and(|range| path_is_within_target_element(struct_path, target_path, range));
+    // Per target, whether it resolves to the edited block: `None` when it does
+    // not resolve at all, which (as before) is what lets a plain short fall
+    // back to its semantic target.
+    let mut declared: HashMap<String, Option<bool>> = HashMap::new();
+    let mut semantic: HashMap<&'static str, Option<bool>> = HashMap::new();
+    let is_target = |resolved: Option<String>| {
+        resolved.map(|path| path_without_field_ordinals(&path) == target_path)
+    };
 
-        let declared_target = (!is_new_element)
+    for field in tag_struct.fields_all() {
+        let declared_state = (!is_new_element)
             .then(|| field.definition().block_index_target())
             .flatten()
             .and_then(|target| {
-                resolve_declared_block_target_path(tag_struct, root, struct_path, target.name())
+                *declared.entry(target.name().to_owned()).or_insert_with(|| {
+                    is_target(resolve_declared_block_target_path(
+                        tag_struct,
+                        root,
+                        struct_path,
+                        target.name(),
+                    ))
+                })
             });
-        let semantic_target = (!is_new_element && field.field_type() == TagFieldType::ShortInteger)
-            .then(|| semantic_short_index_target_key(field.name()))
-            .flatten()
-            .and_then(|key| resolve_semantic_block_target_path(tag_struct, root, struct_path, key));
+        let state = declared_state.or_else(|| {
+            (!is_new_element && field.field_type() == TagFieldType::ShortInteger)
+                .then(|| semantic_short_index_target_key(field.name()))
+                .flatten()
+                .and_then(|key| {
+                    *semantic.entry(key).or_insert_with(|| {
+                        is_target(resolve_semantic_block_target_path(
+                            tag_struct,
+                            root,
+                            struct_path,
+                            key,
+                        ))
+                    })
+                })
+        });
 
-        let resolved_target = declared_target.or(semantic_target);
-        if resolved_target
-            .as_deref()
-            .map(path_without_field_ordinals)
-            .as_deref()
-            == Some(target_path)
-        {
+        if state == Some(true) {
+            let field_path = append_field_path_for(struct_path, &field);
             let old = if field.field_type() == TagFieldType::ShortInteger {
                 match field.value() {
                     Some(TagFieldData::ShortInteger(value)) => Some(value as i64),
@@ -829,7 +853,7 @@ fn collect_block_index_edits(
                 let new = mapped.map(|index| index as i64).unwrap_or(-1);
                 if new != old {
                     edits.push(BlockIndexEdit {
-                        path: field_path.clone(),
+                        path: field_path,
                         value: new,
                     });
                 }
@@ -837,6 +861,7 @@ fn collect_block_index_edits(
         }
 
         if let Some(block) = field.as_block() {
+            let field_path = append_field_path_for(struct_path, &field);
             for (index, element) in block.iter().enumerate() {
                 collect_block_index_edits(
                     &element,
@@ -848,6 +873,7 @@ fn collect_block_index_edits(
                 );
             }
         } else if let Some(array) = field.as_array() {
+            let field_path = append_field_path_for(struct_path, &field);
             for (index, element) in array.iter().enumerate() {
                 collect_block_index_edits(
                     &element,
@@ -859,6 +885,7 @@ fn collect_block_index_edits(
                 );
             }
         } else if let Some(nested) = field.as_struct() {
+            let field_path = append_field_path_for(struct_path, &field);
             collect_block_index_edits(&nested, &field_path, root, target_path, remap, edits);
         }
     }

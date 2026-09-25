@@ -3083,7 +3083,6 @@ mod palette_repro_tests {
     #[test]
     fn adding_to_a_targeted_block_reaches_its_dropdown_at_every_depth() {
         let defs = std::path::Path::new("definitions");
-        let names = crate::format::TagNameIndex::default();
         let cases = [
             (
                 "halo3_mcc",
