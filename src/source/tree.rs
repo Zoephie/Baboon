@@ -954,6 +954,77 @@ mod tests {
         assert_eq!(refresh.entries.len(), 1);
     }
 
+    /// A one-row upsert must leave the index exactly as a full rewrite of the
+    /// new entry set would, fingerprint included, so the next refresh finds
+    /// nothing to do.
+    #[test]
+    fn entry_index_upsert_matches_a_full_rewrite() {
+        let root = temp_dir("index_upsert");
+        let game = unique_game("index_upsert");
+        let rewrite_game = unique_game("index_upsert_rewrite");
+        fs::create_dir_all(root.join("objects")).unwrap();
+        fs::create_dir_all(root.join("saved")).unwrap();
+        write_fake_tag(&root.join("objects/a.model"), b"hlmt");
+        let names = TagNameIndex::default();
+        let before = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        save_entry_index(&game, &root, &before).unwrap();
+
+        // A new file, and an existing file rewritten under the same key.
+        write_fake_tag(&root.join("saved/b.shader"), b"shdr");
+        write_fake_tag_with_padding(&root.join("objects/a.model"), b"hlmt", 16);
+        let after = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        for entry in &after {
+            assert!(upsert_entry_index_row(&game, &root, entry).unwrap());
+        }
+        save_entry_index(&rewrite_game, &root, &after).unwrap();
+
+        let upserted = load_entry_index(&game, &root).unwrap();
+        let rewritten = load_entry_index(&rewrite_game, &root).unwrap();
+        let refresh = refresh_entry_index(&game, &root, &names).unwrap();
+
+        remove_test_index(&game);
+        remove_test_index(&rewrite_game);
+        fs::remove_dir_all(&root).unwrap();
+
+        let paths = |entries: &[TagEntry]| {
+            entries
+                .iter()
+                .map(|entry| {
+                    (
+                        entry.key.clone(),
+                        entry.display_path.clone(),
+                        entry.group_tag,
+                    )
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(upserted.len(), 2);
+        assert_eq!(paths(&upserted), paths(&rewritten));
+        assert!(!refresh.changed);
+        assert_eq!((refresh.added, refresh.updated, refresh.removed), (0, 0, 0));
+    }
+
+    /// With no index for the folder yet, a lone row would load back as a
+    /// complete one-tag index, so the upsert must not create one.
+    #[test]
+    fn entry_index_upsert_never_creates_an_index() {
+        let root = temp_dir("index_upsert_absent");
+        let game = unique_game("index_upsert_absent");
+        fs::create_dir_all(root.join("objects")).unwrap();
+        write_fake_tag(&root.join("objects/a.model"), b"hlmt");
+        let names = TagNameIndex::default();
+        let entries = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+
+        let written = upsert_entry_index_row(&game, &root, &entries[0]).unwrap();
+        let loaded = load_entry_index(&game, &root);
+
+        remove_test_index(&game);
+        fs::remove_dir_all(&root).unwrap();
+
+        assert!(!written);
+        assert!(loaded.is_none());
+    }
+
     #[test]
 
     fn sqlite_entry_index_keeps_multiple_roots_for_same_game() {
