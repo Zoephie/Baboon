@@ -879,8 +879,12 @@ impl Baboon {
                     }
                     false
                 }
-                WorkerMessage::ReverseDependenciesBuilt { stamp, index } => {
-                    self.handle_reverse_dependencies_built(stamp, index)
+                WorkerMessage::ReverseDependenciesBuilt {
+                    stamp,
+                    index,
+                    missing,
+                } => {
+                    self.handle_reverse_dependencies_built(stamp, index, missing)
                 }
                 WorkerMessage::ReferenceIndexProgress {
                     stamp,
@@ -7546,6 +7550,7 @@ impl Baboon {
             let processed = std::sync::atomic::AtomicUsize::new(0);
 
             let mut index = ReverseDependencyIndex::default();
+            let mut missing = 0usize;
             std::thread::scope(|scope| {
                 let mut handles = Vec::new();
                 for chunk in entries.chunks(chunk_size) {
@@ -7574,15 +7579,25 @@ impl Baboon {
                     }));
                 }
 
-                for handle in handles {
-                    if let Ok(chunk_results) = handle.join() {
-                        for (key, deps) in chunk_results {
-                            index.set_tag_dependencies(key, deps);
+                // A chunk whose thread panicked used to vanish from the index
+                // without a word. Its tags are counted instead, so the index is
+                // reported (and not saved) as incomplete.
+                for (handle, chunk) in handles.into_iter().zip(entries.chunks(chunk_size)) {
+                    match handle.join() {
+                        Ok(chunk_results) => {
+                            for (key, deps) in chunk_results {
+                                index.set_tag_dependencies(key, deps);
+                            }
                         }
+                        Err(_) => missing += chunk.len(),
                     }
                 }
             });
-            let _ = tx.send(WorkerMessage::ReverseDependenciesBuilt { stamp, index });
+            let _ = tx.send(WorkerMessage::ReverseDependenciesBuilt {
+                stamp,
+                index,
+                missing,
+            });
             ctx.request_repaint();
         });
     }

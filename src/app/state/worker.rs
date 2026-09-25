@@ -384,6 +384,9 @@ pub(in crate::app) enum WorkerMessage {
     ReverseDependenciesBuilt {
         stamp: KitStamp,
         index: ReverseDependencyIndex,
+        /// Tags left out because the thread reading them crashed. Non-zero
+        /// means the index is incomplete, so it is used but not saved.
+        missing: usize,
     },
 }
 
