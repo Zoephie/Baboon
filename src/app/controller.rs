@@ -1621,12 +1621,9 @@ impl Baboon {
         let package = new_container_package(logical, group_name);
         let key = new_container_key(&package);
         if self.kits[self.active].parsed_tags.contains_key(&key)
-            || self.source().is_some_and(|s| {
-                s.entries
-                    .iter()
-                    .chain(s.all_entries.iter())
-                    .any(|e| e.key == key)
-            })
+            || self
+                .source()
+                .is_some_and(|s| s.entry_for_key(&key).is_some())
         {
             return Err(format!("A new tag already exists at {logical}"));
         }
@@ -1704,13 +1701,9 @@ impl Baboon {
             return Ok(format!("{} is already at that path", entry.display_path));
         }
         if self.kits[self.active].parsed_tags.contains_key(&new_key)
-            || self.source().is_some_and(|source| {
-                source
-                    .entries
-                    .iter()
-                    .chain(source.all_entries.iter())
-                    .any(|existing| existing.key == new_key)
-            })
+            || self
+                .source()
+                .is_some_and(|source| source.entry_for_key(&new_key).is_some())
         {
             return Err(format!("A tag already exists at {new_rel}"));
         }
@@ -3099,11 +3092,13 @@ impl Baboon {
         // Check both the lazily-loaded entries and the full scan set (all_entries).
         // Flat search results reference all_entries, which may not overlap with entries.
         let Some(entry) = source
-            .entries
-            .iter()
-            .chain(source.all_entries.iter())
-            .chain(self.kits[self.active].active_favorite_entries.iter())
-            .find(|e| e.key == key)
+            .entry_for_key(&key)
+            .or_else(|| {
+                self.kits[self.active]
+                    .active_favorite_entries
+                    .iter()
+                    .find(|e| e.key == key)
+            })
             .cloned()
         else {
             return;
@@ -3394,12 +3389,7 @@ impl Baboon {
         let source_path = kit.requested_path.clone().unwrap_or(source_path);
         let mut tags = Vec::new();
         for key in ordered_unique_keys(kit.open_tabs.iter()) {
-            let Some(entry) = source
-                .entries
-                .iter()
-                .chain(source.all_entries.iter())
-                .find(|entry| entry.key == key)
-            else {
+            let Some(entry) = source.entry_for_key(&key) else {
                 continue;
             };
             let path = match &entry.location {
@@ -9743,6 +9733,7 @@ mod tests {
             all_entries: entries,
             reverse_dependencies: None,
             initial_tag: None,
+            key_hints: Default::default(),
         };
 
         let saved_path = root.join("saved").join("cyborg.gbxmodel");
@@ -10239,6 +10230,7 @@ mod listing_entries_tests {
             all_entries: Vec::new(),
             reverse_dependencies: None,
             initial_tag: None,
+            key_hints: Default::default(),
         }
     }
 
@@ -11777,6 +11769,7 @@ mod dependency_tests {
             all_entries: entries,
             reverse_dependencies: None,
             initial_tag: None,
+            key_hints: Default::default(),
         }
     }
 

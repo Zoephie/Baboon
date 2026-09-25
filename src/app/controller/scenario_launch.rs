@@ -400,6 +400,7 @@ mod tests {
             all_entries: Vec::new(),
             reverse_dependencies: None,
             initial_tag: None,
+            key_hints: Default::default(),
         }
     }
 

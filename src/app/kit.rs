@@ -660,6 +660,7 @@ mod tests {
             all_entries: Vec::new(),
             reverse_dependencies: None,
             initial_tag: None,
+            key_hints: Default::default(),
         });
         kit.parsed_tags
             .insert("tag".to_owned(), TagDocument::modified(tag));
@@ -810,12 +811,11 @@ impl Kit {
     /// from elsewhere.
     pub(super) fn entry_for_key(&self, key: &str) -> Option<&TagEntry> {
         let source = self.source.as_ref()?;
-        source
-            .entries
-            .iter()
-            .chain(source.all_entries.iter())
-            .chain(self.active_favorite_entries.iter())
-            .find(|entry| entry.key == key)
+        source.entry_for_key(key).or_else(|| {
+            self.active_favorite_entries
+                .iter()
+                .find(|entry| entry.key == key)
+        })
     }
 
     /// Tag keys currently laid out, in tab order. Derived from the tree, which

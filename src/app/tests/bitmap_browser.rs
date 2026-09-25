@@ -321,6 +321,7 @@ fn extraction_resolves_a_bitmap_the_grid_listed_from_the_background_index() {
         all_entries: vec![indexed.clone()],
         reverse_dependencies: None,
         initial_tag: None,
+        key_hints: Default::default(),
     });
 
     let source = kit.source.as_ref().unwrap();

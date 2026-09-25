@@ -49,6 +49,7 @@ fn an_unopened_referrer_is_read_once_not_reloaded_forever() {
         all_entries: vec![entry.clone()],
         reverse_dependencies: None,
         initial_tag: None,
+        key_hints: Default::default(),
     });
     app.query_results = Some(TagQueryResults {
         kit: app.active_kit_id(),

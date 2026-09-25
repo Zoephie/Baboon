@@ -404,9 +404,82 @@ pub struct LoadedSourceData {
     /// folder moves so future refactors can touch only dependent tags.
     pub reverse_dependencies: Option<ReverseDependencyIndex>,
     pub initial_tag: Option<(String, TagFile)>,
+    /// Where each looked-up key was last found. See [`Self::entry_for_key`].
+    pub key_hints: EntryKeyHints,
+}
+
+/// A hint cache from tag key to its position in `entries` or `all_entries`.
+///
+/// Key lookups were a linear scan of both lists, made every frame (tab labels,
+/// tag panes), per search hit, and per exported key, over tens of thousands of
+/// entries. The lists are mutated in many places, including the browser's lazy
+/// loader, so a map every mutation had to maintain would go stale the first
+/// time one forgot. A hint is instead checked against the list before it is
+/// trusted, and a miss or a stale hint falls back to the scan and records what
+/// it found: a lookup is never wrong, and is only ever as slow as it used to be.
+#[cfg(test)]
+thread_local! {
+    /// Fallback scans this thread has made, for tests that bound them.
+    static KEY_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+#[derive(Default)]
+pub struct EntryKeyHints(std::sync::Mutex<HashMap<String, (EntryList, usize)>>);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EntryList {
+    /// `entries`, the browser's lazily loaded subset (every entry, for
+    /// container and single-file sources).
+    Lazy,
+    /// `all_entries`, a loose folder's completed scan.
+    All,
 }
 
 impl LoadedSourceData {
+    /// The entry with `key`, from `entries` first and then `all_entries`.
+    pub fn entry_for_key(&self, key: &str) -> Option<&TagEntry> {
+        let list = |which: EntryList| match which {
+            EntryList::Lazy => &self.entries,
+            EntryList::All => &self.all_entries,
+        };
+        let hint = self
+            .key_hints
+            .0
+            .lock()
+            .ok()
+            .and_then(|hints| hints.get(key).copied());
+        if let Some((which, index)) = hint
+            && let Some(entry) = list(which).get(index)
+            && entry.key == key
+        {
+            return Some(entry);
+        }
+        #[cfg(test)]
+        KEY_SCANS.with(|scans| scans.set(scans.get() + 1));
+        let found = self
+            .entries
+            .iter()
+            .position(|entry| entry.key == key)
+            .map(|index| (EntryList::Lazy, index))
+            .or_else(|| {
+                self.all_entries
+                    .iter()
+                    .position(|entry| entry.key == key)
+                    .map(|index| (EntryList::All, index))
+            });
+        if let Ok(mut hints) = self.key_hints.0.lock() {
+            match found {
+                Some(location) => {
+                    hints.insert(key.to_owned(), location);
+                }
+                None => {
+                    hints.remove(key);
+                }
+            }
+        }
+        found.map(|(which, index)| &list(which)[index])
+    }
+
     /// The complete entry set, for callers that must see every tag rather than
     /// the browser's lazy subset. A loose folder fills `all_entries` from its
     /// background scan; a container mount enumerates every tag into `entries`
@@ -655,5 +728,82 @@ mod container_ref_tests {
             index.lookup(sbsp, "levels\\x\\bsp"),
             Some((1, "exact.ubulk"))
         );
+    }
+}
+
+#[cfg(test)]
+mod entry_key_hint_tests {
+    use super::*;
+
+    fn entry(key: &str) -> TagEntry {
+        TagEntry {
+            key: key.to_owned(),
+            display_path: key.to_owned(),
+            group_tag: 0,
+            group_name: None,
+            location: TagEntryLocation::LooseFile(PathBuf::from(key)),
+        }
+    }
+
+    fn source(entries: Vec<TagEntry>, all_entries: Vec<TagEntry>) -> LoadedSourceData {
+        LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::SingleFile {
+                path: PathBuf::from("a"),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries,
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries,
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+        }
+    }
+
+    fn found<'a>(source: &'a LoadedSourceData, key: &str) -> Option<&'a str> {
+        source.entry_for_key(key).map(|entry| entry.display_path.as_str())
+    }
+
+    /// The lists are mutated in many places behind the hints' back. Whatever
+    /// happens to them, a lookup answers exactly what a scan would.
+    #[test]
+    fn key_lookups_stay_right_as_the_lists_change_under_them() {
+        let mut source = source(vec![entry("a"), entry("b")], vec![entry("c")]);
+        assert_eq!(found(&source, "b"), Some("b"));
+        assert_eq!(found(&source, "c"), Some("c"), "found in the full scan");
+        assert_eq!(found(&source, "b"), Some("b"), "and again from the hint");
+
+        // Inserting ahead of a remembered key moves it: the stale hint is
+        // caught, not trusted.
+        source.entries.insert(0, entry("z"));
+        assert_eq!(found(&source, "b"), Some("b"));
+
+        // The browser's lazy loader appends; a key nobody asked about before
+        // is found by the fallback.
+        source.entries.push(entry("d"));
+        assert_eq!(found(&source, "d"), Some("d"));
+
+        // A removed key is gone, even though its hint pointed at a real slot.
+        source.entries.retain(|entry| entry.key != "b");
+        assert_eq!(found(&source, "b"), None);
+        source.all_entries.clear();
+        assert_eq!(found(&source, "c"), None);
+        assert_eq!(found(&source, "missing"), None);
+    }
+
+    /// A key found once is found again without scanning, which is the point.
+    #[test]
+    fn a_repeated_key_lookup_does_not_scan_again() {
+        let entries: Vec<TagEntry> = (0..1000).map(|index| entry(&format!("k{index}"))).collect();
+        let source = source(entries, Vec::new());
+        assert_eq!(found(&source, "k999"), Some("k999"));
+        let before = KEY_SCANS.with(std::cell::Cell::get);
+        for _ in 0..100 {
+            assert_eq!(found(&source, "k999"), Some("k999"));
+        }
+        assert_eq!(KEY_SCANS.with(std::cell::Cell::get), before);
     }
 }

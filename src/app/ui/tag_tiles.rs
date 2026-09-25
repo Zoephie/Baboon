@@ -100,13 +100,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         let Some(entry) = self.app.kits[self.kit_index]
             .source
             .as_ref()
-            .and_then(|source| {
-                source
-                    .entries
-                    .iter()
-                    .chain(source.all_entries.iter())
-                    .find(|entry| entry.key == key)
-            })
+            .and_then(|source| source.entry_for_key(&key))
             .cloned()
             .or_else(|| {
                 self.app.kits[self.kit_index]
@@ -533,13 +527,7 @@ impl Baboon {
             let found = kit
                 .source
                 .as_ref()
-                .and_then(|source| {
-                    source
-                        .entries
-                        .iter()
-                        .chain(source.all_entries.iter())
-                        .find(|entry| &entry.key == key)
-                })
+                .and_then(|source| source.entry_for_key(key))
                 .or_else(|| {
                     kit.active_favorite_entries
                         .iter()

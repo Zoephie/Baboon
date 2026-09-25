@@ -902,6 +902,7 @@ mod tests {
             all_entries: Vec::new(),
             reverse_dependencies: None,
             initial_tag: None,
+            key_hints: Default::default(),
         });
         kit.selected_key = Some(key.clone());
         let generation_before = kit.generation;

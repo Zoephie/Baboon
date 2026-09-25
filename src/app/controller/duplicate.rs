@@ -1702,6 +1702,7 @@ mod tests {
             all_entries: Vec::new(),
             reverse_dependencies: None,
             initial_tag: None,
+            key_hints: Default::default(),
         }
     }
 
@@ -2088,6 +2089,7 @@ mod tests {
             all_entries: Vec::new(),
             reverse_dependencies: None,
             initial_tag: None,
+            key_hints: Default::default(),
         };
 
         crate::app::controller::register_created_tag_in_source(&mut source, new_entry.clone(), &[]);

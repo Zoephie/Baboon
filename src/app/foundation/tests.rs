@@ -636,6 +636,7 @@ mod tests {
             all_entries: Vec::new(),
             reverse_dependencies: None,
             initial_tag: None,
+            key_hints: Default::default(),
         };
         let catalog = tag_reference_catalog_for_source(&container_source, true)
             .expect("container source should expose a catalog");
@@ -656,6 +657,7 @@ mod tests {
             all_entries: Vec::new(),
             reverse_dependencies: None,
             initial_tag: None,
+            key_hints: Default::default(),
         };
         assert!(tag_reference_catalog_for_source(&loose_source, true).is_none());
     }
