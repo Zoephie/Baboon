@@ -1060,20 +1060,38 @@ impl Baboon {
         &self,
         kit: usize,
         overlay: &CampaignProjectOverlay,
-    ) -> Option<(TagEntry, TagFile)> {
-        let group_name = self.kits[kit]
+    ) -> OverlayAdoption {
+        // The names and the template come off the source: before it has
+        // loaded, this is a "not yet" rather than a "no".
+        if self.kits[kit].source.is_none() {
+            return OverlayAdoption::NotYet;
+        }
+        let Some(group_name) = self.kits[kit]
             .names
             .name_for(overlay.group_tag)
-            .map(str::to_owned)?;
+            .map(str::to_owned)
+        else {
+            return OverlayAdoption::Failed(format!(
+                "its group {} is not one this game's definitions know",
+                format_group_tag(overlay.group_tag)
+            ));
+        };
         // A stashed tag of a group the game ships none of has no donor to point
         // back at, and recovering it must not depend on finding one — otherwise
         // the tag survives the save and vanishes on reopen.
-        let template = super::controller::new_container_template_for(
+        let template = match super::controller::new_container_template_for(
             self.find_container_template_in(kit, overlay.group_tag),
             &group_name,
-        )
-        .ok()?;
-        let tag = TagFile::read_from_bytes(&overlay.bytes).ok()?;
+        ) {
+            Ok(template) => template,
+            Err(error) => return OverlayAdoption::Failed(error),
+        };
+        let tag = match TagFile::read_from_bytes(&overlay.bytes) {
+            Ok(tag) => tag,
+            Err(error) => {
+                return OverlayAdoption::Failed(format!("its stashed bytes do not parse: {error}"))
+            }
+        };
         let extension = group_tag_to_extension(overlay.group_tag)
             .unwrap_or(group_name.as_str())
             .to_owned();
@@ -1081,7 +1099,7 @@ impl Baboon {
             .package
             .clone()
             .unwrap_or_else(|| format!("/Game/Tags/{}-{group_name}", overlay.logical_path));
-        Some((
+        OverlayAdoption::Ready(
             TagEntry {
                 key: format!("newtag:{package}"),
                 display_path: format!("{}.{}", overlay.logical_path, extension),
@@ -1094,7 +1112,7 @@ impl Baboon {
                 },
             },
             tag,
-        ))
+        )
     }
 
     /// Put stashed new tags back into the browser.
@@ -1124,6 +1142,7 @@ impl Baboon {
             .unwrap_or_default();
         let mut adopted = 0usize;
         let mut still_pending = Vec::new();
+        let mut failed = Vec::new();
         for overlay in queued {
             if self
                 .campaign_entry_for_identity(kit, &overlay.identity)
@@ -1131,11 +1150,20 @@ impl Baboon {
             {
                 continue;
             }
-            let Some((entry, tag)) = self.new_overlay_entry(kit, &overlay) else {
-                // The names and the template come off a source that may still be
-                // loading, so this is a "not yet" rather than a "no".
-                still_pending.push(overlay);
-                continue;
+            // Only "not yet" stays queued. A failure used to stay queued too,
+            // and this runs every frame: one overlay that could never be placed
+            // redid the entry scans and the tag parse every frame, for good.
+            // Its bytes stay stashed in the project either way.
+            let (entry, tag) = match self.new_overlay_entry(kit, &overlay) {
+                OverlayAdoption::Ready(entry, tag) => (entry, tag),
+                OverlayAdoption::NotYet => {
+                    still_pending.push(overlay);
+                    continue;
+                }
+                OverlayAdoption::Failed(reason) => {
+                    failed.push(format!("{}: {reason}", overlay.logical_path));
+                    continue;
+                }
             };
             let key = entry.key.clone();
             self.stash_in_memory_tag(entry, tag);
@@ -1159,6 +1187,13 @@ impl Baboon {
         if adopted > 0 {
             self.status =
                 format!("Restored {adopted} stashed new tag(s) from this workspace's last session");
+        }
+        if !failed.is_empty() {
+            self.status = format!(
+                "Could not restore {} stashed new tag(s) (still saved in the project): {}",
+                failed.len(),
+                failed.join("; ")
+            );
         }
     }
 
@@ -1832,7 +1867,7 @@ impl Baboon {
             .cloned()
             .collect::<Vec<_>>();
         for overlay in new_overlays {
-            let Some((entry, tag)) = self.new_overlay_entry(kit, &overlay) else {
+            let OverlayAdoption::Ready(entry, tag) = self.new_overlay_entry(kit, &overlay) else {
                 missing += 1;
                 continue;
             };
@@ -2572,5 +2607,60 @@ mod tests {
                 .collect::<Vec<_>>()
                 .join("\n")
         );
+    }
+}
+
+/// What adopting one stashed new tag came to.
+enum OverlayAdoption {
+    Ready(TagEntry, TagFile),
+    /// The source it is read against has not loaded yet.
+    NotYet,
+    /// It cannot be placed, and trying again will not change that.
+    Failed(String),
+}
+
+#[cfg(test)]
+mod overlay_adoption_tests {
+    use super::*;
+
+    /// A stashed new tag that can never be placed leaves the retry queue and
+    /// says why. It used to stay queued, and adoption runs every frame, so it
+    /// redid the entry scans and the parse every frame for the whole session.
+    #[test]
+    fn an_overlay_that_cannot_be_placed_is_not_retried_every_frame() {
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::SingleFile {
+                path: PathBuf::from("a.model"),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+        });
+        let mut project = ActiveCampaignProject::fresh(PathBuf::from("recovery.baboon"), 0.0);
+        project.pending_new_overlays.push(CampaignProjectOverlay {
+            identity: "tag:unknown".to_owned(),
+            group_tag: u32::from_be_bytes(*b"zzzz"),
+            logical_path: "objects/unknown".to_owned(),
+            kind: CampaignProjectTagKind::New,
+            package: None,
+            bytes: Arc::new(Vec::new()),
+            digest: [0; 32],
+        });
+        app.kits[0].campaign_project = Some(project);
+
+        app.adopt_pending_new_overlays(0);
+
+        let queue = &app.kits[0].campaign_project.as_ref().unwrap().pending_new_overlays;
+        assert!(queue.is_empty(), "dropped from the retry queue");
+        assert!(app.status.contains("Could not restore 1"), "{}", app.status);
     }
 }

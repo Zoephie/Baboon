@@ -277,8 +277,7 @@ pub(super) fn new_container_template_for(
             rel_path,
         });
     }
-    let usmap = blam_tags::iostore::object::usmap::Usmap::meteorite()
-        .map_err(|error| format!("Could not load the Unreal mappings: {error}"))?;
+    let usmap = meteorite_usmap()?;
     if blam_tags::iostore::asset::tag_package::is_bare_group(group_name, &usmap) {
         return Ok(NewContainerTemplate::Derived {
             group: group_name.to_owned(),
@@ -289,6 +288,25 @@ pub(super) fn new_container_template_for(
          {group_name} wrapper cannot be derived because the group carries Unreal properties \
          that name other packages"
     ))
+}
+
+/// The embedded Campaign Evolved Unreal mappings, parsed once per process.
+///
+/// It is 2.4 MB, and new_container_template_for parsed it on every call. That
+/// includes the stashed-overlay adoption, which retried every frame for an
+/// overlay it could not place, so one such overlay reparsed it every frame.
+pub(super) fn meteorite_usmap(
+) -> Result<std::sync::Arc<blam_tags::iostore::object::usmap::Usmap>, String> {
+    static USMAP: std::sync::OnceLock<
+        Result<std::sync::Arc<blam_tags::iostore::object::usmap::Usmap>, String>,
+    > = std::sync::OnceLock::new();
+    USMAP
+        .get_or_init(|| {
+            blam_tags::iostore::object::usmap::Usmap::meteorite()
+                .map(std::sync::Arc::new)
+                .map_err(|error| format!("Could not load the Unreal mappings: {error}"))
+        })
+        .clone()
 }
 
 /// The `.uasset` bytes to seed a new tag's package with, cloned or derived.
