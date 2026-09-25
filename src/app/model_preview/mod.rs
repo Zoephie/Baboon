@@ -604,16 +604,15 @@ pub(super) fn draw_model_preview_panel(
                             state.animation.stopped = false;
                         }
                         if controls_enabled && state.animation.playing {
+                            let pass = ui.ctx().cumulative_pass_nr();
                             let dt = ui.input(|input| input.stable_dt).min(0.1);
-                            state.animation.time += dt * state.animation.speed.max(0.0);
-                            if state.animation.looped {
-                                if duration > 0.0 {
-                                    state.animation.time %= duration;
-                                }
-                            } else if state.animation.time * ANIMATION_FRAME_RATE >= last_frame {
-                                state.animation.time = last_frame / ANIMATION_FRAME_RATE;
-                                state.animation.playing = false;
-                            }
+                            advance_playback_clock(
+                                &mut state.animation,
+                                pass,
+                                dt,
+                                duration,
+                                last_frame,
+                            );
                             ui.ctx().request_repaint();
                         }
                     });
@@ -1961,5 +1960,49 @@ mod tests {
             preview_panel_title(u32::from_be_bytes(*b"coll")),
             "Collision Model"
         );
+    }
+}
+
+/// Move a playing animation's clock on by `dt`, once per egui pass however
+/// many panes draw it (they share the state), wrapping or stopping at the end.
+fn advance_playback_clock(
+    playback: &mut PreviewAnimationPlayback,
+    pass: u64,
+    dt: f32,
+    duration: f32,
+    last_frame: f32,
+) {
+    if playback.advanced_in_pass == Some(pass) {
+        return;
+    }
+    playback.advanced_in_pass = Some(pass);
+    playback.time += dt * playback.speed.max(0.0);
+    if playback.looped {
+        if duration > 0.0 {
+            playback.time %= duration;
+        }
+    } else if playback.time * ANIMATION_FRAME_RATE >= last_frame {
+        playback.time = last_frame / ANIMATION_FRAME_RATE;
+        playback.playing = false;
+    }
+}
+
+#[cfg(test)]
+mod playback_clock_tests {
+    use super::*;
+
+    /// Two panes on the same tag draw the same playback state in one pass; the
+    /// clock moves once. Each pane used to move it, so playback ran at 2x.
+    #[test]
+    fn two_panes_advance_the_clock_once_per_pass() {
+        let mut playback = PreviewAnimationPlayback {
+            playing: true,
+            ..Default::default()
+        };
+        advance_playback_clock(&mut playback, 7, 0.1, 10.0, 300.0);
+        advance_playback_clock(&mut playback, 7, 0.1, 10.0, 300.0);
+        assert!((playback.time - 0.1).abs() < 1e-6, "{}", playback.time);
+        advance_playback_clock(&mut playback, 8, 0.1, 10.0, 300.0);
+        assert!((playback.time - 0.2).abs() < 1e-6, "{}", playback.time);
     }
 }

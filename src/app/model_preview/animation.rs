@@ -88,6 +88,10 @@ pub(crate) struct PreviewAnimationPlayback {
     /// Case-insensitive substring filter for the animation picker; a graph
     /// can list a thousand animations.
     pub filter: String,
+    /// The egui pass the clock last advanced in. Two panes showing the same
+    /// tag share this state, and each advanced the clock, so playback ran at
+    /// twice the speed.
+    pub advanced_in_pass: Option<u64>,
 }
 
 impl Default for PreviewAnimationPlayback {
@@ -104,6 +108,7 @@ impl Default for PreviewAnimationPlayback {
             error: None,
             requested_list: false,
             filter: String::new(),
+            advanced_in_pass: None,
         }
     }
 }
