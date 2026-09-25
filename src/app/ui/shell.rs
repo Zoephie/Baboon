@@ -1155,26 +1155,7 @@ impl Baboon {
                         .show_inside(ui, |ui| {
                             let want_scroll_bottom = self.terminal.scroll_to_bottom;
                             self.terminal.scroll_to_bottom = false;
-                            egui::ScrollArea::vertical()
-                                .id_salt("terminal_output")
-                                .auto_shrink([false, false])
-                                .show(ui, |ui| {
-                                    ui.visuals_mut().override_text_color = None;
-                                    ui.set_min_width(ui.available_width());
-                                    for line in &self.terminal.lines {
-                                        let mut text = RichText::new(&line.text)
-                                            .color(terminal_line_color(line.severity));
-                                        if terminal_line_is_strong(line.severity) {
-                                            text = text.font(bold_font(13.0)).strong();
-                                        } else {
-                                            text = text.monospace().font(FontId::monospace(13.0));
-                                        }
-                                        ui.add(egui::Label::new(text).wrap());
-                                    }
-                                    if want_scroll_bottom {
-                                        ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
-                                    }
-                                });
+                            draw_terminal_output(ui, &self.terminal.lines, want_scroll_bottom);
                         });
                 });
         }
@@ -1510,4 +1491,186 @@ pub(super) fn recent_folder_menu_label(path: &Path) -> String {
         .rev()
         .collect::<String>();
     format!("...{tail}")
+}
+
+fn terminal_line_text(line: &TerminalLineEntry) -> RichText {
+    let text = RichText::new(&line.text).color(terminal_line_color(line.severity));
+    if terminal_line_is_strong(line.severity) {
+        text.font(bold_font(13.0)).strong()
+    } else {
+        text.monospace().font(FontId::monospace(13.0))
+    }
+}
+
+/// The terminal's output lines, scrolled.
+///
+/// Only the lines in view are laid out and drawn. The rest are placed by
+/// their wrapped heights, which each line keeps for the width it was last
+/// wrapped at: a width change re-measures once, an appended line measures
+/// itself. Drawing every line as a label, up to the 20,000 kept, cost 4.5 ms
+/// a frame in a release build.
+pub(super) fn draw_terminal_output(
+    ui: &mut Ui,
+    lines: &[TerminalLineEntry],
+    want_scroll_bottom: bool,
+) {
+    let gap = ui.spacing().item_spacing.y;
+    egui::ScrollArea::vertical()
+        .id_salt("terminal_output")
+        .auto_shrink([false, false])
+        .show_viewport(ui, |ui, viewport| {
+            ui.visuals_mut().override_text_color = None;
+            ui.set_min_width(ui.available_width());
+            let width = ui.available_width();
+            let height_of = |line: &TerminalLineEntry| match line.wrapped.get() {
+                Some((at, height)) if at == width => height,
+                _ => {
+                    let height = egui::WidgetText::from(terminal_line_text(line))
+                        .into_galley(
+                            ui,
+                            Some(egui::TextWrapMode::Wrap),
+                            width,
+                            TextStyle::Body,
+                        )
+                        .size()
+                        .y;
+                    line.wrapped.set(Some((width, height)));
+                    height
+                }
+            };
+            // Where each line starts, from the top of the content.
+            let mut top = 0.0;
+            let mut first = None;
+            let mut first_top = 0.0;
+            let mut last = 0;
+            for (index, line) in lines.iter().enumerate() {
+                let bottom = top + height_of(line);
+                if first.is_none() && bottom >= viewport.min.y {
+                    first = Some(index);
+                    first_top = top;
+                }
+                if top <= viewport.max.y {
+                    last = index + 1;
+                }
+                top = bottom + gap;
+            }
+            let total = (top - gap).max(0.0);
+            ui.set_height(total);
+            let origin = ui.max_rect().top();
+            if let Some(first) = first {
+                let rect = egui::Rect::from_x_y_ranges(
+                    ui.max_rect().x_range(),
+                    origin + first_top..=origin + total,
+                );
+                ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), |ui| {
+                    ui.skip_ahead_auto_ids(first);
+                    for line in &lines[first..last.max(first)] {
+                        ui.add(egui::Label::new(terminal_line_text(line)).wrap());
+                    }
+                });
+            }
+            if want_scroll_bottom {
+                let bottom = egui::Rect::from_x_y_ranges(
+                    ui.max_rect().x_range(),
+                    origin + total..=origin + total,
+                );
+                ui.scroll_to_rect(bottom, Some(egui::Align::BOTTOM));
+            }
+        });
+}
+
+#[cfg(test)]
+mod terminal_output_tests {
+    use super::*;
+
+    fn lines(count: usize) -> Vec<TerminalLineEntry> {
+        (0..count)
+            .map(|index| {
+                TerminalLineEntry::new(format!(
+                    "{index}: tool.exe: importing C:\\Halo\\tags\\objects\\weapons\\rifle_{index}\\\
+                     render\\rifle_{index}.render_model from data\\objects\\weapons ... done"
+                ))
+            })
+            .collect()
+    }
+
+    fn frame(ctx: &egui::Context, lines: &[TerminalLineEntry], bottom: bool) -> std::time::Duration {
+        let started = std::time::Instant::now();
+        let _ = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 300.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    draw_terminal_output(ui, lines, bottom);
+                });
+            },
+        );
+        started.elapsed()
+    }
+
+    /// The text of every line painted in a frame.
+    fn painted(ctx: &egui::Context, lines: &[TerminalLineEntry], bottom: bool) -> Vec<String> {
+        let output = ctx.run(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(900.0, 300.0),
+                )),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    draw_terminal_output(ui, lines, bottom);
+                });
+            },
+        );
+        output
+            .shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Only the lines in view are drawn, and they are the right ones: the
+    /// top of the output when opened, the end of it after scrolling there.
+    #[test]
+    fn the_terminal_draws_the_lines_in_view() {
+        let lines = lines(20_000);
+        let starts = |painted: &[String], prefix: &str| {
+            painted.iter().any(|text| text.starts_with(prefix))
+        };
+
+        let top = painted(&egui::Context::default(), &lines, false);
+        assert!(starts(&top, "0: ") && !starts(&top, "19999: "));
+        assert!(top.len() < 100, "painted {} lines", top.len());
+
+        let ctx = egui::Context::default();
+        // Scrolling animates over frames; land in one.
+        ctx.style_mut(|style| style.scroll_animation = egui::style::ScrollAnimation::none());
+        painted(&ctx, &lines, true);
+        let bottom = (0..3).map(|_| painted(&ctx, &lines, false)).last().unwrap();
+        assert!(starts(&bottom, "19999: "), "the last line is in view");
+        assert!(!starts(&bottom, "0: "));
+        assert!(bottom.len() < 100, "painted {} lines", bottom.len());
+    }
+
+    /// Frame time with a full terminal. Run with `--release --ignored
+    /// --nocapture`.
+    #[test]
+    #[ignore]
+    fn bench_terminal_frame() {
+        let lines = lines(20_000);
+        let ctx = egui::Context::default();
+        for index in 0..6 {
+            eprintln!("frame {index}: {:?}", frame(&ctx, &lines, index == 0));
+        }
+    }
 }
