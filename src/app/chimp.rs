@@ -6846,16 +6846,7 @@ fn draw_chimp_value(
             }
             changed
         }
-        PropValue::Name(value) => {
-            let mut text = value.to_string();
-            let changed = ui
-                .add(egui::TextEdit::singleline(&mut text).id(id))
-                .changed();
-            if changed {
-                *value = blam_tags::iostore::object::edit::intern_name(names, &text);
-            }
-            changed
-        }
+        PropValue::Name(value) => edit_chimp_fname(ui, id, value, names),
         PropValue::Object(value) => ui
             .add(egui::DragValue::new(value).prefix("Object "))
             .on_hover_text("FPackageIndex: negative = import, positive = export, zero = None")
@@ -7044,16 +7035,44 @@ fn draw_chimp_fname(
     value: &mut blam_tags::iostore::object::value::FName,
     names: &mut blam_tags::iostore::package::name_map::FNameMap,
 ) -> bool {
-    let mut text = value.to_string();
-    let mut changed = false;
     ui.horizontal(|ui| {
         ui.label(label);
-        if ui.text_edit_singleline(&mut text).changed() {
-            *value = blam_tags::iostore::object::edit::intern_name(names, &text);
-            changed = true;
-        }
-    });
-    changed
+        let id = ui.auto_id_with(("chimp_fname", label));
+        edit_chimp_fname(ui, id, value, names)
+    })
+    .inner
+}
+
+/// An FName text box that interns its name once, when the edit is committed.
+///
+/// Interning adds any name the package does not have yet to its name map, and
+/// the map is written into the saved package. Interning per keystroke, as
+/// this used to, left every prefix typed on the way ("R", "Ro", "Roc", …) in
+/// the package for good. The text lives in egui memory while the box has
+/// focus; leaving it commits, and Escape discards.
+fn edit_chimp_fname(
+    ui: &mut Ui,
+    id: egui::Id,
+    value: &mut blam_tags::iostore::object::value::FName,
+    names: &mut blam_tags::iostore::package::name_map::FNameMap,
+) -> bool {
+    let draft_id = id.with("fname_draft");
+    let current = value.to_string();
+    let mut text = ui
+        .data(|data| data.get_temp::<String>(draft_id))
+        .unwrap_or_else(|| current.clone());
+    let response = ui.add(egui::TextEdit::singleline(&mut text).id(id));
+    if response.has_focus() {
+        ui.data_mut(|data| data.insert_temp(draft_id, text));
+        return false;
+    }
+    ui.data_mut(|data| data.remove::<String>(draft_id));
+    let cancelled = ui.input(|input| input.key_pressed(egui::Key::Escape));
+    if !response.lost_focus() || cancelled || text == current {
+        return false;
+    }
+    *value = blam_tags::iostore::object::edit::intern_name(names, &text);
+    true
 }
 
 fn draw_chimp_fstr(
@@ -12174,5 +12193,81 @@ mod tests {
                 as usize;
         assert_eq!(face_count, expected_faces);
         std::fs::remove_file(output).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod fname_edit_tests {
+    use super::*;
+    use blam_tags::iostore::object::value::FName;
+    use blam_tags::iostore::package::name_map::{EMappedNameType, FNameMap};
+
+    /// Draw one FName box for a frame of `events`.
+    fn frame(ctx: &egui::Context, events: Vec<egui::Event>, value: &mut FName, names: &mut FNameMap) -> bool {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(400.0, 100.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let mut changed = false;
+        let _ = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                changed |= draw_chimp_fname(ui, "Name", value, names);
+            });
+        });
+        changed
+    }
+
+    /// Typing a new name must add one name to the package, not one per
+    /// keystroke: every name interned is written into the saved package.
+    #[test]
+    fn typing_an_fname_interns_one_name_on_commit() {
+        let ctx = egui::Context::default();
+        let mut names = FNameMap::create_from_names(EMappedNameType::Package, vec!["None".to_owned()]);
+        let mut value = FName::new(0, 0, "None");
+        let before = names.len();
+
+        // Click across the row until the text box has focus.
+        for step in 0..40 {
+            let pointer = egui::Pos2::new(step as f32 * 10.0, 12.0);
+            let click = |pressed| egui::Event::PointerButton {
+                pos: pointer,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: Default::default(),
+            };
+            frame(&ctx, vec![egui::Event::PointerMoved(pointer), click(true), click(false)], &mut value, &mut names);
+            if ctx.memory(|memory| memory.focused()).is_some() {
+                break;
+            }
+        }
+        assert!(ctx.memory(|memory| memory.focused()).is_some(), "the box never took focus");
+
+        let key = |key, modifiers| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers,
+        };
+        let select_all = egui::Modifiers { command: true, ..Default::default() };
+        frame(&ctx, vec![key(egui::Key::A, select_all)], &mut value, &mut names);
+        let mut changes = 0;
+        for letter in "Rocket".chars() {
+            if frame(&ctx, vec![egui::Event::Text(letter.to_string())], &mut value, &mut names) {
+                changes += 1;
+            }
+        }
+        assert_eq!(names.len(), before, "nothing is interned while typing");
+        if frame(&ctx, vec![key(egui::Key::Enter, Default::default())], &mut value, &mut names) {
+            changes += 1;
+        }
+
+        assert_eq!(changes, 1, "one committed change");
+        assert_eq!(value.to_string(), "Rocket");
+        assert_eq!(names.len(), before + 1, "exactly one new name: {:?}", names.names());
     }
 }
