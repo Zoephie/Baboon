@@ -315,12 +315,15 @@ impl Baboon {
                                 ui.label(RichText::new("No matching tags").color(subtle_dark()));
                                 return;
                             }
+                            // Already filtered by `filter_cache`: drawn with
+                            // folders open rather than matched a second time.
                             let tree_action = draw_tree(
                                 ui,
                                 tree,
                                 visible_entries,
                                 selected.as_deref(),
-                                filter,
+                                "",
+                                !filter.is_empty(),
                                 show_browser_prefixes,
                                 double_click_to_open,
                                 groups_mode,
@@ -609,6 +612,7 @@ impl Baboon {
                                     &cache.entries,
                                     selected.as_deref(),
                                     "",
+                                    false,
                                     show_prefixes,
                                     double_click_to_open,
                                     groups_mode,
@@ -652,6 +656,7 @@ impl Baboon {
                                         &source.entries,
                                         selected.as_deref(),
                                         &filter,
+                                        false,
                                         show_prefixes,
                                         double_click_to_open,
                                         false,
@@ -683,6 +688,7 @@ impl Baboon {
                                         entries,
                                         selected.as_deref(),
                                         &filter,
+                                        false,
                                         show_prefixes,
                                         double_click_to_open,
                                         true,

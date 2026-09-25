@@ -654,12 +654,17 @@ pub(in crate::app) fn ancestor_labels(display_path: &str) -> Vec<String> {
     segments
 }
 
+/// `filter` narrows what is drawn; pass `""` for a tree that is already
+/// filtered. `expand_folders` opens folders by default, as a non-empty
+/// `filter` also does: a pre-filtered tree wants its results open without
+/// being matched against the query a second time, every frame.
 pub(in crate::app) fn draw_tree(
     ui: &mut Ui,
     tree: &TagTree,
     entries: &[TagEntry],
     selected: Option<&str>,
     filter: &str,
+    expand_folders: bool,
     show_prefixes: bool,
     double_click_to_open: bool,
     groups_mode: bool,
@@ -701,6 +706,7 @@ pub(in crate::app) fn draw_tree(
                 entries,
                 selected,
                 filter,
+                expand_folders,
                 show_prefixes,
                 double_click_to_open,
                 groups_mode,
@@ -1020,6 +1026,7 @@ pub(in crate::app) fn draw_tree_node(
     entries: &[TagEntry],
     selected: Option<&str>,
     filter: &str,
+    expand_folders: bool,
     show_prefixes: bool,
     double_click_to_open: bool,
     groups_mode: bool,
@@ -1075,6 +1082,7 @@ pub(in crate::app) fn draw_tree_node(
                     entries,
                     selected,
                     filter,
+                    expand_folders,
                     show_prefixes,
                     double_click_to_open,
                     groups_mode,
@@ -1122,7 +1130,7 @@ pub(in crate::app) fn draw_tree_node(
             &node.label,
             folder_label_color(ui, node),
             show_prefixes,
-            !filter.is_empty(),
+            expand_folders || !filter.is_empty(),
             on_path,
             body,
         )
@@ -1137,7 +1145,7 @@ pub(in crate::app) fn draw_tree_node(
             &node.label,
             &folder_label,
             folder_label_color(ui, node),
-            !filter.is_empty(),
+            expand_folders || !filter.is_empty(),
             on_path,
             body,
         )
@@ -2881,6 +2889,7 @@ mod tests {
                             false,
                             false,
                             false,
+                            false,
                             None,
                             BrowserSort::Natural,
                             false,
@@ -2956,6 +2965,7 @@ mod tests {
                         "",
                         false,
                         false,
+                        false,
                         groups_mode,
                         None,
                         BrowserSort::Natural,
@@ -2985,6 +2995,57 @@ mod tests {
         // node paths are group labels rather than folders.
         assert!(unused_height_after_tree(false, false) > 100.0);
         assert!(unused_height_after_tree(true, true) > 100.0);
+    }
+
+    /// A tree the folder pane has already filtered is drawn with an empty
+    /// query, so the query no longer opens its folders; `expand_folders`
+    /// does. Measured by height: an open folder lays out its tags.
+    #[test]
+    fn a_prefiltered_tree_opens_its_folders_when_asked() {
+        let entries: Vec<TagEntry> = (0..6)
+            .map(|index| TagEntry {
+                key: format!("file:objects/weapons/rifle_{index}.weapon"),
+                display_path: format!("objects/weapons/rifle_{index}.weapon"),
+                group_tag: u32::from_be_bytes(*b"weap"),
+                group_name: Some("weapon".to_owned()),
+                location: TagEntryLocation::LooseFile(PathBuf::from(format!(
+                    "objects/weapons/rifle_{index}.weapon"
+                ))),
+            })
+            .collect();
+        let tree = crate::source::build_tree(&entries);
+        let height = |expand_folders: bool| {
+            let ctx = egui::Context::default();
+            let mut height = 0.0;
+            let _ = ctx.run(Default::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    let top = ui.cursor().top();
+                    draw_tree(
+                        ui,
+                        &tree,
+                        &entries,
+                        None,
+                        "",
+                        expand_folders,
+                        false,
+                        false,
+                        false,
+                        None,
+                        BrowserSort::Natural,
+                        false,
+                        None,
+                        false,
+                    );
+                    height = ui.cursor().top() - top;
+                });
+            });
+            height
+        };
+        let (closed, open) = (height(false), height(true));
+        assert!(
+            open > closed + 5.0 * 16.0,
+            "expanded {open} vs collapsed {closed}: the folders did not open"
+        );
     }
 
     /// Control for the regression test below: the same pointer script against
