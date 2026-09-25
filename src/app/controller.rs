@@ -6843,7 +6843,7 @@ impl Baboon {
             .filter(|entry| referrer_keys.contains(entry.key.as_str()))
             .cloned()
             .collect();
-        out.sort_by(|a, b| natural_entry_order(a).cmp(&natural_entry_order(b)));
+        out.sort_by_cached_key(|entry| crate::source::natural_key(&entry.display_path));
         Some(out)
     }
 
@@ -6862,7 +6862,7 @@ impl Baboon {
             })
             .cloned()
             .collect();
-        out.sort_by(|a, b| natural_entry_order(a).cmp(&natural_entry_order(b)));
+        out.sort_by_cached_key(|entry| crate::source::natural_key(&entry.display_path));
         Some(out)
     }
 
@@ -6892,7 +6892,7 @@ impl Baboon {
                     .map(|entry| (*entry).clone())
             })
             .collect();
-        children.sort_by(|a, b| natural_entry_order(a).cmp(&natural_entry_order(b)));
+        children.sort_by_cached_key(|entry| crate::source::natural_key(&entry.display_path));
         children.dedup_by(|a, b| a.key == b.key);
         (children, false)
     }
@@ -11450,12 +11450,8 @@ fn affected_move_rewrite_entries(
         .into_iter()
         .filter_map(|key| entries_by_key.get(&key).cloned())
         .collect::<Vec<_>>();
-    entries.sort_by(|a, b| natural_entry_order(a).cmp(&natural_entry_order(b)));
+    entries.sort_by_cached_key(|entry| crate::source::natural_key(&entry.display_path));
     entries
-}
-
-fn natural_entry_order(entry: &TagEntry) -> String {
-    entry.display_path.to_ascii_lowercase().replace('\\', "/")
 }
 
 fn rewrite_references_in_entries(

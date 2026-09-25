@@ -6,15 +6,8 @@ use std::cmp::Ordering;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-fn display_path(path: &str) -> String {
-    if std::path::MAIN_SEPARATOR == '\\' {
-        path.replace('/', "\\")
-    } else {
-        path.replace('\\', "/")
-    }
-}
-
-fn truncate_start(text: &str, max_width: f32, measure: impl Fn(&str) -> f32) -> String {
+/// `text`, cut from the start with an ellipsis until `measure` says it fits.
+pub(super) fn truncate_start(text: &str, max_width: f32, measure: impl Fn(&str) -> f32) -> String {
     if measure(text) <= max_width {
         return text.to_owned();
     }
@@ -33,7 +26,8 @@ fn truncate_start(text: &str, max_width: f32, measure: impl Fn(&str) -> f32) -> 
     format!("…{}", chars[chars.len() - low..].iter().collect::<String>())
 }
 
-fn truncate_end(text: &str, max_width: f32, measure: impl Fn(&str) -> f32) -> String {
+/// `text`, cut from the end with an ellipsis until `measure` says it fits.
+pub(super) fn truncate_end(text: &str, max_width: f32, measure: impl Fn(&str) -> f32) -> String {
     if measure(text) <= max_width {
         return text.to_owned();
     }
@@ -60,7 +54,7 @@ fn commit_text(commit: &GitHistoryCommit) -> String {
 }
 
 fn path_text(ui: &Ui, path: &str, width: f32, font: egui::FontId) -> String {
-    let path = display_path(path);
+    let path = native_display_path(path);
     truncate_start(&path, width, |text| {
         ui.painter()
             .layout_no_wrap(text.to_owned(), font.clone(), text_dark())
@@ -70,7 +64,7 @@ fn path_text(ui: &Ui, path: &str, width: f32, font: egui::FontId) -> String {
 }
 
 fn path_label(ui: &mut Ui, path: &str, width: f32) {
-    let full = display_path(path);
+    let full = native_display_path(path);
     let font = egui::TextStyle::Body.resolve(ui.style());
     let short = path_text(ui, &full, width - 4.0, font.clone());
     let (rect, response) =
@@ -873,8 +867,8 @@ impl Baboon {
                     .profile
                     .as_ref()
                     .map(|profile| profile.name.clone())
-                    .unwrap_or_else(|| display_path(&other_source.label));
-                let location = display_path(&match &other_source.source {
+                    .unwrap_or_else(|| native_display_path(&other_source.label));
+                let location = native_display_path(&match &other_source.source {
                     TagSource::LooseFolder { root, .. } => root.display().to_string(),
                     _ => kit
                         .requested_path
@@ -952,7 +946,7 @@ impl Baboon {
                 .profile
                 .as_ref()
                 .map(|profile| profile.name.clone())
-                .or_else(|| source.map(|source| display_path(&source.label)))
+                .or_else(|| source.map(|source| native_display_path(&source.label)))
                 .unwrap_or_else(|| "Current tag".to_owned())
         } else {
             "Current tag".to_owned()
@@ -1160,7 +1154,7 @@ impl Baboon {
                                                 );
                                                 if ui
                                                     .selectable_label(selected, shown)
-                                                    .on_hover_text(display_path(label))
+                                                    .on_hover_text(native_display_path(label))
                                                     .clicked()
                                                 {
                                                     state.b_kit = Some(group.kit);
@@ -1213,7 +1207,7 @@ impl Baboon {
                                                 );
                                             if ui
                                                 .selectable_label(selected, &kit.name)
-                                                .on_hover_text(display_path(
+                                                .on_hover_text(native_display_path(
                                                     &kit.tags.display().to_string(),
                                                 ))
                                                 .clicked()
@@ -1903,7 +1897,7 @@ mod tests {
     #[test]
     fn displayed_paths_use_the_platform_separator_without_changing_keys() {
         let path = r"C:\kit/tags\objects/example.model";
-        let shown = display_path(path);
+        let shown = native_display_path(path);
         assert_eq!(
             shown,
             path.replace(['\\', '/'], &std::path::MAIN_SEPARATOR.to_string())

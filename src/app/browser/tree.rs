@@ -62,7 +62,8 @@ pub(in crate::app) fn entry_rel_path(entry: &TagEntry) -> String {
 /// Format an internal or persisted path for presentation on this host. Tag
 /// references deliberately remain forward-slash portable; browser tooltips
 /// should look like native filesystem paths instead.
-fn native_display_path(path: &str) -> String {
+/// A tag path with either separator, in the platform's own.
+pub(in crate::app) fn native_display_path(path: &str) -> String {
     let separator = std::path::MAIN_SEPARATOR.to_string();
     path.replace('\\', &separator).replace('/', &separator)
 }

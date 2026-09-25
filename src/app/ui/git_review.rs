@@ -374,34 +374,9 @@ fn truncate_end_to_width(
     color: Color32,
     max_width: f32,
 ) -> String {
-    if ui
-        .painter()
-        .layout_no_wrap(text.to_owned(), font.clone(), color)
-        .size()
-        .x
-        <= max_width
-    {
-        return text.to_owned();
-    }
-    let chars: Vec<char> = text.chars().collect();
-    let mut low = 0;
-    let mut high = chars.len();
-    while low < high {
-        let mid = (low + high + 1) / 2;
-        let candidate = format!("{}…", chars[..mid].iter().collect::<String>());
-        if ui
-            .painter()
-            .layout_no_wrap(candidate, font.clone(), color)
-            .size()
-            .x
-            <= max_width
-        {
-            low = mid;
-        } else {
-            high = mid - 1;
-        }
-    }
-    format!("{}…", chars[..low].iter().collect::<String>())
+    super::tag_compare::truncate_end(text, max_width, |candidate| {
+        text_width(ui, candidate, font, color)
+    })
 }
 
 fn truncate_start_to_width(
@@ -411,34 +386,16 @@ fn truncate_start_to_width(
     color: Color32,
     max_width: f32,
 ) -> String {
-    if ui
-        .painter()
+    super::tag_compare::truncate_start(text, max_width, |candidate| {
+        text_width(ui, candidate, font, color)
+    })
+}
+
+fn text_width(ui: &Ui, text: &str, font: &FontId, color: Color32) -> f32 {
+    ui.painter()
         .layout_no_wrap(text.to_owned(), font.clone(), color)
         .size()
         .x
-        <= max_width
-    {
-        return text.to_owned();
-    }
-    let chars: Vec<char> = text.chars().collect();
-    let mut low = 0;
-    let mut high = chars.len();
-    while low < high {
-        let mid = (low + high + 1) / 2;
-        let candidate = format!("…{}", chars[chars.len() - mid..].iter().collect::<String>());
-        if ui
-            .painter()
-            .layout_no_wrap(candidate, font.clone(), color)
-            .size()
-            .x
-            <= max_width
-        {
-            low = mid;
-        } else {
-            high = mid - 1;
-        }
-    }
-    format!("…{}", chars[chars.len() - low..].iter().collect::<String>())
 }
 
 fn commit_matches_filter(commit: &GitReviewCommit, filter: &str) -> bool {
