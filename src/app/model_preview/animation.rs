@@ -425,12 +425,19 @@ impl Baboon {
         key: String,
         result: Result<Vec<PreviewAnimationEntry>, String>,
     ) -> bool {
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
+        let Some(kit_index) = self.resolve_kit(stamp.kit) else {
             return true;
         };
+        let stale = self.resolve_stamp(stamp).is_none();
         let Some(state) = self.kits[kit_index].model_previews.get_mut(&key) else {
             return true;
         };
+        if stale {
+            // Asked for once per preview, so a list dropped as stale has to be
+            // asked for again, or it never arrives.
+            state.animation.requested_list = false;
+            return true;
+        }
         match result {
             Ok(entries) => {
                 if let Some(Ok(data)) = state.data.as_mut() {
@@ -449,14 +456,20 @@ impl Baboon {
         animation_index: usize,
         result: Result<DecodedAnimationPose, String>,
     ) -> bool {
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
+        let Some(kit_index) = self.resolve_kit(stamp.kit) else {
             return true;
         };
+        let stale = self.resolve_stamp(stamp).is_none();
         let Some(state) = self.kits[kit_index].model_previews.get_mut(&key) else {
             return true;
         };
+        // Cleared before the staleness check, so a decode dropped for a
+        // generation bump does not leave the clip "decoding" for good.
         if state.animation.decoding == Some(animation_index) {
             state.animation.decoding = None;
+        }
+        if stale {
+            return true;
         }
         // The selection moved on while this decoded; the per-frame hook will
         // have started (or will start) the right one.

@@ -861,13 +861,19 @@ impl Baboon {
         result: Result<ThumbnailImage, String>,
         ctx: &egui::Context,
     ) -> bool {
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
-            // The kit closed or was reloaded while this decoded; its thumbnail
-            // belongs to a source that is no longer there.
+        let Some(kit_index) = self.resolve_kit(stamp.kit) else {
+            // The kit closed while this decoded.
             return true;
         };
+        // Clear the in-flight marker before deciding whether the result is
+        // stale. Returning first, as this did, left it set after any generation
+        // bump that landed mid-job, so the work was never asked for again.
+        self.kits[kit_index].bitmap_browser.pending.remove(&key);
+        if self.resolve_stamp(stamp).is_none() {
+            // Reloaded while this decoded: the thumbnail is of the old source.
+            return true;
+        }
         let browser = &mut self.kits[kit_index].bitmap_browser;
-        browser.pending.remove(&key);
         // A failure is cached as `None` rather than dropped: an empty or
         // unsupported bitmap would otherwise be re-decoded every frame it stays
         // on screen, which is the one way this grid could still stall.
@@ -925,3 +931,54 @@ pub(in crate::app) fn tag_leaf_name(display_path: &str) -> String {
 #[cfg(test)]
 #[path = "tests/bitmap_browser.rs"]
 mod tests;
+
+#[cfg(test)]
+mod stale_result_tests {
+    use super::*;
+
+    /// A thumbnail that lands after a generation bump is dropped, but its key
+    /// must leave `pending`: it used to stay, and four such keys stopped every
+    /// further decode for the kit.
+    #[test]
+    fn a_stale_thumbnail_still_frees_its_decode_slot() {
+        let mut app = Baboon::for_test();
+        let stamp = app.kit_stamp();
+        app.kits[0].bitmap_browser.pending.insert("file:a.bitmap".to_owned());
+        app.kits[0].generation = app.kits[0].generation.wrapping_add(1);
+
+        app.handle_bitmap_thumbnail_decoded(
+            stamp,
+            "file:a.bitmap".to_owned(),
+            Err("stale".to_owned()),
+            &egui::Context::default(),
+        );
+
+        assert!(app.kits[0].bitmap_browser.pending.is_empty());
+        let cached = app.kits[0]
+            .bitmap_browser
+            .thumbnails
+            .lock()
+            .unwrap()
+            .contains("file:a.bitmap");
+        assert!(!cached, "the stale result itself is not kept");
+    }
+
+    /// Same for a model preview's texture resolve: a stale result left
+    /// `textures_pending` set, and the preview showed "Loading shaders…" and
+    /// repainted every frame for good.
+    #[test]
+    fn a_stale_texture_resolve_clears_textures_pending() {
+        let mut app = Baboon::for_test();
+        let stamp = app.kit_stamp();
+        let state = app.kits[0]
+            .model_previews
+            .entry("file:a.model".to_owned())
+            .or_default();
+        state.textures_pending = true;
+        app.kits[0].generation = app.kits[0].generation.wrapping_add(1);
+
+        app.handle_model_textures_resolved(stamp, "file:a.model".to_owned(), 1, Vec::new());
+
+        assert!(!app.kits[0].model_previews["file:a.model"].textures_pending);
+    }
+}

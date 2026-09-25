@@ -1592,13 +1592,20 @@ impl Baboon {
         collision: Option<RenderModelPreview>,
         physics: Option<RenderModelPreview>,
     ) -> bool {
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
+        let Some(kit_index) = self.resolve_kit(stamp.kit) else {
             return true;
         };
+        let stale = self.resolve_stamp(stamp).is_none();
         let Some(state) = self.kits[kit_index].model_previews.get_mut(&key) else {
             return true;
         };
+        // The in-flight marker is cleared before the staleness check: a result
+        // dropped for a generation bump used to leave it set, and the preview
+        // then waited for it for good (the overlays never arrived).
         state.overlays_pending = false;
+        if stale {
+            return true;
+        }
         {
             let Some(Ok(data)) = state.data.as_mut() else {
                 return true;

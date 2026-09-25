@@ -716,12 +716,19 @@ impl Baboon {
         result: Result<ThumbnailImage, String>,
         ctx: &egui::Context,
     ) -> bool {
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
-            // The kit closed or was reloaded while this rendered.
+        let Some(kit_index) = self.resolve_kit(stamp.kit) else {
+            // The kit closed while this rendered.
             return true;
         };
+        // Clear the in-flight marker before deciding whether the result is
+        // stale. Returning first, as this did, left it set after any generation
+        // bump that landed mid-job, so the work was never asked for again.
+        self.kits[kit_index].model_browser.pending.remove(&key);
+        if self.resolve_stamp(stamp).is_none() {
+            // Reloaded while this rendered: the thumbnail is of the old source.
+            return true;
+        }
         let browser = &mut self.kits[kit_index].model_browser;
-        browser.pending.remove(&key);
         // A failure is cached as `None` rather than dropped, so an unparseable
         // model is not re-rasterized every frame it stays on screen.
         let texture = match result {
