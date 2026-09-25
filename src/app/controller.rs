@@ -754,15 +754,17 @@ impl Baboon {
             return None;
         };
 
-        // `kits` and `audio` are disjoint fields, so the pak set can be handed
-        // to the walk while the container borrow is live. It is needed for
-        // events whose media is cooked inside a SoundBank.
+        // The pak set is needed for events whose media is cooked inside a
+        // SoundBank. A decode worker holds the lock only while it reads a
+        // file's bytes.
+        let store = self.audio.ce_media.clone();
+        let mut store = store.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let binding = std::sync::Arc::new(ce_audio::resolve_sound_binding(
             containers,
             packages,
             &usmap,
             package,
-            Some((root.as_path(), &mut self.audio.ce_media)),
+            Some((root.as_path(), &mut store)),
         ));
         self.kits[kit_index]
             .ce_sound_bindings

@@ -146,7 +146,8 @@ mod tests {
             items,
             tags_root: None,
             label: "ce extract test".to_owned(),
-        });
+        }, &egui::Context::default());
+        audio.wait_for_audio_jobs();
 
         for path in &expected {
             let bytes = std::fs::read(path)
@@ -700,7 +701,8 @@ mod tests {
             items,
             tags_root: None,
             label: "ce".to_owned(),
-        });
+        }, &egui::Context::default());
+        audio.wait_for_audio_jobs();
         let wav = std::fs::read(wav_dir.join(format!("{}.wav", sanitize_component(&rows[0].name))))
             .expect("wav written");
         assert_eq!(&wav[0..4], b"RIFF");
@@ -715,7 +717,8 @@ mod tests {
             items,
             tags_root: None,
             label: "ce".to_owned(),
-        });
+        }, &egui::Context::default());
+        audio.wait_for_audio_jobs();
         let ogg = std::fs::read(ogg_dir.join(format!("{}.ogg", sanitize_component(&rows[0].name))))
             .expect("ogg written");
         assert!(ogg.starts_with(b"OggS"), "raw passthrough should be an Ogg");
@@ -757,7 +760,8 @@ mod tests {
             items,
             tags_root: None,
             label: "h2".to_owned(),
-        });
+        }, &egui::Context::default());
+        audio.wait_for_audio_jobs();
         // At least one WAV should have been written with a valid RIFF header.
         let mut found = 0usize;
         for entry in walkdir(&dir) {
@@ -797,7 +801,8 @@ mod tests {
             items,
             tags_root: Some(tags_root.to_path_buf()),
             label: "bank".to_owned(),
-        });
+        }, &egui::Context::default());
+        audio.wait_for_audio_jobs();
         let mut found = 0usize;
         for entry in walkdir(&dir) {
             let bytes = std::fs::read(&entry).unwrap();

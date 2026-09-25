@@ -1300,7 +1300,7 @@ impl Baboon {
         // Drain a queued sound extraction (decode + write files off the render
         // hot loop) and a reimport hand-off (opens the tool runner pre-filled).
         if let Some(request) = self.pending_sound_extract.take() {
-            self.audio.run_extract(request);
+            self.audio.run_extract(request, ctx);
             if let Some(status) = self.audio.status.clone() {
                 self.status = status;
             }
