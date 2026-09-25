@@ -850,8 +850,10 @@ pub(in crate::app) fn draw_tree_node_lazy(
     } else {
         node.label.clone()
     };
+    let folder_name = node.label.clone();
     let response = show_folder_tree_header(
         ui,
+        &folder_name,
         &folder_label,
         folder_label_color(ui, node),
         !filter.is_empty(),
@@ -1132,6 +1134,7 @@ pub(in crate::app) fn draw_tree_node(
         };
         show_folder_tree_header(
             ui,
+            &node.label,
             &folder_label,
             folder_label_color(ui, node),
             !filter.is_empty(),
@@ -1762,15 +1765,19 @@ fn show_relocated_browser_tree_body<R>(
     }
 }
 
+/// `id_source` is the folder's name, never its displayed label: the label
+/// gains a `[folder]` prefix when prefixes are shown, and keying the open
+/// state on it made toggling "Show prefixes" forget every expanded folder.
 fn show_folder_tree_header<R>(
     ui: &mut Ui,
+    id_source: &str,
     label: &str,
     label_color: Color32,
     default_open: bool,
     force_open: bool,
     add_body: impl FnOnce(&mut Ui) -> R,
 ) -> egui::Response {
-    let id = ui.make_persistent_id(label);
+    let id = ui.make_persistent_id(id_source);
     let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
         ui.ctx(),
         id,
@@ -1884,6 +1891,7 @@ mod group_header_tests {
                     actual = show_folder_tree_header(
                         ui,
                         "characters",
+                        "characters",
                         text_dark(),
                         false,
                         false,
@@ -1930,9 +1938,9 @@ mod group_header_tests {
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
                 begin_folder_chevron_collection(ui);
-                show_folder_tree_header(ui, "outer", text_dark(), true, true, |ui| {
+                show_folder_tree_header(ui, "outer", "outer", text_dark(), true, true, |ui| {
                     nested_guide_enabled = ui.visuals().indent_has_left_vline;
-                    show_folder_tree_header(ui, "inner", text_dark(), true, true, |_| {});
+                    show_folder_tree_header(ui, "inner", "inner", text_dark(), true, true, |_| {});
                 });
             });
         });
@@ -2881,6 +2889,37 @@ mod tests {
 
         assert_eq!(requests_with_pointer_at(Some(egui::pos2(290.0, 890.0))), 0);
         assert_eq!(requests_with_pointer_at(Some(egui::pos2(60.0, 20.0))), 1);
+    }
+
+    /// A folder stays open when "Show prefixes" changes its label. Its open
+    /// state was keyed on the label, which gains a `[folder]` prefix.
+    #[test]
+    fn a_folder_stays_open_when_prefixes_are_shown() {
+        let ctx = egui::Context::default();
+        let body_drawn = |label: &str, open_first: bool| {
+            let mut drawn = false;
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    if open_first {
+                        let id = ui.make_persistent_id("objects");
+                        let mut state = egui::collapsing_header::CollapsingState::load_with_default_open(
+                            ui.ctx(),
+                            id,
+                            false,
+                        );
+                        state.set_open(true);
+                        state.store(ui.ctx());
+                    }
+                    show_folder_tree_header(ui, "objects", label, text_dark(), false, false, |_| {
+                        drawn = true;
+                    });
+                });
+            });
+            drawn
+        };
+
+        assert!(body_drawn("objects", true), "opened");
+        assert!(body_drawn("[folder] objects", false), "still open with the prefix shown");
     }
 
     /// Draw one browser tree and report how much vertical space it left unused.
