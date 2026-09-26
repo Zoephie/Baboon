@@ -159,16 +159,24 @@ impl Baboon {
         request_id: u64,
         result: Result<ModelPreviewData, String>,
     ) -> bool {
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
+        let Some(kit_index) = self.resolve_kit(stamp.kit) else {
             return true;
         };
+        let stale = self.resolve_stamp(stamp).is_none();
         let Some(state) = self.kits[kit_index].model_previews.get_mut(&key) else {
             return true;
         };
         if state.preview_load_id != Some(request_id) {
             return true;
         }
+        // The request is answered before the staleness check. A result dropped
+        // for a generation bump used to leave the id set, and with no data and
+        // a request "in flight" nothing asked again: the pane sat on its
+        // loading shells, repainting every frame, until the tag was closed.
         state.preview_load_id = None;
+        if stale {
+            return true;
+        }
         if let Ok(data) = &result {
             state.render_model_path = Some(data.render_model_path.clone());
             // Auto-select the canonical variant (named `default`, else the

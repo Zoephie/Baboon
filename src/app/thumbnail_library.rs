@@ -470,6 +470,10 @@ impl Baboon {
             .lock()
             .ok()
             .and_then(|mut thumbnails| thumbnails.get(&key));
+        // Cached as `None` is a thumbnail that could not be made: it is done,
+        // not loading, so it must not spin (and repaint) for as long as it is
+        // on screen.
+        let failed = matches!(cached, Some(None));
         let texture = match cached {
             Some(texture) => texture,
             None => {
@@ -512,6 +516,15 @@ impl Baboon {
                 let drawn = fit_within(texture.size_vec2(), cell - 2.0);
                 let at = egui::Rect::from_center_size(image_rect.center(), drawn);
                 egui::Image::new(&texture).paint_at(ui, at);
+            }
+            None if failed => {
+                ui.painter().text(
+                    image_rect.center(),
+                    Align2::CENTER_CENTER,
+                    "No preview",
+                    FontId::proportional(11.0),
+                    subtle_dark(),
+                );
             }
             None => {
                 crate::app::ui::paint_loading_rings(ui, image_rect);

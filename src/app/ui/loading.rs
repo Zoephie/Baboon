@@ -77,11 +77,22 @@ fn themed_svg(
     }
 }
 
-fn loading_image_uri(part: &str, theme: &str, size: f32, pixels_per_point: f32) -> String {
+/// The pixel size to rasterize artwork drawn `size` points wide at.
+///
+/// Rounded up to a quarter-octave step rather than used exactly. egui keeps
+/// every (uri, size) rasterization for the life of the process, and makes it
+/// on the UI thread, so an exact size gave every thumbnail-slider position and
+/// every resize of a small pane its own pair of SVG renders and textures —
+/// never freed. The ladder bounds that to a handful per part, and oversamples
+/// by between 2x and 2.4x instead of exactly 2x.
+fn loading_raster_pixels(size: f32, pixels_per_point: f32) -> u32 {
+    let needed = (size * pixels_per_point * LOADING_RASTER_SCALE).max(1.0);
+    let quarter_octaves = (needed.log2() * 4.0).ceil();
+    2.0_f32.powf(quarter_octaves / 4.0).ceil() as u32
+}
+
+fn loading_image_uri(part: &str, theme: &str, raster_pixels: u32, pixels_per_point: f32) -> String {
     let dpi = (pixels_per_point * 100.0).round().max(1.0) as u32;
-    let raster_pixels = (size * pixels_per_point * LOADING_RASTER_SCALE)
-        .round()
-        .max(1.0) as u32;
     format!("bytes://baboon_loading/{part}-{theme}-dpi{dpi}-{raster_pixels}px.svg")
 }
 
@@ -90,11 +101,12 @@ fn paint_loading_art(ui: &Ui, rect: egui::Rect, include_background: bool) {
     let theme = if dark_mode { "dark" } else { "light" };
     let size = rect.width().min(rect.height());
     let pixels_per_point = ui.ctx().pixels_per_point();
-    let raster_size = rect.size() * LOADING_RASTER_SCALE;
+    let raster_pixels = loading_raster_pixels(size, pixels_per_point);
+    let raster_size = Vec2::splat(raster_pixels as f32 / pixels_per_point);
 
     if include_background {
         egui::Image::from_bytes(
-            loading_image_uri("background", theme, size, pixels_per_point),
+            loading_image_uri("background", theme, raster_pixels, pixels_per_point),
             themed_svg(dark_mode, LOADING_BACKGROUND_SVG, &LIGHT_BACKGROUND_SVG),
         )
         .fit_to_exact_size(raster_size)
@@ -107,7 +119,7 @@ fn paint_loading_art(ui: &Ui, rect: egui::Rect, include_background: bool) {
     let center = Vec2::splat(0.5);
 
     egui::Image::from_bytes(
-        loading_image_uri("outer", theme, size, pixels_per_point),
+        loading_image_uri("outer", theme, raster_pixels, pixels_per_point),
         themed_svg(dark_mode, LOADING_OUTER_SVG, &LIGHT_OUTER_SVG),
     )
     .fit_to_exact_size(raster_size)
@@ -115,7 +127,7 @@ fn paint_loading_art(ui: &Ui, rect: egui::Rect, include_background: bool) {
     .paint_at(ui, rect);
 
     egui::Image::from_bytes(
-        loading_image_uri("inner", theme, size, pixels_per_point),
+        loading_image_uri("inner", theme, raster_pixels, pixels_per_point),
         themed_svg(dark_mode, LOADING_INNER_SVG, &LIGHT_INNER_SVG),
     )
     .fit_to_exact_size(raster_size)
@@ -199,9 +211,33 @@ mod tests {
 
     #[test]
     fn loading_texture_key_tracks_fractional_display_scale() {
+        let pixels = loading_raster_pixels(256.0, 1.5);
         assert_eq!(
-            loading_image_uri("outer", "dark", 256.0, 1.5),
-            "bytes://baboon_loading/outer-dark-dpi150-768px.svg"
+            loading_image_uri("outer", "dark", pixels, 1.5),
+            "bytes://baboon_loading/outer-dark-dpi150-862px.svg"
         );
+    }
+
+    /// Every size the artwork is drawn at — thumbnail cells from the slider's
+    /// whole range, panes of any height — lands on a few rasterizations, each
+    /// at least twice the display resolution.
+    #[test]
+    fn loading_rasters_are_bounded_and_oversampled() {
+        for pixels_per_point in [1.0, 1.25, 1.5, 2.0, 3.0] {
+            let mut rasters = std::collections::BTreeSet::new();
+            for quarter_points in 4..=(LOADING_SPINNER_SIZE as u32 * 4) {
+                let size = quarter_points as f32 / 4.0;
+                let pixels = loading_raster_pixels(size, pixels_per_point);
+                let needed = size * pixels_per_point * LOADING_RASTER_SCALE;
+                assert!(pixels as f32 >= needed, "{size}pt @{pixels_per_point}x undersampled");
+                assert!(pixels as f32 <= needed * 1.2 + 1.0, "{size}pt oversampled to {pixels}px");
+                rasters.insert(pixels);
+            }
+            assert!(
+                rasters.len() <= 36,
+                "{} rasterizations at {pixels_per_point}x",
+                rasters.len()
+            );
+        }
     }
 }

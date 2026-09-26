@@ -221,3 +221,31 @@ fn invalidating_drops_the_load_in_flight() {
         "the pre-edit load landed after the edit"
     );
 }
+
+/// The kit's generation moved while the worker ran — a background scan
+/// started, or a tag was created. The reply is stale and is dropped, but the
+/// preview must ask again rather than wait on a request nobody will answer.
+#[test]
+fn a_result_dropped_for_a_generation_bump_is_requested_again() {
+    let tags = crate::test_kits::h3ek_tags();
+    let rel = "objects/weapons/rifle/assault_rifle/assault_rifle.render_model";
+    let Some(mut fixture) = fixture(&tags, "halo3_mcc", rel) else {
+        return;
+    };
+    fixture.frame();
+    let first = fixture.state().preview_load_id.expect("a worker started");
+    let reply = wait_for_reply(&fixture);
+    fixture.app.kits[0].generation = fixture.app.kits[0].generation.wrapping_add(1);
+    fixture.app.tx.send(reply).unwrap();
+    fixture.app.process_worker_messages(&fixture.ctx);
+    assert!(fixture.state().data.is_none(), "a stale result was installed");
+
+    let key = fixture.key.clone();
+    fixture.app.maybe_request_model_preview(0, &key, &fixture.ctx);
+    let second = fixture.state().preview_load_id;
+    assert!(
+        second.is_some_and(|second| second != first),
+        "the dropped request was never re-made: the preview waits for good"
+    );
+    fixture.frames_until_loaded();
+}

@@ -126,3 +126,56 @@ fn the_bitmap_library_queues_bitmaps() {
 fn the_model_library_queues_models() {
     draws_and_queues_its_own::<Models>("model");
 }
+
+/// How long egui may wait before the next frame, once the bitmap library has
+/// settled with every bitmap's thumbnail either pending or failed.
+fn repaint_delay_with_thumbnails(failed: bool) -> std::time::Duration {
+    let mut app = app_with_mixed_kit();
+    if failed {
+        let mut thumbnails = Bitmaps::library(&app.kits[0]).thumbnails.lock().unwrap();
+        for index in 0..40 {
+            thumbnails.insert(format!("file:textures/grass_{index:02}.bitmap"), None);
+        }
+    }
+    let ctx = egui::Context::default();
+    let input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(900.0, 700.0),
+        )),
+        ..Default::default()
+    };
+    // egui repaints its first frames by itself, and the scrollbar fades in
+    // over time that only passes if the input says so. Once both settle, the
+    // frame says what the library itself asked for.
+    let mut delay = std::time::Duration::ZERO;
+    for frame in 0..3 {
+        let input = egui::RawInput {
+            time: Some(frame as f64),
+            ..input.clone()
+        };
+        let output = ctx.run(input, |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                app.draw_thumbnail_library::<Bitmaps>(ui, ctx, 0);
+            });
+        });
+        delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+    }
+    delay
+}
+
+/// A failed thumbnail is finished, not loading: a screen of them must not
+/// spin, or keep the whole window repainting for as long as they are shown.
+#[test]
+fn failed_thumbnails_do_not_keep_the_window_repainting() {
+    let pending = repaint_delay_with_thumbnails(false);
+    assert!(
+        pending <= std::time::Duration::from_millis(16),
+        "pending thumbnails should animate: {pending:?}"
+    );
+    let failed = repaint_delay_with_thumbnails(true);
+    assert!(
+        failed > std::time::Duration::from_secs(1),
+        "failed thumbnails still repaint every {failed:?}"
+    );
+}
