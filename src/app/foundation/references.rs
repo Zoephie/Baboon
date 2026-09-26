@@ -439,7 +439,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                 REFERENCE_MISSING_COLOR
             };
             ui.painter()
-                .rect_stroke(row_response.rect, 3.0, Stroke::new(1.5, color));
+                .rect_stroke(row_response.rect, 3.0, Stroke::new(1.5_f32, color));
         }
         if let Some(payload) = row_response.dnd_release_payload::<DraggedTagRef>() {
             if accepts(&payload) {
@@ -742,7 +742,7 @@ pub(in crate::app) fn draw_foundation_flags_row(
         Vec2::new(panel_width, panel_height),
     );
     painter.rect_filled(flags_rect, 0.0, foundation_input());
-    painter.rect_stroke(flags_rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
+    painter.rect_stroke(flags_rect, 0.0, Stroke::new(1.0_f32, foundation_input_edge()));
 
     if display_flags.is_empty() {
         paint_findable_text(
@@ -785,10 +785,10 @@ pub(in crate::app) fn draw_foundation_flags_row(
             painter.rect_stroke(
                 checkbox_rect,
                 0.0,
-                Stroke::new(1.0, foundation_input_edge()),
+                Stroke::new(1.0_f32, foundation_input_edge()),
             );
             if *is_set {
-                let stroke = Stroke::new(1.6, text_dark());
+                let stroke = Stroke::new(1.6_f32, text_dark());
                 painter.line_segment(
                     [
                         checkbox_rect.left_center() + Vec2::new(3.0, 0.0),

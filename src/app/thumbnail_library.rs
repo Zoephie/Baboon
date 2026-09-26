@@ -505,10 +505,10 @@ impl Baboon {
             .rect_filled(image_rect, 0.0, foundation_input());
         if response.hovered() {
             ui.painter()
-                .rect_stroke(image_rect, 0.0, Stroke::new(1.0, foundation_blue()));
+                .rect_stroke(image_rect, 0.0, Stroke::new(1.0_f32, foundation_blue()));
         } else {
             ui.painter()
-                .rect_stroke(image_rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
+                .rect_stroke(image_rect, 0.0, Stroke::new(1.0_f32, foundation_input_edge()));
         }
 
         match texture {

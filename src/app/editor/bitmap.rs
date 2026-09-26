@@ -402,7 +402,7 @@ fn draw_bitmap_header_separator(ui: &mut Ui) {
     ui.painter().vline(
         separator_rect.center().x,
         separator_rect.y_range(),
-        Stroke::new(1.0, foundation_group_edge()),
+        Stroke::new(1.0_f32, foundation_group_edge()),
     );
 }
 
@@ -515,9 +515,9 @@ fn draw_bitmap_channel_toggle(
                 widgets.inactive.weak_bg_fill = active_fill;
                 widgets.hovered.weak_bg_fill = active_fill;
                 widgets.active.weak_bg_fill = active_fill;
-                widgets.inactive.bg_stroke = Stroke::new(1.0, active_border);
-                widgets.hovered.bg_stroke = Stroke::new(1.0, Color32::WHITE);
-                widgets.active.bg_stroke = Stroke::new(1.0, Color32::WHITE);
+                widgets.inactive.bg_stroke = Stroke::new(1.0_f32, active_border);
+                widgets.hovered.bg_stroke = Stroke::new(1.0_f32, Color32::WHITE);
+                widgets.active.bg_stroke = Stroke::new(1.0_f32, Color32::WHITE);
             }
             icon_button(ui, icon, tooltip, true, text_dark())
         })
@@ -794,7 +794,7 @@ fn draw_bitmap_canvas_and_footer(
     // its 4 px tiles never zoom with the bitmap.
     let painter = ui.painter();
     painter.rect_filled(canvas_rect, 0.0, preview.bg.color());
-    painter.rect_stroke(canvas_rect, 0.0, Stroke::new(1.0, grid_line()));
+    painter.rect_stroke(canvas_rect, 0.0, Stroke::new(1.0_f32, grid_line()));
 
     let img_tl = canvas_rect.center() + preview.pan - draw_size * 0.5;
     let img_rect = egui::Rect::from_min_size(img_tl, draw_size);
@@ -827,7 +827,7 @@ fn draw_bitmap_canvas_and_footer(
         painter.with_clip_rect(canvas_rect).rect_stroke(
             img_rect.expand(1.0),
             0.0,
-            Stroke::new(2.0, color),
+            Stroke::new(2.0_f32, color),
         );
     }
 
@@ -857,7 +857,7 @@ fn draw_bitmap_canvas_and_footer(
                     egui::vec2(swatch, swatch),
                 );
                 painter.rect_filled(swatch_rect, 2.0, Color32::from_rgb(r, g, b));
-                painter.rect_stroke(swatch_rect, 2.0, Stroke::new(1.0, grid_line()));
+                painter.rect_stroke(swatch_rect, 2.0, Stroke::new(1.0_f32, grid_line()));
                 painter.text(
                     swatch_rect.right_center() + egui::vec2(6.0, 0.0),
                     egui::Align2::LEFT_CENTER,

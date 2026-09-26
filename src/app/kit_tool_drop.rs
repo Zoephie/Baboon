@@ -16,6 +16,8 @@ use super::*;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::app) enum KitTool {
     Sapien,
+    /// Only the Windows window lookup finds one.
+    #[cfg_attr(not(windows), allow(dead_code))]
     Guerilla,
 }
 
@@ -100,6 +102,7 @@ pub(in crate::app) fn mouse_buttons_are_up() -> bool {
 
 /// Which kit tool an executable file stem names (`sapien`, `sapien_play`,
 /// `guerilla`, ...), case-insensitively.
+#[cfg(any(windows, test))]
 pub(in crate::app) fn kit_tool_for_executable(stem: &str) -> Option<KitTool> {
     let stem = stem.to_ascii_lowercase();
     let names = |tool: &str| stem == tool || stem.starts_with(&format!("{tool}_"));
@@ -196,6 +199,7 @@ pub(in crate::app) fn explorer_path(file: &Path) -> PathBuf {
 /// The bytes of a `DROPFILES` block carrying one wide path: the 20-byte
 /// header (`pFiles = 20`, the client point, `fNC = 0`, `fWide = 1`) followed
 /// by the UTF-16LE path and the list's double terminator.
+#[cfg(any(windows, test))]
 pub(in crate::app) fn encode_dropfiles(file: &Path, client_point: (i32, i32)) -> Vec<u8> {
     const HEADER_LEN: u32 = 20;
     const NOT_IN_NONCLIENT_AREA: i32 = 0;
@@ -218,7 +222,7 @@ fn wide_path(file: &Path) -> impl Iterator<Item = u16> + '_ {
     file.as_os_str().encode_wide()
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), test))]
 fn wide_path(file: &Path) -> impl Iterator<Item = u16> + '_ {
     file.to_string_lossy()
         .encode_utf16()

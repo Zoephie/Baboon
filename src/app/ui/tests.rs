@@ -207,7 +207,7 @@ fn custom_header_inputs_use_standard_hover_and_focus_strokes() {
         egui::CentralPanel::default().show(ctx, |ui| {
             assert_eq!(
                 pane_header_input_stroke(ui, false, false),
-                Stroke::new(1.0, foundation_input_edge())
+                Stroke::new(1.0_f32, foundation_input_edge())
             );
             assert_eq!(
                 pane_header_input_stroke(ui, true, false),

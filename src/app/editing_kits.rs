@@ -716,6 +716,8 @@ mod tests {
             .unwrap();
         let status = validate_builtin_editing_kit(shortcut, Some(&root));
         assert!(validate_editing_kit_profile_layout(&root, shortcut.game).is_ok());
+        // Read on Windows only, but the `expect` is the check everywhere.
+        #[cfg_attr(not(windows), allow(unused_variables))]
         let layout = status.layout().expect("built-in layout should be ready");
         #[cfg(windows)]
         assert!(

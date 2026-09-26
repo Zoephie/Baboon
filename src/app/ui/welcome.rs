@@ -152,7 +152,7 @@ impl Baboon {
 
                     Frame::none()
                         .fill(foundation_group_bg())
-                        .stroke(Stroke::new(1.0, foundation_group_edge()))
+                        .stroke(Stroke::new(1.0_f32, foundation_group_edge()))
                         .show(ui, |ui| {
                             let content_item_spacing_y = ui.spacing().item_spacing.y;
                             ui.spacing_mut().item_spacing.y = 0.0;

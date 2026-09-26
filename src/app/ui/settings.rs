@@ -753,7 +753,7 @@ fn editing_kit_card_with_read_only(
                 ui.painter().hline(
                     card.response.rect.x_range(),
                     y,
-                    Stroke::new(2.0, ui.visuals().selection.stroke.color),
+                    Stroke::new(2.0_f32, ui.visuals().selection.stroke.color),
                 );
             }
         }

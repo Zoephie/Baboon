@@ -85,7 +85,7 @@ fn pane_header_input_stroke(ui: &Ui, hovered: bool, focused: bool) -> Stroke {
     } else if hovered {
         ui.visuals().widgets.hovered.bg_stroke
     } else {
-        Stroke::new(1.0, foundation_input_edge())
+        Stroke::new(1.0_f32, foundation_input_edge())
     }
 }
 

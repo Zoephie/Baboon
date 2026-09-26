@@ -722,8 +722,6 @@ fn x11_work_area() -> Option<PixelRect> {
         return None;
     }
 
-    use xcb::x;
-
     let (connection, screen_number) = xcb::Connection::connect(None).ok()?;
     let root = connection
         .get_setup()

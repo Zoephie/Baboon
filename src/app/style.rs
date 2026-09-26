@@ -31,7 +31,7 @@ pub(super) fn foundation_visuals() -> egui::Visuals {
         foundation_input()
     };
     visuals.selection.bg_fill = selection_fill_for(is_dark_mode());
-    visuals.selection.stroke = Stroke::new(1.0, selection_stroke_for(is_dark_mode()));
+    visuals.selection.stroke = Stroke::new(1.0_f32, selection_stroke_for(is_dark_mode()));
     visuals.widgets.noninteractive.bg_fill = row_type();
     visuals.widgets.inactive.bg_fill = if is_dark_mode() {
         Color32::from_rgb(68, 68, 68)
@@ -56,7 +56,7 @@ pub(super) fn foundation_visuals() -> egui::Visuals {
         Color32::from_rgb(188, 207, 216)
     };
     visuals.menu_rounding = egui::Rounding::same(5.0);
-    visuals.window_stroke = Stroke::new(1.0, foundation_group_edge());
+    visuals.window_stroke = Stroke::new(1.0_f32, foundation_group_edge());
     visuals
 }
 

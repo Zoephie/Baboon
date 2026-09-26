@@ -1042,7 +1042,7 @@ pub(in crate::app) fn draw_model_preview_section_with_header_wrap(
         ui.painter().rect_stroke(
             container_rect,
             RADIUS,
-            Stroke::new(1.0, foundation_group_edge()),
+            Stroke::new(1.0_f32, foundation_group_edge()),
         );
         container_rect
     })
@@ -1310,7 +1310,7 @@ fn draw_marker_filter_field(ui: &mut Ui, filter: &mut String) -> egui::Response 
     } else if response.hovered() {
         ui.visuals().widgets.hovered.bg_stroke
     } else {
-        Stroke::new(1.0, foundation_input_edge())
+        Stroke::new(1.0_f32, foundation_input_edge())
     };
     ui.painter().rect_stroke(rect, rounding, stroke);
     response
@@ -1388,7 +1388,7 @@ fn draw_model_viewport_with_stats(
     if waiting_for_textures {
         let (rect, _) = ui.allocate_exact_size(desired_size, Sense::hover());
         ui.painter()
-            .rect_stroke(rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
+            .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, foundation_input_edge()));
         crate::app::ui::paint_loading_rings(ui, rect);
     } else {
         draw_model_viewport(ui, data, state, desired_size);

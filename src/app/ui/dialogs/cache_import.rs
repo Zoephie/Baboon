@@ -39,7 +39,7 @@ fn draw_outside_folder(
     let id = ui.make_persistent_id(("cache_import_outside_folder", folder));
     // Open at the top so the first level is readable without a click, closed
     // below it so a folder of two thousand tags does not arrive expanded.
-    let mut state =
+    let state =
         egui::collapsing_header::CollapsingState::load_with_default_open(ui.ctx(), id, depth == 0);
     state
         .show_header(ui, |ui| {

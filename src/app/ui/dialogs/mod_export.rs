@@ -496,7 +496,7 @@ impl Baboon {
                     ui.set_width(width);
                     Frame::none()
                         .fill(wash)
-                        .stroke(Stroke::new(1.0, accent.gamma_multiply(0.5)))
+                        .stroke(Stroke::new(1.0_f32, accent.gamma_multiply(0.5)))
                         .inner_margin(egui::Margin::symmetric(6.0, 6.0))
                         .show(ui, |ui| {
                             ui.label(RichText::new(title).color(accent).small());

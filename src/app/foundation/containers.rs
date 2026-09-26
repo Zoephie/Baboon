@@ -920,7 +920,7 @@ fn draw_foundation_collapsing_header(
     ui.painter().rect_stroke(
         container_rect,
         FOUNDATION_CONTAINER_RADIUS,
-        Stroke::new(1.0, foundation_block_edge()),
+        Stroke::new(1.0_f32, foundation_block_edge()),
     );
     open
 }
@@ -2079,7 +2079,7 @@ pub(in crate::app) fn draw_foundation_block_control(
     ui.painter().rect_stroke(
         container_rect,
         FOUNDATION_CONTAINER_RADIUS,
-        Stroke::new(1.0, foundation_block_edge()),
+        Stroke::new(1.0_f32, foundation_block_edge()),
     );
 
     actions
@@ -2383,7 +2383,7 @@ pub(in crate::app) fn foundation_header_value_cell(ui: &mut Ui, text: &str, max_
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 22.0), Sense::hover());
     ui.painter().rect_filled(rect, 4.0, foundation_input());
     ui.painter()
-        .rect_stroke(rect, 4.0, Stroke::new(1.0, foundation_input_edge()));
+        .rect_stroke(rect, 4.0, Stroke::new(1.0_f32, foundation_input_edge()));
     ui.painter().text(
         rect.left_center() + Vec2::new(5.0, 0.0),
         Align2::LEFT_CENTER,

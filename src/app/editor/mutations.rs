@@ -1530,7 +1530,6 @@ pub(in crate::app) fn apply_one_shader_op(
 
 #[cfg(test)]
 mod campaign_evolved_field_paths {
-    use super::*;
     use crate::source::{load_iostore_container_set, read_entry};
     use std::path::{Path, PathBuf};
 

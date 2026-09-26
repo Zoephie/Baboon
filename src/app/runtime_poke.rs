@@ -4,6 +4,12 @@
 //! injection. It can alter bytes in allocations the game already owns, but it
 //! never allocates remote memory, changes page protection, resizes a block or
 //! data payload, or registers a new tag.
+//!
+//! Everything above `platform` — the profiles, the planner, the transaction
+//! engine — is plain byte work, but only the Windows `platform` drives it
+//! against a live process. Elsewhere only the tests reach it, so a non-Windows
+//! build would report the lot as dead; Windows builds still lint it.
+#![cfg_attr(not(windows), allow(dead_code))]
 
 use super::*;
 
@@ -30,6 +36,8 @@ const STRING_ID_SET_ZERO_BUILTIN_COUNT: u32 = 1_068;
 #[derive(Clone, Copy, Debug)]
 pub(in crate::app) struct RuntimeBuildProfile {
     pub(in crate::app) label: &'static str,
+    /// Recorded with the measurement, never consulted: see [`PROFILES`].
+    #[allow(dead_code)]
     host_sha256: &'static str,
     dll_sha256: &'static str,
     tag_table_pointer_rva: u64,
@@ -2034,7 +2042,7 @@ mod platform {
             _ => return Err("multiple matching game processes are running".to_owned()),
         };
         let modules = modules(process_id)?;
-        let host = modules
+        modules
             .iter()
             .find(|module| module.name.eq_ignore_ascii_case(PROCESS_NAME))
             .ok_or_else(|| "game executable module is missing".to_owned())?;

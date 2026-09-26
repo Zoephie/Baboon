@@ -464,7 +464,7 @@ fn draw_foundation_right_rail(
                 );
                 ui.painter().rect_filled(rect, 0.0, color);
                 ui.painter()
-                    .rect_stroke(rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
+                    .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, foundation_input_edge()));
                 if response.clicked() {
                     *color_popup = Some(
                         MaterialColorPopup::new(

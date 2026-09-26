@@ -224,7 +224,7 @@ fn context_menu_primary_button(
                 system_visuals.widgets.noninteractive.weak_bg_fill
             };
             let stroke = if hovered || pressed {
-                Stroke::new(1.0, foundation_input_edge())
+                Stroke::new(1.0_f32, foundation_input_edge())
             } else {
                 Stroke::NONE
             };
@@ -1886,7 +1886,7 @@ fn show_group_tree_header<R>(
             }
             let badge = Frame::none()
                 .fill(Color32::from_rgb(48, 58, 66))
-                .stroke(Stroke::new(1.0, Color32::from_rgb(76, 89, 98)))
+                .stroke(Stroke::new(1.0_f32, Color32::from_rgb(76, 89, 98)))
                 .rounding(egui::Rounding::same(4.0))
                 .inner_margin(egui::Margin::symmetric(6.0, 1.0))
                 .show(ui, |ui| {
@@ -2177,7 +2177,7 @@ mod group_header_tests {
                 egui::pos2(5.0, 14.0),
                 egui::pos2(15.0, 26.0),
             )],
-            Stroke::new(1.0, Color32::WHITE),
+            Stroke::new(1.0_f32, Color32::WHITE),
         );
 
         assert_eq!(shapes.len(), 2);
@@ -3334,7 +3334,7 @@ mod tests {
     fn control_a_bare_drag_source_sets_its_payload() {
         let ctx = egui::Context::default();
         let mut source_rect = egui::Rect::NOTHING;
-        let mut frame = |events: Vec<egui::Event>, source_rect: &mut egui::Rect| {
+        let frame = |events: Vec<egui::Event>, source_rect: &mut egui::Rect| {
             let _ = ctx.run(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
@@ -3413,11 +3413,11 @@ mod tests {
         let mut hover_seen = false;
         let mut dropped: Option<String> = None;
 
-        let mut frame = |events: Vec<egui::Event>,
-                         row_rect: &mut egui::Rect,
-                         target_rect: &mut egui::Rect,
-                         hover_seen: &mut bool,
-                         dropped: &mut Option<String>| {
+        let frame = |events: Vec<egui::Event>,
+                     row_rect: &mut egui::Rect,
+                     target_rect: &mut egui::Rect,
+                     hover_seen: &mut bool,
+                     dropped: &mut Option<String>| {
             let _ = ctx.run(
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
@@ -3770,7 +3770,7 @@ pub(in crate::app) fn folder_chevron_icon(ui: &mut Ui, openness: f32, response: 
         cutouts.push(slot);
     }
     let half = 3.5;
-    let stroke = Stroke::new(1.5, ui.visuals().text_color());
+    let stroke = Stroke::new(1.5_f32, ui.visuals().text_color());
     let points = if openness > 0.5 {
         [
             egui::pos2(center.x - half, center.y - half * 0.5),

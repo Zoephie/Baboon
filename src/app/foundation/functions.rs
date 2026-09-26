@@ -30,7 +30,7 @@ fn draw_foundation_function_row_contents(
         foundation_label_cell(ui, &meta.label, meta.help.as_deref());
         Frame::none()
             .fill(foundation_group_bg())
-            .stroke(Stroke::new(1.0, foundation_group_edge()))
+            .stroke(Stroke::new(1.0_f32, foundation_group_edge()))
             .inner_margin(egui::Margin::same(6.0))
             .show(ui, |ui| {
                 // `Frame::show` inherits the parent layout, and this row is
@@ -126,7 +126,7 @@ fn draw_foundation_wrapped_function_row_contents(
         foundation_label_cell(ui, &label, None);
         Frame::none()
             .fill(foundation_group_bg())
-            .stroke(Stroke::new(1.0, foundation_group_edge()))
+            .stroke(Stroke::new(1.0_f32, foundation_group_edge()))
             .inner_margin(egui::Margin::same(6.0))
             .show(ui, |ui| {
                 ui.vertical(|ui| {

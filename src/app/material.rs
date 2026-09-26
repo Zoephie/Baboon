@@ -30,7 +30,7 @@ pub(super) fn draw_material_tag(
 ) {
     Frame::none()
         .fill(material_panel())
-        .stroke(Stroke::new(1.0, material_panel_edge()))
+        .stroke(Stroke::new(1.0_f32, material_panel_edge()))
         .inner_margin(egui::Margin {
             left: 2.0,
             right: 2.0,
@@ -349,7 +349,7 @@ pub(super) fn draw_material_value_row(
     ui.painter().rect_filled(rect, 0.0, fill);
     ui.painter().line_segment(
         [rect.left_bottom(), rect.right_bottom()],
-        Stroke::new(1.0, MATERIAL_GRID),
+        Stroke::new(1.0_f32, MATERIAL_GRID),
     );
 
     let label_rect = egui::Rect::from_min_size(
@@ -375,7 +375,7 @@ pub(super) fn draw_material_value_row(
     };
     ui.painter().rect_filled(value_rect, 0.0, value_fill);
     ui.painter()
-        .rect_stroke(value_rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+        .rect_stroke(value_rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
     let text_offset = if let Some(color) = color {
         let swatch_size = (value_rect.height() - 4.0).max(12.0);
         let swatch_rect = egui::Rect::from_min_size(
@@ -384,7 +384,7 @@ pub(super) fn draw_material_value_row(
         );
         ui.painter().rect_filled(swatch_rect, 0.0, color.color32());
         ui.painter()
-            .rect_stroke(swatch_rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+            .rect_stroke(swatch_rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
         let swatch_response = ui
             .interact(
                 swatch_rect,
@@ -426,7 +426,7 @@ pub(super) fn draw_material_function_value_row(
     ui.painter().rect_filled(rect, 0.0, MATERIAL_FUNCTION_ROW);
     ui.painter().line_segment(
         [rect.left_bottom(), rect.right_bottom()],
-        Stroke::new(1.0, MATERIAL_GRID),
+        Stroke::new(1.0_f32, MATERIAL_GRID),
     );
 
     let label_rect = egui::Rect::from_min_size(
@@ -447,7 +447,7 @@ pub(super) fn draw_material_function_value_row(
     );
     ui.painter().rect_filled(function_rect, 0.0, Color32::WHITE);
     ui.painter()
-        .rect_stroke(function_rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+        .rect_stroke(function_rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
     ui.painter().text(
         function_rect.left_center() + Vec2::new(6.0, 0.0),
         Align2::LEFT_CENTER,
@@ -465,7 +465,7 @@ pub(super) fn draw_material_function_value_row(
     );
     ui.painter().rect_filled(button_rect, 0.0, Color32::WHITE);
     ui.painter()
-        .rect_stroke(button_rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+        .rect_stroke(button_rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
     ui.painter().text(
         button_rect.center(),
         Align2::CENTER_CENTER,

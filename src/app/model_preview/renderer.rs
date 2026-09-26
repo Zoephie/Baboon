@@ -47,7 +47,7 @@ pub(super) fn draw_model_viewport(
     // what makes a corner of a BSP inspectable. Screen-space panning kept the
     // orbit pivot at the model's center, so orbiting a panned view swung the
     // framed geometry away.
-    let mut pan_world = |state: &mut ModelPreviewState, delta: Vec2| {
+    let pan_world = |state: &mut ModelPreviewState, delta: Vec2| {
         let moved = unrotate_view_vector(
             state.yaw,
             state.pitch,
@@ -137,7 +137,7 @@ pub(super) fn draw_model_viewport(
             paint_model_gl(info, painter, &frame);
         })),
     });
-    painter.rect_stroke(rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
+    painter.rect_stroke(rect, 0.0, Stroke::new(1.0_f32, foundation_input_edge()));
 
     if state.show_errors {
         draw_model_errors(
@@ -172,12 +172,12 @@ pub(super) fn draw_model_viewport(
                 };
                 painter.line_segment(
                     [parent, joint],
-                    Stroke::new(3.5, Color32::from_rgba_unmultiplied(0, 0, 0, 180)),
+                    Stroke::new(3.5_f32, Color32::from_rgba_unmultiplied(0, 0, 0, 180)),
                 );
-                painter.line_segment([parent, joint], Stroke::new(1.5, ARMATURE_COLOR));
+                painter.line_segment([parent, joint], Stroke::new(1.5_f32, ARMATURE_COLOR));
             }
             painter.circle_filled(joint, 2.5, Color32::WHITE);
-            painter.circle_stroke(joint, 2.5, Stroke::new(1.0, Color32::BLACK));
+            painter.circle_stroke(joint, 2.5, Stroke::new(1.0_f32, Color32::BLACK));
             if let Some(distance) = hover_pos.map(|pos| screen_edge_length(pos, joint)) {
                 if distance <= 6.0 && hovered.is_none_or(|(_, _, closest)| distance < closest) {
                     hovered = Some((index, joint, distance));
@@ -360,7 +360,7 @@ fn draw_model_error_shape<'a>(
         ModelErrorShape::Point(point) => {
             let position = project_error_point(camera, point, skinning_rows);
             painter.circle_filled(position, 4.5, color);
-            painter.circle_stroke(position, 5.5, Stroke::new(1.25, Color32::WHITE));
+            painter.circle_stroke(position, 5.5, Stroke::new(1.25_f32, Color32::WHITE));
             hover.consider_point(position, 8.0, &error.label, label_color);
         }
         ModelErrorShape::Vector {
@@ -376,13 +376,13 @@ fn draw_model_error_shape<'a>(
             ];
             let start = camera.project(start_world).pos;
             let end = camera.project(end_world).pos;
-            painter.line_segment([start, end], Stroke::new(3.0, color));
+            painter.line_segment([start, end], Stroke::new(3.0_f32, color));
             hover.consider_segment(start, end, &error.label, label_color);
         }
         ModelErrorShape::Polyline(points) => {
             let projected = project_error_points(camera, points, skinning_rows);
             for pair in projected.windows(2) {
-                painter.line_segment([pair[0], pair[1]], Stroke::new(3.0, color));
+                painter.line_segment([pair[0], pair[1]], Stroke::new(3.0_f32, color));
                 hover.consider_segment(pair[0], pair[1], &error.label, label_color);
             }
         }
@@ -428,7 +428,7 @@ fn draw_model_error_face<'a>(
         ));
     }
     for (&start, &end) in polygon_edges(&projected) {
-        painter.line_segment([start, end], Stroke::new(2.0, color));
+        painter.line_segment([start, end], Stroke::new(2.0_f32, color));
     }
 
     let Some(pointer) = hover.pointer else { return };
@@ -1403,7 +1403,7 @@ impl ModelGlRenderer {
                     gl.uniform_1_f32(Some(&self.unlit), 1.0);
                     self.bind_material(gl, None);
                     gl.line_width(1.0);
-                    let flat = |gl: &glow::Context, location, [r, g, b]: [f32; 3]| unsafe {
+                    let flat = |gl: &glow::Context, location, [r, g, b]: [f32; 3]| {
                         gl.uniform_3_f32(Some(location), r, g, b);
                     };
                     // Minor lines a step below the clear color; the world X
@@ -2112,9 +2112,9 @@ pub(super) fn draw_marker_axes(
         let end = origin + delta;
         painter.line_segment(
             [origin, end],
-            Stroke::new(2.5, Color32::from_rgba_unmultiplied(0, 0, 0, 150)),
+            Stroke::new(2.5_f32, Color32::from_rgba_unmultiplied(0, 0, 0, 150)),
         );
-        painter.line_segment([origin, end], Stroke::new(1.35, color));
+        painter.line_segment([origin, end], Stroke::new(1.35_f32, color));
     }
 }
 

@@ -203,7 +203,7 @@ pub(in crate::app) fn draw_foundation_color_row(
         let (rect, response) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::click());
         ui.painter().rect_filled(rect, 2.0, swatch);
         ui.painter()
-            .rect_stroke(rect, 2.0, Stroke::new(1.0, foundation_input_edge()));
+            .rect_stroke(rect, 2.0, Stroke::new(1.0_f32, foundation_input_edge()));
         let response = response
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .on_hover_text(if editable {

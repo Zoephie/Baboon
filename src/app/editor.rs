@@ -191,7 +191,7 @@ fn view_tab_button_optional_icon(
         );
     }
     if selected {
-        let stroke = Stroke::new(2.0, ui.visuals().selection.stroke.color);
+        let stroke = Stroke::new(2.0_f32, ui.visuals().selection.stroke.color);
         ui.painter()
             .hline(rect.x_range(), rect.bottom() - stroke.width / 2.0, stroke);
     }

@@ -249,7 +249,7 @@ pub(in crate::app) fn draw_shader_grid_row(
     ui.painter().rect_filled(rect, 0.0, row.fill);
     ui.painter().line_segment(
         [rect.left_bottom(), rect.right_bottom()],
-        Stroke::new(1.0, material_grid_light()),
+        Stroke::new(1.0_f32, material_grid_light()),
     );
     let modified = row_differs_from_default(row);
     if modified {
@@ -300,7 +300,7 @@ pub(in crate::app) fn draw_shader_grid_row(
                 egui::pos2(split_x, rect.top()),
                 egui::pos2(split_x, rect.bottom()),
             ],
-            Stroke::new(1.0, row_text),
+            Stroke::new(1.0_f32, row_text),
         );
     }
     if split_resp.dragged() {
@@ -386,7 +386,7 @@ pub(in crate::app) fn draw_shader_grid_row(
     if let (Some(reset), Some(reset_rect)) = (reset, reset_rect) {
         ui.painter().rect_filled(reset_rect, 0.0, material_input());
         ui.painter()
-            .rect_stroke(reset_rect, 0.0, Stroke::new(1.0, material_input_edge()));
+            .rect_stroke(reset_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
         ui.painter().text(
             reset_rect.center(),
             Align2::CENTER_CENTER,
@@ -425,7 +425,7 @@ pub(in crate::app) fn draw_shader_grid_row(
         );
         ui.painter().rect_filled(button_rect, 0.0, material_input());
         ui.painter()
-            .rect_stroke(button_rect, 0.0, Stroke::new(1.0, material_input_edge()));
+            .rect_stroke(button_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
         let icon_rect = egui::Rect::from_center_size(button_rect.center(), Vec2::splat(16.0));
         paint_button_icon_at(ui, ButtonIcon::Function, icon_rect, material_text());
 
@@ -454,7 +454,7 @@ pub(in crate::app) fn draw_shader_grid_row(
                 );
                 ui.painter().rect_filled(del_rect, 0.0, material_input());
                 ui.painter()
-                    .rect_stroke(del_rect, 0.0, Stroke::new(1.0, material_input_edge()));
+                    .rect_stroke(del_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
                 ui.painter().text(
                     del_rect.center(),
                     Align2::CENTER_CENTER,
@@ -486,7 +486,7 @@ pub(in crate::app) fn draw_shader_grid_row(
         );
         ui.painter().rect_filled(f_rect, 0.0, material_input());
         ui.painter()
-            .rect_stroke(f_rect, 0.0, Stroke::new(1.0, material_input_edge()));
+            .rect_stroke(f_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
         let icon_rect = egui::Rect::from_center_size(f_rect.center(), Vec2::splat(16.0));
         paint_button_icon_at(ui, ButtonIcon::Function, icon_rect, material_text());
         // The f() button is the only way into the graph editor here, on
@@ -520,7 +520,7 @@ pub(in crate::app) fn draw_shader_grid_row(
                 );
                 ui.painter().rect_filled(del_rect, 0.0, material_input());
                 ui.painter()
-                    .rect_stroke(del_rect, 0.0, Stroke::new(1.0, material_input_edge()));
+                    .rect_stroke(del_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
                 ui.painter().text(
                     del_rect.center(),
                     Align2::CENTER_CENTER,
@@ -552,7 +552,7 @@ pub(in crate::app) fn draw_shader_grid_row(
         );
         ui.painter().rect_filled(button_rect, 0.0, material_input());
         ui.painter()
-            .rect_stroke(button_rect, 0.0, Stroke::new(1.0, material_input_edge()));
+            .rect_stroke(button_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
         ui.painter().text(
             button_rect.center(),
             Align2::CENTER_CENTER,
@@ -1109,7 +1109,7 @@ pub(in crate::app) fn draw_shader_editable_value(
             // × delete button
             ui.painter().rect_filled(del_rect, 0.0, material_input());
             ui.painter()
-                .rect_stroke(del_rect, 0.0, Stroke::new(1.0, material_input_edge()));
+                .rect_stroke(del_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
             ui.painter().text(
                 del_rect.center(),
                 Align2::CENTER_CENTER,
@@ -1276,7 +1276,7 @@ pub(in crate::app) fn draw_shader_editable_value(
             // × delete button
             ui.painter().rect_filled(del_rect, 0.0, material_input());
             ui.painter()
-                .rect_stroke(del_rect, 0.0, Stroke::new(1.0, material_input_edge()));
+                .rect_stroke(del_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
             ui.painter().text(
                 del_rect.center(),
                 Align2::CENTER_CENTER,
@@ -1837,7 +1837,7 @@ fn draw_shader_reference_cell(
         },
     );
     ui.painter()
-        .rect_stroke(open_rect, 0.0, Stroke::new(1.0, material_input_edge()));
+        .rect_stroke(open_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
     let icon_rect = egui::Rect::from_center_size(open_rect.center(), Vec2::splat(16.0));
     let icon_color = if open_enabled {
         material_text()
@@ -1919,7 +1919,7 @@ fn draw_shader_reference_cell(
                 REFERENCE_MISSING_COLOR
             };
             ui.painter()
-                .rect_stroke(text_rect, 2.0, Stroke::new(1.5, color));
+                .rect_stroke(text_rect, 2.0, Stroke::new(1.5_f32, color));
         }
         if let Some(payload) = drop.dnd_release_payload::<DraggedTagRef>()
             && accepts(&payload)
@@ -1933,7 +1933,7 @@ fn draw_shader_reference_cell(
     // "..." browse button
     ui.painter().rect_filled(browse_rect, 0.0, material_input());
     ui.painter()
-        .rect_stroke(browse_rect, 0.0, Stroke::new(1.0, material_input_edge()));
+        .rect_stroke(browse_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
     ui.painter().text(
         browse_rect.center(),
         Align2::CENTER_CENTER,
@@ -1978,13 +1978,13 @@ pub(in crate::app) fn draw_shader_color_swatch(ui: &mut Ui, rect: egui::Rect, co
     let display_color = Color32::from_rgb(color.r(), color.g(), color.b());
     ui.painter().rect_filled(rect, 0.0, material_input());
     ui.painter()
-        .rect_stroke(rect, 0.0, Stroke::new(1.0, material_input_edge()));
+        .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
     let inner = rect.shrink(3.0);
     ui.painter().rect_filled(inner, 0.0, display_color);
     ui.painter().rect_stroke(
         inner,
         0.0,
-        Stroke::new(1.25, material_color_swatch_edge(display_color)),
+        Stroke::new(1.25_f32, material_color_swatch_edge(display_color)),
     );
 }
 

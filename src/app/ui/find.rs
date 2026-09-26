@@ -260,11 +260,11 @@ pub(super) fn draw_icon_window_header(ui: &mut Ui, title: &str, icon: ButtonIcon
     let cross = close_rect.shrink(5.0);
     ui.painter().line_segment(
         [cross.left_top(), cross.right_bottom()],
-        Stroke::new(1.5, color),
+        Stroke::new(1.5_f32, color),
     );
     ui.painter().line_segment(
         [cross.right_top(), cross.left_bottom()],
-        Stroke::new(1.5, color),
+        Stroke::new(1.5_f32, color),
     );
     if close.clicked() {
         *open = false;

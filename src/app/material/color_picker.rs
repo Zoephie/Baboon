@@ -301,7 +301,7 @@ pub(in crate::app) fn draw_color_popup(
                     let (rect, _) = ui.allocate_exact_size(Vec2::splat(80.0), Sense::hover());
                     ui.painter().rect_filled(rect, 0.0, color.color32());
                     ui.painter()
-                        .rect_stroke(rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+                        .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
                     ui.add_space(14.0);
                     draw_color_channel_table(ui, color);
                 });
@@ -447,7 +447,7 @@ pub(in crate::app) fn draw_color_picker_editor(
             let (rect, _) = ui.allocate_exact_size(Vec2::new(84.0, 56.0), Sense::hover());
             ui.painter().rect_filled(rect, 0.0, Color32::WHITE);
             ui.painter()
-                .rect_stroke(rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+                .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
             ui.painter()
                 .rect_filled(rect.shrink(5.0), 0.0, color.color32());
         });
@@ -486,15 +486,15 @@ pub(in crate::app) fn draw_color_sv_square(ui: &mut Ui, color: &mut MaterialColo
         }
     }
     ui.painter()
-        .rect_stroke(rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+        .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
     let cursor = egui::pos2(
         egui::lerp(rect.left()..=rect.right(), s as f32 / 255.0),
         egui::lerp(rect.bottom()..=rect.top(), b as f32 / 255.0),
     );
     ui.painter()
-        .circle_stroke(cursor, 5.0, Stroke::new(1.0, Color32::BLACK));
+        .circle_stroke(cursor, 5.0, Stroke::new(1.0_f32, Color32::BLACK));
     ui.painter()
-        .circle_stroke(cursor, 4.0, Stroke::new(1.0, Color32::WHITE));
+        .circle_stroke(cursor, 4.0, Stroke::new(1.0_f32, Color32::WHITE));
     if response.dragged() || response.clicked() {
         if let Some(pos) = response.interact_pointer_pos() {
             let sat = ((pos.x - rect.left()) / rect.width()).clamp(0.0, 1.0);
@@ -529,14 +529,14 @@ pub(in crate::app) fn draw_color_hue_strip(ui: &mut Ui, color: &mut MaterialColo
         );
     }
     ui.painter()
-        .rect_stroke(rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+        .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
     let marker_y = egui::lerp(rect.bottom()..=rect.top(), h as f32 / 255.0);
     ui.painter().line_segment(
         [
             egui::pos2(rect.left() - 4.0, marker_y),
             egui::pos2(rect.right() + 4.0, marker_y),
         ],
-        Stroke::new(1.0, Color32::BLACK),
+        Stroke::new(1.0_f32, Color32::BLACK),
     );
     if response.dragged() || response.clicked() {
         if let Some(pos) = response.interact_pointer_pos() {
@@ -681,7 +681,7 @@ pub(in crate::app) fn draw_palette_grid(ui: &mut Ui, color: &mut MaterialColorPo
                 ui.painter()
                     .rect_filled(rect, 0.0, Color32::from_rgb(r, g, b));
                 ui.painter()
-                    .rect_stroke(rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+                    .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
                 if response.clicked() {
                     color.set_rgb_bytes(r, g, b);
                 }
@@ -725,7 +725,7 @@ pub(in crate::app) fn draw_custom_color_swatches(
                 }
             }
             ui.painter()
-                .rect_stroke(rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+                .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
             if response.secondary_clicked() {
                 custom_swatches[index] = Some([
                     float_channel_to_u8(color.red),
@@ -934,7 +934,7 @@ fn documents_dir() -> Option<PathBuf> {
 fn draw_empty_custom_swatch(ui: &mut Ui, rect: egui::Rect) {
     ui.painter()
         .rect_filled(rect, 0.0, ui.visuals().extreme_bg_color);
-    let stroke = Stroke::new(1.0, subtle_dark());
+    let stroke = Stroke::new(1.0_f32, subtle_dark());
     ui.painter()
         .line_segment([rect.left_top(), rect.right_bottom()], stroke);
     ui.painter()
@@ -1036,7 +1036,7 @@ pub(in crate::app) fn draw_copy_text(ui: &mut Ui, value: &str, width: f32) -> eg
     };
     ui.painter().rect_filled(rect, 0.0, fill);
     ui.painter()
-        .rect_stroke(rect, 0.0, Stroke::new(1.0, MATERIAL_INPUT_EDGE));
+        .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, MATERIAL_INPUT_EDGE));
     ui.painter().text(
         rect.left_center() + Vec2::new(6.0, 0.0),
         Align2::LEFT_CENTER,

@@ -132,7 +132,7 @@ impl Baboon {
                 };
                 ui.painter().line_segment(
                     [handle_rect.center_top(), handle_rect.center_bottom()],
-                    Stroke::new(2.0, handle_color),
+                    Stroke::new(2.0_f32, handle_color),
                 );
                 if handle_response.dragged() {
                     self.prefs.tool_commands_left_width = (self.prefs.tool_commands_left_width

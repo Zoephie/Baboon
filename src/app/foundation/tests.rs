@@ -882,7 +882,7 @@ pub(in crate::app) mod tests {
         let ctx = egui::Context::default();
         let mut pending = Vec::new();
         with_test_edit_context(|edit| {
-            let mut frame = |events: Vec<egui::Event>, edit: &mut FieldEditContext<'_>| {
+            let frame = |events: Vec<egui::Event>, edit: &mut FieldEditContext<'_>| {
                 let input = egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(900.0, 200.0))),
                     events,
