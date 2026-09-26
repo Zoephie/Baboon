@@ -368,7 +368,6 @@ pub(super) fn draw_model_preview_panel(
     tag: &TagFile,
     entry: &TagEntry,
     names: &TagNameIndex,
-    source: Option<&TagSource>,
     source_game: Option<&str>,
     state: &mut ModelPreviewState,
     model_preview_size: &mut f32,
@@ -385,14 +384,9 @@ pub(super) fn draw_model_preview_panel(
     }
 
     ui.scope(|ui| {
-        // The parse runs on a worker; until it lands, show a spinner. The
-        // worker repaints when it finishes, so nothing here polls.
-        ensure_model_preview_loaded(tag, entry, names, source, state, ui.ctx());
-        if state.needs_preview_load(&entry.key) {
-            ui.horizontal(|ui| {
-                ui.spinner();
-                ui.label(RichText::new("Loading model…").color(subtle_dark()));
-            });
+        let needs_load = state.needs_preview_load(&entry.key);
+        if needs_load {
+            draw_model_preview_loading_shells(ui, *model_preview_size);
             return;
         }
 
@@ -777,6 +771,79 @@ const MODEL_SETUP_INLINE_HEADER_MIN_WIDTH: f32 = 680.0;
 const MODEL_SETUP_SHARED_CONTROLS_ROW_MIN_WIDTH: f32 = 560.0;
 const WIDE_MODEL_SETUP_MIN_WIDTH: f32 = 400.0;
 const MODEL_PREVIEW_SECTION_GAP: f32 = 8.0;
+
+fn draw_loading_section_body(ui: &mut Ui, height: f32) {
+    let (rect, _) = ui.allocate_exact_size(
+        Vec2::new(ui.available_width().max(1.0), height.max(1.0)),
+        Sense::hover(),
+    );
+    crate::app::ui::paint_loading_rings(ui, rect);
+}
+
+/// Draw the final preview/setup card geometry before any model parsing begins.
+/// The post-pane worker hook starts the actual build after this frame, so a tab
+/// switch never has to wait for a complex render model or BSP to be walked.
+fn draw_model_preview_loading_shells(ui: &mut Ui, model_preview_size: f32) {
+    let page_width = ui.available_width();
+    if page_width >= 780.0 {
+        let gap = MODEL_PREVIEW_SECTION_GAP;
+        let preview_width = wide_model_preview_section_width(page_width, model_preview_size);
+        let setup_width = (page_width - preview_width - gap).max(WIDE_MODEL_SETUP_MIN_WIDTH);
+        let viewport_size = model_viewport_size(preview_width, model_preview_size);
+        let shared_body_height = viewport_size.y + MODEL_PREVIEW_STATS_FOOTER_HEIGHT;
+        let setup_body_height =
+            (shared_body_height - model_setup_extra_header_height(setup_width) - 16.0).max(1.0);
+
+        ui.horizontal_top(|ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            ui.allocate_ui(Vec2::new(preview_width, 0.0), |ui| {
+                ui.set_width(preview_width);
+                draw_model_preview_section(
+                    ui,
+                    "Model Preview",
+                    Some(shared_body_height),
+                    |ui, part| {
+                        if part == ModelPreviewSectionPart::Body {
+                            draw_loading_section_body(ui, shared_body_height);
+                        }
+                    },
+                );
+            });
+            ui.allocate_ui(Vec2::new(setup_width, 0.0), |ui| {
+                ui.set_width(setup_width);
+                draw_model_preview_section(
+                    ui,
+                    "Model Setup",
+                    Some(setup_body_height),
+                    |ui, part| {
+                        if part == ModelPreviewSectionPart::Body {
+                            draw_loading_section_body(ui, setup_body_height);
+                        }
+                    },
+                );
+            });
+        });
+    } else {
+        let viewport_size = model_viewport_size(page_width, model_preview_size);
+        let preview_body_height = viewport_size.y + MODEL_PREVIEW_STATS_FOOTER_HEIGHT;
+        draw_model_preview_section(
+            ui,
+            "Model Preview",
+            Some(preview_body_height),
+            |ui, part| {
+                if part == ModelPreviewSectionPart::Body {
+                    draw_loading_section_body(ui, preview_body_height);
+                }
+            },
+        );
+        ui.add_space(MODEL_PREVIEW_SECTION_GAP);
+        draw_model_preview_section(ui, "Model Setup", Some(160.0), |ui, part| {
+            if part == ModelPreviewSectionPart::Body {
+                draw_loading_section_body(ui, 160.0);
+            }
+        });
+    }
+}
 
 fn model_setup_extra_header_height(width: f32) -> f32 {
     if width >= MODEL_SETUP_INLINE_HEADER_MIN_WIDTH {
@@ -1315,19 +1382,14 @@ fn draw_model_viewport_with_stats(
     // Hold the viewport until the textures land, rather than drawing the model
     // untextured and re-shading it a second later — a model that changes
     // appearance under the cursor reads as a glitch, not as progress.
-    if state.render_mode.uses_textures() && state.textures_pending && data.textures.is_none() {
+    let waiting_for_textures = state.render_mode.uses_textures()
+        && !data.preview.materials.is_empty()
+        && data.textures.is_none();
+    if waiting_for_textures {
         let (rect, _) = ui.allocate_exact_size(desired_size, Sense::hover());
         ui.painter()
             .rect_stroke(rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
-        ui.allocate_new_ui(egui::UiBuilder::new().max_rect(rect), |ui| {
-            ui.centered_and_justified(|ui| {
-                ui.horizontal_centered(|ui| {
-                    ui.spinner();
-                    ui.label(RichText::new("Loading shaders…").color(subtle_dark()));
-                });
-            });
-        });
-        ui.ctx().request_repaint();
+        crate::app::ui::paint_loading_rings(ui, rect);
     } else {
         draw_model_viewport(ui, data, state, desired_size);
     }

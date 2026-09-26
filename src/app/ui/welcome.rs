@@ -124,22 +124,11 @@ impl Baboon {
                 .file_name()
                 .map(|name| name.to_string_lossy().into_owned())
                 .unwrap_or_else(|| path.display().to_string());
-            ui.centered_and_justified(|ui| {
-                ui.vertical_centered(|ui| {
-                    ui.spinner();
-                    ui.add_space(10.0);
-                    ui.label(
-                        RichText::new(format!("Please wait — {name} is starting up…"))
-                            .color(text_dark())
-                            .size(16.0),
-                    );
-                    ui.add_space(4.0);
-                    ui.label(
-                        RichText::new("Large editing kits can take a moment to index.")
-                            .color(subtle_dark()),
-                    );
-                });
-            });
+            centered_loading_state(
+                ui,
+                &format!("Please wait — {name} is starting up…"),
+                "Large editing kits can take a moment to index.",
+            );
             return;
         }
 

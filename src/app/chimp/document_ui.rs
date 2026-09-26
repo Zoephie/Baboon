@@ -186,16 +186,12 @@ fn chimp_tint_toward(base: Color32, accent: Color32, amount: f32) -> Color32 {
 impl Baboon {
     pub(super) fn draw_chimp_tiles(&mut self, ui: &mut Ui, ctx: &egui::Context, kit_index: usize) {
         let Some(mut tree) = self.kits[kit_index].chimp.document_tree.take() else {
-            ui.centered_and_justified(|ui| {
-                ui.label("Select a package to inspect it.");
-            });
+            crate::app::ui::centered_empty_state(ui, "Select a package to inspect it.");
             return;
         };
         if tree.is_empty() {
             self.kits[kit_index].chimp.document_tree = Some(tree);
-            ui.centered_and_justified(|ui| {
-                ui.label("Select a package to inspect it.");
-            });
+            crate::app::ui::centered_empty_state(ui, "Select a package to inspect it.");
             return;
         }
 

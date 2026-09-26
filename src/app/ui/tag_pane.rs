@@ -331,11 +331,11 @@ impl Baboon {
             ctx.data_mut(|data| data.insert_temp(jump_target_id(), block_path));
         }
 
-        // The model preview panel draws without `&mut Baboon`, so it cannot
-        // start its own texture job. Started here instead, once the panel has
-        // had its frame to load the geometry the textures belong to. The
-        // collision/physics overlay build rides the same hook for the same
-        // reason.
+        // Model preview work starts only after the pane has drawn its shell,
+        // so switching tabs can reach the screen before a complex geometry
+        // parse begins. Follow-up texture/overlay/animation workers use the
+        // same post-draw hook once the base preview lands.
+        self.maybe_request_model_preview(kit_index, &key, ctx);
         self.maybe_request_model_textures(kit_index, &key, ctx);
         self.maybe_request_model_overlays(kit_index, &key, ctx);
         self.maybe_request_model_animations(kit_index, &key, ctx);

@@ -78,7 +78,6 @@ pub(super) fn draw_tag(
             tag,
             entry,
             names,
-            source,
             source_game,
             model_preview,
             model_preview_size,

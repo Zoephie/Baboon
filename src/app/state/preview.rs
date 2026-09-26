@@ -187,12 +187,11 @@ pub(in crate::app) struct BitmapPreviewData {
 /// selected document whose preview has not yet been resolved.
 pub(in crate::app) struct ModelPreviewState {
     pub(in crate::app) loaded_key: Option<String>,
+    /// Identifies the base geometry/variant build currently running. A newer
+    /// request replaces it; late worker replies are ignored by id.
+    pub(in crate::app) preview_load_id: Option<u64>,
     pub(in crate::app) render_model_path: Option<String>,
     pub(in crate::app) data: Option<Result<ModelPreviewData, String>>,
-    /// A worker parsing the preview for the request it names. The panel
-    /// shows its spinner until the result lands; one that lands for a
-    /// request the state no longer wants is dropped.
-    pub(in crate::app) loading: Option<PendingPreviewLoad>,
     pub(in crate::app) active_tab: ModelTagPanelTab,
     pub(in crate::app) new_variant_name: String,
     pub(in crate::app) selected_variant: Option<usize>,
@@ -263,9 +262,9 @@ impl Default for ModelPreviewState {
     fn default() -> Self {
         Self {
             loaded_key: None,
+            preview_load_id: None,
             render_model_path: None,
             data: None,
-            loading: None,
             active_tab: ModelTagPanelTab::Fields,
             new_variant_name: String::new(),
             selected_variant: None,
@@ -298,22 +297,6 @@ impl Default for ModelPreviewState {
     }
 }
 
-/// What a preview-load worker was asked for, and where its answer arrives.
-pub(in crate::app) struct PendingPreviewLoad {
-    pub(in crate::app) key: String,
-    pub(in crate::app) high_detail: bool,
-    pub(in crate::app) scenario_selection: std::collections::BTreeSet<usize>,
-    pub(in crate::app) receiver: std::sync::mpsc::Receiver<PreviewLoadOutcome>,
-}
-
-/// A preview-load worker's answer.
-pub(in crate::app) enum PreviewLoadOutcome {
-    Loaded(Result<ModelPreviewData, String>),
-    /// The worker could not re-parse the serialized tag, so the panel parses
-    /// the open document on the UI thread instead.
-    Unparsed,
-}
-
 impl ModelPreviewState {
     /// Forget the loaded preview and any load in flight, so the next frame
     /// rebuilds from the document as it is now. Dropping the pending load
@@ -321,7 +304,7 @@ impl ModelPreviewState {
     pub(in crate::app) fn invalidate_load(&mut self) {
         self.loaded_key = None;
         self.data = None;
-        self.loading = None;
+        self.preview_load_id = None;
     }
 
     /// Whether the cached preview no longer matches what the panel should

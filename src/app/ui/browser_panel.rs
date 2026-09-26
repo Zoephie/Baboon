@@ -472,6 +472,7 @@ impl Baboon {
             Arc::clone(&self.kits[kit_index].bitmap_browser.thumbnails),
         );
         let mut open_git_review = false;
+        let git_review_enabled = self.git_review_enabled_for_kit(kit_index);
         let kit = &mut self.kits[kit_index];
         if let Some(source) = kit.source.as_mut() {
             ui.add_space(8.0);
@@ -575,7 +576,7 @@ impl Baboon {
                     );
                     browser_favorites_divider(ui, favorites_visible);
 
-                    if matches!(source.source, TagSource::LooseFolder { .. }) {
+                    if git_review_enabled {
                         if sidebar_list_button(ui, ButtonIcon::Git, GIT_REVIEW_TITLE).clicked() {
                             open_git_review = true;
                         }

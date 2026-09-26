@@ -13,6 +13,10 @@ mod first_run;
 mod git_review;
 pub(super) mod help;
 mod kit_tiles;
+mod loading;
+pub(in crate::app) use loading::{
+    centered_loading_state, paint_loading_rings, paint_loading_rings_sized,
+};
 mod recents;
 mod search_windows;
 mod settings;
@@ -26,6 +30,30 @@ mod welcome;
 const PANE_HEADER_ICON_SIZE: f32 = 32.0;
 const PANE_HEADER_SECTION_GAP: f32 = 20.0;
 const PANE_HEADER_ICON_TEXT_GAP: f32 = 10.0;
+
+/// The shared loaded-workspace state for a canvas that has no open document.
+pub(in crate::app) fn centered_empty_state(ui: &mut Ui, detail: &str) {
+    const IMAGE_SIZE: f32 = 256.0;
+    const CONTENT_HEIGHT: f32 = IMAGE_SIZE + 64.0;
+
+    ui.with_layout(egui::Layout::top_down(egui::Align::Center), |ui| {
+        ui.add_space(((ui.available_height() - CONTENT_HEIGHT) * 0.5).max(0.0));
+        ui.add(
+            egui::Image::from_bytes(
+                "bytes://baboon_branding/empty-state.svg",
+                include_bytes!("../../assets/branding/empty-state.svg").as_slice(),
+            )
+            .fit_to_exact_size(Vec2::splat(IMAGE_SIZE)),
+        );
+        ui.heading(
+            RichText::new("Nothing’s Open!")
+                .color(text_dark())
+                .strong()
+                .italics(),
+        );
+        ui.label(RichText::new(detail).color(subtle_dark()));
+    });
+}
 const PANE_HEADER_ACTION_GAP: f32 = 4.0;
 const PANE_HEADER_WIDE_BREAKPOINT: f32 = 600.0;
 const PANE_HEADER_MIN_LEFT_WIDTH: f32 = 200.0;
