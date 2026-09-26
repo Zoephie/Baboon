@@ -3,6 +3,9 @@
 
 use super::*;
 
+mod h2;
+pub(in crate::app) use h2::*;
+
 /// The `sound_classes` (`sncl`) tag group.
 pub(in crate::app) fn is_sound_classes_group(group_tag: u32) -> bool {
     &group_tag.to_be_bytes() == b"sncl"
@@ -139,21 +142,22 @@ pub(in crate::app) fn is_sound_group(group_tag: u32) -> bool {
     &group_tag.to_be_bytes() == b"snd!"
 }
 
-/// How a permutation row sources its audio: an FMOD bank subsound (Halo 3+), an
-/// inline blob on the permutation (CE), or an inline Opus/Xbox-ADPCM blob in
-/// H2's parallel language-permutation-info block. CE stores the whole
-/// per-permutation `samples` stream in one of four formats (PCM / Xbox-ADPCM /
-/// IMA-ADPCM / Ogg Vorbis), so its codec/channels/rate are read from the tag
-/// rather than assumed to be Ogg.
+/// How a permutation row sources its audio: an FMOD bank subsound (Halo 3+),
+/// samples stored on the permutation itself (Halo CE, and Halo 2's older
+/// layout), or Halo 2's per-language entries (see [`H2Sound`]).
 pub(super) enum RowKind {
     Bank,
-    InlineCe {
+    /// The permutation's own `samples`. CE stores them in one of four formats
+    /// (PCM / Xbox-ADPCM / IMA-ADPCM / Ogg Vorbis), so the codec is read from
+    /// the tag rather than assumed.
+    InlinePermutation {
         codec: super::audio::InlineCodec,
         channels: u16,
         sample_rate: u32,
     },
+    /// Index into the tag's `language permutation info` block.
     InlineH2 {
-        blob: usize,
+        lpi: usize,
     },
 }
 
@@ -165,9 +169,13 @@ pub(super) struct SoundPermRow {
     pub(super) pr_index: usize,
     pub(super) perm_index: usize,
     pub(super) kind: RowKind,
+    pub(super) gain_db: Option<f32>,
+    pub(super) skip_fraction: Option<f32>,
+    /// Length of the permutation's own samples (`InlinePermutation` only).
+    pub(super) inline_bytes: usize,
 }
 
-/// Extract a CE permutation's inline `samples` bytes (a self-contained Ogg).
+/// Extract a permutation's own `samples` bytes (CE, older Halo 2).
 /// Re-navigates from the root so it only clones the played permutation's blob.
 pub(super) fn inline_permutation_samples(
     tag: &TagFile,
@@ -184,103 +192,10 @@ pub(super) fn inline_permutation_samples(
     (!data.is_empty()).then(|| data.to_vec())
 }
 
-/// Walk an H2 `.sound` tag's inline audio blobs — the first non-empty `data`
-/// field (the samples) in each language-permutation-info raw-info entry. Returns
-/// the total count, and the `want`-th blob if requested. Counting is a cheap
-/// borrow-only walk; pass `want` to clone exactly one blob.
-pub(super) fn h2_blobs(tag: &TagFile, want: Option<usize>) -> (usize, Option<Vec<u8>>) {
-    let root = tag.root();
-    let mut count = 0usize;
-    let mut got = None;
-    for field in root.fields() {
-        let Some(block) = field.as_block() else {
-            continue;
-        };
-        for i in 0..block.len() {
-            let Some(el) = block.element(i) else {
-                continue;
-            };
-            let Some(lang_perm_info) = find_block_field(&el, "language permutation info") else {
-                continue;
-            };
-            for j in 0..lang_perm_info.len() {
-                let Some(lpi_el) = lang_perm_info.element(j) else {
-                    continue;
-                };
-
-                let Some(raw_info) = find_block_field(&lpi_el, "raw info block") else {
-                    continue;
-                };
-                for k in 0..raw_info.len() {
-                    let Some(raw_el) = raw_info.element(k) else {
-                        continue;
-                    };
-                    let samples = raw_el
-                        .fields()
-                        .find_map(|f| f.as_data().filter(|d| !d.is_empty()));
-                    let Some(bytes) = samples else {
-                        continue;
-                    };
-                    if want == Some(count) {
-                        got = Some(bytes.to_vec());
-                    }
-                    count += 1;
-                }
-            }
-        }
-    }
-    (count, got)
-}
-
-/// The per-chunk byte offsets of the `want`-th H2 inline blob, from its
-/// `sound_permutation_chunk_block` (each element's `file offset`). H2 splits a
-/// permutation's audio into ~1.36 s chunks, each an independent stream; these
-/// offsets let the decoder slice + concatenate them. Empty if unchunked.
-/// Mirrors [`h2_blobs`]'s traversal so ordinals line up.
-pub(super) fn h2_blob_chunk_offsets(tag: &TagFile, want: usize) -> Vec<usize> {
-    let root = tag.root();
-    let mut count = 0usize;
-    for field in root.fields() {
-        let Some(block) = field.as_block() else {
-            continue;
-        };
-        for i in 0..block.len() {
-            let Some(el) = block.element(i) else {
-                continue;
-            };
-            let Some(lang_perm_info) = find_block_field(&el, "language permutation info") else {
-                continue;
-            };
-            for j in 0..lang_perm_info.len() {
-                let Some(lpi_el) = lang_perm_info.element(j) else {
-                    continue;
-                };
-                let Some(raw_info) = find_block_field(&lpi_el, "raw info block") else {
-                    continue;
-                };
-                for k in 0..raw_info.len() {
-                    let Some(raw_el) = raw_info.element(k) else {
-                        continue;
-                    };
-                    let has_samples = raw_el
-                        .fields()
-                        .any(|f| f.as_data().is_some_and(|d| !d.is_empty()));
-                    if !has_samples {
-                        continue;
-                    }
-                    if count == want {
-                        return chunk_offsets_of(&raw_el);
-                    }
-                    count += 1;
-                }
-            }
-        }
-    }
-    Vec::new()
-}
-
 /// Read the `file offset` of each `sound_permutation_chunk_block` element in a
 /// raw-info-block struct (the block whose elements carry a `file offset` field).
+/// H2 splits an entry's audio into ~1.36 s chunks, each an independent stream;
+/// these offsets let the decoder slice + concatenate them. Empty if unchunked.
 fn chunk_offsets_of(raw_el: &TagStruct) -> Vec<usize> {
     for field in raw_el.fields() {
         let Some(block) = field.as_block() else {
@@ -315,76 +230,30 @@ fn chunk_offsets_of(raw_el: &TagStruct) -> Vec<usize> {
     Vec::new()
 }
 
-/// Read H2's tag-level inline codec parameters: `compression` → codec,
-/// `encoding` → channel count, `sample rate` → Hz (used only by ADPCM; Opus is
-/// always 48 kHz).
-pub(super) fn h2_codec_params(tag: &TagFile) -> (super::audio::InlineCodec, u16, u32) {
+/// Codec parameters for samples stored on the permutation itself.
+///
+/// Halo CE names them `format` / `channel count` / `sample rate`, and uses Ogg
+/// for music but Xbox-ADPCM for most effects, so the format must be read (the
+/// Ogg decoder chokes on ADPCM bytes). Halo 2's older layout names them
+/// `compression` (on the permutation, else the tag) / `encoding` / `sample
+/// rate` — read through CE's names, its ADPCM decoded as PCM noise.
+pub(super) fn permutation_inline_params(
+    root: &TagStruct,
+    perm: &TagStruct,
+) -> (super::audio::InlineCodec, u16, u32) {
     use super::audio::InlineCodec;
-    let root = tag.root();
-    let compression = find_full_field_name(&root, "compression")
-        .and_then(|full| root.read_enum_name(full))
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let codec = if compression.contains("opus") {
-        InlineCodec::Opus
-    } else if compression.contains("none") {
-        // Uncompressed PCM — "none (big endian)" / "none (little endian)".
-        InlineCodec::Pcm {
-            big_endian: compression.contains("big"),
-        }
-    } else {
-        InlineCodec::XboxAdpcm
+    let read = |element: &TagStruct, clean: &str| {
+        find_full_field_name(element, clean).and_then(|full| element.read_enum_name(full))
     };
-    // Channel count from the `encoding` enum by NAME — the enum ordering differs
-    // between games (H2: mono,stereo,codec,quad; H3/Reach: mono,stereo,quad,5.1,
-    // codec), so an index-based map would be wrong.
-    let channels = find_full_field_name(&root, "encoding")
-        .and_then(|full| root.read_enum_name(full))
-        .map(|name| {
-            let n = name.to_ascii_lowercase();
-            if n.contains("mono") {
-                1
-            } else if n.contains("5.1") {
-                6
-            } else if n.contains("quad") {
-                4
-            } else {
-                2 // stereo, codec
-            }
-        })
-        .unwrap_or(2);
-    let sample_rate = find_full_field_name(&root, "sample rate")
-        .and_then(|full| root.read_enum_name(full))
-        .map(|name| {
-            let n = name.to_ascii_lowercase();
-            if n.contains("48") {
-                48_000
-            } else if n.contains("44") {
-                44_100
-            } else if n.contains("32") {
-                32_000
-            } else if n.contains("22") {
-                22_050
-            } else {
-                48_000
-            }
-        })
-        .unwrap_or(48_000);
-    (codec, channels, sample_rate)
-}
-
-/// Read CE's tag-level inline codec parameters: `format` → codec, `channel
-/// count` → channels, `sample rate` → Hz. Unlike H2, CE stores the whole stream
-/// per permutation and can use any of four formats — Ogg Vorbis is common but
-/// weapon/effect sounds are frequently Xbox-ADPCM, so the format must be read
-/// (not assumed) or the Ogg decoder chokes on the ADPCM bytes.
-pub(super) fn ce_codec_params(tag: &TagFile) -> (super::audio::InlineCodec, u16, u32) {
-    use super::audio::InlineCodec;
-    let root = tag.root();
-    let format = find_full_field_name(&root, "format")
-        .and_then(|full| root.read_enum_name(full))
-        .unwrap_or_default()
-        .to_ascii_lowercase();
+    let Some(format) = read(root, "format") else {
+        let compression = read(perm, "compression")
+            .or_else(|| read(root, "compression"))
+            .unwrap_or_default();
+        let channels = read(root, "encoding").map_or(1, |name| h2_channels_for(&name));
+        let rate = read(root, "sample rate").map_or(22_050, |name| h2_rate_for(&name));
+        return (h2_codec_for(&compression), channels, rate);
+    };
+    let format = format.to_ascii_lowercase();
     let codec = if format.contains("ogg") || format.contains("vorbis") {
         InlineCodec::OggVorbis
     } else if format.contains("xbox") || format.contains("ima") {
@@ -395,8 +264,7 @@ pub(super) fn ce_codec_params(tag: &TagFile) -> (super::audio::InlineCodec, u16,
         // "pcm" — uncompressed interleaved 16-bit PCM, little-endian on CE.
         InlineCodec::Pcm { big_endian: false }
     };
-    let channels = find_full_field_name(&root, "channel count")
-        .and_then(|full| root.read_enum_name(full))
+    let channels = read(root, "channel count")
         .map(|name| {
             if name.to_ascii_lowercase().contains("mono") {
                 1
@@ -405,11 +273,29 @@ pub(super) fn ce_codec_params(tag: &TagFile) -> (super::audio::InlineCodec, u16,
             }
         })
         .unwrap_or(1);
-    let sample_rate = find_full_field_name(&root, "sample rate")
-        .and_then(|full| root.read_enum_name(full))
+    let sample_rate = read(root, "sample rate")
         .map(|name| if name.contains("44") { 44_100 } else { 22_050 })
         .unwrap_or(22_050);
     (codec, channels, sample_rate)
+}
+
+/// Seconds of audio in `bytes` of a fixed-rate codec; `None` for Opus and Ogg,
+/// whose length only a decode reveals.
+fn fixed_rate_duration(
+    codec: super::audio::InlineCodec,
+    bytes: usize,
+    channels: u16,
+    sample_rate: u32,
+) -> Option<f64> {
+    use super::audio::InlineCodec;
+    let channels = usize::from(channels.max(1));
+    let frames = match codec {
+        // 36 bytes per channel per block, 64 samples each.
+        InlineCodec::XboxAdpcm => bytes / (36 * channels) * 64,
+        InlineCodec::Pcm { .. } => bytes / (2 * channels),
+        InlineCodec::Opus | InlineCodec::OggVorbis => return None,
+    };
+    (sample_rate > 0).then(|| frames as f64 / f64::from(sample_rate))
 }
 
 /// Audition panel for a `sound` (`snd!`) tag. Halo 3+ page the actual samples
@@ -439,9 +325,66 @@ pub(super) fn h4_event_names(tag: &TagFile) -> Vec<(&'static str, String)> {
     out
 }
 
-/// Localized languages available for the current source, by game family (Wwise
-/// `.pck` subdirs for H4/H2A, FMOD `.fsb` for the rest). Empty ⇒ single-language.
-fn available_sound_languages(edit: &FieldEditContext<'_>) -> Vec<String> {
+/// Halo 2's languages in schema order (`sound.json`'s `language` enum), for the
+/// dialogue and looping players, which can't know what their referenced sounds
+/// carry until one is loaded.
+const H2_LANGUAGES: [&str; 9] = [
+    "english",
+    "japanese",
+    "german",
+    "french",
+    "spanish",
+    "italian",
+    "korean",
+    "chinese",
+    "portuguese",
+];
+
+/// A language the picker offers: the value kept in the shared audio state
+/// (`None` = the source's default) and its label.
+pub(super) struct LanguageChoice {
+    value: Option<String>,
+    label: String,
+}
+
+/// Localized languages available for the current source. Halo 2 carries its
+/// languages in the tag (`h2`), English being the default; Wwise `.pck`
+/// subdirs for H4/H2A and FMOD `.fsb` banks for the rest, behind a separate
+/// "default". Empty ⇒ single-language.
+fn language_choices(edit: &FieldEditContext<'_>, h2: Option<&H2Sound>) -> Vec<LanguageChoice> {
+    let h2_choices = |languages: &mut dyn Iterator<Item = &str>| -> Vec<LanguageChoice> {
+        languages
+            .map(|language| LanguageChoice {
+                value: (!language.eq_ignore_ascii_case(H2_DEFAULT_LANGUAGE))
+                    .then(|| language.to_owned()),
+                label: language_label(language),
+            })
+            .collect()
+    };
+    if let Some(h2) = h2 {
+        return if h2.languages.len() > 1 {
+            h2_choices(&mut h2.languages.iter().map(String::as_str))
+        } else {
+            Vec::new()
+        };
+    }
+    if edit.game == Some("halo2_mcc") && edit.ce_sound.is_none() {
+        return h2_choices(&mut H2_LANGUAGES.iter().copied());
+    }
+    let with_default = |languages: Vec<String>| -> Vec<LanguageChoice> {
+        if languages.is_empty() {
+            return Vec::new();
+        }
+        std::iter::once(LanguageChoice {
+            value: None,
+            label: "default".to_owned(),
+        })
+        .chain(languages.into_iter().map(|language| LanguageChoice {
+            label: language.clone(),
+            value: Some(language),
+        }))
+        .collect()
+    };
     // Campaign Evolved has no `tags_root` (its tags live in containers) and its
     // languages aren't discoverable from a bank directory — they're named by
     // the event's own cooked data, so take them from the resolved binding.
@@ -453,26 +396,25 @@ fn available_sound_languages(edit: &FieldEditContext<'_>) -> Vec<String> {
             .filter(|l| !l.eq_ignore_ascii_case("SFX"))
             .collect();
         if !langs.is_empty() {
-            return langs;
+            return with_default(langs);
         }
     }
     let Some(root) = edit.tags_root else {
         return Vec::new();
     };
-    match edit.game {
+    with_default(match edit.game {
         Some("halo4_mcc") | Some("halo2amp_mcc") => {
             blam_tags::audio::WwiseBanks::available_languages(root)
         }
 
         _ => blam_tags::audio::SoundBanks::available_languages(root),
-    }
+    })
 }
 
 /// Shared transport row for every sound-player variant: Stop, a volume slider, a
 /// language selector (when the source is localized), and the status line. All
 /// changes queue a [`super::audio::SoundAction`] the app drains after rendering.
-fn draw_sound_transport(ui: &mut Ui, edit: &mut FieldEditContext<'_>) {
-    let languages = available_sound_languages(edit);
+fn draw_sound_transport(ui: &mut Ui, edit: &mut FieldEditContext<'_>, languages: &[LanguageChoice]) {
     ui.horizontal(|ui| {
         if ui
             .button(RichText::new("\u{25A0} Stop"))
@@ -494,23 +436,37 @@ fn draw_sound_transport(ui: &mut Ui, edit: &mut FieldEditContext<'_>) {
         {
             *edit.sound_play_request = Some(super::audio::SoundAction::SetVolume(volume));
         }
-        // Language selector — resolves banks/pcks (and routes extraction to
-        // `data_<lang>\`) for the chosen localized language.
+        // Language selector — picks which localized audio plays and is
+        // extracted (to `data_<lang>\`). A language this source lacks shows as
+        // the default, which is what plays.
         if !languages.is_empty() {
             let current = edit.sound_language.map(str::to_owned);
-            let mut selected = current.clone();
+            let shown = languages
+                .iter()
+                .find(|choice| {
+                    choice.value.as_deref().map(str::to_ascii_lowercase)
+                        == current.as_deref().map(str::to_ascii_lowercase)
+                })
+                .or_else(|| languages.iter().find(|choice| choice.value.is_none()))
+                .or(languages.first());
+            let mut selected = shown.and_then(|choice| choice.value.clone());
+            let before = selected.clone();
             egui::ComboBox::from_id_salt("sound_language")
                 .selected_text(format!(
                     "\u{1F310} {}",
-                    current.as_deref().unwrap_or("default")
+                    shown.map_or("default", |choice| choice.label.as_str())
                 ))
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut selected, None, "default");
-                    for lang in &languages {
-                        ui.selectable_value(&mut selected, Some(lang.clone()), lang);
+                    for choice in languages {
+                        ui.selectable_value(&mut selected, choice.value.clone(), &choice.label);
                     }
-                });
-            if selected != current {
+                })
+                .response
+                .on_hover_text(format!(
+                    "Language to play and extract ({} available)",
+                    languages.len()
+                ));
+            if selected != before {
                 *edit.sound_play_request = Some(super::audio::SoundAction::SetLanguage(selected));
             }
         }
@@ -520,39 +476,32 @@ fn draw_sound_transport(ui: &mut Ui, edit: &mut FieldEditContext<'_>) {
     });
 }
 
+/// The block index a Halo 2 permutation keeps into `language permutation info`
+/// (its unnamed `custom short block index`), or `None` when unset.
+fn permutation_lpi_index(perm: &TagStruct) -> Option<usize> {
+    perm.fields()
+        .filter(|field| field.field_type() == TagFieldType::CustomShortBlockIndex)
+        .find_map(|field| match field.value() {
+            Some(blam_tags::TagFieldData::CustomShortBlockIndex(index)) => {
+                usize::try_from(index).ok()
+            }
+            _ => None,
+        })
+}
+
 /// Build the audition/extraction rows for a `.sound` tag: every pitch-range
 /// permutation with its name and audio source, classified identically for the
 /// player and the extractor. Capped so a pathological tag can't stall the UI.
-pub(super) fn sound_permutation_rows(tag: &TagFile) -> Vec<SoundPermRow> {
+/// `h2` is the tag's [`H2Sound`], when it is one.
+pub(super) fn sound_permutation_rows(tag: &TagFile, h2: Option<&H2Sound>) -> Vec<SoundPermRow> {
     let root = tag.root();
     let Some(pitch_ranges) = find_block_field(&root, "pitch range") else {
         return Vec::new();
     };
     const MAX_ROWS: usize = 400;
-    // H2 stores audio in a parallel language-permutation-info block (not on the
-    // permutation like CE); count its blobs so rows can map to them by order.
-    // Gate strictly on an inline-decodable codec: H3/ODST use the SAME nested
-    // block but store XMA `samples` inline (undecodable here; the playable audio
-    // is FMOD-Vorbis in the bank), so treating them as inline-H2 would decode
-    // garbage. Only opus / xbox-adpcm / uncompressed are actually inline audio.
-    let comp = find_full_field_name(&root, "compression")
-        .and_then(|full| root.read_enum_name(full))
-        .unwrap_or_default()
-        .to_ascii_lowercase();
-    let inline_decodable = !comp.contains("xma")
-        && (comp.contains("opus")
-            || comp.contains("adpcm")
-            || comp.contains("none")
-            || comp.contains("pcm"));
-    let h2_count = if inline_decodable {
-        h2_blobs(tag, None).0
-    } else {
-        0
-    };
-    let mut h2_ordinal = 0usize;
-    // CE codec/channels/rate (read once, lazily — only CE tags have inline
-    // per-permutation `samples`).
-    let mut ce_params: Option<(super::audio::InlineCodec, u16, u32)> = None;
+    // Permutations in tag order: the fallback index into `language permutation
+    // info` for a permutation whose own index is unset or out of range.
+    let mut ordinal = 0usize;
     let mut rows: Vec<SoundPermRow> = Vec::new();
     for pr_index in 0..pitch_ranges.len() {
         let Some(pitch_range) = pitch_ranges.element(pr_index) else {
@@ -576,31 +525,36 @@ pub(super) fn sound_permutation_rows(tag: &TagFile) -> Vec<SoundPermRow> {
                 .and_then(|full| perm.read_string_id(full))
                 .filter(|name| !name.is_empty())
                 .unwrap_or_else(|| format!("#{perm_index}"));
-            let has_inline_samples = find_full_field_name(&perm, "samples")
+            let inline_bytes = find_full_field_name(&perm, "samples")
                 .and_then(|full| perm.field(full))
                 .and_then(|field| field.as_data())
-                .is_some_and(|data| !data.is_empty());
-            let kind = if has_inline_samples {
-                let (codec, channels, sample_rate) =
-                    *ce_params.get_or_insert_with(|| ce_codec_params(tag));
-                RowKind::InlineCe {
+                .map_or(0, <[u8]>::len);
+            let kind = if inline_bytes > 0 {
+                let (codec, channels, sample_rate) = permutation_inline_params(&root, &perm);
+                RowKind::InlinePermutation {
                     codec,
                     channels,
                     sample_rate,
                 }
-            } else if h2_count > 0 {
-                let blob = h2_ordinal.min(h2_count - 1);
-                h2_ordinal += 1;
-                RowKind::InlineH2 { blob }
+            } else if let Some(h2) = h2 {
+                let lpi = permutation_lpi_index(&perm)
+                    .filter(|&index| !h2.entries(index).is_empty())
+                    .unwrap_or(ordinal);
+                RowKind::InlineH2 { lpi }
             } else {
                 RowKind::Bank
             };
+            ordinal += 1;
             rows.push(SoundPermRow {
                 pitch_range: pr_name.clone(),
                 name,
                 pr_index,
                 perm_index,
                 kind,
+                gain_db: find_full_field_name(&perm, "gain").and_then(|full| perm.read_real(full)),
+                skip_fraction: find_full_field_name(&perm, "skip fraction")
+                    .and_then(|full| perm.read_real(full)),
+                inline_bytes,
             });
         }
     }
@@ -629,24 +583,32 @@ fn row_bank_id(sound_rel: Option<&str>, multi_pr: bool, row: &SoundPermRow) -> O
     ))
 }
 
-/// The play action for a permutation row (bank subsound / CE inline Ogg / H2
-/// inline blob). Returns `None` if the inline bytes can't be re-extracted.
-/// `sound_rel`/`multi_pr` disambiguate the FMOD subsound (see [`row_bank_id`]).
+/// What a row plays and extracts from: the Halo 2 language entries and the
+/// chosen language, and the FMOD subsound id inputs (see [`row_bank_id`]).
+#[derive(Clone, Copy)]
+pub(super) struct RowSource<'a> {
+    pub(super) h2: Option<&'a H2Sound>,
+    /// The chosen language; `None` is the source's default.
+    pub(super) language: Option<&'a str>,
+    pub(super) sound_rel: Option<&'a str>,
+    pub(super) multi_pr: bool,
+}
+
+/// The play action for a permutation row (bank subsound / the permutation's own
+/// samples / a Halo 2 language entry). `None` if the audio can't be read.
 fn row_play_action(
     tag: &TagFile,
     row: &SoundPermRow,
-    h2_params: Option<(super::audio::InlineCodec, u16, u32)>,
-    sound_rel: Option<&str>,
-    multi_pr: bool,
+    source: RowSource<'_>,
 ) -> Option<super::audio::SoundAction> {
-    use super::audio::{InlineCodec, SoundAction};
+    use super::audio::SoundAction;
     match &row.kind {
         RowKind::Bank => Some(SoundAction::Play {
-            id: row_bank_id(sound_rel, multi_pr, row),
+            id: row_bank_id(source.sound_rel, source.multi_pr, row),
             key: row.name.clone(),
             label: row.name.clone(),
         }),
-        RowKind::InlineCe {
+        RowKind::InlinePermutation {
             codec,
             channels,
             sample_rate,
@@ -662,17 +624,23 @@ fn row_play_action(
                 label: row.name.clone(),
             })
         }
-        RowKind::InlineH2 { blob } => {
-            let bytes = h2_blobs(tag, Some(*blob)).1?;
-            let (codec, channels, sample_rate) =
-                h2_params.unwrap_or((InlineCodec::Opus, 1, 48_000));
+        RowKind::InlineH2 { lpi } => {
+            let h2 = source.h2?;
+            let (entry, _) = h2.entry_for(*lpi, source.language)?;
+            let (bytes, chunk_offsets) = h2.samples(tag, entry)?;
+            let (codec, channels, sample_rate) = h2.decode_params(entry);
+            let label = if entry.language.eq_ignore_ascii_case(H2_DEFAULT_LANGUAGE) {
+                row.name.clone()
+            } else {
+                format!("{} ({})", row.name, language_label(&entry.language))
+            };
             Some(SoundAction::PlayInline {
                 bytes,
                 codec,
                 channels,
                 sample_rate,
-                chunk_offsets: h2_blob_chunk_offsets(tag, *blob),
-                label: row.name.clone(),
+                chunk_offsets,
+                label,
             })
         }
     }
@@ -681,21 +649,22 @@ fn row_play_action(
 /// Where a permutation row's audio comes from for extraction. Mirrors
 /// [`row_play_action`] but yields file-writing sources. `raw_ce` writes CE's
 /// self-contained inline Ogg verbatim (near-lossless) instead of decoding.
+/// `exact_language` refuses a Halo 2 row that lacks the chosen language rather
+/// than writing another language's audio in its place.
 fn row_extract_source(
     tag: &TagFile,
     row: &SoundPermRow,
-    h2_params: Option<(super::audio::InlineCodec, u16, u32)>,
+    source: RowSource<'_>,
     raw_ce: bool,
-    sound_rel: Option<&str>,
-    multi_pr: bool,
+    exact_language: bool,
 ) -> Option<ExtractSource> {
     use super::audio::InlineCodec;
     match &row.kind {
         RowKind::Bank => Some(ExtractSource::Bank {
-            id: row_bank_id(sound_rel, multi_pr, row),
+            id: row_bank_id(source.sound_rel, source.multi_pr, row),
             key: row.name.clone(),
         }),
-        RowKind::InlineCe {
+        RowKind::InlinePermutation {
             codec,
             channels,
             sample_rate,
@@ -716,16 +685,20 @@ fn row_extract_source(
                 }
             })
         }
-        RowKind::InlineH2 { blob } => {
-            let bytes = h2_blobs(tag, Some(*blob)).1?;
-            let (codec, channels, sample_rate) =
-                h2_params.unwrap_or((InlineCodec::Opus, 1, 48_000));
+        RowKind::InlineH2 { lpi } => {
+            let h2 = source.h2?;
+            let (entry, fallback) = h2.entry_for(*lpi, source.language)?;
+            if fallback && exact_language {
+                return None;
+            }
+            let (bytes, chunk_offsets) = h2.samples(tag, entry)?;
+            let (codec, channels, sample_rate) = h2.decode_params(entry);
             Some(ExtractSource::Inline {
                 bytes,
                 codec,
                 channels,
                 sample_rate,
-                chunk_offsets: h2_blob_chunk_offsets(tag, *blob),
+                chunk_offsets,
             })
         }
     }
@@ -737,7 +710,7 @@ fn row_extract_ext(kind: &RowKind, raw_ce: bool) -> &'static str {
     if raw_ce
         && matches!(
             kind,
-            RowKind::InlineCe {
+            RowKind::InlinePermutation {
                 codec: super::audio::InlineCodec::OggVorbis,
                 ..
             }
@@ -752,7 +725,9 @@ fn row_extract_ext(kind: &RowKind, raw_ce: bool) -> &'static str {
 /// A compact `(sound class, codec)` readout for the player header.
 fn sound_class_and_compression(tag: &TagFile) -> (Option<String>, String) {
     let root = tag.root();
+    // CE names it `sound class`; H2 through Reach, `class`.
     let class = find_full_field_name(&root, "sound class")
+        .or_else(|| find_full_field_name(&root, "class"))
         .and_then(|full| root.read_enum_name(full))
         .filter(|value| !value.is_empty());
     let compression = find_full_field_name(&root, "compression")
@@ -798,26 +773,33 @@ fn perm_relative_path(multi_pr: bool, row: &SoundPermRow, ext: &str) -> std::pat
 
 /// Lay each row out under `base` as `[<pitch range>/]<permutation>.<ext>` — the
 /// structure `tool.exe`'s sound import consumes (RE-verified from the tool's own
-/// exporter).
+/// exporter). A Halo 2 permutation without the chosen language is left out, not
+/// filled with another language's audio.
 pub(super) fn build_extract_items(
     tag: &TagFile,
     rows: &[SoundPermRow],
-    h2_params: Option<(super::audio::InlineCodec, u16, u32)>,
+    source: RowSource<'_>,
     base: &std::path::Path,
     raw_ce: bool,
-    sound_rel: Option<&str>,
 ) -> Vec<ExtractItem> {
     let multi_pr = rows_span_multiple_pitch_ranges(rows);
+    let source = RowSource { multi_pr, ..source };
     rows.iter()
         .filter_map(|row| {
-            let source = row_extract_source(tag, row, h2_params, raw_ce, sound_rel, multi_pr)?;
+            let item_source = row_extract_source(tag, row, source, raw_ce, true)?;
             let rel = perm_relative_path(multi_pr, row, row_extract_ext(&row.kind, raw_ce));
             Some(ExtractItem {
                 out_path: base.join(rel),
-                source,
+                source: item_source,
             })
         })
         .collect()
+}
+
+/// The `data\` root name a Halo 2 language extracts under: English is the
+/// default (`data\`), the rest `data_<language>\`.
+fn h2_data_language(language: &str) -> Option<&str> {
+    (!language.eq_ignore_ascii_case(H2_DEFAULT_LANGUAGE)).then_some(language)
 }
 
 /// Per-game one-line note on the format `tool.exe` requires when reimporting the
@@ -841,12 +823,13 @@ fn draw_wwise_event_player(
     events: &[(&'static str, String)],
     edit: &mut FieldEditContext<'_>,
 ) {
+    let languages = language_choices(edit, None);
     egui::CollapsingHeader::new(
         RichText::new(format!("Sound \u{2014} Wwise event ({})", events.len())).color(text_dark()),
     )
     .default_open(true)
     .show(ui, |ui| {
-        draw_sound_transport(ui, edit);
+        draw_sound_transport(ui, edit, &languages);
         ui.label(
             RichText::new(
                 "Wwise-authored \u{2014} audio lives in sound\\pc\\*.pck; \
@@ -939,6 +922,7 @@ fn draw_ce_wwise_player(
     let selected = binding.language_to_show(edit.sound_language);
     let media = binding.media_for_language(&selected);
 
+    let language_picker = language_choices(edit, None);
     egui::CollapsingHeader::new(
         RichText::new(format!(
             "Sound \u{2014} Wwise media ({} permutation{})",
@@ -949,7 +933,7 @@ fn draw_ce_wwise_player(
     )
     .default_open(true)
     .show(ui, |ui| {
-        draw_sound_transport(ui, edit);
+        draw_sound_transport(ui, edit, &language_picker);
         ui.label(
             RichText::new(if localized {
                 "Wwise-authored \u{2014} localized voice; media lives in the \
@@ -1068,6 +1052,168 @@ fn draw_ce_wwise_player(
     });
 }
 
+/// `1` → `mono`, `2` → `stereo`, `4` → `quad`.
+fn channel_label(channels: u16) -> String {
+    match channels {
+        1 => "mono".to_owned(),
+        2 => "stereo".to_owned(),
+        4 => "quad".to_owned(),
+        6 => "5.1".to_owned(),
+        n => format!("{n} channels"),
+    }
+}
+
+fn codec_label(codec: super::audio::InlineCodec) -> &'static str {
+    use super::audio::InlineCodec;
+    match codec {
+        InlineCodec::OggVorbis => "ogg vorbis",
+        InlineCodec::Opus => "opus",
+        InlineCodec::XboxAdpcm => "xbox adpcm",
+        InlineCodec::Pcm { .. } => "pcm",
+    }
+}
+
+/// Why a legacy entry's rate is shown as inferred.
+const INFERRED_RATE_HOVER: &str = "Legacy Xbox audio. The tag doesn't record this language's sample \
+     rate (the tool writes every language at the tag's rate; this one predates that), so it is \
+     recovered from the lip-sync mouth data, which runs at the same pace in every language.";
+
+/// The audio a row plays for `language`, as `(duration, fell back to English)`.
+fn row_duration(row: &SoundPermRow, source: RowSource<'_>) -> (Option<f64>, bool) {
+    match &row.kind {
+        RowKind::Bank => (None, false),
+        RowKind::InlinePermutation {
+            codec,
+            channels,
+            sample_rate,
+        } => (
+            fixed_rate_duration(*codec, row.inline_bytes, *channels, *sample_rate),
+            false,
+        ),
+        RowKind::InlineH2 { lpi } => {
+            let Some((entry, fallback)) = source.h2.and_then(|h2| h2.entry_for(*lpi, source.language))
+            else {
+                return (None, false);
+            };
+            (source.h2.and_then(|h2| h2.duration_secs(entry)), fallback)
+        }
+    }
+}
+
+/// Everything a row holds, for its hover: every Halo 2 language with its codec,
+/// rate, length and size, or the permutation's own format.
+fn row_details(row: &SoundPermRow, h2: Option<&H2Sound>) -> String {
+    match &row.kind {
+        RowKind::Bank => format!("{}\nplays from the FMOD sound bank", row.name),
+        RowKind::InlinePermutation {
+            codec,
+            channels,
+            sample_rate,
+        } => format!(
+            "{}\n{} \u{00B7} {} \u{00B7} {} \u{00B7} {}",
+            row.name,
+            codec_label(*codec),
+            channel_label(*channels),
+            format_rate(*sample_rate),
+            format_bytes(row.inline_bytes)
+        ),
+        RowKind::InlineH2 { lpi } => {
+            let Some(h2) = h2 else {
+                return row.name.clone();
+            };
+            let mut lines = vec![row.name.clone()];
+            let mut entries: Vec<&H2Entry> = h2.entries(*lpi).iter().collect();
+            entries.sort_by_key(|entry| {
+                h2.languages
+                    .iter()
+                    .position(|language| *language == entry.language)
+            });
+            for entry in entries {
+                let (rate, rate_source) = h2.rate_of(entry);
+                let duration = h2
+                    .duration_secs(entry)
+                    .map(|seconds| format!(" \u{00B7} {seconds:.2} s"))
+                    .unwrap_or_default();
+                let inferred = match rate_source {
+                    H2RateSource::Tag => "",
+                    H2RateSource::Inferred => " (inferred)",
+                    H2RateSource::Unknown => " (unknown, assumed)",
+                };
+                lines.push(format!(
+                    "{}: {} \u{00B7} {}{inferred}{duration} \u{00B7} {}",
+                    language_label(&entry.language),
+                    entry.compression,
+                    format_rate(rate),
+                    format_bytes(entry.sample_bytes)
+                ));
+            }
+            lines.join("\n")
+        }
+    }
+}
+
+/// The class · codec · channels · rate line under the transport, describing
+/// what the chosen language actually plays.
+fn draw_sound_format_line(ui: &mut Ui, tag: &TagFile, rows: &[SoundPermRow], source: RowSource<'_>) {
+    let (class, compression) = sound_class_and_compression(tag);
+    ui.horizontal_wrapped(|ui| {
+        let dot = |ui: &mut Ui| {
+            ui.label(RichText::new("\u{00B7}").color(subtle_dark()));
+        };
+        if let Some(class) = &class {
+            ui.label(RichText::new(format!("class: {class}")).color(subtle_dark()));
+            dot(ui);
+        }
+        let h2_entry = source.h2.and_then(|h2| {
+            rows.iter().find_map(|row| match row.kind {
+                RowKind::InlineH2 { lpi } => h2.entry_for(lpi, source.language),
+                _ => None,
+            })
+        });
+        let (Some(h2), Some((entry, _))) = (source.h2, h2_entry) else {
+            let text = match rows.first().map(|row| &row.kind) {
+                Some(RowKind::InlinePermutation {
+                    codec,
+                    channels,
+                    sample_rate,
+                }) => format!(
+                    "{} \u{00B7} {} \u{00B7} {}",
+                    codec_label(*codec),
+                    channel_label(*channels),
+                    format_rate(*sample_rate)
+                ),
+                _ => format!("codec: {compression}"),
+            };
+            ui.label(RichText::new(text).color(subtle_dark()));
+            return;
+        };
+        let (rate, rate_source) = h2.rate_of(entry);
+        ui.label(
+            RichText::new(format!(
+                "{} \u{00B7} {} \u{00B7} {}",
+                entry.compression,
+                channel_label(h2.channels),
+                format_rate(rate)
+            ))
+            .color(subtle_dark()),
+        );
+        match rate_source {
+            H2RateSource::Tag => {}
+            H2RateSource::Inferred => {
+                ui.label(RichText::new("(rate inferred)").color(ui.visuals().warn_fg_color))
+                    .on_hover_text(INFERRED_RATE_HOVER);
+            }
+            H2RateSource::Unknown => {
+                ui.label(
+                    RichText::new("(rate unknown \u{2014} assumed)")
+                        .color(ui.visuals().warn_fg_color),
+                )
+                .on_hover_text(INFERRED_RATE_HOVER);
+            }
+        }
+    });
+}
+
 pub(in crate::app) fn draw_sound_player(
     ui: &mut Ui,
     tag: &TagFile,
@@ -1094,21 +1240,31 @@ pub(in crate::app) fn draw_sound_player(
         draw_wwise_event_player(ui, &events, edit);
         return;
     }
-    let rows = sound_permutation_rows(tag);
+    let h2 = H2Sound::read(tag);
+    let rows = sound_permutation_rows(tag, h2.as_ref());
     if rows.is_empty() {
         return;
     }
-    // H2 tag-level codec/channels/rate (read once; used by inline H2 rows).
-    let is_h2 = rows
-        .iter()
-        .any(|row| matches!(row.kind, RowKind::InlineH2 { .. }));
-    let h2_params = is_h2.then(|| h2_codec_params(tag));
+    let languages = language_choices(edit, h2.as_ref());
+    // A Halo 2 tag plays the chosen language when it has it, else English;
+    // the shared choice may be another game's language this tag never had.
+    let chosen = edit.sound_language.map(str::to_owned);
+    let missing_language = h2
+        .as_ref()
+        .zip(chosen.as_deref())
+        .filter(|(h2, language)| !h2.has_language(language))
+        .map(|(_, language)| language.to_owned());
+    let language = if missing_language.is_some() {
+        None
+    } else {
+        chosen.as_deref()
+    };
     // The raw-passthrough toggle is only meaningful for CE Ogg-format tags
     // (writing the verbatim stream as `.ogg`); ADPCM/PCM tags must decode to WAV.
     let has_inline_ogg = rows.iter().any(|row| {
         matches!(
             row.kind,
-            RowKind::InlineCe {
+            RowKind::InlinePermutation {
                 codec: super::audio::InlineCodec::OggVorbis,
                 ..
             }
@@ -1126,48 +1282,90 @@ pub(in crate::app) fn draw_sound_player(
         .zip(edit.tags_root)
         .and_then(|(abs, root)| sound_tag_rel(abs, root));
     let multi_pr = rows_span_multiple_pitch_ranges(&rows);
+    let source = RowSource {
+        h2: h2.as_ref(),
+        language,
+        sound_rel: sound_rel.as_deref(),
+        multi_pr,
+    };
+    // A lone `|default|` pitch range is just the container; name ranges only
+    // when there's more than one, or the one there is was named.
+    let show_pitch_ranges =
+        multi_pr || rows.first().is_some_and(|row| !is_default_pitch_range(&row.pitch_range));
+    let localized = h2.as_ref().is_some_and(|h2| h2.languages.len() > 1);
+    let language_name = language_label(language.unwrap_or(H2_DEFAULT_LANGUAGE));
 
     egui::CollapsingHeader::new(
-        RichText::new(format!("Sound \u{2014} {} permutation(s)", rows.len())).color(text_dark()),
+        RichText::new(format!(
+            "Sound \u{2014} {} permutation{}",
+            rows.len(),
+            if rows.len() == 1 { "" } else { "s" }
+        ))
+        .color(text_dark()),
     )
     .default_open(true)
     .show(ui, |ui| {
-        draw_sound_transport(ui, edit);
+        draw_sound_transport(ui, edit, &languages);
+        draw_sound_format_line(ui, tag, &rows, source);
+        if let Some(missing) = &missing_language {
+            ui.label(
+                RichText::new(format!(
+                    "{} isn't in this tag \u{2014} playing English.",
+                    language_label(missing)
+                ))
+                .color(subtle_dark()),
+            );
+        }
 
-        // Class / codec readout.
-        let (class, codec) = sound_class_and_compression(tag);
-        ui.horizontal(|ui| {
-            if let Some(class) = &class {
-                ui.label(RichText::new(format!("class: {class}")).color(subtle_dark()));
-                ui.label(RichText::new("\u{00B7}").color(subtle_dark()));
-            }
-            ui.label(RichText::new(format!("codec: {codec}")).color(subtle_dark()));
-        });
-
-        // Extract-all. The CE raw-ogg toggle persists per tag. (Reimport is left
+        // Extract. The CE raw-ogg toggle persists per tag. (Reimport is left
         // to the user via the game's tool.exe.)
         let raw_ce_id = ui.make_persistent_id(("sound_raw_ce", edit.tag_key));
         let mut raw_ce = ui.data(|d| d.get_temp::<bool>(raw_ce_id)).unwrap_or(false);
-        let extract_base =
+        let data_language = |language: Option<&str>| -> Option<String> {
+            if h2.is_some() {
+                language.and_then(h2_data_language).map(str::to_owned)
+            } else {
+                language.map(str::to_owned)
+            }
+        };
+        let base_for = |language: Option<&str>| {
             abs_tag_path
                 .as_deref()
                 .zip(edit.tags_root)
                 .and_then(|(tag_path, root)| {
-                    reimport_base_dir_lang(root, tag_path, edit.sound_language)
-                });
+                    reimport_base_dir_lang(root, tag_path, data_language(language).as_deref())
+                })
+        };
+        let extract_base = base_for(if h2.is_some() {
+            language
+        } else {
+            edit.sound_language
+        });
         let format_note = sound_format_note(edit.game);
+        let missing_count = rows
+            .iter()
+            .filter(|row| row_duration(row, source).1)
+            .count();
         ui.horizontal(|ui| {
-            let extract_hover = match &extract_base {
+            let mut extract_hover = match &extract_base {
                 Some(dir) => format!("Extract every permutation to {}", dir.display()),
                 None => "Choose a folder and extract every permutation".to_owned(),
             };
-            let extract_hover = if format_note.is_empty() {
-                extract_hover
+            if missing_count > 0 {
+                extract_hover.push_str(&format!(
+                    "\n{missing_count} permutation(s) have no {language_name} audio and are skipped"
+                ));
+            }
+            if !format_note.is_empty() {
+                extract_hover.push_str(&format!("\nFor tool.exe reimport: {format_note}"));
+            }
+            let extract_label = if localized {
+                format!("\u{2B07} Extract all ({language_name})")
             } else {
-                format!("{extract_hover}\nFor tool.exe reimport: {format_note}")
+                "\u{2B07} Extract all".to_owned()
             };
             if ui
-                .button(RichText::new("\u{2B07} Extract all"))
+                .button(RichText::new(extract_label))
                 .on_hover_text(extract_hover)
                 .clicked()
             {
@@ -1177,14 +1375,7 @@ pub(in crate::app) fn draw_sound_player(
                         .pick_folder()
                 });
                 if let Some(base) = base {
-                    let items = build_extract_items(
-                        tag,
-                        &rows,
-                        h2_params,
-                        &base,
-                        raw_ce,
-                        sound_rel.as_deref(),
-                    );
+                    let items = build_extract_items(tag, &rows, source, &base, raw_ce);
                     let label = base
                         .file_name()
                         .map(|name| name.to_string_lossy().into_owned())
@@ -1194,6 +1385,57 @@ pub(in crate::app) fn draw_sound_player(
                         tags_root: edit.tags_root.map(std::path::Path::to_path_buf),
                         label,
                     });
+                }
+            }
+            if let Some(h2) = h2.as_ref().filter(|_| localized) {
+                let all_hover = if extract_base.is_some() {
+                    format!(
+                        "Extract all {} languages: English to data\\\u{2026}, the others to \
+                         data_<language>\\\u{2026}",
+                        h2.languages.len()
+                    )
+                } else {
+                    format!(
+                        "Choose a folder and extract all {} languages, one subfolder each",
+                        h2.languages.len()
+                    )
+                };
+                if ui
+                    .button(RichText::new("\u{2B07} All languages"))
+                    .on_hover_text(all_hover)
+                    .clicked()
+                {
+                    // Loose tags extract beside the kit's data roots; anywhere
+                    // else, into one chosen folder with a subfolder per language.
+                    let picked = if extract_base.is_some() {
+                        None
+                    } else {
+                        rfd::FileDialog::new()
+                            .set_title("Extract every language")
+                            .pick_folder()
+                    };
+                    if extract_base.is_some() || picked.is_some() {
+                        let mut items = Vec::new();
+                        for each in &h2.languages {
+                            let base = match &picked {
+                                Some(folder) => Some(folder.join(each)),
+                                None => base_for(Some(each)),
+                            };
+                            let Some(base) = base else {
+                                continue;
+                            };
+                            let each_source = RowSource {
+                                language: Some(each),
+                                ..source
+                            };
+                            items.extend(build_extract_items(tag, &rows, each_source, &base, false));
+                        }
+                        *edit.sound_extract_request = Some(ExtractRequest {
+                            items,
+                            tags_root: edit.tags_root.map(std::path::Path::to_path_buf),
+                            label: "all languages".to_owned(),
+                        });
+                    }
                 }
             }
             if has_inline_ogg {
@@ -1210,21 +1452,38 @@ pub(in crate::app) fn draw_sound_player(
             .show(ui, |ui| {
                 egui::Grid::new("sound_permutations")
                     .striped(true)
-                    .num_columns(4)
+                    .num_columns(5)
                     .show(ui, |ui| {
+                        let mut last_pitch_range: Option<&str> = None;
                         for row in &rows {
-                            let hover = match row.kind {
-                                RowKind::Bank => "Play this permutation from the FMOD bank",
-                                _ => "Play this permutation (inline tag audio)",
-                            };
-                            if ui.small_button("\u{25B6}").on_hover_text(hover).clicked() {
-                                *edit.sound_play_request = row_play_action(
-                                    tag,
-                                    row,
-                                    h2_params,
-                                    sound_rel.as_deref(),
-                                    multi_pr,
+                            if show_pitch_ranges && last_pitch_range != Some(row.pitch_range.as_str()) {
+                                last_pitch_range = Some(row.pitch_range.as_str());
+                                ui.label("");
+                                ui.label("");
+                                ui.label(
+                                    RichText::new(format!("pitch range: {}", row.pitch_range))
+                                        .strong()
+                                        .color(subtle_dark()),
                                 );
+                                ui.label("");
+                                ui.label("");
+                                ui.end_row();
+                            }
+                            let (duration, fallback) = row_duration(row, source);
+                            let play_hover = match row.kind {
+                                RowKind::Bank => {
+                                    "Play this permutation from the FMOD bank".to_owned()
+                                }
+                                RowKind::InlineH2 { .. } if localized && !fallback => {
+                                    format!("Play this permutation in {language_name}")
+                                }
+                                RowKind::InlineH2 { .. } if fallback => {
+                                    "Play this permutation in English".to_owned()
+                                }
+                                _ => "Play this permutation".to_owned(),
+                            };
+                            if ui.small_button("\u{25B6}").on_hover_text(play_hover).clicked() {
+                                *edit.sound_play_request = row_play_action(tag, row, source);
                             }
                             if ui
                                 .small_button("\u{2B07}")
@@ -1239,30 +1498,54 @@ pub(in crate::app) fn draw_sound_player(
                                         sanitize_component(&row.name)
                                     ))
                                     .save_file()
+                                    && let Some(item_source) =
+                                        row_extract_source(tag, row, source, raw_ce, false)
                                 {
-                                    if let Some(source) = row_extract_source(
-                                        tag,
-                                        row,
-                                        h2_params,
-                                        raw_ce,
-                                        sound_rel.as_deref(),
-                                        multi_pr,
-                                    ) {
-                                        *edit.sound_extract_request = Some(ExtractRequest {
-                                            items: vec![ExtractItem {
-                                                out_path: path,
-                                                source,
-                                            }],
-                                            tags_root: edit
-                                                .tags_root
-                                                .map(std::path::Path::to_path_buf),
-                                            label: row.name.clone(),
-                                        });
-                                    }
+                                    *edit.sound_extract_request = Some(ExtractRequest {
+                                        items: vec![ExtractItem {
+                                            out_path: path,
+                                            source: item_source,
+                                        }],
+                                        tags_root: edit.tags_root.map(std::path::Path::to_path_buf),
+                                        label: row.name.clone(),
+                                    });
                                 }
                             }
-                            ui.label(RichText::new(&row.name).color(text_dark()));
-                            ui.label(RichText::new(&row.pitch_range).color(subtle_dark()));
+                            ui.label(RichText::new(&row.name).color(text_dark()))
+                                .on_hover_text(row_details(row, h2.as_ref()));
+                            ui.label(
+                                RichText::new(
+                                    duration
+                                        .map(|seconds| format!("{seconds:.2} s"))
+                                        .unwrap_or_default(),
+                                )
+                                .color(subtle_dark()),
+                            );
+                            ui.horizontal(|ui| {
+                                if fallback {
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "no {language_name} \u{00B7} plays English"
+                                        ))
+                                        .color(ui.visuals().warn_fg_color),
+                                    );
+                                }
+                                if let Some(gain) = row.gain_db.filter(|gain| gain.abs() >= 0.05) {
+                                    ui.label(
+                                        RichText::new(format!("gain {gain:+.1} dB"))
+                                            .color(subtle_dark()),
+                                    );
+                                }
+                                if let Some(skip) = row.skip_fraction.filter(|skip| *skip > 0.0) {
+                                    ui.label(
+                                        RichText::new(format!("skip {:.0}%", skip * 100.0))
+                                            .color(subtle_dark()),
+                                    )
+                                    .on_hover_text(
+                                        "Fraction of requests for this permutation that are ignored",
+                                    );
+                                }
+                            });
                             ui.end_row();
                         }
                     });
@@ -1364,12 +1647,22 @@ fn load_referenced_sound(
     Some((tag, abs))
 }
 
+/// The chosen language when `h2` carries it, else the default — a referenced
+/// sound may lack the language the dialogue player was set to.
+fn language_for<'a>(h2: Option<&H2Sound>, language: Option<&'a str>) -> Option<&'a str> {
+    match h2 {
+        Some(h2) => language.filter(|language| h2.has_language(language)),
+        None => language,
+    }
+}
+
 /// The play action for the first playable unit of a (referenced) sound tag:
 /// a Wwise event (H4) or the first pitch-range permutation. `sound_rel` is the
 /// referenced tag's rel path, used to compute the FMOD subsound id.
 fn referenced_sound_play_action(
     tag: &TagFile,
     sound_rel: Option<&str>,
+    language: Option<&str>,
 ) -> Option<super::audio::SoundAction> {
     if let Some((_, name)) = h4_event_names(tag).into_iter().next() {
         return Some(super::audio::SoundAction::PlayEvent {
@@ -1378,14 +1671,16 @@ fn referenced_sound_play_action(
         });
     }
 
-    let rows = sound_permutation_rows(tag);
-    let multi_pr = rows_span_multiple_pitch_ranges(&rows);
-    let is_h2 = rows
-        .iter()
-        .any(|row| matches!(row.kind, RowKind::InlineH2 { .. }));
-    let h2_params = is_h2.then(|| h2_codec_params(tag));
+    let h2 = H2Sound::read(tag);
+    let rows = sound_permutation_rows(tag, h2.as_ref());
+    let source = RowSource {
+        h2: h2.as_ref(),
+        language: language_for(h2.as_ref(), language),
+        sound_rel,
+        multi_pr: rows_span_multiple_pitch_ranges(&rows),
+    };
     rows.first()
-        .and_then(|row| row_play_action(tag, row, h2_params, sound_rel, multi_pr))
+        .and_then(|row| row_play_action(tag, row, source))
 }
 
 /// Extract items for a whole (referenced) sound tag under `base` — Wwise events
@@ -1395,6 +1690,7 @@ fn referenced_sound_extract_items(
     tag: &TagFile,
     base: &std::path::Path,
     sound_rel: Option<&str>,
+    language: Option<&str>,
 ) -> Vec<ExtractItem> {
     let events = h4_event_names(tag);
     if !events.is_empty() {
@@ -1406,12 +1702,15 @@ fn referenced_sound_extract_items(
             })
             .collect();
     }
-    let rows = sound_permutation_rows(tag);
-    let is_h2 = rows
-        .iter()
-        .any(|row| matches!(row.kind, RowKind::InlineH2 { .. }));
-    let h2_params = is_h2.then(|| h2_codec_params(tag));
-    build_extract_items(tag, &rows, h2_params, base, false, sound_rel)
+    let h2 = H2Sound::read(tag);
+    let rows = sound_permutation_rows(tag, h2.as_ref());
+    let source = RowSource {
+        h2: h2.as_ref(),
+        language: language_for(h2.as_ref(), language),
+        sound_rel,
+        multi_pr: false,
+    };
+    build_extract_items(tag, &rows, source, base, false)
 }
 
 /// What a click on a referenced-sound row produced. A container source can only
@@ -1494,7 +1793,8 @@ fn draw_referenced_sound_cell(
                     } else if let Some((sound, _)) =
                         load_referenced_sound(game, tags_root, definitions_root, path, *group)
                     {
-                        click.play = referenced_sound_play_action(&sound, Some(path.as_str()));
+                        click.play =
+                            referenced_sound_play_action(&sound, Some(path.as_str()), language);
                     }
                 }
                 // Deliberately a second `if`: chaining these would skip drawing
@@ -1522,7 +1822,7 @@ fn draw_referenced_sound_cell(
                             tags_root.and_then(|root| reimport_base_dir_lang(root, &abs, language))
                     {
                         let items =
-                            referenced_sound_extract_items(&sound, &base, Some(path.as_str()));
+                            referenced_sound_extract_items(&sound, &base, Some(path.as_str()), language);
                         click.extract = Some(ExtractRequest {
                             items,
                             tags_root: tags_root.map(std::path::Path::to_path_buf),
@@ -1598,6 +1898,7 @@ pub(in crate::app) fn draw_dialogue_summary(
     let defs = edit.definitions_root;
     let language = edit.sound_language;
     let container_source = edit.ce_paks_root.is_some();
+    let languages = language_choices(edit, None);
     egui::CollapsingHeader::new(
         RichText::new(format!(
             "Dialogue Overview ({total} vocalizations, {total_sounds} sounds)"
@@ -1608,7 +1909,7 @@ pub(in crate::app) fn draw_dialogue_summary(
     .id_salt("dialogue_overview")
     .default_open(total <= 40)
     .show(ui, |ui| {
-        draw_sound_transport(ui, edit);
+        draw_sound_transport(ui, edit, &languages);
         if total == 0 {
             ui.label(RichText::new("(no vocalizations)").color(subtle_dark()));
             return;
@@ -1716,6 +2017,7 @@ pub(in crate::app) fn draw_sound_looping_player(
     let defs = edit.definitions_root;
     let language = edit.sound_language;
     let container_source = edit.ce_paks_root.is_some();
+    let languages = language_choices(edit, None);
     egui::CollapsingHeader::new(
         RichText::new(format!(
             "Sound Looping \u{2014} {} component sound(s)",
@@ -1725,7 +2027,7 @@ pub(in crate::app) fn draw_sound_looping_player(
     )
     .default_open(true)
     .show(ui, |ui| {
-        draw_sound_transport(ui, edit);
+        draw_sound_transport(ui, edit, &languages);
         egui::ScrollArea::vertical()
             .max_height(240.0)
             .show(ui, |ui| {
