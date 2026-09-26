@@ -645,7 +645,13 @@ mod tests {
             .expect("read CE sound tag");
 
         // The tag reports Xbox-ADPCM, mono, 22050 Hz — and carries no Ogg stream.
-        let (codec, channels, sample_rate) = ce_codec_params(&tag);
+        let root = tag.root();
+        let perm = find_block_field(&root, "pitch range")
+            .and_then(|ranges| ranges.element(0))
+            .and_then(|range| find_block_field(&range, "permutation"))
+            .and_then(|perms| perms.element(0))
+            .expect("first permutation");
+        let (codec, channels, sample_rate) = permutation_inline_params(&root, &perm);
         assert!(
             matches!(codec, InlineCodec::XboxAdpcm),
             "sniper fire.sound is xbox adpcm, got {codec:?}"
@@ -653,10 +659,10 @@ mod tests {
         assert_eq!((channels, sample_rate), (1, 22_050));
 
         // The player's row must inherit that codec (not assume Ogg).
-        let rows = sound_permutation_rows(&tag);
+        let rows = sound_permutation_rows(&tag, None);
         assert!(matches!(
             rows.first().map(|r| &r.kind),
-            Some(RowKind::InlineCe {
+            Some(RowKind::InlinePermutation {
                 codec: InlineCodec::XboxAdpcm,
                 ..
             })
@@ -695,14 +701,14 @@ mod tests {
         let group = u32::from_be_bytes(*b"snd!");
         let tag = crate::source::read_tag_at_path(tag_path, Some("haloce_mcc"), Some(defs), group)
             .expect("read CE sound tag");
-        let rows = sound_permutation_rows(&tag);
+        let rows = sound_permutation_rows(&tag, None);
         assert!(!rows.is_empty(), "CE tag should have permutations");
 
         // Decoded WAV.
         let wav_dir = std::env::temp_dir().join("baboon_ce_extract_wav");
         let _ = std::fs::remove_dir_all(&wav_dir);
 
-        let items = build_extract_items(&tag, &rows, None, &wav_dir, false, None);
+        let items = build_extract_items(&tag, &rows, RowSource { h2: None, language: None, sound_rel: None, multi_pr: false }, &wav_dir, false);
         let mut audio = super::audio::AudioState::default();
         audio.run_extract(
             ExtractRequest {
@@ -722,7 +728,7 @@ mod tests {
         // Raw .ogg passthrough should be byte-identical to the inline samples.
         let ogg_dir = std::env::temp_dir().join("baboon_ce_extract_ogg");
         let _ = std::fs::remove_dir_all(&ogg_dir);
-        let items = build_extract_items(&tag, &rows, None, &ogg_dir, true, None);
+        let items = build_extract_items(&tag, &rows, RowSource { h2: None, language: None, sound_rel: None, multi_pr: false }, &ogg_dir, true);
         audio.run_extract(
             ExtractRequest {
                 items,
@@ -744,30 +750,42 @@ mod tests {
         let _ = std::fs::remove_dir_all(&ogg_dir);
     }
 
-    /// Whole-tag H2 extraction end-to-end (skip-if-absent): build the same rows
-    /// the player builds and run the real `AudioState::run_extract`, validating a
-    /// decoded WAV lands for the inline (Opus/ADPCM/PCM) path. `SND_TAG` overrides.
-    #[test]
-    #[ignore]
-    fn h2_extract_writes_wav() {
+    /// Read a Halo 2 kit sound, or `None` (with a skip message naming the
+    /// variable) when `BLAM_TEST_H2EK` isn't set.
+    fn h2_kit_sound(rel: &str) -> Option<TagFile> {
         let defs = crate::test_kits::definitions();
-        let rel =
-            std::env::var("SND_TAG").unwrap_or_else(|_| "sound/ui/pickup_health.sound".to_owned());
-        let tag_path = std::path::Path::new(crate::test_kits::tag_path("halo2_mcc", "")).join(&rel);
+        let tag_path = crate::test_kits::h2ek_tags().join(rel);
         if !tag_path.exists() || !defs.exists() {
-            eprintln!("skip: no H2 tag/defs ({})", tag_path.display());
-            return;
+            eprintln!("skip: set BLAM_TEST_H2EK to a Halo 2 kit's tags ({})", tag_path.display());
+            return None;
         }
         let group = u32::from_be_bytes(*b"snd!");
-        let tag = crate::source::read_tag_at_path(&tag_path, Some("halo2_mcc"), Some(defs), group)
-            .expect("read H2 sound tag");
-        let rows = sound_permutation_rows(&tag);
-        assert!(!rows.is_empty(), "H2 tag should have permutations");
-        let h2_params = Some(h2_codec_params(&tag));
-        let dir = std::env::temp_dir().join("baboon_h2_extract");
-        let _ = std::fs::remove_dir_all(&dir);
-        let items = build_extract_items(&tag, &rows, h2_params, &dir, false, None);
-        let count = items.len();
+        Some(
+            crate::source::read_tag_at_path(&tag_path, Some("halo2_mcc"), Some(defs), group)
+                .expect("read H2 sound tag"),
+        )
+    }
+
+    /// Whole-tag H2 extraction end-to-end (skip-if-absent): build the same rows
+    /// the player builds and run the real `AudioState::run_extract` for one
+    /// language, validating a WAV per permutation at that language's length.
+    #[test]
+    fn h2_extract_writes_one_wav_per_permutation_in_the_chosen_language() {
+        let Some(tag) = h2_kit_sound("sound/dialog/combat/elite_dogmatic/01_alert/seefoe.sound")
+        else {
+            return;
+        };
+        let h2 = H2Sound::read(&tag).expect("H2 language entries");
+        let rows = sound_permutation_rows(&tag, Some(&h2));
+        let dir = crate::test_kits::unique_temp_dir("h2_extract_german");
+        let source = RowSource {
+            h2: Some(&h2),
+            language: Some("german"),
+            sound_rel: None,
+            multi_pr: false,
+        };
+        let items = build_extract_items(&tag, &rows, source, &dir, false);
+        assert_eq!(items.len(), rows.len(), "every permutation has German");
         let mut audio = super::audio::AudioState::default();
         audio.run_extract(
             ExtractRequest {
@@ -778,15 +796,19 @@ mod tests {
             &egui::Context::default(),
         );
         audio.wait_for_audio_jobs();
-        // At least one WAV should have been written with a valid RIFF header.
-        let mut found = 0usize;
-        for entry in walkdir(&dir) {
-            let bytes = std::fs::read(&entry).unwrap();
-            assert_eq!(&bytes[0..4], b"RIFF");
-            assert_eq!(&bytes[8..12], b"WAVE");
-            found += 1;
+        for row in &rows {
+            let RowKind::InlineH2 { lpi } = row.kind else {
+                panic!("{} should be an H2 language row", row.name);
+            };
+            let (entry, fallback) = h2.entry_for(lpi, Some("german")).unwrap();
+            assert!(!fallback);
+            let wav = std::fs::read(dir.join(format!("{}.wav", row.name))).expect("wav written");
+            assert_eq!(&wav[0..4], b"RIFF");
+            // 16-bit mono: the data chunk is 2 bytes a frame.
+            let frames = (wav.len() - 44) / 2;
+            let expected = (h2.duration_secs(entry).unwrap() * 48_000.0).round();
+            assert_eq!(frames as f64, expected, "{}: German length", row.name);
         }
-        assert!(found > 0 && found <= count, "wrote {found}/{count} wavs");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -807,11 +829,11 @@ mod tests {
             return;
         }
         let tag = blam_tags::TagFile::read(&tag_path).expect("read sound tag");
-        let rows = sound_permutation_rows(&tag);
+        let rows = sound_permutation_rows(&tag, None);
         assert!(!rows.is_empty());
         let dir = std::env::temp_dir().join("baboon_bank_extract");
         let _ = std::fs::remove_dir_all(&dir);
-        let items = build_extract_items(&tag, &rows, None, &dir, false, None);
+        let items = build_extract_items(&tag, &rows, RowSource { h2: None, language: None, sound_rel: None, multi_pr: false }, &dir, false);
         let mut audio = super::audio::AudioState::default();
         audio.run_extract(
             ExtractRequest {
@@ -832,238 +854,292 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// DIAGNOSTIC (skip-if-absent): dump the full structure of a real H2 sound
-    /// tag — every block/element and each data field's size — plus h2_blobs and
-    /// decoded durations, to find why long sounds show short. Point via SND_TAG.
+    /// Each permutation plays its own audio in the chosen language. Rows used to
+    /// take the Nth blob of a flat list of every language of every permutation,
+    /// so `seefoe`'s four rows played permutation `1` in English, Portuguese,
+    /// German and French.
     #[test]
-    #[ignore]
-    fn h2_dump_structure() {
-        let defs = crate::test_kits::definitions();
-
-        let rel = std::env::var("SND_TAG").unwrap_or_else(|_| "sound/loop.sound".to_owned());
-        let tag_path = std::path::Path::new(crate::test_kits::tag_path("halo2_mcc", "")).join(&rel);
-        if !tag_path.exists() || !defs.exists() {
-            eprintln!("skip: no tag/defs ({})", tag_path.display());
+    fn h2_rows_play_their_own_permutation_in_the_chosen_language() {
+        let Some(tag) = h2_kit_sound("sound/dialog/combat/elite_dogmatic/01_alert/seefoe.sound")
+        else {
             return;
-        }
-        let group = u32::from_be_bytes(*b"snd!");
-        let tag = crate::source::read_tag_at_path(&tag_path, Some("halo2_mcc"), Some(defs), group)
-            .expect("read tag");
-        let (codec, channels, rate) = h2_codec_params(&tag);
-        eprintln!("codec={codec:?} channels={channels} rate={rate}");
-        let root = tag.root();
-
-        // Permutation names + count.
-        if let Some(prs) = find_block_field(&root, "pitch range") {
-            for p in 0..prs.len() {
-                let pr = prs.element(p).unwrap();
-                if let Some(perms) = find_block_field(&pr, "permutation") {
-                    eprintln!("pitch range {p}: {} permutations", perms.len());
-                    for pm in 0..perms.len() {
-                        let perm = perms.element(pm).unwrap();
-                        let name = find_full_field_name(&perm, "name")
-                            .and_then(|f| perm.read_string_id(f))
-                            .unwrap_or_default();
-                        // dump any int/enum fields that look like chunk/sample counts
-                        let fields: Vec<String> = perm
-                            .field_names()
-                            .filter(|n| {
-                                let c = clean_field_name(n).to_ascii_lowercase();
-                                c.contains("sample")
-                                    || c.contains("count")
-                                    || c.contains("chunk")
-                                    || c.contains("first")
-                                    || c.contains("index")
-                            })
-                            .map(|n| {
-                                let v = perm
-                                    .read_int_any(n)
-                                    .map(|x| x.to_string())
-                                    .unwrap_or_default();
-                                format!("{}={v}", clean_field_name(n))
-                            })
-                            .collect();
-                        eprintln!("  perm {pm} '{name}': {}", fields.join(" "));
-                    }
-                }
-            }
-        }
-
-        // Walk extra-info → language perm info → raw info block, dumping data sizes
-        // AND any nested blocks (chunked samples live in a nested block).
-        for field in root.fields() {
-            let Some(block) = field.as_block() else {
-                continue;
+        };
+        let h2 = H2Sound::read(&tag).expect("H2 language entries");
+        assert_eq!(
+            h2.languages,
+            [
+                "english",
+                "japanese",
+                "german",
+                "french",
+                "spanish",
+                "italian",
+                "korean",
+                "chinese",
+                "portuguese"
+            ]
+        );
+        let rows = sound_permutation_rows(&tag, Some(&h2));
+        let names: Vec<&str> = rows.iter().map(|row| row.name.as_str()).collect();
+        assert_eq!(names, ["1", "2", "4", "5"]);
+        for (ordinal, row) in rows.iter().enumerate() {
+            let RowKind::InlineH2 { lpi } = row.kind else {
+                panic!("{} should be an H2 language row", row.name);
             };
-            for i in 0..block.len() {
-                let el = block.element(i).unwrap();
-                let Some(lpi) = find_block_field(&el, "language permutation info") else {
-                    continue;
-                };
-                eprintln!(
-                    "extra-info[{i}] '{}': lpi={}",
-                    clean_field_name(field.name()),
-                    lpi.len()
-                );
-                for j in 0..lpi.len() {
-                    let lel = lpi.element(j).unwrap();
-                    let Some(raw) = find_block_field(&lel, "raw info block") else {
-                        continue;
-                    };
-                    eprintln!("  lpi[{j}]: raw info block={}", raw.len());
-                    for k in 0..raw.len() {
-                        let rel = raw.element(k).unwrap();
-                        let mut parts = Vec::new();
-                        for f in rel.fields() {
-                            if let Some(d) = f.as_data() {
-                                parts.push(format!(
-                                    "data'{}'={}B",
-                                    clean_field_name(f.name()),
-                                    d.len()
-                                ));
-                            } else if let Some(b) = f.as_block() {
-                                parts.push(format!(
-                                    "block'{}'x{}",
-                                    clean_field_name(f.name()),
-                                    b.len()
-                                ));
-                                // dump nested block element int values (chunk offsets/sizes)
-                                for m in 0..b.len().min(20) {
-                                    if let Some(be) = b.element(m) {
-                                        let ints: Vec<String> = be
-                                            .field_names()
-                                            .filter_map(|n| {
-                                                be.read_int_any(n).map(|v| v.to_string())
-                                            })
-                                            .collect();
-                                        let datas: Vec<String> = be
-                                            .fields()
-                                            .filter_map(|bf| {
-                                                bf.as_data().map(|d| format!("data={}B", d.len()))
-                                            })
-                                            .collect();
-                                        if !ints.is_empty() || !datas.is_empty() {
-                                            parts.push(format!(
-                                                "[{m}:{} {}]",
-                                                ints.join(","),
-                                                datas.join(",")
-                                            ));
-                                        }
-                                    }
-                                }
-                            } else {
-                                let c = clean_field_name(f.name()).to_ascii_lowercase();
-                                if c.contains("sample")
-                                    || c.contains("count")
-                                    || c.contains("size")
-                                    || c.contains("compression")
-                                    || c.contains("index")
-                                {
-                                    if let Some(v) = rel.read_int_any(f.name()) {
-                                        parts.push(format!("{}={v}", clean_field_name(f.name())));
-                                    }
-                                }
-                            }
-                        }
-                        eprintln!("    raw[{k}]: {}", parts.join(" "));
-                    }
-                }
+            assert_eq!(lpi, ordinal, "{} keeps its own entry", row.name);
+            for language in [None, Some("german"), Some("portuguese")] {
+                let (entry, fallback) = h2.entry_for(lpi, language).unwrap();
+                assert!(!fallback);
+                assert_eq!(entry.language, language.unwrap_or("english"));
             }
         }
+        // English perm `1` is 0.65 s: 62,400 bytes of 16-bit mono at 48 kHz,
+        // the engine's own duration rule.
+        let (english, _) = h2.entry_for(0, None).unwrap();
+        assert_eq!(h2.duration_secs(english), Some(0.65));
+    }
 
-        let (count, _) = h2_blobs(&tag, Some(0));
-        eprintln!("h2_blobs count={count}");
-        for idx in 0..count {
-            let (_, blob) = h2_blobs(&tag, Some(idx));
-            let offs = h2_blob_chunk_offsets(&tag, idx);
-            if let Some(b) = blob {
-                let old = super::audio::decode_inline(codec, &b, channels, rate)
-                    .map(|p| p.duration_secs())
-                    .unwrap_or(0.0);
-                match super::audio::decode_inline_chunked(codec, &b, &offs, channels, rate) {
-                    Ok(pcm) => eprintln!(
-                        "blob{idx}: {}B, {} chunks -> {:.2}s (was {:.2}s single-chunk)",
-                        b.len(),
-                        offs.len().max(1),
-                        pcm.duration_secs(),
-                        old
-                    ),
-                    Err(e) => eprintln!("blob{idx}: {}B decode err: {e}", b.len()),
-                }
-            }
+    /// Render the sound player for `tag` with `language` chosen, returning
+    /// every piece of text it paints.
+    fn painted_sound_player(tag: &TagFile, language: Option<&str>) -> Vec<String> {
+        let ctx = egui::Context::default();
+        let mut painted = Vec::new();
+        for _ in 0..2 {
+            let output = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1200.0, 900.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let mut sinks = EditSinks::default();
+                        let mut edit = FieldEditContext::read_only(&mut sinks, "test", "test");
+                        edit.game = Some("halo2_mcc");
+                        edit.sound_language = language;
+                        draw_sound_player(ui, tag, &mut edit);
+                    });
+                },
+            );
+            painted = output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                    _ => None,
+                })
+                .collect();
         }
+        painted
+    }
 
-        // Verify: decode blob0's chunks independently by slicing at chunk offsets.
-        let (_, blob0) = h2_blobs(&tag, Some(0));
-        if let Some(b) = blob0 {
-            let offs = [0usize, 19234, 38487, b.len()];
-            let mut sum = 0.0f32;
-            for w in offs.windows(2) {
-                if w[1] <= b.len() && w[0] < w[1] {
-                    match super::audio::decode_inline(codec, &b[w[0]..w[1]], channels, rate) {
-                        Ok(p) => {
-                            sum += p.duration_secs();
-                            eprintln!(
-                                "  chunk [{}..{}] {}B -> {} frames = {:.2}s",
-                                w[0],
-                                w[1],
-                                w[1] - w[0],
-                                p.frame_count(),
-                                p.duration_secs()
-                            );
-                        }
-                        Err(e) => eprintln!("  chunk [{}..{}] err: {e}", w[0], w[1]),
+    /// The player shows what each permutation is — its name and length in the
+    /// chosen language — instead of the pitch range `|default|` on every row,
+    /// offers the tag's languages, and describes what that language plays.
+    #[test]
+    fn h2_sound_player_shows_lengths_languages_and_the_chosen_format() {
+        let Some(tag) = h2_kit_sound("sound/dialog/combat/elite_dogmatic/01_alert/seefoe.sound")
+        else {
+            return;
+        };
+        let has = |painted: &[String], text: &str| painted.iter().any(|shown| shown == text);
+
+        let english = painted_sound_player(&tag, None);
+        for text in ["class: unit_dialog", "1", "2", "4", "5", "0.65 s", "\u{1F310} English", "opus \u{00B7} mono \u{00B7} 48 kHz"] {
+            assert!(has(&english, text), "missing {text:?} in {english:?}");
+        }
+        assert!(has(&english, "\u{2B07} Extract all (English)"));
+        assert!(has(&english, "\u{2B07} All languages"));
+        assert!(
+            !english.iter().any(|shown| shown.contains("|default|")),
+            "a lone default pitch range isn't shown: {english:?}"
+        );
+
+        let portuguese = painted_sound_player(&tag, Some("portuguese"));
+        assert!(has(&portuguese, "xbox adpcm \u{00B7} mono \u{00B7} 22.05 kHz"), "{portuguese:?}");
+        assert!(has(&portuguese, "(rate inferred)"));
+        assert!(has(&portuguese, "\u{2B07} Extract all (Portuguese)"));
+
+        // Another game's language this tag never had: say so, play English.
+        let mexican = painted_sound_player(&tag, Some("mexican"));
+        assert!(has(&mexican, "Mexican isn't in this tag \u{2014} playing English."), "{mexican:?}");
+        assert!(has(&mexican, "\u{1F310} English"));
+    }
+
+    /// A permutation missing the chosen language says so and plays English,
+    /// but a bulk extract leaves it out rather than filing English audio
+    /// under `data_japanese`.
+    #[test]
+    fn h2_permutation_missing_the_language_falls_back_and_is_not_extracted() {
+        let Some(tag) = h2_kit_sound("sound/dialog/combat/elite_loose/16_taunt/tnt_elt.sound")
+        else {
+            return;
+        };
+        let h2 = H2Sound::read(&tag).expect("H2 language entries");
+        let rows = sound_permutation_rows(&tag, Some(&h2));
+        assert_eq!(rows.len(), 3);
+        let painted = painted_sound_player(&tag, Some("japanese"));
+        let notes = painted
+            .iter()
+            .filter(|shown| *shown == "no Japanese \u{00B7} plays English")
+            .count();
+        assert_eq!(notes, 1, "{painted:?}");
+
+        let source = RowSource {
+            h2: Some(&h2),
+            language: Some("japanese"),
+            sound_rel: None,
+            multi_pr: false,
+        };
+        let base = std::path::Path::new("data_japanese");
+        assert_eq!(build_extract_items(&tag, &rows, source, base, false).len(), 2);
+    }
+
+    /// Portuguese is legacy Xbox ADPCM under an Opus tag. It used to go to the
+    /// Opus decoder ("no opus packets decoded"); it decodes as ADPCM at the
+    /// rate its mouth data implies, not the tag's 48 kHz.
+    #[test]
+    fn h2_legacy_language_decodes_with_its_own_codec_and_inferred_rate() {
+        use super::audio::InlineCodec;
+        let Some(tag) = h2_kit_sound("sound/dialog/combat/elite_dogmatic/01_alert/seefoe.sound")
+        else {
+            return;
+        };
+        let h2 = H2Sound::read(&tag).expect("H2 language entries");
+        let (entry, _) = h2.entry_for(0, Some("portuguese")).unwrap();
+        assert!(matches!(entry.codec, InlineCodec::XboxAdpcm));
+        assert_eq!(h2.rate_of(entry), (22_050, H2RateSource::Inferred));
+        let (english, _) = h2.entry_for(0, None).unwrap();
+        assert_eq!(h2.rate_of(english), (48_000, H2RateSource::Tag));
+
+        let (bytes, offsets) = h2.samples(&tag, entry).unwrap();
+        let (codec, channels, rate) = h2.decode_params(entry);
+        let pcm = super::audio::decode_inline_chunked(codec, &bytes, &offsets, channels, rate)
+            .expect("portuguese decodes");
+        assert_eq!(pcm.sample_rate, 22_050);
+        let seconds = pcm.frame_count() as f64 / 22_050.0;
+        assert!((seconds - h2.duration_secs(entry).unwrap()).abs() < 1e-9);
+    }
+
+    /// A permutation's `language permutation info` index isn't its position:
+    /// in `marine_jump` the first permutation's audio is entry 6.
+    #[test]
+    fn h2_permutation_uses_its_stored_index_not_its_position() {
+        let Some(tag) = h2_kit_sound("sound/characters/marines/marine_jump.sound") else {
+            return;
+        };
+        let h2 = H2Sound::read(&tag).expect("H2 language entries");
+        let rows = sound_permutation_rows(&tag, Some(&h2));
+        assert!(matches!(rows[0].kind, RowKind::InlineH2 { lpi: 6 }));
+        assert!(matches!(rows[1].kind, RowKind::InlineH2 { lpi: 0 }));
+    }
+
+    /// Halo 2's older layout keeps samples on the permutation, like CE, but names
+    /// the codec `compression`. Read through CE's `format`, its Xbox ADPCM was
+    /// decoded as PCM noise.
+    #[test]
+    fn h2_older_layout_reads_compression_not_ce_format() {
+        use super::audio::InlineCodec;
+        let Some(tag) = h2_kit_sound("sound/characters/footsteps/grunt/dirt/jump_up.sound") else {
+            return;
+        };
+        assert!(H2Sound::read(&tag).is_none(), "no language entries in this layout");
+        let rows = sound_permutation_rows(&tag, None);
+        assert_eq!(rows.len(), 6);
+        for row in &rows {
+            assert!(
+                matches!(
+                    row.kind,
+                    RowKind::InlinePermutation {
+                        codec: InlineCodec::XboxAdpcm,
+                        channels: 1,
+                        sample_rate: 44_100,
                     }
-                }
-            }
-            eprintln!("  blob0 all chunks summed = {sum:.2}s");
+                ),
+                "{}",
+                row.name
+            );
         }
     }
 
-    /// Regression (skip-if-absent): H2 splits inline audio into per-chunk streams
-    /// (`sound_permutation_chunk_block`); the decoder must concatenate all chunks,
-    /// not stop at the first. For any multi-chunk blob, the chunked decode must be
-    /// longer than the single-stream decode. Default tag = the custom `loop.sound`.
+    /// Every Halo 2 sound's every language entry decodes, to exactly the length
+    /// the engine computes from the tag (`sound_definitions.cpp`: count × ½ ×
+    /// encoding factor ÷ rate). This is the gate on the whole model: the entry
+    /// choice, the per-entry codec, the inferred legacy rate, and the Opus
+    /// decoder's negated last packet all have to be right for the lengths to
+    /// agree. Long: run with `--ignored` in release.
     #[test]
     #[ignore]
-    fn h2_chunked_decode_is_full_length() {
-        let defs = crate::test_kits::definitions();
-        let rel = std::env::var("SND_TAG").unwrap_or_else(|_| "sound/loop.sound".to_owned());
-        let tag_path = std::path::Path::new(crate::test_kits::tag_path("halo2_mcc", "")).join(&rel);
-        if !tag_path.exists() || !defs.exists() {
-            eprintln!("skip: no tag/defs ({})", tag_path.display());
+    fn h2_every_language_entry_decodes_to_the_engine_length() {
+        let root = crate::test_kits::h2ek_tags();
+        if !root.exists() {
+            eprintln!("skip: set BLAM_TEST_H2EK");
             return;
         }
-        let group = u32::from_be_bytes(*b"snd!");
-        let tag = crate::source::read_tag_at_path(&tag_path, Some("halo2_mcc"), Some(defs), group)
-            .expect("read tag");
-        let (codec, channels, rate) = h2_codec_params(&tag);
-        let (count, _) = h2_blobs(&tag, Some(0));
-        let mut checked_multichunk = false;
-        for idx in 0..count {
-            let (_, blob) = h2_blobs(&tag, Some(idx));
-            let offs = h2_blob_chunk_offsets(&tag, idx);
-            let Some(bytes) = blob else { continue };
-            if offs.len() <= 1 {
-                continue; // single-chunk: chunked == single, nothing to prove
+        let mut files = Vec::new();
+        let mut stack = vec![root.clone()];
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|ext| ext == "sound") {
+                    files.push(path);
+                }
             }
-            checked_multichunk = true;
-            let single = super::audio::decode_inline(codec, &bytes, channels, rate)
-                .map(|p| p.frame_count())
-                .unwrap_or(0);
-            let full = super::audio::decode_inline_chunked(codec, &bytes, &offs, channels, rate)
-                .expect("chunked decode")
-                .frame_count();
-            assert!(
-                full > single,
-                "blob{idx}: chunked {full} !> single {single} ({} chunks)",
-                offs.len()
-            );
         }
-        assert!(
-            checked_multichunk,
-            "expected at least one multi-chunk blob to test"
+        let total = files.len();
+        let (mut tags_with_entries, mut entries, mut unknown_length) = (0usize, 0usize, 0usize);
+        let mut failures = Vec::new();
+        for path in &files {
+            let rel = path.strip_prefix(&root).unwrap().to_string_lossy().into_owned();
+            let tag = h2_kit_sound(&rel).unwrap();
+            let Some(h2) = H2Sound::read(&tag) else {
+                continue;
+            };
+            tags_with_entries += 1;
+            let rows = sound_permutation_rows(&tag, Some(&h2));
+            for row in &rows {
+                let RowKind::InlineH2 { lpi } = row.kind else {
+                    continue;
+                };
+                for entry in h2.entries(lpi) {
+                    entries += 1;
+                    let (bytes, offsets) = h2.samples(&tag, entry).unwrap();
+                    let (codec, channels, rate) = h2.decode_params(entry);
+                    let decoded = match super::audio::decode_inline_chunked(
+                        codec, &bytes, &offsets, channels, rate,
+                    ) {
+                        Ok(pcm) => pcm.frame_count() as f64,
+                        Err(error) => {
+                            failures.push(format!("{rel} {} {}: {error}", row.name, entry.language));
+                            continue;
+                        }
+                    };
+                    let Some(expected) = h2.duration_secs(entry).map(|s| s * f64::from(rate)) else {
+                        unknown_length += 1;
+                        continue;
+                    };
+                    if (decoded - expected).abs() > 0.5 {
+                        failures.push(format!(
+                            "{rel} {} {}: decoded {decoded} frames, engine says {expected}",
+                            row.name, entry.language
+                        ));
+                    }
+                }
+            }
+        }
+        eprintln!(
+            "{total} sound tags, {tags_with_entries} with language entries, {entries} entries \
+             decoded, {unknown_length} without a stored length, {} failures",
+            failures.len()
         );
+        for failure in failures.iter().take(40) {
+            eprintln!("  {failure}");
+        }
+        assert!(failures.is_empty());
     }
 
     /// Per-language bank plumbing (skip-if-absent): the FMOD languages are
@@ -1094,7 +1170,7 @@ mod tests {
             &tags_root.join("sound/visual_fx/ambient_vehicle_destroyed_large.sound"),
         )
         .expect("read sfx sound tag");
-        let rows = sound_permutation_rows(&tag);
+        let rows = sound_permutation_rows(&tag, None);
         let resolved = rows
             .iter()
             .filter(|r| banks.resolve(&r.name).is_some())
@@ -1117,52 +1193,6 @@ mod tests {
             }
         }
         out
-    }
-
-    /// Classic Halo 2 inline audio (skip-if-absent): read the tag, extract the
-    /// first inline audio blob + codec params exactly as the player does, and
-    /// decode via the matching codec (Opus or Xbox-ADPCM). Point at a tag with
-    /// `SND_TAG`; default an Opus one.
-    #[test]
-    #[ignore]
-    fn h2_inline_extracts_and_decodes() {
-        use super::audio::InlineCodec;
-        use blam_tags::audio::{decode_opus, decode_xbox_adpcm};
-        let defs = crate::test_kits::definitions();
-        let rel =
-            std::env::var("SND_TAG").unwrap_or_else(|_| "sound/ui/pickup_health.sound".to_owned());
-        let tag_path = std::path::Path::new(crate::test_kits::tag_path("halo2_mcc", "")).join(&rel);
-        if !tag_path.exists() || !defs.exists() {
-            eprintln!("skip: no H2 tag/defs ({})", tag_path.display());
-            return;
-        }
-        let group = u32::from_be_bytes(*b"snd!");
-        let tag = crate::source::read_tag_at_path(&tag_path, Some("halo2_mcc"), Some(defs), group)
-            .expect("read H2 sound tag");
-        let (count, blob) = h2_blobs(&tag, Some(0));
-        assert!(count > 0, "no H2 inline audio blobs found");
-        let bytes = blob.expect("blob 0");
-        let (codec, channels, sample_rate) = h2_codec_params(&tag);
-        let (codec_name, pcm) = match codec {
-            InlineCodec::Opus => ("opus", decode_opus(&bytes, channels)),
-            InlineCodec::XboxAdpcm => (
-                "xbox-adpcm",
-                decode_xbox_adpcm(&bytes, channels, sample_rate),
-            ),
-            InlineCodec::Pcm { big_endian } => (
-                "pcm",
-                blam_tags::audio::decode_pcm(&bytes, channels, sample_rate, big_endian),
-            ),
-            InlineCodec::OggVorbis => unreachable!("H2 is opus/adpcm/pcm"),
-        };
-        let pcm = pcm.expect("decode H2 inline");
-        eprintln!(
-            "H2 {rel}: {count} blob(s) codec={codec_name} ch={channels} {sample_rate}Hz \
-             -> {} frames ({:.2}s)",
-            pcm.frame_count(),
-            pcm.duration_secs()
-        );
-        assert!(pcm.frame_count() > 0);
     }
 
     #[test]
