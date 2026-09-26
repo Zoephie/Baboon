@@ -130,6 +130,30 @@ pub(in crate::app) fn draw_tag_reference_catalog_picker_contents(
     picked
 }
 
+/// [`reference_target_missing`], answered from egui memory for a couple of
+/// seconds at a time.
+///
+/// Reference rows are redrawn every frame, and each one checked its target
+/// with a filesystem stat every time: dozens of stats a frame on a tag full
+/// of references, and a stall per frame on a slow or network drive. A file
+/// created or deleted outside shows up within the recheck interval.
+pub(in crate::app) fn reference_target_missing_cached(
+    ui: &Ui,
+    names: Option<&TagNameIndex>,
+    tags_root: Option<&Path>,
+    group_tag: u32,
+    rel_path: &str,
+) -> bool {
+    let Some(root) = tags_root else {
+        return false;
+    };
+    crate::app::ui::recheck_cached(
+        ui.ctx(),
+        ("reference_target_missing", root, group_tag, rel_path),
+        || reference_target_missing(names, tags_root, group_tag, rel_path),
+    )
+}
+
 pub(in crate::app) fn reference_target_missing(
     names: Option<&TagNameIndex>,
     tags_root: Option<&Path>,
@@ -240,7 +264,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
             let icon_group = tag_reference_value_icon_group(meta, target.as_ref(), &draft.text);
             // A non-empty reference whose target file is absent on disk.
             let missing = target.as_ref().is_some_and(|(group, rel)| {
-                reference_target_missing(edit.names, edit.tags_root, *group, rel)
+                reference_target_missing_cached(ui, edit.names, edit.tags_root, *group, rel)
             });
             let is_bitmap_reference = icon_group == Some(u32::from_be_bytes(*b"bitm"));
             let value_response = if editable {
@@ -415,7 +439,7 @@ pub(in crate::app) fn draw_foundation_tag_reference_row(
                 REFERENCE_MISSING_COLOR
             };
             ui.painter()
-                .rect_stroke(row_response.rect, 3.0, Stroke::new(1.5, color));
+                .rect_stroke(row_response.rect, 3.0, Stroke::new(1.5_f32, color));
         }
         if let Some(payload) = row_response.dnd_release_payload::<DraggedTagRef>() {
             if accepts(&payload) {
@@ -718,7 +742,7 @@ pub(in crate::app) fn draw_foundation_flags_row(
         Vec2::new(panel_width, panel_height),
     );
     painter.rect_filled(flags_rect, 0.0, foundation_input());
-    painter.rect_stroke(flags_rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
+    painter.rect_stroke(flags_rect, 0.0, Stroke::new(1.0_f32, foundation_input_edge()));
 
     if display_flags.is_empty() {
         paint_findable_text(
@@ -761,10 +785,10 @@ pub(in crate::app) fn draw_foundation_flags_row(
             painter.rect_stroke(
                 checkbox_rect,
                 0.0,
-                Stroke::new(1.0, foundation_input_edge()),
+                Stroke::new(1.0_f32, foundation_input_edge()),
             );
             if *is_set {
-                let stroke = Stroke::new(1.6, text_dark());
+                let stroke = Stroke::new(1.6_f32, text_dark());
                 painter.line_segment(
                     [
                         checkbox_rect.left_center() + Vec2::new(3.0, 0.0),

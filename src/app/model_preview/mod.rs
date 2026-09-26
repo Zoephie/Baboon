@@ -30,6 +30,8 @@ pub(in crate::app) use materials::*;
 // Re-exported for the Model Library (`model_browser`), whose worker rasterizes
 // the same geometry with the same flat palette into grid thumbnails.
 pub(in crate::app) use loading::build_render_preview;
+// Started by the source loader when a Campaign Evolved install mounts.
+pub(in crate::app) use loading::prewarm_ce_mesh_sync_index;
 pub(in crate::app) use renderer::material_color;
 use renderer::*;
 use variants::*;
@@ -248,11 +250,13 @@ fn model_preview_data(
     preview: RenderModelPreview,
     variants: Vec<ModelVariantPreview>,
 ) -> ModelPreviewData {
+    let geometry_id = NEXT_MODEL_GEOMETRY_ID.fetch_add(1, Ordering::Relaxed);
     ModelPreviewData {
         source_key,
         render_model_path,
         preview: Arc::new(preview),
-        geometry_id: NEXT_MODEL_GEOMETRY_ID.fetch_add(1, Ordering::Relaxed),
+        geometry_id,
+        textures_id: geometry_id,
         textures: None,
         variants,
         scenario_bsps: Vec::new(),
@@ -592,16 +596,15 @@ pub(super) fn draw_model_preview_panel(
                             state.animation.stopped = false;
                         }
                         if controls_enabled && state.animation.playing {
+                            let pass = ui.ctx().cumulative_pass_nr();
                             let dt = ui.input(|input| input.stable_dt).min(0.1);
-                            state.animation.time += dt * state.animation.speed.max(0.0);
-                            if state.animation.looped {
-                                if duration > 0.0 {
-                                    state.animation.time %= duration;
-                                }
-                            } else if state.animation.time * ANIMATION_FRAME_RATE >= last_frame {
-                                state.animation.time = last_frame / ANIMATION_FRAME_RATE;
-                                state.animation.playing = false;
-                            }
+                            advance_playback_clock(
+                                &mut state.animation,
+                                pass,
+                                dt,
+                                duration,
+                                last_frame,
+                            );
                             ui.ctx().request_repaint();
                         }
                     });
@@ -689,8 +692,7 @@ pub(super) fn draw_model_preview_panel(
                                         )
                                         .clicked()
                                         {
-                                            state.loaded_key = None;
-                                            state.data = None;
+                                            state.invalidate_load();
                                             reload_requested = true;
                                         }
                                     },
@@ -737,8 +739,7 @@ pub(super) fn draw_model_preview_panel(
                         if icon_text_button(ui, ButtonIcon::Refresh, "Refresh Model", true)
                             .clicked()
                         {
-                            state.loaded_key = None;
-                            state.data = None;
+                            state.invalidate_load();
                             reload_requested = true;
                         }
                     });
@@ -750,8 +751,7 @@ pub(super) fn draw_model_preview_panel(
         }
         draw_animation_player(ui, state);
         if mutation_requested {
-            state.loaded_key = None;
-            state.data = None;
+            state.invalidate_load();
         } else if !reload_requested {
             state.data = restore_data.take();
         }
@@ -1042,7 +1042,7 @@ pub(in crate::app) fn draw_model_preview_section_with_header_wrap(
         ui.painter().rect_stroke(
             container_rect,
             RADIUS,
-            Stroke::new(1.0, foundation_group_edge()),
+            Stroke::new(1.0_f32, foundation_group_edge()),
         );
         container_rect
     })
@@ -1310,7 +1310,7 @@ fn draw_marker_filter_field(ui: &mut Ui, filter: &mut String) -> egui::Response 
     } else if response.hovered() {
         ui.visuals().widgets.hovered.bg_stroke
     } else {
-        Stroke::new(1.0, foundation_input_edge())
+        Stroke::new(1.0_f32, foundation_input_edge())
     };
     ui.painter().rect_stroke(rect, rounding, stroke);
     response
@@ -1388,7 +1388,7 @@ fn draw_model_viewport_with_stats(
     if waiting_for_textures {
         let (rect, _) = ui.allocate_exact_size(desired_size, Sense::hover());
         ui.painter()
-            .rect_stroke(rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
+            .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, foundation_input_edge()));
         crate::app::ui::paint_loading_rings(ui, rect);
     } else {
         draw_model_viewport(ui, data, state, desired_size);
@@ -1411,6 +1411,75 @@ fn draw_model_viewport_with_stats(
         FontId::proportional(10.0),
         foundation_block_text(),
     );
+    // Why a material drew untextured, which the resolve records and nothing
+    // showed: the model just looked flat.
+    if state.render_mode.uses_textures()
+        && let Some(textures) = data.textures.as_deref()
+        && let Some((summary, detail)) = texture_resolve_note(textures, &data.preview.materials)
+    {
+        ui.label(RichText::new(summary).small().color(subtle_dark()))
+            .on_hover_text(detail);
+    }
+}
+
+/// A line saying which materials resolved badly, and the reasons, for hover.
+/// `None` when every material resolved from its definition.
+fn texture_resolve_note(
+    textures: &[MaterialTextures],
+    materials: &[RenderModelPreviewMaterial],
+) -> Option<(String, String)> {
+    let name = |index: usize| {
+        materials
+            .get(index)
+            .map(|material| material.shader_path.as_str())
+            .filter(|path| !path.is_empty())
+            .unwrap_or("(no shader)")
+            .to_owned()
+    };
+    let failed: Vec<String> = textures
+        .iter()
+        .enumerate()
+        .filter_map(|(index, texture)| {
+            texture
+                .error
+                .as_ref()
+                .map(|error| format!("{}: {error}", name(index)))
+        })
+        .collect();
+    let partial: Vec<String> = textures
+        .iter()
+        .enumerate()
+        .filter(|(_, texture)| texture.error.is_none() && texture.used_shader_parameters_only)
+        .map(|(index, _)| name(index))
+        .collect();
+    if failed.is_empty() && partial.is_empty() {
+        return None;
+    }
+    let mut summary = Vec::new();
+    let mut detail = Vec::new();
+    if !failed.is_empty() {
+        summary.push(format!(
+            "{} of {} materials untextured",
+            failed.len(),
+            textures.len()
+        ));
+        detail.extend(failed);
+    }
+    if !partial.is_empty() {
+        summary.push(format!(
+            "{} read without their render method definition",
+            partial.len()
+        ));
+        detail.push(format!(
+            "Read from the shader's own parameters, without option defaults such as \
+             detail-map tiling:\n{}",
+            partial.join("\n")
+        ));
+    }
+    Some((
+        format!("{} — hover for why", summary.join("; ")),
+        detail.join("\n"),
+    ))
 }
 
 /// Build the renderer's camera-independent data for a standalone mesh, such as
@@ -2013,5 +2082,89 @@ mod tests {
             preview_panel_title(u32::from_be_bytes(*b"coll")),
             "Collision Model"
         );
+    }
+}
+
+/// Move a playing animation's clock on by `dt`, once per egui pass however
+/// many panes draw it (they share the state), wrapping or stopping at the end.
+fn advance_playback_clock(
+    playback: &mut PreviewAnimationPlayback,
+    pass: u64,
+    dt: f32,
+    duration: f32,
+    last_frame: f32,
+) {
+    if playback.advanced_in_pass == Some(pass) {
+        return;
+    }
+    playback.advanced_in_pass = Some(pass);
+    playback.time += dt * playback.speed.max(0.0);
+    if playback.looped {
+        if duration > 0.0 {
+            playback.time %= duration;
+        }
+    } else if playback.time * ANIMATION_FRAME_RATE >= last_frame {
+        playback.time = last_frame / ANIMATION_FRAME_RATE;
+        playback.playing = false;
+    }
+}
+
+#[cfg(test)]
+mod playback_clock_tests {
+    use super::*;
+
+    /// Two panes on the same tag draw the same playback state in one pass; the
+    /// clock moves once. Each pane used to move it, so playback ran at 2x.
+    #[test]
+    fn two_panes_advance_the_clock_once_per_pass() {
+        let mut playback = PreviewAnimationPlayback {
+            playing: true,
+            ..Default::default()
+        };
+        advance_playback_clock(&mut playback, 7, 0.1, 10.0, 300.0);
+        advance_playback_clock(&mut playback, 7, 0.1, 10.0, 300.0);
+        assert!((playback.time - 0.1).abs() < 1e-6, "{}", playback.time);
+        advance_playback_clock(&mut playback, 8, 0.1, 10.0, 300.0);
+        assert!((playback.time - 0.2).abs() < 1e-6, "{}", playback.time);
+    }
+}
+
+#[cfg(test)]
+mod texture_note_tests {
+    use super::*;
+
+    /// A material that drew untextured says why, instead of just looking flat.
+    #[test]
+    fn untextured_materials_say_why() {
+        let material = |path: &str| RenderModelPreviewMaterial {
+            shader_path: path.to_owned(),
+            ..Default::default()
+        };
+        let materials = [
+            material("shaders/a"),
+            material("shaders/b"),
+            material("shaders/c"),
+        ];
+        let textures = [
+            MaterialTextures {
+                error: Some("shader tag not found".to_owned()),
+                ..Default::default()
+            },
+            MaterialTextures {
+                used_shader_parameters_only: true,
+                ..Default::default()
+            },
+            MaterialTextures::default(),
+        ];
+        let (summary, detail) = texture_resolve_note(&textures, &materials).unwrap();
+        assert_eq!(
+            summary,
+            "1 of 3 materials untextured; 1 read without their render method definition \
+             — hover for why"
+        );
+        assert!(detail.contains("shaders/a: shader tag not found"));
+        assert!(detail.contains("shaders/b"));
+        assert!(!detail.contains("shaders/c"));
+        assert_eq!(texture_resolve_note(&textures[2..], &materials[2..]), None);
     }
 }

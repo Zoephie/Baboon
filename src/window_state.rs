@@ -376,6 +376,12 @@ pub(crate) struct WindowStateTracker {
 }
 
 impl WindowStateTracker {
+    /// A tracker that persists nowhere, for tests that need an app.
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        Self::new(None, Vec::new(), None)
+    }
+
     fn new(
         path: Option<PathBuf>,
         monitors: Vec<MonitorGeometry>,
@@ -715,8 +721,6 @@ fn x11_work_area() -> Option<PixelRect> {
     {
         return None;
     }
-
-    use xcb::x;
 
     let (connection, screen_number) = xcb::Connection::connect(None).ok()?;
     let root = connection

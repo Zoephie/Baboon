@@ -25,8 +25,10 @@ atomic-write-file = "0.3"
 # Pinned to camden-smallwood/blam-tags. It carries everything the Zoephie fork
 # did (the stale-outer-chunk-size tolerance and the JMS/ASS model importers,
 # merged in e69b229; the fork's previous pin 5d0509f is an ancestor of this
-# rev) plus the unified Halo 2 / H3+ function editor backend.
-blam-tags = { git = "https://github.com/camden-smallwood/blam-tags", rev = "47bc0ec", features = ["audio", "iostore"] }
+# rev) plus the unified Halo 2 / H3+ function editor backend, the
+# 2026-09-25 performance and duplication review, and the bitmap conversion
+# fixes that followed it.
+blam-tags = { git = "https://github.com/camden-smallwood/blam-tags", rev = "44027bc", features = ["audio", "iostore"] }
 directories = "6"
 display-info = "0.5"
 eframe = { version = "0.29", default-features = false, features = ["default_fonts", "glow"] }

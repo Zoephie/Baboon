@@ -64,6 +64,7 @@ fn git_review_header_actions(
     });
 }
 
+#[derive(Clone)]
 struct GitHubDesktopLauncher {
     program: PathBuf,
     arguments: Vec<&'static str>,
@@ -373,34 +374,9 @@ fn truncate_end_to_width(
     color: Color32,
     max_width: f32,
 ) -> String {
-    if ui
-        .painter()
-        .layout_no_wrap(text.to_owned(), font.clone(), color)
-        .size()
-        .x
-        <= max_width
-    {
-        return text.to_owned();
-    }
-    let chars: Vec<char> = text.chars().collect();
-    let mut low = 0;
-    let mut high = chars.len();
-    while low < high {
-        let mid = (low + high + 1) / 2;
-        let candidate = format!("{}…", chars[..mid].iter().collect::<String>());
-        if ui
-            .painter()
-            .layout_no_wrap(candidate, font.clone(), color)
-            .size()
-            .x
-            <= max_width
-        {
-            low = mid;
-        } else {
-            high = mid - 1;
-        }
-    }
-    format!("{}…", chars[..low].iter().collect::<String>())
+    super::tag_compare::truncate_end(text, max_width, |candidate| {
+        text_width(ui, candidate, font, color)
+    })
 }
 
 fn truncate_start_to_width(
@@ -410,34 +386,16 @@ fn truncate_start_to_width(
     color: Color32,
     max_width: f32,
 ) -> String {
-    if ui
-        .painter()
+    super::tag_compare::truncate_start(text, max_width, |candidate| {
+        text_width(ui, candidate, font, color)
+    })
+}
+
+fn text_width(ui: &Ui, text: &str, font: &FontId, color: Color32) -> f32 {
+    ui.painter()
         .layout_no_wrap(text.to_owned(), font.clone(), color)
         .size()
         .x
-        <= max_width
-    {
-        return text.to_owned();
-    }
-    let chars: Vec<char> = text.chars().collect();
-    let mut low = 0;
-    let mut high = chars.len();
-    while low < high {
-        let mid = (low + high + 1) / 2;
-        let candidate = format!("…{}", chars[chars.len() - mid..].iter().collect::<String>());
-        if ui
-            .painter()
-            .layout_no_wrap(candidate, font.clone(), color)
-            .size()
-            .x
-            <= max_width
-        {
-            low = mid;
-        } else {
-            high = mid - 1;
-        }
-    }
-    format!("…{}", chars[chars.len() - low..].iter().collect::<String>())
 }
 
 fn commit_matches_filter(commit: &GitReviewCommit, filter: &str) -> bool {
@@ -637,17 +595,24 @@ fn tag_change_row(ui: &mut Ui, file: &GitReviewFile, selected: bool) -> egui::Re
 
 impl Baboon {
     pub(super) fn draw_git_review(&mut self, ui: &mut Ui, kit_index: usize) {
+        // Borrowed for the draw, which reads the review and writes only locals:
+        // the commit list, the change list and a diff of up to 5,000 rows used
+        // to be copied out every frame.
         let state = &self.kits[kit_index].git_review;
         let branch = state.branch.clone();
         let repo = state.repo_root.clone();
-        let github_desktop = github_desktop_launcher();
-        let commits = state.commits.clone();
-        let files = state.files.clone();
+        // Looking for GitHub Desktop stats the disk (on macOS, every folder on
+        // PATH), so it is asked once a second rather than every frame.
+        let github_desktop =
+            recheck_cached(ui.ctx(), "github_desktop_launcher", github_desktop_launcher);
+        let commits = &state.commits;
+        let files = &state.files;
         let selection = state.selection.clone();
-        let revision_title = selected_revision_title(&selection, &commits);
+        let revision_title = selected_revision_title(&selection, commits);
         let selected_path = state.selected_path.clone();
-        let results = state.results.clone();
+        let results = &state.results;
         let error = state.error.clone();
+        let loading = state.loading;
         let local_count = state.local_files.len();
         let mut commit_filter = state.commit_filter.clone();
         let mut filter_text = state.filter.clone();
@@ -732,6 +697,21 @@ impl Baboon {
                     Stroke::new(1.0_f32, grid_line()),
                 );
 
+                if loading {
+                    Frame::none()
+                        .inner_margin(egui::Margin {
+                            left: 10.0,
+                            right: 10.0,
+                            top: 0.0,
+                            bottom: 8.0,
+                        })
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.spinner();
+                                ui.label(RichText::new("Reading Git…").color(subtle_dark()));
+                            });
+                        });
+                }
                 if let Some(error) = error.as_ref() {
                     Frame::none()
                         .inner_margin(egui::Margin {
@@ -932,23 +912,17 @@ impl Baboon {
                 }
             }
             Some(GitReviewAction::Refresh) => {
-                if let Some(root) =
-                    self.kits[kit_index]
-                        .source
-                        .as_ref()
-                        .and_then(|source| match &source.source {
-                            TagSource::LooseFolder { root, .. } => Some(root.clone()),
-                            _ => None,
-                        })
-                {
-                    self.refresh_git_review(kit_index, &root);
-                }
+                self.run_git_review_job(kit_index, GitReviewJob::Refresh, ui.ctx());
             }
             Some(GitReviewAction::SelectRevision(selection)) => {
-                self.select_git_review_revision(kit_index, selection);
+                self.run_git_review_job(
+                    kit_index,
+                    GitReviewJob::SelectRevision(selection),
+                    ui.ctx(),
+                );
             }
             Some(GitReviewAction::SelectFile(path)) => {
-                self.select_git_review_file(kit_index, path);
+                self.run_git_review_job(kit_index, GitReviewJob::SelectFile(path), ui.ctx());
             }
             Some(GitReviewAction::OpenFile(path)) => {
                 self.open_git_review_file(kit_index, &path);

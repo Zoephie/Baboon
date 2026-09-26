@@ -80,19 +80,24 @@ impl Baboon {
             .as_ref()
             .is_some_and(|source| matches!(&source.source, TagSource::IoStoreContainerSet { .. }));
         if campaign_evolved {
+            if let Some(TagSource::IoStoreContainerSet { containers, .. }) = self.kits[installed]
+                .source
+                .as_ref()
+                .map(|source| &source.source)
+            {
+                crate::app::model_preview::prewarm_ce_mesh_sync_index(containers.clone());
+            }
             // Tags is the primary Campaign Evolved workspace. Chimp still
             // mounts eagerly when enabled so it is ready if the user selects
             // it, but loading a project must not switch surfaces implicitly.
             self.kits[installed].surface = campaign_evolved_surface_on_load();
-            if self.enable_chimp {
+            if self.prefs.enable_chimp {
                 self.begin_chimp_mount(installed, ctx.clone());
             }
         }
-        self.refreshing_entry_index = false;
-        self.building_reverse_dependencies = false;
-        self.building_reference_for_entry_index = false;
-        self.reference_index_progress = None;
-        self.next_entry_index_refresh_at = 0.0;
+        // A fresh source for this kit: none of its old index work applies.
+        // Other kits' jobs are theirs, and are left running.
+        self.kits[installed].index_jobs = IndexJobs::default();
         let loose_folder_source = self.source().is_some_and(|source| {
             source.game.is_some() && matches!(source.source, TagSource::LooseFolder { .. })
         });
@@ -106,7 +111,7 @@ impl Baboon {
                 self.begin_scan_all_entries(ctx.clone());
             }
         } else {
-            self.schedule_next_entry_index_refresh(ctx);
+            self.schedule_next_entry_index_refresh(installed, ctx);
         }
         self.finish_pending_session_restore(ctx.clone());
         // This load made its own kit active. If a session restore is still in
@@ -142,24 +147,18 @@ impl Baboon {
             return true;
         };
         self.kits[kit_index].scanning_entries = false;
-        self.entry_index_progress = None;
+        self.kits[kit_index].index_jobs.entry_progress = None;
         match result {
             Ok(scanned) => {
                 let mut build_reference_index = false;
+                let n = scanned.len();
+                // Moves the generation too: a folder pane only rebuilds its
+                // tree (positions in the lazy list, just cleared) on a new one.
+                // Done before the jobs below take their stamps.
+                let browser_refresh_error = self.install_complete_entry_set(kit_index, scanned);
                 let kit = &mut self.kits[kit_index];
                 if let Some(source) = kit.source.as_mut() {
-                    let n = scanned.len();
-                    source.group_tree = crate::source::build_group_tree(&scanned);
-                    source.all_entries = scanned;
-                    let browser_refresh_error = if let TagSource::LooseFolder { root, .. } =
-                        &source.source
-                    {
-                        reset_lazy_folder_browser(root, &mut source.tree, &mut source.entries).err()
-                    } else {
-                        None
-                    };
                     source.reverse_dependencies = None;
-                    kit.field_index.invalidate();
                     self.status = browser_refresh_error.map_or_else(
                         || format!("Tag index complete: {n} tags; building reference index..."),
                         |error| format!("Tag index complete, but browser refresh failed: {error}"),
@@ -189,7 +188,7 @@ impl Baboon {
                         });
                     }
                 }
-                self.schedule_next_entry_index_refresh(ctx);
+                self.schedule_next_entry_index_refresh(kit_index, ctx);
                 if build_reference_index {
                     self.begin_build_reverse_dependencies_for_entry_index(ctx.clone());
                 } else {
@@ -219,7 +218,7 @@ impl Baboon {
         if !self.kits[kit_index].scanning_entries {
             return true;
         }
-        if let Some(progress) = self.entry_index_progress.as_mut() {
+        if let Some(progress) = self.kits[kit_index].index_jobs.entry_progress.as_mut() {
             progress.processed = processed;
             progress.total = total;
             progress.matched = matched;
@@ -235,11 +234,14 @@ impl Baboon {
         result: Result<EntryIndexRefresh, String>,
         ctx: &egui::Context,
     ) -> bool {
-        self.refreshing_entry_index = false;
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
+        let Some(kit_index) = self.resolve_kit(stamp.kit) else {
             return true;
         };
-        self.schedule_next_entry_index_refresh(ctx);
+        self.kits[kit_index].index_jobs.refreshing = false;
+        if self.resolve_stamp(stamp).is_none() {
+            return true;
+        }
+        self.schedule_next_entry_index_refresh(kit_index, ctx);
         match result {
             Ok(refresh) if refresh.changed => {
                 self.apply_entry_index_refresh(kit_index, refresh, ctx.clone())
@@ -302,5 +304,149 @@ pub(super) fn loaded_source_status(source: &LoadedSourceData) -> String {
             source.entries.len(),
             source.label
         ),
+    }
+}
+
+#[cfg(test)]
+mod scan_generation_tests {
+    use super::*;
+
+    /// A finished scan replaces the lists folder panes index into, so it has
+    /// to move the generation the panes rebuild on.
+    #[test]
+    fn a_finished_scan_moves_the_kit_generation() {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-scan-generation-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::LooseFolder {
+                root: root.clone(),
+                game: None,
+                definitions_root: PathBuf::new(),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+        });
+        let before = app.kits[0].generation;
+        let stamp = app.kit_stamp();
+        // Not empty: an empty scan leaves the reference build thinking the
+        // scan is unfinished, and it starts another scan, which bumps the
+        // generation on its own and would hide a missing bump here.
+        let scanned = vec![TagEntry {
+            key: "file:objects/a.model".to_owned(),
+            display_path: "objects/a.model".to_owned(),
+            group_tag: u32::from_be_bytes(*b"hlmt"),
+            group_name: None,
+            location: TagEntryLocation::LooseFile(root.join("objects/a.model")),
+        }];
+
+        app.handle_all_entries_scanned(stamp, Ok(scanned), &egui::Context::default());
+        assert!(!app.kits[0].scanning_entries, "no second scan was started");
+
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_ne!(app.kits[0].generation, before);
+    }
+
+    /// Loading a source into one kit leaves another kit's index work alone.
+    /// The flags were app-wide, so any kit finishing a load cleared another
+    /// kit's running reference build (and its progress bar), which let a
+    /// second build start over it.
+    #[test]
+    fn loading_one_kit_leaves_another_kits_index_build_running() {
+        let mut app = Baboon::for_test();
+        app.kits[0].index_jobs.building_references = true;
+        let second = KitId(app.kits[0].id.0 + 1);
+        app.kits.push(Kit::empty(second, TagNameIndex::default()));
+
+        app.handle_source_loaded(
+            second,
+            Ok(LoadedSourceData {
+                label: "second".to_owned(),
+                source: TagSource::SingleFile {
+                    path: PathBuf::from("second.model"),
+                },
+                names: TagNameIndex::default(),
+                game: None,
+                entries: Vec::new(),
+                tree: TagTree::default(),
+                group_tree: TagTree::default(),
+                all_entries: Vec::new(),
+                reverse_dependencies: None,
+                initial_tag: None,
+                key_hints: Default::default(),
+                complete_scan: false,
+            }),
+            None,
+            &egui::Context::default(),
+        );
+
+        assert!(app.kits[0].index_jobs.building_references);
+    }
+
+    /// An empty tags folder scans to nothing, and that is a finished scan.
+    /// The reference build used to read the empty list as "not scanned yet"
+    /// and start another scan, which landed empty and started another.
+    #[test]
+    fn an_empty_folder_is_scanned_once() {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-empty-scan-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::LooseFolder {
+                root: root.clone(),
+                game: None,
+                definitions_root: PathBuf::new(),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+        });
+        let stamp = app.kit_stamp();
+
+        app.handle_all_entries_scanned(stamp, Ok(Vec::new()), &egui::Context::default());
+
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(!app.kits[0].scanning_entries, "no second scan was started");
+        let index = app.kits[0]
+            .source
+            .as_ref()
+            .unwrap()
+            .reverse_dependencies
+            .as_ref();
+        assert!(
+            index.is_some(),
+            "an empty folder has an empty reference graph"
+        );
     }
 }

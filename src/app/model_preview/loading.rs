@@ -85,6 +85,18 @@ impl Baboon {
                     .write_to_bytes()
                     .map_err(|error| format!("Could not snapshot edited model: {error}"))
             });
+        // Edited bytes re-parse the way the kit reads them from disk: a
+        // classic (H2/CE) tag has no self-describing layout for
+        // `TagFile::read_from_bytes` to find.
+        let (game, definitions_root) = match &source {
+            TagSource::LooseFolder {
+                game,
+                definitions_root,
+                ..
+            } => (game.clone(), Some(definitions_root.clone())),
+            _ => (None, None),
+        };
+        let group_tag = entry.group_tag;
         let names = kit.names.clone();
         let stamp = KitStamp {
             kit: kit.id,
@@ -116,9 +128,13 @@ impl Baboon {
         thread::spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let model_tag = match edited_model_bytes {
-                    Some(Ok(bytes)) => {
-                        TagFile::read_from_bytes(&bytes).map_err(|error| error.to_string())?
-                    }
+                    Some(Ok(bytes)) => crate::source::read_tag_from_bytes(
+                        &bytes,
+                        game.as_deref(),
+                        definitions_root.as_deref(),
+                        group_tag,
+                    )
+                    .map_err(|error| error.to_string())?,
                     Some(Err(error)) => return Err(error),
                     None => read_entry(&source, &entry).map_err(|error| error.to_string())?,
                 };
@@ -143,16 +159,24 @@ impl Baboon {
         request_id: u64,
         result: Result<ModelPreviewData, String>,
     ) -> bool {
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
+        let Some(kit_index) = self.resolve_kit(stamp.kit) else {
             return true;
         };
+        let stale = self.resolve_stamp(stamp).is_none();
         let Some(state) = self.kits[kit_index].model_previews.get_mut(&key) else {
             return true;
         };
         if state.preview_load_id != Some(request_id) {
             return true;
         }
+        // The request is answered before the staleness check. A result dropped
+        // for a generation bump used to leave the id set, and with no data and
+        // a request "in flight" nothing asked again: the pane sat on its
+        // loading shells, repainting every frame, until the tag was closed.
         state.preview_load_id = None;
+        if stale {
+            return true;
+        }
         if let Ok(data) = &result {
             state.render_model_path = Some(data.render_model_path.clone());
             // Auto-select the canonical variant (named `default`, else the
@@ -498,15 +522,24 @@ pub(super) fn load_campaign_evolved_preview(
     ))
 }
 
-fn build_campaign_evolved_preview(
+/// A Campaign Evolved model's skeleton and Unreal render geometry, resolved
+/// the one way both its preview and its JMS export need.
+struct CeModelMeshes {
+    skel: TagFile,
+    variants: Vec<ModelVariantPreview>,
+    meshes: CeMeshes,
+    /// Where the geometry came from, for the preview's label.
+    render_path: String,
+}
+
+fn resolve_ce_model_meshes(
     model_tag: &TagFile,
     entry: &TagEntry,
     source: &TagSource,
     containers: &[MountedContainer],
     skel_ref: &str,
     high_detail: bool,
-) -> Result<ModelPreviewData, String> {
-    let _ = model_tag;
+) -> Result<CeModelMeshes, String> {
     // 1. Resolve the skeleton_model (node skeleton + markers + regions) through
     //    the container tag index — the same read the browser tree performs.
     let skel = source
@@ -516,7 +549,7 @@ fn build_campaign_evolved_preview(
     // 2. This model's package key, as DA_MeshSynchronization imports it
     //    (e.g. `objects/characters/elite_ai/elite_ai-model`).
     let TagEntryLocation::Container { rel_path, .. } = &entry.location else {
-        return Err("CE model preview requires a container entry.".to_owned());
+        return Err("A Campaign Evolved model needs a container entry.".to_owned());
     };
     let stem = rel_path.to_ascii_lowercase().replace('\\', "/");
     let stem = stem.strip_suffix(".ubulk").unwrap_or(&stem);
@@ -550,15 +583,15 @@ fn build_campaign_evolved_preview(
         }
         None => (CeMeshes::default(), String::new()),
     };
-    let (meshes, render_path) = if meshes.is_empty() {
+    let (mut meshes, render_path) = if meshes.is_empty() {
         let char_root = ce_find_character_root(containers, &model_key).ok_or_else(|| {
             // First-person hand/body models (GameGlobals FirstPersonHands /
             // FirstPersonBody) are a separate representation: no world
             // DA_MeshSynchronization imports them, and their geometry is
             // sourced through the FirstPerson weapon/equipment actors — which
-            // this world-model preview doesn't reconstruct.
+            // this world-model reconstruction doesn't rebuild.
             if is_first_person_model(&model_key) {
-                "First-person hand/body models aren't previewable here — their geometry is \
+                "First-person hand/body models can't be rebuilt here — their geometry is \
                  provided by the first-person weapon actors, not the world mesh-sync path."
                     .to_owned()
             } else {
@@ -579,7 +612,6 @@ fn build_campaign_evolved_preview(
     };
     // Human characters' heads come from a separate MetaHuman `Face` component
     // (DT_MetaHumanHeads), not the mesh-sync path — resolve and fuse it in.
-    let mut meshes = meshes;
     let head_node = ce_head_node_name(&skel);
     ce_add_metahuman_head(
         containers,
@@ -592,7 +624,23 @@ fn build_campaign_evolved_preview(
     if meshes.is_empty() {
         return Err("No UE meshes resolved for this model.".to_owned());
     }
-    let parts: Vec<UeMeshPart> = meshes
+    Ok(CeModelMeshes {
+        skel,
+        variants,
+        meshes,
+        render_path,
+    })
+}
+
+/// The resolved meshes as the part lists the cross-game builders take.
+fn ce_mesh_parts(
+    meshes: &CeMeshes,
+) -> (
+    Vec<UeMeshPart<'_>>,
+    Vec<UeStaticPart<'_>>,
+    Vec<UeWorldPart<'_>>,
+) {
+    let parts = meshes
         .skeletal
         .iter()
         .map(|(region, perm, name, mesh, mats)| UeMeshPart {
@@ -603,7 +651,7 @@ fn build_campaign_evolved_preview(
             material_names: mats.clone(),
         })
         .collect();
-    let static_parts: Vec<UeStaticPart> = meshes
+    let static_parts = meshes
         .statics
         .iter()
         .map(
@@ -619,7 +667,7 @@ fn build_campaign_evolved_preview(
             },
         )
         .collect();
-    let world_parts: Vec<UeWorldPart> = meshes
+    let world_parts = meshes
         .world
         .iter()
         .map(
@@ -634,6 +682,24 @@ fn build_campaign_evolved_preview(
             },
         )
         .collect();
+    (parts, static_parts, world_parts)
+}
+
+fn build_campaign_evolved_preview(
+    model_tag: &TagFile,
+    entry: &TagEntry,
+    source: &TagSource,
+    containers: &[MountedContainer],
+    skel_ref: &str,
+    high_detail: bool,
+) -> Result<ModelPreviewData, String> {
+    let CeModelMeshes {
+        skel,
+        variants,
+        meshes,
+        render_path,
+    } = resolve_ce_model_meshes(model_tag, entry, source, containers, skel_ref, high_detail)?;
+    let (parts, static_parts, world_parts) = ce_mesh_parts(&meshes);
 
     // 5. Reconstruct the cross-game RenderModel and run the standard pipeline.
     let (render_model, render_meshes) =
@@ -696,8 +762,8 @@ fn build_campaign_evolved_preview(
 
 /// Build a full-resolution JMS for a Campaign Evolved `hlmt` model by fusing
 /// its Unreal render geometry (skeletal + **Nanite** static pieces) onto the
-/// classic `skeleton_model` rig. Mirrors [`build_campaign_evolved_preview`]'s
-/// mesh resolution but loads the high-detail Nanite geometry and emits JMS —
+/// classic `skeleton_model` rig. Resolves the meshes as the preview does
+/// ([`resolve_ce_model_meshes`]) but at full Nanite detail, and emits JMS —
 /// the render-geometry half of model extraction (CE keeps render geometry in
 /// Unreal, so there's no `render_model` tag to walk).
 pub(in crate::app) fn campaign_evolved_render_jms(
@@ -709,99 +775,9 @@ pub(in crate::app) fn campaign_evolved_render_jms(
     let TagSource::IoStoreContainerSet { containers, .. } = source else {
         return Err("CE render extraction requires an IoStore container source.".to_owned());
     };
-    let skel = source
-        .read_container_tag_by_ref(u32::from_be_bytes(*b"skel"), skel_ref)
-        .map_err(|e| e.to_string())?;
-
-    let TagEntryLocation::Container { rel_path, .. } = &entry.location else {
-        return Err("CE render extraction requires a container entry.".to_owned());
-    };
-    let stem = rel_path.to_ascii_lowercase().replace('\\', "/");
-    let stem = stem.strip_suffix(".ubulk").unwrap_or(&stem);
-    let model_key = stem.rsplit("tags/").next().unwrap_or(stem).to_string();
-
-    let variants = read_model_variants(model_tag);
-    let mut needed: std::collections::BTreeSet<(String, String)> =
-        std::collections::BTreeSet::new();
-    for v in &variants {
-        for (region, perm) in &v.regions {
-            if !perm.is_empty() {
-                needed.insert((region.to_ascii_lowercase(), perm.to_ascii_lowercase()));
-            }
-        }
-    }
-
-    let meshes = match ce_load_meshsync_regions(containers, &model_key) {
-        Some(regions) => ce_collect_parts_from_regions(containers, &regions, &needed, true),
-        None => CeMeshes::default(),
-    };
-    let meshes = if meshes.is_empty() {
-        let char_root = ce_find_character_root(containers, &model_key)
-            .ok_or_else(|| "No MeshSynchronization data asset references this model.".to_owned())?;
-        CeMeshes {
-            skeletal: ce_load_variant_meshes(containers, &char_root, &needed),
-            ..Default::default()
-        }
-    } else {
-        meshes
-    };
-    let mut meshes = meshes;
-    let head_node = ce_head_node_name(&skel);
-    ce_add_metahuman_head(
-        containers,
-        &model_key,
-        &needed,
-        &head_node,
-        true,
-        &mut meshes,
-    );
-    if meshes.is_empty() {
-        return Err("No UE meshes resolved for this model.".to_owned());
-    }
-
-    let parts: Vec<UeMeshPart> = meshes
-        .skeletal
-        .iter()
-        .map(|(region, perm, name, mesh, mats)| UeMeshPart {
-            mesh: &**mesh,
-            region: region.clone(),
-            permutation: perm.clone(),
-            name: name.clone(),
-            material_names: mats.clone(),
-        })
-        .collect();
-    let static_parts: Vec<UeStaticPart> = meshes
-        .statics
-        .iter()
-        .map(
-            |(region, perm, name, mesh, bone, mats, xf, wa)| UeStaticPart {
-                mesh: &**mesh,
-                bone_name: bone.clone(),
-                region: region.clone(),
-                permutation: perm.clone(),
-                name: name.clone(),
-                material_names: mats.clone(),
-                rel_transform: *xf,
-                world_anchor: *wa,
-            },
-        )
-        .collect();
-    let world_parts: Vec<UeWorldPart> = meshes
-        .world
-        .iter()
-        .map(
-            |(region, perm, name, mesh, node, mats, anchor)| UeWorldPart {
-                mesh: &**mesh,
-                node_name: node.clone(),
-                head_anchor: *anchor,
-                region: region.clone(),
-                permutation: perm.clone(),
-                name: name.clone(),
-                material_names: mats.clone(),
-            },
-        )
-        .collect();
-
+    let CeModelMeshes { skel, meshes, .. } =
+        resolve_ce_model_meshes(model_tag, entry, source, containers, skel_ref, true)?;
+    let (parts, static_parts, world_parts) = ce_mesh_parts(&meshes);
     let mut jms =
         blam_tags::jms::JmsFile::from_ue_meshes(&parts, &static_parts, &world_parts, &skel)
             .map_err(|e| e.to_string())?;
@@ -876,39 +852,32 @@ fn is_first_person_model(model_key: &str) -> bool {
 }
 
 fn ce_find_character_root(containers: &[MountedContainer], model_key: &str) -> Option<String> {
-    for c in containers {
-        for e in c.archive.entries() {
-            let norm = e.path.to_ascii_lowercase().replace('\\', "/");
-            if !(norm.ends_with(".uasset") && norm.contains("meshsync")) {
-                continue;
-            }
-            let Ok(bytes) = c.archive.read(&e.path) else {
-                continue;
-            };
-            let Ok(hdr) = FZenPackageHeader::deserialize(
-                &mut Cursor::new(&bytes[..]),
-                None,
-                CE_CV,
-                CE_HV,
-                None,
-            ) else {
-                continue;
-            };
-            let hit = hdr.imported_package_names.iter().any(|p| {
-                p.to_ascii_lowercase()
-                    .replace('\\', "/")
-                    .ends_with(model_key)
-            });
-            if !hit {
-                continue;
-            }
-            // Char folder = the dir holding this DA's `Common/` subfolder
-            // (or the DA's own dir when it isn't under a `Common/`).
-            return norm
-                .rsplit_once("/common/")
-                .map(|(root, _)| root.to_string())
-                .or_else(|| norm.rsplit_once('/').map(|(root, _)| root.to_string()));
+    let index = ce_path_index(containers);
+    for (norm, container, entry) in &index.mesh_sync {
+        let c = &containers[*container];
+        let e = &c.archive.entries()[*entry];
+        let Ok(bytes) = c.archive.read(&e.path) else {
+            continue;
+        };
+        let Ok(hdr) =
+            FZenPackageHeader::deserialize(&mut Cursor::new(&bytes[..]), None, CE_CV, CE_HV, None)
+        else {
+            continue;
+        };
+        let hit = hdr.imported_package_names.iter().any(|p| {
+            p.to_ascii_lowercase()
+                .replace('\\', "/")
+                .ends_with(model_key)
+        });
+        if !hit {
+            continue;
         }
+        // Char folder = the dir holding this DA's `Common/` subfolder
+        // (or the DA's own dir when it isn't under a `Common/`).
+        return norm
+            .rsplit_once("/common/")
+            .map(|(root, _)| root.to_string())
+            .or_else(|| norm.rsplit_once('/').map(|(root, _)| root.to_string()));
     }
     None
 }
@@ -964,6 +933,75 @@ struct CeMeshSyncIndex {
 /// keep it for the life of the mount rather than rebuilding per preview.
 static CE_INDEX_CACHE: LazyLock<Mutex<HashMap<String, Arc<CeMeshSyncIndex>>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// Every `.uasset` in a mounted container set, found by name without a scan.
+struct CePathIndex {
+    /// Lowercased file name (`sk_foo.uasset`) → `(container, entry)`, in the
+    /// order a scan of containers then entries meets them, so the first match
+    /// is the one a linear scan would have found.
+    by_file_name: HashMap<String, Vec<(usize, usize)>>,
+    /// The mesh-sync assets (lowercased, `/`-separated paths), in scan order.
+    mesh_sync: Vec<(String, usize, usize)>,
+}
+
+/// Cache of [`CePathIndex`], keyed like [`CE_INDEX_CACHE`].
+static CE_PATH_INDEX_CACHE: LazyLock<Mutex<HashMap<String, Arc<CePathIndex>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
+
+/// A container set's identity: its `.utoc` paths.
+fn ce_container_set_key(containers: &[MountedContainer]) -> String {
+    containers
+        .iter()
+        .map(|c| c.utoc_path.display().to_string())
+        .collect::<Vec<_>>()
+        .join("|")
+}
+
+fn build_ce_path_index(containers: &[MountedContainer]) -> CePathIndex {
+    index_ce_paths(containers.iter().enumerate().flat_map(|(container, c)| {
+        c.archive
+            .entries()
+            .iter()
+            .enumerate()
+            .map(move |(entry, e)| (container, entry, e.path.as_str()))
+    }))
+}
+
+/// Index `(container, entry, path)` in the order given.
+fn index_ce_paths<'p>(paths: impl Iterator<Item = (usize, usize, &'p str)>) -> CePathIndex {
+    let mut by_file_name: HashMap<String, Vec<(usize, usize)>> = HashMap::new();
+    let mut mesh_sync = Vec::new();
+    for (container, entry, path) in paths {
+        let norm = path.to_ascii_lowercase().replace('\\', "/");
+        if !norm.ends_with(".uasset") {
+            continue;
+        }
+        let file_name = norm.rsplit('/').next().unwrap_or(&norm).to_owned();
+        by_file_name
+            .entry(file_name)
+            .or_default()
+            .push((container, entry));
+        if norm.contains("meshsync") {
+            mesh_sync.push((norm, container, entry));
+        }
+    }
+    CePathIndex {
+        by_file_name,
+        mesh_sync,
+    }
+}
+
+/// The cached path index for this container set (built on first use).
+fn ce_path_index(containers: &[MountedContainer]) -> Arc<CePathIndex> {
+    let key = ce_container_set_key(containers);
+    let mut cache = CE_PATH_INDEX_CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    cache
+        .entry(key)
+        .or_insert_with(|| Arc::new(build_ce_path_index(containers)))
+        .clone()
+}
 
 /// Parse a package's Zen header cheaply — decode only the header prefix (name
 /// map + import/export tables live at the front, before the bulky export data),
@@ -1078,18 +1116,35 @@ fn build_ce_mesh_sync_index(containers: &[MountedContainer]) -> CeMeshSyncIndex 
 
 /// The cached mesh-sync index for this container set (built on first use).
 fn ce_mesh_sync_index(containers: &[MountedContainer]) -> Arc<CeMeshSyncIndex> {
-    let key = containers
-        .iter()
-        .map(|c| c.utoc_path.display().to_string())
-        .collect::<Vec<_>>()
-        .join("|");
-    let mut cache = CE_INDEX_CACHE.lock().unwrap();
+    let key = ce_container_set_key(containers);
+    // Held for the whole build, so a preview that asks while the prewarm is
+    // running waits for it instead of scanning every header a second time. A
+    // build that panicked poisons the lock; the map it guards is still sound.
+    let mut cache = CE_INDEX_CACHE
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if let Some(idx) = cache.get(&key) {
         return idx.clone();
     }
     let idx = Arc::new(build_ce_mesh_sync_index(containers));
     cache.insert(key, idx.clone());
     idx
+}
+
+/// Build a Campaign Evolved container set's mesh-sync index in the background
+/// as soon as it is mounted.
+///
+/// The first model preview used to build it on the UI thread, which scans
+/// every package header in the install: about five seconds with the app
+/// frozen. Built here, the first preview finds it ready (or waits on this
+/// build rather than starting its own).
+pub(in crate::app) fn prewarm_ce_mesh_sync_index(containers: Vec<MountedContainer>) {
+    std::thread::spawn(move || {
+        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            ce_path_index(&containers);
+            ce_mesh_sync_index(&containers);
+        }));
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -1163,26 +1218,14 @@ fn ce_metahuman_tables(containers: &[MountedContainer]) -> Arc<CeMetaHumanTables
 /// Find a `.uasset` by its exact basename (no extension), returning `(container
 /// index, bytes)`. Used for the singleton MetaHuman data tables / row structs.
 fn ce_find_uasset_by_basename(containers: &[MountedContainer], basename: &str) -> Option<Vec<u8>> {
-    let want = basename.to_ascii_lowercase();
-    for c in containers {
-        for e in c.archive.entries() {
-            let p = e.path.to_ascii_lowercase();
-            if !p.ends_with(".uasset") {
-                continue;
-            }
-            let base = p
-                .rsplit('/')
-                .next()
-                .unwrap_or(&p)
-                .trim_end_matches(".uasset");
-            if base == want {
-                if let Ok(bytes) = c.archive.read(&e.path) {
-                    return Some(bytes);
-                }
-            }
-        }
-    }
-    None
+    let index = ce_path_index(containers);
+    let candidates = index
+        .by_file_name
+        .get(&format!("{}.uasset", basename.to_ascii_lowercase()))?;
+    candidates.iter().find_map(|&(container, entry)| {
+        let c = &containers[container];
+        c.archive.read(&c.archive.entries()[entry].path).ok()
+    })
 }
 
 /// Export[0]'s serial byte slice within a package.
@@ -1887,30 +1930,57 @@ fn ce_collect_parts_from_regions(
     out
 }
 
-/// Read a `.uasset` by its UE package path (`/Game/Characters/.../SK_Foo`),
-/// matching the container entry whose path ends with the corresponding
-/// `Content/...SK_Foo.uasset` tail.
+/// The `.uasset` entries of a UE package path (`/Game/Characters/.../SK_Foo`):
+/// those whose path ends with the corresponding `/...SK_Foo.uasset` tail, in
+/// the order a scan of every container meets them.
+///
+/// Answered from the file-name index: a path with that tail has the tail's
+/// last segment as its file name, so only those few entries are compared.
+/// This used to lowercase and rewrite every path in the install, several
+/// times per mesh.
+fn ce_package_entries<'c>(
+    containers: &'c [MountedContainer],
+    package: &str,
+) -> impl Iterator<Item = (&'c MountedContainer, &'c blam_tags::iostore::Entry)> {
+    let (file_name, suffix) = ce_package_file_name_and_suffix(package);
+    let candidates = ce_path_index(containers)
+        .by_file_name
+        .get(&file_name)
+        .cloned()
+        .unwrap_or_default();
+    candidates
+        .into_iter()
+        .filter_map(move |(container, entry)| {
+            let c = &containers[container];
+            let e = &c.archive.entries()[entry];
+            e.path
+                .to_ascii_lowercase()
+                .replace('\\', "/")
+                .ends_with(&suffix)
+                .then_some((c, e))
+        })
+}
+
+/// A package path's `.uasset` file name, and the path tail a matching entry
+/// ends with: `/Game/A/SK_Foo` → (`sk_foo.uasset`, `/a/sk_foo.uasset`).
+fn ce_package_file_name_and_suffix(package: &str) -> (String, String) {
+    let tail = package.to_ascii_lowercase().replace('\\', "/");
+    let tail = tail.strip_prefix("/game/").unwrap_or(&tail);
+    let file_name = format!("{}.uasset", tail.rsplit('/').next().unwrap_or(tail));
+    (file_name, format!("/{tail}.uasset"))
+}
+
+/// Read a `.uasset` by its UE package path; see [`ce_package_entries`].
 fn ce_read_uasset_by_package(
     containers: &[MountedContainer],
     package: &str,
 ) -> Option<(String, Vec<u8>)> {
-    let tail = package.to_ascii_lowercase().replace('\\', "/");
-    let tail = tail.strip_prefix("/game/").unwrap_or(&tail);
-    let suffix = format!("/{tail}.uasset");
-    for c in containers {
-        for e in c.archive.entries() {
-            if e.path
-                .to_ascii_lowercase()
-                .replace('\\', "/")
-                .ends_with(&suffix)
-            {
-                if let Ok(bytes) = c.archive.read(&e.path) {
-                    return Some((e.path.clone(), bytes));
-                }
-            }
-        }
-    }
-    None
+    ce_package_entries(containers, package).find_map(|(c, e)| {
+        c.archive
+            .read(&e.path)
+            .ok()
+            .map(|bytes| (e.path.clone(), bytes))
+    })
 }
 
 /// Read the sibling `.ubulk` (Nanite streaming pages) for a package, matched
@@ -1918,21 +1988,8 @@ fn ce_read_uasset_by_package(
 /// directory index — it shares the package's chunk id with the BulkData type,
 /// fetched via [`IoStoreArchive::read_bulk_for`].
 fn ce_read_bulk_by_package(containers: &[MountedContainer], package: &str) -> Option<Vec<u8>> {
-    let tail = package.to_ascii_lowercase().replace('\\', "/");
-    let tail = tail.strip_prefix("/game/").unwrap_or(&tail);
-    let suffix = format!("/{tail}.uasset");
-    for c in containers {
-        for e in c.archive.entries() {
-            if e.path
-                .to_ascii_lowercase()
-                .replace('\\', "/")
-                .ends_with(&suffix)
-            {
-                return c.archive.read_bulk_for(e.chunk_index, 0).ok();
-            }
-        }
-    }
-    None
+    let (c, e) = ce_package_entries(containers, package).next()?;
+    c.archive.read_bulk_for(e.chunk_index, 0).ok()
 }
 
 /// Variant-driven mesh loading: for each `(region, permutation)` the hlmt's
@@ -2116,6 +2173,108 @@ mod ce_repro_tests {
         assert_eq!(target.vertices[2].uvs[0].y, 1.5);
     }
 
+    /// The index narrows a package lookup to entries with its file name, then
+    /// keeps the linear scan's rule and order. Checked against that scan over
+    /// paths built to trip it: case, backslashes, a plugin's copy of the same
+    /// file, a longer name sharing the tail, and a `.ubulk` beside the asset.
+    #[test]
+    fn a_package_lookup_through_the_index_finds_what_a_scan_found() {
+        let paths = [
+            (0, 0, "Meteorite/Content/A/SK_Foo.ubulk"),
+            (0, 1, "Meteorite/Plugins/P/Content/A/SK_Foo.uasset"),
+            (0, 2, "Meteorite/Content/A/SK_Foo.uasset"),
+            (1, 0, "Meteorite\\Content\\B\\sk_foo.uasset"),
+            (1, 1, "Meteorite/Content/B/XSK_Foo.uasset"),
+            (1, 2, "Meteorite/Content/MeshSync/DA_Foo.uasset"),
+        ];
+        let index = index_ce_paths(paths.iter().copied());
+        let normalized = |path: &str| path.to_ascii_lowercase().replace('\\', "/");
+        for package in [
+            "/Game/A/SK_Foo",
+            "/Game/B/SK_FOO",
+            "/Game/SK_Foo",
+            "/Game/Nope",
+            "/Game/B/Foo",
+        ] {
+            let (file_name, suffix) = ce_package_file_name_and_suffix(package);
+            let indexed = index
+                .by_file_name
+                .get(&file_name)
+                .into_iter()
+                .flatten()
+                .find(|&&(c, e)| {
+                    let path = paths.iter().find(|p| (p.0, p.1) == (c, e)).unwrap().2;
+                    normalized(path).ends_with(&suffix)
+                })
+                .copied();
+            let scanned = paths
+                .iter()
+                .find(|p| normalized(p.2).ends_with(&suffix))
+                .map(|p| (p.0, p.1));
+            assert_eq!(indexed, scanned, "{package}");
+        }
+        assert_eq!(index.mesh_sync.len(), 1);
+    }
+
+    /// The indexed package lookups find exactly the entry the linear scans
+    /// they replaced did, sampled across a real install.
+    #[test]
+    fn indexed_package_lookups_match_a_linear_scan() {
+        let paks = crate::test_kits::ce_paks();
+        if !paks.is_dir() {
+            eprintln!(
+                "skipping: Campaign Evolved not present at {}",
+                paks.display()
+            );
+            return;
+        }
+        let loaded = crate::source::load_iostore_container_set(
+            paks,
+            &TagNameIndex::default(),
+            crate::test_kits::definitions(),
+        )
+        .expect("mount Campaign Evolved");
+        let TagSource::IoStoreContainerSet { containers, .. } = &loaded.source else {
+            panic!("not a container set");
+        };
+        // What `ce_read_uasset_by_package` did before the index.
+        let scan = |package: &str| {
+            let tail = package.to_ascii_lowercase().replace('\\', "/");
+            let tail = tail.strip_prefix("/game/").unwrap_or(&tail).to_owned();
+            let suffix = format!("/{tail}.uasset");
+            containers.iter().find_map(|c| {
+                c.archive
+                    .entries()
+                    .iter()
+                    .find(|e| {
+                        e.path
+                            .to_ascii_lowercase()
+                            .replace('\\', "/")
+                            .ends_with(&suffix)
+                    })
+                    .map(|e| e.path.clone())
+            })
+        };
+        let assets: Vec<String> = containers
+            .iter()
+            .flat_map(|c| c.archive.entries().iter().map(|e| e.path.clone()))
+            .filter(|path| path.to_ascii_lowercase().ends_with(".uasset"))
+            .collect();
+        let mut compared = 0;
+        for path in assets.iter().step_by(500) {
+            let Some((_, rest)) = path.split_once("/Content/") else {
+                continue;
+            };
+            let package = format!("/Game/{}", rest.trim_end_matches(".uasset"));
+            let found = ce_package_entries(containers, &package)
+                .next()
+                .map(|(_, e)| e.path.clone());
+            assert_eq!(found, scan(&package), "{package}");
+            compared += 1;
+        }
+        assert!(compared > 50, "compared only {compared} packages");
+    }
+
     /// Runs the exact app CE-preview path against the optional `CE_PAKS`
     /// installation. `CE_MODEL` selects the tag path fragment and `CE_HD`
     /// enables Nanite detail. Skips when `CE_PAKS` is not configured.
@@ -2225,3 +2384,7 @@ mod ce_repro_tests {
 #[cfg(test)]
 #[path = "../tests/particle_model_preview.rs"]
 mod particle_model_preview;
+
+#[cfg(test)]
+#[path = "../tests/model_preview_worker.rs"]
+mod model_preview_worker;

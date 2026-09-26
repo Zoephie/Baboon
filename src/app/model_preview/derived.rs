@@ -1592,13 +1592,20 @@ impl Baboon {
         collision: Option<RenderModelPreview>,
         physics: Option<RenderModelPreview>,
     ) -> bool {
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
+        let Some(kit_index) = self.resolve_kit(stamp.kit) else {
             return true;
         };
+        let stale = self.resolve_stamp(stamp).is_none();
         let Some(state) = self.kits[kit_index].model_previews.get_mut(&key) else {
             return true;
         };
+        // The in-flight marker is cleared before the staleness check: a result
+        // dropped for a generation bump used to leave it set, and the preview
+        // then waited for it for good (the overlays never arrived).
         state.overlays_pending = false;
+        if stale {
+            return true;
+        }
         {
             let Some(Ok(data)) = state.data.as_mut() else {
                 return true;
@@ -1644,10 +1651,8 @@ impl Baboon {
                         .unwrap_or_else(|| "default".to_owned()),
                 });
         }
-        // A texture resolve in flight was keyed to the old geometry id and
-        // will be dropped on arrival; clearing the flag re-arms that request
-        // against the new id.
-        state.textures_pending = false;
+        // Textures are keyed by `textures_id`, which the merge leaves alone:
+        // a resolve in flight still lands, and resolved ones stay uploaded.
         false
     }
 }
@@ -1669,3 +1674,54 @@ mod tests;
 #[cfg(test)]
 #[path = "../tests/bsp_texture_probe.rs"]
 mod bsp_texture_probe;
+
+#[cfg(test)]
+mod overlay_texture_tests {
+    use super::*;
+
+    /// Collision and physics overlays land while the model's textures are
+    /// still resolving. The merge appends flat-coloured materials after the
+    /// model's own, so the resolve in flight is still the right answer and
+    /// has to be kept, not dropped and run again.
+    #[test]
+    fn an_overlay_merge_keeps_the_texture_resolve_in_flight() {
+        let mut app = Baboon::for_test();
+        let stamp = app.kit_stamp();
+        let key = "file:a.model".to_owned();
+        let preview = RenderModelPreview {
+            materials: vec![Default::default()],
+            ..Default::default()
+        };
+        let data = super::super::model_preview_data(key.clone(), key.clone(), preview, Vec::new());
+        let (geometry_id, textures_id) = (data.geometry_id, data.textures_id);
+        let state = app.kits[0].model_previews.entry(key.clone()).or_default();
+        state.data = Some(Ok(data));
+        state.textures_pending = true;
+
+        let overlay = RenderModelPreview {
+            materials: vec![Default::default()],
+            ..Default::default()
+        };
+        app.handle_model_overlays_built(stamp, key.clone(), geometry_id, Some(overlay), None);
+        let state = &app.kits[0].model_previews[&key];
+        assert!(
+            state.textures_pending,
+            "the resolve in flight is still awaited"
+        );
+        let Some(Ok(data)) = state.data.as_ref() else {
+            panic!("preview data");
+        };
+        assert_ne!(data.geometry_id, geometry_id, "the geometry did change");
+
+        app.handle_model_textures_resolved(
+            stamp,
+            key.clone(),
+            textures_id,
+            vec![Default::default()],
+        );
+        let Some(Ok(data)) = app.kits[0].model_previews[&key].data.as_ref() else {
+            panic!("preview data");
+        };
+        assert!(data.textures.is_some(), "and its result is kept");
+    }
+}

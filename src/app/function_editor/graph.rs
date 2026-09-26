@@ -217,17 +217,17 @@ pub(super) fn draw_foundation_graph(
     } else {
         draw_function_color_gradient_vertical(painter, plot, &function_color_stops(function));
     }
-    painter.rect_stroke(plot, 0.0, Stroke::new(1.0, grid_line()));
+    painter.rect_stroke(plot, 0.0, Stroke::new(1.0_f32, grid_line()));
     for i in 1..10 {
         let x = egui::lerp(plot.left()..=plot.right(), i as f32 / 10.0);
         let y = egui::lerp(plot.bottom()..=plot.top(), i as f32 / 10.0);
         painter.line_segment(
             [egui::pos2(x, plot.top()), egui::pos2(x, plot.bottom())],
-            Stroke::new(1.0, function_grid_line()),
+            Stroke::new(1.0_f32, function_grid_line()),
         );
         painter.line_segment(
             [egui::pos2(plot.left(), y), egui::pos2(plot.right(), y)],
-            Stroke::new(1.0, function_grid_line()),
+            Stroke::new(1.0_f32, function_grid_line()),
         );
     }
     for graph in 0..editor.graph_count() {
@@ -243,7 +243,7 @@ pub(super) fn draw_foundation_graph(
         } else {
             Color32::from_rgb(220, 55, 55)
         };
-        painter.add(egui::Shape::line(samples, Stroke::new(2.0, color)));
+        painter.add(egui::Shape::line(samples, Stroke::new(2.0_f32, color)));
     }
 
     // Guerilla draws a spline's end tangents: p0 to p1 and p3 to p2.
@@ -258,7 +258,7 @@ pub(super) fn draw_foundation_graph(
             if let (Some(p0), Some(p1), Some(p2), Some(p3)) =
                 (point(0), point(1), point(2), point(3))
             {
-                let stroke = Stroke::new(1.0, Color32::from_gray(150));
+                let stroke = Stroke::new(1.0_f32, Color32::from_gray(150));
                 painter.line_segment([p0, p1], stroke);
                 painter.line_segment([p3, p2], stroke);
             }
@@ -284,7 +284,7 @@ pub(super) fn draw_foundation_graph(
         } else {
             painter.circle_filled(center, radius, fill);
         }
-        painter.circle_stroke(center, radius, Stroke::new(1.0, Color32::BLACK));
+        painter.circle_stroke(center, radius, Stroke::new(1.0_f32, Color32::BLACK));
     }
 
     if function.color_graph_type() != ColorGraphType::Scalar {

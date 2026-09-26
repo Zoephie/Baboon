@@ -23,18 +23,12 @@ impl HelpDocsState {
 
 #[derive(Clone, Deserialize)]
 pub(super) struct HelpDocs {
-    /// External document schema revision reserved for compatibility checks and
-    /// migrations when the help JSON shape changes.
-    pub(super) version: u32,
     pub(super) tabs: Vec<HelpDocTab>,
 }
 
 #[derive(Clone, Deserialize)]
 pub(super) struct HelpDocTab {
     pub(super) id: String,
-    /// Data-owned tab label retained for future multi-tab help navigation; the
-    /// current single Doc tab is still selected by its stable `id`.
-    pub(super) title: String,
     pub(super) sections: Vec<HelpDocSection>,
 }
 

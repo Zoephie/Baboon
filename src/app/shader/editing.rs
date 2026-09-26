@@ -249,7 +249,7 @@ pub(in crate::app) fn draw_shader_grid_row(
     ui.painter().rect_filled(rect, 0.0, row.fill);
     ui.painter().line_segment(
         [rect.left_bottom(), rect.right_bottom()],
-        Stroke::new(1.0, material_grid_light()),
+        Stroke::new(1.0_f32, material_grid_light()),
     );
     let modified = row_differs_from_default(row);
     if modified {
@@ -300,7 +300,7 @@ pub(in crate::app) fn draw_shader_grid_row(
                 egui::pos2(split_x, rect.top()),
                 egui::pos2(split_x, rect.bottom()),
             ],
-            Stroke::new(1.0, row_text),
+            Stroke::new(1.0_f32, row_text),
         );
     }
     if split_resp.dragged() {
@@ -386,7 +386,7 @@ pub(in crate::app) fn draw_shader_grid_row(
     if let (Some(reset), Some(reset_rect)) = (reset, reset_rect) {
         ui.painter().rect_filled(reset_rect, 0.0, material_input());
         ui.painter()
-            .rect_stroke(reset_rect, 0.0, Stroke::new(1.0, material_input_edge()));
+            .rect_stroke(reset_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
         ui.painter().text(
             reset_rect.center(),
             Align2::CENTER_CENTER,
@@ -425,7 +425,7 @@ pub(in crate::app) fn draw_shader_grid_row(
         );
         ui.painter().rect_filled(button_rect, 0.0, material_input());
         ui.painter()
-            .rect_stroke(button_rect, 0.0, Stroke::new(1.0, material_input_edge()));
+            .rect_stroke(button_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
         let icon_rect = egui::Rect::from_center_size(button_rect.center(), Vec2::splat(16.0));
         paint_button_icon_at(ui, ButtonIcon::Function, icon_rect, material_text());
 
@@ -454,7 +454,7 @@ pub(in crate::app) fn draw_shader_grid_row(
                 );
                 ui.painter().rect_filled(del_rect, 0.0, material_input());
                 ui.painter()
-                    .rect_stroke(del_rect, 0.0, Stroke::new(1.0, material_input_edge()));
+                    .rect_stroke(del_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
                 ui.painter().text(
                     del_rect.center(),
                     Align2::CENTER_CENTER,
@@ -486,7 +486,7 @@ pub(in crate::app) fn draw_shader_grid_row(
         );
         ui.painter().rect_filled(f_rect, 0.0, material_input());
         ui.painter()
-            .rect_stroke(f_rect, 0.0, Stroke::new(1.0, material_input_edge()));
+            .rect_stroke(f_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
         let icon_rect = egui::Rect::from_center_size(f_rect.center(), Vec2::splat(16.0));
         paint_button_icon_at(ui, ButtonIcon::Function, icon_rect, material_text());
         // The f() button is the only way into the graph editor here, on
@@ -520,7 +520,7 @@ pub(in crate::app) fn draw_shader_grid_row(
                 );
                 ui.painter().rect_filled(del_rect, 0.0, material_input());
                 ui.painter()
-                    .rect_stroke(del_rect, 0.0, Stroke::new(1.0, material_input_edge()));
+                    .rect_stroke(del_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
                 ui.painter().text(
                     del_rect.center(),
                     Align2::CENTER_CENTER,
@@ -552,7 +552,7 @@ pub(in crate::app) fn draw_shader_grid_row(
         );
         ui.painter().rect_filled(button_rect, 0.0, material_input());
         ui.painter()
-            .rect_stroke(button_rect, 0.0, Stroke::new(1.0, material_input_edge()));
+            .rect_stroke(button_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
         ui.painter().text(
             button_rect.center(),
             Align2::CENTER_CENTER,
@@ -1109,7 +1109,7 @@ pub(in crate::app) fn draw_shader_editable_value(
             // × delete button
             ui.painter().rect_filled(del_rect, 0.0, material_input());
             ui.painter()
-                .rect_stroke(del_rect, 0.0, Stroke::new(1.0, material_input_edge()));
+                .rect_stroke(del_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
             ui.painter().text(
                 del_rect.center(),
                 Align2::CENTER_CENTER,
@@ -1133,505 +1133,73 @@ pub(in crate::app) fn draw_shader_editable_value(
             }
         }
 
-        // BitmapRef → text box + Open + "..." browse button.
+        // Tag references: text box + Open + "..." browse, and a drop target.
         ShaderRowEditKind::BitmapRef { group_tag, create } => {
-            let current = row_edit.current.clone();
-            // Reserve the right edge: "..." browse (24px) then Open (40px).
-            let browse_rect = egui::Rect::from_min_size(
-                rect.right_top() - Vec2::new(26.0, 0.0),
-                Vec2::new(24.0, rect.height()),
-            );
-            let open_rect = egui::Rect::from_min_size(
-                rect.right_top() - Vec2::new(70.0, 0.0),
-                Vec2::new(40.0, rect.height()),
-            );
-            // The grid stores the path with a ".bitmap" suffix and forward
-            // slashes; strip both so it resolves like a normal tag reference.
-            let cleaned = sanitize_ref_path(&current);
-            let open_ref = cleaned
-                .strip_suffix(".bitmap")
-                .unwrap_or(&cleaned)
-                .replace('/', "\\");
-            let open_enabled = !open_ref.is_empty() && open_ref != "NONE";
-            // Inline thumbnail of the referenced bitmap (Phase 4.2), at the left.
-            let thumb = open_enabled
-                .then(|| shader_bitmap_thumbnail(ui, edit, *group_tag, &open_ref))
-                .flatten();
-            let (thumb_w, thumb_gap) = if thumb.is_some() {
-                (rect.height() - 2.0, 4.0)
-            } else {
-                (0.0, 0.0)
+            let cell = ShaderReferenceCell {
+                id: "shader_bitmap",
+                group_tag: *group_tag,
+                extension: "bitmap",
+                browse_extensions: &["bitmap"],
+                thumbnail: true,
+                // The cell's canonical form carries the `.bitmap` suffix (see
+                // the row builders); the payload's rel_path does not, and the
+                // edit applier refuses an extension-less tag reference.
+                drop_value: |payload| format!("{}.bitmap", payload.rel_path),
+                normalize: normalize_bitmap_browse_path,
             };
-            if let Some(texture) = &thumb {
-                let thumb_rect = egui::Rect::from_min_size(
-                    rect.left_top() + Vec2::new(0.0, 1.0),
-                    Vec2::splat(rect.height() - 2.0),
-                );
-                ui.painter().image(
-                    texture.id(),
-                    thumb_rect,
-                    egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    Color32::WHITE,
-                );
-                // Hover → enlarged preview popup (up to native, ≤256px) + path,
-                // mirroring Foundation's help-popup image.
-                ui.interact(
-                    thumb_rect,
-                    ui.make_persistent_id(("shader_thumb_hover", &open_ref)),
-                    Sense::hover(),
-                )
-                .on_hover_ui(|ui| {
-                    bitmap_hover_preview_ui(ui, texture, &open_ref, material_muted_text());
-                });
-            }
-            let text_rect = egui::Rect::from_min_size(
-                rect.left_top() + Vec2::new(thumb_w + thumb_gap, 0.0),
-                Vec2::new(
-                    (rect.width() - 72.0 - thumb_w - thumb_gap).max(40.0),
-                    rect.height(),
-                ),
-            );
-            // Open the referenced bitmap in a new tab (when the ref is set).
-            ui.painter().rect_filled(
-                open_rect,
-                0.0,
-                if open_enabled {
-                    material_input()
-                } else {
-                    material_disabled_input()
-                },
-            );
-            ui.painter()
-                .rect_stroke(open_rect, 0.0, Stroke::new(1.0, material_input_edge()));
-            let icon_rect = egui::Rect::from_center_size(open_rect.center(), Vec2::splat(16.0));
-            let icon_color = if open_enabled {
-                material_text()
-            } else {
-                material_muted_text()
-            };
-            paint_button_icon_at(ui, ButtonIcon::Open, icon_rect, icon_color);
-            if open_enabled
-                && ui
-                    .interact(
-                        open_rect,
-                        ui.make_persistent_id(format!("shader_bitmap_open:{}", buffer_key)),
-                        Sense::click(),
-                    )
-                    .on_hover_text("Open the referenced bitmap tag (Alt: floating window)")
-                    .clicked()
+            if let Some(input) =
+                draw_shader_reference_cell(ui, edit, rect, &buffer_key, row_edit, &cell)
             {
-                let float = ui.input(|i| i.modifiers.alt);
-                *edit.open_request = Some(OpenTagRequest {
-                    group_tag: *group_tag,
-                    rel_path: open_ref.clone(),
-                    float,
-                });
-            }
-            let id = edit.widget_id(("shader_text", &buffer_key));
-            let mut draft = edit.buffers.take(&buffer_key, &current);
-            // Flag a referenced bitmap that is missing on disk (red text).
-            let missing = open_enabled
-                && reference_target_missing(edit.names, edit.tags_root, *group_tag, &open_ref);
-            let text_color = if missing {
-                REFERENCE_MISSING_COLOR
-            } else {
-                material_text()
-            };
-            let mut commit = None;
-            ui.scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
-                ui.visuals_mut().extreme_bg_color = material_input();
-                let resp = ui.add(
-                    egui::TextEdit::singleline(&mut draft.text)
-                        .id(id)
-                        .desired_width(text_rect.width())
-                        .hint_text(placeholder_text("(no reference)"))
-                        .text_color(text_color)
-                        .font(egui::TextStyle::Monospace),
-                );
-                if missing {
-                    resp.clone()
-                        .on_hover_text("Referenced bitmap not found on disk");
-                }
-                text_edit_cursor_to_start_on_tab_focus(ui, &resp);
-                draft.note_response(&resp);
-                if draft.should_commit(ui, &resp) {
-                    commit = Some(draft.text.trim().to_owned());
-                }
-            });
-            if let Some(input) = commit {
                 push_shader_value_edit(edit, row_edit, create.as_ref(), input);
             }
-            // Drag-and-drop: drop a bitmap tag from the browser onto the cell to
-            // set the reference. Accept only bitmap-group tags.
-            if edit.editable {
-                let drop = ui.interact(
-                    text_rect,
-                    ui.make_persistent_id(("shader_bitmap_drop", &buffer_key)),
-                    Sense::hover(),
-                );
-                let is_bitmap =
-                    |payload: &DraggedTagRef| &payload.group_tag.to_be_bytes() == b"bitm";
-                if let Some(payload) = drop.dnd_hover_payload::<DraggedTagRef>() {
-                    let color = if is_bitmap(&payload) {
-                        Color32::from_rgb(120, 170, 90)
-                    } else {
-                        REFERENCE_MISSING_COLOR
-                    };
-                    ui.painter()
-                        .rect_stroke(text_rect, 2.0, Stroke::new(1.5, color));
-                }
-                if let Some(payload) = drop.dnd_release_payload::<DraggedTagRef>() {
-                    if is_bitmap(&payload) {
-                        // The cell's canonical form carries the `.bitmap`
-                        // suffix (see the row builders); the payload's
-                        // rel_path does not, and the edit applier refuses an
-                        // extension-less tag reference.
-                        let value = format!("{}.bitmap", payload.rel_path);
-                        draft.set_clean(value.clone());
-                        push_shader_value_edit(edit, row_edit, create.as_ref(), value);
-                    }
-                }
-            }
-            // "..." browse button
-            ui.painter().rect_filled(browse_rect, 0.0, material_input());
-            ui.painter()
-                .rect_stroke(browse_rect, 0.0, Stroke::new(1.0, material_input_edge()));
-            ui.painter().text(
-                browse_rect.center(),
-                Align2::CENTER_CENTER,
-                "...",
-                FontId::proportional(11.0),
-                material_text(),
-            );
-            if ui
-                .interact(
-                    browse_rect,
-                    ui.make_persistent_id(format!("shader_bitmap_browse:{}", buffer_key)),
-                    Sense::click(),
-                )
-                .on_hover_text("Browse for a .bitmap tag file")
-                .clicked()
-            {
-                let mut dialog = rfd::FileDialog::new()
-                    .add_filter("Bitmap tag", &["bitmap"])
-                    .set_title("Select Bitmap Tag");
-                if let Some(tags_root) = edit.tags_root {
-                    dialog = dialog.set_directory(tag_reference_start_dir(tags_root, &open_ref));
-                }
-                if let Some(path) = dialog.pick_file() {
-                    match normalize_bitmap_browse_path(&path, edit.tags_root) {
-                        Ok(rel) => {
-                            draft.set_clean(rel.clone());
-                            push_shader_value_edit(edit, row_edit, create.as_ref(), rel);
-                        }
-                        Err(error) => {
-                            if let Some(status) = edit.status.as_deref_mut() {
-                                *status = error;
-                            }
-                        }
-                    }
-                }
-            }
-            edit.buffers.put(buffer_key, draft);
         }
 
-        // Shader template tag reference → text box + Open + "..." browse button.
         ShaderRowEditKind::ShaderTemplateRef => {
-            let current = row_edit.current.clone();
-            let browse_rect = egui::Rect::from_min_size(
-                rect.right_top() - Vec2::new(26.0, 0.0),
-                Vec2::new(24.0, rect.height()),
-            );
-            let open_rect = egui::Rect::from_min_size(
-                rect.right_top() - Vec2::new(70.0, 0.0),
-                Vec2::new(40.0, rect.height()),
-            );
-            let text_rect = egui::Rect::from_min_size(
-                rect.left_top(),
-                Vec2::new((rect.width() - 72.0).max(40.0), rect.height()),
-            );
-            let cleaned = sanitize_ref_path(&current);
-            let open_ref = cleaned
-                .strip_suffix(".shader_template")
-                .unwrap_or(&cleaned)
-                .replace('/', "\\");
-            let open_enabled = !open_ref.is_empty() && open_ref != "NONE";
-            ui.painter().rect_filled(
-                open_rect,
-                0.0,
-                if open_enabled {
-                    material_input()
-                } else {
-                    material_disabled_input()
-                },
-            );
-            ui.painter()
-                .rect_stroke(open_rect, 0.0, Stroke::new(1.0, material_input_edge()));
-            let icon_rect = egui::Rect::from_center_size(open_rect.center(), Vec2::splat(16.0));
-            let icon_color = if open_enabled {
-                material_text()
-            } else {
-                material_muted_text()
+            let cell = ShaderReferenceCell {
+                id: "shader_template",
+                group_tag: u32::from_be_bytes(*b"stem"),
+                extension: "shader_template",
+                browse_extensions: &["shader_template", "stem"],
+                thumbnail: false,
+                drop_value: |payload| payload.rel_path.clone(),
+                normalize: normalize_shader_template_browse_path,
             };
-            paint_button_icon_at(ui, ButtonIcon::Open, icon_rect, icon_color);
-            if open_enabled
-                && ui
-                    .interact(
-                        open_rect,
-                        ui.make_persistent_id(format!("shader_template_open:{}", buffer_key)),
-                        Sense::click(),
-                    )
-                    .on_hover_text("Open the referenced shader_template tag")
-                    .clicked()
+            if let Some(input) =
+                draw_shader_reference_cell(ui, edit, rect, &buffer_key, row_edit, &cell)
             {
-                *edit.open_request = Some(OpenTagRequest {
-                    group_tag: u32::from_be_bytes(*b"stem"),
-                    rel_path: open_ref.clone(),
-                    float: ui.input(|i| i.modifiers.alt),
-                });
-            }
-
-            let id = edit.widget_id(("shader_template_text", &buffer_key));
-            let mut draft = edit.buffers.take(&buffer_key, &current);
-            let mut commit = None;
-            let text_response = ui
-                .scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
-                    ui.visuals_mut().extreme_bg_color = material_input();
-                    let resp = ui.add(
-                        egui::TextEdit::singleline(&mut draft.text)
-                            .id(id)
-                            .desired_width(text_rect.width())
-                            .text_color(material_text())
-                            .font(egui::TextStyle::Monospace),
-                    );
-                    text_edit_cursor_to_start_on_tab_focus(ui, &resp);
-                    draft.note_response(&resp);
-                    if draft.should_commit(ui, &resp) {
-                        commit = Some(draft.text.trim().to_owned());
-                    }
-                    resp
-                })
-                .inner;
-            // Drop a shader_template tag from the browser onto the cell.
-            let shader_template_group = u32::from_be_bytes(*b"stem");
-            let template_ok = |payload: &DraggedTagRef| payload.group_tag == shader_template_group;
-            if let Some(payload) = text_response.dnd_hover_payload::<DraggedTagRef>() {
-                let color = if template_ok(&payload) {
-                    Color32::from_rgb(120, 170, 90)
-                } else {
-                    REFERENCE_MISSING_COLOR
-                };
-                ui.painter()
-                    .rect_stroke(text_response.rect, 2.0, Stroke::new(1.5, color));
-            }
-            if edit.editable {
-                if let Some(payload) = text_response.dnd_release_payload::<DraggedTagRef>() {
-                    if template_ok(&payload) {
-                        commit = Some(payload.rel_path.clone());
-                    }
-                }
-            }
-            if let Some(input) = commit {
                 push_h2_template_reference_edit(edit, row_edit, input);
             }
-
-            ui.painter().rect_filled(browse_rect, 0.0, material_input());
-            ui.painter()
-                .rect_stroke(browse_rect, 0.0, Stroke::new(1.0, material_input_edge()));
-            ui.painter().text(
-                browse_rect.center(),
-                Align2::CENTER_CENTER,
-                "...",
-                FontId::proportional(11.0),
-                material_text(),
-            );
-            if ui
-                .interact(
-                    browse_rect,
-                    ui.make_persistent_id(format!("shader_template_browse:{}", buffer_key)),
-                    Sense::click(),
-                )
-                .on_hover_text("Browse for a .shader_template tag file")
-                .clicked()
-            {
-                let mut dialog = rfd::FileDialog::new()
-                    .add_filter("Shader template tag", &["shader_template", "stem"])
-                    .set_title("Select Shader Template Tag");
-                if let Some(tags_root) = edit.tags_root {
-                    dialog = dialog.set_directory(tag_reference_start_dir(tags_root, &open_ref));
-                }
-                if let Some(path) = dialog.pick_file() {
-                    match normalize_shader_template_browse_path(&path, edit.tags_root) {
-                        Ok(rel) => {
-                            draft.set_clean(rel.clone());
-                            push_h2_template_reference_edit(edit, row_edit, rel);
-                        }
-                        Err(error) => {
-                            if let Some(status) = edit.status.as_deref_mut() {
-                                *status = error;
-                            }
-                        }
-                    }
-                }
-            }
-            edit.buffers.put(buffer_key, draft);
         }
 
-        // A shader's structural references: `definition` and `shader template`.
-        // Text box + Open + browse, committed straight through the generic
-        // field-edit path. Nothing is reconciled afterwards, which matches
-        // Foundation — it carries no shader-aware code to reconcile with, and
-        // its expert mode is a blanket field-panel switch.
+        // A shader's structural references: `definition` and `shader template`,
+        // committed straight through the generic field-edit path. Nothing is
+        // reconciled afterwards, which matches Foundation — it carries no
+        // shader-aware code to reconcile with, and its expert mode is a
+        // blanket field-panel switch.
         ShaderRowEditKind::StructuralRef {
             group_tag,
             extension,
         } => {
-            let (group_tag, extension) = (*group_tag, *extension);
-            let current = row_edit.current.clone();
-            let browse_rect = egui::Rect::from_min_size(
-                rect.right_top() - Vec2::new(26.0, 0.0),
-                Vec2::new(24.0, rect.height()),
-            );
-            let open_rect = egui::Rect::from_min_size(
-                rect.right_top() - Vec2::new(70.0, 0.0),
-                Vec2::new(40.0, rect.height()),
-            );
-            let text_rect = egui::Rect::from_min_size(
-                rect.left_top(),
-                Vec2::new((rect.width() - 72.0).max(40.0), rect.height()),
-            );
-            let cleaned = sanitize_ref_path(&current);
-            let open_ref = cleaned
-                .strip_suffix(&format!(".{extension}"))
-                .unwrap_or(&cleaned)
-                .replace('/', "\\");
-            let open_enabled = !open_ref.is_empty() && open_ref != "NONE";
-            ui.painter().rect_filled(
-                open_rect,
-                0.0,
-                if open_enabled {
-                    material_input()
-                } else {
-                    material_disabled_input()
-                },
-            );
-            ui.painter()
-                .rect_stroke(open_rect, 0.0, Stroke::new(1.0, material_input_edge()));
-            let icon_rect = egui::Rect::from_center_size(open_rect.center(), Vec2::splat(16.0));
-            paint_button_icon_at(
-                ui,
-                ButtonIcon::Open,
-                icon_rect,
-                if open_enabled {
-                    material_text()
-                } else {
-                    material_muted_text()
-                },
-            );
-            if open_enabled
-                && ui
-                    .interact(
-                        open_rect,
-                        ui.make_persistent_id(format!("structural_ref_open:{buffer_key}")),
-                        Sense::click(),
-                    )
-                    .on_hover_text(format!("Open the referenced {extension} tag"))
-                    .clicked()
-            {
-                *edit.open_request = Some(OpenTagRequest {
-                    group_tag,
-                    rel_path: open_ref.clone(),
-                    float: ui.input(|i| i.modifiers.alt),
-                });
-            }
-
-            let id = edit.widget_id(("structural_ref_text", &buffer_key));
-            let mut draft = edit.buffers.take(&buffer_key, &current);
-            let mut commit = None;
-            let text_response = ui
-                .scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
-                    ui.visuals_mut().extreme_bg_color = material_input();
-                    let resp = ui.add(
-                        egui::TextEdit::singleline(&mut draft.text)
-                            .id(id)
-                            .desired_width(text_rect.width())
-                            .text_color(material_text())
-                            .font(egui::TextStyle::Monospace),
-                    );
-                    text_edit_cursor_to_start_on_tab_focus(ui, &resp);
-                    draft.note_response(&resp);
-                    if draft.should_commit(ui, &resp) {
-                        commit = Some(draft.text.trim().to_owned());
-                    }
-                    resp
-                })
-                .inner;
-            let accepts = |payload: &DraggedTagRef| payload.group_tag == group_tag;
-            if let Some(payload) = text_response.dnd_hover_payload::<DraggedTagRef>() {
-                let color = if accepts(&payload) {
-                    Color32::from_rgb(120, 170, 90)
-                } else {
-                    REFERENCE_MISSING_COLOR
-                };
-                ui.painter()
-                    .rect_stroke(text_response.rect, 2.0, Stroke::new(1.5, color));
-            }
-            if edit.editable
-                && let Some(payload) = text_response.dnd_release_payload::<DraggedTagRef>()
-                && accepts(&payload)
-            {
+            let cell = ShaderReferenceCell {
+                id: "structural_ref",
+                group_tag: *group_tag,
+                extension,
+                browse_extensions: &[extension],
+                thumbnail: false,
                 // `input` is the `GROUP:path` form, which the edit applier
                 // parses for any group; the bare rel_path would be refused as
                 // an extension-less tag reference.
-                commit = Some(payload.input.clone());
-            }
-
-            ui.painter().rect_filled(browse_rect, 0.0, material_input());
-            ui.painter()
-                .rect_stroke(browse_rect, 0.0, Stroke::new(1.0, material_input_edge()));
-            ui.painter().text(
-                browse_rect.center(),
-                Align2::CENTER_CENTER,
-                "...",
-                FontId::proportional(11.0),
-                material_text(),
-            );
-            if ui
-                .interact(
-                    browse_rect,
-                    ui.make_persistent_id(format!("structural_ref_browse:{buffer_key}")),
-                    Sense::click(),
-                )
-                .on_hover_text(format!("Browse for a .{extension} tag file"))
-                .clicked()
+                drop_value: |payload| payload.input.clone(),
+                normalize: normalize_bitmap_browse_path,
+            };
+            if let Some(input) =
+                draw_shader_reference_cell(ui, edit, rect, &buffer_key, row_edit, &cell)
             {
-                let mut dialog = rfd::FileDialog::new()
-                    .add_filter(extension, &[extension])
-                    .set_title(format!("Select {extension} Tag"));
-                if let Some(tags_root) = edit.tags_root {
-                    dialog = dialog.set_directory(tag_reference_start_dir(tags_root, &open_ref));
-                }
-                if let Some(path) = dialog.pick_file() {
-                    match normalize_bitmap_browse_path(&path, edit.tags_root) {
-                        Ok(rel) => {
-                            draft.set_clean(rel.clone());
-                            commit = Some(rel);
-                        }
-                        Err(error) => {
-                            if let Some(status) = edit.status.as_deref_mut() {
-                                *status = error;
-                            }
-                        }
-                    }
-                }
-            }
-            if let Some(input) = commit {
                 edit.pending.push(PendingFieldEdit {
                     path: row_edit.path.clone(),
                     input,
                 });
             }
-            edit.buffers.put(buffer_key, draft);
         }
 
         ShaderRowEditKind::Bool { create } => {
@@ -1708,7 +1276,7 @@ pub(in crate::app) fn draw_shader_editable_value(
             // × delete button
             ui.painter().rect_filled(del_rect, 0.0, material_input());
             ui.painter()
-                .rect_stroke(del_rect, 0.0, Stroke::new(1.0, material_input_edge()));
+                .rect_stroke(del_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
             ui.painter().text(
                 del_rect.center(),
                 Align2::CENTER_CENTER,
@@ -2167,17 +1735,256 @@ pub(in crate::app) fn draw_shader_editable_value(
     }
 }
 
+/// How one kind of tag-reference cell differs from the others.
+struct ShaderReferenceCell<'a> {
+    /// Prefix for the cell's widget ids.
+    id: &'static str,
+    /// What Open opens, and what a drop must be.
+    group_tag: u32,
+    /// The referenced tag's extension, as the cell may spell it.
+    extension: &'a str,
+    browse_extensions: &'a [&'a str],
+    /// Show the referenced bitmap beside the path.
+    thumbnail: bool,
+    /// The cell text a dropped tag becomes.
+    drop_value: fn(&DraggedTagRef) -> String,
+    /// A browsed file's path, as the cell text.
+    normalize: fn(&std::path::Path, Option<&std::path::Path>) -> Result<String, String>,
+}
+
+/// A tag-reference cell in the shader grid: an optional thumbnail, the path
+/// in a text box, Open, "..." browse, and a drop target for a tag dragged
+/// from the browser. Returns the text to commit; the caller decides how it
+/// is applied.
+///
+/// Bitmap, shader-template and structural references were three copies of
+/// this that had drifted: only the bitmap cell marked a missing target, hinted
+/// an empty one, and ignored drops on a read-only tag, and only it and browse
+/// updated the text box after a drop.
+fn draw_shader_reference_cell(
+    ui: &mut Ui,
+    edit: &mut FieldEditContext<'_>,
+    rect: egui::Rect,
+    buffer_key: &str,
+    row_edit: &ShaderRowEdit,
+    cell: &ShaderReferenceCell<'_>,
+) -> Option<String> {
+    let current = row_edit.current.clone();
+    let extension = cell.extension;
+    // Reserve the right edge: "..." browse (24px) then Open (40px).
+    let browse_rect = egui::Rect::from_min_size(
+        rect.right_top() - Vec2::new(26.0, 0.0),
+        Vec2::new(24.0, rect.height()),
+    );
+    let open_rect = egui::Rect::from_min_size(
+        rect.right_top() - Vec2::new(70.0, 0.0),
+        Vec2::new(40.0, rect.height()),
+    );
+    // The grid stores the path with its extension and forward slashes; strip
+    // both so it resolves like a normal tag reference.
+    let cleaned = sanitize_ref_path(&current);
+    let open_ref = cleaned
+        .strip_suffix(&format!(".{extension}"))
+        .unwrap_or(&cleaned)
+        .replace('/', "\\");
+    let open_enabled = !open_ref.is_empty() && open_ref != "NONE";
+    let thumb = (cell.thumbnail && open_enabled)
+        .then(|| shader_bitmap_thumbnail(ui, edit, cell.group_tag, &open_ref))
+        .flatten();
+    let (thumb_w, thumb_gap) = if thumb.is_some() {
+        (rect.height() - 2.0, 4.0)
+    } else {
+        (0.0, 0.0)
+    };
+    if let Some(texture) = &thumb {
+        let thumb_rect = egui::Rect::from_min_size(
+            rect.left_top() + Vec2::new(0.0, 1.0),
+            Vec2::splat(rect.height() - 2.0),
+        );
+        ui.painter().image(
+            texture.id(),
+            thumb_rect,
+            egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
+            Color32::WHITE,
+        );
+        // Hover → enlarged preview popup (up to native, ≤256px) + path,
+        // mirroring Foundation's help-popup image.
+        ui.interact(
+            thumb_rect,
+            ui.make_persistent_id(("shader_thumb_hover", &open_ref)),
+            Sense::hover(),
+        )
+        .on_hover_ui(|ui| {
+            bitmap_hover_preview_ui(ui, texture, &open_ref, material_muted_text());
+        });
+    }
+    let text_rect = egui::Rect::from_min_size(
+        rect.left_top() + Vec2::new(thumb_w + thumb_gap, 0.0),
+        Vec2::new(
+            (rect.width() - 72.0 - thumb_w - thumb_gap).max(40.0),
+            rect.height(),
+        ),
+    );
+
+    // Open the referenced tag in a new tab (when the reference is set).
+    ui.painter().rect_filled(
+        open_rect,
+        0.0,
+        if open_enabled {
+            material_input()
+        } else {
+            material_disabled_input()
+        },
+    );
+    ui.painter()
+        .rect_stroke(open_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
+    let icon_rect = egui::Rect::from_center_size(open_rect.center(), Vec2::splat(16.0));
+    let icon_color = if open_enabled {
+        material_text()
+    } else {
+        material_muted_text()
+    };
+    paint_button_icon_at(ui, ButtonIcon::Open, icon_rect, icon_color);
+    if open_enabled
+        && ui
+            .interact(
+                open_rect,
+                ui.make_persistent_id(format!("{}_open:{buffer_key}", cell.id)),
+                Sense::click(),
+            )
+            .on_hover_text(format!(
+                "Open the referenced {extension} tag (Alt: floating window)"
+            ))
+            .clicked()
+    {
+        *edit.open_request = Some(OpenTagRequest {
+            group_tag: cell.group_tag,
+            rel_path: open_ref.clone(),
+            float: ui.input(|i| i.modifiers.alt),
+        });
+    }
+
+    let id = edit.widget_id((cell.id, "text", buffer_key));
+    let mut draft = edit.buffers.take(buffer_key, &current);
+    // Flag a referenced tag that is missing on disk (red text).
+    let missing = open_enabled
+        && reference_target_missing_cached(
+            ui,
+            edit.names,
+            edit.tags_root,
+            cell.group_tag,
+            &open_ref,
+        );
+    let text_color = if missing {
+        REFERENCE_MISSING_COLOR
+    } else {
+        material_text()
+    };
+    let mut commit = None;
+    ui.scope_builder(egui::UiBuilder::new().max_rect(text_rect), |ui| {
+        ui.visuals_mut().extreme_bg_color = material_input();
+        let resp = ui.add(
+            egui::TextEdit::singleline(&mut draft.text)
+                .id(id)
+                .desired_width(text_rect.width())
+                .hint_text(placeholder_text("(no reference)"))
+                .text_color(text_color)
+                .font(egui::TextStyle::Monospace),
+        );
+        if missing {
+            resp.clone()
+                .on_hover_text(format!("Referenced {extension} not found on disk"));
+        }
+        text_edit_cursor_to_start_on_tab_focus(ui, &resp);
+        draft.note_response(&resp);
+        if draft.should_commit(ui, &resp) {
+            commit = Some(draft.text.trim().to_owned());
+        }
+    });
+
+    // Drop a tag of the right group from the browser onto the cell, received
+    // by a hover interaction laid over the text box — the structure the
+    // browser's drag test drives end to end.
+    if edit.editable {
+        let drop = ui.interact(
+            text_rect,
+            ui.make_persistent_id((cell.id, "drop", buffer_key)),
+            Sense::hover(),
+        );
+        let accepts = |payload: &DraggedTagRef| payload.group_tag == cell.group_tag;
+        if let Some(payload) = drop.dnd_hover_payload::<DraggedTagRef>() {
+            let color = if accepts(&payload) {
+                Color32::from_rgb(120, 170, 90)
+            } else {
+                REFERENCE_MISSING_COLOR
+            };
+            ui.painter()
+                .rect_stroke(text_rect, 2.0, Stroke::new(1.5_f32, color));
+        }
+        if let Some(payload) = drop.dnd_release_payload::<DraggedTagRef>()
+            && accepts(&payload)
+        {
+            let value = (cell.drop_value)(&payload);
+            draft.set_clean(value.clone());
+            commit = Some(value);
+        }
+    }
+
+    // "..." browse button
+    ui.painter().rect_filled(browse_rect, 0.0, material_input());
+    ui.painter()
+        .rect_stroke(browse_rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
+    ui.painter().text(
+        browse_rect.center(),
+        Align2::CENTER_CENTER,
+        "...",
+        FontId::proportional(11.0),
+        material_text(),
+    );
+    if ui
+        .interact(
+            browse_rect,
+            ui.make_persistent_id(format!("{}_browse:{buffer_key}", cell.id)),
+            Sense::click(),
+        )
+        .on_hover_text(format!("Browse for a .{extension} tag file"))
+        .clicked()
+    {
+        let mut dialog = rfd::FileDialog::new()
+            .add_filter(format!("{extension} tag"), cell.browse_extensions)
+            .set_title(format!("Select {extension} Tag"));
+        if let Some(tags_root) = edit.tags_root {
+            dialog = dialog.set_directory(tag_reference_start_dir(tags_root, &open_ref));
+        }
+        if let Some(path) = dialog.pick_file() {
+            match (cell.normalize)(&path, edit.tags_root) {
+                Ok(rel) => {
+                    draft.set_clean(rel.clone());
+                    commit = Some(rel);
+                }
+                Err(error) => {
+                    if let Some(status) = edit.status.as_deref_mut() {
+                        *status = error;
+                    }
+                }
+            }
+        }
+    }
+    edit.buffers.put(buffer_key.to_owned(), draft);
+    commit
+}
+
 pub(in crate::app) fn draw_shader_color_swatch(ui: &mut Ui, rect: egui::Rect, color: Color32) {
     let display_color = Color32::from_rgb(color.r(), color.g(), color.b());
     ui.painter().rect_filled(rect, 0.0, material_input());
     ui.painter()
-        .rect_stroke(rect, 0.0, Stroke::new(1.0, material_input_edge()));
+        .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, material_input_edge()));
     let inner = rect.shrink(3.0);
     ui.painter().rect_filled(inner, 0.0, display_color);
     ui.painter().rect_stroke(
         inner,
         0.0,
-        Stroke::new(1.25, material_color_swatch_edge(display_color)),
+        Stroke::new(1.25_f32, material_color_swatch_edge(display_color)),
     );
 }
 
@@ -2225,9 +2032,12 @@ fn push_h2_template_reference_edit(
     });
 
     if let Some(tags_root) = edit.tags_root {
-        if let Some(allowed_parameter_names) =
-            h2_template_parameter_names_from_reference(tags_root, &normalized)
-        {
+        if let Some(allowed_parameter_names) = h2_template_parameter_names_from_reference(
+            tags_root,
+            edit.game,
+            edit.definitions_root,
+            &normalized,
+        ) {
             edit.h2_shader_param_ops
                 .push(H2ShaderParamOp::SwitchTemplate {
                     parameters_block_path: "parameters".to_owned(),
@@ -2237,24 +2047,29 @@ fn push_h2_template_reference_edit(
     }
 }
 
+/// The parameter names the template `reference` declares, read with the
+/// loader the H2 shader grid uses.
+///
+/// This used to read the file itself: it joined a backslash-separated path
+/// onto the tags root, which names no file on macOS or Linux, and assumed the
+/// Halo 2 definitions and a classic header. Switching a template there never
+/// pruned the parameters the new one lacks.
 fn h2_template_parameter_names_from_reference(
     tags_root: &std::path::Path,
+    game: Option<&str>,
+    definitions_root: Option<&std::path::Path>,
     reference: &str,
 ) -> Option<Vec<String>> {
-    let rel = reference.replace('/', "\\");
-    let path = tags_root.join(format!("{rel}.shader_template"));
-    h2_template_parameter_names_from_file(&path)
-}
-
-fn h2_template_parameter_names_from_file(path: &std::path::Path) -> Option<Vec<String>> {
-    let bytes = std::fs::read(path).ok()?;
-    blam_tags::classic::ClassicHeader::parse(&bytes)?;
-    let schema_path = locate_definitions_root()
-        .join("halo2_mcc")
-        .join("shader_template.json");
-    let layout = blam_tags::TagLayout::from_json(schema_path).ok()?;
-    let tag = blam_tags::classic::read_classic_tag_file(&bytes, layout).ok()?;
-    Some(h2_template_parameter_names(tag.root()))
+    let source = TagSource::LooseFolder {
+        root: tags_root.to_path_buf(),
+        game: Some(game.unwrap_or("halo2_mcc").to_owned()),
+        definitions_root: definitions_root
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_else(locate_definitions_root),
+    };
+    let template =
+        load_referenced_tag_from_source(&source, reference, "shader_template", b"stem").ok()?;
+    Some(h2_template_parameter_names(template.root()))
 }
 
 fn h2_template_parameter_names(root: TagStruct<'_>) -> Vec<String> {
@@ -2353,4 +2168,168 @@ pub(in crate::app) fn normalize_shader_template_browse_path(
 ) -> Result<String, String> {
     let normalized = normalize_bitmap_browse_path(path, tags_root)?;
     Ok(h2_normalize_shader_template_reference(&normalized))
+}
+
+#[cfg(test)]
+mod reference_cell_tests {
+    use super::*;
+    use crate::app::browser::draw_entry;
+    use crate::app::foundation::extracted_tests::tests::with_test_edit_context;
+
+    /// Drag `entry` from a real browser row onto a real shader reference cell
+    /// of `kind`, and return the field edits the cell committed.
+    fn drop_onto(kind: ShaderRowEditKind, entry: &TagEntry, editable: bool) -> Vec<String> {
+        let row_edit = ShaderRowEdit {
+            path: "field".to_owned(),
+            current: String::new(),
+            kind,
+        };
+        let ctx = egui::Context::default();
+        let row_rect = std::cell::Cell::new(egui::Rect::NOTHING);
+        let cell_rect = std::cell::Cell::new(egui::Rect::NOTHING);
+        let mut committed = Vec::new();
+        let mut frame = |events: Vec<egui::Event>| {
+            let _ = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::Vec2::new(600.0, 400.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let top = ui.cursor().min;
+                        draw_entry(ui, entry, None, false, false, None, None, true);
+                        row_rect.set(egui::Rect::from_min_size(
+                            top,
+                            Vec2::new(240.0, ui.spacing().interact_size.y),
+                        ));
+                        ui.add_space(120.0);
+                        let (rect, _) =
+                            ui.allocate_exact_size(Vec2::new(360.0, 22.0), Sense::hover());
+                        // The cell's text box, left of Open and browse.
+                        cell_rect.set(egui::Rect::from_min_size(rect.min, Vec2::new(200.0, 22.0)));
+                        with_test_edit_context(|edit| {
+                            edit.editable = editable;
+                            draw_shader_editable_value(
+                                ui,
+                                rect,
+                                "Reference",
+                                &row_edit,
+                                edit,
+                                &mut None,
+                            );
+                            committed.extend(edit.pending.iter().map(|edit| edit.input.clone()));
+                        });
+                    });
+                },
+            );
+        };
+        frame(Vec::new());
+        let (start, end) = (row_rect.get().center(), cell_rect.get().center());
+        frame(vec![egui::Event::PointerMoved(start)]);
+        frame(vec![egui::Event::PointerButton {
+            pos: start,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        frame(vec![egui::Event::PointerMoved(
+            start + Vec2::new(0.0, 40.0),
+        )]);
+        frame(vec![egui::Event::PointerMoved(end)]);
+        frame(vec![egui::Event::PointerButton {
+            pos: end,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        }]);
+        committed
+    }
+
+    fn entry(path: &str, group: &[u8; 4]) -> TagEntry {
+        TagEntry {
+            key: format!("file:{path}"),
+            display_path: path.to_owned(),
+            group_tag: u32::from_be_bytes(*group),
+            group_name: None,
+            location: TagEntryLocation::LooseFile(std::path::PathBuf::from(path)),
+        }
+    }
+
+    /// Every kind of reference cell takes a dropped tag of its own group, in
+    /// its own committed form, through the one shared cell.
+    #[test]
+    fn each_reference_cell_takes_a_dropped_tag() {
+        let bitmap = entry("objects/rifle/rifle.bitmap", b"bitm");
+        assert_eq!(
+            drop_onto(
+                ShaderRowEditKind::BitmapRef {
+                    group_tag: u32::from_be_bytes(*b"bitm"),
+                    create: None,
+                },
+                &bitmap,
+                true,
+            ),
+            ["objects/rifle/rifle.bitmap"],
+        );
+        let template = entry("shaders/opaque.shader_template", b"stem");
+        assert_eq!(
+            drop_onto(ShaderRowEditKind::ShaderTemplateRef, &template, true),
+            ["stem:shaders\\opaque"],
+        );
+        let definition = entry("shaders/shader.render_method_definition", b"rmdf");
+        let structural = || ShaderRowEditKind::StructuralRef {
+            group_tag: u32::from_be_bytes(*b"rmdf"),
+            extension: "render_method_definition",
+        };
+        let dropped = drop_onto(structural(), &definition, true);
+        assert_eq!(dropped.len(), 1, "{dropped:?}");
+
+        // A tag of another group is refused, and so is any drop on a
+        // read-only tag — which only the bitmap cell used to refuse.
+        assert!(drop_onto(structural(), &bitmap, true).is_empty());
+        assert!(drop_onto(ShaderRowEditKind::ShaderTemplateRef, &template, false).is_empty());
+    }
+}
+
+#[cfg(test)]
+mod h2_template_switch_tests {
+    use super::*;
+    use crate::app::foundation::extracted_tests::tests::with_test_edit_context;
+
+    /// Switching an H2 shader's template queues the new template's parameter
+    /// names, so parameters it lacks are pruned. This read the template off a
+    /// backslash-joined path, which found nothing outside Windows.
+    #[test]
+    fn switching_a_template_reads_its_parameters() {
+        let root = crate::test_kits::h2ek_tags();
+        let reference = "shaders/shader_templates/water/water_static";
+        if !root.join(format!("{reference}.shader_template")).is_file() {
+            eprintln!("skipping: {reference} not present under {}", root.display());
+            return;
+        }
+        let row_edit = ShaderRowEdit {
+            path: "template".to_owned(),
+            current: String::new(),
+            kind: ShaderRowEditKind::ShaderTemplateRef,
+        };
+        let root: &'static std::path::Path = std::path::Path::new(crate::test_kits::leak(root));
+        with_test_edit_context(|edit| {
+            edit.tags_root = Some(root);
+            edit.game = Some("halo2_mcc");
+            push_h2_template_reference_edit(edit, &row_edit, reference.to_owned());
+            let names = edit.h2_shader_param_ops.iter().find_map(|op| match op {
+                H2ShaderParamOp::SwitchTemplate {
+                    allowed_parameter_names,
+                    ..
+                } => Some(allowed_parameter_names.clone()),
+                _ => None,
+            });
+            let names = names.expect("the template's parameters were read");
+            assert!(!names.is_empty());
+        });
+    }
 }

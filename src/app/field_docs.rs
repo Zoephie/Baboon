@@ -410,8 +410,10 @@ mod tests {
     /// element. Keyed by name, each struct gets only its own.
     #[test]
     fn halo2_structs_get_only_their_own_explanations() {
-        let tag_path =
-            "/Users/camden/Halo/halo2_mcc/tags/objects/characters/masterchief/masterchief.biped";
+        let tag_path = crate::test_kits::tag_path(
+            "halo2_mcc",
+            "objects/characters/masterchief/masterchief.biped",
+        );
         let def = crate::app::test_definition_path("halo2_mcc/biped.json");
         if !std::path::Path::new(tag_path).exists() || !def.exists() {
             eprintln!("skipping: H2 biped/definition not present");

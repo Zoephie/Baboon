@@ -108,6 +108,7 @@ pub(in crate::app) enum ConversionOutcome {
 }
 
 impl ConversionOutcome {
+    #[cfg(test)]
     /// The audited fields this conversion gives up, empty unless it is lossy.
     pub(in crate::app) fn losses(&self) -> &[String] {
         match self {
@@ -578,6 +579,7 @@ impl Baboon {
             }
         }
         if let Some(root) = self
+            .prefs
             .editing_kit_paths
             .get(&dialog.source_game)
             .map(|root| import_tags_root(root))
@@ -586,6 +588,7 @@ impl Baboon {
             return Some(root);
         }
         let mut others = self
+            .prefs
             .editing_kit_paths
             .iter()
             .filter(|(game, _)| *game != &dialog.target_game)
@@ -627,6 +630,7 @@ impl Baboon {
             return;
         }
         let kit_roots = self
+            .prefs
             .editing_kit_paths
             .iter()
             .map(|(game, root)| (game.clone(), root.clone()))
@@ -729,6 +733,7 @@ impl Baboon {
         // `Send` but not `Sync`, and only one analysis runs at a time.
         let mut cache = self.native_template_cache.take().unwrap_or_default();
         let mut kit_roots: HashMap<String, PathBuf> = self
+            .prefs
             .editing_kit_paths
             .iter()
             .map(|(game, root)| (game.clone(), import_tags_root(root)))
@@ -1032,6 +1037,7 @@ impl Baboon {
             target_game: dialog.target_game.clone(),
             target_tags_root: dialog.target_tags_root.clone(),
             kit_roots: self
+                .prefs
                 .editing_kit_paths
                 .iter()
                 .map(|(game, root)| (game.clone(), import_tags_root(root)))

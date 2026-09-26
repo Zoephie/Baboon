@@ -116,8 +116,10 @@ impl EditingKitValidationCache {
 
 impl Baboon {
     pub(super) fn refresh_editing_kit_validation(&mut self) {
-        self.editing_kit_validation
-            .refresh(&self.editing_kit_paths, &self.custom_editing_kit_profiles);
+        self.editing_kit_validation.refresh(
+            &self.prefs.editing_kit_paths,
+            &self.prefs.custom_editing_kit_profiles,
+        );
         self.custom_editing_kit_texture_failures.clear();
     }
 
@@ -127,7 +129,8 @@ impl Baboon {
     ) -> EditingKitPathStatus {
         self.editing_kit_validation.refresh_builtin(
             shortcut,
-            self.editing_kit_paths
+            self.prefs
+                .editing_kit_paths
                 .get(shortcut.game)
                 .map(PathBuf::as_path),
         )
@@ -176,6 +179,7 @@ pub(super) fn validate_builtin_editing_kit(
         .unwrap_or_else(EditingKitPathStatus::Invalid)
 }
 
+#[cfg(test)]
 pub(super) fn validate_custom_editing_kit_layout(path: &Path) -> Result<EditingKitLayout, String> {
     validate_loose_editing_kit_layout(path, true)
 }
@@ -348,6 +352,7 @@ pub(super) fn resolve_custom_icon_path(relative: &Path) -> Result<PathBuf, Strin
     resolve_custom_icon_path_in_roots(&crate::storage::data_path(""), legacy.as_deref(), relative)
 }
 
+#[cfg(test)]
 fn resolve_custom_icon_path_at(base: &Path, relative: &Path) -> Result<PathBuf, String> {
     resolve_custom_icon_path_in_roots(base, None, relative)
 }
@@ -481,6 +486,7 @@ pub(super) fn remove_unreferenced_custom_icon(
     )
 }
 
+#[cfg(test)]
 fn remove_unreferenced_custom_icon_at(
     base: &Path,
     relative: &Path,
@@ -575,19 +581,9 @@ pub(super) fn sanitise_project_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_dir(label: &str) -> PathBuf {
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let root = std::env::temp_dir().join(format!(
-            "baboon-editing-kits-{label}-{}-{stamp}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&root).unwrap();
-        root
+        crate::test_kits::unique_temp_dir(&format!("editing-kits-{label}"))
     }
 
     #[test]
@@ -720,6 +716,8 @@ mod tests {
             .unwrap();
         let status = validate_builtin_editing_kit(shortcut, Some(&root));
         assert!(validate_editing_kit_profile_layout(&root, shortcut.game).is_ok());
+        // Read on Windows only, but the `expect` is the check everywhere.
+        #[cfg_attr(not(windows), allow(unused_variables))]
         let layout = status.layout().expect("built-in layout should be ready");
         #[cfg(windows)]
         assert!(

@@ -21,12 +21,20 @@ pub(in crate::app) struct TerminalState {
 pub(in crate::app) struct TerminalLineEntry {
     pub(in crate::app) text: String,
     pub(in crate::app) severity: TerminalLineSeverity,
+    /// The line's wrapped height and the width it was wrapped at, so the
+    /// output pane can place every line without laying all of them out each
+    /// frame. Kept on the line itself, it survives appends and trimming.
+    pub(in crate::app) wrapped: std::cell::Cell<Option<(f32, f32)>>,
 }
 
 impl TerminalLineEntry {
     pub(in crate::app) fn new(text: String) -> Self {
         let severity = TerminalLineSeverity::classify(&text);
-        Self { text, severity }
+        Self {
+            text,
+            severity,
+            wrapped: std::cell::Cell::new(None),
+        }
     }
 }
 

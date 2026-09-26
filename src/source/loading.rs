@@ -35,6 +35,8 @@ pub fn load_single_file(path: PathBuf, names: &TagNameIndex) -> Result<LoadedSou
         reverse_dependencies: None,
         entries,
         initial_tag: Some((key, tag)),
+        key_hints: Default::default(),
+        complete_scan: false,
     })
 }
 
@@ -111,9 +113,13 @@ fn load_resolved_folder(
         entries,
         tree,
         group_tree,
+        // A saved index is a complete scan; an empty one is not saved, so an
+        // empty folder still gets its first scan.
+        complete_scan: !all_entries.is_empty(),
         all_entries,
         reverse_dependencies,
         initial_tag: None,
+        key_hints: Default::default(),
     })
 }
 
@@ -169,6 +175,8 @@ pub fn load_monolithic_blob_index(
         tree,
         group_tree,
         initial_tag: None,
+        key_hints: Default::default(),
+        complete_scan: false,
         reverse_dependencies: None,
     })
 }
@@ -702,6 +710,8 @@ fn build_container_set(
         tree,
         group_tree,
         initial_tag: None,
+        key_hints: Default::default(),
+        complete_scan: false,
         reverse_dependencies: None,
     })
 }
@@ -1098,7 +1108,8 @@ fn read_non_classic_tag(path: &Path) -> Result<TagFile> {
 mod container_tests {
     use super::*;
 
-    const PAKS: &str = "/Users/camden/Halo/halo-campaign-evolved_pc/Meteorite/Content/Paks";
+    static PAKS: std::sync::LazyLock<&'static str> =
+        std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_paks()));
 
     #[test]
     fn container_ref_key_normalizes() {
@@ -1121,13 +1132,13 @@ mod container_tests {
     /// show up alongside pak0's shared tags. Skipped when the game isn't present.
     #[test]
     fn mount_container_set_and_read_tags() {
-        if !Path::new(PAKS).exists() {
-            eprintln!("skipping: {PAKS} not present");
+        if !Path::new(*PAKS).exists() {
+            eprintln!("skipping: {} not present", *PAKS);
             return;
         }
         let defs = Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
         let names = TagNameIndex::load_from_definitions(&defs);
-        let loaded = load_iostore_container_set(PathBuf::from(PAKS), &names, &defs)
+        let loaded = load_iostore_container_set(PathBuf::from(*PAKS), &names, &defs)
             .expect("mount container set");
 
         assert!(
@@ -1252,11 +1263,7 @@ mod paks_dir_tests {
     use super::*;
 
     fn temp_dir(name: &str) -> PathBuf {
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos())
-            .unwrap_or_default();
-        std::env::temp_dir().join(format!("baboon_paks_{name}_{stamp}"))
+        crate::test_kits::unique_temp_path(&format!("paks-{name}"))
     }
 
     fn touch(path: &Path) {
@@ -1439,14 +1446,15 @@ mod paks_dir_tests {
     /// exported `mymod-WinGDK_P.utoc`. Skipped when the game is not present.
     #[test]
     fn the_real_install_root_resolves_to_its_paks_directory() {
-        const ROOT: &str = "/Users/camden/Halo/halo-campaign-evolved_pc";
-        if !Path::new(ROOT).is_dir() {
+        static ROOT: std::sync::LazyLock<&'static str> =
+            std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_install()));
+        if !Path::new(*ROOT).is_dir() {
             return;
         }
         assert_eq!(
-            find_paks_dir(Path::new(ROOT)),
+            find_paks_dir(Path::new(*ROOT)),
             Some(
-                PathBuf::from(ROOT)
+                PathBuf::from(*ROOT)
                     .join("Meteorite")
                     .join("Content")
                     .join("Paks")
@@ -1468,7 +1476,8 @@ mod paks_dir_tests {
 mod mod_export_tests {
     use super::*;
 
-    const PAKS: &str = "/Users/camden/Halo/halo-campaign-evolved_pc/Meteorite/Content/Paks";
+    static PAKS: std::sync::LazyLock<&'static str> =
+        std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_paks()));
 
     /// End-to-end check of what Export Mod actually writes, short of the game
     /// loading it: take a real container tag, change a byte, write an override
@@ -1479,13 +1488,14 @@ mod mod_export_tests {
     /// whether the artifact carries the edit at all.
     #[test]
     fn exported_mod_container_carries_the_edited_bytes() {
-        if !Path::new(PAKS).exists() {
-            eprintln!("skipping: {PAKS} not present");
+        if !Path::new(*PAKS).exists() {
+            eprintln!("skipping: {} not present", *PAKS);
             return;
         }
         let defs = Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
         let names = TagNameIndex::load_from_definitions(&defs);
-        let loaded = load_iostore_container_set(PathBuf::from(PAKS), &names, &defs).expect("mount");
+        let loaded =
+            load_iostore_container_set(PathBuf::from(*PAKS), &names, &defs).expect("mount");
         let TagSource::IoStoreContainerSet { ref containers, .. } = loaded.source else {
             panic!("expected a container set");
         };
@@ -1579,13 +1589,14 @@ mod mod_export_tests {
     /// fine while the UI showed an empty tree.
     #[test]
     fn a_mod_container_lists_its_tags_when_opened_on_its_own() {
-        if !Path::new(PAKS).exists() {
-            eprintln!("skipping: {PAKS} not present");
+        if !Path::new(*PAKS).exists() {
+            eprintln!("skipping: {} not present", *PAKS);
             return;
         }
         let defs = Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
         let names = TagNameIndex::load_from_definitions(&defs);
-        let loaded = load_iostore_container_set(PathBuf::from(PAKS), &names, &defs).expect("mount");
+        let loaded =
+            load_iostore_container_set(PathBuf::from(*PAKS), &names, &defs).expect("mount");
         let TagSource::IoStoreContainerSet { ref containers, .. } = loaded.source else {
             panic!("expected a container set");
         };
@@ -1612,7 +1623,7 @@ mod mod_export_tests {
         // Write the mod into the game's own Paks folder, which is where mods
         // live and therefore where they get opened from.
         let out =
-            PathBuf::from(PAKS).join(format!("baboon-listing-test-{}_P.utoc", std::process::id()));
+            PathBuf::from(*PAKS).join(format!("baboon-listing-test-{}_P.utoc", std::process::id()));
         let archive = containers[container].archive.clone();
         blam_tags::iostore::writer::write_mod_container_ex(
             &[(archive.as_ref(), rel_path.as_str(), edited.as_slice())],
@@ -1652,13 +1663,14 @@ mod mod_export_tests {
     /// `.utoc` against the install root the app already knows.
     #[test]
     fn a_mod_installed_below_the_paks_folder_is_mounted() {
-        if !Path::new(PAKS).exists() {
-            eprintln!("skipping: {PAKS} not present");
+        if !Path::new(*PAKS).exists() {
+            eprintln!("skipping: {} not present", *PAKS);
             return;
         }
         let defs = Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
         let names = TagNameIndex::load_from_definitions(&defs);
-        let loaded = load_iostore_container_set(PathBuf::from(PAKS), &names, &defs).expect("mount");
+        let loaded =
+            load_iostore_container_set(PathBuf::from(*PAKS), &names, &defs).expect("mount");
         let TagSource::IoStoreContainerSet { ref containers, .. } = loaded.source else {
             panic!("expected a container set");
         };
@@ -1682,7 +1694,7 @@ mod mod_export_tests {
         let last = edited.len() - 1;
         edited[last] ^= 0xFF;
 
-        let mods_dir = PathBuf::from(PAKS).join("~mods");
+        let mods_dir = PathBuf::from(*PAKS).join("~mods");
         std::fs::create_dir_all(&mods_dir).expect("create the mod folder");
         let out = mods_dir.join(format!("baboon-submod-test-{}_P.utoc", std::process::id()));
         blam_tags::iostore::writer::write_mod_container_ex(
@@ -1701,7 +1713,7 @@ mod mod_export_tests {
         let result = std::panic::catch_unwind(|| {
             // Mounting the install must serve the tag out of the mod, not the
             // base pak it overrides.
-            let with_mod = load_iostore_container_set(PathBuf::from(PAKS), &names, &defs)
+            let with_mod = load_iostore_container_set(PathBuf::from(*PAKS), &names, &defs)
                 .expect("remount the install");
             let TagSource::IoStoreContainerSet {
                 containers: ref mounted,
@@ -1734,7 +1746,7 @@ mod mod_export_tests {
 
             // Opening the mod alone, against the install root the app knows.
             let opened =
-                load_iostore_container(out.clone(), Some(PathBuf::from(PAKS)), &names, &defs)
+                load_iostore_container(out.clone(), Some(PathBuf::from(*PAKS)), &names, &defs)
                     .expect("mount the mod against the install");
             let listed = opened.entries.iter().any(|entry| match &entry.location {
                 TagEntryLocation::Container { rel_path: p, .. } => *p == rel_path,
@@ -1764,13 +1776,14 @@ mod mod_export_tests {
     /// `path not found in container`.
     #[test]
     fn a_tag_served_by_an_exported_mod_can_be_saved_into_it_again() {
-        if !Path::new(PAKS).exists() {
-            eprintln!("skipping: {PAKS} not present");
+        if !Path::new(*PAKS).exists() {
+            eprintln!("skipping: {} not present", *PAKS);
             return;
         }
         let defs = Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
         let names = TagNameIndex::load_from_definitions(&defs);
-        let loaded = load_iostore_container_set(PathBuf::from(PAKS), &names, &defs).expect("mount");
+        let loaded =
+            load_iostore_container_set(PathBuf::from(*PAKS), &names, &defs).expect("mount");
         let TagSource::IoStoreContainerSet { ref containers, .. } = loaded.source else {
             panic!("expected a container set");
         };
@@ -1796,7 +1809,7 @@ mod mod_export_tests {
 
         // Export the mod into the game's own Paks folder, where mods live.
         let out =
-            PathBuf::from(PAKS).join(format!("baboon-resave-test-{}_P.utoc", std::process::id()));
+            PathBuf::from(*PAKS).join(format!("baboon-resave-test-{}_P.utoc", std::process::id()));
         blam_tags::iostore::writer::write_mod_container_ex(
             &[(
                 containers[container].archive.as_ref(),

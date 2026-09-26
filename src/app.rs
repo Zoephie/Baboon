@@ -23,10 +23,10 @@ use blam_tags::render_method::{
     compile_real_constant,
 };
 use blam_tags::{
-    AssFile, Bitmap, ColorGraphType, CurvePointMode, CurveSegmentType, Endian,
-    FoundationMasterType as EngineMasterType, FunctionFlags, FunctionKind, FunctionType, JmsFile,
-    PERIODIC_FUNCTIONS, PeriodicParams, RenderModel, StringIdData, TRANSITION_FUNCTIONS, TagBlock,
-    TagField, TagFieldData, TagFieldType, TagFile, TagFunction, TagFunctionEditor, BlobFunction, FunctionEncoding, H2Function, SchemaEnum,
+    AssFile, Bitmap, BlobFunction, ColorGraphType, CurvePointMode, CurveSegmentType, Endian,
+    FoundationMasterType as EngineMasterType, FunctionEncoding, FunctionFlags, FunctionKind,
+    FunctionType, H2Function, JmsFile, PeriodicParams, RenderModel, SchemaEnum, StringIdData,
+    TagBlock, TagField, TagFieldData, TagFieldType, TagFile, TagFunction, TagFunctionEditor,
     TagReferenceData, TagResource, TagResourceKind, TagStruct, TransitionParams, format_group_tag,
     parse_group_tag,
 };
@@ -129,6 +129,8 @@ mod button_icons;
 use button_icons::*;
 mod editor;
 use editor::*;
+mod thumbnail_library;
+use thumbnail_library::*;
 mod bitmap_browser;
 use bitmap_browser::*;
 mod model_browser;
@@ -199,23 +201,6 @@ pub struct Baboon {
     native_template_cache: Option<NativeTemplateCache>,
     /// Modeless find-in-tag dialog and its exact occurrence list.
     find: FindDialogState,
-    /// Browser view a newly opened workspace starts in. The live setting is
-    /// [`Kit::browser_mode`] — each workspace keeps its own — and this is the
-    /// saved default they are seeded from.
-    default_browser_mode: BrowserMode,
-    default_browser_sort: BrowserSort,
-    /// How nested groups, structs and blocks in the tag editor start out.
-    nested_default: NestedDefault,
-    show_browser_prefixes: bool,
-    folders_before_tags: bool,
-    double_click_to_open_tags: bool,
-    /// Persisted policy controlling whether prior windows are restored, asked
-    /// about, or deliberately ignored at startup.
-    session_restore: SessionRestore,
-    /// Which build track update checks look at — stable releases or the
-    /// rolling development build.
-    update_channel: UpdateChannel,
-    check_updates_on_startup: bool,
     /// The most recent check's result, kept only while it is actually an
     /// update. The status line expires on a timer, so this is what keeps the
     /// news reachable after a silent startup check.
@@ -223,34 +208,17 @@ pub struct Baboon {
     /// The most recent successful check, update or not, so Settings can report
     /// the outcome after the status line has expired.
     last_update_check: Option<UpdateCheckResult>,
-    show_block_sizes: bool,
-    /// Mirrors [`crate::format::angles_in_degrees`], which is where the
-    /// formatters actually read it; this field is what gets persisted and
-    /// what the checkboxes bind to.
-    angles_in_degrees: bool,
-    scroll_to_cycle_dropdowns: bool,
-    /// Warn before Save overwrites Campaign Evolved pak files in place.
-    confirm_container_overwrite: bool,
-    /// Show the preflight plan and wait for confirmation before a runtime poke.
-    confirm_runtime_poke: bool,
-    /// Whether the CE-only Unreal package workspace is visible and mounted.
-    enable_chimp: bool,
-    /// Optional directory for Chimp's non-destructive `_P` output.
-    chimp_output_dir: Option<PathBuf>,
-    /// Optional external Unreal mappings used when Chimp mounts CE packages.
-    chimp_usmap_path: Option<PathBuf>,
     chimp_usmap_path_input: String,
-    expert_mode: bool,
-    dark_mode: bool,
-    ui_scale: f32,
     pending_ui_scale: f32,
-    model_preview_size: f32,
-    bitmap_preview_view: BitmapPreviewViewSettings,
-    ek_folder_aliases: Vec<EkFolderAlias>,
-    custom_editing_kit_profiles: Vec<CustomEditingKitProfile>,
     editing_kit_validation: EditingKitValidationCache,
     custom_editing_kit_draft: Option<CustomEditingKitDraft>,
     custom_editing_kit_removal: Option<CustomEditingKitRemoval>,
+    /// The live preferences: what Settings edits and every reader consults.
+    /// `browser_mode` / `browser_sort` here are only the seed a new workspace
+    /// starts from — each kit keeps its own — and [`Baboon::current_prefs`]
+    /// takes the focused kit's when it writes them out.
+    prefs: GuiPrefs,
+    /// What was last written to disk, so an unchanged frame writes nothing.
     saved_prefs: GuiPrefs,
     first_run_wizard: Option<FirstRunWizardState>,
     settings_open: bool,
@@ -304,6 +272,8 @@ pub struct Baboon {
     last_mod_export_name: Option<String>,
     /// Kit ids with an in-place delete worker currently running.
     container_delete_running: HashSet<KitId>,
+    /// Kits with a Chimp save running, and the close to run once it lands.
+    chimp_writes: HashMap<KitId, Option<PendingCloseAction>>,
     /// Every Campaign Evolved tag this installation created by duplicating
     /// another. Deletion is limited to what is recorded here, because a copy is
     /// otherwise indistinguishable from a tag the game shipped.
@@ -334,15 +304,7 @@ pub struct Baboon {
     tag_compat: TagCompatUiState,
     map_names_game_tab: MapNamesGameTab,
     tool_commands: ToolCommandsUiState,
-    tool_commands_window_pos: Option<egui::Pos2>,
-    tool_commands_window_size: Vec2,
-    tool_commands_left_width: f32,
-    tool_commands_collapsed_categories: HashSet<String>,
-    recent_folders: Vec<PathBuf>,
-    editing_kit_favorites: Vec<EditingKitFavorites>,
-    blender_path: Option<PathBuf>,
     blender_path_input: String,
-    editing_kit_paths: HashMap<String, PathBuf>,
     editing_kit_path_inputs: HashMap<String, String>,
     editing_kit_path_attention: Option<String>,
     /// One cross-frame edit popup at a time; its embedded tag/path identity
@@ -364,15 +326,12 @@ pub struct Baboon {
     color_popup_kit: Option<KitId>,
     function_popup_kit: Option<KitId>,
     tag_reference_picker_kit: Option<KitId>,
-    custom_color_swatches: Vec<Option<[u8; 4]>>,
-    palette_last_dir: Option<PathBuf>,
     /// Function editor snapshot and write targets captured when the popup opens.
     function_popup: Option<FunctionPopup>,
     query_results: Option<TagQueryResults>,
     /// "Compare Tags" (Tag Diff) window state.
     tag_diff: Option<TagDiffState>,
     content_explorer: Option<ContentExplorer>,
-    keyword_input: String,
     keyword_chooser_open: bool,
     reveal_target: Option<RevealRequest>,
     field_value_search_open: bool,
@@ -396,20 +355,14 @@ pub struct Baboon {
     status_shown: String,
     status_changed_at: f64,
     folder_refactor: Option<FolderRefactorUiState>,
-    entry_index_progress: Option<EntryIndexProgressState>,
     show_entry_index_wait_notice: bool,
-    /// True while checking a cached loose-folder index for file changes.
-    refreshing_entry_index: bool,
-    next_entry_index_refresh_at: f64,
-    /// True while a background reverse-dependency index build is running.
-    building_reverse_dependencies: bool,
-    building_reference_for_entry_index: bool,
-    reference_index_progress: Option<ReferenceIndexProgressState>,
     terminal: TerminalState,
     /// Game identifiers (e.g. "halo3_mcc") for which the user has chosen to
     /// keep the terminal open. Persisted in prefs.json and restored per kit.
     terminal_open_games: HashSet<String>,
     saved_terminal_open_games: HashSet<String>,
+    /// When the per-frame prefs check next runs (egui time).
+    prefs_next_check_at: f64,
     /// Modal close transaction; the pending action is executed only after every
     /// selected dirty document has been saved or discard is confirmed.
     save_changes_prompt: SaveChangesPrompt,
@@ -460,6 +413,10 @@ pub struct Baboon {
     /// Lazily-computed occurrences per expanded referrer row. A present-but-empty
     /// vec means "walked, none found"; absence means "not yet walked (loading)".
     ref_jump_occurrences: HashMap<usize, Vec<RefOccurrence>>,
+    /// Referrer rows whose occurrences a worker is computing. The tag is read
+    /// and walked off the UI thread and never cached as a document: it is not
+    /// open, so there is no tab to keep it for.
+    ref_jump_loading: HashSet<usize>,
 }
 
 impl Baboon {
@@ -498,7 +455,6 @@ impl Baboon {
         cc.egui_ctx.set_visuals(foundation_visuals());
         let names = TagNameIndex::load_from_definitions(&locate_definitions_root());
         names.publish_as_process_group_names();
-        let (tx, rx) = mpsc::channel();
         let last_session = (!suppress_startup_popups && first_run_wizard.is_none())
             .then(load_last_session)
             .flatten()
@@ -515,11 +471,62 @@ impl Baboon {
             // Start fresh — never reopen, never ask.
             SessionRestore::Never => (None, None),
         };
+        let mut app = Self::assemble(
+            &cc.egui_ctx,
+            window_state,
+            prefs,
+            terminal_open_games,
+            first_run_wizard,
+            names,
+            last_opened_windows,
+        );
+        if let Some(kits) = auto_restore_session {
+            app.begin_last_session_restore(kits, cc.egui_ctx.clone());
+        }
+        match startup_arguments {
+            StartupArguments::Normal => {}
+            StartupArguments::Launch(launch) => {
+                app.begin_command_line_launch(launch, cc.egui_ctx.clone())
+            }
+            StartupArguments::Invalid(error) => {
+                app.status = format!("Command line: {error}");
+            }
+        }
+        if app.should_check_updates_on_startup() {
+            app.begin_check_for_updates(cc.egui_ctx.clone(), true);
+        }
+        app
+    }
+
+    /// The app built from state already loaded. Split from [`Baboon::new`],
+    /// which owns the side effects — context setup, reading prefs and the last
+    /// session off disk, startup restores and update checks — so tests can
+    /// build an app without any of them.
+    #[allow(clippy::too_many_arguments)]
+    fn assemble(
+        ctx: &egui::Context,
+        window_state: crate::window_state::WindowStateTracker,
+        prefs: GuiPrefs,
+        terminal_open_games: HashSet<String>,
+        first_run_wizard: Option<FirstRunWizardState>,
+        names: TagNameIndex,
+        last_opened_windows: Option<LastOpenedWindowsPrompt>,
+    ) -> Self {
+        let (tx, rx) = mpsc::channel();
         let editing_kit_validation = EditingKitValidationCache::new(
             &prefs.editing_kit_paths,
             &prefs.custom_editing_kit_profiles,
         );
-        let mut app = Self {
+        // What the file holds, brought into range. `saved_prefs` keeps the
+        // file's own values, so a correction here is written back once.
+        let mut live_prefs = prefs.clone();
+        live_prefs
+            .tool_commands_window_size
+            .get_or_insert(DEFAULT_TOOL_COMMANDS_WINDOW_SIZE);
+        live_prefs.tool_commands_left_width = live_prefs
+            .tool_commands_left_width
+            .max(MIN_TOOL_COMMANDS_LEFT_WIDTH);
+        Self {
             window_state,
             default_names: names.clone(),
             tx,
@@ -538,42 +545,19 @@ impl Baboon {
             cache_import_dialog: None,
             native_template_cache: None,
             find: FindDialogState::default(),
-            default_browser_mode: prefs.browser_mode,
-            default_browser_sort: prefs.browser_sort,
-            nested_default: prefs.nested_default,
-            show_browser_prefixes: prefs.show_browser_prefixes,
-            folders_before_tags: prefs.folders_before_tags,
-            double_click_to_open_tags: prefs.double_click_to_open_tags,
-            session_restore: prefs.session_restore,
-            update_channel: prefs.update_channel,
-            check_updates_on_startup: prefs.check_updates_on_startup,
             available_update: None,
             last_update_check: None,
-            show_block_sizes: prefs.show_block_sizes,
-            angles_in_degrees: prefs.angles_in_degrees,
-            scroll_to_cycle_dropdowns: prefs.scroll_to_cycle_dropdowns,
-            confirm_container_overwrite: prefs.confirm_container_overwrite,
-            confirm_runtime_poke: prefs.confirm_runtime_poke,
-            enable_chimp: prefs.enable_chimp,
-            chimp_output_dir: prefs.chimp_output_dir.clone(),
-            chimp_usmap_path: prefs.chimp_usmap_path.clone(),
             chimp_usmap_path_input: prefs
                 .chimp_usmap_path
                 .as_ref()
                 .map(|path| path.display().to_string())
                 .unwrap_or_default(),
-            expert_mode: prefs.expert_mode,
-            dark_mode: prefs.dark_mode,
-            ui_scale: prefs.ui_scale,
             pending_ui_scale: prefs.ui_scale,
-            model_preview_size: prefs.model_preview_size,
-            bitmap_preview_view: prefs.bitmap_preview_view,
-            ek_folder_aliases: prefs.ek_folder_aliases.clone(),
-            custom_editing_kit_profiles: prefs.custom_editing_kit_profiles.clone(),
             editing_kit_validation,
             custom_editing_kit_draft: None,
             custom_editing_kit_removal: None,
             saved_prefs: prefs.clone(),
+            prefs: live_prefs,
             first_run_wizard,
             settings_open: false,
             settings_tab: SettingsTab::Startup,
@@ -598,6 +582,7 @@ impl Baboon {
             chimp_level_job: None,
             last_mod_export_name: None,
             container_delete_running: HashSet::new(),
+            chimp_writes: HashMap::new(),
             created_tags: CreatedTagLedger::load(),
             clear_stash_confirm: None,
             chimp_discard_prompt: None,
@@ -610,32 +595,20 @@ impl Baboon {
             about_open: false,
             help_panel_tab: HelpPanelTab::About,
             help_docs: HelpDocsState::load(),
-            tutorials: TutorialsState::load(&cc.egui_ctx),
+            tutorials: TutorialsState::load(&ctx),
             tutorials_game: "haloce_evolved".to_owned(),
             tutorials_category: TutorialCategory::ThreeD,
             script_docs: ScriptDocsUiState::default(),
             tag_compat: TagCompatUiState::default(),
             map_names_game_tab: MapNamesGameTab::HaloCe,
             tool_commands: ToolCommandsUiState::default(),
-            tool_commands_window_pos: prefs.tool_commands_window_pos,
-            tool_commands_window_size: prefs
-                .tool_commands_window_size
-                .unwrap_or(DEFAULT_TOOL_COMMANDS_WINDOW_SIZE),
-            tool_commands_left_width: prefs
-                .tool_commands_left_width
-                .max(MIN_TOOL_COMMANDS_LEFT_WIDTH),
-            tool_commands_collapsed_categories: prefs.tool_commands_collapsed_categories.clone(),
-            recent_folders: prefs.recent_folders.clone(),
-            editing_kit_favorites: prefs.editing_kit_favorites.clone(),
             editing_kit_path_inputs: editing_kit_path_inputs(&prefs.editing_kit_paths),
-            editing_kit_paths: prefs.editing_kit_paths.clone(),
             editing_kit_path_attention: None,
             blender_path_input: prefs
                 .blender_path
                 .as_ref()
                 .map(|path| path.display().to_string())
                 .unwrap_or_default(),
-            blender_path: prefs.blender_path,
             deferred_file_action: None,
             restoring_kits: HashSet::new(),
             restored_active_kit: None,
@@ -643,8 +616,6 @@ impl Baboon {
             color_popup_kit: None,
             function_popup_kit: None,
             tag_reference_picker_kit: None,
-            custom_color_swatches: prefs.custom_color_swatches.clone(),
-            palette_last_dir: prefs.palette_last_dir.clone(),
             function_popup: None,
             query_results: None,
             pending_ref_jump: None,
@@ -652,9 +623,9 @@ impl Baboon {
             field_nav: None,
             ref_jump_expanded: HashSet::new(),
             ref_jump_occurrences: HashMap::new(),
+            ref_jump_loading: HashSet::new(),
             tag_diff: None,
             content_explorer: None,
-            keyword_input: String::new(),
             keyword_chooser_open: false,
             reveal_target: None,
             field_value_search_open: false,
@@ -670,13 +641,7 @@ impl Baboon {
             status_shown: String::new(),
             status_changed_at: 0.0,
             folder_refactor: None,
-            entry_index_progress: None,
             show_entry_index_wait_notice: false,
-            refreshing_entry_index: false,
-            next_entry_index_refresh_at: 0.0,
-            building_reverse_dependencies: false,
-            building_reference_for_entry_index: false,
-            reference_index_progress: None,
             terminal: TerminalState {
                 input: String::new(),
                 lines: Vec::new(),
@@ -692,6 +657,7 @@ impl Baboon {
                 scroll_to_bottom: false,
             },
             saved_terminal_open_games: terminal_open_games.clone(),
+            prefs_next_check_at: 0.0,
             terminal_open_games,
             save_changes_prompt: SaveChangesPrompt::default(),
             last_opened_windows,
@@ -704,17 +670,17 @@ impl Baboon {
             tag_reference_picker: None,
             pending_tool_import: None,
             blender_icon: load_ico_texture(
-                &cc.egui_ctx,
+                &ctx,
                 "blender_icon",
                 include_bytes!("../assets/Quick access/blender.ico"),
             ),
             sapien_icon: load_ico_texture(
-                &cc.egui_ctx,
+                &ctx,
                 "sapien_icon",
                 include_bytes!("../assets/Quick access/sapien.ico"),
             ),
             tag_test_icon: load_ico_texture(
-                &cc.egui_ctx,
+                &ctx,
                 "tag_test_icon",
                 include_bytes!("../assets/Quick access/tag_test.ico"),
             ),
@@ -722,25 +688,24 @@ impl Baboon {
             game_emblem_textures: HashMap::new(),
             custom_editing_kit_textures: HashMap::new(),
             custom_editing_kit_texture_failures: HashSet::new(),
-            last_pixels_per_point: cc.egui_ctx.pixels_per_point(),
+            last_pixels_per_point: ctx.pixels_per_point(),
             block_clipboard: None,
-        };
-        if let Some(kits) = auto_restore_session {
-            app.begin_last_session_restore(kits, cc.egui_ctx.clone());
         }
-        match startup_arguments {
-            StartupArguments::Normal => {}
-            StartupArguments::Launch(launch) => {
-                app.begin_command_line_launch(launch, cc.egui_ctx.clone())
-            }
-            StartupArguments::Invalid(error) => {
-                app.status = format!("Command line: {error}");
-            }
-        }
-        if app.should_check_updates_on_startup() {
-            app.begin_check_for_updates(cc.egui_ctx.clone(), true);
-        }
-        app
+    }
+
+    /// An app with default prefs and no kits, for tests. Prefs and the last
+    /// session are not read, and building it writes nothing.
+    #[cfg(test)]
+    pub(crate) fn for_test() -> Self {
+        Self::assemble(
+            &egui::Context::default(),
+            crate::window_state::WindowStateTracker::for_test(),
+            GuiPrefs::default(),
+            HashSet::new(),
+            None,
+            TagNameIndex::default(),
+            None,
+        )
     }
 
     fn game_banner_texture(
@@ -815,7 +780,8 @@ impl Baboon {
         profile_id: Option<&str>,
     ) -> Option<egui::TextureHandle> {
         let profile = profile_id.and_then(|profile_id| {
-            self.custom_editing_kit_profiles
+            self.prefs
+                .custom_editing_kit_profiles
                 .iter()
                 .find(|profile| profile.id == profile_id)
                 .cloned()
@@ -1502,8 +1468,14 @@ mod tests {
         );
 
         let entry = h2_shader_entry(u32::from_be_bytes(*b"shad"));
-        let model =
-            build_h2ek_shader_editor_model(&tag, &entry, &TagNameIndex::default(), None).unwrap();
+        let model = build_h2ek_shader_editor_model(
+            &tag,
+            &entry,
+            &TagNameIndex::default(),
+            None,
+            &mut H2TemplateCache::default(),
+        )
+        .unwrap();
         let (function_bytes, path) = first_halo2_byte_block_function_row(&model).unwrap();
 
         assert_eq!(function_bytes, bytes);
@@ -1519,13 +1491,26 @@ mod tests {
             header: vec![0; 64],
         };
         assert!(
-            build_h2ek_shader_editor_model(&classic, &entry, &TagNameIndex::default(), None)
-                .is_some()
+            build_h2ek_shader_editor_model(
+                &classic,
+                &entry,
+                &TagNameIndex::default(),
+                None,
+                &mut H2TemplateCache::default()
+            )
+            .is_some()
         );
 
         let mcc = TagFile::new(test_definition_path("halo2_mcc/shader.json")).unwrap();
         assert!(
-            build_h2ek_shader_editor_model(&mcc, &entry, &TagNameIndex::default(), None).is_none()
+            build_h2ek_shader_editor_model(
+                &mcc,
+                &entry,
+                &TagNameIndex::default(),
+                None,
+                &mut H2TemplateCache::default()
+            )
+            .is_none()
         );
 
         let non_shader = classic;
@@ -1535,7 +1520,8 @@ mod tests {
                 &non_shader,
                 &non_shader_entry,
                 &TagNameIndex::default(),
-                None
+                None,
+                &mut H2TemplateCache::default(),
             )
             .is_none()
         );
@@ -1568,6 +1554,7 @@ mod tests {
             &h2_shader_entry(u32::from_be_bytes(*b"rmsh")),
             &TagNameIndex::default(),
             None,
+            &mut H2TemplateCache::default(),
         )
         .unwrap();
 
@@ -1597,6 +1584,7 @@ mod tests {
             &h2_shader_entry(u32::from_be_bytes(*b"rmsh")),
             &TagNameIndex::default(),
             None,
+            &mut H2TemplateCache::default(),
         )
         .unwrap();
 
@@ -2647,6 +2635,7 @@ mod tests {
             &h2_shader_entry(u32::from_be_bytes(*b"rmsh")),
             &TagNameIndex::default(),
             None,
+            &mut H2TemplateCache::default(),
         )
         .unwrap();
         let summary = first_h2_function_edit_summary(&model).expect("function row");
@@ -3029,6 +3018,54 @@ mod tests {
             wrote = true;
         });
         assert!(wrote, "failed to seed wrapped H2 function bytes");
+    }
+
+    /// The H2 shader grid is rebuilt every frame, and used to read and parse
+    /// its `.shader_template` off disk each time. Now the template is read
+    /// once, and again only when the file changes.
+    #[test]
+    fn the_h2_shader_grid_reads_its_template_once_per_change() {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-h2-template-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("shaders")).unwrap();
+        let template_path = root.join("shaders/test.shader_template");
+        std::fs::write(&template_path, b"not a template").unwrap();
+
+        let mut tag = h2_classic_shader_tag();
+        crate::app::apply_field_edit(&mut tag, "template", "stem:shaders/test").unwrap();
+        let entry = h2_shader_entry(u32::from_be_bytes(*b"shad"));
+        let source = TagSource::LooseFolder {
+            root: root.clone(),
+            game: None,
+            definitions_root: PathBuf::new(),
+        };
+        let mut templates = H2TemplateCache::default();
+        let frames = |templates: &mut H2TemplateCache| {
+            for _ in 0..3 {
+                build_h2ek_shader_editor_model(
+                    &tag,
+                    &entry,
+                    &TagNameIndex::default(),
+                    Some(&source),
+                    templates,
+                );
+            }
+        };
+
+        frames(&mut templates);
+        assert_eq!(templates.loads, 1, "three frames, one read");
+        // A different size is a different file, whatever the clock says.
+        std::fs::write(&template_path, b"still not a template, but longer").unwrap();
+        frames(&mut templates);
+
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(templates.loads, 2, "a changed file is read again, once");
     }
 
     fn h2_shader_entry(group_tag: u32) -> TagEntry {

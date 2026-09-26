@@ -14,6 +14,153 @@ pub(in crate::app) struct AppliedFieldEdits {
     pub(in crate::app) outcomes: Vec<FieldEditOutcome>,
 }
 
+/// Every kind of edit a tag pane collects while it draws. They are applied
+/// together once the draw has finished, behind one undo snapshot.
+#[derive(Default)]
+pub(in crate::app) struct DeferredOps {
+    pub(in crate::app) pending: Vec<PendingFieldEdit>,
+    pub(in crate::app) block_ops: Vec<BlockOp>,
+    pub(in crate::app) shader_ops: Vec<ShaderOp>,
+    pub(in crate::app) shader_param_ops: Vec<ShaderParamOp>,
+    pub(in crate::app) h2_shader_param_ops: Vec<H2ShaderParamOp>,
+    pub(in crate::app) model_variant_ops: Vec<ModelVariantOp>,
+    /// Halo 2 function byte-block writes from the function editor.
+    pub(in crate::app) function_data_ops: Vec<FunctionDataOp>,
+}
+
+impl DeferredOps {
+    pub(in crate::app) fn is_empty(&self) -> bool {
+        self.pending.is_empty()
+            && self.block_ops.is_empty()
+            && self.shader_ops.is_empty()
+            && self.shader_param_ops.is_empty()
+            && self.h2_shader_param_ops.is_empty()
+            && self.model_variant_ops.is_empty()
+            && self.function_data_ops.is_empty()
+    }
+}
+
+/// Whether a batch of edits is its own undo step or joins the one open.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::app) enum UndoStep {
+    /// A tag pane's per-frame edits: typing into a field keeps extending one
+    /// step, and a frame with no edits closes it.
+    Coalesce,
+    /// A popup, picker or paste confirmed once: one step, closed at once.
+    Own,
+}
+
+pub(in crate::app) struct AppliedDeferredOps {
+    /// The last batch's status line, if any batch set one.
+    pub(in crate::app) status: Option<String>,
+    /// Per-draft outcomes of the plain field edits.
+    pub(in crate::app) outcomes: Vec<FieldEditOutcome>,
+    /// A model-variant op ran, so a cached model preview is stale.
+    pub(in crate::app) model_variants_changed: bool,
+}
+
+/// Apply one frame's deferred edits to `doc`. Any edit at all opens (or
+/// extends) an undo window first; a frame with none closes it.
+///
+/// The undo decision used to list the op kinds by hand, and missed the H2
+/// shader-parameter and function-data ops: the H2 shader grid's main edits
+/// changed the tag with no snapshot to undo to.
+pub(in crate::app) fn apply_deferred_ops(
+    doc: &mut TagDocument,
+    ops: DeferredOps,
+    label: &str,
+) -> AppliedDeferredOps {
+    if ops.is_empty() {
+        doc.journal.end_edit_window();
+        return AppliedDeferredOps {
+            status: None,
+            outcomes: Vec::new(),
+            model_variants_changed: false,
+        };
+    }
+    doc.journal.begin_edit(&doc.tag, label);
+    let DeferredOps {
+        pending,
+        block_ops,
+        shader_ops,
+        shader_param_ops,
+        h2_shader_param_ops,
+        model_variant_ops,
+        function_data_ops,
+    } = ops;
+    let tag = &mut doc.tag;
+    let dirty = &mut doc.dirty;
+    let applied = apply_pending_edits(tag, pending, dirty);
+    let mut status = applied.status;
+    let mut keep = |next: Option<String>| {
+        if next.is_some() {
+            status = next;
+        }
+    };
+    keep(apply_block_ops(tag, block_ops, dirty));
+    keep(apply_shader_ops(tag, shader_ops, dirty));
+    keep(apply_shader_param_ops(tag, shader_param_ops, dirty));
+    keep(apply_h2_shader_param_ops(tag, h2_shader_param_ops, dirty));
+    let variant_status = apply_model_variant_ops(tag, model_variant_ops, dirty);
+    let model_variants_changed = variant_status.is_some();
+    keep(variant_status);
+    keep(apply_function_data_ops(tag, function_data_ops, dirty));
+    AppliedDeferredOps {
+        status,
+        outcomes: applied.outcomes,
+        model_variants_changed,
+    }
+}
+
+impl Baboon {
+    /// Apply edits the UI collected to one open tag: the one entry every
+    /// UI-originated edit goes through, so each gets the same undo step, the
+    /// same read-only refusal, the same draft bookkeeping and the same
+    /// status line.
+    ///
+    /// `None` when nothing was applied: the tag is not open in `kit_index`,
+    /// or the kit is read-only (which says so on the status line when there
+    /// was something to refuse).
+    pub(in crate::app) fn apply_doc_ops(
+        &mut self,
+        kit_index: usize,
+        tag_key: &str,
+        label: &str,
+        ops: DeferredOps,
+        step: UndoStep,
+    ) -> Option<AppliedDeferredOps> {
+        if self.editing_kit_is_read_only(kit_index) {
+            if !ops.is_empty() {
+                self.refuse_read_only_edit(kit_index);
+            }
+            if let Some(doc) = self.kits[kit_index].parsed_tags.get_mut(tag_key) {
+                doc.journal.end_edit_window();
+            }
+            return None;
+        }
+        let kit = &mut self.kits[kit_index];
+        let doc = kit.parsed_tags.get_mut(tag_key)?;
+        let applied = apply_deferred_ops(doc, ops, label);
+        if step == UndoStep::Own {
+            doc.journal.end_edit_window();
+        }
+        // Per-edit outcomes: a draft whose value applied cleanly is marked
+        // clean, while one the parser rejected keeps the text the user typed
+        // instead of snapping back to the old value.
+        kit.edit_buffers
+            .accept_successful_edits(tag_key, &applied.outcomes);
+        if applied.model_variants_changed
+            && let Some(preview) = kit.model_previews.get_mut(tag_key)
+        {
+            preview.invalidate_load();
+        }
+        if let Some(status) = &applied.status {
+            self.status = status.clone();
+        }
+        Some(applied)
+    }
+}
+
 pub(in crate::app) fn apply_pending_edits(
     tag: &mut TagFile,
     edits: Vec<PendingFieldEdit>,
@@ -222,23 +369,44 @@ pub(in crate::app) fn apply_one_h2_shader_param_op(
             animation_type_index,
             initial_function_data,
         } => {
-            let parameter_index = ensure_h2_shader_parameter(
+            let parameter = ensure_h2_shader_parameter(
                 tag,
                 parameters_block_path,
                 parameter_name,
                 *parameter_type_index,
             )?;
-            let animation_index = ensure_h2_animation_property(
-                tag,
-                parameters_block_path,
-                parameter_index,
-                *animation_type_index,
-            )?;
-            let data_path = format!(
-                "{}[{}]/animation properties[{}]/function/data",
-                parameters_block_path, parameter_index, animation_index
-            );
-            replace_halo2_function_byte_block(tag, &data_path, initial_function_data)?;
+            let mut animation = None;
+            let result = (|| {
+                let property = ensure_h2_animation_property(
+                    tag,
+                    parameters_block_path,
+                    parameter.index,
+                    *animation_type_index,
+                )?;
+                animation = Some(property);
+                let data_path = format!(
+                    "{}[{}]/animation properties[{}]/function/data",
+                    parameters_block_path, parameter.index, property.index
+                );
+                replace_halo2_function_byte_block(tag, &data_path, initial_function_data)
+            })();
+            if result.is_err() {
+                // Remove whatever this op made, outermost first: deleting a
+                // created parameter takes its animation properties with it.
+                if parameter.created {
+                    delete_block_element(tag, parameters_block_path, parameter.index);
+                } else if let Some(property) = animation.filter(|property| property.created) {
+                    delete_block_element(
+                        tag,
+                        &format!(
+                            "{parameters_block_path}[{}]/animation properties",
+                            parameter.index
+                        ),
+                        property.index,
+                    );
+                }
+            }
+            result?;
             Ok(format!(
                 "Created H2 function row '{}' type {}",
                 parameter_name, animation_type_index
@@ -255,7 +423,7 @@ pub(in crate::app) fn apply_one_h2_shader_param_op(
             field,
             input,
         } => {
-            let index = ensure_h2_shader_parameter(
+            let parameter = ensure_h2_shader_parameter(
                 tag,
                 parameters_block_path,
                 parameter_name,
@@ -264,10 +432,17 @@ pub(in crate::app) fn apply_one_h2_shader_param_op(
             let path = format!(
                 "{}[{}]/{}",
                 parameters_block_path,
-                index,
+                parameter.index,
                 escape_field_path_segment(field)
             );
-            apply_field_edit(tag, &path, input)?;
+            // A value that does not parse must not leave behind the empty
+            // parameter created to hold it.
+            if let Err(error) = apply_field_edit(tag, &path, input) {
+                if parameter.created {
+                    delete_block_element(tag, parameters_block_path, parameter.index);
+                }
+                return Err(error);
+            }
             Ok(format!(
                 "Edited H2 parameter '{}' {}",
                 parameter_name, field
@@ -323,22 +498,30 @@ fn ensure_h2_shader_parameter(
     parameters_block_path: &str,
     parameter_name: &str,
     parameter_type_index: i32,
-) -> Result<usize, String> {
+) -> Result<Ensured, String> {
     if let Some(index) = h2_shader_parameter_index(tag, parameters_block_path, parameter_name) {
-        return Ok(index);
+        return Ok(Ensured {
+            index,
+            created: false,
+        });
     }
-    let index = add_block_element(tag, parameters_block_path)?;
-    apply_field_edit(
-        tag,
-        &format!("{parameters_block_path}[{index}]/name"),
-        parameter_name,
-    )?;
-    apply_field_edit(
-        tag,
-        &format!("{parameters_block_path}[{index}]/type"),
-        &parameter_type_index.to_string(),
-    )?;
-    Ok(index)
+    let index = with_new_element(tag, parameters_block_path, |tag, index| {
+        apply_field_edit(
+            tag,
+            &format!("{parameters_block_path}[{index}]/name"),
+            parameter_name,
+        )?;
+        apply_field_edit(
+            tag,
+            &format!("{parameters_block_path}[{index}]/type"),
+            &parameter_type_index.to_string(),
+        )?;
+        Ok(index)
+    })?;
+    Ok(Ensured {
+        index,
+        created: true,
+    })
 }
 
 fn h2_shader_parameter_index(
@@ -360,21 +543,29 @@ fn ensure_h2_animation_property(
     parameters_block_path: &str,
     parameter_index: usize,
     animation_type_index: i32,
-) -> Result<usize, String> {
+) -> Result<Ensured, String> {
     let animation_block_path =
         format!("{parameters_block_path}[{parameter_index}]/animation properties");
     if let Some(index) =
         h2_animation_property_index(tag, &animation_block_path, animation_type_index)
     {
-        return Ok(index);
+        return Ok(Ensured {
+            index,
+            created: false,
+        });
     }
-    let index = add_block_element(tag, &animation_block_path)?;
-    apply_field_edit(
-        tag,
-        &format!("{animation_block_path}[{index}]/type"),
-        &animation_type_index.to_string(),
-    )?;
-    Ok(index)
+    let index = with_new_element(tag, &animation_block_path, |tag, index| {
+        apply_field_edit(
+            tag,
+            &format!("{animation_block_path}[{index}]/type"),
+            &animation_type_index.to_string(),
+        )?;
+        Ok(index)
+    })?;
+    Ok(Ensured {
+        index,
+        created: true,
+    })
 }
 
 fn h2_animation_property_index(
@@ -660,31 +851,56 @@ fn collect_block_index_edits(
     remap: &BlockElementRemap,
     edits: &mut Vec<BlockIndexEdit>,
 ) {
-    for field in tag_struct.fields_all() {
-        let field_path = append_field_path_for(struct_path, &field);
-        let is_new_element = remap
-            .excluded_new_elements
-            .as_ref()
-            .is_some_and(|range| path_is_within_target_element(struct_path, target_path, range));
+    // Everything here depends on the struct, not the field, so it is worked
+    // out once per struct. It used to be redone for every field of the tag on
+    // every structural block edit, target resolution included, and that
+    // resolution descends from the root once per ancestor.
+    let is_new_element = remap
+        .excluded_new_elements
+        .as_ref()
+        .is_some_and(|range| path_is_within_target_element(struct_path, target_path, range));
+    // Per target, whether it resolves to the edited block: `None` when it does
+    // not resolve at all, which (as before) is what lets a plain short fall
+    // back to its semantic target.
+    let mut declared: HashMap<String, Option<bool>> = HashMap::new();
+    let mut semantic: HashMap<&'static str, Option<bool>> = HashMap::new();
+    let is_target = |resolved: Option<String>| {
+        resolved.map(|path| path_without_field_ordinals(&path) == target_path)
+    };
 
-        let declared_target = (!is_new_element)
+    for field in tag_struct.fields_all() {
+        let declared_state = (!is_new_element)
             .then(|| field.definition().block_index_target())
             .flatten()
             .and_then(|target| {
-                resolve_declared_block_target_path(tag_struct, root, struct_path, target.name())
+                *declared.entry(target.name().to_owned()).or_insert_with(|| {
+                    is_target(
+                        declared_block_index_target(
+                            tag_struct,
+                            Some(root),
+                            struct_path,
+                            target.name(),
+                        )
+                        .map(|target| target.path),
+                    )
+                })
             });
-        let semantic_target = (!is_new_element && field.field_type() == TagFieldType::ShortInteger)
-            .then(|| semantic_short_index_target_key(field.name()))
-            .flatten()
-            .and_then(|key| resolve_semantic_block_target_path(tag_struct, root, struct_path, key));
+        let state = declared_state.or_else(|| {
+            (!is_new_element && field.field_type() == TagFieldType::ShortInteger)
+                .then(|| semantic_short_index_target_key(field.name()))
+                .flatten()
+                .and_then(|key| {
+                    *semantic.entry(key).or_insert_with(|| {
+                        is_target(
+                            semantic_block_index_target(tag_struct, Some(root), struct_path, key)
+                                .map(|target| target.path),
+                        )
+                    })
+                })
+        });
 
-        let resolved_target = declared_target.or(semantic_target);
-        if resolved_target
-            .as_deref()
-            .map(path_without_field_ordinals)
-            .as_deref()
-            == Some(target_path)
-        {
+        if state == Some(true) {
+            let field_path = append_field_path_for(struct_path, &field);
             let old = if field.field_type() == TagFieldType::ShortInteger {
                 match field.value() {
                     Some(TagFieldData::ShortInteger(value)) => Some(value as i64),
@@ -699,7 +915,7 @@ fn collect_block_index_edits(
                 let new = mapped.map(|index| index as i64).unwrap_or(-1);
                 if new != old {
                     edits.push(BlockIndexEdit {
-                        path: field_path.clone(),
+                        path: field_path,
                         value: new,
                     });
                 }
@@ -707,6 +923,7 @@ fn collect_block_index_edits(
         }
 
         if let Some(block) = field.as_block() {
+            let field_path = append_field_path_for(struct_path, &field);
             for (index, element) in block.iter().enumerate() {
                 collect_block_index_edits(
                     &element,
@@ -718,6 +935,7 @@ fn collect_block_index_edits(
                 );
             }
         } else if let Some(array) = field.as_array() {
+            let field_path = append_field_path_for(struct_path, &field);
             for (index, element) in array.iter().enumerate() {
                 collect_block_index_edits(
                     &element,
@@ -729,6 +947,7 @@ fn collect_block_index_edits(
                 );
             }
         } else if let Some(nested) = field.as_struct() {
+            let field_path = append_field_path_for(struct_path, &field);
             collect_block_index_edits(&nested, &field_path, root, target_path, remap, edits);
         }
     }
@@ -753,58 +972,78 @@ fn path_is_within_target_element(
     range.contains(&index)
 }
 
-fn resolve_declared_block_target_path(
+/// The block a declared block-index field points into: the first sibling, or
+/// failing that the nearest ancestor's field, holding a block of the target
+/// definition.
+///
+/// The one rule for this, used both by the field's element dropdown and by
+/// the renumbering that follows an element insert, delete or move, so what
+/// the dropdown offers is what renumbering keeps pointing at. `root` is only
+/// needed to climb past the field's own struct.
+pub(in crate::app) fn declared_block_index_target(
     tag_struct: &blam_tags::TagStruct<'_>,
-    root: blam_tags::TagStruct<'_>,
+    root: Option<blam_tags::TagStruct<'_>>,
     struct_path: &str,
     target_definition: &str,
-) -> Option<String> {
-    find_sibling_block_path(tag_struct, struct_path, |field| {
+) -> Option<BlockIndexTarget> {
+    if target_definition.is_empty() {
+        return None;
+    }
+    find_block_target(tag_struct, root, struct_path, |field| {
         field
             .as_block()
             .is_some_and(|block| block.definition().name() == target_definition)
     })
-    .or_else(|| {
-        find_ancestor_block_path(root, struct_path, |field| {
-            field
-                .as_block()
-                .is_some_and(|block| block.definition().name() == target_definition)
-        })
-    })
 }
 
-fn resolve_semantic_block_target_path(
+/// The same for a plain short that older schemas use as an index, found by
+/// the block's cleaned field name (see `semantic_short_index_target_key`).
+///
+/// The dropdown used to search nested blocks here as well, inside whichever
+/// element was selected, and renumbering did not. Over every Halo 2, Halo 3
+/// and classic CE tag in the local kits (97,000) the nested search never chose
+/// a target: the only such shorts are classic CE's `nodes/parent node`, whose
+/// `nodes` block is the one directly above.
+pub(in crate::app) fn semantic_block_index_target(
     tag_struct: &blam_tags::TagStruct<'_>,
-    root: blam_tags::TagStruct<'_>,
+    root: Option<blam_tags::TagStruct<'_>>,
     struct_path: &str,
     target_key: &str,
-) -> Option<String> {
-    find_sibling_block_path(tag_struct, struct_path, |field| {
+) -> Option<BlockIndexTarget> {
+    find_block_target(tag_struct, root, struct_path, |field| {
         field.as_block().is_some() && clean_field_key(field.name()) == target_key
-    })
-    .or_else(|| {
-        find_ancestor_block_path(root, struct_path, |field| {
-            field.as_block().is_some() && clean_field_key(field.name()) == target_key
-        })
     })
 }
 
-fn find_sibling_block_path(
+fn find_block_target(
+    tag_struct: &blam_tags::TagStruct<'_>,
+    root: Option<blam_tags::TagStruct<'_>>,
+    struct_path: &str,
+    matches: impl Fn(&TagField<'_>) -> bool + Copy,
+) -> Option<BlockIndexTarget> {
+    find_sibling_block(tag_struct, struct_path, matches)
+        .or_else(|| find_ancestor_block(root?, struct_path, matches))
+}
+
+fn find_sibling_block(
     tag_struct: &blam_tags::TagStruct<'_>,
     struct_path: &str,
     matches: impl Fn(&TagField<'_>) -> bool,
-) -> Option<String> {
+) -> Option<BlockIndexTarget> {
     tag_struct
         .fields_all()
         .find(|field| matches(field))
-        .map(|field| append_field_path_for(struct_path, &field))
+        .map(|field| BlockIndexTarget {
+            path: append_field_path_for(struct_path, &field),
+            len: field.as_block().map_or(0, |block| block.len()),
+        })
 }
 
-fn find_ancestor_block_path(
+fn find_ancestor_block(
     root: blam_tags::TagStruct<'_>,
     struct_path: &str,
     matches: impl Fn(&TagField<'_>) -> bool + Copy,
-) -> Option<String> {
+) -> Option<BlockIndexTarget> {
     let mut current = struct_path;
     while !current.is_empty() {
         let parent = current.rsplit_once('/').map(|(path, _)| path).unwrap_or("");
@@ -813,8 +1052,8 @@ fn find_ancestor_block_path(
         } else {
             root.descend(parent)?
         };
-        if let Some(path) = find_sibling_block_path(&ancestor, parent, matches) {
-            return Some(path);
+        if let Some(found) = find_sibling_block(&ancestor, parent, matches) {
+            return Some(found);
         }
         if parent.is_empty() {
             break;
@@ -1124,10 +1363,11 @@ pub(in crate::app) fn apply_model_variant_ops(
 fn apply_one_model_variant_op(tag: &mut TagFile, op: &ModelVariantOp) -> Result<String, String> {
     match op {
         ModelVariantOp::Create { name, regions } => {
-            let variant_index = add_block_element(tag, "variants")?;
-            apply_field_edit(tag, &format!("variants[{variant_index}]/name"), name)?;
-            write_model_variant_regions(tag, variant_index, regions)?;
-            Ok(format!("Created model variant '{name}'"))
+            with_new_element(tag, "variants", |tag, index| {
+                apply_field_edit(tag, &format!("variants[{index}]/name"), name)?;
+                write_model_variant_regions(tag, index, regions)?;
+                Ok(format!("Created model variant '{name}'"))
+            })
         }
         ModelVariantOp::Update {
             variant_index,
@@ -1136,19 +1376,6 @@ fn apply_one_model_variant_op(tag: &mut TagFile, op: &ModelVariantOp) -> Result<
             ensure_block_element_exists(tag, "variants", *variant_index)?;
             write_model_variant_regions(tag, *variant_index, regions)?;
             Ok(format!("Updated model variant {}", variant_index))
-        }
-        ModelVariantOp::Drop { variant_index } => {
-            let mut root = tag.root_mut();
-            let mut field = root
-                .field_path_mut("variants")
-                .ok_or_else(|| "variants block not found".to_owned())?;
-            let mut block = field
-                .as_block_mut()
-                .ok_or_else(|| "variants is not a block".to_owned())?;
-            block
-                .delete_element(*variant_index)
-                .map_err(|e| format!("{e:?}"))?;
-            Ok(format!("Deleted model variant {}", variant_index))
         }
     }
 }
@@ -1202,6 +1429,42 @@ pub(in crate::app) fn add_block_element(tag: &mut TagFile, path: &str) -> Result
     Ok(block.add_element())
 }
 
+/// Add an element to the block at `path` and fill it with `fill`. If filling
+/// fails, the element is deleted again, so a failed op leaves the tag as it
+/// found it.
+///
+/// Ops that add an element and then write its fields used to stop at the
+/// first failed write and leave the half-built element behind. Their callers
+/// only mark the document dirty on success, so that element was an unsaved
+/// change nothing knew about.
+fn with_new_element<T>(
+    tag: &mut TagFile,
+    path: &str,
+    fill: impl FnOnce(&mut TagFile, usize) -> Result<T, String>,
+) -> Result<T, String> {
+    let index = add_block_element(tag, path)?;
+    fill(tag, index).inspect_err(|_| delete_block_element(tag, path, index))
+}
+
+/// Undo an element added by this module. Best effort: it runs on a path that
+/// is already reporting an error.
+fn delete_block_element(tag: &mut TagFile, path: &str, index: usize) {
+    let mut root = tag.root_mut();
+    if let Some(mut field) = root.field_path_mut(path)
+        && let Some(mut block) = field.as_block_mut()
+    {
+        let _ = block.delete_element(index);
+    }
+}
+
+/// An element found by name, or created because it was missing. A caller that
+/// fails later removes it only if it made it.
+#[derive(Clone, Copy)]
+struct Ensured {
+    index: usize,
+    created: bool,
+}
+
 fn clear_block(tag: &mut TagFile, path: &str) -> Result<(), String> {
     let mut root = tag.root_mut();
     let mut field = root
@@ -1218,92 +1481,60 @@ pub(in crate::app) fn apply_one_shader_param_op(
     tag: &mut TagFile,
     op: &ShaderParamOp,
 ) -> Result<String, String> {
-    // Step 1: append a new element to the parameters block.
-    let new_idx = {
-        let mut root = tag.root_mut();
-        let mut field = root
-            .field_path_mut(&op.parameters_block_path)
-            .ok_or_else(|| format!("parameters block not found: {}", op.parameters_block_path))?;
-        let mut block = field
-            .as_block_mut()
-            .ok_or_else(|| format!("not a block: {}", op.parameters_block_path))?;
-        block.add_element()
-    };
-
-    // Step 2: write parameter name.
-    let name_path = format!("{}[{}]/parameter name", op.parameters_block_path, new_idx);
-    apply_field_edit(tag, &name_path, &op.parameter_name)?;
-
-    // Step 3: initialise requested fields.
-    for initial in &op.initial_fields {
-        let field = escape_field_path_segment(&initial.field);
-        let field_path = format!("{}[{}]/{}", op.parameters_block_path, new_idx, field);
-        apply_field_edit(tag, &field_path, &initial.input)?;
-    }
-
-    for animated in &op.animated_parameters {
-        let animated_block_path = format!(
-            "{}[{}]/animated parameters",
-            op.parameters_block_path, new_idx
-        );
-        apply_one_shader_op(
-            tag,
-            &ShaderOp {
-                animated_block_path,
-                output_type_index: animated.output_type_index,
-                initial_function_hex: animated.initial_function_hex.clone(),
-            },
-        )?;
-    }
-
-    Ok(format!(
-        "Created parameter '{}' at {}[{}]",
-        op.parameter_name, op.parameters_block_path, new_idx
-    ))
+    let block_path = &op.parameters_block_path;
+    with_new_element(tag, block_path, |tag, new_idx| {
+        let name_path = format!("{block_path}[{new_idx}]/parameter name");
+        apply_field_edit(tag, &name_path, &op.parameter_name)?;
+        for initial in &op.initial_fields {
+            let field = escape_field_path_segment(&initial.field);
+            apply_field_edit(
+                tag,
+                &format!("{block_path}[{new_idx}]/{field}"),
+                &initial.input,
+            )?;
+        }
+        for animated in &op.animated_parameters {
+            apply_one_shader_op(
+                tag,
+                &ShaderOp {
+                    animated_block_path: format!("{block_path}[{new_idx}]/animated parameters"),
+                    output_type_index: animated.output_type_index,
+                    initial_function_hex: animated.initial_function_hex.clone(),
+                },
+            )?;
+        }
+        Ok(format!(
+            "Created parameter '{}' at {block_path}[{new_idx}]",
+            op.parameter_name
+        ))
+    })
 }
 
 pub(in crate::app) fn apply_one_shader_op(
     tag: &mut TagFile,
     op: &ShaderOp,
 ) -> Result<String, String> {
-    // Step 1: append one element to the animated-parameters block and capture its index.
-    let new_idx = {
-        let mut root = tag.root_mut();
-        let mut field = root
-            .field_path_mut(&op.animated_block_path)
-            .ok_or_else(|| {
-                format!(
-                    "animated params block not found: {}",
-                    op.animated_block_path
-                )
-            })?;
-        let mut block = field
-            .as_block_mut()
-            .ok_or_else(|| format!("not a block: {}", op.animated_block_path))?;
-        block.add_element()
-    };
-
-    // Step 2: set the output `type` field on the newly created element.
-    let type_path = format!("{}[{}]/type", op.animated_block_path, new_idx);
-    apply_field_edit(tag, &type_path, &op.output_type_index.to_string())?;
-
-    // Step 3: write the initial `mapping_function` blob into `function/data`.
-    let data_path = format!("{}[{}]/function/data", op.animated_block_path, new_idx);
-    apply_field_edit(tag, &data_path, &op.initial_function_hex)?;
-
-    Ok(format!(
-        "Added animated parameter (type {}) at {}[{}]",
-        op.output_type_index, op.animated_block_path, new_idx
-    ))
+    let block_path = &op.animated_block_path;
+    with_new_element(tag, block_path, |tag, new_idx| {
+        let type_path = format!("{block_path}[{new_idx}]/type");
+        apply_field_edit(tag, &type_path, &op.output_type_index.to_string())?;
+        // The initial `mapping_function` blob goes into `function/data`.
+        let data_path = format!("{block_path}[{new_idx}]/function/data");
+        apply_field_edit(tag, &data_path, &op.initial_function_hex)?;
+        Ok(format!(
+            "Added animated parameter (type {}) at {block_path}[{new_idx}]",
+            op.output_type_index
+        ))
+    })
 }
 
 #[cfg(test)]
 mod campaign_evolved_field_paths {
-    use super::*;
     use crate::source::{load_iostore_container_set, read_entry};
     use std::path::{Path, PathBuf};
 
-    const PAKS: &str = "/Users/camden/Halo/halo-campaign-evolved_pc/Meteorite/Content/Paks";
+    static PAKS: std::sync::LazyLock<&'static str> =
+        std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_paks()));
 
     /// Mirrors how the editor builds paths: the inherited-parent chain
     /// contributes a name-only prefix, leaves add `name#ordinal`.
@@ -1339,13 +1570,14 @@ mod campaign_evolved_field_paths {
 
     #[test]
     fn every_ui_field_path_resolves_on_campaign_evolved_vehicles() {
-        if !Path::new(PAKS).exists() {
-            eprintln!("skipping: {PAKS} not present");
+        if !Path::new(*PAKS).exists() {
+            eprintln!("skipping: {} not present", *PAKS);
             return;
         }
         let defs = Path::new(env!("CARGO_MANIFEST_DIR")).join("definitions");
         let names = crate::format::TagNameIndex::load_from_definitions(&defs);
-        let loaded = load_iostore_container_set(PathBuf::from(PAKS), &names, &defs).expect("mount");
+        let loaded =
+            load_iostore_container_set(PathBuf::from(*PAKS), &names, &defs).expect("mount");
         let vehicles: Vec<_> = loaded
             .entries
             .iter()
@@ -1375,5 +1607,238 @@ mod campaign_evolved_field_paths {
             eprintln!("  {tagname}  ->  {p}");
         }
         assert!(broken.is_empty(), "{} unresolvable paths", broken.len());
+    }
+}
+
+#[cfg(test)]
+mod rollback_tests {
+    use super::*;
+
+    const PARAMETERS: &str = "render_method/parameters";
+
+    fn parameter_count(tag: &TagFile) -> usize {
+        tag.root()
+            .field_path(PARAMETERS)
+            .and_then(|field| field.as_block())
+            .map(|block| block.len())
+            .expect("a Halo 3 shader has a parameters block")
+    }
+
+    /// A value typed into a new scalar row that does not parse must fail the
+    /// whole op. It used to fail only its last step, leaving the parameter it
+    /// had just added — named, empty, and unknown to the dirty flag.
+    #[test]
+    fn a_failed_shader_parameter_op_leaves_no_parameter_behind() {
+        let schema = locate_definitions_root().join("halo3_mcc/shader.json");
+        let mut tag = TagFile::new(schema).unwrap();
+        let before = parameter_count(&tag);
+
+        let result = apply_one_shader_param_op(
+            &mut tag,
+            &ShaderParamOp {
+                parameters_block_path: PARAMETERS.to_owned(),
+                parameter_name: "specular_coefficient".to_owned(),
+                initial_fields: vec![ShaderParamInitialField {
+                    field: "real".to_owned(),
+                    input: "not a number".to_owned(),
+                }],
+                animated_parameters: Vec::new(),
+            },
+        );
+
+        assert!(result.is_err());
+        assert_eq!(parameter_count(&tag), before);
+
+        // And the same op with a value that parses still adds one.
+        apply_one_shader_param_op(
+            &mut tag,
+            &ShaderParamOp {
+                parameters_block_path: PARAMETERS.to_owned(),
+                parameter_name: "specular_coefficient".to_owned(),
+                initial_fields: vec![ShaderParamInitialField {
+                    field: "real".to_owned(),
+                    input: "0.5".to_owned(),
+                }],
+                animated_parameters: Vec::new(),
+            },
+        )
+        .unwrap();
+        assert_eq!(parameter_count(&tag), before + 1);
+    }
+}
+
+#[cfg(test)]
+mod deferred_ops_tests {
+    use super::*;
+
+    fn document() -> TagDocument {
+        let schema = locate_definitions_root().join("halo3_mcc/render_model.json");
+        TagDocument::clean(TagFile::new(schema).unwrap())
+    }
+
+    /// Every kind of deferred op must open an undo window, not just the ones
+    /// someone remembered to list. The H2 shader grid's value edits and the
+    /// function editor's byte-block writes go through the two kinds the old
+    /// hand-written condition left out, so they changed the tag with nothing
+    /// to undo to. Whether the op then applies is beside the point here: the
+    /// snapshot is taken before it runs.
+    #[test]
+    fn every_deferred_op_kind_opens_an_undo_window() {
+        let mut h2_param = document();
+        apply_deferred_ops(
+            &mut h2_param,
+            DeferredOps {
+                h2_shader_param_ops: vec![H2ShaderParamOp::EditFunctionData {
+                    block_path: "missing".to_owned(),
+                    data: Vec::new(),
+                }],
+                ..DeferredOps::default()
+            },
+            "Edit",
+        );
+        assert!(h2_param.journal.can_undo(), "H2 shader parameter op");
+
+        let mut function_data = document();
+        let applied = apply_deferred_ops(
+            &mut function_data,
+            DeferredOps {
+                function_data_ops: vec![FunctionDataOp {
+                    block_path: "missing".to_owned(),
+                    data: Vec::new(),
+                }],
+                ..DeferredOps::default()
+            },
+            "Edit",
+        );
+        assert!(function_data.journal.can_undo(), "function data op");
+        assert!(
+            applied
+                .status
+                .is_some_and(|status| status.starts_with("Function edit failed for missing")),
+            "the function data op never ran"
+        );
+
+        let mut untouched = document();
+        apply_deferred_ops(&mut untouched, DeferredOps::default(), "Edit");
+        assert!(!untouched.journal.can_undo(), "a frame with no ops");
+    }
+}
+
+#[cfg(test)]
+mod apply_doc_ops_tests {
+    use super::*;
+
+    const KEY: &str = "file:test.render_model";
+    const FIELD: &str = "node list checksum";
+
+    fn app_with_open_tag() -> Baboon {
+        let mut app = Baboon::for_test();
+        let schema = locate_definitions_root().join("halo3_mcc/render_model.json");
+        app.kits[0].parsed_tags.insert(
+            KEY.to_owned(),
+            TagDocument::clean(TagFile::new(schema).unwrap()),
+        );
+        app
+    }
+
+    fn set(value: &str) -> DeferredOps {
+        DeferredOps {
+            pending: vec![PendingFieldEdit {
+                path: FIELD.to_owned(),
+                input: value.to_owned(),
+            }],
+            ..DeferredOps::default()
+        }
+    }
+
+    fn value(app: &Baboon) -> String {
+        let doc = &app.kits[0].parsed_tags[KEY];
+        doc.tag
+            .root()
+            .field_path(FIELD)
+            .and_then(|field| field.value())
+            .map(|value| match value {
+                blam_tags::TagFieldData::LongInteger(value) => value.to_string(),
+                other => panic!("{FIELD} is a long integer, got {other:?}"),
+            })
+            .unwrap_or_default()
+    }
+
+    fn undo_steps(app: &mut Baboon) -> usize {
+        let doc = app.kits[0].parsed_tags.get_mut(KEY).unwrap();
+        let mut steps = 0;
+        while doc.journal.undo(&doc.tag).is_some() {
+            steps += 1;
+        }
+        steps
+    }
+
+    /// A popup's confirmed edit is its own undo step; a pane's per-frame
+    /// edits join the one still open.
+    #[test]
+    fn own_edits_are_separate_steps_and_coalesced_edits_merge() {
+        let mut app = app_with_open_tag();
+        app.apply_doc_ops(0, KEY, "Edit color", set("7"), UndoStep::Own);
+        app.apply_doc_ops(0, KEY, "Edit color", set("8"), UndoStep::Own);
+        assert_eq!(value(&app), "8");
+        assert_eq!(undo_steps(&mut app), 2, "two confirmed popups, two steps");
+
+        let mut app = app_with_open_tag();
+        app.apply_doc_ops(0, KEY, "Edit", set("7"), UndoStep::Coalesce);
+        app.apply_doc_ops(0, KEY, "Edit", set("8"), UndoStep::Coalesce);
+        assert_eq!(undo_steps(&mut app), 1, "one typing session, one step");
+    }
+
+    /// A read-only kit refuses the edit wherever it came from. The popups and
+    /// the reference picker applied theirs regardless, because only the pane
+    /// checked.
+    #[test]
+    fn a_read_only_kit_refuses_every_ui_edit() {
+        let mut app = app_with_open_tag();
+        let profile = CustomEditingKitProfile {
+            read_only: true,
+            git_tracked: false,
+            id: "protected".to_owned(),
+            name: "Protected".to_owned(),
+            game: "halo3_mcc".to_owned(),
+            root: PathBuf::from("/nowhere"),
+            icon: None,
+        };
+        app.kits[0].profile = Some(EditingKitProfileIdentity {
+            id: profile.id.clone(),
+            name: profile.name.clone(),
+        });
+        app.prefs.custom_editing_kit_profiles = vec![profile];
+        let before = value(&app);
+
+        let applied = app.apply_doc_ops(0, KEY, "Edit color", set("7"), UndoStep::Own);
+
+        assert!(applied.is_none());
+        assert_eq!(value(&app), before, "the tag is unchanged");
+        assert!(app.status.contains("read-only"), "status: {}", app.status);
+        assert_eq!(undo_steps(&mut app), 0);
+    }
+
+    /// A draft whose value was applied is marked clean, whichever path
+    /// applied it. Typed as `07`, which the field shows as `7`: only the
+    /// accept step can tell that draft was applied rather than abandoned.
+    #[test]
+    fn an_applied_edit_marks_its_draft_clean() {
+        let mut app = app_with_open_tag();
+        let draft_key = format!("{KEY}|{FIELD}");
+        let shown = value(&app);
+        let draft = app.kits[0]
+            .edit_buffers
+            .draft_mut(draft_key.clone(), &shown);
+        draft.text = "07".to_owned();
+        draft.changed = true;
+
+        app.apply_doc_ops(0, KEY, "Paste TSV", set("07"), UndoStep::Own);
+
+        let shown = value(&app);
+        assert_eq!(shown, "7");
+        let draft = app.kits[0].edit_buffers.take(&draft_key, &shown);
+        assert!(!draft.changed, "the applied draft still reads as unsaved");
+        assert_eq!(draft.text, "7");
     }
 }

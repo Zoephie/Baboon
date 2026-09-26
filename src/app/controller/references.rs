@@ -9,19 +9,26 @@ impl Baboon {
         &mut self,
         stamp: KitStamp,
         index: ReverseDependencyIndex,
+        missing: usize,
     ) -> bool {
-        self.building_reverse_dependencies = false;
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
+        let Some(kit_index) = self.resolve_kit(stamp.kit) else {
             return true;
         };
-        self.reference_index_progress = None;
-        let paired_entry_index_build = self.building_reference_for_entry_index;
-        self.building_reference_for_entry_index = false;
+        // The build is over whether or not its result is still wanted.
+        self.kits[kit_index].index_jobs.reference_progress = None;
+        self.kits[kit_index].index_jobs.building_references = false;
+        let paired_entry_index_build =
+            std::mem::take(&mut self.kits[kit_index].index_jobs.references_for_entry_index);
         self.show_entry_index_wait_notice = false;
+        if self.resolve_stamp(stamp).is_none() {
+            return true;
+        }
         if let Some(source) = self.kits[kit_index].source.as_mut() {
             let n = index.len();
-            if let (Some(game), TagSource::LooseFolder { root, .. }) =
-                (source.game.clone(), &source.source)
+            // An incomplete index is used for this session but not saved: saved,
+            // it would load back next time as complete.
+            if let (0, Some(game), TagSource::LooseFolder { root, .. }) =
+                (missing, source.game.clone(), &source.source)
             {
                 let root = root.clone();
                 let to_save = index.clone();
@@ -34,7 +41,12 @@ impl Baboon {
                 });
             }
             source.reverse_dependencies = Some(index);
-            self.status = if paired_entry_index_build {
+            self.status = if missing > 0 {
+                format!(
+                    "Reference index built without {missing} tag(s): a reader crashed on them. \
+                     Rebuild it to try again."
+                )
+            } else if paired_entry_index_build {
                 format!("Tag and reference indexes complete: {n} tags")
             } else {
                 format!("Reference index complete: {n} tags")
@@ -53,10 +65,13 @@ impl Baboon {
     ) -> bool {
         // Drives the global progress bar only; the stamp is checked purely so
         // a closed or reloaded kit's progress stops updating it.
-        if self.resolve_stamp(stamp).is_none() || !self.building_reverse_dependencies {
+        let Some(kit_index) = self.resolve_stamp(stamp) else {
+            return true;
+        };
+        if !self.kits[kit_index].index_jobs.building_references {
             return true;
         }
-        if let Some(progress) = self.reference_index_progress.as_mut() {
+        if let Some(progress) = self.kits[kit_index].index_jobs.reference_progress.as_mut() {
             progress.processed = processed;
             progress.total = total;
         }
@@ -288,4 +303,37 @@ pub(super) fn dependency_leaf_key(rel_path: &str) -> String {
 
 pub(super) fn dependency_target_exists(tags_root: &Path, rel_path: &str, extension: &str) -> bool {
     resolve_tag_path(tags_root, rel_path, extension).is_file()
+}
+
+#[cfg(test)]
+mod incomplete_index_tests {
+    use super::*;
+
+    /// A build that lost tags to a crashed reader says so, rather than
+    /// reporting a complete index.
+    #[test]
+    fn an_incomplete_reference_index_is_reported_as_such() {
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::SingleFile {
+                path: PathBuf::from("a.model"),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+        });
+        let stamp = app.kit_stamp();
+
+        app.handle_reverse_dependencies_built(stamp, ReverseDependencyIndex::default(), 3);
+
+        assert!(app.status.contains("without 3 tag"), "{}", app.status);
+    }
 }

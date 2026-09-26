@@ -292,8 +292,8 @@ pub(super) fn build_shader_editor_model(
     tag: &TagFile,
     group_tag: u32,
     source: Option<&TagSource>,
-    rmdf_cache: &mut HashMap<String, Option<RenderMethodDefinition>>,
-    rmop_cache: &mut HashMap<String, Option<RenderMethodOption>>,
+    rmdf_cache: &mut HashMap<String, Option<Arc<RenderMethodDefinition>>>,
+    rmop_cache: &mut HashMap<String, Option<Arc<RenderMethodOption>>>,
 ) -> Option<ShaderEditorModel> {
     let source = source?;
     // Guarded: a recompiled shader can carry animated-parameter type names

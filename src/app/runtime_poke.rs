@@ -4,6 +4,12 @@
 //! injection. It can alter bytes in allocations the game already owns, but it
 //! never allocates remote memory, changes page protection, resizes a block or
 //! data payload, or registers a new tag.
+//!
+//! Everything above `platform` — the profiles, the planner, the transaction
+//! engine — is plain byte work, but only the Windows `platform` drives it
+//! against a live process. Elsewhere only the tests reach it, so a non-Windows
+//! build would report the lot as dead; Windows builds still lint it.
+#![cfg_attr(not(windows), allow(dead_code))]
 
 use super::*;
 
@@ -30,6 +36,8 @@ const STRING_ID_SET_ZERO_BUILTIN_COUNT: u32 = 1_068;
 #[derive(Clone, Copy, Debug)]
 pub(in crate::app) struct RuntimeBuildProfile {
     pub(in crate::app) label: &'static str,
+    /// Recorded with the measurement, never consulted: see [`PROFILES`].
+    #[allow(dead_code)]
     host_sha256: &'static str,
     dll_sha256: &'static str,
     tag_table_pointer_rva: u64,
@@ -2034,7 +2042,7 @@ mod platform {
             _ => return Err("multiple matching game processes are running".to_owned()),
         };
         let modules = modules(process_id)?;
-        let host = modules
+        modules
             .iter()
             .find(|module| module.name.eq_ignore_ascii_case(PROCESS_NAME))
             .ok_or_else(|| "game executable module is missing".to_owned())?;
@@ -2654,7 +2662,7 @@ impl Baboon {
     /// the preflight plan is shown for confirmation first is the user's
     /// `confirm_runtime_poke` preference, not a property of how it was invoked.
     pub(super) fn begin_poke_current_tag(&mut self, ctx: egui::Context) {
-        if !self.confirm_runtime_poke {
+        if !self.prefs.confirm_runtime_poke {
             self.begin_poke_current_tag_direct(ctx);
             return;
         }
@@ -2877,7 +2885,7 @@ impl Baboon {
     }
 
     pub(super) fn draw_poke_window(&mut self, ctx: &egui::Context) {
-        let mut dont_ask = !self.confirm_runtime_poke;
+        let mut dont_ask = !self.prefs.confirm_runtime_poke;
         let Some(dialog) = self.poke_dialog.as_ref() else {
             return;
         };
@@ -2972,8 +2980,8 @@ impl Baboon {
         } else if confirm {
             // Apply the opt-out only when the user commits to the poke, so
             // cancelling out of the dialog never disarms the next one.
-            if dont_ask && self.confirm_runtime_poke {
-                self.confirm_runtime_poke = false;
+            if dont_ask && self.prefs.confirm_runtime_poke {
+                self.prefs.confirm_runtime_poke = false;
                 self.persist_prefs_if_changed();
             }
             self.confirm_poke(ctx.clone());

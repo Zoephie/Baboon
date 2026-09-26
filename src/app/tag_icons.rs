@@ -77,6 +77,7 @@ pub(super) fn tag_icon_uri(ctx: &egui::Context, group: &str) -> String {
     tag_icon_uri_for_pixels_per_point_and_size(group, ctx.pixels_per_point(), 16.0)
 }
 
+#[cfg(test)]
 fn tag_icon_uri_for_pixels_per_point(group: &str, pixels_per_point: f32) -> String {
     tag_icon_uri_for_pixels_per_point_and_size(group, pixels_per_point, 16.0)
 }

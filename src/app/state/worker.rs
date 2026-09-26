@@ -2,6 +2,8 @@
 //! It owns passive cross-frame state and operation messages; rendering and workflow execution belong to UI and controller modules.
 
 use super::*;
+use crate::app::controller::{InPlaceOverwrite, InPlaceOverwriteJob};
+use crate::app::ui::tag_compare::TagCompareGitUpdate;
 
 /// Completed in-place Campaign Evolved duplicate, ready for UI-thread source
 /// and document registration.
@@ -63,7 +65,6 @@ pub(in crate::app) struct ContainerDeleteResult {
     pub(in crate::app) display_path: String,
     pub(in crate::app) group_tag: u32,
     pub(in crate::app) package: String,
-    pub(in crate::app) uasset_path: String,
     pub(in crate::app) ubulk_path: String,
     pub(in crate::app) target_label: String,
     pub(in crate::app) is_mod: bool,
@@ -98,6 +99,35 @@ pub(in crate::app) enum WorkerMessage {
         stamp: KitStamp,
         index: ChimpTypeIndex,
     },
+    /// A Chimp mod container built and checked at `temporary`, to be
+    /// installed over `output` on the UI thread.
+    ChimpModBuilt {
+        kit: KitId,
+        output: PathBuf,
+        temporary: PathBuf,
+        written: Vec<ChimpWritten>,
+        result: Result<(), String>,
+    },
+    /// Chimp packages written into their own source containers.
+    ChimpSourcesOverwritten {
+        kit: KitId,
+        leases: Vec<ContainerLeaseId>,
+        containers: usize,
+        touched: bool,
+        written: Vec<ChimpWritten>,
+        result: Result<(), String>,
+    },
+    /// A Compare window Git read; `request` says which.
+    TagCompareGit {
+        request: u64,
+        update: Result<TagCompareGitUpdate, String>,
+    },
+    /// A Git Review job's finished view; `request` says which job it was.
+    GitReviewUpdated {
+        kit: KitId,
+        request: u64,
+        view: Result<GitReviewView, String>,
+    },
     ChimpPackageLoaded {
         stamp: KitStamp,
         package: String,
@@ -115,6 +145,15 @@ pub(in crate::app) enum WorkerMessage {
         kit: KitId,
         key: String,
         result: Result<TagFile, String>,
+    },
+    /// Where one unopened referrer points at the "References to" target, read
+    /// and walked off the UI thread.
+    RefJumpOccurrences {
+        kit: KitId,
+        index: usize,
+        key: String,
+        target: (u32, String),
+        result: Result<Vec<RefOccurrence>, String>,
     },
     /// One Bitmap Library thumbnail, decoded off the UI thread.
     BitmapThumbnailDecoded {
@@ -170,7 +209,7 @@ pub(in crate::app) enum WorkerMessage {
         /// Identifies which load this answers, so a reply that arrives after the
         /// user switched detail level or reloaded is dropped rather than paired
         /// with geometry it does not belong to.
-        geometry_id: u64,
+        textures_id: u64,
         textures: Vec<MaterialTextures>,
     },
     BitmapReimportFinished {
@@ -211,8 +250,17 @@ pub(in crate::app) enum WorkerMessage {
         lease: ContainerLeaseId,
         result: Result<ContainerRenameResult, String>,
     },
+    /// A tag written into its own container on a worker.
+    InPlaceOverwriteFinished {
+        job: Box<InPlaceOverwriteJob>,
+        lease: ContainerLeaseId,
+        written: InPlaceOverwrite,
+    },
     ContainerDeleteFinished {
         stamp: KitStamp,
+        /// The container write this job holds, round-tripped like Duplicate's
+        /// and Rename's so the handler can release it on every path.
+        lease: ContainerLeaseId,
         result: Result<ContainerDeleteResult, String>,
     },
     /// Exporting a level is minutes of work over thousands of cells and
@@ -379,9 +427,17 @@ pub(in crate::app) enum WorkerMessage {
     },
     // Background reverse-dependency index build finished; the stamp guards
     // against staleness after a source reload.
+    /// A whole-source listing from the Tools menu, read off the UI thread.
+    SourceListingReady {
+        stamp: KitStamp,
+        results: TagQueryResults,
+    },
     ReverseDependenciesBuilt {
         stamp: KitStamp,
         index: ReverseDependencyIndex,
+        /// Tags left out because the thread reading them crashed. Non-zero
+        /// means the index is incomplete, so it is used but not saved.
+        missing: usize,
     },
 }
 
@@ -511,5 +567,93 @@ impl ContainerDumpJob {
         Some(std::time::Duration::from_secs_f64(
             each * (self.total - self.done) as f64,
         ))
+    }
+}
+
+/// Run `job` on a worker thread and send the message it returns, then wake
+/// the UI.
+///
+/// If `job` panics, `on_panic` builds the message instead, from the panic's
+/// text. Most workers were plain `thread::spawn`s: a panic there sent
+/// nothing, so whatever the UI had marked as in flight (a loading tag, a
+/// running search, a container write) stayed that way for the session.
+/// Going through this, every job answers.
+pub(in crate::app) fn spawn_worker<J, P>(
+    tx: &std::sync::mpsc::Sender<WorkerMessage>,
+    ctx: &egui::Context,
+    job: J,
+    on_panic: P,
+) where
+    J: FnOnce() -> WorkerMessage + Send + 'static,
+    P: FnOnce(String) -> WorkerMessage + Send + 'static,
+{
+    let (tx, ctx) = (tx.clone(), ctx.clone());
+    std::thread::spawn(move || {
+        let message = std::panic::catch_unwind(std::panic::AssertUnwindSafe(job))
+            .unwrap_or_else(|panic| on_panic(panic_text(panic.as_ref())));
+        let _ = tx.send(message);
+        ctx.request_repaint();
+    });
+}
+
+/// A panic payload as text, for a message saying the job crashed.
+pub(in crate::app) fn panic_text(panic: &(dyn std::any::Any + Send)) -> String {
+    let detail = panic
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| panic.downcast_ref::<&'static str>().copied())
+        .unwrap_or("no message");
+    format!("the worker crashed: {detail}")
+}
+
+#[cfg(test)]
+mod spawn_worker_tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// A worker that panics still answers, so whatever the UI marked as in
+    /// flight is settled. A plain `thread::spawn` sent nothing.
+    #[test]
+    fn a_panicking_worker_still_sends_its_message() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let ctx = egui::Context::default();
+        spawn_worker(
+            &tx,
+            &ctx,
+            || panic!("decoder fell over"),
+            |error| WorkerMessage::TagLoaded {
+                kit: KitId(0),
+                key: "k".to_owned(),
+                result: Err(error),
+            },
+        );
+        spawn_worker(
+            &tx,
+            &ctx,
+            || WorkerMessage::TagLoaded {
+                kit: KitId(0),
+                key: "fine".to_owned(),
+                result: Err("not a panic".to_owned()),
+            },
+            |_| unreachable!(),
+        );
+
+        let mut results = Vec::new();
+        for _ in 0..2 {
+            let Ok(WorkerMessage::TagLoaded { key, result, .. }) =
+                rx.recv_timeout(Duration::from_secs(10))
+            else {
+                panic!("a worker did not answer");
+            };
+            results.push((key, result.unwrap_err()));
+        }
+        results.sort();
+        assert_eq!(results[0], ("fine".to_owned(), "not a panic".to_owned()));
+        assert_eq!(results[1].0, "k");
+        assert!(
+            results[1].1.contains("decoder fell over"),
+            "{}",
+            results[1].1
+        );
     }
 }

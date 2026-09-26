@@ -39,44 +39,21 @@ pub(in crate::app) fn export_tag_json_entries(
     output: &Path,
 ) -> anyhow::Result<String> {
     fs::create_dir_all(output)?;
-    let mut written = 0usize;
-    let mut failures = Vec::new();
-
-    for entry in entries {
+    export_each(entries, |entry| {
         let path = output.join(tag_json_relative_path(entry));
         if let Some(parent) = path.parent() {
-            if let Err(error) = fs::create_dir_all(parent) {
-                failures.push(format!("{}: {error}", entry.display_path));
-                continue;
-            }
+            fs::create_dir_all(parent)?;
         }
-
-        let result = (|| -> anyhow::Result<()> {
-            let tag = read_entry(source, entry)?;
-            let value = tag_to_json(&tag, entry);
-            let text = serde_json::to_string_pretty(&value)?;
-            fs::write(&path, text)?;
-            Ok(())
-        })();
-
-        match result {
-            Ok(()) => written += 1,
-            Err(error) => failures.push(format!("{}: {error}", entry.display_path)),
-        }
-    }
-
-    if written == 0 && !failures.is_empty() {
-        anyhow::bail!("failed to dump folder JSON: {}", failures.join("; "));
-    }
-    if written == 0 {
-        anyhow::bail!("no tag files found");
-    }
-
-    let mut message = format!("Wrote {written} JSON tag file(s) to {}", output.display());
-    if !failures.is_empty() {
-        message.push_str(&format!("; {} failed", failures.len()));
-    }
-    Ok(message)
+        let tag = read_entry(source, entry)?;
+        let value = tag_to_json(&tag, entry);
+        fs::write(&path, serde_json::to_string_pretty(&value)?)?;
+        Ok(1)
+    })
+    .finish(
+        "no tag files found",
+        "failed to dump folder JSON",
+        |written, _| format!("Wrote {written} JSON tag file(s) to {}", output.display()),
+    )
 }
 
 pub(in crate::app) fn tag_to_json(tag: &TagFile, entry: &TagEntry) -> Value {

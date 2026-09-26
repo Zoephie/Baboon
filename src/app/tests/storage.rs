@@ -84,3 +84,13 @@ fn installed_state_paths_remain_under_app_data() {
         installed.join("prefs.json")
     );
 }
+
+/// Tests keep installed-mode state in a temp folder of their own. It used to
+/// resolve to `.baboon` in the working directory, so `cargo test` wrote prefs
+/// and an index database into the repository.
+#[test]
+fn tests_keep_installed_state_out_of_the_working_directory() {
+    let root = installed_data_root("Baboon", "baboon");
+    assert!(root.starts_with(std::env::temp_dir()), "{}", root.display());
+    assert!(root.is_absolute());
+}

@@ -142,11 +142,15 @@ mod tests {
         let expected: Vec<PathBuf> = items.iter().map(|i| i.out_path.clone()).collect();
 
         let mut audio = AudioState::default();
-        audio.run_extract(ExtractRequest {
-            items,
-            tags_root: None,
-            label: "ce extract test".to_owned(),
-        });
+        audio.run_extract(
+            ExtractRequest {
+                items,
+                tags_root: None,
+                label: "ce extract test".to_owned(),
+            },
+            &egui::Context::default(),
+        );
+        audio.wait_for_audio_jobs();
 
         for path in &expected {
             let bytes = std::fs::read(path)
@@ -174,7 +178,7 @@ mod tests {
         use blam_tags::audio::{SoundBanks, decode_subsound};
         // Overridable so the same check runs against any game's tags + banks.
         let root = std::env::var("SND_TAGS_ROOT")
-            .unwrap_or_else(|_| "/Users/camden/Halo/halo3_mcc/tags".to_owned());
+            .unwrap_or_else(|_| crate::test_kits::tag_path("halo3_mcc", "").to_owned());
         let rel = std::env::var("SND_TAG")
             .unwrap_or_else(|_| "sound/visual_fx/ambient_vehicle_destroyed_large.sound".to_owned());
         let tags_root = std::path::Path::new(&root);
@@ -233,7 +237,7 @@ mod tests {
     fn h4_event_resolves_and_decodes() {
         use blam_tags::audio::WwiseBanks;
         let root = std::env::var("H4_TAGS_ROOT")
-            .unwrap_or_else(|_| "/Users/camden/Halo/halo4_mcc/tags".to_owned());
+            .unwrap_or_else(|_| crate::test_kits::tag_path("halo4_mcc", "").to_owned());
         let rel = std::env::var("H4_SND_TAG")
             .unwrap_or_else(|_| "sound/ui/m30_a_60_sfx.sound".to_owned());
         let tags_root = std::path::Path::new(&root);
@@ -270,7 +274,7 @@ mod tests {
     /// id-coverage and, for id-misses, whether the legacy name lookup would have
     /// found *anything* — so a miss is attributed to a genuinely absent subsound
     /// vs. a hash/reconstruction gap. Run with:
-    ///   SND_TAGS_ROOT=/Users/camden/Halo/haloreach_mcc/tags \
+    ///   SND_TAGS_ROOT=/path/to/haloreach_mcc/tags \
     ///     cargo test fmod_id_resolves_every_permutation -- --ignored --nocapture
     #[test]
     #[ignore]
@@ -278,7 +282,7 @@ mod tests {
         use blam_tags::audio::{SoundBanks, fmod_bank_subsound_id_hash, fmod_pitch_range_folder};
 
         let root = std::env::var("SND_TAGS_ROOT")
-            .unwrap_or_else(|_| "/Users/camden/Halo/haloreach_mcc/tags".to_owned());
+            .unwrap_or_else(|_| crate::test_kits::tag_path("haloreach_mcc", "").to_owned());
         let tags_root = std::path::Path::new(&root);
         if !tags_root.exists() {
             eprintln!("skip: no tags at {}", tags_root.display());
@@ -435,10 +439,10 @@ mod tests {
             }
         }
 
-        let defs = std::path::Path::new("/Users/camden/Source/blam-tags/definitions");
+        let defs = crate::test_kits::definitions();
         let rel =
             std::env::var("SND_TAG").unwrap_or_else(|_| "sound/ui/pickup_health.sound".to_owned());
-        let tag_path = std::path::Path::new("/Users/camden/Halo/halo2_mcc/tags").join(&rel);
+        let tag_path = std::path::Path::new(crate::test_kits::tag_path("halo2_mcc", "")).join(&rel);
         if !tag_path.exists() || !defs.exists() {
             eprintln!("skip: no H2 tag/defs ({})", tag_path.display());
             return;
@@ -520,10 +524,11 @@ mod tests {
     #[test]
     #[ignore]
     fn ce_shader_model_clear_reference_saves() {
-        let defs = std::path::Path::new("/Users/camden/Source/blam-tags/definitions");
-        let tag_path = std::path::Path::new(
-            "/Users/camden/Halo/haloce_mcc/tags/characters/crewman/shaders/crewman_body.shader_model",
-        );
+        let defs = crate::test_kits::definitions();
+        let tag_path = std::path::Path::new(crate::test_kits::tag_path(
+            "haloce_mcc",
+            "characters/crewman/shaders/crewman_body.shader_model",
+        ));
         if !tag_path.exists() || !defs.exists() {
             eprintln!("skip: no CE tag/defs");
             return;
@@ -588,10 +593,11 @@ mod tests {
     #[ignore]
     fn ce_inline_permutation_extracts_and_decodes() {
         use blam_tags::audio::decode_ogg_vorbis;
-        let defs = std::path::Path::new("/Users/camden/Source/blam-tags/definitions");
-        let tag_path = std::path::Path::new(
-            "/Users/camden/Halo/haloce_mcc/tags/sound/sinomatixx_music/b40_extraction_music.sound",
-        );
+        let defs = crate::test_kits::definitions();
+        let tag_path = std::path::Path::new(crate::test_kits::tag_path(
+            "haloce_mcc",
+            "sound/sinomatixx_music/b40_extraction_music.sound",
+        ));
         if !tag_path.exists() || !defs.exists() {
             eprintln!("skip: no CE tag/defs");
             return;
@@ -624,10 +630,11 @@ mod tests {
     #[ignore]
     fn ce_inline_xbox_adpcm_extracts_and_decodes() {
         use super::audio::InlineCodec;
-        let defs = std::path::Path::new("/Users/camden/Source/blam-tags/definitions");
-        let tag_path = std::path::Path::new(
-            "/Users/camden/Halo/haloce_mcc/tags/sound/sfx/weapons/sniper rifle/fire.sound",
-        );
+        let defs = crate::test_kits::definitions();
+        let tag_path = std::path::Path::new(crate::test_kits::tag_path(
+            "haloce_mcc",
+            "sound/sfx/weapons/sniper rifle/fire.sound",
+        ));
         if !tag_path.exists() || !defs.exists() {
             eprintln!("skip: no CE tag/defs");
             return;
@@ -676,10 +683,11 @@ mod tests {
     #[test]
     #[ignore]
     fn ce_extract_writes_wav_and_raw_ogg() {
-        let defs = std::path::Path::new("/Users/camden/Source/blam-tags/definitions");
-        let tag_path = std::path::Path::new(
-            "/Users/camden/Halo/haloce_mcc/tags/sound/sinomatixx_music/b40_extraction_music.sound",
-        );
+        let defs = crate::test_kits::definitions();
+        let tag_path = std::path::Path::new(crate::test_kits::tag_path(
+            "haloce_mcc",
+            "sound/sinomatixx_music/b40_extraction_music.sound",
+        ));
         if !tag_path.exists() || !defs.exists() {
             eprintln!("skip: no CE tag/defs");
             return;
@@ -696,11 +704,15 @@ mod tests {
 
         let items = build_extract_items(&tag, &rows, None, &wav_dir, false, None);
         let mut audio = super::audio::AudioState::default();
-        audio.run_extract(ExtractRequest {
-            items,
-            tags_root: None,
-            label: "ce".to_owned(),
-        });
+        audio.run_extract(
+            ExtractRequest {
+                items,
+                tags_root: None,
+                label: "ce".to_owned(),
+            },
+            &egui::Context::default(),
+        );
+        audio.wait_for_audio_jobs();
         let wav = std::fs::read(wav_dir.join(format!("{}.wav", sanitize_component(&rows[0].name))))
             .expect("wav written");
         assert_eq!(&wav[0..4], b"RIFF");
@@ -711,11 +723,15 @@ mod tests {
         let ogg_dir = std::env::temp_dir().join("baboon_ce_extract_ogg");
         let _ = std::fs::remove_dir_all(&ogg_dir);
         let items = build_extract_items(&tag, &rows, None, &ogg_dir, true, None);
-        audio.run_extract(ExtractRequest {
-            items,
-            tags_root: None,
-            label: "ce".to_owned(),
-        });
+        audio.run_extract(
+            ExtractRequest {
+                items,
+                tags_root: None,
+                label: "ce".to_owned(),
+            },
+            &egui::Context::default(),
+        );
+        audio.wait_for_audio_jobs();
         let ogg = std::fs::read(ogg_dir.join(format!("{}.ogg", sanitize_component(&rows[0].name))))
             .expect("ogg written");
         assert!(ogg.starts_with(b"OggS"), "raw passthrough should be an Ogg");
@@ -734,10 +750,10 @@ mod tests {
     #[test]
     #[ignore]
     fn h2_extract_writes_wav() {
-        let defs = std::path::Path::new("/Users/camden/Source/blam-tags/definitions");
+        let defs = crate::test_kits::definitions();
         let rel =
             std::env::var("SND_TAG").unwrap_or_else(|_| "sound/ui/pickup_health.sound".to_owned());
-        let tag_path = std::path::Path::new("/Users/camden/Halo/halo2_mcc/tags").join(&rel);
+        let tag_path = std::path::Path::new(crate::test_kits::tag_path("halo2_mcc", "")).join(&rel);
         if !tag_path.exists() || !defs.exists() {
             eprintln!("skip: no H2 tag/defs ({})", tag_path.display());
             return;
@@ -753,11 +769,15 @@ mod tests {
         let items = build_extract_items(&tag, &rows, h2_params, &dir, false, None);
         let count = items.len();
         let mut audio = super::audio::AudioState::default();
-        audio.run_extract(ExtractRequest {
-            items,
-            tags_root: None,
-            label: "h2".to_owned(),
-        });
+        audio.run_extract(
+            ExtractRequest {
+                items,
+                tags_root: None,
+                label: "h2".to_owned(),
+            },
+            &egui::Context::default(),
+        );
+        audio.wait_for_audio_jobs();
         // At least one WAV should have been written with a valid RIFF header.
         let mut found = 0usize;
         for entry in walkdir(&dir) {
@@ -777,7 +797,7 @@ mod tests {
     #[ignore]
     fn bank_extract_writes_wav() {
         let root = std::env::var("SND_TAGS_ROOT")
-            .unwrap_or_else(|_| "/Users/camden/Halo/halo3_mcc/tags".to_owned());
+            .unwrap_or_else(|_| crate::test_kits::tag_path("halo3_mcc", "").to_owned());
         let rel = std::env::var("SND_TAG")
             .unwrap_or_else(|_| "sound/visual_fx/ambient_vehicle_destroyed_large.sound".to_owned());
         let tags_root = std::path::Path::new(&root);
@@ -793,11 +813,15 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let items = build_extract_items(&tag, &rows, None, &dir, false, None);
         let mut audio = super::audio::AudioState::default();
-        audio.run_extract(ExtractRequest {
-            items,
-            tags_root: Some(tags_root.to_path_buf()),
-            label: "bank".to_owned(),
-        });
+        audio.run_extract(
+            ExtractRequest {
+                items,
+                tags_root: Some(tags_root.to_path_buf()),
+                label: "bank".to_owned(),
+            },
+            &egui::Context::default(),
+        );
+        audio.wait_for_audio_jobs();
         let mut found = 0usize;
         for entry in walkdir(&dir) {
             let bytes = std::fs::read(&entry).unwrap();
@@ -814,10 +838,10 @@ mod tests {
     #[test]
     #[ignore]
     fn h2_dump_structure() {
-        let defs = std::path::Path::new("/Users/camden/Source/blam-tags/definitions");
+        let defs = crate::test_kits::definitions();
 
         let rel = std::env::var("SND_TAG").unwrap_or_else(|_| "sound/loop.sound".to_owned());
-        let tag_path = std::path::Path::new("/Users/camden/Halo/halo2_mcc/tags").join(&rel);
+        let tag_path = std::path::Path::new(crate::test_kits::tag_path("halo2_mcc", "")).join(&rel);
         if !tag_path.exists() || !defs.exists() {
             eprintln!("skip: no tag/defs ({})", tag_path.display());
             return;
@@ -1003,9 +1027,9 @@ mod tests {
     #[test]
     #[ignore]
     fn h2_chunked_decode_is_full_length() {
-        let defs = std::path::Path::new("/Users/camden/Source/blam-tags/definitions");
+        let defs = crate::test_kits::definitions();
         let rel = std::env::var("SND_TAG").unwrap_or_else(|_| "sound/loop.sound".to_owned());
-        let tag_path = std::path::Path::new("/Users/camden/Halo/halo2_mcc/tags").join(&rel);
+        let tag_path = std::path::Path::new(crate::test_kits::tag_path("halo2_mcc", "")).join(&rel);
         if !tag_path.exists() || !defs.exists() {
             eprintln!("skip: no tag/defs ({})", tag_path.display());
             return;
@@ -1050,7 +1074,7 @@ mod tests {
     #[ignore]
     fn fmod_language_selection_resolves() {
         use blam_tags::audio::SoundBanks;
-        let tags_root = std::path::Path::new("/Users/camden/Halo/halo3_mcc/tags");
+        let tags_root = std::path::Path::new(crate::test_kits::tag_path("halo3_mcc", ""));
         if !tags_root.join("../fmod/pc/sfx.fsb").exists() {
             eprintln!("skip: no H3 fmod banks");
             return;
@@ -1104,10 +1128,10 @@ mod tests {
     fn h2_inline_extracts_and_decodes() {
         use super::audio::InlineCodec;
         use blam_tags::audio::{decode_opus, decode_xbox_adpcm};
-        let defs = std::path::Path::new("/Users/camden/Source/blam-tags/definitions");
+        let defs = crate::test_kits::definitions();
         let rel =
             std::env::var("SND_TAG").unwrap_or_else(|_| "sound/ui/pickup_health.sound".to_owned());
-        let tag_path = std::path::Path::new("/Users/camden/Halo/halo2_mcc/tags").join(&rel);
+        let tag_path = std::path::Path::new(crate::test_kits::tag_path("halo2_mcc", "")).join(&rel);
         if !tag_path.exists() || !defs.exists() {
             eprintln!("skip: no H2 tag/defs ({})", tag_path.display());
             return;
@@ -1778,19 +1802,6 @@ mod tests {
         );
         assert_eq!(status.as_deref(), Some("Updated model variant 0"));
         assert_variant(&tag, 0, "test", "head", "damaged");
-
-        let status = apply_model_variant_ops(
-            &mut tag,
-            vec![ModelVariantOp::Drop { variant_index: 0 }],
-            &mut dirty,
-        );
-        assert_eq!(status.as_deref(), Some("Deleted model variant 0"));
-        let variants = tag
-            .root()
-            .field("variants")
-            .and_then(|field| field.as_block())
-            .unwrap();
-        assert_eq!(variants.len(), 0);
     }
 
     #[test]

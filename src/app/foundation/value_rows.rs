@@ -13,30 +13,19 @@ pub(in crate::app) fn draw_foundation_value_row(
     depth: usize,
     path: &str,
     edit: &mut FieldEditContext<'_>,
-    // Resolved (element labels, target block field name) for a block-index field
-    // whose target block was found among the struct's siblings; `None` for
-    // non-block-index fields and unresolvable (custom) indices → numeric editor.
-    block_index: Option<&(Vec<String>, String)>,
-    semantic_short_index: Option<&(Vec<String>, String)>,
+    // The target block of a block-index field, when it could be found among
+    // the struct's siblings or ancestors; `None` for non-block-index fields and
+    // unresolvable (custom) indices → numeric editor.
+    block_index: Option<&BlockIndexTarget>,
+    semantic_short_index: Option<&BlockIndexTarget>,
     tag_reference_value_width: f32,
 ) {
-    if let (Some((labels, target_path)), Some(index)) = (block_index, block_index_value(value)) {
-        draw_foundation_block_index_row(ui, meta, index, labels, target_path, depth, path, edit);
+    if let (Some(target), Some(index)) = (block_index, block_index_value(value)) {
+        draw_foundation_block_index_row(ui, meta, index, target, depth, path, edit);
         return;
     }
-    if let (TagFieldData::ShortInteger(index), Some((labels, target_path))) =
-        (value, semantic_short_index)
-    {
-        draw_foundation_block_index_row(
-            ui,
-            meta,
-            *index as i64,
-            labels,
-            target_path,
-            depth,
-            path,
-            edit,
-        );
+    if let (TagFieldData::ShortInteger(index), Some(target)) = (value, semantic_short_index) {
+        draw_foundation_block_index_row(ui, meta, *index as i64, target, depth, path, edit);
         return;
     }
     if let TagFieldData::TagReference(reference) = value {
@@ -214,7 +203,7 @@ pub(in crate::app) fn draw_foundation_color_row(
         let (rect, response) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::click());
         ui.painter().rect_filled(rect, 2.0, swatch);
         ui.painter()
-            .rect_stroke(rect, 2.0, Stroke::new(1.0, foundation_input_edge()));
+            .rect_stroke(rect, 2.0, Stroke::new(1.0_f32, foundation_input_edge()));
         let response = response
             .on_hover_cursor(egui::CursorIcon::PointingHand)
             .on_hover_text(if editable {

@@ -17,6 +17,7 @@
 use std::path::PathBuf;
 
 use blam_tags::TagFile;
+use eframe::egui;
 
 use crate::app::editor::bitmap::build_bitmap_preview;
 
@@ -87,5 +88,59 @@ fn h3_bump_bitmap_previews_as_a_normal_map() {
         blues.iter().any(|&b| b != blues[0]),
         "blue channel is a constant {} — Z was not reconstructed",
         blues[0],
+    );
+}
+
+/// The bitmap editor decodes on a worker: the first frame shows the
+/// decode running rather than blocking on it, and what lands is exactly the
+/// preview built directly.
+#[test]
+fn the_bitmap_editor_decodes_off_the_ui_thread() {
+    let Some(tags) = h3ek_tags() else {
+        eprintln!("skipping: no H3 editing kit (set BLAM_TEST_H3EK to its `tags` directory)");
+        return;
+    };
+    let path = tags.join(BUMP_TAG);
+    if !path.is_file() {
+        eprintln!("skipping: {BUMP_TAG} not in this kit");
+        return;
+    }
+    let tag = TagFile::read(&path).expect("read bump bitmap tag");
+    let entry = crate::source::TagEntry {
+        key: "file:bump".to_owned(),
+        display_path: BUMP_TAG.to_owned(),
+        group_tag: u32::from_be_bytes(*b"bitm"),
+        group_name: None,
+        location: crate::source::TagEntryLocation::LooseFile(path.clone()),
+    };
+    let mut preview = crate::app::BitmapPreviewState::default();
+    let ctx = egui::Context::default();
+    let frame = |preview: &mut crate::app::BitmapPreviewState| {
+        let _ = ctx.run(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                crate::app::editor::bitmap::draw_bitmap_preview(ui, ctx, &tag, &entry, preview);
+            });
+        });
+    };
+    frame(&mut preview);
+    assert!(
+        preview.decoded.is_none() && preview.decoding.is_some(),
+        "decoding, not blocking"
+    );
+    let started = std::time::Instant::now();
+    while preview.decoded.is_none() {
+        assert!(started.elapsed().as_secs() < 30, "the decode never landed");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        frame(&mut preview);
+    }
+    let direct = build_bitmap_preview(&tag, 0, 0).expect("build preview");
+    let decoded = preview.decoded.as_ref().unwrap().as_ref().expect("decoded");
+    assert_eq!(
+        (decoded.width, decoded.height),
+        (direct.width, direct.height)
+    );
+    assert!(
+        decoded.rgba == direct.rgba,
+        "the worker decoded different pixels"
     );
 }

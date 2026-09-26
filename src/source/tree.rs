@@ -167,14 +167,7 @@ fn build_group_tree_from_indices(
 ) -> TagTree {
     let mut root = TreeBuildNode::default();
     for index in indices {
-        let entry = &entries[index];
-        let fourcc = format_group_tag(entry.group_tag);
-        let group = friendly_group_name(entry.group_tag, entry.group_name.as_deref(), &fourcc);
-        let label = if group == fourcc {
-            fourcc
-        } else {
-            format!("{group} {fourcc}")
-        };
+        let label = group_tree_label(&entries[index]);
         root.children.entry(label).or_default().entries.push(index);
     }
     TagTree {
@@ -184,6 +177,17 @@ fn build_group_tree_from_indices(
             .map(|(label, node)| finish_node(label, node, ""))
             .collect(),
         entries: root.entries,
+    }
+}
+
+/// The Groups-view node an entry is filed under, e.g. `bitmap bitm`.
+pub fn group_tree_label(entry: &TagEntry) -> String {
+    let fourcc = format_group_tag(entry.group_tag);
+    let group = friendly_group_name(entry.group_tag, entry.group_name.as_deref(), &fourcc);
+    if group == fourcc {
+        fourcc
+    } else {
+        format!("{group} {fourcc}")
     }
 }
 
@@ -308,13 +312,74 @@ pub fn load_folder_node_entries(
         return Ok(());
     }
     let folder = root.join(&node.rel_path);
-    let mut new_entries = scan_folder_direct_entries(root, &folder, names)?;
-    new_entries.sort_by(|a, b| natural_key(&a.display_path).cmp(&natural_key(&b.display_path)));
-    let start = entries.len();
-    node.entries.extend(start..start + new_entries.len());
-    entries.extend(new_entries);
+    let mut found = scan_folder_direct_entries(root, &folder, names)?;
+    found.sort_by_cached_key(|entry| natural_key(&entry.display_path));
+    // A tag already in the list (loaded before the tree was rebuilt, or added
+    // by a save or a new tag) keeps its slot. Appending it again, as this
+    // used to, left the same key in the list twice after every Save As or New
+    // Tag followed by re-expanding its folder.
+    let known: HashMap<&str, usize> = entries
+        .iter()
+        .enumerate()
+        .map(|(index, entry)| (entry.key.as_str(), index))
+        .collect();
+    let mut indices = Vec::with_capacity(found.len());
+    let mut appended = Vec::new();
+    for entry in found {
+        match known.get(entry.key.as_str()) {
+            Some(&index) => indices.push(index),
+            None => {
+                indices.push(entries.len() + appended.len());
+                appended.push(entry);
+            }
+        }
+    }
+    drop(known);
+    entries.extend(appended);
+    node.entries.extend(indices);
     node.entries_loaded = true;
     Ok(())
+}
+
+/// Whether a per-file error means the file went away or cannot be opened,
+/// which a scan skips, rather than something wrong with the scan itself.
+///
+/// A temp file deleted between the walk and the read, or a tag locked by
+/// tool.exe, used to fail the whole scan (or the 30-second refresh) over one
+/// file.
+pub(crate) fn skippable_file_error(error: &anyhow::Error) -> bool {
+    error.chain().any(|cause| {
+        cause
+            .downcast_ref::<std::io::Error>()
+            .is_some_and(|io| skippable_io_error(io.kind()))
+    })
+}
+
+fn skippable_io_error(kind: std::io::ErrorKind) -> bool {
+    matches!(
+        kind,
+        std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied
+    )
+}
+
+/// A walk entry, or `None` for one below the root that vanished or cannot be
+/// read. An error on the root itself still fails: an unreadable tags folder is
+/// not an empty one.
+pub(crate) fn walk_item(
+    item: std::result::Result<walkdir::DirEntry, walkdir::Error>,
+) -> Result<Option<walkdir::DirEntry>> {
+    match item {
+        Ok(item) => Ok(Some(item)),
+        Err(error)
+            if error.depth() > 0
+                && error
+                    .io_error()
+                    .is_some_and(|io| skippable_io_error(io.kind())) =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(error.into()),
+    }
 }
 
 /// Recursively scans one source-relative subtree without progress reporting.
@@ -341,7 +406,9 @@ where
     let folder = root.join(rel_path);
     let mut paths = Vec::new();
     for item in WalkDir::new(&folder).follow_links(false) {
-        let item = item?;
+        let Some(item) = walk_item(item)? else {
+            continue;
+        };
         if !item.file_type().is_file() {
             continue;
         }
@@ -373,7 +440,12 @@ where
             handles.push(scope.spawn(move || -> Result<Vec<(PathBuf, u32)>> {
                 let mut chunk_entries = Vec::new();
                 for path in chunk {
-                    if let Some(group_tag) = probe_tag_group(path)? {
+                    let probed = match probe_tag_group(path) {
+                        Ok(probed) => probed,
+                        Err(error) if skippable_file_error(&error) => None,
+                        Err(error) => return Err(error),
+                    };
+                    if let Some(group_tag) = probed {
                         matched.fetch_add(1, Ordering::Relaxed);
                         chunk_entries.push((path.clone(), group_tag));
                     }
@@ -423,6 +495,24 @@ where
 
 /// Probes one loose file and returns its stable source entry when it is a tag.
 /// Group detection is source-aware and must not be replaced by extension alone.
+/// `path` spelled on `root` as the source holds it, or `None` when it is not
+/// under `root`.
+///
+/// A loose entry's key is `file:` plus its path, and the folder scan builds
+/// those paths by joining names onto the root it was given. Canonicalizing is
+/// the right way to decide whether a path is inside the root, but not a way to
+/// spell it: on Windows it adds `\\?\`, on macOS it resolves `/var` to
+/// `/private/var`, and an entry built from that form gets a key the scan never
+/// produces, so the same tag is listed twice under two keys.
+pub fn path_on_root(root: &Path, path: &Path) -> std::io::Result<Option<PathBuf>> {
+    let canonical_root = std::fs::canonicalize(root)?;
+    let canonical = std::fs::canonicalize(path)?;
+    Ok(canonical
+        .strip_prefix(&canonical_root)
+        .ok()
+        .map(|relative| root.join(relative)))
+}
+
 pub fn loose_file_entry(
     root: &Path,
     path: &Path,
@@ -432,6 +522,15 @@ pub fn loose_file_entry(
         return Ok(None);
     };
     let rel = path.strip_prefix(root).unwrap_or(path);
+    // The folder scan's path is the root as given plus what it walked, joined
+    // with the platform's separator. A caller's path may have been joined from
+    // a `/`-separated relative path instead, which on Windows leaves both
+    // separators in it and a key the scan never produces. Rebuild the
+    // relative part from its components so the two agree.
+    let path = match path.strip_prefix(root) {
+        Ok(rel) => root.join(rel.components().collect::<PathBuf>()),
+        Err(_) => path.to_path_buf(),
+    };
     let group_name = names.name_for(group_tag).map(str::to_owned);
     let display_path = display_path_with_friendly_extension(rel, group_tag, names);
     Ok(Some(TagEntry {
@@ -439,7 +538,7 @@ pub fn loose_file_entry(
         display_path,
         group_tag,
         group_name,
-        location: TagEntryLocation::LooseFile(path.to_path_buf()),
+        location: TagEntryLocation::LooseFile(path),
     }))
 }
 
@@ -717,11 +816,7 @@ mod tests {
     }
 
     fn temp_dir(name: &str) -> PathBuf {
-        let stamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        std::env::temp_dir().join(format!("blam_tag_gui_{name}_{stamp}"))
+        crate::test_kits::unique_temp_path(name)
     }
 
     fn write_fake_tag(path: &Path, group: &[u8; 4]) {
@@ -1002,6 +1097,279 @@ mod tests {
         assert_eq!(paths(&upserted), paths(&rewritten));
         assert!(!refresh.changed);
         assert_eq!((refresh.added, refresh.updated, refresh.removed), (0, 0, 0));
+    }
+
+    fn loose_source(
+        root: &Path,
+        game: &str,
+        entries: Vec<TagEntry>,
+        all: Vec<TagEntry>,
+    ) -> LoadedSourceData {
+        LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::LooseFolder {
+                root: root.to_path_buf(),
+                game: Some(game.to_owned()),
+                definitions_root: PathBuf::new(),
+            },
+            names: TagNameIndex::default(),
+            game: Some(game.to_owned()),
+            entries,
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: all,
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+        }
+    }
+
+    /// One tag in, one tag out, on an indexed loose folder: the full list stays
+    /// in `natural_key` order, a replaced entry keeps its lazy slot (trees hold
+    /// positions in that list), and the on-disk index matches a full rewrite.
+    #[test]
+    fn upserting_and_removing_an_entry_keeps_lists_and_index_consistent() {
+        let root = temp_dir("upsert_entry");
+        let game = unique_game("upsert_entry");
+        let check = unique_game("upsert_entry_check");
+        fs::create_dir_all(root.join("objects")).unwrap();
+        for name in ["a.model", "c.model"] {
+            write_fake_tag(&root.join("objects").join(name), b"hlmt");
+        }
+        let names = TagNameIndex::default();
+        let scanned = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        save_entry_index(&game, &root, &scanned).unwrap();
+        let mut source = loose_source(&root, &game, scanned.clone(), scanned.clone());
+        let lazy_c = source
+            .entries
+            .iter()
+            .position(|e| e.display_path.ends_with("c.model"))
+            .unwrap();
+
+        // A new tag (sorted into the middle of the full list), a rewritten one
+        // (replaced in place), and a deleted one.
+        write_fake_tag(&root.join("objects/B.model"), b"hlmt");
+        write_fake_tag_with_padding(&root.join("objects/c.model"), b"hlmt", 8);
+        fs::remove_file(root.join("objects/a.model")).unwrap();
+        let entry = |name: &str| {
+            loose_file_entry(&root, &root.join("objects").join(name), &names)
+                .unwrap()
+                .unwrap()
+        };
+        source.upsert_entry(entry("B.model"), &[]);
+        source.upsert_entry(entry("c.model"), &[]);
+        let replaced_in_place = source.entries[lazy_c].display_path.ends_with("c.model")
+            && source
+                .entries
+                .iter()
+                .filter(|e| e.display_path.ends_with("c.model"))
+                .count()
+                == 1;
+        // A removal is allowed to shift the lazy list: it re-reads the tree.
+        source.remove_entry(&scanned[0].key, &[]);
+
+        let after = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        save_entry_index(&check, &root, &after).unwrap();
+        let indexed = load_entry_index(&game, &root).unwrap();
+        let rewritten = load_entry_index(&check, &root).unwrap();
+        let refresh = refresh_entry_index(&game, &root, &names).unwrap();
+
+        remove_test_index(&game);
+        remove_test_index(&check);
+        fs::remove_dir_all(&root).unwrap();
+
+        let order: Vec<&str> = source
+            .all_entries
+            .iter()
+            .map(|e| e.display_path.as_str())
+            .collect();
+        assert_eq!(
+            order,
+            ["objects/B.model", "objects/c.model"],
+            "natural (case-insensitive) order"
+        );
+        assert!(replaced_in_place, "a replaced entry keeps its slot, once");
+        let keys = |entries: &[TagEntry]| entries.iter().map(|e| e.key.clone()).collect::<Vec<_>>();
+        assert_eq!(keys(&indexed), keys(&rewritten));
+        assert!(!refresh.changed, "the index already matches the disk");
+    }
+
+    /// Expanding a folder again after its tree was rebuilt reuses the entries
+    /// the lazy list already has, instead of appending the same keys again.
+    #[test]
+    fn re_expanding_a_folder_does_not_duplicate_its_entries() {
+        let root = temp_dir("reexpand");
+        fs::create_dir_all(root.join("objects")).unwrap();
+        write_fake_tag(&root.join("objects/a.model"), b"hlmt");
+        write_fake_tag(&root.join("objects/b.model"), b"hlmt");
+        let names = TagNameIndex::default();
+        let mut entries = Vec::new();
+        for _ in 0..2 {
+            let mut tree = build_folder_directory_tree(&root).unwrap();
+            let node = tree
+                .children
+                .iter_mut()
+                .find(|node| node.label == "objects")
+                .unwrap();
+            load_folder_node_entries(&root, node, &mut entries, &names).unwrap();
+            assert_eq!(node.entries.len(), 2);
+        }
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(entries.len(), 2, "the second expansion added nothing");
+    }
+
+    /// A container's list is the full list and stays in `natural_key` order.
+    /// Several insert paths used to re-sort by a case-sensitive comparison,
+    /// which put "B" before "a" and broke `insert_entry_sorted` afterwards.
+    #[test]
+    fn a_containers_entries_stay_in_natural_order() {
+        let entry = |name: &str| TagEntry {
+            key: format!("ublock:{name}"),
+            display_path: name.to_owned(),
+            group_tag: 0,
+            group_name: None,
+            location: TagEntryLocation::LooseFile(PathBuf::from(name)),
+        };
+        let mut source = LoadedSourceData {
+            source: TagSource::SingleFile {
+                path: PathBuf::from("x"),
+            },
+            ..loose_source(
+                Path::new("/unused"),
+                "none",
+                vec![entry("a"), entry("c")],
+                Vec::new(),
+            )
+        };
+        source.upsert_entry(entry("B"), &[]);
+        source.upsert_entry(entry("b2"), &[]);
+        let order: Vec<&str> = source
+            .entries
+            .iter()
+            .map(|e| e.display_path.as_str())
+            .collect();
+        assert_eq!(order, ["a", "B", "b2", "c"]);
+    }
+
+    /// A tag that cannot be opened (locked by another program, or unreadable)
+    /// is left out of a scan and a refresh; it used to fail both outright.
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_tag_is_skipped_not_fatal() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = temp_dir("unreadable_tag");
+        let game = unique_game("unreadable_tag");
+        fs::create_dir_all(root.join("objects")).unwrap();
+        write_fake_tag(&root.join("objects/a.model"), b"hlmt");
+        write_fake_tag(&root.join("objects/b.model"), b"hlmt");
+        let names = TagNameIndex::default();
+        let before = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        save_entry_index(&game, &root, &before).unwrap();
+        let locked = root.join("objects/b.model");
+        // Rewritten, so the refresh has to read it, then made unreadable.
+        write_fake_tag_with_padding(&locked, b"hlmt", 4);
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let scanned = scan_folder_subtree_entries(&root, Path::new(""), &names);
+        let refreshed = refresh_entry_index(&game, &root, &names);
+
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o644)).unwrap();
+        remove_test_index(&game);
+        fs::remove_dir_all(&root).unwrap();
+        let scanned = scanned.expect("the scan survives one unreadable tag");
+        assert_eq!(scanned.len(), 1);
+        let refreshed = refreshed.expect("so does the refresh");
+        assert_eq!(refreshed.entries.len(), 1);
+    }
+
+    /// A refresh names what changed, so only those tags are rewritten: the
+    /// rows it writes leave the index exactly as a full rewrite would, and
+    /// references are saved per tag only where a reference index exists.
+    #[test]
+    fn a_refresh_reports_and_persists_only_what_changed() {
+        let root = temp_dir("refresh_changes");
+        let game = unique_game("refresh_changes");
+        let check = unique_game("refresh_changes_check");
+        fs::create_dir_all(root.join("objects")).unwrap();
+        for name in ["a.model", "b.model", "c.model"] {
+            write_fake_tag(&root.join("objects").join(name), b"hlmt");
+        }
+        let names = TagNameIndex::default();
+        let before = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        save_entry_index(&game, &root, &before).unwrap();
+        let key = |name: &str| {
+            before
+                .iter()
+                .find(|e| e.display_path.ends_with(name))
+                .unwrap()
+                .key
+                .clone()
+        };
+
+        write_fake_tag_with_padding(&root.join("objects/b.model"), b"hlmt", 8);
+        fs::remove_file(root.join("objects/c.model")).unwrap();
+        write_fake_tag(&root.join("objects/d.model"), b"hlmt");
+        let refresh = refresh_entry_index(&game, &root, &names).unwrap();
+        let mut touched: Vec<String> = refresh
+            .touched
+            .iter()
+            .map(|e| e.display_path.clone())
+            .collect();
+        touched.sort();
+
+        // Row by row, as the refresh worker writes them.
+        for gone in &refresh.removed_keys {
+            delete_entry_index_row(&game, &root, gone).unwrap();
+        }
+        for entry in &refresh.touched {
+            upsert_entry_index_row(&game, &root, entry).unwrap();
+        }
+        let after = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        save_entry_index(&check, &root, &after).unwrap();
+        let patched = load_entry_index(&game, &root).unwrap();
+        let rewritten = load_entry_index(&check, &root).unwrap();
+        let no_reference_index =
+            save_tag_dependencies(&game, &root, &key("a.model"), Some(&[])).unwrap();
+
+        remove_test_index(&game);
+        remove_test_index(&check);
+        fs::remove_dir_all(&root).unwrap();
+        assert_eq!(touched, ["objects/b.model", "objects/d.model"]);
+        assert_eq!(refresh.removed_keys, [key("c.model")]);
+        let keys = |entries: &[TagEntry]| entries.iter().map(|e| e.key.clone()).collect::<Vec<_>>();
+        assert_eq!(keys(&patched), keys(&rewritten));
+        assert!(
+            !no_reference_index,
+            "no reference index here, so none is started"
+        );
+    }
+
+    /// One row that names no file must not cost the whole index: the loader
+    /// used to return nothing at all, so every other tag was re-probed and the
+    /// reference index was lost with it.
+    #[test]
+    fn an_index_row_without_a_file_key_is_skipped_not_fatal() {
+        let root = temp_dir("index_bad_row");
+        let game = unique_game("index_bad_row");
+        fs::create_dir_all(root.join("objects")).unwrap();
+        write_fake_tag(&root.join("objects/a.model"), b"hlmt");
+        let names = TagNameIndex::default();
+        let entries = scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        save_entry_index(&game, &root, &entries).unwrap();
+        // What New Tag and Blam Import used to register.
+        let mut bare = entries[0].clone();
+        bare.key = "objects/b.model".to_owned();
+        bare.display_path = "objects/b.model".to_owned();
+        assert!(upsert_entry_index_row(&game, &root, &bare).unwrap());
+
+        let loaded = load_entry_index(&game, &root);
+
+        remove_test_index(&game);
+        fs::remove_dir_all(&root).unwrap();
+        let loaded = loaded.expect("the good rows must still load");
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].key, entries[0].key);
     }
 
     /// With no index for the folder yet, a lone row would load back as a

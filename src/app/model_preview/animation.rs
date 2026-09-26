@@ -66,6 +66,42 @@ pub(crate) struct PreviewAnimationPose {
     pub animation_index: usize,
     /// `frames[frame][preview_node]`, parent-local.
     pub frames: Vec<Vec<PreviewNodeTransform>>,
+    /// How far any frame can carry a node from the model origin; see
+    /// [`PreviewAnimationPose::new`]. Worked out once here: the camera needs
+    /// it every frame, and it walks every node of every frame.
+    pub reach: f32,
+}
+
+impl PreviewAnimationPose {
+    pub fn new(animation_index: usize, frames: Vec<Vec<PreviewNodeTransform>>) -> Self {
+        let reach = pose_reach_bound(&frames);
+        Self {
+            animation_index,
+            frames,
+            reach,
+        }
+    }
+}
+
+/// How far a decoded pose can carry any node from the model origin, as the
+/// largest per-frame sum of local translation norms (rotations preserve
+/// norms, so a chain can never reach further than its links laid end to end),
+/// stretched by the frame's largest scale. Loose on purpose: it only sizes
+/// the depth window, where slack costs precision and a tight miss costs
+/// geometry.
+fn pose_reach_bound(frames: &[Vec<PreviewNodeTransform>]) -> f32 {
+    let mut reach = 0.0f32;
+    for frame in frames {
+        let mut total = 0.0f32;
+        let mut max_scale = 1.0f32;
+        for transform in frame {
+            let [x, y, z] = transform.translation;
+            total += (x * x + y * y + z * z).sqrt();
+            max_scale = max_scale.max(transform.scale.abs());
+        }
+        reach = reach.max(total * max_scale);
+    }
+    if reach.is_finite() { reach } else { 0.0 }
 }
 
 /// Cross-frame playback state, one per previewed document.
@@ -88,6 +124,10 @@ pub(crate) struct PreviewAnimationPlayback {
     /// Case-insensitive substring filter for the animation picker; a graph
     /// can list a thousand animations.
     pub filter: String,
+    /// The egui pass the clock last advanced in. Two panes showing the same
+    /// tag share this state, and each advanced the clock, so playback ran at
+    /// twice the speed.
+    pub advanced_in_pass: Option<u64>,
 }
 
 impl Default for PreviewAnimationPlayback {
@@ -104,6 +144,7 @@ impl Default for PreviewAnimationPlayback {
             error: None,
             requested_list: false,
             filter: String::new(),
+            advanced_in_pass: None,
         }
     }
 }
@@ -425,12 +466,19 @@ impl Baboon {
         key: String,
         result: Result<Vec<PreviewAnimationEntry>, String>,
     ) -> bool {
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
+        let Some(kit_index) = self.resolve_kit(stamp.kit) else {
             return true;
         };
+        let stale = self.resolve_stamp(stamp).is_none();
         let Some(state) = self.kits[kit_index].model_previews.get_mut(&key) else {
             return true;
         };
+        if stale {
+            // Asked for once per preview, so a list dropped as stale has to be
+            // asked for again, or it never arrives.
+            state.animation.requested_list = false;
+            return true;
+        }
         match result {
             Ok(entries) => {
                 if let Some(Ok(data)) = state.data.as_mut() {
@@ -449,14 +497,20 @@ impl Baboon {
         animation_index: usize,
         result: Result<DecodedAnimationPose, String>,
     ) -> bool {
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
+        let Some(kit_index) = self.resolve_kit(stamp.kit) else {
             return true;
         };
+        let stale = self.resolve_stamp(stamp).is_none();
         let Some(state) = self.kits[kit_index].model_previews.get_mut(&key) else {
             return true;
         };
+        // Cleared before the staleness check, so a decode dropped for a
+        // generation bump does not leave the clip "decoding" for good.
         if state.animation.decoding == Some(animation_index) {
             state.animation.decoding = None;
+        }
+        if stale {
+            return true;
         }
         // The selection moved on while this decoded; the per-frame hook will
         // have started (or will start) the right one.
@@ -502,10 +556,10 @@ impl Baboon {
                             .collect()
                     })
                     .collect();
-                state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose {
+                state.animation.pose = Some(std::sync::Arc::new(PreviewAnimationPose::new(
                     animation_index,
                     frames,
-                }));
+                )));
                 state.animation.time = 0.0;
                 state.animation.playing = true;
                 state.animation.stopped = false;

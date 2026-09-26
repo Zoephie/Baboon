@@ -74,16 +74,21 @@ pub(super) struct Kit {
     /// The Bitmap Library tab's state: its search, its grid size, and its
     /// own bounded thumbnail cache — deliberately not `bitmap_previews`,
     /// which is unbounded and holds full-resolution images.
-    pub(super) bitmap_browser: BitmapBrowserState,
+    pub(super) bitmap_browser: ThumbnailLibrary<Bitmaps>,
     /// The Model Library tab's state, the same shape for the same reasons.
-    pub(super) model_browser: ModelBrowserState,
+    pub(super) model_browser: ThumbnailLibrary<Models>,
     /// Read-only repository history and working-tree browser.
     pub(super) git_review: GitReviewState,
     pub(super) model_previews: HashMap<String, ModelPreviewState>,
     /// Source-local render-method definition cache; `None` is a cached miss.
-    pub(super) rmdf_cache: HashMap<String, Option<RenderMethodDefinition>>,
+    pub(super) rmdf_cache: HashMap<String, Option<Arc<RenderMethodDefinition>>>,
+    pub(super) h2_templates: H2TemplateCache,
+    /// This kit's background index work. It lived on the app, shared by every
+    /// kit: loading one kit reset another's in-flight reference build, and one
+    /// kit's build or refresh blocked every other kit's.
+    pub(super) index_jobs: IndexJobs,
     /// Source-local render-method option cache; `None` is a cached miss.
-    pub(super) rmop_cache: HashMap<String, Option<RenderMethodOption>>,
+    pub(super) rmop_cache: HashMap<String, Option<Arc<RenderMethodOption>>>,
     /// Campaign Evolved Wwise bindings, cached per tag key because resolving
     /// one walks several packages.
     pub(super) ce_sound_bindings: HashMap<String, Arc<crate::source::ce_audio::CeSoundBinding>>,
@@ -215,11 +220,13 @@ impl Kit {
             tag_tree: egui_tiles::Tree::empty(tag_tree_id(id)),
             edit_buffers: EditDrafts::default(),
             bitmap_previews: HashMap::new(),
-            bitmap_browser: BitmapBrowserState::default(),
-            model_browser: ModelBrowserState::default(),
+            bitmap_browser: ThumbnailLibrary::default(),
+            model_browser: ThumbnailLibrary::default(),
             git_review: GitReviewState::default(),
             model_previews: HashMap::new(),
             rmdf_cache: HashMap::new(),
+            h2_templates: H2TemplateCache::default(),
+            index_jobs: IndexJobs::default(),
             rmop_cache: HashMap::new(),
             ce_sound_bindings: HashMap::new(),
             pending_expand: HashMap::new(),
@@ -434,8 +441,8 @@ impl Baboon {
     fn empty_kit(&mut self) -> Kit {
         let id = self.next_kit_id();
         Kit {
-            browser_mode: self.default_browser_mode,
-            browser_sort: self.default_browser_sort,
+            browser_mode: self.prefs.browser_mode,
+            browser_sort: self.prefs.browser_sort,
             ..Kit::empty(id, self.default_names.clone())
         }
     }
@@ -658,6 +665,8 @@ mod tests {
             all_entries: Vec::new(),
             reverse_dependencies: None,
             initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
         });
         kit.parsed_tags
             .insert("tag".to_owned(), TagDocument::modified(tag));
@@ -803,17 +812,62 @@ pub(super) fn tag_tree_id(id: KitId) -> egui::Id {
 }
 
 impl Kit {
+    /// Forget everything this kit holds for one open document: the parsed tag,
+    /// an in-flight load, its previews, Find filter, edit drafts and, for a
+    /// folder pane, its browser state.
+    ///
+    /// This used to be written out in four places (closing a tab, closing all,
+    /// closing all but one, deleting a tag), each clearing a different subset:
+    /// only the delete path dropped the model preview, whose geometry and
+    /// textures therefore outlived every closed tab.
+    pub(super) fn drop_document(&mut self, key: &str) {
+        self.parsed_tags.remove(key);
+        self.loading_tags.remove(key);
+        self.bitmap_previews.remove(key);
+        self.model_previews.remove(key);
+        self.find_filter_applied.remove(key);
+        self.edit_buffers.forget_tag(key);
+        self.folder_browsers.remove(key);
+    }
+
+    /// [`Self::drop_document`] for every document except `keep`.
+    pub(super) fn drop_documents_except(&mut self, keep: Option<&str>) {
+        let keys: HashSet<String> = self
+            .parsed_tags
+            .keys()
+            .chain(self.loading_tags.iter())
+            .chain(self.bitmap_previews.keys())
+            .chain(self.model_previews.keys())
+            .chain(self.find_filter_applied.keys())
+            .chain(self.folder_browsers.keys())
+            .filter(|key| Some(key.as_str()) != keep)
+            .cloned()
+            .collect();
+        for key in &keys {
+            self.drop_document(key);
+        }
+        // Drafts are keyed "<tag>|<field>", including ones for tags that were
+        // never loaded, so they are trimmed by prefix rather than by key.
+        match keep {
+            None => self.edit_buffers.clear(),
+            Some(keep) => {
+                let prefix = format!("{keep}|");
+                self.edit_buffers
+                    .retain(|draft, _| draft.starts_with(&prefix));
+            }
+        }
+    }
+
     /// This kit's browser entry for `key`, wherever it is listed: the visible
     /// entries, the full set a filtered browser hides, or a favorite pulled in
     /// from elsewhere.
     pub(super) fn entry_for_key(&self, key: &str) -> Option<&TagEntry> {
         let source = self.source.as_ref()?;
-        source
-            .entries
-            .iter()
-            .chain(source.all_entries.iter())
-            .chain(self.active_favorite_entries.iter())
-            .find(|entry| entry.key == key)
+        source.entry_for_key(key).or_else(|| {
+            self.active_favorite_entries
+                .iter()
+                .find(|entry| entry.key == key)
+        })
     }
 
     /// Tag keys currently laid out, in tab order. Derived from the tree, which
@@ -934,5 +988,52 @@ impl Kit {
                 egui_tiles::Tile::Pane(pane) if pane == key => Some(*id),
                 _ => None,
             })
+    }
+}
+
+/// A kit's background tag-index and reference-index jobs.
+#[derive(Default)]
+pub(super) struct IndexJobs {
+    /// Checking the cached loose-folder index for file changes.
+    pub(super) refreshing: bool,
+    /// When the next periodic refresh is due, in egui time.
+    pub(super) next_refresh_at: f64,
+    /// A reference-index build is running.
+    pub(super) building_references: bool,
+    /// That build was started by a tag-index build, which reports them as one.
+    pub(super) references_for_entry_index: bool,
+    pub(super) reference_progress: Option<ReferenceIndexProgressState>,
+    pub(super) entry_progress: Option<EntryIndexProgressState>,
+}
+
+#[cfg(test)]
+mod document_cleanup_tests {
+    use super::*;
+
+    /// Closing tabs drops every cache kept for them, model previews included.
+    /// Three of the four close paths kept the model preview (its geometry and
+    /// textures) for the rest of the session.
+    #[test]
+    fn closing_tabs_drops_everything_kept_for_them() {
+        let mut kit = Kit::empty(KitId(0), TagNameIndex::default());
+        for key in ["kept", "closed"] {
+            kit.model_previews
+                .insert(key.to_owned(), ModelPreviewState::default());
+            kit.bitmap_previews
+                .insert(key.to_owned(), BitmapPreviewState::default());
+            kit.loading_tags.insert(key.to_owned());
+            kit.edit_buffers
+                .insert_clean(format!("{key}|name"), "x".to_owned());
+        }
+
+        kit.drop_documents_except(Some("kept"));
+        assert_eq!(kit.model_previews.keys().collect::<Vec<_>>(), ["kept"]);
+        assert_eq!(kit.bitmap_previews.keys().collect::<Vec<_>>(), ["kept"]);
+        assert_eq!(kit.loading_tags.iter().collect::<Vec<_>>(), ["kept"]);
+
+        kit.drop_document("kept");
+        assert!(kit.model_previews.is_empty());
+        assert!(kit.bitmap_previews.is_empty());
+        assert!(kit.loading_tags.is_empty());
     }
 }

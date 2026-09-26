@@ -8,6 +8,7 @@ pub(in crate::app) fn build_h2ek_shader_editor_model(
     entry: &TagEntry,
     names: &TagNameIndex,
     source: Option<&TagSource>,
+    templates: &mut H2TemplateCache,
 ) -> Option<ShaderEditorModel> {
     if tag.classic_engine()? != blam_tags::classic::ClassicEngine::Halo2V4 {
         return None;
@@ -17,7 +18,7 @@ pub(in crate::app) fn build_h2ek_shader_editor_model(
     }
 
     let root = tag.root();
-    let template_tag = h2_load_shader_template(source, root);
+    let template_tag = h2_load_shader_template(source, root, templates);
     let template_root = template_tag.as_ref().map(|template| template.root());
     let mut sections = Vec::new();
     h2_push_section(
@@ -59,10 +60,74 @@ pub(in crate::app) fn build_h2ek_shader_editor_model(
     })
 }
 
-fn h2_load_shader_template(source: Option<&TagSource>, root: TagStruct<'_>) -> Option<TagFile> {
+fn h2_load_shader_template(
+    source: Option<&TagSource>,
+    root: TagStruct<'_>,
+    templates: &mut H2TemplateCache,
+) -> Option<Arc<TagFile>> {
     let source = source?;
     let reference = h2_shader_template_reference(root)?;
-    load_referenced_tag_from_source(source, &reference, "shader_template", b"stem").ok()
+    templates.get(source, &reference)
+}
+
+/// The `.shader_template`s the H2 shader grid has read, by reference.
+///
+/// The grid is rebuilt every frame, and it used to read and parse the
+/// template off disk each time. An entry is reused while the file's size and
+/// modified time are unchanged, so a template saved elsewhere is picked up
+/// on the next frame; sources that cannot change underneath (caches, paks)
+/// keep theirs for the session. A failed read is cached the same way, so a
+/// missing template is not retried every frame, but is as soon as it appears.
+#[derive(Default)]
+pub(in crate::app) struct H2TemplateCache {
+    entries: HashMap<String, CachedTemplate>,
+    #[cfg(test)]
+    pub(in crate::app) loads: usize,
+}
+
+struct CachedTemplate {
+    stamp: Option<(u64, std::time::SystemTime)>,
+    tag: Option<Arc<TagFile>>,
+}
+
+impl H2TemplateCache {
+    fn get(&mut self, source: &TagSource, reference: &str) -> Option<Arc<TagFile>> {
+        let stamp = template_stamp(source, reference);
+        if let Some(cached) = self.entries.get(reference)
+            && cached.stamp == stamp
+        {
+            return cached.tag.clone();
+        }
+        #[cfg(test)]
+        {
+            self.loads += 1;
+        }
+        let tag = load_referenced_tag_from_source(source, reference, "shader_template", b"stem")
+            .ok()
+            .map(Arc::new);
+        self.entries.insert(
+            reference.to_owned(),
+            CachedTemplate {
+                stamp,
+                tag: tag.clone(),
+            },
+        );
+        tag
+    }
+}
+
+/// Size and modified time of a loose template, the one kind of source whose
+/// files can change during a session. `None` for everything else, and for a
+/// loose file that is not there.
+fn template_stamp(source: &TagSource, reference: &str) -> Option<(u64, std::time::SystemTime)> {
+    let root = match source {
+        TagSource::LooseFolder { root, .. } => root.clone(),
+        TagSource::SingleFile { path } => blam_tags::paths::derive_tags_root(path)
+            .or_else(|| path.parent().map(Path::to_path_buf))?,
+        TagSource::MonolithicCache { .. } | TagSource::IoStoreContainerSet { .. } => return None,
+    };
+    let metadata = std::fs::metadata(resolve_tag_path(&root, reference, "shader_template")).ok()?;
+    Some((metadata.len(), metadata.modified().ok()?))
 }
 
 fn h2_shader_template_reference(root: TagStruct<'_>) -> Option<String> {

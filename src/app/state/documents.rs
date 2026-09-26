@@ -645,6 +645,8 @@ pub(in crate::app) struct ModRowDiff {
     pub(in crate::app) edited: Option<blam_tags::TagFile>,
     pub(in crate::app) truncated: bool,
     pub(in crate::app) error: Option<String>,
+    /// The rows arranged for display, built on first draw.
+    pub(in crate::app) view: std::sync::OnceLock<crate::app::ui::DiffNode>,
 }
 
 /// Review of what Export Mod is about to write, shown before anything is
@@ -1008,6 +1010,8 @@ pub(in crate::app) struct TagDiffState {
     /// Reverses which tag is on the left in the results table.
     pub(in crate::app) swapped: bool,
     pub(in crate::app) results: Option<TagDiffResults>,
+    /// The Git read this window is waiting on, if any.
+    pub(in crate::app) git_pending: Option<u64>,
 }
 
 #[derive(Clone)]

@@ -105,6 +105,11 @@ pub(in crate::app) struct BitmapPreviewState {
     /// Draw a high-contrast two-pixel outline just outside the image bounds.
     pub(in crate::app) show_border: bool,
     pub(in crate::app) decoded: Option<Result<BitmapPreviewData, String>>,
+    /// A decode running on a worker, to be taken as `decoded` when it lands.
+    /// Dropped with `decoded` when the tag changes, so a result decoded from
+    /// the old bytes is never shown.
+    pub(in crate::app) decoding:
+        Option<std::sync::mpsc::Receiver<Result<BitmapPreviewData, String>>>,
     pub(in crate::app) texture: Option<egui::TextureHandle>,
     pub(in crate::app) checker_texture: Option<egui::TextureHandle>,
     pub(in crate::app) texture_dirty: bool,
@@ -132,6 +137,7 @@ impl Default for BitmapPreviewState {
             show_checkerboard: true,
             show_border: true,
             decoded: None,
+            decoding: None,
             texture: None,
             checker_texture: None,
             texture_dirty: true,
@@ -292,6 +298,15 @@ impl Default for ModelPreviewState {
 }
 
 impl ModelPreviewState {
+    /// Forget the loaded preview and any load in flight, so the next frame
+    /// rebuilds from the document as it is now. Dropping the pending load
+    /// matters after an edit: its worker is parsing the bytes from before it.
+    pub(in crate::app) fn invalidate_load(&mut self) {
+        self.loaded_key = None;
+        self.data = None;
+        self.preview_load_id = None;
+    }
+
     /// Whether the cached preview no longer matches what the panel should
     /// show — a different tag, or a load-affecting setting that changed.
     /// One predicate for the panel's spinner gate and the loader's early
@@ -423,6 +438,13 @@ pub(in crate::app) struct ModelPreviewData {
     /// Monotonic identity used by the shared GL upload cache. Unlike a pointer,
     /// it cannot be accidentally reused after a preview reload.
     pub(in crate::app) geometry_id: u64,
+    /// Identity of the material list `textures` is resolved against. Set when
+    /// the preview loads and kept when collision/physics overlays merge in:
+    /// the merge only appends flat-coloured materials after the model's own,
+    /// so textures resolved for it (or still resolving) stay right. Keyed to
+    /// `geometry_id` instead, every merge threw away a resolve in flight and
+    /// re-uploaded textures already on the GPU.
+    pub(in crate::app) textures_id: u64,
     /// One entry per `RenderModelPreview::materials`, once the worker has
     /// resolved them. `None` while that job is still running — the panel shows
     /// its spinner rather than drawing the model untextured, so a model never

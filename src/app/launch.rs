@@ -130,7 +130,24 @@ pub(super) fn resolve_launch_tag_entries(
     let resolved = resolve_launch_tag_paths(tags_root, requested)?;
     let mut errors = resolved.errors;
     let mut entries = Vec::new();
-    for path in resolved.paths {
+    for canonical in resolved.paths {
+        // Spelled on the root the source holds, so the key is the one the
+        // folder scan makes; the canonical form is for the containment check.
+        let path = match crate::source::path_on_root(tags_root, &canonical) {
+            Ok(Some(path)) => path,
+            Ok(None) => {
+                errors.push(format!(
+                    "{} is outside {}",
+                    canonical.display(),
+                    tags_root.display()
+                ));
+                continue;
+            }
+            Err(error) => {
+                errors.push(format!("{}: {error}", canonical.display()));
+                continue;
+            }
+        };
         match loose_file_entry(tags_root, &path, names) {
             Ok(Some(entry)) => entries.push(entry),
             Ok(None) => errors.push(format!("{} is not a supported tag", path.display())),
@@ -143,6 +160,39 @@ pub(super) fn resolve_launch_tag_entries(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A tag named on the command line gets the key the folder scan gives it,
+    /// even when the root is not in canonical form. On macOS the temp folder is
+    /// `/var/...`, which canonicalizes to `/private/var/...`; on Windows every
+    /// canonical path gains `\\?\`. Either way the launched tag used to be a
+    /// second entry, under a key the browser never uses.
+    #[test]
+    fn a_launched_tag_is_keyed_like_the_folder_scan() {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-launch-key-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("objects")).unwrap();
+        let mut header = [0u8; 64];
+        header[48..52].copy_from_slice(&u32::from_be_bytes(*b"hlmt").to_le_bytes());
+        header[60..64].copy_from_slice(b"MALB");
+        std::fs::write(root.join("objects/a.model"), header).unwrap();
+        let names = TagNameIndex::default();
+
+        let launched =
+            resolve_launch_tag_entries(&root, &[PathBuf::from("objects/a.model")], &names).unwrap();
+        let scanned =
+            crate::source::scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(launched.entries.len(), 1, "{:?}", launched.errors);
+        assert_eq!(launched.entries[0].key, scanned[0].key);
+        assert_eq!(launched.entries[0].display_path, scanned[0].display_path);
+    }
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn args(values: &[&str]) -> Vec<OsString> {
@@ -315,13 +365,10 @@ mod tests {
                 _ => panic!("expected loose file"),
             })
             .collect::<Vec<_>>();
-        assert_eq!(
-            entry_paths,
-            [
-                fs::canonicalize(&first).unwrap(),
-                fs::canonicalize(&second).unwrap()
-            ]
-        );
+        // Spelled on the root the kit holds, as the folder scan spells them.
+        // This used to expect canonical paths, which is what gave launched
+        // tags keys the browser never uses.
+        assert_eq!(entry_paths, [first.clone(), second.clone()]);
         assert_eq!(resolved.errors.len(), 1);
         assert!(resolved.errors[0].contains("not a supported tag"));
         let _ = fs::remove_dir_all(base);

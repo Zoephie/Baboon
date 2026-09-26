@@ -638,6 +638,7 @@ fn nested_menu_button<R>(
     menu
 }
 
+#[cfg(test)]
 fn button_icon_uri_for_pixels_per_point(
     icon: ButtonIcon,
     color: Color32,

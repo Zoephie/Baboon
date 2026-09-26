@@ -156,12 +156,12 @@ impl Baboon {
         result: Result<(), String>,
     ) -> bool {
         // Reports through the global status line only.
-        if self.resolve_stamp(stamp).is_none() {
+        let Some(kit_index) = self.resolve_stamp(stamp) else {
             return true;
-        }
+        };
         match result {
             Ok(()) => {
-                if !self.building_reference_for_entry_index {
+                if !self.kits[kit_index].index_jobs.references_for_entry_index {
                     self.status = format!("Index saved: {}", path.display());
                 }
             }
@@ -199,46 +199,19 @@ pub(super) fn register_saved_copy_in_loaded_source(
     let TagSource::LooseFolder { root, .. } = &source.source else {
         return Ok(false);
     };
-    let canonical_root = fs::canonicalize(root)
-        .map_err(|error| format!("Could not resolve loaded tags folder: {error}"))?;
-    let canonical_path = fs::canonicalize(path)
-        .map_err(|error| format!("Could not resolve saved tag path: {error}"))?;
-    if !canonical_path.starts_with(&canonical_root) {
+    let Some(path) = crate::source::path_on_root(root, path)
+        .map_err(|error| format!("Could not resolve saved tag path: {error}"))?
+    else {
         return Ok(false);
-    }
-    let Some(entry) = loose_file_entry(&canonical_root, &canonical_path, &source.names)
+    };
+    let Some(entry) = loose_file_entry(root, &path, &source.names)
         .map_err(|error| format!("Could not inspect saved tag: {error:#}"))?
     else {
         return Ok(false);
     };
-    let key = entry.key.clone();
-    source.entries.retain(|existing| existing.key != key);
-    source.entries.push(entry.clone());
-    source
-        .entries
-        .sort_by(|a, b| a.display_path.cmp(&b.display_path));
-    if !source.all_entries.is_empty() {
-        // One file changed, so one row: rewriting the whole index here stats
-        // every tag file on the UI thread, a cost that grows with the kit.
-        if let (Some(game), TagSource::LooseFolder { root, .. }) =
-            (source.game.as_deref(), &source.source)
-        {
-            let _ = crate::source::upsert_entry_index_row(game, root, &entry);
-        }
-        source.all_entries.retain(|existing| existing.key != key);
-        source.all_entries.push(entry);
-        source
-            .all_entries
-            .sort_by(|a, b| a.display_path.cmp(&b.display_path));
-        source.group_tree = crate::source::build_group_tree(&source.all_entries);
-    } else {
-        source.group_tree = crate::source::build_group_tree(&source.entries);
-    }
-    if let TagSource::LooseFolder { root, .. } = &source.source
-        && let Ok(tree) = crate::source::build_folder_directory_tree(root)
-    {
-        source.tree = tree;
-    }
+    // The folder tree is re-read from disk, so pending (empty) folders are
+    // not needed here.
+    source.upsert_entry(entry, &[]);
     Ok(true)
 }
 

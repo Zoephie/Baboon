@@ -14,6 +14,7 @@ use serde::Serialize;
 
 const DUPLICATE_BACKUP_SUFFIX: &str = ".baboon-duplicate-backup";
 const DUPLICATE_BACKUP_MANIFEST_TAIL: &str = ".manifest.json";
+#[cfg(test)]
 const DUPLICATE_BACKUP_MANIFEST_SUFFIX: &str = ".baboon-duplicate-backup.manifest.json";
 const DUPLICATE_BACKUP_VERSION: u32 = 1;
 /// How many immutable backups may pile up beside one container before Baboon
@@ -641,21 +642,11 @@ fn apply_container_duplicate_source_state(
     }
 
     let key = entry.key.clone();
-    source.entries.retain(|existing| existing.key != key);
-    source.all_entries.retain(|existing| existing.key != key);
-    // Sorted, not pushed: the mount sorts by `natural_key` and the browser draws
-    // a folder in entry-vector order, so a pushed copy lands at the bottom of
-    // its folder instead of beside the tag it was duplicated from.
-    crate::source::insert_entry_sorted(&mut source.entries, entry.clone());
-    if !source.all_entries.is_empty() {
-        crate::source::insert_entry_sorted(&mut source.all_entries, entry.clone());
-    }
-    crate::source::rebuild_folder_tree(source, pending_folders);
-    source.group_tree = crate::source::build_group_tree(if source.all_entries.is_empty() {
-        &source.entries
-    } else {
-        &source.all_entries
-    });
+    // Sorted, not pushed (upsert_entry keeps a container's list in
+    // `natural_key` order): the browser draws a folder in entry-vector order,
+    // so a pushed copy would land at the bottom of its folder instead of
+    // beside the tag it was duplicated from.
+    source.upsert_entry(entry.clone(), pending_folders);
     if let Some(reverse) = source.reverse_dependencies.as_mut() {
         let mut dependencies = Vec::new();
         collect_tag_dependency_refs(tag.root(), &mut dependencies);
@@ -1167,16 +1158,22 @@ impl Baboon {
             entry_count_before,
             source_display: entry.display_path.clone(),
         };
-        let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result = run_container_duplicate(input);
-            let _ = tx.send(WorkerMessage::ContainerDuplicateFinished {
+        // Through spawn_worker so the lease always comes back: a panicking
+        // write used to send nothing, leaving the container leased for good.
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || WorkerMessage::ContainerDuplicateFinished {
                 stamp,
                 lease: lease_id,
-                result,
-            });
-            ctx.request_repaint();
-        });
+                result: run_container_duplicate(input),
+            },
+            move |error| WorkerMessage::ContainerDuplicateFinished {
+                stamp,
+                lease: lease_id,
+                result: Err(error),
+            },
+        );
     }
 
     pub(in crate::app) fn handle_container_duplicate_finished(
@@ -1702,6 +1699,8 @@ mod tests {
             all_entries: Vec::new(),
             reverse_dependencies: None,
             initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
         }
     }
 
@@ -2088,6 +2087,8 @@ mod tests {
             all_entries: Vec::new(),
             reverse_dependencies: None,
             initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
         };
 
         crate::app::controller::register_created_tag_in_source(&mut source, new_entry.clone(), &[]);

@@ -23,7 +23,9 @@ pub(super) use tool_drop::KIT_TOOL_DROP_CURSOR;
 // Re-exported: the browser's row menus gate on this, and its drawing functions
 // reach it through egui memory rather than through `Baboon`.
 use scenario_launch::*;
-pub(super) use scenario_launch::{ScenarioLaunchAvailability, scenario_launch_availability};
+pub(super) use scenario_launch::{
+    ScenarioLaunchAvailability, scenario_launch_availability, scenario_launch_availability_with,
+};
 mod queries;
 use queries::*;
 mod saving;
@@ -277,8 +279,7 @@ pub(super) fn new_container_template_for(
             rel_path,
         });
     }
-    let usmap = blam_tags::iostore::object::usmap::Usmap::meteorite()
-        .map_err(|error| format!("Could not load the Unreal mappings: {error}"))?;
+    let usmap = meteorite_usmap()?;
     if blam_tags::iostore::asset::tag_package::is_bare_group(group_name, &usmap) {
         return Ok(NewContainerTemplate::Derived {
             group: group_name.to_owned(),
@@ -289,6 +290,25 @@ pub(super) fn new_container_template_for(
          {group_name} wrapper cannot be derived because the group carries Unreal properties \
          that name other packages"
     ))
+}
+
+/// The embedded Campaign Evolved Unreal mappings, parsed once per process.
+///
+/// It is 2.4 MB, and new_container_template_for parsed it on every call. That
+/// includes the stashed-overlay adoption, which retried every frame for an
+/// overlay it could not place, so one such overlay reparsed it every frame.
+pub(super) fn meteorite_usmap()
+-> Result<std::sync::Arc<blam_tags::iostore::object::usmap::Usmap>, String> {
+    static USMAP: std::sync::OnceLock<
+        Result<std::sync::Arc<blam_tags::iostore::object::usmap::Usmap>, String>,
+    > = std::sync::OnceLock::new();
+    USMAP
+        .get_or_init(|| {
+            blam_tags::iostore::object::usmap::Usmap::meteorite()
+                .map(std::sync::Arc::new)
+                .map_err(|error| format!("Could not load the Unreal mappings: {error}"))
+        })
+        .clone()
 }
 
 /// The `.uasset` bytes to seed a new tag's package with, cloned or derived.
@@ -397,33 +417,7 @@ pub(super) fn register_created_tag_in_source(
     entry: TagEntry,
     pending_folders: &[String],
 ) {
-    let key = entry.key.clone();
-    source.entries.retain(|existing| existing.key != key);
-    crate::source::insert_entry_sorted(&mut source.entries, entry.clone());
-    let loose_folder = matches!(&source.source, TagSource::LooseFolder { .. });
-    let had_complete_index = !source.all_entries.is_empty();
-    if loose_folder && had_complete_index {
-        source.all_entries.retain(|existing| existing.key != key);
-        crate::source::insert_entry_sorted(&mut source.all_entries, entry.clone());
-    } else if !loose_folder {
-        source.all_entries.clear();
-    }
-    if let TagSource::LooseFolder { root, .. } = &source.source {
-        if let Ok(tree) = crate::source::build_folder_directory_tree(root) {
-            source.tree = tree;
-        }
-        source.group_tree = crate::source::build_group_tree(if had_complete_index {
-            &source.all_entries
-        } else {
-            &source.entries
-        });
-        if had_complete_index && let Some(game) = source.game.as_deref() {
-            let _ = crate::source::save_entry_index(game, root, &source.all_entries);
-        }
-    } else {
-        crate::source::rebuild_folder_tree(source, pending_folders);
-        source.group_tree = crate::source::build_group_tree(&source.entries);
-    }
+    source.upsert_entry(entry, pending_folders);
 }
 
 /// Prompt for an override `.utoc` output path, defaulting to `default_name`.
@@ -475,6 +469,67 @@ fn mod_output_path(output: PathBuf) -> PathBuf {
         .or_else(|| stem.strip_suffix("_p"))
         .unwrap_or(stem);
     parent.join(MODS_DIR).join(folder).join(file_name)
+}
+
+/// An in-place container overwrite, as the worker needs it.
+#[derive(Clone)]
+pub(in crate::app) struct InPlaceOverwriteJob {
+    stamp: KitStamp,
+    key: String,
+    /// The document's dirty revision when it was serialized.
+    dirty_revision: u64,
+    root: PathBuf,
+    containers: Vec<crate::source::MountedContainer>,
+    container_idx: usize,
+    utoc_path: PathBuf,
+    rel_path: String,
+    bytes: Vec<u8>,
+}
+
+/// What an in-place overwrite did.
+pub(in crate::app) struct InPlaceOverwrite {
+    write: Result<(), String>,
+    /// The container reopened after a successful write, so later reads see it.
+    reopened: Option<Result<blam_tags::iostore::IoStoreArchive, String>>,
+    /// Whether the container's files may have changed.
+    touched: bool,
+}
+
+impl InPlaceOverwrite {
+    fn outcome(&self) -> ContainerWriteOutcome {
+        if self.touched {
+            ContainerWriteOutcome::Committed
+        } else {
+            ContainerWriteOutcome::Unchanged
+        }
+    }
+}
+
+/// Write the tag into its container and reopen it. No UI state: runs on a
+/// worker, or inline for the close prompt.
+fn run_in_place_overwrite(job: &InPlaceOverwriteJob) -> InPlaceOverwrite {
+    // Resolve against the MOUNTED archive, not a fresh handle: an override
+    // container (an exported mod the user then reloaded) ships no directory
+    // index, and only the mounted handle has the rebuilt file list that can
+    // name `rel_path`.
+    let archive = &job.containers[job.container_idx].archive;
+    let write = blam_tags::iostore::writer::overwrite_tag_in_place_with(
+        archive,
+        &job.utoc_path,
+        &job.rel_path,
+        &job.bytes,
+    )
+    .map_err(|error| error.to_string());
+    let touched = write.is_ok();
+    let reopened = touched.then(|| {
+        crate::source::reopen_container_archive(&job.root, &job.containers, job.container_idx)
+            .map_err(|error| error.to_string())
+    });
+    InPlaceOverwrite {
+        write,
+        reopened,
+        touched,
+    }
 }
 
 /// What Save does with an edited Campaign Evolved container tag.
@@ -762,15 +817,19 @@ impl Baboon {
             return None;
         };
 
-        // `kits` and `audio` are disjoint fields, so the pak set can be handed
-        // to the walk while the container borrow is live. It is needed for
-        // events whose media is cooked inside a SoundBank.
+        // The pak set is needed for events whose media is cooked inside a
+        // SoundBank. A decode worker holds the lock only while it reads a
+        // file's bytes.
+        let store = self.audio.ce_media.clone();
+        let mut store = store
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let binding = std::sync::Arc::new(ce_audio::resolve_sound_binding(
             containers,
             packages,
             &usmap,
             package,
-            Some((root.as_path(), &mut self.audio.ce_media)),
+            Some((root.as_path(), &mut store)),
         ));
         self.kits[kit_index]
             .ce_sound_bindings
@@ -905,9 +964,14 @@ impl Baboon {
                     }
                     false
                 }
-                WorkerMessage::ReverseDependenciesBuilt { stamp, index } => {
-                    self.handle_reverse_dependencies_built(stamp, index)
+                WorkerMessage::SourceListingReady { stamp, results } => {
+                    self.handle_source_listing_ready(stamp, results)
                 }
+                WorkerMessage::ReverseDependenciesBuilt {
+                    stamp,
+                    index,
+                    missing,
+                } => self.handle_reverse_dependencies_built(stamp, index, missing),
                 WorkerMessage::ReferenceIndexProgress {
                     stamp,
                     processed,
@@ -929,6 +993,29 @@ impl Baboon {
                     package,
                     scan,
                 } => self.handle_chimp_referrers_scanned(stamp, package, scan),
+                WorkerMessage::ChimpModBuilt {
+                    kit,
+                    output,
+                    temporary,
+                    written,
+                    result,
+                } => self.handle_chimp_mod_built(kit, output, temporary, written, result, ctx),
+                WorkerMessage::ChimpSourcesOverwritten {
+                    kit,
+                    leases,
+                    containers,
+                    touched,
+                    written,
+                    result,
+                } => self.handle_chimp_sources_overwritten(
+                    kit, leases, containers, touched, written, result, ctx,
+                ),
+                WorkerMessage::TagCompareGit { request, update } => {
+                    self.handle_tag_compare_git(request, update)
+                }
+                WorkerMessage::GitReviewUpdated { kit, request, view } => {
+                    self.handle_git_review_updated(kit, request, view)
+                }
                 WorkerMessage::ChimpPackageLoaded {
                     stamp,
                     package,
@@ -937,6 +1024,13 @@ impl Baboon {
                 WorkerMessage::TagLoaded { kit, key, result } => {
                     self.handle_tag_loaded(kit, key, result)
                 }
+                WorkerMessage::RefJumpOccurrences {
+                    kit,
+                    index,
+                    key,
+                    target,
+                    result,
+                } => self.handle_ref_jump_occurrences(kit, index, key, target, result),
                 WorkerMessage::BitmapReimportFinished { kit, key, result } => {
                     self.handle_bitmap_reimport_finished(kit, key, result)
                 }
@@ -960,9 +1054,16 @@ impl Baboon {
                     lease,
                     result,
                 } => self.handle_container_rename_finished(stamp, lease, result, ctx),
-                WorkerMessage::ContainerDeleteFinished { stamp, result } => {
-                    self.handle_container_delete_finished(stamp, result)
-                }
+                WorkerMessage::InPlaceOverwriteFinished {
+                    job,
+                    lease,
+                    written,
+                } => self.handle_in_place_overwrite_finished(*job, lease, written),
+                WorkerMessage::ContainerDeleteFinished {
+                    stamp,
+                    lease,
+                    result,
+                } => self.handle_container_delete_finished(stamp, lease, result),
                 WorkerMessage::ChimpLevelProgress {
                     kit,
                     phase,
@@ -1028,14 +1129,14 @@ impl Baboon {
                 WorkerMessage::ModelTexturesResolved {
                     stamp,
                     key,
-                    geometry_id,
+                    textures_id,
                     textures,
-                } => self.handle_model_textures_resolved(stamp, key, geometry_id, textures),
+                } => self.handle_model_textures_resolved(stamp, key, textures_id, textures),
                 WorkerMessage::BitmapThumbnailDecoded { stamp, key, result } => {
-                    self.handle_bitmap_thumbnail_decoded(stamp, key, result, ctx)
+                    self.handle_thumbnail_ready::<Bitmaps>(stamp, key, result, ctx)
                 }
                 WorkerMessage::ModelThumbnailRendered { stamp, key, result } => {
-                    self.handle_model_thumbnail_rendered(stamp, key, result, ctx)
+                    self.handle_thumbnail_ready::<Models>(stamp, key, result, ctx)
                 }
                 WorkerMessage::ModelPreviewLoaded {
                     stamp,
@@ -1142,7 +1243,7 @@ impl Baboon {
         let kit = self.active_kit_id();
         let names = self.default_names.clone();
         let definitions_root = locate_definitions_root();
-        let ek_folder_aliases = self.ek_folder_aliases.clone();
+        let ek_folder_aliases = self.prefs.ek_folder_aliases.clone();
         let folder_info = match resolve_folder_root(&path, &ek_folder_aliases) {
             Ok(info) => info,
             Err(error) => {
@@ -1225,7 +1326,8 @@ impl Baboon {
             }
         });
         mounted.or_else(|| {
-            self.custom_editing_kit_profiles
+            self.prefs
+                .custom_editing_kit_profiles
                 .iter()
                 .filter(|profile| profile.game == "haloce_evolved")
                 .find_map(|profile| crate::source::find_paks_dir(&profile.root))
@@ -1309,14 +1411,16 @@ impl Baboon {
 
     pub(super) fn remember_recent_folder(&mut self, path: PathBuf) {
         let path = clean_recent_path(path);
-        self.recent_folders
+        self.prefs
+            .recent_folders
             .retain(|existing| !same_recent_path(existing, &path));
-        self.recent_folders.insert(0, path);
-        self.recent_folders.truncate(MAX_RECENT_FOLDERS);
+        self.prefs.recent_folders.insert(0, path);
+        self.prefs.recent_folders.truncate(MAX_RECENT_FOLDERS);
     }
 
     pub(super) fn remove_recent_folder(&mut self, path: &Path) {
-        self.recent_folders
+        self.prefs
+            .recent_folders
             .retain(|existing| !same_recent_path(existing, path));
     }
 
@@ -1527,18 +1631,29 @@ impl Baboon {
             return;
         }
 
-        let display_path = output
-            .strip_prefix(&root)
-            .unwrap_or(output.as_path())
-            .to_string_lossy()
-            .replace('\\', "/");
-        let key = display_path.clone();
-        let entry = TagEntry {
-            key: key.clone(),
-            display_path,
-            group_tag: group.group_tag,
-            group_name: Some(group.name.clone()),
-            location: TagEntryLocation::LooseFile(output.clone()),
+        // Built the way the folder scan builds it, so the key is the scan's
+        // `file:` key: a bare display-path key cannot be read back out of the
+        // entry index, and a row carrying one made the whole index fail to load.
+        let names = self
+            .source()
+            .map(|source| source.names.clone())
+            .unwrap_or_default();
+        let entry = match loose_file_entry(&root, &output, &names) {
+            Ok(Some(entry)) => entry,
+            Ok(None) => {
+                self.new_tag_dialog.error = Some(format!(
+                    "Wrote {}, but it does not read back as a tag",
+                    output.display()
+                ));
+                return;
+            }
+            Err(error) => {
+                self.new_tag_dialog.error = Some(format!(
+                    "Wrote {}, but could not inspect it: {error:#}",
+                    output.display()
+                ));
+                return;
+            }
         };
         self.register_created_tag(entry, tag);
         self.new_tag_open = false;
@@ -1609,12 +1724,9 @@ impl Baboon {
         let package = new_container_package(logical, group_name);
         let key = new_container_key(&package);
         if self.kits[self.active].parsed_tags.contains_key(&key)
-            || self.source().is_some_and(|s| {
-                s.entries
-                    .iter()
-                    .chain(s.all_entries.iter())
-                    .any(|e| e.key == key)
-            })
+            || self
+                .source()
+                .is_some_and(|s| s.entry_for_key(&key).is_some())
         {
             return Err(format!("A new tag already exists at {logical}"));
         }
@@ -1692,13 +1804,9 @@ impl Baboon {
             return Ok(format!("{} is already at that path", entry.display_path));
         }
         if self.kits[self.active].parsed_tags.contains_key(&new_key)
-            || self.source().is_some_and(|source| {
-                source
-                    .entries
-                    .iter()
-                    .chain(source.all_entries.iter())
-                    .any(|existing| existing.key == new_key)
-            })
+            || self
+                .source()
+                .is_some_and(|source| source.entry_for_key(&new_key).is_some())
         {
             return Err(format!("A tag already exists at {new_rel}"));
         }
@@ -2071,42 +2179,6 @@ impl Baboon {
         )
     }
 
-    /// Read the `.uasset` a new tag donates its package structure from.
-    ///
-    /// The donor recorded on the entry is a *hint*, not a fact: container
-    /// indices are positional, so a remount reorders them and a tag stashed in a
-    /// project outlives the index it was created against. Re-resolving on a miss
-    /// is what keeps such a tag saveable instead of failing with "template
-    /// container is stale".
-    fn read_new_container_template(
-        &self,
-        template_container: usize,
-        template_rel: &str,
-        group_tag: u32,
-    ) -> Result<Vec<u8>, String> {
-        let Some(source) = self.source() else {
-            return Err("No source loaded".to_owned());
-        };
-        let TagSource::IoStoreContainerSet { containers, .. } = &source.source else {
-            return Err("Source is not a container".to_owned());
-        };
-        if let Some(bytes) = containers
-            .get(template_container)
-            .and_then(|mounted| mounted.archive.read(template_rel).ok())
-        {
-            return Ok(bytes);
-        }
-        let (container, rel) = self
-            .find_container_template(group_tag)
-            .ok_or_else(|| "No tag in the mounted paks can donate a package template".to_owned())?;
-        containers
-            .get(container)
-            .ok_or_else(|| "Template container is stale".to_owned())?
-            .archive
-            .read(&rel)
-            .map_err(|e| format!("Failed to read template .uasset: {e}"))
-    }
-
     /// Register an in-memory (unsaved) container tag: insert it into the browser
     /// entries, rebuild the folder + group trees so it shows up, open it in a
     /// **dirty** tab, and select it. Used by New Tag and Import for CE.
@@ -2126,13 +2198,7 @@ impl Baboon {
         let key = entry.key.clone();
         let folder_seeds = self.kits[self.active].folder_seeds();
         if let Some(source) = self.source_mut() {
-            source.entries.retain(|existing| existing.key != key);
-            source.entries.push(entry.clone());
-            // Container sources keep their full set in `entries` (all_entries is
-            // empty), so rebuild both trees from it.
-            let group_tree = crate::source::build_group_tree(&source.entries);
-            crate::source::rebuild_folder_tree(source, &folder_seeds);
-            source.group_tree = group_tree;
+            source.upsert_entry(entry.clone(), &folder_seeds);
         }
         self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
         // Index what the new tag points at. Nothing else can: the reverse-
@@ -2170,7 +2236,8 @@ impl Baboon {
     }
 
     fn favorite_kit_index(&self, root: &Path) -> Option<usize> {
-        self.editing_kit_favorites
+        self.prefs
+            .editing_kit_favorites
             .iter()
             .position(|kit| same_recent_path(&kit.tags_root, root))
     }
@@ -2192,8 +2259,8 @@ impl Baboon {
             .as_ref()
             .map(|source| source.names.clone())
             .unwrap_or_else(|| self.kits[kit].names.clone());
-        let saved_paths = self.editing_kit_favorites[index].tags.clone();
-        let saved_folders = self.editing_kit_favorites[index].folders.clone();
+        let saved_paths = self.prefs.editing_kit_favorites[index].tags.clone();
+        let saved_folders = self.prefs.editing_kit_favorites[index].folders.clone();
         let mut missing = Vec::new();
         for relative_path in saved_paths {
             let path = root.join(&relative_path);
@@ -2214,7 +2281,7 @@ impl Baboon {
             }
         }
         if !missing.is_empty() || !missing_folders.is_empty() {
-            let favorites = &mut self.editing_kit_favorites[index];
+            let favorites = &mut self.prefs.editing_kit_favorites[index];
             favorites.tags.retain(|path| {
                 !missing
                     .iter()
@@ -2226,7 +2293,7 @@ impl Baboon {
                     .any(|missing| same_recent_path(missing, path))
             });
             if favorites.tags.is_empty() && favorites.folders.is_empty() {
-                self.editing_kit_favorites.remove(index);
+                self.prefs.editing_kit_favorites.remove(index);
             }
         }
     }
@@ -2254,14 +2321,14 @@ impl Baboon {
             return;
         };
         let index = self.favorite_kit_index(&root).unwrap_or_else(|| {
-            self.editing_kit_favorites.push(EditingKitFavorites {
+            self.prefs.editing_kit_favorites.push(EditingKitFavorites {
                 tags_root: clean_recent_path(root.clone()),
                 tags: Vec::new(),
                 folders: Vec::new(),
             });
-            self.editing_kit_favorites.len() - 1
+            self.prefs.editing_kit_favorites.len() - 1
         });
-        let kit = &mut self.editing_kit_favorites[index];
+        let kit = &mut self.prefs.editing_kit_favorites[index];
         if let Some(position) = kit
             .tags
             .iter()
@@ -2272,7 +2339,7 @@ impl Baboon {
                 .active_favorite_entries
                 .retain(|favorite| favorite.key != entry.key);
             if kit.tags.is_empty() && kit.folders.is_empty() {
-                self.editing_kit_favorites.remove(index);
+                self.prefs.editing_kit_favorites.remove(index);
             }
             self.status = format!("Removed {} from Favorites", entry.display_path);
         } else {
@@ -2298,14 +2365,14 @@ impl Baboon {
             return;
         }
         let index = self.favorite_kit_index(&root).unwrap_or_else(|| {
-            self.editing_kit_favorites.push(EditingKitFavorites {
+            self.prefs.editing_kit_favorites.push(EditingKitFavorites {
                 tags_root: clean_recent_path(root.clone()),
                 tags: Vec::new(),
                 folders: Vec::new(),
             });
-            self.editing_kit_favorites.len() - 1
+            self.prefs.editing_kit_favorites.len() - 1
         });
-        let favorites = &mut self.editing_kit_favorites[index];
+        let favorites = &mut self.prefs.editing_kit_favorites[index];
         if let Some(position) = favorites
             .folders
             .iter()
@@ -2316,7 +2383,7 @@ impl Baboon {
                 .active_favorite_folders
                 .retain(|current| !same_recent_path(current, &relative_path));
             if favorites.tags.is_empty() && favorites.folders.is_empty() {
-                self.editing_kit_favorites.remove(index);
+                self.prefs.editing_kit_favorites.remove(index);
             }
             self.status = format!("Removed {} from Favorites", relative_path.display());
         } else {
@@ -2343,11 +2410,11 @@ impl Baboon {
         };
         remap_favorite_paths(
             &root,
-            &mut self.editing_kit_favorites[index].tags,
+            &mut self.prefs.editing_kit_favorites[index].tags,
             old_to_new_keys,
         );
         let mut unique: Vec<PathBuf> = Vec::new();
-        self.editing_kit_favorites[index].tags.retain(|path| {
+        self.prefs.editing_kit_favorites[index].tags.retain(|path| {
             if unique
                 .iter()
                 .any(|existing| same_recent_path(existing, path))
@@ -2420,23 +2487,9 @@ impl Baboon {
         };
 
         let key = entry.key.clone();
+        let folder_seeds = self.kits[self.active].folder_seeds();
         if let Some(source) = self.source_mut() {
-            source.entries.retain(|existing| existing.key != key);
-            source.entries.push(entry.clone());
-
-            if !source.all_entries.is_empty() {
-                source.all_entries.retain(|existing| existing.key != key);
-                source.all_entries.push(entry.clone());
-                source
-                    .all_entries
-                    .sort_by(|a, b| a.display_path.cmp(&b.display_path));
-                source.group_tree = crate::source::build_group_tree(&source.all_entries);
-                if let (Some(game), TagSource::LooseFolder { root, .. }) =
-                    (source.game.as_deref(), &source.source)
-                {
-                    let _ = crate::source::save_entry_index(game, root, &source.all_entries);
-                }
-            }
+            source.upsert_entry(entry, &folder_seeds);
         }
         self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
         self.select_entry(key, ctx);
@@ -2503,10 +2556,24 @@ impl Baboon {
         ctx: egui::Context,
         label: impl Into<String>,
     ) {
-        if self.kits[self.active].scanning_entries {
+        self.begin_scan_all_entries_in(self.active, ctx, label);
+    }
+
+    /// Scan `kit_index`'s folder, which need not be the focused kit: the Model
+    /// and Bitmap Libraries ask for their own kit's scan. They used to call the
+    /// active-kit version, which scanned whichever kit had focus and left
+    /// theirs waiting for a scan it had recorded as requested.
+    pub(super) fn begin_scan_all_entries_in(
+        &mut self,
+        kit_index: usize,
+        ctx: egui::Context,
+        label: impl Into<String>,
+    ) {
+        let kit = &self.kits[kit_index];
+        if kit.scanning_entries {
             return;
         }
-        let Some(source) = self.source() else {
+        let Some(source) = kit.source.as_ref() else {
             return;
         };
         let TagSource::LooseFolder { root, .. } = &source.source else {
@@ -2515,54 +2582,64 @@ impl Baboon {
         let root = root.clone();
         let names = source.names.clone();
         let tx = self.tx.clone();
-        self.refreshing_entry_index = false;
-        self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
-        self.kits[self.active].field_index.invalidate();
-        let stamp = self.kit_stamp();
+        let kit = &mut self.kits[kit_index];
+        kit.index_jobs.refreshing = false;
+        kit.generation = kit.generation.wrapping_add(1);
+        kit.field_index.invalidate();
+        let stamp = KitStamp {
+            kit: kit.id,
+            generation: kit.generation,
+        };
         let label = label.into();
-        self.kits[self.active].scanning_entries = true;
-        self.show_entry_index_wait_notice = true;
-        self.entry_index_progress = Some(EntryIndexProgressState {
+        kit.scanning_entries = true;
+        kit.index_jobs.entry_progress = Some(EntryIndexProgressState {
             label: label.clone(),
             processed: 0,
             total: 0,
             matched: 0,
         });
+        self.show_entry_index_wait_notice = true;
         self.status = label;
-        thread::spawn(move || {
-            let progress_tx = tx.clone();
-            let progress_ctx = ctx.clone();
-            let result = scan_folder_subtree_entries_with_progress(
-                &root,
-                std::path::Path::new(""),
-                &names,
-                move |progress| {
-                    let _ = progress_tx.send(WorkerMessage::EntryIndexScanProgress {
-                        stamp,
-                        processed: progress.processed,
-                        total: progress.total,
-                        matched: progress.matched,
-                    });
-                    progress_ctx.request_repaint();
-                },
-            )
-            .map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::AllEntriesScanned { stamp, result });
-            ctx.request_repaint();
-        });
+        let progress_ctx = ctx.clone();
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || {
+                let result = scan_folder_subtree_entries_with_progress(
+                    &root,
+                    std::path::Path::new(""),
+                    &names,
+                    move |progress| {
+                        let _ = tx.send(WorkerMessage::EntryIndexScanProgress {
+                            stamp,
+                            processed: progress.processed,
+                            total: progress.total,
+                            matched: progress.matched,
+                        });
+                        progress_ctx.request_repaint();
+                    },
+                )
+                .map_err(|e| e.to_string());
+                WorkerMessage::AllEntriesScanned { stamp, result }
+            },
+            move |error| WorkerMessage::AllEntriesScanned {
+                stamp,
+                result: Err(error),
+            },
+        );
     }
 
     /// Starts source work off the UI thread and reports completion through `WorkerMessage`.
     /// Captured source identity prevents stale results from replacing newer state.
     pub(super) fn maybe_refresh_entry_index(&mut self, ctx: egui::Context) {
         if self.kits[self.active].scanning_entries
-            || self.refreshing_entry_index
-            || self.building_reverse_dependencies
+            || self.kits[self.active].index_jobs.refreshing
+            || self.kits[self.active].index_jobs.building_references
         {
             return;
         }
         let now = ctx.input(|input| input.time);
-        if now < self.next_entry_index_refresh_at {
+        if now < self.kits[self.active].index_jobs.next_refresh_at {
             return;
         }
         let should_refresh = self.source().is_some_and(|source| {
@@ -2573,12 +2650,12 @@ impl Baboon {
         if should_refresh {
             self.begin_refresh_entry_index(ctx);
         } else {
-            self.schedule_next_entry_index_refresh(&ctx);
+            self.schedule_next_entry_index_refresh(self.active, &ctx);
         }
     }
 
     pub(super) fn begin_refresh_entry_index(&mut self, ctx: egui::Context) {
-        if self.kits[self.active].scanning_entries || self.refreshing_entry_index {
+        if self.kits[self.active].scanning_entries || self.kits[self.active].index_jobs.refreshing {
             return;
         }
         let Some(source) = self.source() else {
@@ -2592,15 +2669,23 @@ impl Baboon {
         };
         let root = root.clone();
         let names = source.names.clone();
-        let tx = self.tx.clone();
+        let tag_source = source.source.clone();
         let stamp = self.kit_stamp();
-        self.refreshing_entry_index = true;
-        thread::spawn(move || {
-            let result =
-                crate::source::refresh_entry_index(&game, &root, &names).map_err(|e| e.to_string());
-            let _ = tx.send(WorkerMessage::EntryIndexRefreshed { stamp, result });
-            ctx.request_repaint();
-        });
+        self.kits[self.active].index_jobs.refreshing = true;
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || WorkerMessage::EntryIndexRefreshed {
+                stamp,
+                result: crate::source::refresh_entry_index(&game, &root, &names)
+                    .map(|refresh| persist_entry_index_changes(&game, &root, &tag_source, refresh))
+                    .map_err(|e| e.to_string()),
+            },
+            move |error| WorkerMessage::EntryIndexRefreshed {
+                stamp,
+                result: Err(error),
+            },
+        );
     }
 
     pub(super) fn refresh_tag_browser(&mut self, ctx: egui::Context) {
@@ -2626,65 +2711,78 @@ impl Baboon {
         }
     }
 
-    fn schedule_next_entry_index_refresh(&mut self, ctx: &egui::Context) {
+    pub(super) fn schedule_next_entry_index_refresh(&mut self, kit: usize, ctx: &egui::Context) {
         let now = ctx.input(|input| input.time);
-        self.next_entry_index_refresh_at = now + ENTRY_INDEX_REFRESH_INTERVAL_SECS;
+        self.kits[kit].index_jobs.next_refresh_at = now + ENTRY_INDEX_REFRESH_INTERVAL_SECS;
     }
 
     fn apply_entry_index_refresh(
         &mut self,
         kit_index: usize,
         refresh: EntryIndexRefresh,
-        ctx: egui::Context,
+        _ctx: egui::Context,
     ) {
-        let kit = &mut self.kits[kit_index];
-        let Some(source) = kit.source.as_mut() else {
-            return;
-        };
-        let n = refresh.entries.len();
-        source.group_tree = crate::source::build_group_tree(&refresh.entries);
-        source.all_entries = refresh.entries;
-        let browser_refresh_error = if let TagSource::LooseFolder { root, .. } = &source.source {
-            reset_lazy_folder_browser(root, &mut source.tree, &mut source.entries).err()
-        } else {
-            None
-        };
-        source.reverse_dependencies = None;
-        kit.field_index.invalidate();
-        kit.generation = kit.generation.wrapping_add(1);
+        let EntryIndexRefresh {
+            entries,
+            added,
+            updated,
+            removed,
+            removed_keys,
+            touched_dependencies,
+            ..
+        } = refresh;
+        let n = entries.len();
+        let browser_refresh_error = self.install_complete_entry_set(kit_index, entries);
+        // Patched, not dropped: the worker read the changed tags' references
+        // and already wrote them (and the index rows) to disk. Dropping it, as
+        // this used to, left "References to" unavailable until a manual
+        // rebuild after any change the refresh noticed, including the user's
+        // own saves.
+        if let Some(index) = self.kits[kit_index]
+            .source
+            .as_mut()
+            .and_then(|source| source.reverse_dependencies.as_mut())
+        {
+            for key in &removed_keys {
+                index.clear_tag(key);
+            }
+            for (key, deps) in touched_dependencies {
+                index.set_tag_dependencies(key, deps);
+            }
+        }
         self.status = browser_refresh_error.map_or_else(
             || {
                 format!(
-                    "Index updated: {n} tags ({} added, {} changed, {} removed)",
-                    refresh.added, refresh.updated, refresh.removed
+                    "Index updated: {n} tags ({added} added, {updated} changed, {removed} removed)"
                 )
             },
             |error| format!("Index updated, but browser refresh failed: {error}"),
         );
+    }
 
-        if let (Some(game), TagSource::LooseFolder { root, .. }) =
-            (source.game.clone(), &source.source)
-        {
-            let root = root.clone();
-            let entries = source.all_entries.clone();
-            let tx = self.tx.clone();
-            let ctx = ctx.clone();
-            let stamp = KitStamp {
-                kit: kit.id,
-                generation: kit.generation,
-            };
-            let path = crate::source::index_db_path();
-            thread::spawn(move || {
-                let result = crate::source::save_entry_index(&game, &root, &entries)
-                    .map_err(|error| error.to_string());
-                let _ = tx.send(WorkerMessage::EntryIndexSaved {
-                    stamp,
-                    path,
-                    result,
-                });
-                ctx.request_repaint();
-            });
-        }
+    /// Adopt a complete entry set for a kit: the full list and its group tree,
+    /// a reset lazy browser, and a new generation so panes and caches rebuild.
+    /// Shared by the full scan and the periodic refresh, which used to do this
+    /// separately and had drifted (only one of them moved the generation).
+    /// Returns the browser reset's error, if it failed.
+    pub(super) fn install_complete_entry_set(
+        &mut self,
+        kit_index: usize,
+        entries: Vec<TagEntry>,
+    ) -> Option<String> {
+        let kit = &mut self.kits[kit_index];
+        let source = kit.source.as_mut()?;
+        source.group_tree = crate::source::build_group_tree(&entries);
+        source.all_entries = entries;
+        source.complete_scan = true;
+        let error = if let TagSource::LooseFolder { root, .. } = &source.source {
+            reset_lazy_folder_browser(root, &mut source.tree, &mut source.entries).err()
+        } else {
+            None
+        };
+        kit.field_index.invalidate();
+        kit.generation = kit.generation.wrapping_add(1);
+        error
     }
 
     /// Starts the non-blocking release lookup and returns its result through `WorkerMessage`.
@@ -2696,7 +2794,7 @@ impl Baboon {
         if !silent {
             self.status = "Checking for updates...".to_owned();
         }
-        let channel = self.update_channel;
+        let channel = self.prefs.update_channel;
         let tx = self.tx.clone();
         thread::spawn(move || {
             let result = fetch_latest_release(channel);
@@ -2707,7 +2805,7 @@ impl Baboon {
 
     /// Whether the automatic startup check should run.
     pub(super) fn should_check_updates_on_startup(&self) -> bool {
-        self.check_updates_on_startup
+        self.prefs.check_updates_on_startup
     }
 
     pub(super) fn begin_terminal_command(&mut self, ctx: egui::Context) {
@@ -3041,10 +3139,7 @@ impl Baboon {
             kit_state.selected_key = None;
         }
         if let Some(source) = kit_state.source.as_mut() {
-            source.entries.retain(|entry| entry.key != key);
-            source.all_entries.retain(|entry| entry.key != key);
-            crate::source::rebuild_folder_tree(source, &folder_seeds);
-            source.group_tree = crate::source::build_group_tree(&source.entries);
+            source.remove_entry(key, &folder_seeds);
             if let Some(index) = source.reverse_dependencies.as_mut() {
                 index.clear_tag(key);
             }
@@ -3087,11 +3182,13 @@ impl Baboon {
         // Check both the lazily-loaded entries and the full scan set (all_entries).
         // Flat search results reference all_entries, which may not overlap with entries.
         let Some(entry) = source
-            .entries
-            .iter()
-            .chain(source.all_entries.iter())
-            .chain(self.kits[self.active].active_favorite_entries.iter())
-            .find(|e| e.key == key)
+            .entry_for_key(&key)
+            .or_else(|| {
+                self.kits[self.active]
+                    .active_favorite_entries
+                    .iter()
+                    .find(|e| e.key == key)
+            })
             .cloned()
         else {
             return;
@@ -3107,15 +3204,23 @@ impl Baboon {
             return;
         }
         let source_kind = source.source.clone();
-        let tx = self.tx.clone();
         let kit = self.active_kit_id();
         self.kits[self.active].loading_tags.insert(key.clone());
         self.status = format!("Loading {}", entry.display_path);
-        thread::spawn(move || {
-            let result = read_entry(&source_kind, &entry).map_err(|error| format!("{error:#}"));
-            let _ = tx.send(WorkerMessage::TagLoaded { kit, key, result });
-            ctx.request_repaint();
-        });
+        let panic_key = key.clone();
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || {
+                let result = read_entry(&source_kind, &entry).map_err(|error| format!("{error:#}"));
+                WorkerMessage::TagLoaded { kit, key, result }
+            },
+            move |error| WorkerMessage::TagLoaded {
+                kit,
+                key: panic_key,
+                result: Err(error),
+            },
+        );
     }
 
     /// Kept for save/export paths that address "the current tag".
@@ -3147,10 +3252,26 @@ impl Baboon {
     }
 
     pub(super) fn request_close_action(&mut self, action: PendingCloseAction, ctx: &egui::Context) {
+        // Chimp's recovery checkpoints wait for edits to pause; one still
+        // waiting when the app or a workspace closes would be lost.
+        self.flush_all_chimp_checkpoints();
         if self.save_changes_prompt.visible
             || self.chimp_discard_prompt.is_some()
             || self.has_chimp_save_dialog()
         {
+            return;
+        }
+        // A Chimp save is writing containers on a worker. The close waits
+        // for it and runs from its completion, like a close the save dialog
+        // was opened for.
+        let writing = match &action {
+            PendingCloseAction::CloseApp => self.chimp_writes.keys().next().copied(),
+            PendingCloseAction::CloseKit(id) => self.chimp_writes.contains_key(id).then_some(*id),
+            _ => None,
+        };
+        if let Some(kit) = writing {
+            self.chimp_writes.insert(kit, Some(action));
+            self.status = "Closing once the Chimp save finishes…".to_owned();
             return;
         }
         // The save prompt and every save path below it address documents by
@@ -3382,12 +3503,7 @@ impl Baboon {
         let source_path = kit.requested_path.clone().unwrap_or(source_path);
         let mut tags = Vec::new();
         for key in ordered_unique_keys(kit.open_tabs.iter()) {
-            let Some(entry) = source
-                .entries
-                .iter()
-                .chain(source.all_entries.iter())
-                .find(|entry| entry.key == key)
-            else {
+            let Some(entry) = source.entry_for_key(&key) else {
                 continue;
             };
             let path = match &entry.location {
@@ -3481,7 +3597,8 @@ impl Baboon {
                     let started = if let Some(profile) = profile_id
                         .as_deref()
                         .and_then(|id| {
-                            self.custom_editing_kit_profiles
+                            self.prefs
+                                .custom_editing_kit_profiles
                                 .iter()
                                 .find(|profile| profile.id == id)
                         })
@@ -3673,19 +3790,12 @@ impl Baboon {
         }
         let entry = loose_file_entry(&root, &path, &source.names).ok()??;
         let current_key = entry.key.clone();
+        let folder_seeds = self.kits[self.active].folder_seeds();
         if let Some(source) = self.source_mut() {
-            source.entries.retain(|existing| existing.key != tag.key);
-            source.entries.push(entry.clone());
-            if !source.all_entries.is_empty() {
-                source
-                    .all_entries
-                    .retain(|existing| existing.key != tag.key);
-                source.all_entries.push(entry);
-                source
-                    .all_entries
-                    .sort_by(|a, b| a.display_path.cmp(&b.display_path));
-                source.group_tree = crate::source::build_group_tree(&source.all_entries);
+            if tag.key != current_key {
+                source.remove_entry(&tag.key, &folder_seeds);
             }
+            source.upsert_entry(entry, &folder_seeds);
         }
         self.kits[self.active].generation = self.kits[self.active].generation.wrapping_add(1);
         Some(current_key)
@@ -3695,11 +3805,7 @@ impl Baboon {
         let id = self.kits[self.active].id;
         self.kits[self.active].tag_tree = egui_tiles::Tree::empty(tag_tree_id(id));
         self.kits[self.active].open_tabs.clear();
-        self.kits[self.active].parsed_tags.clear();
-        self.kits[self.active].loading_tags.clear();
-        self.kits[self.active].bitmap_previews.clear();
-        self.kits[self.active].folder_browsers.clear();
-        self.kits[self.active].edit_buffers.clear();
+        self.kits[self.active].drop_documents_except(None);
         self.kits[self.active].selected_key = None;
         self.color_popup = None;
         self.function_popup = None;
@@ -3711,30 +3817,14 @@ impl Baboon {
                 self.kits[self.active].close_tag_pane(&open);
             }
         }
-        self.kits[self.active]
-            .parsed_tags
-            .retain(|tab, _| tab == key);
-        self.kits[self.active].loading_tags.retain(|tab| tab == key);
-        self.kits[self.active]
-            .bitmap_previews
-            .retain(|tab, _| tab == key);
-        let edit_prefix = format!("{key}|");
-        self.kits[self.active]
-            .edit_buffers
-            .retain(|buffer_key, _| buffer_key.starts_with(&edit_prefix));
+        self.kits[self.active].drop_documents_except(Some(key));
         self.kits[self.active].selected_key = (!is_folder_pane_key(key)).then(|| key.to_owned());
         self.color_popup = None;
         self.function_popup = None;
     }
 
     pub(super) fn unload_tag(&mut self, key: &str) {
-        self.kits[self.active].parsed_tags.remove(key);
-        self.kits[self.active].loading_tags.remove(key);
-        self.kits[self.active].bitmap_previews.remove(key);
-        let edit_prefix = format!("{key}|");
-        self.kits[self.active]
-            .edit_buffers
-            .retain(|buffer_key, _| !buffer_key.starts_with(&edit_prefix));
+        self.kits[self.active].drop_document(key);
     }
 
     pub(super) fn handle_browser_action(&mut self, action: BrowserAction, ctx: egui::Context) {
@@ -3797,11 +3887,12 @@ impl Baboon {
                         filter: String::new(),
                         focus_search: false,
                         mode: BrowserMode::Folders,
-                        sort: self.default_browser_sort,
+                        sort: self.prefs.browser_sort,
                         cached_generation: u64::MAX,
                         cached_source_len: usize::MAX,
                         tree: TagTree::default(),
                         group_tree: TagTree::default(),
+                        group_tree_for: None,
                         filter_cache: FilterCache::default(),
                     });
                 let selected = self.kits[self.active].selected_key.clone();
@@ -4040,7 +4131,7 @@ impl Baboon {
             return;
         };
         let materials = data.preview.materials.clone();
-        let geometry_id = data.geometry_id;
+        let textures_id = data.textures_id;
         let stamp = KitStamp {
             kit: self.kits[kit_index].id,
             generation: self.kits[kit_index].generation,
@@ -4049,39 +4140,54 @@ impl Baboon {
             state.textures_pending = true;
         }
 
-        let (tx, ctx, key) = (self.tx.clone(), ctx.clone(), key.to_owned());
-        thread::spawn(move || {
-            let textures = resolve_model_textures(&source, &materials);
-            let _ = tx.send(WorkerMessage::ModelTexturesResolved {
+        let (key, panic_key) = (key.to_owned(), key.to_owned());
+        spawn_worker(
+            &self.tx,
+            ctx,
+            move || WorkerMessage::ModelTexturesResolved {
                 stamp,
                 key,
-                geometry_id,
-                textures,
-            });
-            ctx.request_repaint();
-        });
+                textures_id,
+                textures: resolve_model_textures(&source, &materials),
+            },
+            // No textures: the preview draws untextured, and stops waiting.
+            move |_| WorkerMessage::ModelTexturesResolved {
+                stamp,
+                key: panic_key,
+                textures_id,
+                textures: Vec::new(),
+            },
+        );
     }
 
     pub(in crate::app) fn handle_model_textures_resolved(
         &mut self,
         stamp: KitStamp,
         key: String,
-        geometry_id: u64,
+        textures_id: u64,
         textures: Vec<MaterialTextures>,
     ) -> bool {
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
+        let Some(kit_index) = self.resolve_kit(stamp.kit) else {
             return true;
         };
+        let stale = self.resolve_stamp(stamp).is_none();
         let Some(state) = self.kits[kit_index].model_previews.get_mut(&key) else {
             return true;
         };
+        // The in-flight marker is cleared before the staleness check: a result
+        // dropped for a generation bump used to leave it set, and the preview
+        // then waited for it for good ("Loading shaders…", repainting every
+        // frame).
         state.textures_pending = false;
+        if stale {
+            return true;
+        }
         let Some(Ok(data)) = state.data.as_mut() else {
             return true;
         };
-        // The model was reloaded while this ran — different geometry, and these
-        // textures are indexed against the materials of the old one.
-        if data.geometry_id != geometry_id {
+        // The model was reloaded while this ran, and these textures are
+        // indexed against the materials of the old one.
+        if data.textures_id != textures_id {
             return true;
         }
         data.textures = Some(std::sync::Arc::new(textures));
@@ -4389,7 +4495,7 @@ impl Baboon {
     /// in one go, and it should not be reachable by a stale request. The folder-
     /// scoped twin below carries no such gate, because it is bounded and aimed.
     pub(super) fn begin_extract_all_container_tags(&mut self, _ctx: egui::Context) {
-        if !self.expert_mode {
+        if !self.prefs.expert_mode {
             self.status = "Extracting all tags requires Expert mode".to_owned();
             return;
         }
@@ -4823,7 +4929,7 @@ impl Baboon {
         Some((source, entry))
     }
 
-    pub(super) fn save_current_tag(&mut self) {
+    pub(super) fn save_current_tag(&mut self, ctx: &egui::Context) {
         if self.refuse_read_only_edit(self.active) {
             return;
         }
@@ -4845,7 +4951,10 @@ impl Baboon {
         // shipping a change — so it is an expert-mode route now. Everyone else
         // gets the export, which is the supported one.
         if self.current_source_is_container() {
-            match container_save_route(self.expert_mode, self.confirm_container_overwrite) {
+            match container_save_route(
+                self.prefs.expert_mode,
+                self.prefs.confirm_container_overwrite,
+            ) {
                 ContainerSaveRoute::ExportReview => {
                     self.status = "Your change is kept in this workspace — export it as a mod to \
                                    put it in the game"
@@ -4858,7 +4967,9 @@ impl Baboon {
                         key,
                     });
                 }
-                ContainerSaveRoute::OverwriteInPlace => self.overwrite_current_tag_in_place(&key),
+                ContainerSaveRoute::OverwriteInPlace => {
+                    self.begin_overwrite_current_tag_in_place(&key, ctx)
+                }
             }
             return;
         }
@@ -4896,10 +5007,42 @@ impl Baboon {
         doc.tag
             .write_atomic(&output)
             .map_err(|error| error.to_string())?;
+        // What the tag now points at, from the document just written.
+        let dependencies = {
+            let mut refs = Vec::new();
+            collect_tag_dependency_refs(doc.tag.root(), &mut refs);
+            refs
+        };
         if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(key) {
             doc.dirty.clear();
         }
+        self.record_saved_tag_in_indexes(&entry, dependencies);
         Ok(output)
+    }
+
+    /// Bring the on-disk indexes and the reference index up to date with a tag
+    /// the user just saved.
+    ///
+    /// A plain Save touched neither. The next periodic refresh then saw the
+    /// file's new modified time as a change, and (before refreshes were
+    /// patched in) dropped the whole reference index for it. Writing the row
+    /// here means the refresh sees nothing to do, and the references are the
+    /// ones the saved document holds.
+    fn record_saved_tag_in_indexes(&mut self, entry: &TagEntry, dependencies: Vec<DependencyRef>) {
+        let Some(source) = self.source_mut() else {
+            return;
+        };
+        if let (TagSource::LooseFolder { root, .. }, Some(game)) =
+            (&source.source, source.game.as_deref())
+            && !source.all_entries.is_empty()
+        {
+            let _ = crate::source::upsert_entry_index_row(game, root, entry);
+            let _ =
+                crate::source::save_tag_dependencies(game, root, &entry.key, Some(&dependencies));
+        }
+        if let Some(index) = source.reverse_dependencies.as_mut() {
+            index.set_tag_dependencies(entry.key.clone(), dependencies);
+        }
     }
 
     pub(super) fn current_source_is_container(&self) -> bool {
@@ -5015,16 +5158,82 @@ impl Baboon {
         }
     }
 
-    /// Overwrite the current container tag inside its own pak, in place.
-    /// **Destructive** — modifies the shipped game files. Only reached after the
-    /// user confirms the overwrite dialog.
+    /// Overwrite the current container tag inside its own pak, in place, and
+    /// wait for it. **Destructive** — modifies the shipped game files.
+    ///
+    /// For the close prompt's Save, which reads the result off the document's
+    /// dirty flag before it lets the app or workspace close. Everything else
+    /// uses [`Self::begin_overwrite_current_tag_in_place`].
     pub(super) fn overwrite_current_tag_in_place(&mut self, key: &str) {
-        if self.refuse_read_only_edit(self.active) {
+        let Some((job, lease)) = self.prepare_in_place_overwrite(key) else {
             return;
+        };
+        let written = run_in_place_overwrite(&job);
+        self.release_in_place_lease(lease, written.outcome());
+        self.finish_in_place_overwrite(job, written);
+    }
+
+    /// The same, with the write and the pak reopen on a worker. Only reached
+    /// after the user confirms the overwrite, or has turned that off.
+    pub(super) fn begin_overwrite_current_tag_in_place(&mut self, key: &str, ctx: &egui::Context) {
+        let Some((job, lease)) = self.prepare_in_place_overwrite(key) else {
+            return;
+        };
+        let lease = self.park_container_write_lease(lease);
+        self.status = format!("Saving into {}…", job.utoc_path.display());
+        let panic_job = job.clone();
+        spawn_worker(
+            &self.tx,
+            ctx,
+            move || {
+                let written = run_in_place_overwrite(&job);
+                WorkerMessage::InPlaceOverwriteFinished {
+                    job: Box::new(job),
+                    lease,
+                    written,
+                }
+            },
+            move |error| WorkerMessage::InPlaceOverwriteFinished {
+                job: Box::new(panic_job),
+                lease,
+                // A panic may have come after the write: remount rather than
+                // trust the TOCs.
+                written: InPlaceOverwrite {
+                    write: Err(error),
+                    reopened: None,
+                    touched: true,
+                },
+            },
+        );
+    }
+
+    /// Applies `WorkerMessage::InPlaceOverwriteFinished`.
+    pub(super) fn handle_in_place_overwrite_finished(
+        &mut self,
+        job: InPlaceOverwriteJob,
+        lease: ContainerLeaseId,
+        written: InPlaceOverwrite,
+    ) -> bool {
+        if let Some(lease) = self.take_container_write_lease(lease) {
+            self.release_in_place_lease(lease, written.outcome());
+        }
+        self.finish_in_place_overwrite(job, written);
+        false
+    }
+
+    /// Everything the in-place overwrite needs from the UI thread: the tag
+    /// serialized (a `TagFile` cannot be cloned), the container, and the write
+    /// lease Duplicate, Rename and Delete take on the same files.
+    fn prepare_in_place_overwrite(
+        &mut self,
+        key: &str,
+    ) -> Option<(InPlaceOverwriteJob, ContainerWriteLease)> {
+        if self.refuse_read_only_edit(self.active) {
+            return None;
         }
         let Some(entry) = self.entry_for_key(key).cloned() else {
             self.status = "Tag is no longer in the source".to_owned();
-            return;
+            return None;
         };
         let TagEntryLocation::Container {
             container,
@@ -5032,50 +5241,77 @@ impl Baboon {
         } = &entry.location
         else {
             self.status = "Not a Campaign Evolved container tag".to_owned();
-            return;
+            return None;
         };
         let container_idx = *container;
         let rel_path = rel_path.clone();
         let Some(doc) = self.kits[self.active].parsed_tags.get(key) else {
             self.status = "Load the tag before saving".to_owned();
-            return;
+            return None;
         };
+        let dirty_revision = doc.dirty.revision();
         let bytes = match doc.tag.write_to_bytes() {
             Ok(b) => b,
             Err(e) => {
                 self.status = format!("Failed to serialize tag: {e}");
-                return;
+                return None;
             }
         };
-        let (root, utoc_path, archive) = {
+        let (root, containers) = {
             let Some(source) = self.source() else {
                 self.status = "No source loaded".to_owned();
-                return;
+                return None;
             };
             let TagSource::IoStoreContainerSet {
                 root, containers, ..
             } = &source.source
             else {
                 self.status = "Source is not a container".to_owned();
-                return;
+                return None;
             };
-            let Some(m) = containers.get(container_idx) else {
-                self.status = "Container provenance is stale".to_owned();
-                return;
-            };
-            (root.clone(), m.utoc_path.clone(), m.archive.clone())
+            (root.clone(), containers.clone())
         };
-        // Resolve against the MOUNTED archive, not a fresh handle: an override
-        // container (an exported mod the user then reloaded) ships no directory
-        // index, and only the mounted handle has the rebuilt file list that can
-        // name `rel_path`.
-        if let Err(e) = blam_tags::iostore::writer::overwrite_tag_in_place_with(
-            &archive, &utoc_path, &rel_path, &bytes,
-        ) {
+        let Some(utoc_path) = containers.get(container_idx).map(|m| m.utoc_path.clone()) else {
+            self.status = "Container provenance is stale".to_owned();
+            return None;
+        };
+        // The same lease Duplicate, Rename and Delete take: it refuses a second
+        // write to this container while one is in flight (from this workspace
+        // or another on the same install).
+        let lease = match self
+            .acquire_container_write_lease(&utoc_path, ContainerWriteMode::AppendInPlace)
+        {
+            Ok(lease) => lease,
+            Err(failure) => {
+                self.status = failure.to_string();
+                return None;
+            }
+        };
+        Some((
+            InPlaceOverwriteJob {
+                stamp: self.kit_stamp(),
+                key: key.to_owned(),
+                dirty_revision,
+                root,
+                containers,
+                container_idx,
+                utoc_path,
+                rel_path,
+                bytes,
+            },
+            lease,
+        ))
+    }
+
+    /// Install the reopened pak and report. The document is marked clean only
+    /// if it was not edited while the write ran: the bytes on disk are the
+    /// ones serialized before it started.
+    fn finish_in_place_overwrite(&mut self, job: InPlaceOverwriteJob, written: InPlaceOverwrite) {
+        if let Err(e) = written.write {
             // A mod exported by an older build carries the tag alone, so there
             // is no `.uasset` chunk to rewrite the declared length into and
             // nothing can be added to a container in place.
-            let hint = if e.to_string().contains("no paired .uasset") {
+            let hint = if e.contains("no paired .uasset") {
                 " — export this mod again instead of saving into it"
             } else {
                 ""
@@ -5083,35 +5319,42 @@ impl Baboon {
             self.status = format!("Overwrite failed: {e}{hint}");
             return;
         }
-        drop(archive);
-        // Hot-swap the pak's archive so subsequent reads see the new bytes.
-        let containers = match self.source().map(|s| &s.source) {
-            Some(TagSource::IoStoreContainerSet { containers, .. }) => containers.clone(),
-            _ => Vec::new(),
+        let Some(kit) = self.resolve_stamp(job.stamp) else {
+            self.status = format!(
+                "Saved into {}, but the workspace changed meanwhile; reload it to see the tag",
+                job.utoc_path.display()
+            );
+            return;
         };
-        let reload_error =
-            match crate::source::reopen_container_archive(&root, &containers, container_idx) {
-                Ok(a) => {
-                    if let Some(source) = self.source_mut()
-                        && let TagSource::IoStoreContainerSet { containers, .. } =
-                            &mut source.source
-                        && let Some(m) = containers.get_mut(container_idx)
-                    {
-                        m.archive = std::sync::Arc::new(a);
-                    }
-                    None
+        let mut reload_error = None;
+        match written.reopened {
+            Some(Ok(archive)) => {
+                // Only onto the container the write was for.
+                if let Some(source) = self.kits[kit].source.as_mut()
+                    && let TagSource::IoStoreContainerSet { containers, .. } = &mut source.source
+                    && let Some(m) = containers.get_mut(job.container_idx)
+                    && m.utoc_path == job.utoc_path
+                {
+                    m.archive = std::sync::Arc::new(archive);
                 }
-                Err(e) => Some(e),
-            };
-        if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(key) {
+            }
+            Some(Err(error)) => reload_error = Some(error),
+            None => {}
+        }
+        if let Some(doc) = self.kits[kit].parsed_tags.get_mut(&job.key)
+            && doc.dirty.revision() == job.dirty_revision
+        {
             doc.dirty.clear();
         }
         self.status = match reload_error {
             Some(e) => format!(
                 "Saved into {}, but reloading the pak failed: {e}",
-                utoc_path.display()
+                job.utoc_path.display()
             ),
-            None => format!("Saved into {} (game files modified)", utoc_path.display()),
+            None => format!(
+                "Saved into {} (game files modified)",
+                job.utoc_path.display()
+            ),
         };
     }
 
@@ -5399,6 +5642,7 @@ impl Baboon {
             edited: None,
             truncated: false,
             error: Some(error),
+            view: Default::default(),
         };
         let Some(dialog) = self.mod_export.as_ref() else {
             return failed("The review is no longer open".to_owned());
@@ -5426,6 +5670,7 @@ impl Baboon {
                 edited: Some(edited_tag),
                 truncated,
                 error: None,
+                view: Default::default(),
             }
         };
         if overlay.kind == CampaignProjectTagKind::New {
@@ -5446,6 +5691,7 @@ impl Baboon {
             edited: Some(edited_tag),
             truncated,
             error: None,
+            view: Default::default(),
         }
     }
 
@@ -5608,111 +5854,6 @@ impl Baboon {
             .filter_map(|index| containers.get(index))
             .map(|container| container.chunk_label.clone())
             .collect()
-    }
-
-    /// Release the `.ucas` mapping of every mounted container an export to
-    /// `output` is about to replace, so the writer can truncate the file.
-    ///
-    /// `Err` when a mapping cannot be released because something else still holds
-    /// the archive — better a named refusal than a write that fails at the OS with
-    /// `ERROR_USER_MAPPED_FILE` and nothing to connect it to the mod being
-    /// installed.
-    /// Superseded by [`Baboon::unmap_leased_containers`], which does the same
-    /// thing across every open workspace and inside a lease that guarantees the
-    /// restore. Kept only as the mechanism the container tests drive directly.
-    #[cfg(test)]
-    pub(super) fn release_export_target_mappings(
-        &mut self,
-        kit: usize,
-        output: &Path,
-    ) -> Result<Vec<usize>, String> {
-        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
-            return Ok(Vec::new());
-        };
-        let targets = crate::source::mounted_containers_at(&source.source, output);
-        if targets.is_empty() {
-            return Ok(Vec::new());
-        }
-        let Some(source) = self.kits.get_mut(kit).and_then(|kit| kit.source.as_mut()) else {
-            return Ok(Vec::new());
-        };
-        let TagSource::IoStoreContainerSet { containers, .. } = &mut source.source else {
-            return Ok(Vec::new());
-        };
-        let mut released = Vec::new();
-        for index in targets {
-            let Some(mounted) = containers.get_mut(index) else {
-                continue;
-            };
-            let label = mounted.chunk_label.clone();
-            // Only the mount may hold this archive. A surviving clone — a preview
-            // still reading, a worker mid-scan — keeps the mapping alive whatever
-            // this does, and the write would fail anyway.
-            let Some(archive) = std::sync::Arc::get_mut(&mut mounted.archive) else {
-                return Err(format!(
-                    "Export Mod failed: {label} is being read by this workspace right now, so it \
-                     cannot be replaced. Try again in a moment, or export under a different name."
-                ));
-            };
-            archive.release_partition();
-            released.push(index);
-        }
-        Ok(released)
-    }
-
-    /// Put back what [`Self::release_export_target_mappings`] released, once the
-    /// files it was protecting have been rewritten.
-    ///
-    /// The container on disk is a different file now, so its index is reopened
-    /// rather than the old one remapped: an override container ships no directory
-    /// index, and `reopen_container_archive` is what rebuilds its file list from
-    /// the containers it overrides. Falls back to remapping the archive that is
-    /// already there, which at least leaves the mount readable.
-    #[cfg(test)]
-    pub(super) fn restore_released_mappings(
-        &mut self,
-        kit: usize,
-        released: &[usize],
-    ) -> Vec<String> {
-        if released.is_empty() {
-            return Vec::new();
-        }
-        let Some(source) = self.kits.get(kit).and_then(|kit| kit.source.as_ref()) else {
-            return Vec::new();
-        };
-        let TagSource::IoStoreContainerSet {
-            root, containers, ..
-        } = &source.source
-        else {
-            return Vec::new();
-        };
-        let (root, containers) = (root.clone(), containers.clone());
-        let mut failures = Vec::new();
-        for &index in released {
-            let reopened = crate::source::reopen_container_archive(&root, &containers, index);
-            let Some(source) = self.kits.get_mut(kit).and_then(|kit| kit.source.as_mut()) else {
-                continue;
-            };
-            let TagSource::IoStoreContainerSet { containers, .. } = &mut source.source else {
-                continue;
-            };
-            let Some(mounted) = containers.get_mut(index) else {
-                continue;
-            };
-            match reopened {
-                Ok(archive) => mounted.archive = std::sync::Arc::new(archive),
-                Err(error) => {
-                    if let Some(archive) = std::sync::Arc::get_mut(&mut mounted.archive)
-                        && archive.remap_partition().is_ok()
-                    {
-                        failures.push(format!("{}: {error}", mounted.chunk_label));
-                        continue;
-                    }
-                    failures.push(format!("{}: {error}", mounted.chunk_label));
-                }
-            }
-        }
-        failures
     }
 
     /// Write the reviewed mod. `included` are the identities the user kept.
@@ -6124,7 +6265,7 @@ impl Baboon {
             return;
         };
 
-        let entries = match self.dependency_database_entries(&root) {
+        let entries = match self.dependency_database_entries() {
             Ok(entries) => entries,
             Err(error) => {
                 self.status = format!("Could not build dependency database: {error}");
@@ -6155,23 +6296,27 @@ impl Baboon {
         self.status = status;
     }
 
-    fn dependency_database_entries(&mut self, root: &Path) -> Result<Vec<TagEntry>, String> {
-        let kit_index = self.active;
-        if !matches!(
-            self.kits[kit_index].source.as_ref().map(|s| &s.source),
-            Some(TagSource::LooseFolder { .. })
-        ) {
+    /// Every tag in the loaded folder, for Fix Tag Dependencies to match
+    /// broken references against.
+    ///
+    /// This used to rescan the whole folder on the UI thread on every use,
+    /// even with the completed scan already in memory, then replace
+    /// `all_entries` without moving the kit generation and rewrite the whole
+    /// index. The completed scan is kept current by single-tag upserts and the
+    /// periodic refresh, so it is used as it is; before it exists, this says
+    /// so rather than blocking on a scan of its own.
+    fn dependency_database_entries(&self) -> Result<Vec<TagEntry>, String> {
+        let source = self.kits[self.active]
+            .source
+            .as_ref()
+            .ok_or_else(|| "no tag source is loaded".to_owned())?;
+        if !matches!(source.source, TagSource::LooseFolder { .. }) {
             return Err("load a loose editing-kit tags folder first".to_owned());
         }
-        let entries = scan_folder_subtree_entries(root, Path::new(""), &self.kits[kit_index].names)
-            .map_err(|error| error.to_string())?;
-        let Some(source) = self.kits[kit_index].source.as_mut() else {
-            return Err("no tag source is loaded".to_owned());
-        };
-        source.all_entries = entries;
-        source.group_tree = crate::source::build_group_tree(&source.all_entries);
-        if let Some(game) = source.game.as_deref() {
-            let _ = crate::source::save_entry_index(game, root, &source.all_entries);
+        if source.all_entries.is_empty() {
+            return Err(
+                "the tag index is still being built; try again once indexing finishes".to_owned(),
+            );
         }
         Ok(source.all_entries.clone())
     }
@@ -6613,7 +6758,7 @@ impl Baboon {
             .filter(|entry| referrer_keys.contains(entry.key.as_str()))
             .cloned()
             .collect();
-        out.sort_by(|a, b| natural_entry_order(a).cmp(&natural_entry_order(b)));
+        out.sort_by_cached_key(|entry| crate::source::natural_key(&entry.display_path));
         Some(out)
     }
 
@@ -6632,7 +6777,7 @@ impl Baboon {
             })
             .cloned()
             .collect();
-        out.sort_by(|a, b| natural_entry_order(a).cmp(&natural_entry_order(b)));
+        out.sort_by_cached_key(|entry| crate::source::natural_key(&entry.display_path));
         Some(out)
     }
 
@@ -6662,7 +6807,7 @@ impl Baboon {
                     .map(|entry| (*entry).clone())
             })
             .collect();
-        children.sort_by(|a, b| natural_entry_order(a).cmp(&natural_entry_order(b)));
+        children.sort_by_cached_key(|entry| crate::source::natural_key(&entry.display_path));
         children.dedup_by(|a, b| a.key == b.key);
         (children, false)
     }
@@ -6758,6 +6903,7 @@ impl Baboon {
         // Fresh query — drop any expander state from a previous references popup.
         self.ref_jump_expanded.clear();
         self.ref_jump_occurrences.clear();
+        self.ref_jump_loading.clear();
         let title = format!("References to {}", entry.display_path.replace('\\', "/"));
         // The referenced tag's dependency path, so a clicked row can jump to the
         // exact field that points here.
@@ -6911,33 +7057,99 @@ impl Baboon {
 
         let target = normalize_ref(&rel_path);
         for (index, key) in pending {
-            match self.kits[self.active].parsed_tags.get(&key) {
-                Some(doc) => {
-                    let mut refs = Vec::new();
-                    collect_tag_references(doc.tag.root(), "", &mut refs);
-                    let occurrences = refs
-                        .into_iter()
-                        .filter(|reference| {
-                            reference.group_tag == group_tag
-                                && normalize_ref(&reference.rel_path) == target
-                        })
-                        .map(|reference| RefOccurrence {
-                            label: occurrence_label(&reference.field_path),
-                            field_path: reference.field_path,
-                        })
-                        .collect();
-                    self.ref_jump_occurrences.insert(index, occurrences);
-                }
-                None => self.ensure_tag_loading(key.clone(), ctx.clone()),
+            if let Some(doc) = self.kits[self.active].parsed_tags.get(&key) {
+                let occurrences = ref_occurrences_in(&doc.tag, group_tag, &target);
+                self.ref_jump_occurrences.insert(index, occurrences);
+                continue;
             }
+            // Not open: read and walk it on a worker. This used to go through
+            // the tab loader, which drops results for tags without a tab, so
+            // the row asked again as soon as each load finished — forever.
+            if !self.ref_jump_loading.insert(index) {
+                continue;
+            }
+            let Some(entry) = self.entry_for_key(&key).cloned() else {
+                self.ref_jump_loading.remove(&index);
+                self.ref_jump_occurrences.insert(index, Vec::new());
+                continue;
+            };
+            let Some(source_kind) = self.source().map(|source| source.source.clone()) else {
+                self.ref_jump_loading.remove(&index);
+                continue;
+            };
+            let kit = self.active_kit_id();
+            // The popup's own target, as `handle_ref_jump_occurrences` compares
+            // it; the walk matches against the normalized form.
+            let query_target = (group_tag, rel_path.clone());
+            let normalized = target.clone();
+            let (panic_key, panic_target) = (key.clone(), query_target.clone());
+            spawn_worker(
+                &self.tx,
+                ctx,
+                move || {
+                    let target = query_target;
+                    let result = read_entry(&source_kind, &entry)
+                        .map(|tag| ref_occurrences_in(&tag, target.0, &normalized))
+                        .map_err(|error| format!("{error:#}"));
+                    WorkerMessage::RefJumpOccurrences {
+                        kit,
+                        index,
+                        key,
+                        target,
+                        result,
+                    }
+                },
+                move |error| WorkerMessage::RefJumpOccurrences {
+                    kit,
+                    index,
+                    key: panic_key,
+                    target: panic_target,
+                    result: Err(error),
+                },
+            );
         }
+    }
+
+    /// Applies `WorkerMessage::RefJumpOccurrences`. Dropped unless the popup
+    /// still shows the same target with the same tag in that row.
+    pub(super) fn handle_ref_jump_occurrences(
+        &mut self,
+        kit: KitId,
+        index: usize,
+        key: String,
+        target: (u32, String),
+        result: Result<Vec<RefOccurrence>, String>,
+    ) -> bool {
+        self.ref_jump_loading.remove(&index);
+        let current = kit == self.active_kit_id()
+            && self.query_results.as_ref().is_some_and(|results| {
+                results.ref_target.as_ref() == Some(&target)
+                    && results
+                        .entries
+                        .get(index)
+                        .is_some_and(|entry| entry.key == key)
+            });
+        if !current {
+            return true;
+        }
+        let occurrences = match result {
+            Ok(occurrences) => occurrences,
+            Err(error) => {
+                self.status = format!("Could not read the referring tag: {error}");
+                Vec::new()
+            }
+        };
+        self.ref_jump_occurrences.insert(index, occurrences);
+        false
     }
 
     /// Explain why a reference lookup found no index, tailored to whether one is
     /// currently building (auto after the full scan, or via Tools → Build
     /// Reference Index).
     fn reference_index_unavailable_note(&self) -> String {
-        if self.building_reverse_dependencies || self.kits[self.active].scanning_entries {
+        if self.kits[self.active].index_jobs.building_references
+            || self.kits[self.active].scanning_entries
+        {
             "Reference index is building — try again in a moment.".to_owned()
         } else {
             "Reference index unavailable — run Tools → Build Reference Index.".to_owned()
@@ -6975,173 +7187,114 @@ impl Baboon {
     /// Scan every scenario (`scnr`) tag and list its map id (+ map name where
     /// present). Reads `map id` at the scenario root, which covers the modern
     /// engines (H2A/H3/ODST/Reach/H4); classic Halo 2 stores it elsewhere.
-    pub(super) fn show_map_ids(&mut self) {
-        let Some(source) = self.source() else {
-            self.query_results = Some(TagQueryResults {
-                kit: self.active_kit_id(),
-                title: "Scenario map IDs".to_owned(),
-                entries: Vec::new(),
-                annotations: Vec::new(),
-                note: Some("No source loaded.".to_owned()),
-                ref_target: None,
-            });
-            return;
-        };
-        let mut entries = Vec::new();
-        let mut annotations = Vec::new();
-        for entry in &source.all_entries {
-            if &entry.group_tag.to_be_bytes() != b"scnr" {
-                continue;
-            }
-            let Ok(tag) = crate::source::read_entry(&source.source, entry) else {
-                continue;
-            };
-            let root = tag.root();
-            if let Some(id) = root.read_int_any("map id") {
-                // `map name` carries a `#tooltip` suffix in Reach/H4, so resolve
-                // it via the cleaned-name lookup rather than an exact match.
-                let name = find_full_field_name(&root, "map name")
-                    .and_then(|full| root.read_string_id(full))
-                    .unwrap_or_default();
-                annotations.push(if name.is_empty() {
-                    format!("map id {id}")
-                } else {
-                    format!("map id {id}  ({name})")
-                });
-                entries.push(entry.clone());
-            }
+    /// Every tag a whole-source listing should walk, or why it cannot yet.
+    ///
+    /// A container mount enumerates every tag up front, into `entries`, and
+    /// leaves `all_entries` empty; a loose folder only has them all once its
+    /// background scan is done. The listings read `all_entries` directly, so
+    /// on a container they walked nothing, and on a folder mid-scan they
+    /// walked nothing too, and both said "none found".
+    fn listing_entries(&self) -> Result<&[TagEntry], String> {
+        let source = self
+            .source()
+            .ok_or_else(|| "No source loaded.".to_owned())?;
+        if matches!(source.source, TagSource::LooseFolder { .. }) && source.all_entries.is_empty() {
+            return Err(
+                "The tag index is still being built; try again once indexing finishes.".to_owned(),
+            );
         }
-        let note = entries.is_empty().then(|| {
-            "No scenario map IDs found (scnr tags only; classic Halo 2 stores them elsewhere)."
-                .to_owned()
-        });
-        self.query_results = Some(TagQueryResults {
-            kit: self.active_kit_id(),
-            title: format!("Scenario map IDs ({})", entries.len()),
-            entries,
-            annotations,
-            note,
-            ref_target: None,
-        });
+        Ok(source.full_entry_set())
     }
 
-    /// Scan every `snd!` tag once, reading its `sound class` + `compression`
-    /// enum names. Shared by the class-listing and uncompressed-listing tools.
-    /// Returns `(class, compression, entry)` triples, or `None` if no source.
-    fn scan_sound_tags(&self) -> Option<Vec<(String, String, TagEntry)>> {
-        let source = self.source()?;
-        let mut rows = Vec::new();
-        for entry in &source.all_entries {
-            if &entry.group_tag.to_be_bytes() != b"snd!" {
-                continue;
-            }
-            let Ok(tag) = crate::source::read_entry(&source.source, entry) else {
-                continue;
-            };
-            let root = tag.root();
-            let class = find_full_field_name(&root, "sound class")
-                .and_then(|full| root.read_enum_name(full))
-                .filter(|value| !value.is_empty())
-                .unwrap_or_else(|| "(none)".to_owned());
-            let compression = find_full_field_name(&root, "compression")
-                .and_then(|full| root.read_enum_name(full))
-                .unwrap_or_default();
-            rows.push((class, compression, entry.clone()));
-        }
-        Some(rows)
+    /// List every scenario's map id (and name, where it has one).
+    pub(super) fn show_map_ids(&mut self, ctx: &egui::Context) {
+        self.show_source_listing(SourceListing::MapIds, ctx);
     }
 
     /// List every `snd!` tag annotated with its sound class + compression, with a
     /// per-class count summary (mirrors `count-class-sounds` /
     /// `count-all-class-sounds`).
-    pub(super) fn show_sounds_by_class(&mut self) {
-        let title = "Sounds by class";
-        let Some(mut rows) = self.scan_sound_tags() else {
-            self.query_results = Some(TagQueryResults {
-                kit: self.active_kit_id(),
-                title: title.to_owned(),
-                entries: Vec::new(),
-                annotations: Vec::new(),
-                note: Some("No source loaded.".to_owned()),
-                ref_target: None,
-            });
-            return;
-        };
-        rows.sort_by(|a, b| {
-            a.0.cmp(&b.0)
-                .then_with(|| a.2.display_path.cmp(&b.2.display_path))
-        });
-        let mut counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
-        for (class, _, _) in &rows {
-            *counts.entry(class.as_str()).or_default() += 1;
-        }
-        let entries: Vec<TagEntry> = rows.iter().map(|(_, _, e)| e.clone()).collect();
-        let annotations: Vec<String> = rows
-            .iter()
-            .map(|(class, comp, _)| {
-                if comp.is_empty() {
-                    format!("[{class}]")
-                } else {
-                    format!("[{class}] {comp}")
-                }
-            })
-            .collect();
-        let note = if entries.is_empty() {
-            Some("No sound tags found.".to_owned())
-        } else {
-            let summary = counts
-                .iter()
-                .map(|(k, v)| format!("{k}: {v}"))
-                .collect::<Vec<_>>()
-                .join(", ");
-            Some(format!("{} class(es) \u{2014} {summary}", counts.len()))
-        };
-        self.query_results = Some(TagQueryResults {
-            kit: self.active_kit_id(),
-            title: format!("{title} ({})", entries.len()),
-            entries,
-            annotations,
-            note,
-            ref_target: None,
-        });
+    pub(super) fn show_sounds_by_class(&mut self, ctx: &egui::Context) {
+        self.show_source_listing(SourceListing::SoundsByClass, ctx);
     }
 
     /// List `snd!` tags stored uncompressed (compression name contains "none"),
     /// mirroring `dump-uncompressed-sounds`.
-    pub(super) fn show_uncompressed_sounds(&mut self) {
-        let title = "Uncompressed sounds";
-        let Some(rows) = self.scan_sound_tags() else {
-            self.query_results = Some(TagQueryResults {
-                kit: self.active_kit_id(),
-                title: title.to_owned(),
-                entries: Vec::new(),
-                annotations: Vec::new(),
-                note: Some("No source loaded.".to_owned()),
-                ref_target: None,
-            });
+    pub(super) fn show_uncompressed_sounds(&mut self, ctx: &egui::Context) {
+        self.show_source_listing(SourceListing::UncompressedSounds, ctx);
+    }
+
+    /// Run a whole-source listing on a worker and show it when it lands.
+    ///
+    /// These read every scenario or sound tag in the source, which for sounds
+    /// is thousands of full tag parses, and they used to do it on the UI
+    /// thread. The results window says what it is reading meanwhile.
+    fn show_source_listing(&mut self, listing: SourceListing, ctx: &egui::Context) {
+        let kit = self.active_kit_id();
+        let entries = match self.listing_entries() {
+            Ok(entries) => entries.to_vec(),
+            Err(note) => {
+                self.query_results = Some(TagQueryResults {
+                    kit,
+                    title: listing.title().to_owned(),
+                    entries: Vec::new(),
+                    annotations: Vec::new(),
+                    note: Some(note),
+                    ref_target: None,
+                });
+                return;
+            }
+        };
+        let Some(source) = self.source().map(|source| source.source.clone()) else {
             return;
         };
-        let mut hits: Vec<(String, String, TagEntry)> = rows
-            .into_iter()
-            .filter(|(_, comp, _)| comp.to_ascii_lowercase().contains("none"))
-            .collect();
-        hits.sort_by(|a, b| a.2.display_path.cmp(&b.2.display_path));
-        let entries: Vec<TagEntry> = hits.iter().map(|(_, _, e)| e.clone()).collect();
-        let annotations: Vec<String> = hits
+        let wanted = listing.group();
+        let count = entries
             .iter()
-            .map(|(class, comp, _)| format!("{comp}  [{class}]"))
-            .collect();
-        let note = entries
-            .is_empty()
-            .then(|| "No uncompressed sound tags found.".to_owned());
+            .filter(|entry| entry.group_tag.to_be_bytes() == *wanted)
+            .count();
         self.query_results = Some(TagQueryResults {
-            kit: self.active_kit_id(),
-            title: format!("{title} ({})", entries.len()),
-            entries,
-            annotations,
-            note,
+            kit,
+            title: listing.title().to_owned(),
+            entries: Vec::new(),
+            annotations: Vec::new(),
+            note: Some(format!("Reading {count} tag(s)…")),
             ref_target: None,
         });
+        let stamp = self.kit_stamp();
+        spawn_worker(
+            &self.tx,
+            ctx,
+            move || WorkerMessage::SourceListingReady {
+                stamp,
+                results: build_source_listing(listing, &source, &entries, stamp.kit),
+            },
+            move |error| WorkerMessage::SourceListingReady {
+                stamp,
+                results: TagQueryResults {
+                    kit: stamp.kit,
+                    title: listing.title().to_owned(),
+                    entries: Vec::new(),
+                    annotations: Vec::new(),
+                    note: Some(error),
+                    ref_target: None,
+                },
+            },
+        );
+    }
+
+    /// Applies `WorkerMessage::SourceListingReady` if its kit still has the
+    /// source it was read from.
+    pub(super) fn handle_source_listing_ready(
+        &mut self,
+        stamp: KitStamp,
+        results: TagQueryResults,
+    ) -> bool {
+        if self.resolve_stamp(stamp).is_none() {
+            return true;
+        }
+        self.query_results = Some(results);
+        false
     }
 
     /// Locate a tag in the browser tree: switch to Folders mode, clear the
@@ -7238,19 +7391,23 @@ impl Baboon {
                 .collect()
         };
         let tag_source = self.source().expect("checked").source.clone();
-        let tx = self.tx.clone();
         self.field_value_searching = true;
         self.status = format!("Searching field values for \"{display}\"…");
-        let search_ctx = ctx.clone();
-        thread::spawn(move || {
-            let result = run_field_value_search(&tag_source, &entries, &query_lower);
-            let _ = tx.send(WorkerMessage::FieldValueSearchFinished {
+        let panic_query = display.clone();
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || WorkerMessage::FieldValueSearchFinished {
                 stamp,
                 query: display,
-                result,
-            });
-            search_ctx.request_repaint();
-        });
+                result: run_field_value_search(&tag_source, &entries, &query_lower),
+            },
+            move |error| WorkerMessage::FieldValueSearchFinished {
+                stamp,
+                query: panic_query,
+                result: Err(error),
+            },
+        );
         // Build the index in the background so the next search is instant.
         self.begin_build_field_index(ctx);
     }
@@ -7322,7 +7479,9 @@ impl Baboon {
         force: bool,
         paired_entry_index_build: bool,
     ) {
-        if self.building_reverse_dependencies || self.kits[self.active].scanning_entries {
+        if self.kits[self.active].index_jobs.building_references
+            || self.kits[self.active].scanning_entries
+        {
             return;
         }
         let Some(source) = self.source() else {
@@ -7349,6 +7508,14 @@ impl Baboon {
         } else {
             source.full_entry_set().to_vec()
         };
+        if entries.is_empty() && is_loose && source.complete_scan {
+            // Scanned, and there is nothing in it: an empty graph, not a
+            // reason to scan again (which is what an empty folder did, forever).
+            if let Some(source) = self.source_mut() {
+                source.reverse_dependencies = Some(ReverseDependencyIndex::default());
+            }
+            return;
+        }
         if entries.is_empty() {
             // The full entry set isn't ready yet, so kick the scan first.
             // `begin_scan_all_entries` is idempotent (guards on
@@ -7369,9 +7536,9 @@ impl Baboon {
         let tag_source = source.source.clone();
         let stamp = self.kit_stamp();
         let tx = self.tx.clone();
-        self.building_reverse_dependencies = true;
-        self.building_reference_for_entry_index = paired_entry_index_build;
-        self.reference_index_progress = Some(ReferenceIndexProgressState {
+        self.kits[self.active].index_jobs.building_references = true;
+        self.kits[self.active].index_jobs.references_for_entry_index = paired_entry_index_build;
+        self.kits[self.active].index_jobs.reference_progress = Some(ReferenceIndexProgressState {
             label: "Building reference index...".to_owned(),
             processed: 0,
             total: entries.len(),
@@ -7395,6 +7562,7 @@ impl Baboon {
             let processed = std::sync::atomic::AtomicUsize::new(0);
 
             let mut index = ReverseDependencyIndex::default();
+            let mut missing = 0usize;
             std::thread::scope(|scope| {
                 let mut handles = Vec::new();
                 for chunk in entries.chunks(chunk_size) {
@@ -7423,15 +7591,25 @@ impl Baboon {
                     }));
                 }
 
-                for handle in handles {
-                    if let Ok(chunk_results) = handle.join() {
-                        for (key, deps) in chunk_results {
-                            index.set_tag_dependencies(key, deps);
+                // A chunk whose thread panicked used to vanish from the index
+                // without a word. Its tags are counted instead, so the index is
+                // reported (and not saved) as incomplete.
+                for (handle, chunk) in handles.into_iter().zip(entries.chunks(chunk_size)) {
+                    match handle.join() {
+                        Ok(chunk_results) => {
+                            for (key, deps) in chunk_results {
+                                index.set_tag_dependencies(key, deps);
+                            }
                         }
+                        Err(_) => missing += chunk.len(),
                     }
                 }
             });
-            let _ = tx.send(WorkerMessage::ReverseDependenciesBuilt { stamp, index });
+            let _ = tx.send(WorkerMessage::ReverseDependenciesBuilt {
+                stamp,
+                index,
+                missing,
+            });
             ctx.request_repaint();
         });
     }
@@ -7515,20 +7693,20 @@ impl Baboon {
             self.set_tsv_paste_status("No editable cells matched.");
             return;
         }
-        let edit_count = edits.len();
         let applied_rows = data_rows.saturating_sub(skipped_rows);
-        doc.journal.begin_edit(&doc.tag, "Paste TSV");
-        let _ = apply_pending_edits(&mut doc.tag, edits, &mut doc.dirty);
-        doc.journal.end_edit_window();
         let active = self.active;
+        let ops = DeferredOps {
+            pending: edits,
+            ..DeferredOps::default()
+        };
+        let Some(applied) = self.apply_doc_ops(active, &tag_key, "Paste TSV", ops, UndoStep::Own)
+        else {
+            return;
+        };
         self.invalidate_tag_caches_in(active, &tag_key);
 
-        let mut summary = format!("Pasted {edit_count} cell(s) across {applied_rows} row(s)");
-        if skipped_rows > 0 {
-            summary.push_str(&format!(
-                " — {skipped_rows} extra row(s) ignored (block has {element_count} elements; add more first)"
-            ));
-        }
+        let summary =
+            tsv_paste_summary(&applied.outcomes, applied_rows, skipped_rows, element_count);
         self.status = summary.clone();
         self.set_tsv_paste_status(&summary);
     }
@@ -7599,17 +7777,18 @@ impl Baboon {
     /// Drop derived previews for `key` in `kit`, after its document changed.
     pub(super) fn invalidate_tag_caches_in(&mut self, kit: usize, key: &str) {
         if let Some(preview) = self.kits[kit].model_previews.get_mut(key) {
-            preview.loaded_key = None;
-            preview.data = None;
+            preview.invalidate_load();
         }
         if let Some(bitmap) = self.kits[kit].bitmap_previews.get_mut(key) {
             bitmap.decoded = None;
+            bitmap.decoding = None;
             bitmap.texture = None;
             bitmap.texture_dirty = true;
         }
         // rmdf/rmop caches are keyed by external render-method paths, not by this
-        // tag's contents, and the shader grid rebuilds from the tag each frame —
-        // so nothing to clear there.
+        // tag's contents, and the shader grid's model is keyed by the document's
+        // dirty revision, which the change has already moved — so nothing to
+        // clear there.
     }
 
     pub(super) fn undo_current_tag(&mut self) {
@@ -7718,38 +7897,7 @@ impl Baboon {
             // so a single-workspace session remembers its choice as before.
             browser_mode: self.kits[self.active].browser_mode,
             browser_sort: self.kits[self.active].browser_sort,
-            nested_default: self.nested_default,
-            show_browser_prefixes: self.show_browser_prefixes,
-            folders_before_tags: self.folders_before_tags,
-            double_click_to_open_tags: self.double_click_to_open_tags,
-            session_restore: self.session_restore,
-            update_channel: self.update_channel,
-            check_updates_on_startup: self.check_updates_on_startup,
-            show_block_sizes: self.show_block_sizes,
-            angles_in_degrees: self.angles_in_degrees,
-            scroll_to_cycle_dropdowns: self.scroll_to_cycle_dropdowns,
-            confirm_container_overwrite: self.confirm_container_overwrite,
-            confirm_runtime_poke: self.confirm_runtime_poke,
-            enable_chimp: self.enable_chimp,
-            chimp_output_dir: self.chimp_output_dir.clone(),
-            chimp_usmap_path: self.chimp_usmap_path.clone(),
-            expert_mode: self.expert_mode,
-            dark_mode: self.dark_mode,
-            ui_scale: self.ui_scale,
-            model_preview_size: self.model_preview_size,
-            bitmap_preview_view: self.bitmap_preview_view,
-            blender_path: self.blender_path.clone(),
-            editing_kit_paths: self.editing_kit_paths.clone(),
-            ek_folder_aliases: self.ek_folder_aliases.clone(),
-            custom_editing_kit_profiles: self.custom_editing_kit_profiles.clone(),
-            tool_commands_window_pos: self.tool_commands_window_pos,
-            tool_commands_window_size: Some(self.tool_commands_window_size),
-            tool_commands_left_width: self.tool_commands_left_width,
-            tool_commands_collapsed_categories: self.tool_commands_collapsed_categories.clone(),
-            recent_folders: self.recent_folders.clone(),
-            editing_kit_favorites: self.editing_kit_favorites.clone(),
-            custom_color_swatches: self.custom_color_swatches.clone(),
-            palette_last_dir: self.palette_last_dir.clone(),
+            ..self.prefs.clone()
         }
     }
 
@@ -7767,7 +7915,8 @@ impl Baboon {
                     TagSource::SingleFile { path } => Some(path.clone()),
                     _ => None,
                 });
-        self.custom_editing_kit_profiles
+        self.prefs
+            .custom_editing_kit_profiles
             .iter()
             .any(|profile| profile.is_read_only_for(kit.profile.as_ref(), root.as_deref()))
     }
@@ -7973,7 +8122,7 @@ impl Baboon {
     }
 
     pub(super) fn launch_blender(&mut self) {
-        let Some(path) = self.blender_path.clone() else {
+        let Some(path) = self.prefs.blender_path.clone() else {
             self.settings_open = true;
             self.status = "Set the Blender path in File > Settings first".to_owned();
             return;
@@ -7988,7 +8137,12 @@ impl Baboon {
 
     pub(super) fn choose_blender_path(&mut self) {
         let mut dialog = rfd::FileDialog::new().set_title("Select Blender Executable");
-        if let Some(path) = self.blender_path.as_ref().and_then(|path| path.parent()) {
+        if let Some(path) = self
+            .prefs
+            .blender_path
+            .as_ref()
+            .and_then(|path| path.parent())
+        {
             dialog = dialog.set_directory(path);
         }
         #[cfg(target_os = "windows")]
@@ -7996,7 +8150,7 @@ impl Baboon {
             dialog = dialog.add_filter("Executable", &["exe"]);
         }
         if let Some(path) = dialog.pick_file() {
-            self.blender_path = Some(path.clone());
+            self.prefs.blender_path = Some(path.clone());
             self.blender_path_input = path.display().to_string();
             self.status = format!("Blender path set to {}", path.display());
         }
@@ -8007,8 +8161,9 @@ impl Baboon {
         shortcut: EditingKitShortcut,
         ctx: egui::Context,
     ) {
-        let Some(path) = self.editing_kit_paths.get(shortcut.game).cloned() else {
+        let Some(path) = self.prefs.editing_kit_paths.get(shortcut.game).cloned() else {
             if let Some(profile) = self
+                .prefs
                 .custom_editing_kit_profiles
                 .iter()
                 .find(|profile| profile.game == shortcut.game)
@@ -8060,11 +8215,12 @@ impl Baboon {
             return;
         };
         let Some(path) = self
+            .prefs
             .custom_editing_kit_profiles
             .iter()
             .find(|profile| profile.game == shortcut.game)
             .map(|profile| profile.root.clone())
-            .or_else(|| self.editing_kit_paths.get(shortcut.game).cloned())
+            .or_else(|| self.prefs.editing_kit_paths.get(shortcut.game).cloned())
         else {
             self.status = format!(
                 "Command line: set the {} path in Settings before launching tags",
@@ -8115,29 +8271,12 @@ impl Baboon {
         };
         let errors = resolved.errors;
         let entries = resolved.entries;
+        let folder_seeds = self.kits[self.active].folder_seeds();
         if let Some(source) = self.source_mut() {
             for entry in &entries {
-                if !source
-                    .entries
-                    .iter()
-                    .any(|existing| existing.key == entry.key)
-                {
-                    source.entries.push(entry.clone());
+                if source.entry_for_key(&entry.key).is_none() {
+                    source.upsert_entry(entry.clone(), &folder_seeds);
                 }
-                if !source.all_entries.is_empty()
-                    && !source
-                        .all_entries
-                        .iter()
-                        .any(|existing| existing.key == entry.key)
-                {
-                    source.all_entries.push(entry.clone());
-                }
-            }
-            if !source.all_entries.is_empty() {
-                source
-                    .all_entries
-                    .sort_by(|a, b| a.display_path.cmp(&b.display_path));
-                source.group_tree = crate::source::build_group_tree(&source.all_entries);
             }
         }
         for entry in &entries {
@@ -8252,7 +8391,7 @@ impl Baboon {
             format!("Select {} Editing Kit Folder", shortcut.label)
         };
         let mut dialog = rfd::FileDialog::new().set_title(title);
-        if let Some(path) = self.editing_kit_paths.get(shortcut.game) {
+        if let Some(path) = self.prefs.editing_kit_paths.get(shortcut.game) {
             if path.is_dir() {
                 dialog = dialog.set_directory(path);
             } else if let Some(parent) = path.parent().filter(|parent| parent.is_dir()) {
@@ -8260,7 +8399,8 @@ impl Baboon {
             }
         }
         if let Some(path) = dialog.pick_folder() {
-            self.editing_kit_paths
+            self.prefs
+                .editing_kit_paths
                 .insert(shortcut.game.to_owned(), path.clone());
             self.editing_kit_path_inputs
                 .insert(shortcut.game.to_owned(), path.display().to_string());
@@ -8274,9 +8414,11 @@ impl Baboon {
 
     pub(super) fn auto_detect_editing_kit_paths(&mut self) {
         let detected = detect_editing_kit_paths();
-        let previous = self.custom_editing_kit_profiles.clone();
-        let added =
-            add_standard_editing_kit_profiles(&mut self.custom_editing_kit_profiles, &detected);
+        let previous = self.prefs.custom_editing_kit_profiles.clone();
+        let added = add_standard_editing_kit_profiles(
+            &mut self.prefs.custom_editing_kit_profiles,
+            &detected,
+        );
         if added > 0 {
             let prefs = self.current_prefs();
             if let Err(error) = save_gui_prefs(
@@ -8284,7 +8426,7 @@ impl Baboon {
                 &self.terminal_open_games,
                 self.first_run_wizard.is_none(),
             ) {
-                self.custom_editing_kit_profiles = previous;
+                self.prefs.custom_editing_kit_profiles = previous;
                 self.status = error;
                 return;
             }
@@ -8441,23 +8583,21 @@ impl Baboon {
             return;
         }
         let key = format!("file:{}", abs.display());
-        // Ensure an entry exists so ensure_tag_loading can resolve it.
+        // Ensure an entry exists so ensure_tag_loading can resolve it. Built by
+        // the scanner's own constructor: this used to derive the display path
+        // from the unstripped reference, which could double the extension.
         if self.entry_for_key(&key).is_none() {
-            let group_name = self.names().name_for(req.group_tag).map(str::to_owned);
-            let display_path = if ext.is_empty() {
-                req.rel_path.replace('\\', "/")
-            } else {
-                format!("{}.{ext}", req.rel_path.replace('\\', "/"))
-            };
-            let entry = TagEntry {
-                key: key.clone(),
-                display_path,
-                group_tag: req.group_tag,
-                group_name,
-                location: TagEntryLocation::LooseFile(abs),
-            };
-            if let Some(source) = self.source_mut() {
-                source.entries.push(entry);
+            let names = self
+                .source()
+                .map(|source| source.names.clone())
+                .unwrap_or_default();
+            if let Ok(Some(entry)) = loose_file_entry(&root, &abs, &names) {
+                let folder_seeds = self.kits[self.active].folder_seeds();
+                if let Some(source) = self.source_mut() {
+                    source.upsert_entry(entry, &folder_seeds);
+                }
+                self.kits[self.active].generation =
+                    self.kits[self.active].generation.wrapping_add(1);
             }
         }
         self.select_entry(key.clone(), ctx.clone());
@@ -8631,30 +8771,31 @@ impl Baboon {
             if let Some(confirm) = self.block_confirm.take()
                 && routed
             {
-                let mut refresh_model_preview = false;
-                if let Some(doc) = self.kits[self.active].parsed_tags.get_mut(&confirm.tag_key) {
-                    let deletes_model_variant = confirm.path == "variants"
-                        && matches!(confirm.kind, BlockOpKind::Delete(_))
-                        && doc.tag.header.group_tag.to_be_bytes() == *b"hlmt";
-                    let op = BlockOp {
+                let deletes_model_variant = confirm.path == "variants"
+                    && matches!(confirm.kind, BlockOpKind::Delete(_))
+                    && self.kits[self.active]
+                        .parsed_tags
+                        .get(&confirm.tag_key)
+                        .is_some_and(|doc| doc.tag.header.group_tag.to_be_bytes() == *b"hlmt");
+                let ops = DeferredOps {
+                    block_ops: vec![BlockOp {
                         path: confirm.path,
                         kind: confirm.kind,
-                    };
-                    doc.journal.begin_edit(&doc.tag, "Block edit");
-                    if let Some(status) = apply_block_ops(&mut doc.tag, vec![op], &mut doc.dirty) {
-                        self.status = status;
-                        refresh_model_preview = deletes_model_variant;
-                    }
-                    doc.journal.end_edit_window();
-                }
+                    }],
+                    ..DeferredOps::default()
+                };
+                let active = self.active;
+                let applied =
+                    self.apply_doc_ops(active, &confirm.tag_key, "Block edit", ops, UndoStep::Own);
+                let refresh_model_preview = deletes_model_variant
+                    && applied.is_some_and(|applied| applied.status.is_some());
                 if refresh_model_preview
                     && let Some(preview) = self.kits[self.active]
                         .model_previews
                         .get_mut(&confirm.tag_key)
                 {
                     preview.selected_variant = None;
-                    preview.loaded_key = None;
-                    preview.data = None;
+                    preview.invalidate_load();
                 }
             }
         } else if do_cancel {
@@ -8840,13 +8981,13 @@ impl Baboon {
             }
             LastOpenedWindowsAction::Cancel { remember } => {
                 if remember {
-                    self.session_restore = SessionRestore::Never;
+                    self.prefs.session_restore = SessionRestore::Never;
                 }
                 self.last_opened_windows = None;
             }
             LastOpenedWindowsAction::Restore { kits, remember } => {
                 if remember {
-                    self.session_restore = SessionRestore::Always;
+                    self.prefs.session_restore = SessionRestore::Always;
                 }
                 self.last_opened_windows = None;
                 self.begin_last_session_restore(kits, ctx.clone());
@@ -8855,17 +8996,49 @@ impl Baboon {
     }
 
     pub(super) fn persist_prefs_if_changed(&mut self) {
+        let _ = self.try_persist_prefs();
+    }
+
+    /// Write prefs if they changed; whether a write failed.
+    fn try_persist_prefs(&mut self) -> bool {
         let prefs = self.current_prefs();
         if prefs == self.saved_prefs && self.terminal_open_games == self.saved_terminal_open_games {
-            return;
+            return false;
         }
         match save_gui_prefs(&prefs, &self.terminal_open_games, true) {
             Ok(()) => {
                 self.saved_prefs = prefs;
                 self.saved_terminal_open_games = self.terminal_open_games.clone();
+                false
             }
-            Err(error) => self.status = error,
+            Err(error) => {
+                self.status = error;
+                true
+            }
         }
+    }
+
+    /// The per-frame prefs check, at most once a second.
+    ///
+    /// It ran every frame: a full GuiPrefs rebuilt (recents, favorites, kit
+    /// profiles and swatches cloned) just to compare, and while a window, the
+    /// UI-scale slider or a splitter was being dragged the value changed every
+    /// frame, so prefs.json was rewritten at the frame rate. A failed write was
+    /// retried, and reported, every frame too. Explicit calls (settings, runtime
+    /// poke) still write at once, and exit flushes whatever is pending.
+    pub(super) fn persist_prefs_throttled(&mut self, now: f64) {
+        const CHECK_INTERVAL: f64 = 1.0;
+        const RETRY_AFTER_FAILURE: f64 = 10.0;
+        if now < self.prefs_next_check_at {
+            return;
+        }
+        let failed = self.try_persist_prefs();
+        self.prefs_next_check_at = now
+            + if failed {
+                RETRY_AFTER_FAILURE
+            } else {
+                CHECK_INTERVAL
+            };
     }
 }
 
@@ -8893,6 +9066,10 @@ mod browser_refresh_tests;
 #[cfg(test)]
 #[path = "tests/save_changes_prompt.rs"]
 mod save_changes_prompt_tests;
+
+#[cfg(test)]
+#[path = "tests/ref_jump.rs"]
+mod ref_jump_tests;
 
 #[cfg(test)]
 #[path = "tests/mod_overrides.rs"]
@@ -9648,15 +9825,28 @@ mod tests {
             all_entries: entries,
             reverse_dependencies: None,
             initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
         };
 
         let saved_path = root.join("saved").join("cyborg.gbxmodel");
         write_classic_ce_tag(&saved_path, b"mod2");
 
         let registered = register_saved_copy_in_loaded_source(&mut source, &saved_path).unwrap();
+        // The key the folder scan gives the copy. The root is a temp folder,
+        // which is not canonical on macOS (/var is /private/var), and keying the
+        // copy off canonical paths gave it a key the scan never makes.
+        let scanned_key = loose_file_entry(&root, &saved_path, &TagNameIndex::default())
+            .unwrap()
+            .unwrap()
+            .key;
 
-        let _ = std::fs::remove_dir_all(root);
+        let _ = std::fs::remove_dir_all(&root);
         assert!(registered);
+        assert!(
+            source.entries.iter().any(|entry| entry.key == scanned_key),
+            "the copy is keyed like the folder scan"
+        );
         assert!(
             source
                 .tree
@@ -10087,6 +10277,360 @@ fn fix_tag_dependencies_in_tag(
 
     report.lines.push(report.status());
     report
+}
+
+/// What a TSV paste did, counted from the per-cell outcomes. It used to count
+/// the cells it tried, so a paste whose cells all failed to parse still said
+/// every one of them was pasted.
+fn tsv_paste_summary(
+    outcomes: &[FieldEditOutcome],
+    applied_rows: usize,
+    skipped_rows: usize,
+    element_count: usize,
+) -> String {
+    let failed: Vec<&FieldEditOutcome> = outcomes
+        .iter()
+        .filter(|outcome| outcome.result.is_err())
+        .collect();
+    let pasted = outcomes.len() - failed.len();
+    let mut summary = if failed.is_empty() {
+        format!("Pasted {pasted} cell(s) across {applied_rows} row(s)")
+    } else {
+        format!(
+            "Pasted {pasted} of {} cell(s) across {applied_rows} row(s)",
+            outcomes.len()
+        )
+    };
+    if let Some(first) = failed.first() {
+        let error = first
+            .result
+            .as_ref()
+            .err()
+            .map(String::as_str)
+            .unwrap_or("");
+        summary.push_str(&format!(
+            " — {} failed; first: {} = \"{}\": {error}",
+            failed.len(),
+            first.path,
+            first.input
+        ));
+    }
+    if skipped_rows > 0 {
+        summary.push_str(&format!(
+            " — {skipped_rows} extra row(s) ignored (block has {element_count} elements; add more first)"
+        ));
+    }
+    summary
+}
+
+#[cfg(test)]
+mod listing_entries_tests {
+    use super::*;
+
+    fn source(source: TagSource, entries: Vec<TagEntry>) -> LoadedSourceData {
+        LoadedSourceData {
+            label: "test".to_owned(),
+            source,
+            names: TagNameIndex::default(),
+            game: None,
+            entries,
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+        }
+    }
+
+    fn sound() -> TagEntry {
+        TagEntry {
+            key: "file:/kit/tags/a.sound".to_owned(),
+            display_path: "a.sound".to_owned(),
+            group_tag: u32::from_be_bytes(*b"snd!"),
+            group_name: Some("sound".to_owned()),
+            location: TagEntryLocation::LooseFile(PathBuf::from("/kit/tags/a.sound")),
+        }
+    }
+
+    /// A source that lists every tag up front keeps them in `entries`, with
+    /// `all_entries` empty. The whole-source listings read `all_entries`, so
+    /// on such a source they walked nothing and reported "none found".
+    #[test]
+    fn whole_source_listings_see_a_source_listed_up_front() {
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(source(
+            TagSource::SingleFile {
+                path: PathBuf::from("/kit/tags/a.sound"),
+            },
+            vec![sound()],
+        ));
+        assert_eq!(app.listing_entries().map(<[TagEntry]>::len), Ok(1));
+    }
+
+    /// A listing reads its tags on a worker: the window says it is reading,
+    /// and the listing arrives with the worker's message.
+    #[test]
+    fn a_source_listing_is_read_off_the_ui_thread() {
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(source(
+            TagSource::SingleFile {
+                path: PathBuf::from("/kit/tags/a.sound"),
+            },
+            vec![sound()],
+        ));
+        let ctx = egui::Context::default();
+
+        app.show_sounds_by_class(&ctx);
+        let waiting = app
+            .query_results
+            .as_ref()
+            .and_then(|results| results.note.clone());
+        let message = app
+            .rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the listing worker answers");
+        app.tx.send(message).unwrap();
+        app.process_worker_messages(&ctx);
+
+        assert_eq!(waiting.as_deref(), Some("Reading 1 tag(s)…"));
+        let results = app.query_results.expect("results");
+        assert_eq!(
+            results.title, "Sounds by class (0)",
+            "the one sound is unreadable"
+        );
+        assert_eq!(results.note.as_deref(), Some("No sound tags found."));
+    }
+
+    /// A loose folder mid-scan has only the folders browsed so far. Saying
+    /// "none found" from that is wrong; saying the index is not ready is not.
+    #[test]
+    fn whole_source_listings_wait_for_a_loose_folder_scan() {
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(source(
+            TagSource::LooseFolder {
+                root: PathBuf::from("/kit/tags"),
+                game: None,
+                definitions_root: PathBuf::new(),
+            },
+            vec![sound()],
+        ));
+        let Err(error) = app.listing_entries() else {
+            panic!("a loose folder mid-scan must not be listed");
+        };
+        assert!(error.contains("still being built"), "{error}");
+    }
+}
+
+#[cfg(test)]
+mod tsv_paste_summary_tests {
+    use super::*;
+
+    fn outcome(path: &str, input: &str, result: Result<(), String>) -> FieldEditOutcome {
+        FieldEditOutcome {
+            path: path.to_owned(),
+            input: input.to_owned(),
+            result,
+        }
+    }
+
+    /// The summary counts cells that applied, and names what failed. It used
+    /// to count every cell it tried.
+    #[test]
+    fn a_tsv_paste_reports_the_cells_that_failed() {
+        let outcomes = [
+            outcome("regions[0]/name", "hull", Ok(())),
+            outcome(
+                "regions[1]/lod",
+                "high",
+                Err("expected i16 value".to_owned()),
+            ),
+        ];
+        let summary = tsv_paste_summary(&outcomes, 2, 0, 2);
+        assert_eq!(
+            summary,
+            "Pasted 1 of 2 cell(s) across 2 row(s) — 1 failed; first: regions[1]/lod = \"high\": expected i16 value"
+        );
+        let clean = tsv_paste_summary(&outcomes[..1], 1, 3, 1);
+        assert_eq!(
+            clean,
+            "Pasted 1 cell(s) across 1 row(s) — 3 extra row(s) ignored (block has 1 elements; add more first)"
+        );
+    }
+}
+
+/// The whole-source listings in the Tools menu.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SourceListing {
+    MapIds,
+    SoundsByClass,
+    UncompressedSounds,
+}
+
+impl SourceListing {
+    fn title(self) -> &'static str {
+        match self {
+            Self::MapIds => "Scenario map IDs",
+            Self::SoundsByClass => "Sounds by class",
+            Self::UncompressedSounds => "Uncompressed sounds",
+        }
+    }
+
+    fn group(self) -> &'static [u8; 4] {
+        match self {
+            Self::MapIds => b"scnr",
+            Self::SoundsByClass | Self::UncompressedSounds => b"snd!",
+        }
+    }
+}
+
+/// Read every tag a listing is about and build its results. Runs on a worker.
+fn build_source_listing(
+    listing: SourceListing,
+    source: &TagSource,
+    entries: &[TagEntry],
+    kit: KitId,
+) -> TagQueryResults {
+    let (entries, annotations, note) = match listing {
+        SourceListing::MapIds => listing_map_ids(source, entries),
+        SourceListing::SoundsByClass => listing_sounds_by_class(scan_sound_tags(source, entries)),
+        SourceListing::UncompressedSounds => {
+            listing_uncompressed_sounds(scan_sound_tags(source, entries))
+        }
+    };
+    TagQueryResults {
+        kit,
+        title: format!("{} ({})", listing.title(), entries.len()),
+        entries,
+        annotations,
+        note,
+        ref_target: None,
+    }
+}
+
+type ListingRows = (Vec<TagEntry>, Vec<String>, Option<String>);
+
+fn listing_map_ids(source: &TagSource, listed: &[TagEntry]) -> ListingRows {
+    let mut entries = Vec::new();
+    let mut annotations = Vec::new();
+    for entry in listed {
+        if &entry.group_tag.to_be_bytes() != b"scnr" {
+            continue;
+        }
+        let Ok(tag) = crate::source::read_entry(source, entry) else {
+            continue;
+        };
+        let root = tag.root();
+        if let Some(id) = root.read_int_any("map id") {
+            // `map name` carries a `#tooltip` suffix in Reach/H4, so resolve
+            // it via the cleaned-name lookup rather than an exact match.
+            let name = find_full_field_name(&root, "map name")
+                .and_then(|full| root.read_string_id(full))
+                .unwrap_or_default();
+            annotations.push(if name.is_empty() {
+                format!("map id {id}")
+            } else {
+                format!("map id {id}  ({name})")
+            });
+            entries.push(entry.clone());
+        }
+    }
+    let note = entries.is_empty().then(|| {
+        "No scenario map IDs found (scnr tags only; classic Halo 2 stores them elsewhere)."
+            .to_owned()
+    });
+    (entries, annotations, note)
+}
+
+/// Every `snd!` tag's `sound class` and `compression` enum names, as
+/// `(class, compression, entry)`. Shared by both sound listings.
+fn scan_sound_tags(source: &TagSource, listed: &[TagEntry]) -> Vec<(String, String, TagEntry)> {
+    let mut rows = Vec::new();
+    for entry in listed {
+        if &entry.group_tag.to_be_bytes() != b"snd!" {
+            continue;
+        }
+        let Ok(tag) = crate::source::read_entry(source, entry) else {
+            continue;
+        };
+        let root = tag.root();
+        let class = find_full_field_name(&root, "sound class")
+            .and_then(|full| root.read_enum_name(full))
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "(none)".to_owned());
+        let compression = find_full_field_name(&root, "compression")
+            .and_then(|full| root.read_enum_name(full))
+            .unwrap_or_default();
+        rows.push((class, compression, entry.clone()));
+    }
+    rows
+}
+
+fn listing_sounds_by_class(mut rows: Vec<(String, String, TagEntry)>) -> ListingRows {
+    rows.sort_by(|a, b| {
+        a.0.cmp(&b.0)
+            .then_with(|| a.2.display_path.cmp(&b.2.display_path))
+    });
+    let mut counts: std::collections::BTreeMap<&str, usize> = std::collections::BTreeMap::new();
+    for (class, _, _) in &rows {
+        *counts.entry(class.as_str()).or_default() += 1;
+    }
+    let entries: Vec<TagEntry> = rows.iter().map(|(_, _, e)| e.clone()).collect();
+    let annotations: Vec<String> = rows
+        .iter()
+        .map(|(class, comp, _)| {
+            if comp.is_empty() {
+                format!("[{class}]")
+            } else {
+                format!("[{class}] {comp}")
+            }
+        })
+        .collect();
+    let note = if entries.is_empty() {
+        Some("No sound tags found.".to_owned())
+    } else {
+        let summary = counts
+            .iter()
+            .map(|(k, v)| format!("{k}: {v}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        Some(format!("{} class(es) \u{2014} {summary}", counts.len()))
+    };
+    (entries, annotations, note)
+}
+
+fn listing_uncompressed_sounds(rows: Vec<(String, String, TagEntry)>) -> ListingRows {
+    let mut hits: Vec<(String, String, TagEntry)> = rows
+        .into_iter()
+        .filter(|(_, comp, _)| comp.to_ascii_lowercase().contains("none"))
+        .collect();
+    hits.sort_by(|a, b| a.2.display_path.cmp(&b.2.display_path));
+    let entries: Vec<TagEntry> = hits.iter().map(|(_, _, e)| e.clone()).collect();
+    let annotations: Vec<String> = hits
+        .iter()
+        .map(|(class, comp, _)| format!("{comp}  [{class}]"))
+        .collect();
+    let note = entries
+        .is_empty()
+        .then(|| "No uncompressed sound tags found.".to_owned());
+    (entries, annotations, note)
+}
+
+/// Where `tag` points at the reference `(group_tag, target)`, one row per
+/// referencing field. `target` is already normalized.
+fn ref_occurrences_in(tag: &TagFile, group_tag: u32, target: &str) -> Vec<RefOccurrence> {
+    let mut refs = Vec::new();
+    collect_tag_references(tag.root(), "", &mut refs);
+    refs.into_iter()
+        .filter(|reference| {
+            reference.group_tag == group_tag && normalize_ref(&reference.rel_path) == target
+        })
+        .map(|reference| RefOccurrence {
+            label: occurrence_label(&reference.field_path),
+            field_path: reference.field_path,
+        })
+        .collect()
 }
 
 fn collect_tag_references(
@@ -10831,12 +11375,8 @@ fn affected_move_rewrite_entries(
         .into_iter()
         .filter_map(|key| entries_by_key.get(&key).cloned())
         .collect::<Vec<_>>();
-    entries.sort_by(|a, b| natural_entry_order(a).cmp(&natural_entry_order(b)));
+    entries.sort_by_cached_key(|entry| crate::source::natural_key(&entry.display_path));
     entries
-}
-
-fn natural_entry_order(entry: &TagEntry) -> String {
-    entry.display_path.to_ascii_lowercase().replace('\\', "/")
 }
 
 fn rewrite_references_in_entries(
@@ -10986,6 +11526,33 @@ fn refresh_reverse_dependency_index_after_refactor(
     }
 }
 
+/// Write what a refresh found into the on-disk indexes, row by row, and read
+/// the references of the tags that changed. Runs on the refresh worker.
+///
+/// A refresh used to hand the whole entry list back to the UI, which dropped
+/// the reference index and spawned a rewrite of every index row, a stat per
+/// tag although the refresh had just taken them all. Only the tags that
+/// changed are touched now.
+fn persist_entry_index_changes(
+    game: &str,
+    root: &Path,
+    tag_source: &TagSource,
+    mut refresh: EntryIndexRefresh,
+) -> EntryIndexRefresh {
+    for key in &refresh.removed_keys {
+        let _ = crate::source::delete_entry_index_row(game, root, key);
+        let _ = crate::source::save_tag_dependencies(game, root, key, None);
+    }
+    for entry in &refresh.touched {
+        let _ = crate::source::upsert_entry_index_row(game, root, entry);
+        if let Ok(deps) = read_entry_dependencies(tag_source, entry) {
+            let _ = crate::source::save_tag_dependencies(game, root, &entry.key, Some(&deps));
+            refresh.touched_dependencies.push((entry.key.clone(), deps));
+        }
+    }
+    refresh
+}
+
 fn read_entry_dependencies(
     source: &TagSource,
     entry: &TagEntry,
@@ -11025,7 +11592,8 @@ fn read_entry_dependencies(
 mod container_dependency_tests {
     use super::*;
 
-    const CE_PAKS: &str = "/Users/camden/Halo/halo-campaign-evolved_pc/Meteorite/Content/Paks";
+    static CE_PAKS: std::sync::LazyLock<&'static str> =
+        std::sync::LazyLock::new(|| crate::test_kits::leak(crate::test_kits::ce_paks()));
 
     fn find_entry<'a>(
         loaded: &'a crate::source::LoadedSourceData,
@@ -11052,7 +11620,7 @@ mod container_dependency_tests {
     /// entry display paths built from the pak directory. Skips without the paks.
     #[test]
     fn campaign_evolved_container_tags_report_their_dependencies() {
-        let paks = PathBuf::from(CE_PAKS);
+        let paks = PathBuf::from(*CE_PAKS);
         if !paks.exists() {
             eprintln!("skip: CE paks not found");
             return;
@@ -11103,7 +11671,7 @@ mod container_dependency_tests {
     #[test]
     #[ignore = "parses all ~12k Campaign Evolved tags"]
     fn campaign_evolved_full_reference_index_resolves_referrers() {
-        let paks = PathBuf::from(CE_PAKS);
+        let paks = PathBuf::from(*CE_PAKS);
         if !paks.exists() {
             eprintln!("skip: CE paks not found");
             return;
@@ -11530,6 +12098,8 @@ mod dependency_tests {
             all_entries: entries,
             reverse_dependencies: None,
             initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
         }
     }
 
@@ -12015,5 +12585,319 @@ mod mod_output_tests {
             classify_overlay(true, shipped_kind, false),
             ModExportChange::Modified
         );
+    }
+}
+
+#[cfg(test)]
+mod dependency_database_tests {
+    use super::*;
+
+    fn loose(root: &Path, all_entries: Vec<TagEntry>) -> LoadedSourceData {
+        LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::LooseFolder {
+                root: root.to_path_buf(),
+                game: None,
+                definitions_root: PathBuf::new(),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries,
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+        }
+    }
+
+    /// Fix Tag Dependencies uses the completed scan it already has. It used to
+    /// rescan the whole folder on the UI thread every time.
+    #[test]
+    fn fix_dependencies_uses_the_completed_scan_without_rescanning() {
+        // An empty folder on disk: a rescan would find nothing.
+        let root = std::env::temp_dir().join(format!(
+            "baboon-fix-deps-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let known = TagEntry {
+            key: "file:objects/a.model".to_owned(),
+            display_path: "objects/a.model".to_owned(),
+            group_tag: u32::from_be_bytes(*b"hlmt"),
+            group_name: None,
+            location: TagEntryLocation::LooseFile(root.join("objects/a.model")),
+        };
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(loose(&root, vec![known]));
+        let scanned = app
+            .dependency_database_entries()
+            .map(|entries| entries.len());
+
+        let mut unscanned = Baboon::for_test();
+        unscanned.install_loaded_source(loose(&root, Vec::new()));
+        let waiting = unscanned.dependency_database_entries().is_err();
+
+        std::fs::remove_dir_all(&root).unwrap();
+        assert_eq!(
+            scanned,
+            Ok(1),
+            "the in-memory scan, not a rescan of the empty folder"
+        );
+        assert!(
+            waiting,
+            "no scan yet: say so rather than scan on the UI thread"
+        );
+    }
+}
+
+#[cfg(test)]
+mod refresh_reference_tests {
+    use super::*;
+
+    /// A refresh patches the reference index with what changed. It used to
+    /// drop it, so "References to" said the index was unavailable until a
+    /// manual rebuild after any change the refresh noticed.
+    #[test]
+    fn a_refresh_patches_the_reference_index_instead_of_dropping_it() {
+        let target = DependencyRef {
+            group_tag: u32::from_be_bytes(*b"bitm"),
+            rel_path: "shared\\texture".to_owned(),
+        };
+        let mut index = ReverseDependencyIndex::default();
+        index.set_tag_dependencies("file:kept".to_owned(), vec![target.clone()]);
+        index.set_tag_dependencies("file:gone".to_owned(), vec![target.clone()]);
+        let root = std::env::temp_dir();
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::SingleFile {
+                path: root.join("x"),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: Some(index),
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+        });
+
+        app.apply_entry_index_refresh(
+            0,
+            EntryIndexRefresh {
+                entries: Vec::new(),
+                changed: true,
+                added: 1,
+                updated: 0,
+                removed: 1,
+                touched: Vec::new(),
+                removed_keys: vec!["file:gone".to_owned()],
+                touched_dependencies: vec![("file:new".to_owned(), vec![target.clone()])],
+            },
+            egui::Context::default(),
+        );
+
+        let index = app.kits[0]
+            .source
+            .as_ref()
+            .and_then(|source| source.reverse_dependencies.as_ref())
+            .expect("the reference index survives a refresh");
+        let mut referrers = index
+            .dependents_for(target.group_tag, &target.rel_path)
+            .to_vec();
+        referrers.sort();
+        assert_eq!(referrers, ["file:kept", "file:new"]);
+    }
+}
+
+#[cfg(test)]
+mod saved_tag_index_tests {
+    use super::*;
+
+    /// A plain Save leaves nothing for the periodic refresh to find, and the
+    /// reference index knows what the saved tag now points at.
+    #[test]
+    fn a_saved_tag_updates_its_index_row_and_references() {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-save-index-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let game = format!("save_index_{}", root.file_name().unwrap().to_string_lossy());
+        std::fs::create_dir_all(root.join("objects")).unwrap();
+        let path = root.join("objects/crate.model");
+        let mut tag = TagFile::new(locate_definitions_root().join("halo3_mcc/model.json")).unwrap();
+        tag.write_atomic(&path).unwrap();
+        let names = TagNameIndex::default();
+        let entries =
+            crate::source::scan_folder_subtree_entries(&root, Path::new(""), &names).unwrap();
+        crate::source::save_entry_index(&game, &root, &entries).unwrap();
+        let entry = entries[0].clone();
+
+        let mut app = Baboon::for_test();
+        app.install_loaded_source(LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::LooseFolder {
+                root: root.clone(),
+                game: Some(game.clone()),
+                definitions_root: PathBuf::new(),
+            },
+            names: names.clone(),
+            game: Some(game.clone()),
+            entries: entries.clone(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: entries.clone(),
+            reverse_dependencies: Some(ReverseDependencyIndex::default()),
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+        });
+        crate::app::apply_field_edit(&mut tag, "render model", "mode:objects/crate").unwrap();
+        app.kits[0]
+            .parsed_tags
+            .insert(entry.key.clone(), TagDocument::modified(tag));
+
+        let saved = app.save_tag_by_key(&entry.key);
+        let refresh = crate::source::refresh_entry_index(&game, &root, &names);
+        let referrers = app.kits[0]
+            .source
+            .as_ref()
+            .and_then(|source| source.reverse_dependencies.as_ref())
+            .map(|index| {
+                index
+                    .dependents_for(u32::from_be_bytes(*b"mode"), "objects\\crate")
+                    .to_vec()
+            });
+
+        crate::source::remove_test_index_rows(&game);
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(saved.is_ok(), "{saved:?}");
+        assert!(
+            !refresh.unwrap().changed,
+            "the refresh finds the save already indexed"
+        );
+        assert_eq!(referrers, Some(vec![entry.key.clone()]));
+    }
+}
+
+#[cfg(test)]
+mod prefs_throttle_tests {
+    use super::*;
+
+    /// The per-frame prefs check runs at most once a second. It ran every
+    /// frame, and wrote prefs.json every frame while a slider was dragged.
+    #[test]
+    fn the_per_frame_prefs_check_runs_once_a_second() {
+        // Unchanged prefs, so nothing is written: this only watches the clock.
+        let mut app = Baboon::for_test();
+        app.persist_prefs_throttled(10.0);
+        assert_eq!(app.prefs_next_check_at, 11.0);
+        app.persist_prefs_throttled(10.5);
+        assert_eq!(app.prefs_next_check_at, 11.0, "inside the second: skipped");
+        app.persist_prefs_throttled(11.2);
+        assert_eq!(app.prefs_next_check_at, 12.2);
+    }
+}
+
+#[cfg(test)]
+mod in_place_overwrite_tests {
+    use super::*;
+
+    fn job(app: &Baboon, dirty_revision: u64) -> InPlaceOverwriteJob {
+        InPlaceOverwriteJob {
+            stamp: app.kit_stamp(),
+            key: "tag".to_owned(),
+            dirty_revision,
+            root: PathBuf::new(),
+            containers: Vec::new(),
+            container_idx: 0,
+            utoc_path: std::env::temp_dir().join("baboon-in-place-test/pakchunk0-Windows.utoc"),
+            rel_path: String::new(),
+            bytes: Vec::new(),
+        }
+    }
+
+    fn saved() -> InPlaceOverwrite {
+        InPlaceOverwrite {
+            write: Ok(()),
+            reopened: None,
+            touched: true,
+        }
+    }
+
+    /// The write runs on a worker from bytes serialized before it started.
+    /// An edit made meanwhile is not in them, so the tag stays dirty.
+    #[test]
+    fn a_tag_edited_during_its_save_stays_dirty() {
+        let mut app = Baboon::for_test();
+        let tag = TagFile::new(crate::app::test_definition_path(
+            "halo4_mcc/camera_track.json",
+        ))
+        .unwrap();
+        app.kits[0]
+            .parsed_tags
+            .insert("tag".to_owned(), TagDocument::modified(tag));
+        let at_save = app.kits[0].parsed_tags["tag"].dirty.revision();
+
+        app.kits[0]
+            .parsed_tags
+            .get_mut("tag")
+            .unwrap()
+            .dirty
+            .touch();
+        app.finish_in_place_overwrite(job(&app, at_save), saved());
+        assert!(
+            app.kits[0].parsed_tags["tag"].dirty.is_set(),
+            "edited mid-save"
+        );
+
+        let now = app.kits[0].parsed_tags["tag"].dirty.revision();
+        app.finish_in_place_overwrite(job(&app, now), saved());
+        assert!(
+            !app.kits[0].parsed_tags["tag"].dirty.is_set(),
+            "saved as it stands"
+        );
+    }
+
+    /// The worker's lease is released whatever the write did, or the
+    /// container refuses every later write.
+    #[test]
+    fn a_failed_in_place_overwrite_releases_its_lease() {
+        let mut app = Baboon::for_test();
+        let job = job(&app, 0);
+        let lease = app
+            .acquire_container_write_lease(&job.utoc_path, ContainerWriteMode::AppendInPlace)
+            .unwrap();
+        let lease = app.park_container_write_lease(lease);
+        let failed = InPlaceOverwrite {
+            write: Err("no paired .uasset".to_owned()),
+            reopened: None,
+            touched: false,
+        };
+        let utoc = job.utoc_path.clone();
+        app.handle_in_place_overwrite_finished(job, lease, failed);
+        assert!(
+            app.status.contains("export this mod again"),
+            "{}",
+            app.status
+        );
+        let again = app
+            .acquire_container_write_lease(&utoc, ContainerWriteMode::AppendInPlace)
+            .expect("the container is writable again");
+        app.release_in_place_lease(again, ContainerWriteOutcome::Unchanged);
     }
 }

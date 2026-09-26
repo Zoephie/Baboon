@@ -151,13 +151,40 @@ fn executable_dir() -> PathBuf {
 }
 
 fn installed_data_root(windows_folder: &str, unix_folder: &str) -> PathBuf {
+    // Tests never touch the user's data, or the working directory: one folder
+    // per test process under the temp dir.
+    #[cfg(test)]
+    {
+        let _ = windows_folder;
+        return test_data_root().join(unix_folder);
+    }
+    #[cfg(not(test))]
+    {
+        user_data_root(windows_folder, unix_folder)
+    }
+}
+
+/// Where installed-mode state lives for a real run.
+///
+/// This used to fall back to the relative path `.baboon` whenever neither
+/// `APPDATA` nor `USERPROFILE` was set, which is every macOS and Linux run:
+/// installed state then went wherever Baboon was started from (`/` from the
+/// Finder, where writes fail), and `cargo test` wrote prefs and an index into
+/// the repository. `$HOME/.config/<folder>` is the same shape the
+/// `USERPROFILE` branch already used.
+pub(crate) fn user_data_root(windows_folder: &str, unix_folder: &str) -> PathBuf {
     if let Some(appdata) = std::env::var_os("APPDATA") {
         return PathBuf::from(appdata).join(windows_folder);
     }
-    if let Some(home) = std::env::var_os("USERPROFILE") {
+    if let Some(home) = std::env::var_os("USERPROFILE").or_else(|| std::env::var_os("HOME")) {
         return PathBuf::from(home).join(".config").join(unix_folder);
     }
     PathBuf::from(format!(".{unix_folder}"))
+}
+
+#[cfg(test)]
+fn test_data_root() -> PathBuf {
+    std::env::temp_dir().join(format!("baboon-test-data-{}", std::process::id()))
 }
 
 #[cfg(test)]

@@ -207,7 +207,7 @@ fn custom_header_inputs_use_standard_hover_and_focus_strokes() {
         egui::CentralPanel::default().show(ctx, |ui| {
             assert_eq!(
                 pane_header_input_stroke(ui, false, false),
-                Stroke::new(1.0, foundation_input_edge())
+                Stroke::new(1.0_f32, foundation_input_edge())
             );
             assert_eq!(
                 pane_header_input_stroke(ui, true, false),
@@ -468,4 +468,36 @@ fn monitor_commands_are_game_specific() {
     );
     assert!(monitor_commands_for_game(Some("haloce_mcc")).is_empty());
     assert!(monitor_commands_for_game(None).is_empty());
+}
+
+/// A probe the UI asks every frame is answered from memory for a second,
+/// then asked again, so a file appearing outside Baboon still shows up.
+#[test]
+fn a_rechecked_probe_runs_at_most_once_a_second() {
+    let ctx = egui::Context::default();
+    let probes = std::cell::Cell::new(0);
+    let ask = |time: f64| {
+        let mut answer = false;
+        let _ = ctx.run(
+            egui::RawInput {
+                time: Some(time),
+                ..Default::default()
+            },
+            |ctx| {
+                answer = super::recheck_cached(ctx, "probe", || {
+                    probes.set(probes.get() + 1);
+                    probes.get() > 1
+                });
+            },
+        );
+        answer
+    };
+    assert!(!ask(10.0));
+    assert!(
+        !ask(10.5),
+        "within the second: the first answer, not asked again"
+    );
+    assert_eq!(probes.get(), 1);
+    assert!(ask(11.5), "after it: asked again, and the new answer used");
+    assert_eq!(probes.get(), 2);
 }

@@ -18,4 +18,4 @@ pub(super) use widgets::*;
 
 #[cfg(test)]
 #[path = "foundation/tests.rs"]
-mod extracted_tests;
+pub(in crate::app) mod extracted_tests;

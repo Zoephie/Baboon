@@ -59,7 +59,7 @@ pub(in crate::app) enum MeshDetail {
 /// the surface arrives connected rather than as loose patches.
 fn decode_mesh(
     world: &World,
-    document: &ChimpDocument,
+    document: &ChimpPackage,
     detail: MeshDetail,
 ) -> Result<StaticMesh, String> {
     decode_mesh_raw(world, document, detail).map(|mesh| weld(&mesh).0)
@@ -67,12 +67,12 @@ fn decode_mesh(
 
 fn decode_mesh_raw(
     world: &World,
-    document: &ChimpDocument,
+    document: &ChimpPackage,
     detail: MeshDetail,
 ) -> Result<StaticMesh, String> {
     let header_size = document.header.summary.header_size as usize;
     match detail {
-        MeshDetail::Fallback => StaticMesh::from_package(&document.original, header_size),
+        MeshDetail::Fallback => StaticMesh::from_package(&document.bytes, header_size),
         MeshDetail::Nanite => {
             // Nanite geometry is streamed from the package's bulk data, so the
             // decoder needs it alongside the package itself.
@@ -82,7 +82,7 @@ fn decode_mesh_raw(
                 .ok()
                 .and_then(|chunk| archive.read_bulk_for(chunk, 0).ok());
             StaticMesh::from_package_preferring_nanite(
-                &document.original,
+                &document.bytes,
                 header_size,
                 bulk.as_deref(),
             )
@@ -116,6 +116,10 @@ fn number(value: f64) -> String {
     format!("{value}")
 }
 
+// The single-file USD writer, superseded by the segmented and Blender
+// exports. Nothing in the app calls it; its tests still use it as a reference,
+// so it is compiled for them only.
+#[cfg(test)]
 /// What an export produced, and what it could not.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub(in crate::app) struct LevelExportReport {
@@ -166,6 +170,10 @@ struct Prototype {
     material: String,
 }
 
+// The single-file USD writer, superseded by the segmented and Blender
+// exports. Nothing in the app calls it; its tests still use it as a reference,
+// so it is compiled for them only.
+#[cfg(test)]
 /// Errors are deliberately not checked per call. A `BufWriter` that has failed
 /// once keeps failing, so a single flush at the end catches a disk filling up
 /// mid-write; checking eight million individual `write!`s would not learn
@@ -287,6 +295,10 @@ fn write_mesh_body(usd: &mut impl std::io::Write, mesh: &StaticMesh, material_pa
     let _ = writeln!(usd, "            }}");
 }
 
+// The single-file USD writer, superseded by the segmented and Blender
+// exports. Nothing in the app calls it; its tests still use it as a reference,
+// so it is compiled for them only.
+#[cfg(test)]
 fn write_instance(
     usd: &mut impl std::io::Write,
     index: usize,
@@ -390,70 +402,39 @@ pub(in crate::app) fn write_segmented_usd(
     let mut report = SegmentedExportReport::default();
     let library_name = format!("{name}_prototypes.usda");
 
-    // One pass over the meshes: decode, write, drop, and keep only the triangle
-    // count the split needs. Nothing holds more than a mesh at a time.
-    let mut taken = HashSet::new();
-    let mut prototypes: Vec<Option<String>> = Vec::with_capacity(scene.meshes.len());
-    let mut mesh_triangles: Vec<usize> = Vec::with_capacity(scene.meshes.len());
     let mut materials = HashSet::new();
-    {
-        let library_path = directory.join(&library_name);
-        let mut library = BufWriter::new(File::create(&library_path)?);
-        write_stage_header(&mut library);
-        write_prototypes_open(&mut library);
-        for (index, package) in scene.meshes.iter().enumerate() {
-            progress(ExportStage::Meshes, index, scene.meshes.len());
-            match load_prototype(world, package, detail, &mut taken) {
-                Some(prototype) => {
-                    let triangles = prototype.mesh.indices.len() / 3;
-                    materials.insert(prototype.material.clone());
-                    write_library_prototype(&mut library, &prototype);
-                    prototypes.push(Some(prototype.prim));
-                    mesh_triangles.push(triangles);
-                    report.triangles += triangles;
-                }
-                None => {
-                    report.unreadable_meshes += 1;
-                    prototypes.push(None);
-                    mesh_triangles.push(0);
-                }
-            }
-        }
-        let _ = writeln!(library, "    }}");
-        let _ = writeln!(library, "}}");
-        library.flush()?;
-        drop(library);
-        report.library_bytes = std::fs::metadata(&library_path)?.len();
-    }
+    let library_path = directory.join(&library_name);
+    let mut library = BufWriter::new(File::create(&library_path)?);
+    write_stage_header(&mut library);
+    write_prototypes_open(&mut library);
+    let mut taken = HashSet::new();
+    let pass = level_pass(
+        scene,
+        budget,
+        progress,
+        |package| load_prototype(world, package, detail, &mut taken),
+        |prototype| {
+            materials.insert(prototype.material.clone());
+            report.triangles += prototype.mesh.indices.len() / 3;
+            write_library_prototype(&mut library, &prototype);
+            Ok(prototype.prim)
+        },
+    )?;
+    let _ = writeln!(library, "    }}");
+    let _ = writeln!(library, "}}");
+    library.flush()?;
+    drop(library);
+    report.library_bytes = std::fs::metadata(&library_path)?.len();
+    let LevelPass {
+        meshes: prototypes,
+        unreadable,
+        placed,
+        segments,
+    } = pass;
+    report.unreadable_meshes = unreadable;
     report.prototypes = prototypes.iter().flatten().count();
     report.materials = materials.len();
-
-    // A placement whose mesh could not be decoded has nothing to reference, so
-    // it is dropped before the split rather than skewing a segment's budget with
-    // geometry that will not be there.
-    let placed: Vec<(usize, PlacedMesh)> = scene
-        .placements
-        .iter()
-        .enumerate()
-        .filter(|(_, placement)| matches!(prototypes.get(placement.mesh), Some(Some(_))))
-        .map(|(index, placement)| {
-            (
-                index,
-                PlacedMesh {
-                    mesh: placement.mesh,
-                    position: [
-                        placement.world[12],
-                        placement.world[13],
-                        placement.world[14],
-                    ],
-                },
-            )
-        })
-        .collect();
     report.dropped_placements = scene.placements.len() - placed.len();
-    let positions: Vec<PlacedMesh> = placed.iter().map(|(_, placed)| *placed).collect();
-
-    let segments = segment(&positions, &mesh_triangles, budget);
     report.segments = segments.len();
     for (number, piece) in segments.iter().enumerate() {
         progress(ExportStage::Segments, number, segments.len());
@@ -464,8 +445,7 @@ pub(in crate::app) fn write_segmented_usd(
         let mut usd = BufWriter::new(File::create(&path)?);
         write_stage_header(&mut usd);
         for (slot, &index) in piece.placements.iter().enumerate() {
-            let (placement_index, _) = placed[index];
-            let placement = &scene.placements[placement_index];
+            let placement = &scene.placements[placed[index]];
             let Some(Some(prim)) = prototypes.get(placement.mesh) else {
                 continue;
             };
@@ -505,63 +485,35 @@ pub(in crate::app) fn write_blend_export(
     std::fs::create_dir_all(directory)?;
     let mut report = BlendExportReport::default();
 
-    // Meshes are decoded, written and dropped one at a time; only the triangle
-    // counts the split needs are kept.
-    let mut taken = HashSet::new();
-    let mut written: Vec<Option<u32>> = Vec::with_capacity(scene.meshes.len());
-    let mut mesh_triangles: Vec<usize> = Vec::with_capacity(scene.meshes.len());
     let data_path = directory.join(format!("{name}.baboonlevel"));
     let mut writer = BlendWriter::create(&data_path, scene.meshes.len(), scene.placements.len())?;
-    for (index, package) in scene.meshes.iter().enumerate() {
-        progress(ExportStage::Meshes, index, scene.meshes.len());
-        match load_prototype(world, package, detail, &mut taken) {
-            Some(prototype) => {
-                writer.write_mesh(BlendMesh {
-                    name: &prototype.prim,
-                    mesh: &prototype.mesh,
-                })?;
-                written.push(Some(report.meshes as u32));
-                mesh_triangles.push(prototype.mesh.indices.len() / 3);
-                report.meshes += 1;
-            }
-            None => {
-                report.unreadable_meshes += 1;
-                written.push(None);
-                mesh_triangles.push(0);
-            }
-        }
-    }
-
-    // A placement whose mesh could not be decoded has nothing to place.
-    let placed: Vec<(usize, PlacedMesh)> = scene
-        .placements
-        .iter()
-        .enumerate()
-        .filter(|(_, placement)| matches!(written.get(placement.mesh), Some(Some(_))))
-        .map(|(index, placement)| {
-            (
-                index,
-                PlacedMesh {
-                    mesh: placement.mesh,
-                    position: [
-                        placement.world[12],
-                        placement.world[13],
-                        placement.world[14],
-                    ],
-                },
-            )
-        })
-        .collect();
+    let mut taken = HashSet::new();
+    let LevelPass {
+        meshes: written,
+        unreadable,
+        placed,
+        segments,
+    } = level_pass(
+        scene,
+        budget,
+        progress,
+        |package| load_prototype(world, package, detail, &mut taken),
+        |prototype| {
+            writer.write_mesh(BlendMesh {
+                name: &prototype.prim,
+                mesh: &prototype.mesh,
+            })?;
+            report.meshes += 1;
+            Ok(report.meshes as u32 - 1)
+        },
+    )?;
+    report.unreadable_meshes = unreadable;
     report.dropped_placements = scene.placements.len() - placed.len();
-    let positions: Vec<PlacedMesh> = placed.iter().map(|(_, placed)| *placed).collect();
-
-    let segments = segment(&positions, &mesh_triangles, budget);
     report.segments = segments.len();
     let mut placements = Vec::with_capacity(placed.len());
     for (number, piece) in segments.iter().enumerate() {
         for &index in &piece.placements {
-            let (placement_index, _) = placed[index];
-            let placement = &scene.placements[placement_index];
+            let placement = &scene.placements[placed[index]];
             let Some(Some(mesh)) = written.get(placement.mesh) else {
                 continue;
             };
@@ -577,6 +529,76 @@ pub(in crate::app) fn write_blend_export(
 
     write_build_script(directory, name, &report)?;
     Ok(report)
+}
+
+/// What both level exports share: every mesh decoded once and handed to
+/// `write`, then the placements whose meshes decoded, split into segments.
+struct LevelPass<T> {
+    /// What `write` returned for each mesh, `None` where it did not decode.
+    meshes: Vec<Option<T>>,
+    unreadable: usize,
+    /// The placements kept, as indices into `LevelScene::placements`. A
+    /// segment's `placements` index into this.
+    placed: Vec<usize>,
+    segments: Vec<Segment>,
+}
+
+/// Decode, write and drop the meshes one at a time, keeping only what the
+/// split needs; then drop the placements of meshes that did not decode, which
+/// have nothing to reference and would skew a segment's budget with geometry
+/// that is not there, and split the rest on `budget`.
+fn level_pass<T>(
+    scene: &LevelScene,
+    budget: SegmentBudget,
+    progress: &dyn Fn(ExportStage, usize, usize),
+    mut load: impl FnMut(&str) -> Option<Prototype>,
+    mut write: impl FnMut(Prototype) -> std::io::Result<T>,
+) -> std::io::Result<LevelPass<T>> {
+    let mut meshes = Vec::with_capacity(scene.meshes.len());
+    let mut mesh_triangles = Vec::with_capacity(scene.meshes.len());
+    let mut unreadable = 0;
+    for (index, package) in scene.meshes.iter().enumerate() {
+        progress(ExportStage::Meshes, index, scene.meshes.len());
+        match load(package) {
+            Some(prototype) => {
+                mesh_triangles.push(prototype.mesh.indices.len() / 3);
+                meshes.push(Some(write(prototype)?));
+            }
+            None => {
+                unreadable += 1;
+                mesh_triangles.push(0);
+                meshes.push(None);
+            }
+        }
+    }
+    let placed: Vec<usize> = scene
+        .placements
+        .iter()
+        .enumerate()
+        .filter(|(_, placement)| matches!(meshes.get(placement.mesh), Some(Some(_))))
+        .map(|(index, _)| index)
+        .collect();
+    let positions: Vec<PlacedMesh> = placed
+        .iter()
+        .map(|&index| {
+            let placement = &scene.placements[index];
+            PlacedMesh {
+                mesh: placement.mesh,
+                position: [
+                    placement.world[12],
+                    placement.world[13],
+                    placement.world[14],
+                ],
+            }
+        })
+        .collect();
+    let segments = segment(&positions, &mesh_triangles, budget);
+    Ok(LevelPass {
+        meshes,
+        unreadable,
+        placed,
+        segments,
+    })
 }
 
 /// One prototype in the shared library, with its material nested inside it.
@@ -696,6 +718,10 @@ fn write_segment_readme(
     readme.flush()
 }
 
+// The single-file USD writer, superseded by the segmented and Blender
+// exports. Nothing in the app calls it; its tests still use it as a reference,
+// so it is compiled for them only.
+#[cfg(test)]
 /// Export a level scene to a `.usda` file without ever holding it in memory.
 ///
 /// A whole level is 8.5 GiB of text over 745 meshes; building that as a `String`
@@ -776,7 +802,10 @@ fn load_prototype(
     taken: &mut HashSet<String>,
 ) -> Option<Prototype> {
     let leaf = package.rsplit('/').next().unwrap_or("mesh");
-    let (document, mesh) = load_chimp_document(world, package)
+    // The package, not an editor document: a document decodes its own mesh
+    // preview (Nanite for a static mesh) and renders text panes, and the
+    // mesh is decoded again just below.
+    let (document, mesh) = load_chimp_package(world, package)
         .and_then(|document| decode_mesh(world, &document, detail).map(|mesh| (document, mesh)))
         .ok()?;
     // The mesh's own material, resolved the same way the material list written
@@ -807,6 +836,10 @@ fn write_stage_header(usd: &mut impl std::io::Write) {
     let _ = writeln!(usd, "{{");
 }
 
+// The single-file USD writer, superseded by the segmented and Blender
+// exports. Nothing in the app calls it; its tests still use it as a reference,
+// so it is compiled for them only.
+#[cfg(test)]
 fn write_materials(usd: &mut impl std::io::Write, materials: &[String]) {
     let _ = writeln!(usd, "    def Scope \"Materials\"");
     let _ = writeln!(usd, "    {{");
@@ -841,6 +874,10 @@ fn write_prototypes_open(usd: &mut impl std::io::Write) {
     let _ = writeln!(usd, "        uniform token visibility = \"invisible\"");
 }
 
+// The single-file USD writer, superseded by the segmented and Blender
+// exports. Nothing in the app calls it; its tests still use it as a reference,
+// so it is compiled for them only.
+#[cfg(test)]
 /// Convert a level scene into a USD (`.usda`) document held in memory.
 ///
 /// Only safe for a slice of a level — see [`write_scene_usd`] for anything whose
@@ -1244,7 +1281,7 @@ mod census {
             let leaf = package.rsplit('/').next().unwrap_or("mesh");
             // The undecorated decode, so the weld's effect is what is being
             // measured rather than something already applied.
-            let decoded = load_chimp_document(&world, package)
+            let decoded = load_chimp_package(&world, package)
                 .and_then(|document| decode_mesh_raw(&world, &document, MeshDetail::Nanite));
             let Ok(mesh) = decoded else {
                 unreadable += 1;
@@ -1453,7 +1490,7 @@ mod sample_export {
             // `meshes` only ever grows, and in first-seen order, so everything
             // past the high-water mark is new to this cell.
             while counted < scene.meshes.len() {
-                triangles += load_chimp_document(&world, &scene.meshes[counted])
+                triangles += load_chimp_package(&world, &scene.meshes[counted])
                     .and_then(|mesh_document| decode_mesh(&world, &mesh_document, detail))
                     .map(|mesh| mesh.indices.len() / 3)
                     .unwrap_or(0);
@@ -1706,5 +1743,57 @@ mod sample_export {
             scene.skipped,
             report.dropped_placements
         );
+    }
+}
+
+#[cfg(test)]
+mod level_pass_tests {
+    use super::*;
+    use crate::app::chimp::level::MeshPlacement;
+
+    /// Both level exports decode each mesh once, drop the placements of the
+    /// meshes that did not decode, and segment the rest.
+    #[test]
+    fn a_level_pass_drops_placements_of_meshes_that_did_not_decode() {
+        let mut scene = LevelScene::default();
+        scene.meshes = vec!["a".to_owned(), "b".to_owned(), "c".to_owned()];
+        let at = |mesh: usize, x: f64| {
+            let mut world = [0.0; 16];
+            world[0] = 1.0;
+            world[5] = 1.0;
+            world[10] = 1.0;
+            world[15] = 1.0;
+            world[12] = x;
+            MeshPlacement { mesh, world }
+        };
+        scene.placements = vec![at(0, 0.0), at(1, 10.0), at(2, 20.0), at(0, 30.0)];
+        let progressed = std::cell::Cell::new(0);
+        let pass = level_pass(
+            &scene,
+            SegmentBudget::default(),
+            &|_, _, _| progressed.set(progressed.get() + 1),
+            |package| {
+                (package != "b").then(|| Prototype {
+                    prim: package.to_owned(),
+                    mesh: StaticMesh {
+                        indices: vec![0; 3],
+                        vertices: Vec::new(),
+                    },
+                    material: String::new(),
+                })
+            },
+            |prototype| Ok(prototype.prim),
+        )
+        .unwrap();
+
+        assert_eq!(
+            pass.meshes,
+            [Some("a".to_owned()), None, Some("c".to_owned())]
+        );
+        assert_eq!(pass.unreadable, 1);
+        assert_eq!(pass.placed, [0, 2, 3], "b's placement has nothing to place");
+        let segmented: usize = pass.segments.iter().map(|s| s.placements.len()).sum();
+        assert_eq!(segmented, 3);
+        assert_eq!(progressed.get(), 3);
     }
 }

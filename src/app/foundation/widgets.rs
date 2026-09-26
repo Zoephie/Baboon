@@ -228,7 +228,7 @@ pub(in crate::app) fn foundation_input_cell_colored(
     let (rect, _) = ui.allocate_exact_size(Vec2::new(width, height), Sense::hover());
     ui.painter().rect_filled(rect, 0.0, foundation_input());
     ui.painter()
-        .rect_stroke(rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
+        .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, foundation_input_edge()));
     let response = foundation_read_only_text_cell(ui, rect, text, color, 5.0);
     if response.hovered() {
         response.on_hover_text(hover.unwrap_or(text));
@@ -343,7 +343,7 @@ fn tag_reference_icon_footprint() -> f32 {
 fn paint_tag_reference_value_cell(ui: &Ui, rect: egui::Rect, icon_group: Option<u32>) {
     ui.painter().rect_filled(rect, 0.0, foundation_input());
     ui.painter()
-        .rect_stroke(rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
+        .rect_stroke(rect, 0.0, Stroke::new(1.0_f32, foundation_input_edge()));
     paint_tag_reference_icon(ui, rect, icon_group);
 }
 
@@ -396,10 +396,10 @@ pub(super) fn foundation_tag_reference_text_edit_cell(
             ui.visuals_mut().widgets.inactive.bg_fill = foundation_input();
             ui.visuals_mut().widgets.hovered.bg_fill = foundation_input();
             ui.visuals_mut().widgets.active.bg_fill = foundation_input();
-            ui.visuals_mut().widgets.inactive.fg_stroke = Stroke::new(1.0, text_dark());
+            ui.visuals_mut().widgets.inactive.fg_stroke = Stroke::new(1.0_f32, text_dark());
 
-            ui.visuals_mut().widgets.hovered.fg_stroke = Stroke::new(1.0, text_dark());
-            ui.visuals_mut().widgets.active.fg_stroke = Stroke::new(1.0, text_dark());
+            ui.visuals_mut().widgets.hovered.fg_stroke = Stroke::new(1.0_f32, text_dark());
+            ui.visuals_mut().widgets.active.fg_stroke = Stroke::new(1.0_f32, text_dark());
             let edit = egui::TextEdit::singleline(text)
                 .id(id)
                 .font(TextStyle::Monospace)
@@ -442,9 +442,9 @@ pub(in crate::app) fn foundation_text_edit_cell(
             ui.visuals_mut().widgets.inactive.bg_fill = foundation_input();
             ui.visuals_mut().widgets.hovered.bg_fill = foundation_input();
             ui.visuals_mut().widgets.active.bg_fill = foundation_input();
-            ui.visuals_mut().widgets.inactive.fg_stroke = Stroke::new(1.0, text_dark());
-            ui.visuals_mut().widgets.hovered.fg_stroke = Stroke::new(1.0, text_dark());
-            ui.visuals_mut().widgets.active.fg_stroke = Stroke::new(1.0, text_dark());
+            ui.visuals_mut().widgets.inactive.fg_stroke = Stroke::new(1.0_f32, text_dark());
+            ui.visuals_mut().widgets.hovered.fg_stroke = Stroke::new(1.0_f32, text_dark());
+            ui.visuals_mut().widgets.active.fg_stroke = Stroke::new(1.0_f32, text_dark());
             let edit = egui::TextEdit::singleline(text)
                 .id(id)
                 .font(TextStyle::Monospace)

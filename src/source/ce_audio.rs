@@ -452,13 +452,9 @@ impl CeMediaStore {
         Bnk::parse(bytes).map_err(|e| anyhow!("parsing {path}: {e}"))
     }
 
-    /// Fetch and decode one media entry to PCM.
-    pub fn decode(
-        &mut self,
-        paks_root: &Path,
-        media: &CeSoundMedia,
-    ) -> Result<blam_tags::audio::DecodedPcm> {
-        let bytes = match &media.location {
+    /// Read one media entry's encoded bytes out of the pak set.
+    pub fn fetch(&mut self, paks_root: &Path, media: &CeSoundMedia) -> Result<Vec<u8>> {
+        Ok(match &media.location {
             CeMediaLocation::Loose(_) => {
                 let path = media.mounted_path();
                 self.paks(paks_root)?
@@ -471,10 +467,17 @@ impl CeMediaStore {
                     .ok_or_else(|| anyhow!("{} holds no media {}", bank_path, media.media_id))?
                     .to_vec()
             }
-        };
-        blam_tags::audio::wwise::decode_wem(&bytes)
-            .map_err(|e| anyhow!("decoding {}: {e}", media.location_label()))
+        })
     }
+}
+
+/// Decode one media entry's bytes, as [`CeMediaStore::fetch`] returned them.
+pub fn decode_media_bytes(
+    media: &CeSoundMedia,
+    bytes: &[u8],
+) -> Result<blam_tags::audio::DecodedPcm> {
+    blam_tags::audio::wwise::decode_wem(bytes)
+        .map_err(|e| anyhow!("decoding {}: {e}", media.location_label()))
 }
 
 #[cfg(test)]
@@ -741,7 +744,8 @@ mod tests {
 
             // And the media has to actually decode to non-silent audio.
             for m in binding.media_for_language(&shown) {
-                let pcm = store.decode(&root, m).expect("decode media");
+                let bytes = store.fetch(&root, m).expect("fetch media");
+                let pcm = decode_media_bytes(m, &bytes).expect("decode media");
                 assert!(
                     !pcm.samples.is_empty(),
                     "{} decoded to nothing",

@@ -4,7 +4,7 @@
 use super::*;
 
 #[cfg(test)]
-mod tests {
+pub(in crate::app) mod tests {
     use super::*;
 
     #[test]
@@ -124,74 +124,136 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
-    fn with_test_edit_context(assertion: impl FnOnce(&mut FieldEditContext<'_>)) {
-        let definitions_root = locate_definitions_root();
-        let mut buffers = EditDrafts::default();
-        let mut pending = Vec::new();
-        let mut block_ops = Vec::new();
-        let mut block_confirm = None;
-        let mut open_request = None;
-        let mut sound_play_request = None;
-        let mut sound_extract_request = None;
-        let mut tool_import = None;
-        let mut bitmap_reimport = None;
-        let mut shader_ops = Vec::new();
-        let mut shader_param_ops = Vec::new();
-        let mut h2_shader_param_ops = Vec::new();
-        let mut function_data_ops = Vec::new();
-        let mut model_variant_ops = Vec::new();
-        let mut color_request = None;
-        let mut function_request = None;
-        let mut block_clip_request = None;
-        let mut tsv_paste_request = None;
-        let mut tag_reference_picker = None;
-        let edit = FieldEditContext {
-            expand_all: None,
-            nested_default: NestedDefault::default(),
-            view_scope: "test",
-            tag_key: "test",
-            group_tag: parse_group_tag("jpt!").unwrap(),
-            root: None,
-            game: Some("halo3_mcc"),
-            definitions_root: Some(definitions_root.as_path()),
-            names: None,
-            tags_root: None,
-            bitmap_hover_entries: None,
-            tag_reference_catalog: None,
-            tag_reference_picker: &mut tag_reference_picker,
-            status: None,
-            editable: true,
-            show_block_sizes: false,
-            buffers: &mut buffers,
-            pending: &mut pending,
-            block_ops: &mut block_ops,
-            block_confirm: &mut block_confirm,
-            open_request: &mut open_request,
-            sound_play_request: &mut sound_play_request,
-            sound_status: None,
-            sound_volume: 1.0,
-            sound_extract_request: &mut sound_extract_request,
-            sound_language: None,
-            ce_sound: None,
-            ce_sound_ref_request: &mut None,
-            ce_paks_root: None,
-            tool_import: &mut tool_import,
-            bitmap_reimport: &mut bitmap_reimport,
-            shader_ops: &mut shader_ops,
-            shader_param_ops: &mut shader_param_ops,
-            h2_shader_param_ops: &mut h2_shader_param_ops,
-            function_data_ops: &mut function_data_ops,
-            model_variant_ops: &mut model_variant_ops,
-            color_request: &mut color_request,
-            function_request: &mut function_request,
-            block_clipboard: None,
-            docs: None,
-            tsv_paste_request: &mut tsv_paste_request,
-            block_clip_request: &mut block_clip_request,
-            field_filter: None,
-            field_nav: None,
+    /// A closed block-index dropdown builds the label it shows, not one per
+    /// element of its target block. Every block-index field on screen used to
+    /// build all of them every frame, so a frame's labels grew with the size
+    /// of every block an index pointed into.
+    #[test]
+    fn closed_block_index_dropdowns_do_not_label_every_target_element() {
+        let mut tag = TagFile::new(crate::app::test_definition_path(
+            "haloreach_mcc/test_tag.json",
+        ))
+        .unwrap();
+        let target = {
+            let root = tag.root();
+            let index = root
+                .fields_all()
+                .find(|field| field.name() == "short block index")
+                .unwrap();
+            block_index_target_options(&root, &index, Some(root), "")
+                .expect("the test tag's block index resolves")
+                .path
         };
-        let mut edit = edit;
+        let grow = |tag: &mut TagFile, by: usize| {
+            for _ in 0..by {
+                crate::app::apply_block_ops(
+                    tag,
+                    vec![BlockOp {
+                        path: target.clone(),
+                        kind: BlockOpKind::Add,
+                    }],
+                    &mut Dirty::default(),
+                );
+            }
+        };
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::app::foundation_fonts());
+        let labels_for_one_frame = |tag: &TagFile| {
+            DROPDOWN_LABELS_BUILT.with(|count| count.set(0));
+            with_test_edit_context(|edit| {
+                let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        draw_fields_with_docs(
+                            ui,
+                            &tag.root(),
+                            &TagNameIndex::default(),
+                            0,
+                            true,
+                            "",
+                            edit,
+                            None,
+                        );
+                    });
+                });
+            });
+            DROPDOWN_LABELS_BUILT.with(std::cell::Cell::get)
+        };
+
+        grow(&mut tag, 8);
+        crate::app::apply_field_edit(&mut tag, "short block index", "2").unwrap();
+        let small = labels_for_one_frame(&tag);
+        grow(&mut tag, 32);
+        let large = labels_for_one_frame(&tag);
+
+        assert_eq!(
+            small, large,
+            "a frame built {small} labels over 8 target elements and {large} over 40"
+        );
+    }
+
+    /// A reference row's "missing on disk" check is answered from memory for a
+    /// second, not by a stat every frame, and still notices a file
+    /// that disappears once that interval has passed.
+    #[test]
+    fn reference_rows_recheck_their_target_every_second() {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-ref-missing-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(root.join("objects")).unwrap();
+        let file = root.join("objects/crate.bitmap");
+        std::fs::write(&file, []).unwrap();
+        let bitmap = u32::from_be_bytes(*b"bitm");
+        let ctx = egui::Context::default();
+        let check_at = |time: f64| {
+            let mut missing = None;
+            let _ = ctx.run(
+                egui::RawInput {
+                    time: Some(time),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        missing = Some(reference_target_missing_cached(
+                            ui,
+                            None,
+                            Some(&root),
+                            bitmap,
+                            "objects\\crate",
+                        ));
+                    });
+                },
+            );
+            missing.unwrap()
+        };
+
+        assert!(!check_at(10.0));
+        std::fs::remove_file(&file).unwrap();
+        let within = check_at(10.5);
+        let after = check_at(11.5);
+
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(
+            !within,
+            "within the interval the remembered answer stands (no stat)"
+        );
+        assert!(after, "after it, the missing file is noticed");
+    }
+
+    pub(in crate::app) fn with_test_edit_context(
+        assertion: impl FnOnce(&mut FieldEditContext<'_>),
+    ) {
+        let definitions_root = locate_definitions_root();
+        let mut sinks = EditSinks::default();
+        let mut edit = FieldEditContext::read_only(&mut sinks, "test", "test");
+        edit.group_tag = parse_group_tag("jpt!").unwrap();
+        edit.game = Some("halo3_mcc");
+        edit.definitions_root = Some(definitions_root.as_path());
+        edit.editable = true;
         assertion(&mut edit);
     }
 
@@ -519,6 +581,8 @@ mod tests {
             all_entries: Vec::new(),
             reverse_dependencies: None,
             initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
         };
         let catalog = tag_reference_catalog_for_source(&container_source, true)
             .expect("container source should expose a catalog");
@@ -539,6 +603,8 @@ mod tests {
             all_entries: Vec::new(),
             reverse_dependencies: None,
             initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
         };
         assert!(tag_reference_catalog_for_source(&loose_source, true).is_none());
     }
@@ -816,7 +882,7 @@ mod tests {
         let ctx = egui::Context::default();
         let mut pending = Vec::new();
         with_test_edit_context(|edit| {
-            let mut frame = |events: Vec<egui::Event>, edit: &mut FieldEditContext<'_>| {
+            let frame = |events: Vec<egui::Event>, edit: &mut FieldEditContext<'_>| {
                 let input = egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::new(900.0, 200.0))),
                     events,

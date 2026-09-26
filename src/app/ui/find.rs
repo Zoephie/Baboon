@@ -12,6 +12,11 @@ impl Baboon {
         let mut step = 0;
         let mut changed = false;
         let mut filter_changed = false;
+        // Enter and Escape belong to the query box. They used to be read from
+        // the global input, so committing a field edit with Enter anywhere in
+        // the app stepped to the next match, and Escape out of any menu or edit
+        // closed Find.
+        let mut query_escape = false;
         let default_pos = ctx.screen_rect().right_top() + egui::vec2(-488.0, 72.0);
         egui::Window::new("Find")
             .id(egui::Id::new("find_in_tag"))
@@ -49,6 +54,22 @@ impl Baboon {
                             self.find.focus_query = false;
                         }
                         changed |= response.changed();
+                        // A single-line box gives up focus on Enter and Escape,
+                        // so the key arrives on the frame it loses focus.
+                        let in_query = response.has_focus() || response.lost_focus();
+                        let (enter, escape, shift) = ui.input(|input| {
+                            (
+                                input.key_pressed(egui::Key::Enter),
+                                input.key_pressed(egui::Key::Escape),
+                                input.modifiers.shift,
+                            )
+                        });
+                        if in_query && enter && !self.find.searching {
+                            step = if shift { -1 } else { 1 };
+                            // Keep the box focused so Enter keeps stepping.
+                            response.request_focus();
+                        }
+                        query_escape = in_query && escape;
                         ui.end_row();
 
                         ui.label(RichText::new("within:").strong().color(text_dark()));
@@ -167,14 +188,6 @@ impl Baboon {
                         ui.label(RichText::new(counter).strong().color(subtle_dark()));
                     });
                 });
-                let enter = ui.input(|input| input.key_pressed(egui::Key::Enter));
-                if enter && !self.find.searching {
-                    step = if ui.input(|input| input.modifiers.shift) {
-                        -1
-                    } else {
-                        1
-                    };
-                }
             });
         if changed {
             self.find.active = None;
@@ -190,7 +203,7 @@ impl Baboon {
         if step != 0 {
             self.step_find(ctx, step);
         }
-        if !open || ctx.input(|input| input.key_pressed(egui::Key::Escape)) {
+        if !open || query_escape {
             self.find.close();
             ctx.data_mut(|data| data.remove::<std::sync::Arc<FindRenderSnapshot>>(find_render_snapshot_id()));
         }
@@ -247,13 +260,101 @@ pub(super) fn draw_icon_window_header(ui: &mut Ui, title: &str, icon: ButtonIcon
     let cross = close_rect.shrink(5.0);
     ui.painter().line_segment(
         [cross.left_top(), cross.right_bottom()],
-        Stroke::new(1.5, color),
+        Stroke::new(1.5_f32, color),
     );
     ui.painter().line_segment(
         [cross.right_top(), cross.left_bottom()],
-        Stroke::new(1.5, color),
+        Stroke::new(1.5_f32, color),
     );
     if close.clicked() {
         *open = false;
+    }
+}
+
+#[cfg(test)]
+mod key_scope_tests {
+    use super::*;
+
+    fn occurrence(field_path: &str) -> FindOccurrence {
+        FindOccurrence {
+            tag_key: "file:missing".to_owned(),
+            field_path: field_path.to_owned(),
+            kind: FindTargetKind::Value,
+            text: "match".to_owned(),
+            range: 0..5,
+        }
+    }
+
+    /// One frame: a text box standing in for a field editor, and Find.
+    fn frame(
+        app: &mut Baboon,
+        ctx: &egui::Context,
+        events: Vec<egui::Event>,
+        focus: Option<egui::Id>,
+    ) {
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::Vec2::new(1200.0, 800.0),
+            )),
+            events,
+            ..Default::default()
+        };
+        let _ = ctx.run(input, |ctx| {
+            if let Some(id) = focus {
+                ctx.memory_mut(|memory| memory.request_focus(id));
+            }
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let mut text = String::from("12");
+                ui.add(egui::TextEdit::singleline(&mut text).id(egui::Id::new("a_field")));
+            });
+            app.draw_find_window(ctx);
+        });
+    }
+
+    fn key(key: egui::Key) -> egui::Event {
+        egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        }
+    }
+
+    /// Enter and Escape are Find's only while its query box has focus.
+    /// Committing a field with Enter used to step to the next match, and
+    /// Escape out of anything closed Find.
+    #[test]
+    fn find_answers_enter_and_escape_only_in_its_query_box() {
+        let ctx = egui::Context::default();
+        let mut app = Baboon::for_test();
+        app.find.open = true;
+        app.find.occurrences = vec![occurrence("a"), occurrence("b")];
+        app.find.active = Some(0);
+        let field = Some(egui::Id::new("a_field"));
+        let query = Some(egui::Id::new("find_query"));
+
+        // Lay both out once, then put focus in the field.
+        frame(&mut app, &ctx, Vec::new(), None);
+        frame(&mut app, &ctx, Vec::new(), field);
+        frame(&mut app, &ctx, vec![key(egui::Key::Enter)], None);
+        assert_eq!(
+            app.find.active,
+            Some(0),
+            "Enter in a field must not step Find"
+        );
+        frame(&mut app, &ctx, Vec::new(), field);
+        frame(&mut app, &ctx, vec![key(egui::Key::Escape)], None);
+        assert!(app.find.open, "Escape in a field must not close Find");
+
+        // The same keys in the query box.
+        frame(&mut app, &ctx, Vec::new(), query);
+        frame(&mut app, &ctx, vec![key(egui::Key::Enter)], None);
+        assert_eq!(app.find.active, Some(1), "Enter in the query box steps");
+        frame(&mut app, &ctx, vec![key(egui::Key::Enter)], None);
+        assert_eq!(app.find.active, Some(0), "and keeps stepping");
+        frame(&mut app, &ctx, vec![key(egui::Key::Escape)], None);
+        assert!(!app.find.open, "Escape in the query box closes Find");
     }
 }

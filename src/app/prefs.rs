@@ -81,7 +81,7 @@ pub(super) fn load_gui_prefs() -> GuiPrefs {
                 )),
             );
             if let Ok(text) = serde_json::to_string_pretty(&migrated)
-                && let Err(error) = write_text_atomic(&prefs_path(), &text)
+                && let Err(error) = write_text_atomic(&prefs_path(), &text, "preferences")
             {
                 eprintln!("Could not save editing-kit migration: {error}");
             }
@@ -611,7 +611,7 @@ pub(super) fn save_gui_prefs(
     let value = prefs_to_value(prefs, terminal_open_games, first_run_complete);
     let text = serde_json::to_string_pretty(&value)
         .map_err(|error| format!("Could not encode preferences: {error}"))?;
-    write_text_atomic(&path, &text)
+    write_text_atomic(&path, &text, "preferences")
 }
 
 /// Encodes preferences as the JSON stored in `prefs.json`.
@@ -684,13 +684,17 @@ fn prefs_to_value(
     })
 }
 
-fn write_text_atomic(path: &Path, text: &str) -> Result<(), String> {
-    let temp = path.with_extension("json.tmp");
-    fs::write(&temp, text).map_err(|error| format!("Could not save preferences: {error}"))?;
-    if path.exists() {
-        fs::remove_file(path).map_err(|error| format!("Could not replace preferences: {error}"))?;
-    }
-    fs::rename(&temp, path).map_err(|error| format!("Could not install preferences: {error}"))
+/// Replace `path` with `text` so a crash leaves either the old file or the
+/// new one. This used to remove the old file before renaming the new one in,
+/// so a crash between the two left no file at all.
+fn write_text_atomic(path: &Path, text: &str, what: &str) -> Result<(), String> {
+    use std::io::Write as _;
+    let mut file = atomic_write_file::AtomicWriteFile::open(path)
+        .map_err(|error| format!("Could not save {what}: {error}"))?;
+    file.write_all(text.as_bytes())
+        .map_err(|error| format!("Could not save {what}: {error}"))?;
+    file.commit()
+        .map_err(|error| format!("Could not install {what}: {error}"))
 }
 
 /// Load the set of game identifiers for which the terminal should auto-open.
@@ -968,7 +972,9 @@ pub(super) fn save_last_session(session: &LastSessionState) -> Result<(), String
     }
     let text = serde_json::to_string_pretty(&session_value(session))
         .map_err(|error| format!("Could not encode session: {error}"))?;
-    fs::write(path, text).map_err(|error| format!("Could not save session: {error}"))
+    // Atomic, as the doc above promises: this runs after every autosave, so a
+    // plain write left a window for a crash to truncate the session to nothing.
+    write_text_atomic(&path, &text, "session")
 }
 
 /// Pure encode of a session document, split out from the file write so the
@@ -1831,3 +1837,7 @@ mod session_tests {
         assert!(session.kits[0].has_project, "the kit is still restored");
     }
 }
+
+#[cfg(test)]
+#[path = "tests/prefs_round_trip.rs"]
+mod prefs_round_trip;

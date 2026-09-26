@@ -67,7 +67,8 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             {
                 self.focused = Some(key.clone());
             }
-            self.app.draw_bitmap_library(ui, &self.ctx, self.kit_index);
+            self.app
+                .draw_thumbnail_library::<Bitmaps>(ui, &self.ctx, self.kit_index);
             return egui_tiles::UiResponse::None;
         }
         if key == MODEL_LIBRARY_KEY {
@@ -76,7 +77,8 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
             {
                 self.focused = Some(key.clone());
             }
-            self.app.draw_model_library(ui, &self.ctx, self.kit_index);
+            self.app
+                .draw_thumbnail_library::<Models>(ui, &self.ctx, self.kit_index);
             return egui_tiles::UiResponse::None;
         }
         if key == GIT_REVIEW_KEY {
@@ -100,13 +102,7 @@ impl egui_tiles::Behavior<String> for TagPaneBehavior<'_> {
         let Some(entry) = self.app.kits[self.kit_index]
             .source
             .as_ref()
-            .and_then(|source| {
-                source
-                    .entries
-                    .iter()
-                    .chain(source.all_entries.iter())
-                    .find(|entry| entry.key == key)
-            })
+            .and_then(|source| source.entry_for_key(&key))
             .cloned()
             .or_else(|| {
                 self.app.kits[self.kit_index]
@@ -533,13 +529,7 @@ impl Baboon {
             let found = kit
                 .source
                 .as_ref()
-                .and_then(|source| {
-                    source
-                        .entries
-                        .iter()
-                        .chain(source.all_entries.iter())
-                        .find(|entry| &entry.key == key)
-                })
+                .and_then(|source| source.entry_for_key(key))
                 .or_else(|| {
                     kit.active_favorite_entries
                         .iter()
@@ -607,7 +597,11 @@ impl Baboon {
         // picker — not something to do part-way through drawing the pane that
         // asked for it. `begin_extract_bitmap` resolves the tag against the
         // active kit, so that has to be this one first.
-        if let Some(key) = self.kits[kit_index].bitmap_browser.pending_extract.take() {
+        if let Some(key) = self.kits[kit_index]
+            .bitmap_browser
+            .pending_menu_action
+            .take()
+        {
             self.active = kit_index;
             self.begin_extract_bitmap(key, ctx.clone());
         }
@@ -620,7 +614,11 @@ impl Baboon {
             let open = self.resolve_model_browser_open(kit_index, &key);
             self.select_entry(open, ctx.clone());
         }
-        if let Some(key) = self.kits[kit_index].model_browser.pending_open_raw.take() {
+        if let Some(key) = self.kits[kit_index]
+            .model_browser
+            .pending_menu_action
+            .take()
+        {
             self.active = kit_index;
             self.select_entry(key, ctx.clone());
         }

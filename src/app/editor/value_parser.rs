@@ -257,11 +257,11 @@ pub(in crate::app) fn parse_gui_field_value(
         TagFieldType::RealSlider => parse_value(trimmed, "f32").map(TagFieldData::RealSlider),
         TagFieldType::RealFraction => parse_value(trimmed, "f32").map(TagFieldData::RealFraction),
         TagFieldType::CharEnum => Ok(TagFieldData::CharEnum {
-            value: parse_enum_value(field, trimmed)? as i8,
+            value: narrow(parse_enum_value(field, trimmed)?, "char enum")?,
             name: None,
         }),
         TagFieldType::ShortEnum => Ok(TagFieldData::ShortEnum {
-            value: parse_enum_value(field, trimmed)? as i16,
+            value: narrow(parse_enum_value(field, trimmed)?, "short enum")?,
             name: None,
         }),
         TagFieldType::LongEnum => Ok(TagFieldData::LongEnum {
@@ -269,38 +269,42 @@ pub(in crate::app) fn parse_gui_field_value(
             name: None,
         }),
         TagFieldType::ByteFlags => Ok(TagFieldData::ByteFlags {
-            value: parse_int_mask(trimmed)? as u8,
+            value: mask_bits(trimmed, 8)? as u8,
             names: Vec::new(),
         }),
         TagFieldType::WordFlags => Ok(TagFieldData::WordFlags {
-            value: parse_int_mask(trimmed)? as u16,
+            value: mask_bits(trimmed, 16)? as u16,
             names: Vec::new(),
         }),
         TagFieldType::LongFlags => Ok(TagFieldData::LongFlags {
-            value: parse_int_mask(trimmed)? as i32,
+            value: mask_bits(trimmed, 32)? as u32 as i32,
             names: Vec::new(),
         }),
         TagFieldType::ByteBlockFlags => {
-            Ok(TagFieldData::ByteBlockFlags(parse_int_mask(trimmed)? as u8))
+            Ok(TagFieldData::ByteBlockFlags(mask_bits(trimmed, 8)? as u8))
         }
         TagFieldType::WordBlockFlags => {
-            Ok(TagFieldData::WordBlockFlags(parse_int_mask(trimmed)? as u16))
+            Ok(TagFieldData::WordBlockFlags(mask_bits(trimmed, 16)? as u16))
         }
-        TagFieldType::LongBlockFlags => {
-            Ok(TagFieldData::LongBlockFlags(parse_int_mask(trimmed)? as i32))
-        }
-        TagFieldType::CharBlockIndex => Ok(TagFieldData::CharBlockIndex(
-            parse_block_index(trimmed)? as i8,
+        TagFieldType::LongBlockFlags => Ok(TagFieldData::LongBlockFlags(
+            mask_bits(trimmed, 32)? as u32 as i32
         )),
-        TagFieldType::CustomCharBlockIndex => Ok(TagFieldData::CustomCharBlockIndex(
-            parse_block_index(trimmed)? as i8,
-        )),
-        TagFieldType::ShortBlockIndex => Ok(TagFieldData::ShortBlockIndex(parse_block_index(
-            trimmed,
-        )? as i16)),
-        TagFieldType::CustomShortBlockIndex => Ok(TagFieldData::CustomShortBlockIndex(
-            parse_block_index(trimmed)? as i16,
-        )),
+        TagFieldType::CharBlockIndex => Ok(TagFieldData::CharBlockIndex(narrow(
+            parse_block_index(trimmed)?,
+            "char block index",
+        )?)),
+        TagFieldType::CustomCharBlockIndex => Ok(TagFieldData::CustomCharBlockIndex(narrow(
+            parse_block_index(trimmed)?,
+            "char block index",
+        )?)),
+        TagFieldType::ShortBlockIndex => Ok(TagFieldData::ShortBlockIndex(narrow(
+            parse_block_index(trimmed)?,
+            "short block index",
+        )?)),
+        TagFieldType::CustomShortBlockIndex => Ok(TagFieldData::CustomShortBlockIndex(narrow(
+            parse_block_index(trimmed)?,
+            "short block index",
+        )?)),
         TagFieldType::LongBlockIndex => {
             Ok(TagFieldData::LongBlockIndex(parse_block_index(trimmed)?))
         }
@@ -547,10 +551,24 @@ pub(in crate::app) fn parse_int_mask(input: &str) -> Result<u64, String> {
 }
 
 pub(in crate::app) fn parse_enum_value(field: &TagField<'_>, input: &str) -> Result<i32, String> {
-    if let Ok(value) = input.parse() {
-        return Ok(value);
+    let names = match field.options() {
+        Some(blam_tags::TagOptions::Enum { names, .. }) => Some(names),
+        _ => None,
+    };
+    if let Ok(value) = input.parse::<i64>() {
+        // A typed index has to name an option: anything else is a value no
+        // editing kit tool would write.
+        if let Some(names) = names.as_ref().filter(|names| !names.is_empty()) {
+            if !(0..names.len() as i64).contains(&value) {
+                return Err(format!(
+                    "{value} is not an option of this enum (0 to {})",
+                    names.len() - 1
+                ));
+            }
+        }
+        return narrow(value, "enum");
     }
-    let Some(blam_tags::TagOptions::Enum { names, .. }) = field.options() else {
+    let Some(names) = names else {
         return Err("expected enum name or integer".to_owned());
     };
     let Some((index, _)) = names
@@ -560,7 +578,26 @@ pub(in crate::app) fn parse_enum_value(field: &TagField<'_>, input: &str) -> Res
     else {
         return Err("expected enum name or integer".to_owned());
     };
-    Ok(index as i32)
+    narrow(index as i64, "enum")
+}
+
+/// `value` in the field's storage type, or an error naming the field kind.
+/// These used to be `as` casts, which wrap: 200 in a char block index was
+/// written as -56.
+fn narrow<T: TryFrom<i64>>(value: impl Into<i64>, what: &str) -> Result<T, String> {
+    let value = value.into();
+    T::try_from(value).map_err(|_| format!("{value} does not fit in a {what}"))
+}
+
+/// A flags mask that sets no bit beyond the field's `bits`. Masks are bit
+/// patterns, so the whole unsigned width is allowed (0xFFFFFFFF is a valid
+/// long flags value), but a higher bit is an error rather than dropped.
+fn mask_bits(input: &str, bits: u32) -> Result<u64, String> {
+    let mask = parse_int_mask(input)?;
+    if bits < 64 && mask >> bits != 0 {
+        return Err(format!("0x{mask:X} sets bits beyond this {bits}-bit field"));
+    }
+    Ok(mask)
 }
 
 pub(in crate::app) fn parse_tag_reference(input: &str) -> Result<TagReferenceData, String> {
@@ -708,4 +745,101 @@ pub(in crate::app) fn extension_to_group_tag(extension: &str) -> Option<u32> {
         _ => return None,
     };
     parse_group_tag(fourcc)
+}
+
+#[cfg(test)]
+mod narrowing_tests {
+    use super::*;
+
+    /// Run `check` on the first field of `wanted` type found in a fresh tag of
+    /// any Halo 3 group, following inline structs (a fresh tag's blocks are
+    /// empty). Fails rather than skips when there is none, so the test can
+    /// never pass by finding nothing.
+    fn with_field(wanted: TagFieldType, check: impl Fn(&TagField<'_>)) {
+        fn find<'a>(root: TagStruct<'a>, wanted: TagFieldType) -> Option<TagField<'a>> {
+            root.fields_all().find_map(|field| {
+                if field.field_type() == wanted {
+                    return Some(field);
+                }
+                field.as_struct().and_then(|inner| find(inner, wanted))
+            })
+        }
+        let schemas = locate_definitions_root().join("halo3_mcc");
+        let mut paths: Vec<_> = std::fs::read_dir(&schemas)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.extension().is_some_and(|ext| ext == "json")
+                    && !path
+                        .file_name()
+                        .is_some_and(|name| name.to_string_lossy().starts_with('_'))
+            })
+            .collect();
+        paths.sort();
+        for path in paths {
+            let Ok(tag) = TagFile::new(&path) else {
+                continue;
+            };
+            if let Some(field) = find(tag.root(), wanted) {
+                check(&field);
+                return;
+            }
+        }
+        panic!("no fresh Halo 3 tag has a {wanted:?} field outside a block");
+    }
+
+    /// A typed value that does not fit its field is an error. These were `as`
+    /// casts, which wrap: 200 in a char block index became -56 and 0x1FF in
+    /// byte flags became 0xFF, both written without a word.
+    #[test]
+    fn a_typed_value_that_does_not_fit_its_field_is_refused() {
+        with_field(TagFieldType::CharBlockIndex, |field| {
+            assert!(
+                parse_gui_field_value(field, "200").is_err(),
+                "200 in a char block index"
+            );
+            assert!(matches!(
+                parse_gui_field_value(field, "none"),
+                Ok(TagFieldData::CharBlockIndex(-1))
+            ));
+            assert!(matches!(
+                parse_gui_field_value(field, "127"),
+                Ok(TagFieldData::CharBlockIndex(127))
+            ));
+        });
+        with_field(TagFieldType::ByteFlags, |field| {
+            assert!(
+                parse_gui_field_value(field, "0x1FF").is_err(),
+                "0x1FF in byte flags"
+            );
+            assert!(matches!(
+                parse_gui_field_value(field, "0xFF"),
+                Ok(TagFieldData::ByteFlags { value: 0xFF, .. })
+            ));
+        });
+        with_field(TagFieldType::LongFlags, |field| {
+            // A mask is a bit pattern: every bit of the field is fair game.
+            assert!(matches!(
+                parse_gui_field_value(field, "0xFFFFFFFF"),
+                Ok(TagFieldData::LongFlags { value: -1, .. })
+            ));
+            assert!(parse_gui_field_value(field, "0x100000000").is_err());
+        });
+        with_field(TagFieldType::CharEnum, |field| {
+            let Some(blam_tags::TagOptions::Enum { names, .. }) = field.options() else {
+                panic!("a char enum without options");
+            };
+            let past_the_end = names.len().to_string();
+            assert!(
+                parse_gui_field_value(field, &past_the_end).is_err(),
+                "index {past_the_end} of {} options",
+                names.len()
+            );
+            assert!(
+                parse_gui_field_value(field, "300").is_err(),
+                "300 in a char enum"
+            );
+            assert!(parse_gui_field_value(field, "0").is_ok());
+        });
+    }
 }

@@ -109,7 +109,7 @@ impl Baboon {
                 self.status = format!("Removed {} from recent folders", path.display());
             }
             RecentAction::ForgetAll => {
-                self.recent_folders.clear();
+                self.prefs.recent_folders.clear();
                 self.status = "Cleared recent folders".to_owned();
             }
         }

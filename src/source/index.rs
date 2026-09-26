@@ -53,16 +53,9 @@ fn app_cache_path(filename: &str, windows_folder: &str, unix_folder: &str) -> Pa
     if windows_folder == "Baboon" && unix_folder == "baboon" {
         return crate::storage::data_path(filename);
     }
-    if let Some(appdata) = std::env::var_os("APPDATA") {
-        return PathBuf::from(appdata).join(windows_folder).join(filename);
-    }
-    if let Some(home) = std::env::var_os("USERPROFILE") {
-        return PathBuf::from(home)
-            .join(".config")
-            .join(unix_folder)
-            .join(filename);
-    }
-    PathBuf::from(filename)
+    // The same root as installed-mode state (see `user_data_root`); this is
+    // only reached for the legacy Genesis files, which are read, not written.
+    crate::storage::user_data_root(windows_folder, unix_folder).join(filename)
 }
 
 /// Persist `entries` to the shared SQLite index DB. Called from the background
@@ -101,6 +94,94 @@ pub fn upsert_entry_index_row(game: &str, root: &Path, entry: &TagEntry) -> Resu
         )
         .context("prepare entry index upsert")?;
     execute_entry_row(&mut upsert, source_id, root, entry).context("upsert entry index row")?;
+    Ok(true)
+}
+
+/// Remove one tag's row from an existing index. Like
+/// [`upsert_entry_index_row`], a folder with no index is left without one.
+pub fn delete_entry_index_row(game: &str, root: &Path, key: &str) -> Result<bool> {
+    let conn = open_index_db()?;
+    let Some(source_id) = source_id(&conn, game, root)? else {
+        return Ok(false);
+    };
+    conn.execute(
+        "DELETE FROM entries WHERE source_id = ?1 AND key = ?2",
+        params![source_id, key],
+    )
+    .context("delete entry index row")?;
+    Ok(true)
+}
+
+/// Drop every index row a test wrote under `game`.
+#[cfg(test)]
+pub(crate) fn remove_test_index_rows(game: &str) {
+    if let Ok(conn) = open_index_db() {
+        let _ = conn.execute("DELETE FROM sources WHERE game = ?1", params![game]);
+    }
+}
+
+/// Replace one tag's rows in an existing reverse-dependency index, or remove
+/// them (`deps: None`). Like [`upsert_entry_index_row`], it does nothing for a
+/// folder with no reference index, since a partial graph would load back as a
+/// complete one. Whether it wrote.
+pub fn save_tag_dependencies(
+    game: &str,
+    root: &Path,
+    tag_key: &str,
+    deps: Option<&[DependencyRef]>,
+) -> Result<bool> {
+    let mut conn = open_index_db()?;
+    let Some(source_id) = source_id(&conn, game, root)? else {
+        return Ok(false);
+    };
+    let has_index: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM indexed_tags WHERE source_id = ?1)",
+            params![source_id],
+            |row| row.get(0),
+        )
+        .context("query reverse dependency index")?;
+    if !has_index {
+        return Ok(false);
+    }
+    let tx = conn
+        .transaction()
+        .context("begin tag dependency transaction")?;
+    tx.execute(
+        "DELETE FROM dependencies WHERE source_id = ?1 AND tag_key = ?2",
+        params![source_id, tag_key],
+    )
+    .context("clear tag dependency rows")?;
+    tx.execute(
+        "DELETE FROM indexed_tags WHERE source_id = ?1 AND tag_key = ?2",
+        params![source_id, tag_key],
+    )
+    .context("clear indexed tag row")?;
+    if let Some(deps) = deps {
+        tx.execute(
+            "INSERT OR IGNORE INTO indexed_tags (source_id, tag_key) VALUES (?1, ?2)",
+            params![source_id, tag_key],
+        )
+        .context("insert indexed tag row")?;
+        let mut insert = tx
+            .prepare(
+                "INSERT OR IGNORE INTO dependencies (
+                    source_id, tag_key, dep_group_tag, dep_rel_path
+                 ) VALUES (?1, ?2, ?3, ?4)",
+            )
+            .context("prepare tag dependency insert")?;
+        for dep in deps {
+            insert
+                .execute(params![
+                    source_id,
+                    tag_key,
+                    i64::from(dep.group_tag),
+                    &dep.rel_path
+                ])
+                .context("insert tag dependency row")?;
+        }
+    }
+    tx.commit().context("commit tag dependencies")?;
     Ok(true)
 }
 
@@ -238,7 +319,7 @@ fn index_item_relative_path(
 ///
 /// The path is carried even for a non-tag, because "every file that is still
 /// there" is what decides which cached entries were removed.
-type ResolvedFiles = Vec<(PathBuf, Option<TagEntry>)>;
+type ResolvedFiles = Vec<(PathBuf, Option<TagEntry>, bool)>;
 
 fn refresh_entry_index_from_cache(
     root: &Path,
@@ -267,7 +348,9 @@ fn refresh_entry_index_from_cache(
     // more often, did them one at a time.
     let mut paths = Vec::new();
     for item in WalkDir::new(root).follow_links(false) {
-        let item = item?;
+        let Some(item) = crate::source::walk_item(item)? else {
+            continue;
+        };
         if !item.file_type().is_file() {
             continue;
         }
@@ -296,31 +379,43 @@ fn refresh_entry_index_from_cache(
                 for path in chunk {
                     let rel = path.strip_prefix(root).unwrap_or(path.as_path());
                     let rel_key = normalize_rel_path(rel);
-                    let fingerprint = file_fingerprint(path)?;
+                    // A file that vanished since the walk, or is locked, is
+                    // left out rather than failing the refresh; seen-but-absent
+                    // counts it as removed, which is what it now is.
+                    let fingerprint = match file_fingerprint(path) {
+                        Ok(fingerprint) => fingerprint,
+                        Err(error) if crate::source::skippable_file_error(&error) => continue,
+                        Err(error) => return Err(error),
+                    };
                     if let (Some(cached), Some(current)) =
                         (cached_by_rel.get(&rel_key), fingerprint.as_ref())
                         && cached_fingerprints
                             .get(&rel_key)
                             .is_some_and(|cached_fp| cached_fp == current)
                     {
-                        resolved.push((rel_key, Some(cached.clone())));
+                        resolved.push((rel_key, Some(cached.clone()), false));
                         continue;
                     }
                     let known = cached_by_rel.contains_key(&rel_key);
-                    match loose_file_entry(root, path, names)? {
+                    let probed = match loose_file_entry(root, path, names) {
+                        Ok(probed) => probed,
+                        Err(error) if crate::source::skippable_file_error(&error) => continue,
+                        Err(error) => return Err(error),
+                    };
+                    match probed {
                         Some(entry) => {
                             if known {
                                 updated.fetch_add(1, Ordering::Relaxed);
                             } else {
                                 added.fetch_add(1, Ordering::Relaxed);
                             }
-                            resolved.push((rel_key, Some(entry)));
+                            resolved.push((rel_key, Some(entry), true));
                         }
                         None => {
                             if known {
                                 updated.fetch_add(1, Ordering::Relaxed);
                             }
-                            resolved.push((rel_key, None));
+                            resolved.push((rel_key, None, known));
                         }
                     }
                 }
@@ -339,21 +434,42 @@ fn refresh_entry_index_from_cache(
 
     let mut seen = HashSet::with_capacity(paths.len());
     let mut entries = Vec::with_capacity(paths.len());
+    let mut touched = Vec::new();
+    let mut removed_keys = Vec::new();
     for chunk in chunks {
-        for (rel_key, entry) in chunk {
-            seen.insert(rel_key);
-            if let Some(entry) = entry {
-                entries.push(entry);
+        for (rel_key, entry, changed) in chunk {
+            match entry {
+                Some(entry) => {
+                    if changed {
+                        touched.push(entry.clone());
+                    }
+                    entries.push(entry);
+                }
+                // Was a tag, is not one now.
+                None if changed => {
+                    if let Some(cached) = cached_by_rel.get(&rel_key) {
+                        removed_keys.push(cached.key.clone());
+                    }
+                }
+                None => {}
             }
+            seen.insert(rel_key);
         }
     }
     let added = added.load(Ordering::Relaxed);
     let updated = updated.load(Ordering::Relaxed);
 
-    let removed = cached_by_rel
-        .keys()
-        .filter(|rel_path| !seen.contains(*rel_path))
-        .count();
+    // `removed` counts files that are gone, as it always has (a file that
+    // stopped being a tag is counted under `updated`); `removed_keys` carries
+    // both, since both lose their index rows.
+    let before = removed_keys.len();
+    removed_keys.extend(
+        cached_by_rel
+            .iter()
+            .filter(|(rel_path, _)| !seen.contains(*rel_path))
+            .map(|(_, entry)| entry.key.clone()),
+    );
+    let removed = removed_keys.len() - before;
     entries.sort_by(|a, b| natural_key(&a.display_path).cmp(&natural_key(&b.display_path)));
     let changed = added > 0
         || updated > 0
@@ -370,6 +486,9 @@ fn refresh_entry_index_from_cache(
         added,
         updated,
         removed,
+        touched,
+        removed_keys,
+        touched_dependencies: Vec::new(),
     })
 }
 
@@ -628,7 +747,13 @@ fn load_entry_index_from_db(
     let mut fingerprints = HashMap::new();
     for row in rows {
         let (entry, rel_path, fingerprint) = row.ok()?;
-        let entry = entry?;
+        // A row whose key names no file (older New Tag / Blam Import wrote bare
+        // display paths) is skipped, not fatal: failing here threw the whole
+        // index away over one tag. Its file is still on disk, so the next
+        // refresh finds it as added and writes it back with a proper key.
+        let Some(entry) = entry else {
+            continue;
+        };
         if !rel_path.is_empty()
             && let Some(fingerprint) = fingerprint
         {

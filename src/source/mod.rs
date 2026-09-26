@@ -193,10 +193,7 @@ impl ShippedTagIndex {
             .is_some()
     }
 
-    pub fn len(&self) -> usize {
-        self.by_path.len()
-    }
-
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.by_path.is_empty()
     }
@@ -271,7 +268,10 @@ impl ContainerTagIndex {
 /// resolvable.
 #[derive(Clone, Default)]
 pub struct ContainerPackageIndex {
-    by_package: HashMap<String, (usize, String)>,
+    /// Every container providing each package, in container (mount) order.
+    /// The last is the one that is read, as it is for tags: a mod mounts after
+    /// the game and overrides what it ships.
+    by_package: HashMap<String, Vec<(usize, String)>>,
 }
 
 /// Cooked container path → UE package name, e.g.
@@ -286,26 +286,43 @@ pub fn container_package_name(path: &str) -> Option<String> {
 }
 
 impl ContainerPackageIndex {
-    /// Record a cooked package. First insert wins so the mount order that
-    /// already governs tag layering governs packages too.
+    /// Record that `container` provides a cooked package, replacing what that
+    /// container provided before.
+    ///
+    /// The latest-mounted container wins, as it does for tags. This used to
+    /// keep the first insert, which is the base game: a mod's copy of a
+    /// package was ignored, so a modded tag read its `.ubulk` from the mod and
+    /// its `.uasset` wrapper from the game.
     pub fn insert(&mut self, package: String, container: usize, rel_path: String) {
-        self.by_package
-            .entry(package)
-            .or_insert((container, rel_path));
+        let layers = self.by_package.entry(package).or_default();
+        layers.retain(|(existing, _)| *existing != container);
+        let at = layers.partition_point(|(existing, _)| *existing < container);
+        layers.insert(at, (container, rel_path));
     }
 
     /// Resolve a `/Game/...` package name (any case) to its container payload.
     pub fn lookup(&self, package: &str) -> Option<(usize, &str)> {
         self.by_package
             .get(&package.to_ascii_lowercase())
+            .and_then(|layers| layers.last())
             .map(|(c, p)| (*c, p.as_str()))
     }
 
-    /// Forget a package that no longer exists in any mounted container.
-    pub fn remove(&mut self, package: &str) -> bool {
-        self.by_package
-            .remove(&package.to_ascii_lowercase())
-            .is_some()
+    /// Forget that `container` provides a package. Another container that
+    /// also provides it — the game under a mod's deleted override — is read
+    /// from then on.
+    pub fn remove(&mut self, package: &str, container: usize) -> bool {
+        let key = package.to_ascii_lowercase();
+        let Some(layers) = self.by_package.get_mut(&key) else {
+            return false;
+        };
+        let before = layers.len();
+        layers.retain(|(existing, _)| *existing != container);
+        let removed = layers.len() != before;
+        if layers.is_empty() {
+            self.by_package.remove(&key);
+        }
+        removed
     }
 
     /// Number of indexed packages. Part of the type's surface and asserted on
@@ -404,9 +421,163 @@ pub struct LoadedSourceData {
     /// folder moves so future refactors can touch only dependent tags.
     pub reverse_dependencies: Option<ReverseDependencyIndex>,
     pub initial_tag: Option<(String, TagFile)>,
+    /// Where each looked-up key was last found. See [`Self::entry_for_key`].
+    pub key_hints: EntryKeyHints,
+    /// A full scan (or refresh) has installed `all_entries`. An empty
+    /// `all_entries` alone cannot say this: it is also what an empty folder
+    /// scans to, and reading it as "not scanned" made an empty folder rescan
+    /// forever.
+    pub complete_scan: bool,
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Fallback scans this thread has made, for tests that bound them.
+    static KEY_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// A hint cache from tag key to its position in `entries` or `all_entries`.
+///
+/// Key lookups were a linear scan of both lists, made every frame (tab labels,
+/// tag panes), per search hit, and per exported key, over tens of thousands of
+/// entries. The lists are mutated in many places, including the browser's lazy
+/// loader, so a map every mutation had to maintain would go stale the first
+/// time one forgot. A hint is instead checked against the list before it is
+/// trusted, and a miss or a stale hint falls back to the scan and records what
+/// it found: a lookup is never wrong, and is only ever as slow as it used to be.
+#[derive(Default)]
+pub struct EntryKeyHints(std::sync::Mutex<HashMap<String, (EntryList, usize)>>);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EntryList {
+    /// `entries`, the browser's lazily loaded subset (every entry, for
+    /// container and single-file sources).
+    Lazy,
+    /// `all_entries`, a loose folder's completed scan.
+    All,
 }
 
 impl LoadedSourceData {
+    /// Add `entry`, or replace the entry that has its key, and keep both lists,
+    /// both trees and the on-disk entry index in step with it.
+    ///
+    /// This is the one way to put a single tag into a loaded source. There
+    /// used to be about eight hand-written versions, and they disagreed: some
+    /// inserted in `natural_key` order, some pushed and then re-sorted by a
+    /// case-sensitive `display_path` comparison (which breaks the order
+    /// `insert_entry_sorted` relies on), some did not sort at all, and most
+    /// rewrote the whole entry index, a stat per tag, on the UI thread.
+    ///
+    /// For a loose folder, `entries` is the browser's lazy list and trees hold
+    /// positions in it, so an entry is replaced where it is or appended, never
+    /// inserted in the middle. Everywhere else `entries` is the full list and
+    /// stays sorted.
+    pub fn upsert_entry(&mut self, entry: TagEntry, pending_folders: &[String]) {
+        let key = entry.key.clone();
+        if let TagSource::LooseFolder { root, .. } = &self.source {
+            match self.entries.iter_mut().find(|existing| existing.key == key) {
+                Some(slot) => *slot = entry.clone(),
+                None => self.entries.push(entry.clone()),
+            }
+            // An empty `all_entries` is a folder not scanned yet, not an empty
+            // one: the scan will find this tag, and there is no index to add it
+            // to (`upsert_entry_index_row` will not create one).
+            if !self.all_entries.is_empty() {
+                self.all_entries.retain(|existing| existing.key != key);
+                insert_entry_sorted(&mut self.all_entries, entry.clone());
+                if let Some(game) = self.game.as_deref() {
+                    let _ = upsert_entry_index_row(game, root, &entry);
+                }
+            }
+        } else {
+            self.entries.retain(|existing| existing.key != key);
+            insert_entry_sorted(&mut self.entries, entry.clone());
+            if !self.all_entries.is_empty() {
+                self.all_entries.retain(|existing| existing.key != key);
+                insert_entry_sorted(&mut self.all_entries, entry);
+            }
+        }
+        self.rebuild_trees(pending_folders);
+    }
+
+    /// Remove the entry with `key` from both lists, both trees and the on-disk
+    /// entry index. Whether there was one.
+    pub fn remove_entry(&mut self, key: &str, pending_folders: &[String]) -> bool {
+        let before = self.entries.len() + self.all_entries.len();
+        self.entries.retain(|entry| entry.key != key);
+        self.all_entries.retain(|entry| entry.key != key);
+        let removed = self.entries.len() + self.all_entries.len() != before;
+        if let (TagSource::LooseFolder { root, .. }, Some(game)) =
+            (&self.source, self.game.as_deref())
+        {
+            let _ = delete_entry_index_row(game, root, key);
+        }
+        self.rebuild_trees(pending_folders);
+        removed
+    }
+
+    /// Rebuild the folder and group trees after a change to the lists. A loose
+    /// folder's tree is re-read from disk (it is lazy, and positions in the
+    /// lazy list may have moved); other sources rebuild theirs from `entries`.
+    fn rebuild_trees(&mut self, pending_folders: &[String]) {
+        if let TagSource::LooseFolder { root, .. } = &self.source {
+            if let Ok(tree) = build_folder_directory_tree(root) {
+                self.tree = tree;
+            }
+        } else {
+            rebuild_folder_tree(self, pending_folders);
+        }
+        self.group_tree = build_group_tree(if self.all_entries.is_empty() {
+            &self.entries
+        } else {
+            &self.all_entries
+        });
+    }
+
+    /// The entry with `key`, from `entries` first and then `all_entries`.
+    pub fn entry_for_key(&self, key: &str) -> Option<&TagEntry> {
+        let list = |which: EntryList| match which {
+            EntryList::Lazy => &self.entries,
+            EntryList::All => &self.all_entries,
+        };
+        let hint = self
+            .key_hints
+            .0
+            .lock()
+            .ok()
+            .and_then(|hints| hints.get(key).copied());
+        if let Some((which, index)) = hint
+            && let Some(entry) = list(which).get(index)
+            && entry.key == key
+        {
+            return Some(entry);
+        }
+        #[cfg(test)]
+        KEY_SCANS.with(|scans| scans.set(scans.get() + 1));
+        let found = self
+            .entries
+            .iter()
+            .position(|entry| entry.key == key)
+            .map(|index| (EntryList::Lazy, index))
+            .or_else(|| {
+                self.all_entries
+                    .iter()
+                    .position(|entry| entry.key == key)
+                    .map(|index| (EntryList::All, index))
+            });
+        if let Ok(mut hints) = self.key_hints.0.lock() {
+            match found {
+                Some(location) => {
+                    hints.insert(key.to_owned(), location);
+                }
+                None => {
+                    hints.remove(key);
+                }
+            }
+        }
+        found.map(|(which, index)| &list(which)[index])
+    }
+
     /// The complete entry set, for callers that must see every tag rather than
     /// the browser's lazy subset. A loose folder fills `all_entries` from its
     /// background scan; a container mount enumerates every tag into `entries`
@@ -430,6 +601,14 @@ pub struct EntryIndexRefresh {
     pub added: usize,
     pub updated: usize,
     pub removed: usize,
+    /// Entries added or changed since the cached index: the only ones whose
+    /// index rows and references need rewriting.
+    pub touched: Vec<TagEntry>,
+    /// Keys the cached index had that are gone, or no longer tags.
+    pub removed_keys: Vec<String>,
+    /// References of each touched tag, read by whoever applies the refresh.
+    /// Empty from [`crate::source::refresh_entry_index`] itself.
+    pub touched_dependencies: Vec<(String, Vec<DependencyRef>)>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -655,5 +834,111 @@ mod container_ref_tests {
             index.lookup(sbsp, "levels\\x\\bsp"),
             Some((1, "exact.ubulk"))
         );
+    }
+}
+
+#[cfg(test)]
+mod entry_key_hint_tests {
+    use super::*;
+
+    fn entry(key: &str) -> TagEntry {
+        TagEntry {
+            key: key.to_owned(),
+            display_path: key.to_owned(),
+            group_tag: 0,
+            group_name: None,
+            location: TagEntryLocation::LooseFile(PathBuf::from(key)),
+        }
+    }
+
+    fn source(entries: Vec<TagEntry>, all_entries: Vec<TagEntry>) -> LoadedSourceData {
+        LoadedSourceData {
+            label: "test".to_owned(),
+            source: TagSource::SingleFile {
+                path: PathBuf::from("a"),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries,
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries,
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+        }
+    }
+
+    fn found<'a>(source: &'a LoadedSourceData, key: &str) -> Option<&'a str> {
+        source
+            .entry_for_key(key)
+            .map(|entry| entry.display_path.as_str())
+    }
+
+    /// The lists are mutated in many places behind the hints' back. Whatever
+    /// happens to them, a lookup answers exactly what a scan would.
+    #[test]
+    fn key_lookups_stay_right_as_the_lists_change_under_them() {
+        let mut source = source(vec![entry("a"), entry("b")], vec![entry("c")]);
+        assert_eq!(found(&source, "b"), Some("b"));
+        assert_eq!(found(&source, "c"), Some("c"), "found in the full scan");
+        assert_eq!(found(&source, "b"), Some("b"), "and again from the hint");
+
+        // Inserting ahead of a remembered key moves it: the stale hint is
+        // caught, not trusted.
+        source.entries.insert(0, entry("z"));
+        assert_eq!(found(&source, "b"), Some("b"));
+
+        // The browser's lazy loader appends; a key nobody asked about before
+        // is found by the fallback.
+        source.entries.push(entry("d"));
+        assert_eq!(found(&source, "d"), Some("d"));
+
+        // A removed key is gone, even though its hint pointed at a real slot.
+        source.entries.retain(|entry| entry.key != "b");
+        assert_eq!(found(&source, "b"), None);
+        source.all_entries.clear();
+        assert_eq!(found(&source, "c"), None);
+        assert_eq!(found(&source, "missing"), None);
+    }
+
+    /// A key found once is found again without scanning, which is the point.
+    #[test]
+    fn a_repeated_key_lookup_does_not_scan_again() {
+        let entries: Vec<TagEntry> = (0..1000).map(|index| entry(&format!("k{index}"))).collect();
+        let source = source(entries, Vec::new());
+        assert_eq!(found(&source, "k999"), Some("k999"));
+        let before = KEY_SCANS.with(std::cell::Cell::get);
+        for _ in 0..100 {
+            assert_eq!(found(&source, "k999"), Some("k999"));
+        }
+        assert_eq!(KEY_SCANS.with(std::cell::Cell::get), before);
+    }
+
+    /// Packages layer as tags do: the last-mounted container is read, and
+    /// removing one container's copy leaves the others.
+    #[test]
+    fn a_mods_package_overrides_the_games_until_it_is_deleted() {
+        const PACKAGE: &str = "/game/tags/sound/x-sound";
+        let mut packages = ContainerPackageIndex::default();
+        packages.insert(PACKAGE.to_owned(), 0, "Game/x-sound.uasset".to_owned());
+        packages.insert(PACKAGE.to_owned(), 5, "Mod/x-sound.uasset".to_owned());
+        assert_eq!(
+            packages.lookup("/Game/Tags/Sound/X-Sound"),
+            Some((5, "Mod/x-sound.uasset"))
+        );
+
+        // A rename inside the game's container rewrites its copy, beneath the
+        // mod's.
+        packages.insert(PACKAGE.to_owned(), 0, "Game/renamed.uasset".to_owned());
+        assert_eq!(packages.lookup(PACKAGE), Some((5, "Mod/x-sound.uasset")));
+
+        assert!(packages.remove(PACKAGE, 5), "the mod's copy is deleted");
+        assert_eq!(packages.lookup(PACKAGE), Some((0, "Game/renamed.uasset")));
+        assert!(!packages.remove(PACKAGE, 5));
+        assert!(packages.remove(PACKAGE, 0));
+        assert_eq!(packages.lookup(PACKAGE), None);
+        assert!(packages.is_empty());
     }
 }

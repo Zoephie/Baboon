@@ -52,21 +52,13 @@ fn loose_trash_destination(
 /// browser's memoised filter and the field-value index are both keyed on it, so
 /// without it a search would keep answering with a tag that is gone.
 fn forget_tag_in_kit(kit: &mut Kit, key: &str) {
-    kit.parsed_tags.remove(key);
-    kit.loading_tags.remove(key);
-    kit.bitmap_previews.remove(key);
-    kit.model_previews.remove(key);
-    kit.find_filter_applied.remove(key);
-    kit.edit_buffers.forget_tag(key);
+    kit.drop_document(key);
     if kit.selected_key.as_deref() == Some(key) {
         kit.selected_key = None;
     }
     let folder_seeds = kit.folder_seeds();
     if let Some(source) = kit.source.as_mut() {
-        source.entries.retain(|entry| entry.key != key);
-        source.all_entries.retain(|entry| entry.key != key);
-        crate::source::rebuild_folder_tree(source, &folder_seeds);
-        source.group_tree = crate::source::build_group_tree(&source.entries);
+        source.remove_entry(key, &folder_seeds);
         if let Some(index) = source.reverse_dependencies.as_mut() {
             index.clear_tag(key);
         }
@@ -442,25 +434,6 @@ impl Baboon {
         }
         move_to_trash(path, &destination)?;
         self.forget_deleted_tag(self.active, &entry.key);
-        if let Some(source) = self.source_mut() {
-            if let TagSource::LooseFolder { root, .. } = &source.source
-                && let Ok(tree) = crate::source::build_folder_directory_tree(root)
-            {
-                source.tree = tree;
-            }
-            let complete_index = !source.all_entries.is_empty();
-            source.group_tree = crate::source::build_group_tree(if complete_index {
-                &source.all_entries
-            } else {
-                &source.entries
-            });
-            if complete_index
-                && let TagSource::LooseFolder { root, .. } = &source.source
-                && let Some(game) = source.game.as_deref()
-            {
-                let _ = crate::source::save_entry_index(game, root, &source.all_entries);
-            }
-        }
         Ok(destination)
     }
 
@@ -509,6 +482,26 @@ impl Baboon {
                 return;
             }
         };
+        // The lease Duplicate and Rename take, which Delete never did: it
+        // refuses a second write to this container while this one runs, from
+        // this workspace or another on the same install.
+        let Some(target_utoc) = containers
+            .get(target_container)
+            .map(|container| container.utoc_path.clone())
+        else {
+            self.status = "Container provenance is stale".to_owned();
+            return;
+        };
+        let lease = match self
+            .acquire_container_write_lease(&target_utoc, ContainerWriteMode::AppendInPlace)
+        {
+            Ok(lease) => lease,
+            Err(failure) => {
+                self.status = failure.to_string();
+                return;
+            }
+        };
+        let lease_id = self.park_container_write_lease(lease);
         self.container_delete_running.insert(kit);
         self.status = format!("Deleting {} from {target_label}…", entry.display_path);
         let input = ContainerDeleteWorkerInput {
@@ -526,19 +519,36 @@ impl Baboon {
             kit,
             generation: self.kits[self.active].generation,
         };
-        let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result = run_container_delete(input);
-            let _ = tx.send(WorkerMessage::ContainerDeleteFinished { stamp, result });
-            ctx.request_repaint();
-        });
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || WorkerMessage::ContainerDeleteFinished {
+                stamp,
+                lease: lease_id,
+                result: run_container_delete(input),
+            },
+            move |error| WorkerMessage::ContainerDeleteFinished {
+                stamp,
+                lease: lease_id,
+                result: Err(error),
+            },
+        );
     }
 
     pub(in crate::app) fn handle_container_delete_finished(
         &mut self,
         stamp: KitStamp,
+        lease: ContainerLeaseId,
         result: Result<ContainerDeleteResult, String>,
     ) -> bool {
+        if let Some(lease) = self.take_container_write_lease(lease) {
+            let outcome = if result.is_ok() {
+                ContainerWriteOutcome::Committed
+            } else {
+                ContainerWriteOutcome::Unchanged
+            };
+            self.release_in_place_lease(lease, outcome);
+        }
         let kit_index = self.kit_index(stamp.kit);
         self.container_delete_running.remove(&stamp.kit);
         let result = match result {
@@ -607,7 +617,7 @@ impl Baboon {
             ) {
                 Arc::make_mut(index).remove(&key);
             }
-            Arc::make_mut(packages).remove(&result.package.to_ascii_lowercase());
+            Arc::make_mut(packages).remove(&result.package, result.target_container);
             if !result.is_mod {
                 Arc::make_mut(shipped).remove(&result.ubulk_path);
             }
@@ -712,7 +722,6 @@ fn run_container_delete(
         display_path: input.display_path,
         group_tag: input.group_tag,
         package: input.target.package_path,
-        uasset_path: input.target.uasset_path,
         ubulk_path: input.target.ubulk_path,
         target_label: input.target_label,
         is_mod: input.is_mod,
@@ -902,6 +911,8 @@ mod tests {
             all_entries: Vec::new(),
             reverse_dependencies: None,
             initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
         });
         kit.selected_key = Some(key.clone());
         let generation_before = kit.generation;
@@ -981,5 +992,37 @@ mod tests {
         );
         assert!(loose_trash_destination(None, "../../escape.weapon", 1).is_err());
         assert!(loose_trash_destination(None, "", 1).is_err());
+    }
+}
+
+#[cfg(test)]
+mod delete_lease_tests {
+    use super::*;
+
+    /// A container delete holds the write lease while it runs and gives it back
+    /// when it finishes, failed or not, so the container can be written again.
+    #[test]
+    fn a_finished_container_delete_gives_its_lease_back() {
+        let mut app = Baboon::for_test();
+        let utoc = PathBuf::from("/game/Paks/pakchunk0-WinGDK.utoc");
+        let lease = app
+            .acquire_container_write_lease(&utoc, ContainerWriteMode::AppendInPlace)
+            .ok()
+            .expect("a free container leases");
+        let lease_id = app.park_container_write_lease(lease);
+        assert!(
+            app.acquire_container_write_lease(&utoc, ContainerWriteMode::AppendInPlace)
+                .is_err(),
+            "leased while the delete runs"
+        );
+
+        let stamp = app.kit_stamp();
+        app.handle_container_delete_finished(stamp, lease_id, Err("disk full".to_owned()));
+
+        let again = app
+            .acquire_container_write_lease(&utoc, ContainerWriteMode::AppendInPlace)
+            .ok()
+            .expect("free again once it finished");
+        app.release_in_place_lease(again, ContainerWriteOutcome::Unchanged);
     }
 }

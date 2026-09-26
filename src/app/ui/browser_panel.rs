@@ -76,10 +76,7 @@ impl Baboon {
         let generation = self.kits[kit_index].generation;
         let bitmap_hover_requests = begin_bitmap_hovers(
             ui,
-            KitStamp {
-                kit: self.kits[kit_index].id,
-                generation,
-            },
+            Arc::clone(&self.kits[kit_index].bitmap_browser.thumbnails),
         );
         if pane.cached_generation != generation || pane.cached_source_len != source_len {
             if let Some(source) = self.kits[kit_index].source.as_mut() {
@@ -139,11 +136,15 @@ impl Baboon {
         let scenario_launch = self.kits[kit_index]
             .source
             .as_ref()
-            .map(crate::app::controller::scenario_launch_availability)
+            .map(|source| {
+                crate::app::controller::scenario_launch_availability_with(source, |path| {
+                    is_file_cached(ui.ctx(), path)
+                })
+            })
             .unwrap_or_default();
-        let mut show_browser_prefixes = self.show_browser_prefixes;
-        let mut folders_before_tags = self.folders_before_tags;
-        let double_click_to_open = self.double_click_to_open_tags;
+        let mut show_browser_prefixes = self.prefs.show_browser_prefixes;
+        let mut folders_before_tags = self.prefs.folders_before_tags;
+        let double_click_to_open = self.prefs.double_click_to_open_tags;
         let search_hint = folder_browser_search_hint(&pane.label);
         let mut action = None;
         let mut need_scan = false;
@@ -278,9 +279,15 @@ impl Baboon {
                         });
                 } else {
                     let entries = source.full_entry_set();
-                    if groups_mode {
+                    // Rebuilt when the entries change, not every frame: it walks
+                    // the whole index and allocates per entry. A loose folder's
+                    // full set only grows or is replaced, and either moves the
+                    // generation or the count.
+                    let built_for = (generation, entries.len());
+                    if groups_mode && pane.group_tree_for != Some(built_for) {
                         pane.group_tree =
                             crate::source::build_group_tree_beneath(entries, &pane.rel_path);
+                        pane.group_tree_for = Some(built_for);
                     }
                     let (tree, visible_entries) = if filter.is_empty() {
                         (
@@ -312,12 +319,15 @@ impl Baboon {
                                 ui.label(RichText::new("No matching tags").color(subtle_dark()));
                                 return;
                             }
+                            // Already filtered by `filter_cache`: drawn with
+                            // folders open rather than matched a second time.
                             let tree_action = draw_tree(
                                 ui,
                                 tree,
                                 visible_entries,
                                 selected.as_deref(),
-                                filter,
+                                "",
+                                !filter.is_empty(),
                                 show_browser_prefixes,
                                 double_click_to_open,
                                 groups_mode,
@@ -336,8 +346,8 @@ impl Baboon {
 
         self.queue_bitmap_hover_thumbnails(kit_index, &bitmap_hover_requests, ctx);
 
-        self.show_browser_prefixes = show_browser_prefixes;
-        self.folders_before_tags = folders_before_tags;
+        self.prefs.show_browser_prefixes = show_browser_prefixes;
+        self.prefs.folders_before_tags = folders_before_tags;
 
         action = match action {
             Some(BrowserAction::OpenFolderBrowser {
@@ -459,10 +469,7 @@ impl Baboon {
         );
         let bitmap_hover_requests = begin_bitmap_hovers(
             ui,
-            KitStamp {
-                kit: self.kits[kit_index].id,
-                generation: self.kits[kit_index].generation,
-            },
+            Arc::clone(&self.kits[kit_index].bitmap_browser.thumbnails),
         );
         let mut open_git_review = false;
         let git_review_enabled = self.git_review_enabled_for_kit(kit_index);
@@ -493,8 +500,8 @@ impl Baboon {
                     ui,
                     &mut kit.browser_mode,
                     &mut kit.browser_sort,
-                    &mut self.show_browser_prefixes,
-                    &mut self.folders_before_tags,
+                    &mut self.prefs.show_browser_prefixes,
+                    &mut self.prefs.folders_before_tags,
                 );
                 if groups_clicked
                     && matches!(source.source, TagSource::LooseFolder { .. })
@@ -516,9 +523,9 @@ impl Baboon {
             let selected = kit.selected_key.clone();
             let filter = kit.filter.trim().to_owned();
             let mode = kit.browser_mode;
-            let show_prefixes = self.show_browser_prefixes;
-            let folders_before_tags = self.folders_before_tags;
-            let double_click_to_open = self.double_click_to_open_tags;
+            let show_prefixes = self.prefs.show_browser_prefixes;
+            let folders_before_tags = self.prefs.folders_before_tags;
+            let double_click_to_open = self.prefs.double_click_to_open_tags;
             let mut status_update = None;
             // Groups and filtered Folders use all_entries (background
             // scan) so every tag is visible, not just visited folders.
@@ -610,6 +617,7 @@ impl Baboon {
                                     &cache.entries,
                                     selected.as_deref(),
                                     "",
+                                    false,
                                     show_prefixes,
                                     double_click_to_open,
                                     groups_mode,
@@ -653,6 +661,7 @@ impl Baboon {
                                         &source.entries,
                                         selected.as_deref(),
                                         &filter,
+                                        false,
                                         show_prefixes,
                                         double_click_to_open,
                                         false,
@@ -684,6 +693,7 @@ impl Baboon {
                                         entries,
                                         selected.as_deref(),
                                         &filter,
+                                        false,
                                         show_prefixes,
                                         double_click_to_open,
                                         true,
@@ -726,7 +736,7 @@ impl Baboon {
         }
         if open_git_review {
             self.active = kit_index;
-            self.open_git_review();
+            self.open_git_review(ctx);
         }
         self.queue_bitmap_hover_thumbnails(kit_index, &bitmap_hover_requests, ctx);
     }

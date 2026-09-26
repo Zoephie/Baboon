@@ -23,8 +23,41 @@ use super::*;
 /// a second.
 #[derive(Clone)]
 pub(super) struct Snapshot {
+    /// Unique to this step for as long as it exists, in memory or in a
+    /// recovery file. The recovery project keys its history rows by it, so an
+    /// autosave writes only the steps it has not written before: an undo stack
+    /// shifts by one on every edit, and when rows were keyed by position every
+    /// save rewrote every step — each one a whole serialized tag.
+    pub(super) id: u64,
     pub(super) bytes: Arc<Vec<u8>>,
     pub(super) label: String,
+}
+
+/// The next snapshot id. Never reused within a process, and raised past every
+/// id read back from a recovery file, so a new step cannot take the id of one
+/// already on disk.
+static NEXT_SNAPSHOT_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+impl Snapshot {
+    pub(super) fn new(bytes: Arc<Vec<u8>>, label: String) -> Self {
+        Self {
+            id: NEXT_SNAPSHOT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            bytes,
+            label,
+        }
+    }
+
+    /// A step read back from a recovery file, keeping the id it was saved
+    /// under.
+    pub(super) fn restored(id: u64, bytes: Arc<Vec<u8>>, label: String) -> Self {
+        NEXT_SNAPSHOT_ID.fetch_max(id.saturating_add(1), std::sync::atomic::Ordering::Relaxed);
+        Self { id, bytes, label }
+    }
+}
+
+/// A fresh id for a step read back from a file that stored none.
+pub(super) fn next_snapshot_id() -> u64 {
+    NEXT_SNAPSHOT_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
 pub(super) struct EditJournal {
@@ -41,11 +74,8 @@ pub(super) struct EditJournal {
     coalescing: bool,
     /// Bumped whenever either stack changes.
     ///
-    /// The session's recovery project rewrites its history table wholesale — an
-    /// undo stack shifts by one on every edit, so nearly every row moves and
-    /// there is nothing to reconcile row by row. Knowing cheaply that nothing
-    /// changed is therefore the difference between this and rewriting tens of
-    /// megabytes twice a second while someone drags a slider. Same trick as
+    /// Lets the session's recovery project skip its history entirely when
+    /// nothing moved, without comparing the stacks step by step. Same trick as
     /// [`Dirty::revision`], and for the same reason: answering it by hashing
     /// the snapshots would only move the cost from the disk to the CPU.
     revision: u64,
@@ -73,10 +103,7 @@ impl EditJournal {
             return;
         }
         if let Ok(bytes) = tag.write_to_bytes() {
-            self.push_capped(Snapshot {
-                bytes: Arc::new(bytes),
-                label: label.to_owned(),
-            });
+            self.push_capped(Snapshot::new(Arc::new(bytes), label.to_owned()));
             self.redo.clear();
         }
         self.coalescing = true;
@@ -128,10 +155,7 @@ impl EditJournal {
                 &mut self.redo,
                 self.limit,
                 self.byte_limit,
-                Snapshot {
-                    bytes: Arc::new(bytes),
-                    label: snapshot.label.clone(),
-                },
+                Snapshot::new(Arc::new(bytes), snapshot.label.clone()),
             );
         }
         self.coalescing = false;
@@ -147,10 +171,7 @@ impl EditJournal {
                 &mut self.undo,
                 self.limit,
                 self.byte_limit,
-                Snapshot {
-                    bytes: Arc::new(bytes),
-                    label: snapshot.label.clone(),
-                },
+                Snapshot::new(Arc::new(bytes), snapshot.label.clone()),
             );
         }
         self.coalescing = false;
@@ -216,10 +237,7 @@ mod tests {
                 &mut stack,
                 64,
                 budget,
-                Snapshot {
-                    bytes: Arc::new(vec![0; 400]),
-                    label: format!("edit {i}"),
-                },
+                Snapshot::new(Arc::new(vec![0; 400]), format!("edit {i}")),
             );
         }
         assert_eq!(stack.len(), 2, "400 x 2 fits in 1000, 400 x 3 does not");
@@ -232,10 +250,7 @@ mod tests {
             &mut lone,
             64,
             budget,
-            Snapshot {
-                bytes: Arc::new(vec![0; budget * 4]),
-                label: "huge".to_owned(),
-            },
+            Snapshot::new(Arc::new(vec![0; budget * 4]), "huge".to_owned()),
         );
         assert_eq!(lone.len(), 1);
     }
@@ -288,5 +303,28 @@ mod tests {
         // Two distinct entries now exist.
         assert!(journal.undo(&tag).is_some());
         assert!(journal.can_undo());
+    }
+
+    /// A step keeps its id through undo and a restart, and a step made after
+    /// a restore cannot take an id the restored file already holds.
+    #[test]
+    fn steps_keep_their_ids_and_new_ones_never_collide() {
+        let restored = Snapshot::restored(1_000_000, Arc::new(vec![1]), "old".to_owned());
+        assert_eq!(restored.id, 1_000_000);
+        let fresh = Snapshot::new(Arc::new(vec![2]), "new".to_owned());
+        assert!(fresh.id > restored.id);
+
+        let mut tag = fresh_model();
+        let mut journal = EditJournal::default();
+        journal.begin_edit(&tag, "edit");
+        let pushed = journal.stacks().0[0].id;
+        add_variant(&mut tag);
+        journal.end_edit_window();
+        journal.undo(&tag);
+        assert_ne!(
+            journal.stacks().1[0].id,
+            pushed,
+            "the redo step is a new step"
+        );
     }
 }

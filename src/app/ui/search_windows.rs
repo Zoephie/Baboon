@@ -8,7 +8,7 @@ impl Baboon {
         if self.tag_reference_picker.is_none() {
             return;
         }
-        let expert_mode = self.expert_mode;
+        let expert_mode = self.prefs.expert_mode;
         // The catalog has to come from the kit the picker was opened from, the
         // same kit its selection is applied to — otherwise it would offer
         // another game's tags to pick from.
@@ -60,28 +60,30 @@ impl Baboon {
                 .take()
                 .expect("picker remains open while processing selection");
             let kit = picker_kit;
-            if let Some(doc) = self.kits[kit].parsed_tags.get_mut(&picker.tag_key) {
-                doc.journal.begin_edit(&doc.tag, "Change tag reference");
-                if let Some(status) = apply_pending_edits(
-                    &mut doc.tag,
-                    vec![PendingFieldEdit {
+            if self.kits[kit].parsed_tags.contains_key(&picker.tag_key) {
+                let ops = DeferredOps {
+                    pending: vec![PendingFieldEdit {
                         path: picker.field_path.clone(),
                         input: input.clone(),
                     }],
-                    &mut doc.dirty,
-                )
-                .status
-                {
-                    self.status = status;
+                    ..DeferredOps::default()
+                };
+                let applied = self.apply_doc_ops(
+                    kit,
+                    &picker.tag_key,
+                    "Change tag reference",
+                    ops,
+                    UndoStep::Own,
+                );
+                if applied.is_some() {
+                    // `insert_clean` from upstream: the picked reference is
+                    // now the document's value, so the draft starts
+                    // unmodified rather than looking like an uncommitted edit.
+                    self.kits[kit]
+                        .edit_buffers
+                        .insert_clean(format!("{}|{}", picker.tag_key, picker.field_path), input);
+                    self.invalidate_tag_caches_in(kit, &picker.tag_key);
                 }
-                doc.journal.end_edit_window();
-                // `insert_clean` from upstream: the picked reference is now
-                // the document's value, so the draft starts unmodified rather
-                // than looking like an uncommitted edit.
-                self.kits[kit]
-                    .edit_buffers
-                    .insert_clean(format!("{}|{}", picker.tag_key, picker.field_path), input);
-                self.invalidate_tag_caches_in(kit, &picker.tag_key);
             } else {
                 self.status = "The tag being edited is no longer open".to_owned();
             }
@@ -158,7 +160,7 @@ impl Baboon {
                             .color(text_dark()),
                     );
                     if explorer.index_unavailable {
-                        let note = if self.building_reverse_dependencies
+                        let note = if self.kits[self.active].index_jobs.building_references
                             || self.kits[explorer_kit_index].scanning_entries
                         {
                             "Reference index is building — reopen this in a moment."
@@ -168,14 +170,9 @@ impl Baboon {
                         ui.label(RichText::new(note).color(subtle_dark()));
                     }
                     ui.separator();
-                    let filter_lower = filter.trim().to_ascii_lowercase();
-                    let matches = |entry: &TagEntry| {
-                        filter_lower.is_empty()
-                            || entry
-                                .display_path
-                                .to_ascii_lowercase()
-                                .contains(&filter_lower)
-                    };
+                    let query = filter.trim();
+                    let matches =
+                        |entry: &TagEntry| contains_ignore_ascii_case(&entry.display_path, query);
                     let parents: Vec<&TagEntry> =
                         explorer.parents.iter().filter(|e| matches(e)).collect();
                     let children: Vec<&TagEntry> =
@@ -196,15 +193,20 @@ impl Baboon {
                             .strong()
                             .color(text_dark()),
                         );
+                        if parents.is_empty() {
+                            cols[0].label(RichText::new("(none)").color(subtle_dark()));
+                        }
+                        // A widely used tag has thousands of referrers: only
+                        // the rows in view are drawn.
+                        let row_height = cols[0].spacing().interact_size.y;
                         egui::ScrollArea::vertical()
                             .id_salt("ce_parents")
                             .max_height(380.0)
-                            .show(&mut cols[0], |ui| {
-                                if parents.is_empty() {
-                                    ui.label(RichText::new("(none)").color(subtle_dark()));
-                                }
-                                for entry in &parents {
-                                    if explorer_entry_row(ui, entry) {
+                            .show_rows(&mut cols[0], row_height, parents.len(), |ui, rows| {
+                                for entry in &parents[rows] {
+                                    if fixed_height_row(ui, row_height, |ui| {
+                                        explorer_entry_row(ui, entry)
+                                    }) {
                                         act = Some(ExplorerAct::Navigate((*entry).clone()));
                                     }
                                 }
@@ -217,15 +219,20 @@ impl Baboon {
                             .strong()
                             .color(text_dark()),
                         );
+                        if children.is_empty() {
+                            cols[1].label(RichText::new("(none)").color(subtle_dark()));
+                        }
+                        // A widely used tag has thousands of referrers: only
+                        // the rows in view are drawn.
+                        let row_height = cols[1].spacing().interact_size.y;
                         egui::ScrollArea::vertical()
                             .id_salt("ce_children")
                             .max_height(380.0)
-                            .show(&mut cols[1], |ui| {
-                                if children.is_empty() {
-                                    ui.label(RichText::new("(none)").color(subtle_dark()));
-                                }
-                                for entry in &children {
-                                    if explorer_entry_row(ui, entry) {
+                            .show_rows(&mut cols[1], row_height, children.len(), |ui, rows| {
+                                for entry in &children[rows] {
+                                    if fixed_height_row(ui, row_height, |ui| {
+                                        explorer_entry_row(ui, entry)
+                                    }) {
                                         act = Some(ExplorerAct::Navigate((*entry).clone()));
                                     }
                                 }
@@ -326,114 +333,122 @@ impl Baboon {
                     // A references popup lets each row expand to its per-occurrence
                     // list; other query kinds render a plain clickable row.
                     let expandable = results.ref_target.is_some();
-                    egui::ScrollArea::vertical()
-                        .max_height(460.0)
-                        .show(ui, |ui| {
-                            for (index, entry) in results.entries.iter().enumerate() {
-                                let path = entry.display_path.replace('\\', "/");
-                                let label = match results.annotations.get(index) {
-                                    Some(annotation) => format!("{annotation}  —  {path}"),
-                                    None => path,
-                                };
-                                let is_expanded = expanded.contains(&index);
-                                let make_row = |ui: &mut egui::Ui| {
-                                    ui.add(
-                                        egui::Label::new(RichText::new(&label).color(text_dark()))
-                                            .sense(Sense::click()),
-                                    )
-                                    .on_hover_text(
-                                        "Click to jump to the first reference · right-click to reveal",
-                                    )
-                                };
-                                let row = if expandable {
-                                    ui.horizontal(|ui| {
-                                        let arrow = if is_expanded { "▼" } else { "▶" };
-                                        if ui
-                                            .add(
-                                                egui::Button::new(RichText::new(arrow).small())
-                                                    .frame(false),
-                                            )
-                                            .on_hover_text("Show every field that references this tag")
-                                            .clicked()
-                                        {
-                                            to_toggle.push(index);
-                                        }
-                                        make_row(ui)
-                                    })
-                                    .inner
-                                } else {
-                                    make_row(ui)
-                                };
-                                if row.clicked() {
-                                    to_open = Some(entry.key.clone());
-                                }
-                                row.context_menu(|ui| {
-                                    if ui.button("Open").clicked() {
-                                        to_open = Some(entry.key.clone());
-                                        ui.close_menu();
-                                    }
-                                    if ui.button("Reveal in browser").clicked() {
-                                        to_reveal = Some(entry.key.clone());
-                                        ui.close_menu();
-                                    }
-                                });
-                                if expandable && is_expanded {
-                                    match occurrences.get(&index) {
-                                        Some(list) if !list.is_empty() => {
-                                            for occ in list {
-                                                ui.horizontal(|ui| {
-                                                    ui.add_space(22.0);
-                                                    let jump = icon_button(
-                                                        ui,
-                                                        ButtonIcon::JumpTo,
-                                                        "Jump to this field",
-                                                        true,
-                                                        text_dark(),
-                                                    );
-                                                    let label = ui
-                                                        .add(
-                                                            egui::Label::new(
-                                                                RichText::new(format!("↳ {}", occ.label))
-                                                                    .color(subtle_dark()),
-                                                            )
-                                                            .sense(Sense::click()),
-                                                        )
-                                                        .on_hover_text("Jump to this field");
-                                                    if jump.clicked() || label.clicked() {
-                                                        to_jump = Some((
-                                                            entry.key.clone(),
-                                                            occ.field_path.clone(),
-                                                        ));
-                                                    }
-                                                });
+                    // One line per row, entries and their expanded fields
+                    // alike, so only the rows in view are drawn. A query over
+                    // a whole source lists thousands of tags.
+                    let rows = query_result_rows(results.entries.len(), expandable, |index| {
+                        expanded
+                            .contains(&index)
+                            .then(|| occurrences.get(&index).map(Vec::len))
+                    });
+                    let row_height = ui.spacing().interact_size.y;
+                    egui::ScrollArea::vertical().max_height(460.0).show_rows(
+                        ui,
+                        row_height,
+                        rows.len(),
+                        |ui, range| {
+                            for row in &rows[range] {
+                                #[cfg(test)]
+                                tests::ROWS_BUILT.with(|built| built.set(built.get() + 1));
+                                fixed_height_row(ui, row_height, |ui| match *row {
+                                    QueryResultRow::Entry(index) => {
+                                        let entry = &results.entries[index];
+                                        let path = entry.display_path.replace('\\', "/");
+                                        let label = match results.annotations.get(index) {
+                                            Some(annotation) => format!("{annotation}  —  {path}"),
+                                            None => path,
+                                        };
+                                        if expandable {
+                                            let arrow = if expanded.contains(&index) {
+                                                "▼"
+                                            } else {
+                                                "▶"
+                                            };
+                                            if ui
+                                                .add(
+                                                    egui::Button::new(RichText::new(arrow).small())
+                                                        .frame(false),
+                                                )
+                                                .on_hover_text(
+                                                    "Show every field that references this tag",
+                                                )
+                                                .clicked()
+                                            {
+                                                to_toggle.push(index);
                                             }
                                         }
-                                        Some(_) => {
-                                            ui.horizontal(|ui| {
-                                                ui.add_space(22.0);
-                                                ui.label(
-                                                    RichText::new("no direct field found")
-                                                        .italics()
-                                                        .color(subtle_dark())
-                                                        .small(),
-                                                );
-                                            });
+                                        let row = ui
+                                            .add(
+                                                egui::Label::new(
+                                                    RichText::new(&label).color(text_dark()),
+                                                )
+                                                .sense(Sense::click()),
+                                            )
+                                            .on_hover_text(
+                                                "Click to jump to the first reference · \
+                                                 right-click to reveal",
+                                            );
+                                        if row.clicked() {
+                                            to_open = Some(entry.key.clone());
                                         }
-                                        None => {
-                                            ui.horizontal(|ui| {
-                                                ui.add_space(22.0);
-                                                ui.label(
-                                                    RichText::new("loading…")
-                                                        .italics()
-                                                        .color(subtle_dark())
-                                                        .small(),
-                                                );
-                                            });
+                                        row.context_menu(|ui| {
+                                            if ui.button("Open").clicked() {
+                                                to_open = Some(entry.key.clone());
+                                                ui.close_menu();
+                                            }
+                                            if ui.button("Reveal in browser").clicked() {
+                                                to_reveal = Some(entry.key.clone());
+                                                ui.close_menu();
+                                            }
+                                        });
+                                    }
+                                    QueryResultRow::Occurrence(index, position) => {
+                                        let entry = &results.entries[index];
+                                        let occ = &occurrences[&index][position];
+                                        ui.add_space(22.0);
+                                        let jump = icon_button(
+                                            ui,
+                                            ButtonIcon::JumpTo,
+                                            "Jump to this field",
+                                            true,
+                                            text_dark(),
+                                        );
+                                        let label = ui
+                                            .add(
+                                                egui::Label::new(
+                                                    RichText::new(format!("↳ {}", occ.label))
+                                                        .color(subtle_dark()),
+                                                )
+                                                .sense(Sense::click()),
+                                            )
+                                            .on_hover_text("Jump to this field");
+                                        if jump.clicked() || label.clicked() {
+                                            to_jump =
+                                                Some((entry.key.clone(), occ.field_path.clone()));
                                         }
                                     }
-                                }
+                                    QueryResultRow::NoOccurrences(_) => {
+                                        ui.add_space(22.0);
+                                        ui.label(
+                                            RichText::new("no direct field found")
+                                                .italics()
+                                                .color(subtle_dark())
+                                                .small(),
+                                        );
+                                    }
+                                    QueryResultRow::Loading(_) => {
+                                        ui.add_space(22.0);
+                                        ui.label(
+                                            RichText::new("loading…")
+                                                .italics()
+                                                .color(subtle_dark())
+                                                .small(),
+                                        );
+                                    }
+                                });
                             }
-                        });
+                        },
+                    );
                 }
             });
         for index in to_toggle {
@@ -567,5 +582,146 @@ impl Baboon {
             self.begin_build_field_index(ctx.clone());
         }
         self.field_value_search_open = open;
+    }
+}
+
+/// One line of the query results window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum QueryResultRow {
+    Entry(usize),
+    /// An expanded entry's field, by position in its occurrence list.
+    Occurrence(usize, usize),
+    /// An expanded entry whose walk found no field.
+    NoOccurrences(usize),
+    /// An expanded entry whose walk has not finished.
+    Loading(usize),
+}
+
+/// The results as lines. `expansion(index)` is `None` for a collapsed entry,
+/// `Some(None)` for one still loading, and `Some(Some(count))` for one whose
+/// fields are known.
+fn query_result_rows(
+    entries: usize,
+    expandable: bool,
+    expansion: impl Fn(usize) -> Option<Option<usize>>,
+) -> Vec<QueryResultRow> {
+    let mut rows = Vec::with_capacity(entries);
+    for index in 0..entries {
+        rows.push(QueryResultRow::Entry(index));
+        if !expandable {
+            continue;
+        }
+        match expansion(index) {
+            None => {}
+            Some(None) => rows.push(QueryResultRow::Loading(index)),
+            Some(Some(0)) => rows.push(QueryResultRow::NoOccurrences(index)),
+            Some(Some(count)) => {
+                rows.extend((0..count).map(|position| QueryResultRow::Occurrence(index, position)))
+            }
+        }
+    }
+    rows
+}
+
+/// Lay a row out left to right at exactly `height`, so a `show_rows` list
+/// stays where its row count says it is.
+fn fixed_height_row<R>(ui: &mut Ui, height: f32, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.allocate_ui_with_layout(
+        egui::vec2(ui.available_width(), height),
+        egui::Layout::left_to_right(egui::Align::Center),
+        add,
+    )
+    .inner
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    thread_local! {
+        /// Result rows laid out, to tell a virtualized list from one that
+        /// lays out every row and lets egui cull the painting.
+        pub(super) static ROWS_BUILT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    }
+
+    #[test]
+    fn an_expanded_result_lists_its_fields_under_it() {
+        use QueryResultRow::*;
+        let expansion = |index: usize| match index {
+            1 => Some(None),
+            2 => Some(Some(0)),
+            3 => Some(Some(2)),
+            _ => None,
+        };
+        assert_eq!(
+            query_result_rows(5, true, expansion),
+            [
+                Entry(0),
+                Entry(1),
+                Loading(1),
+                Entry(2),
+                NoOccurrences(2),
+                Entry(3),
+                Occurrence(3, 0),
+                Occurrence(3, 1),
+                Entry(4),
+            ]
+        );
+        assert_eq!(
+            query_result_rows(2, false, expansion),
+            [Entry(0), Entry(1)],
+            "only a references query expands"
+        );
+    }
+
+    /// The window draws the rows in view, not all of them.
+    #[test]
+    fn the_query_results_window_draws_only_rows_in_view() {
+        let mut app = Baboon::for_test();
+        let entries: Vec<TagEntry> = (0..5_000)
+            .map(|index| TagEntry {
+                key: format!("file:sound/row_{index}.sound"),
+                display_path: format!("sound/row_{index}.sound"),
+                group_tag: u32::from_be_bytes(*b"snd!"),
+                group_name: Some("sound".to_owned()),
+                location: TagEntryLocation::LooseFile(format!("sound/row_{index}.sound").into()),
+            })
+            .collect();
+        let ctx = egui::Context::default();
+        let mut painted = Vec::new();
+        for _ in 0..2 {
+            ROWS_BUILT.with(|built| built.set(0));
+            app.query_results = Some(TagQueryResults {
+                kit: app.kits[0].id,
+                title: "Sounds".to_owned(),
+                entries: entries.clone(),
+                annotations: Vec::new(),
+                note: None,
+                ref_target: None,
+            });
+            let output = ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1000.0, 800.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| app.draw_query_results_window(ctx),
+            );
+            painted = output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                    _ => None,
+                })
+                .filter(|text| text.starts_with("sound/row_"))
+                .collect();
+        }
+        assert!(painted.contains(&"sound/row_0.sound".to_owned()));
+        assert!(!painted.contains(&"sound/row_4999.sound".to_owned()));
+        let built = ROWS_BUILT.with(std::cell::Cell::get);
+        assert!(built < 100, "laid out {built} of 5,000 rows");
     }
 }

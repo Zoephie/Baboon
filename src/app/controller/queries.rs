@@ -12,8 +12,8 @@ impl Baboon {
         result: Result<Vec<FieldValueMatch>, String>,
     ) -> bool {
         self.field_value_searching = false;
-        // Only the status/results window is written here, all of it global,
-        // so the stamp is checked for staleness without needing the kit.
+        // The results name tags in the kit the search ran in, which may not be
+        // the one focused by the time they arrive.
         if self.resolve_stamp(stamp).is_none() {
             return true;
         }
@@ -26,7 +26,7 @@ impl Baboon {
                     .then(|| format!("No tag field values contain \"{query}\"."));
                 self.status = format!("Field search for \"{query}\": {} match(es)", entries.len());
                 self.query_results = Some(TagQueryResults {
-                    kit: self.active_kit_id(),
+                    kit: stamp.kit,
                     title: format!("Field value '{query}' ({})", entries.len()),
                     entries,
                     annotations,
@@ -216,5 +216,31 @@ fn truncate_field_value(value: &str) -> String {
         format!("{head}…")
     } else {
         value.to_owned()
+    }
+}
+
+#[cfg(test)]
+mod field_search_kit_tests {
+    use super::*;
+
+    /// Results belong to the kit the search ran in. They were tagged with the
+    /// kit focused when they arrived, so switching workspace mid-search gave
+    /// rows whose keys resolve nowhere.
+    #[test]
+    fn field_search_results_belong_to_the_kit_that_ran_the_search() {
+        let mut app = Baboon::for_test();
+        let searched = app.kits[0].id;
+        let stamp = KitStamp {
+            kit: searched,
+            generation: app.kits[0].generation,
+        };
+        let other = KitId(searched.0 + 1);
+        app.kits.push(Kit::empty(other, TagNameIndex::default()));
+        app.active = 1;
+
+        app.handle_field_value_search_finished(stamp, "grass".to_owned(), Ok(Vec::new()));
+
+        let results = app.query_results.expect("results");
+        assert_eq!(results.kit, searched);
     }
 }

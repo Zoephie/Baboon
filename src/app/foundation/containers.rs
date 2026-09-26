@@ -199,16 +199,9 @@ pub(in crate::app) fn draw_fields_with_docs(
         // Resolve a block-index field's target block (sibling or ancestor) for
         // the element dropdown; `None` falls back to the numeric editor.
         let root = edit.root;
-        let block_index = block_index_target_options(tag_struct, &field, names, root, path_prefix);
-        let semantic_short_index = semantic_short_index_target_options(
-            ui,
-            edit,
-            tag_struct,
-            &field,
-            names,
-            root,
-            path_prefix,
-        );
+        let block_index = block_index_target_options(tag_struct, &field, root, path_prefix);
+        let semantic_short_index =
+            semantic_short_index_target_options(tag_struct, &field, root, path_prefix);
         draw_field(
             ui,
             field,
@@ -250,8 +243,8 @@ pub(in crate::app) fn draw_field(
     path_prefix: &str,
     edit: &mut FieldEditContext<'_>,
     meta_override: Option<FieldDisplayMeta>,
-    block_index: Option<(Vec<String>, String)>,
-    semantic_short_index: Option<(Vec<String>, String)>,
+    block_index: Option<BlockIndexTarget>,
+    semantic_short_index: Option<BlockIndexTarget>,
     tag_reference_value_width: f32,
 ) {
     let field_path = append_field_path_for(path_prefix, &field);
@@ -927,7 +920,7 @@ fn draw_foundation_collapsing_header(
     ui.painter().rect_stroke(
         container_rect,
         FOUNDATION_CONTAINER_RADIUS,
-        Stroke::new(1.0, foundation_block_edge()),
+        Stroke::new(1.0_f32, foundation_block_edge()),
     );
     open
 }
@@ -1064,9 +1057,13 @@ pub(in crate::app) fn draw_foundation_block(
         });
     }
 
-    // Paste / replace from the clipboard.
-    let clip_elements = edit.block_clipboard.map(|clip| clip.elements.clone());
-    if let Some(elements) = clip_elements {
+    // Paste / replace from the clipboard. The elements are cloned only for an
+    // action that was clicked: this runs for every block drawn, every frame,
+    // and used to deep-copy the whole clipboard each time.
+    if let Some(clip) = edit.block_clipboard
+        && (actions.paste || actions.replace_element || actions.replace_block)
+    {
+        let elements = clip.elements.clone();
         if actions.paste {
             let at = if count == 0 { 0 } else { sel + 1 };
             edit.block_ops.push(BlockOp {
@@ -1201,11 +1198,20 @@ pub(in crate::app) fn handle_block_actions(
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    /// How many dropdown labels this thread has built, for tests that bound it.
+    pub(in crate::app) static DROPDOWN_LABELS_BUILT: std::cell::Cell<usize> =
+        const { std::cell::Cell::new(0) };
+}
+
 pub(in crate::app) fn block_element_dropdown_label(
     element: Option<TagStruct<'_>>,
     names: &TagNameIndex,
     index: usize,
 ) -> String {
+    #[cfg(test)]
+    DROPDOWN_LABELS_BUILT.with(|count| count.set(count.get() + 1));
     let Some(element) = element else {
         return format!("{index}.");
     };
@@ -2073,7 +2079,7 @@ pub(in crate::app) fn draw_foundation_block_control(
     ui.painter().rect_stroke(
         container_rect,
         FOUNDATION_CONTAINER_RADIUS,
-        Stroke::new(1.0, foundation_block_edge()),
+        Stroke::new(1.0_f32, foundation_block_edge()),
     );
 
     actions
@@ -2377,7 +2383,7 @@ pub(in crate::app) fn foundation_header_value_cell(ui: &mut Ui, text: &str, max_
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, 22.0), Sense::hover());
     ui.painter().rect_filled(rect, 4.0, foundation_input());
     ui.painter()
-        .rect_stroke(rect, 4.0, Stroke::new(1.0, foundation_input_edge()));
+        .rect_stroke(rect, 4.0, Stroke::new(1.0_f32, foundation_input_edge()));
     ui.painter().text(
         rect.left_center() + Vec2::new(5.0, 0.0),
         Align2::LEFT_CENTER,
@@ -2550,61 +2556,58 @@ pub(in crate::app) fn block_index_value(value: &TagFieldData) -> Option<i64> {
 /// "primary barrel" → the root "barrels" block). `None` for non-(plain)
 /// block-index fields, custom indices (no target in the definition), or targets
 /// that don't resolve — callers fall back to the numeric editor.
+/// The block a block-index field points into. Only its path and length are
+/// resolved per frame; the element labels, one per target element, are built
+/// by the row when it needs them.
+pub(in crate::app) struct BlockIndexTarget {
+    pub(in crate::app) path: String,
+    pub(in crate::app) len: usize,
+}
+
+/// The dropdown label of every element of `target`, for a popup that is open.
+pub(in crate::app) fn block_index_target_labels(
+    root: Option<TagStruct<'_>>,
+    target: &BlockIndexTarget,
+    names: &TagNameIndex,
+) -> Vec<String> {
+    let block = root
+        .and_then(|root| root.field_path(&target.path))
+        .and_then(|field| field.as_block());
+    (0..target.len)
+        .map(|index| {
+            block_element_dropdown_label(
+                block.as_ref().and_then(|b| b.element(index)),
+                names,
+                index,
+            )
+        })
+        .collect()
+}
+
 pub(in crate::app) fn block_index_target_options(
     tag_struct: &TagStruct<'_>,
     field: &TagField<'_>,
-    names: &TagNameIndex,
     root: Option<TagStruct<'_>>,
     struct_path: &str,
-) -> Option<(Vec<String>, String)> {
-    let target_name = field.definition().block_index_target()?.name().to_owned();
-    if target_name.is_empty() {
-        return None;
-    }
-    // 1) The field's own struct (sibling block).
-    if let Some(found) = find_target_block(tag_struct, &target_name, names, struct_path) {
-        return Some(found);
-    }
-    // 2) Ancestors — walk parent structs up to the root.
-    let root = root?;
-    let mut current = struct_path;
-    while !current.is_empty() {
-        let parent = current.rsplit_once('/').map(|(p, _)| p).unwrap_or("");
-        let ancestor = if parent.is_empty() {
-            root
-        } else {
-            root.descend(parent)?
-        };
-        if let Some(found) = find_target_block(&ancestor, &target_name, names, parent) {
-            return Some(found);
-        }
-        if parent.is_empty() {
-            break;
-        }
-        current = parent;
-    }
-    None
+) -> Option<BlockIndexTarget> {
+    let target = field.definition().block_index_target()?;
+    crate::app::editor::declared_block_index_target(tag_struct, root, struct_path, target.name())
 }
 
 /// Some classic schemas expose parent links as plain signed shorts instead of
 /// first-class block-index fields. Render only well-known parent references as
 /// dropdowns so ordinary counters/indices remain numeric.
 pub(in crate::app) fn semantic_short_index_target_options(
-    ui: &Ui,
-    edit: &FieldEditContext<'_>,
     tag_struct: &TagStruct<'_>,
     field: &TagField<'_>,
-    names: &TagNameIndex,
     root: Option<TagStruct<'_>>,
     struct_path: &str,
-) -> Option<(Vec<String>, String)> {
+) -> Option<BlockIndexTarget> {
     if field.field_type() != TagFieldType::ShortInteger {
         return None;
     }
     let target_key = semantic_short_index_target_key(field.name())?;
-    find_target_block_by_clean_key(tag_struct, target_key, names, struct_path).or_else(|| {
-        find_ancestor_target_block_by_clean_key(ui, edit, root?, target_key, names, struct_path)
-    })
+    crate::app::editor::semantic_block_index_target(tag_struct, root, struct_path, target_key)
 }
 
 pub(in crate::app) fn semantic_short_index_target_key(field_name: &str) -> Option<&'static str> {
@@ -2616,131 +2619,6 @@ pub(in crate::app) fn semantic_short_index_target_key(field_name: &str) -> Optio
     }
 }
 
-fn find_ancestor_target_block_by_clean_key(
-    ui: &Ui,
-    edit: &FieldEditContext<'_>,
-    root: TagStruct<'_>,
-    target_key: &str,
-    names: &TagNameIndex,
-    struct_path: &str,
-) -> Option<(Vec<String>, String)> {
-    let mut current = Some(struct_path);
-    while let Some(path) = current {
-        let parent = path.rsplit_once('/').map(|(p, _)| p).unwrap_or("");
-        let ancestor = if parent.is_empty() {
-            root
-        } else {
-            root.descend(parent)?
-        };
-        if let Some(found) = find_target_block_by_clean_key(&ancestor, target_key, names, parent) {
-            return Some(found);
-        }
-        if let Some(found) =
-            find_nested_target_block_by_clean_key(ui, edit, &ancestor, target_key, names, parent, 4)
-        {
-            return Some(found);
-        }
-        current = (!parent.is_empty()).then_some(parent);
-    }
-    None
-}
-
-fn find_nested_target_block_by_clean_key(
-    ui: &Ui,
-    edit: &FieldEditContext<'_>,
-    tag_struct: &TagStruct<'_>,
-    target_key: &str,
-    names: &TagNameIndex,
-    struct_path: &str,
-    depth_left: usize,
-) -> Option<(Vec<String>, String)> {
-    if depth_left == 0 {
-        return None;
-    }
-    for field in tag_struct.fields_all() {
-        let field_path = append_field_path_for(struct_path, &field);
-        if let Some(block) = field.as_block() {
-            if clean_field_key(field.name()) == target_key {
-                let labels = (0..block.len())
-                    .map(|i| block_element_dropdown_label(block.element(i), names, i))
-                    .collect();
-                return Some((labels, field_path));
-            }
-            let count = block.len();
-            if count > 0 {
-                let selected = block_selected_index(ui, edit, &field_path, count);
-                if let Some(element) = block.element(selected) {
-                    let element_path = format!("{field_path}[{selected}]");
-                    if let Some(found) = find_nested_target_block_by_clean_key(
-                        ui,
-                        edit,
-                        &element,
-                        target_key,
-                        names,
-                        &element_path,
-                        depth_left - 1,
-                    ) {
-                        return Some(found);
-                    }
-                }
-            }
-        } else if let Some(nested) = field.as_struct() {
-            if let Some(found) = find_nested_target_block_by_clean_key(
-                ui,
-                edit,
-                &nested,
-                target_key,
-                names,
-                &field_path,
-                depth_left - 1,
-            ) {
-                return Some(found);
-            }
-        }
-    }
-    None
-}
-
-fn find_target_block_by_clean_key(
-    tag_struct: &TagStruct<'_>,
-    target_key: &str,
-    names: &TagNameIndex,
-    struct_path: &str,
-) -> Option<(Vec<String>, String)> {
-    for sibling in tag_struct.fields_all() {
-        if let Some(block) = sibling.as_block() {
-            if clean_field_key(sibling.name()) == target_key {
-                let labels = (0..block.len())
-                    .map(|i| block_element_dropdown_label(block.element(i), names, i))
-                    .collect();
-                return Some((labels, append_field_path_for(struct_path, &sibling)));
-            }
-        }
-    }
-    None
-}
-
-/// Find a block field whose definition name is `target_name` directly within
-/// `tag_struct`, returning `(element labels, full block path)`.
-fn find_target_block(
-    tag_struct: &TagStruct<'_>,
-    target_name: &str,
-    names: &TagNameIndex,
-    struct_path: &str,
-) -> Option<(Vec<String>, String)> {
-    for sibling in tag_struct.fields_all() {
-        if let Some(block) = sibling.as_block() {
-            if block.definition().name() == target_name {
-                let labels = (0..block.len())
-                    .map(|i| block_element_dropdown_label(block.element(i), names, i))
-                    .collect();
-                return Some((labels, append_field_path_for(struct_path, &sibling)));
-            }
-        }
-    }
-    None
-}
-
 /// A block-index field rendered like Foundation: a dropdown of the target
 /// block's elements with a leading `<none>` (value −1), plus a "go to" button
 /// that scrolls to the referenced element.
@@ -2749,16 +2627,31 @@ pub(in crate::app) fn draw_foundation_block_index_row(
     ui: &mut Ui,
     meta: &FieldDisplayMeta,
     current: i64,
-    labels: &[String],
-    target_block_path: &str,
+    target: &BlockIndexTarget,
     depth: usize,
     path: &str,
     edit: &mut FieldEditContext<'_>,
 ) {
+    let target_block_path = target.path.as_str();
     let editable = edit.editable && !meta.read_only;
-    let in_range = current >= 0 && (current as usize) < labels.len();
+    let in_range = current >= 0 && (current as usize) < target.len;
+    // Only the selected element's label is needed to draw a closed combo. The
+    // rest used to be built here too, every frame, for every block-index field
+    // on screen: one recursive walk per element of the target block.
+    let root = edit.root;
+    let default_names = TagNameIndex::default();
+    let names = edit.names.unwrap_or(&default_names);
     let selected_text = if in_range {
-        labels[current as usize].clone()
+        let block = root
+            .and_then(|root| root.field_path(target_block_path))
+            .and_then(|field| field.as_block());
+        block_element_dropdown_label(
+            block
+                .as_ref()
+                .and_then(|block| block.element(current as usize)),
+            names,
+            current as usize,
+        )
     } else {
         "<none>".to_owned()
     };
@@ -2774,7 +2667,7 @@ pub(in crate::app) fn draw_foundation_block_index_row(
                 // Keyed on the option count for the same reason as the
                 // instance selector above: adding a palette entry must not
                 // leave the popup at the size it had before.
-                egui::ComboBox::from_id_salt(("block_index", path, labels.len()))
+                egui::ComboBox::from_id_salt(("block_index", path, target.len))
                     .selected_text(truncate_for_cell(&selected_text, 280.0))
                     .width(300.0),
                 |ui| {
@@ -2788,6 +2681,7 @@ pub(in crate::app) fn draw_foundation_block_index_row(
                     if none_row.clicked() {
                         new_index = Some(-1);
                     }
+                    let labels = block_index_target_labels(root, target, names);
                     for (i, label) in labels.iter().enumerate() {
                         let row = ui.selectable_label(current == i as i64, label);
                         if just_opened && current == i as i64 {
@@ -2800,8 +2694,7 @@ pub(in crate::app) fn draw_foundation_block_index_row(
                 },
             );
             if let Some(delta) = wheel_delta {
-                if let Some(next) =
-                    combo_scroll_next_i64(current, -1, labels.len() as i64 - 1, delta)
+                if let Some(next) = combo_scroll_next_i64(current, -1, target.len as i64 - 1, delta)
                 {
                     new_index = Some(next);
                 }
@@ -2878,9 +2771,9 @@ mod palette_repro_tests {
             .fields_all()
             .find(|field| field.name() == "short block index")
             .unwrap();
-        let (_, target) =
-            block_index_target_options(&root, &index, &TagNameIndex::default(), Some(root), "")
-                .unwrap();
+        let target = block_index_target_options(&root, &index, Some(root), "")
+            .unwrap()
+            .path;
 
         assert!(target.contains('#'), "target should carry an exact ordinal");
         assert!(
@@ -2909,10 +2802,7 @@ mod palette_repro_tests {
         let mut failures = Vec::new();
 
         for (game, rel) in cases {
-            let tag_path = std::path::Path::new("/Users/camden/Halo")
-                .join(game)
-                .join("tags")
-                .join(rel);
+            let tag_path = std::path::Path::new(crate::test_kits::tag_path(game, "")).join(rel);
             if !tag_path.exists() {
                 eprintln!("skip {game}: {} missing", tag_path.display());
                 continue;
@@ -2934,16 +2824,19 @@ mod palette_repro_tests {
                     {
                         for sub in element.fields_all() {
                             if sub.definition().block_index_target().is_some()
-                                && let Some((labels, target)) = block_index_target_options(
+                                && let Some(target) = block_index_target_options(
                                     &element,
                                     &sub,
-                                    &names,
                                     Some(root),
                                     "vehicles[0]",
                                 )
-                                && target.contains("palette")
+                                && target.path.contains("palette")
                             {
-                                return Some(labels);
+                                return Some(block_index_target_labels(
+                                    Some(root),
+                                    &target,
+                                    &names,
+                                ));
                             }
                         }
                     }
@@ -3042,7 +2935,6 @@ mod palette_repro_tests {
     #[test]
     fn adding_to_a_targeted_block_reaches_its_dropdown_at_every_depth() {
         let defs = std::path::Path::new("definitions");
-        let names = crate::format::TagNameIndex::default();
         let cases = [
             (
                 "halo3_mcc",
@@ -3059,10 +2951,7 @@ mod palette_repro_tests {
         let mut checked = 0usize;
 
         for (game, rel, group_bytes) in cases {
-            let tag_path = std::path::Path::new("/Users/camden/Halo")
-                .join(game)
-                .join("tags")
-                .join(rel);
+            let tag_path = std::path::Path::new(crate::test_kits::tag_path(game, "")).join(rel);
             if !tag_path.exists() {
                 eprintln!("skip {game}: {} missing", tag_path.display());
                 continue;
@@ -3098,15 +2987,10 @@ mod palette_repro_tests {
                     };
                     for field in st.fields_all() {
                         if field.definition().block_index_target().is_some()
-                            && let Some((labels, target)) = block_index_target_options(
-                                &st,
-                                &field,
-                                &names,
-                                Some(root),
-                                struct_path,
-                            )
+                            && let Some(target) =
+                                block_index_target_options(&st, &field, Some(root), struct_path)
                         {
-                            return Some((target, labels.len()));
+                            return Some((target.path, target.len));
                         }
                     }
                     None
@@ -3170,10 +3054,7 @@ mod palette_repro_tests {
         let mut failures = Vec::new();
 
         for (game, rel, group_bytes) in cases {
-            let tag_path = std::path::Path::new("/Users/camden/Halo")
-                .join(game)
-                .join("tags")
-                .join(rel);
+            let tag_path = std::path::Path::new(crate::test_kits::tag_path(game, "")).join(rel);
             if !tag_path.exists() {
                 eprintln!("skip {game}: missing");
                 continue;
@@ -3259,7 +3140,7 @@ mod wheel_gesture_tests {
             });
         }
         let mut claimed = false;
-        ctx.run(
+        let _ = ctx.run(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,

@@ -52,9 +52,9 @@ impl Baboon {
         let picker_was_open = self.tag_reference_picker.is_some();
         let def_docs = self.def_docs_for_entry(kit_index, entry);
         let ce_sound = self.ce_sound_binding(kit_index, &key, entry);
-        let bitmap_preview_view = self.bitmap_preview_view;
+        let bitmap_preview_view = self.prefs.bitmap_preview_view;
 
-        let Some(mut doc) = self.kits[kit_index].parsed_tags.remove(&key) else {
+        let Some(doc) = self.kits[kit_index].parsed_tags.remove(&key) else {
             if self.kits[kit_index].loading_tags.contains(&key) {
                 ui.label("Loading tag data...");
             } else {
@@ -120,27 +120,15 @@ impl Baboon {
 
         let kit = &mut self.kits[kit_index];
         let kit_id = kit.id;
-        let bitmap_hover_requests = begin_bitmap_hovers(
-            ui,
-            KitStamp {
-                kit: kit_id,
-                generation: kit.generation,
-            },
-        );
+        let bitmap_hover_requests =
+            begin_bitmap_hovers(ui, Arc::clone(&kit.bitmap_browser.thumbnails));
         let source = kit.source.as_ref();
         let names = &kit.names;
 
-        let mut pending = Vec::new();
-        let mut block_ops = Vec::new();
-        let mut shader_ops = Vec::new();
-        let mut shader_param_ops = Vec::new();
-        let mut h2_shader_param_ops = Vec::new();
-        let mut function_data_ops = Vec::new();
-        let mut model_variant_ops = Vec::new();
+        let mut ops = DeferredOps::default();
         let mut color_request = None;
         let mut function_request = None;
         let mut block_clip_request = None;
-        let mut bitmap_reimport = None;
         let mut tsv_paste_request = None;
         let mut ce_sound_ref_request = None;
 
@@ -149,7 +137,7 @@ impl Baboon {
         // what makes it stick.
         let expand_all = kit.pending_expand.remove(&key);
         let sound_volume = self.audio.volume();
-        let expert_mode = self.expert_mode;
+        let expert_mode = self.prefs.expert_mode;
         // Borrow the kit's source as a plain field rather than through
         // `source()`: a method borrows all of `self`, and the context below
         // needs `&mut` on a dozen sibling fields. Going through `self.kits[i]`
@@ -181,10 +169,10 @@ impl Baboon {
             tag_reference_picker: &mut self.tag_reference_picker,
             status: Some(&mut self.status),
             editable: !kit_read_only && is_editable_tag(entry, &doc.tag),
-            show_block_sizes: self.show_block_sizes,
+            show_block_sizes: self.prefs.show_block_sizes,
             buffers: &mut kit.edit_buffers,
-            pending: &mut pending,
-            block_ops: &mut block_ops,
+            pending: &mut ops.pending,
+            block_ops: &mut ops.block_ops,
             block_confirm: &mut self.block_confirm,
             open_request: &mut self.pending_open,
             sound_play_request: &mut self.audio.pending,
@@ -196,12 +184,10 @@ impl Baboon {
             ce_sound_ref_request: &mut ce_sound_ref_request,
             ce_paks_root,
             tool_import: &mut self.pending_tool_import,
-            bitmap_reimport: &mut bitmap_reimport,
-            shader_ops: &mut shader_ops,
-            shader_param_ops: &mut shader_param_ops,
-            h2_shader_param_ops: &mut h2_shader_param_ops,
-            function_data_ops: &mut function_data_ops,
-            model_variant_ops: &mut model_variant_ops,
+            shader_ops: &mut ops.shader_ops,
+            shader_param_ops: &mut ops.shader_param_ops,
+            h2_shader_param_ops: &mut ops.h2_shader_param_ops,
+            model_variant_ops: &mut ops.model_variant_ops,
             color_request: &mut color_request,
             function_request: &mut function_request,
             docs: def_docs.as_deref(),
@@ -219,7 +205,7 @@ impl Baboon {
                 .as_ref()
                 .filter(|nav| nav.kit == kit_id && nav.tag_key == key),
             expand_all,
-            nested_default: self.nested_default,
+            nested_default: self.prefs.nested_default,
         };
 
         if is_bitmap_tag(entry) {
@@ -233,10 +219,10 @@ impl Baboon {
                 names,
                 &mut self.color_popup,
                 preview,
-                self.expert_mode,
+                self.prefs.expert_mode,
                 &mut edit_context,
             );
-            self.bitmap_preview_view = preview.view_settings();
+            self.prefs.bitmap_preview_view = preview.view_settings();
         } else {
             let mut local_model_preview;
             let model_preview = if is_previewable_geometry_group(entry.group_tag, names) {
@@ -245,20 +231,23 @@ impl Baboon {
                 local_model_preview = ModelPreviewState::default();
                 &mut local_model_preview
             };
+            let document_revision = (doc.id, doc.dirty.revision(), kit.generation);
             draw_tag(
                 ui,
                 &doc.tag,
+                document_revision,
                 entry,
                 names,
                 source.map(|source| &source.source),
                 source.and_then(|source| source.game.as_deref()),
                 &mut kit.rmdf_cache,
                 &mut kit.rmop_cache,
+                &mut kit.h2_templates,
                 &mut self.color_popup,
                 &mut self.function_popup,
                 model_preview,
-                &mut self.model_preview_size,
-                self.expert_mode,
+                &mut self.prefs.model_preview_size,
+                self.prefs.expert_mode,
                 &mut edit_context,
             );
         }
@@ -270,75 +259,13 @@ impl Baboon {
             request
         });
 
-        // Snapshot for undo before a mutating batch. Coalesces continuous edits
-        // into one entry; closes the window on frames with no edits.
-        // Every deferred op this pane collected, including the kinds the undo
-        // window below deliberately ignores. Used only to decide whether the
-        // frame needs redrawing.
-        if kit_read_only {
-            pending.clear();
-            block_ops.clear();
-            shader_ops.clear();
-            shader_param_ops.clear();
-            h2_shader_param_ops.clear();
-            function_data_ops.clear();
-            model_variant_ops.clear();
-        }
-        let mutated = !pending.is_empty()
-            || !block_ops.is_empty()
-            || !shader_ops.is_empty()
-            || !shader_param_ops.is_empty()
-            || !h2_shader_param_ops.is_empty()
-            || !function_data_ops.is_empty()
-            || !model_variant_ops.is_empty();
-        if !pending.is_empty()
-            || !block_ops.is_empty()
-            || !shader_ops.is_empty()
-            || !shader_param_ops.is_empty()
-            || !model_variant_ops.is_empty()
-        {
-            doc.journal.begin_edit(&doc.tag, "Edit");
-        } else {
-            doc.journal.end_edit_window();
-        }
-        // Per-edit outcomes, from upstream: a draft whose value applied cleanly
-        // is marked clean, while one the parser rejected keeps the text the
-        // user typed instead of snapping back to the old value.
-        let applied = apply_pending_edits(&mut doc.tag, pending, &mut doc.dirty);
-        kit.edit_buffers
-            .accept_successful_edits(&key, &applied.outcomes);
-        if let Some(status) = applied.status {
-            self.status = status;
-        }
-        if let Some(status) = apply_block_ops(&mut doc.tag, block_ops, &mut doc.dirty) {
-            self.status = status;
-        }
-        if let Some(status) = apply_shader_ops(&mut doc.tag, shader_ops, &mut doc.dirty) {
-            self.status = status;
-        }
-        if let Some(status) = apply_shader_param_ops(&mut doc.tag, shader_param_ops, &mut doc.dirty)
-        {
-            self.status = status;
-        }
-        if let Some(status) =
-            apply_h2_shader_param_ops(&mut doc.tag, h2_shader_param_ops, &mut doc.dirty)
-        {
-            self.status = status;
-        }
-        if let Some(status) =
-            apply_function_data_ops(&mut doc.tag, function_data_ops, &mut doc.dirty)
-        {
-            self.status = status;
-        }
-        if let Some(status) =
-            apply_model_variant_ops(&mut doc.tag, model_variant_ops, &mut doc.dirty)
-        {
-            self.status = status;
-            if let Some(preview) = kit.model_previews.get_mut(&key) {
-                preview.loaded_key = None;
-                preview.data = None;
-            }
-        }
+        // Every deferred op this pane collected, applied once the document is
+        // back in the kit. Applying them opens the undo window (or closes it
+        // on a frame with none), and `mutated` decides whether the frame
+        // needs redrawing.
+        let mutated = !kit_read_only && !ops.is_empty();
+        kit.parsed_tags.insert(key.clone(), doc);
+        self.apply_doc_ops(kit_index, &key, "Edit", ops, UndoStep::Coalesce);
         // A color swatch was clicked: open the shared picker. Each popup
         // records the kit it was opened from, so confirming it later edits
         // this document rather than whichever kit is active by then.
@@ -389,7 +316,6 @@ impl Baboon {
             // the filter produces the normal one-shot restore-defaults pass.
             self.find.filter_results = false;
         }
-        kit.parsed_tags.insert(key.clone(), doc);
         self.queue_bitmap_hover_thumbnails(kit_index, &bitmap_hover_requests, ctx);
         // These ops are applied *after* the pane has been drawn, so the frame
         // on screen still shows the tag as it was before the edit. egui only
@@ -405,14 +331,6 @@ impl Baboon {
             ctx.data_mut(|data| data.insert_temp(jump_target_id(), block_path));
         }
 
-        if let Some(key) = bitmap_reimport {
-            // Resolves its source and entry against the active kit, and runs an
-            // external tool that rewrites the bitmap on disk. This pane's kit is
-            // the one being asked, so make it active first rather than trusting
-            // press-activation to have already landed this frame.
-            self.active = kit_index;
-            self.begin_reimport_bitmap(key, ctx.clone());
-        }
         // Model preview work starts only after the pane has drawn its shell,
         // so switching tabs can reach the screen before a complex geometry
         // parse begins. Follow-up texture/overlay/animation workers use the
@@ -455,7 +373,7 @@ impl Baboon {
         let inline_left_width = pane_header_inline_left_width(available, action_width);
         let wide = inline_left_width.is_some();
         let left_width = inline_left_width.unwrap_or(available);
-        let title_height = if self.expert_mode {
+        let title_height = if self.prefs.expert_mode {
             48.0
         } else {
             PANE_HEADER_ICON_SIZE
@@ -493,7 +411,7 @@ impl Baboon {
                                 ui.label(
                                     RichText::new(title).size(15.0).strong().color(text_dark()),
                                 );
-                                if self.expert_mode {
+                                if self.prefs.expert_mode {
                                     ui.label(
                                         RichText::new(group_label(
                                             &self.kits[kit_index].names,

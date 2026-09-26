@@ -502,12 +502,13 @@ dependencies = [
 [[package]]
 name = "blam-tags"
 version = "0.1.0"
-source = "git+https://github.com/camden-smallwood/blam-tags?rev=47bc0ec#47bc0ec7cbc4fbbb6eb44807576dc38998ca8958"
+source = "git+https://github.com/camden-smallwood/blam-tags?rev=44027bc#44027bc3670b5c149046da7c2bb5cd805f2ae05a"
 dependencies = [
  "anyhow",
  "bcdec_rs",
  "blake3",
  "byteorder",
+ "crc32fast",
  "flate2",
  "half",
  "lewton",
@@ -1366,6 +1367,7 @@ checksum = "843fba2746e448b37e26a819579957415c8cef339bf08564fe8b7ddbd959573c"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
+ "zlib-rs",
 ]
 
 [[package]]
@@ -5261,6 +5263,12 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "zlib-rs"
+version = "0.6.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b268e58e7c693d7c271f93ffc4ba3b380412554231c85bf61ca7af91042a4112"
 
 [[package]]
 name = "zmij"

@@ -1,7 +1,8 @@
 //! The Model Library: every render model in a kit as a searchable thumbnail grid.
-//! It owns the grid's state, its CPU thumbnail rasterizer, and its presentation;
-//! geometry decoding, tag reading, the shared grid/cache plumbing
-//! (`bitmap_browser`), and the tab layout belong elsewhere.
+//! It owns what is particular to models — which tags are listed, the CPU
+//! thumbnail rasterizer, and opening the `.model` that owns a render model. The
+//! grid itself is `thumbnail_library`'s; geometry decoding, tag reading, and
+//! the tab layout belong elsewhere.
 
 use super::*;
 
@@ -18,57 +19,6 @@ pub(in crate::app) const MODEL_LIBRARY_TITLE: &str = "Model Library";
 /// double-clicked open looks like what was clicked.
 const THUMBNAIL_YAW: f32 = -0.45;
 const THUMBNAIL_PITCH: f32 = 0.25;
-
-/// One kit's Model Library.
-#[derive(Default)]
-pub(in crate::app) struct ModelBrowserState {
-    pub(in crate::app) filter: String,
-    pub(in crate::app) cell_size: f32,
-    /// Every render model in the kit, snapshotted rather than re-scanned per
-    /// frame.
-    entries: Vec<TagEntry>,
-    /// The kit generation `entries` was taken at, so a reload refreshes it.
-    entries_for: Option<u64>,
-    /// Indices into `entries` matching `filter`.
-    matches: Vec<usize>,
-    /// The query `matches` was computed for.
-    matched_for: Option<String>,
-    thumbnails: ThumbnailCache,
-    /// Keys with a rasterize job running, so a cell is not queued twice while
-    /// its thread works.
-    pending: HashSet<String>,
-    /// Set once the "scan the whole kit" request has gone out, so the browser
-    /// does not ask again every frame it is drawn.
-    requested_scan: bool,
-    /// A double-clicked cell waiting to open the `.model` that owns its render
-    /// model (or, when no such tag exists, the render model itself).
-    ///
-    /// Parked for the same reason as the Bitmap Library's: the grid draws
-    /// inside `tree.ui`, where the kit's `tag_tree` has been moved out, and
-    /// opening there writes the tab into a placeholder that is discarded.
-    /// `draw_tag_tiles` takes this once the tree is back.
-    pub(in crate::app) pending_open: Option<String>,
-    /// A cell whose right-click menu asked for the render model tag itself,
-    /// with no owner resolution. Parked likewise.
-    pub(in crate::app) pending_open_raw: Option<String>,
-}
-
-impl ModelBrowserState {
-    fn cell_size(&self) -> f32 {
-        if self.cell_size <= 0.0 {
-            DEFAULT_CELL
-        } else {
-            self.cell_size.clamp(MIN_CELL, MAX_CELL)
-        }
-    }
-}
-
-/// What a grid cell asked for this frame. Both are parked rather than run on
-/// the spot — see the fields they land in on [`ModelBrowserState`].
-enum CellAction {
-    Open(String),
-    OpenRaw(String),
-}
 
 /// The kit entry for the `.model` (hlmt) that owns this render geometry, found
 /// by the path convention `owning_model_skeleton` documents in reverse:
@@ -292,445 +242,127 @@ impl Baboon {
         };
         owning_model_key(entries, clicked).unwrap_or_else(|| key.to_owned())
     }
+}
 
-    /// Draw one kit's Model Library pane.
-    pub(super) fn draw_model_library(
-        &mut self,
-        ui: &mut Ui,
-        ctx: &egui::Context,
-        kit_index: usize,
-    ) {
-        self.refresh_model_library(kit_index, ctx);
+/// The Model Library's [`ThumbnailSource`].
+pub(in crate::app) struct Models;
 
-        let cell = self.kits[kit_index].model_browser.cell_size();
-        let total = self.kits[kit_index].model_browser.matches.len();
-        let all = self.kits[kit_index].model_browser.entries.len();
-        let scanning = self.kits[kit_index].scanning_entries;
+impl ThumbnailSource for Models {
+    const ID_SALT: &'static str = "model_library";
+    const PLURAL: &'static str = "models";
+    const SEARCH_HINT: &'static str = "warthog | ghost, ^objects, _lod$";
+    const INDEXING: &'static str = "Indexing the kit — models will appear as they are found.";
+    const NONE_IN_KIT: &'static str = "No render model tags in this workspace.";
+    const SINGULAR: &'static str = "model";
+    const TEXTURE_PREFIX: &'static str = "model_thumb";
+    /// The render model tag itself, with no owner resolution.
+    const MENU_ITEM: &'static str = "Open render model tag";
+    const CRASHED: &'static str = "render model crashed while parsing";
 
-        self.draw_model_library_toolbar(ui, kit_index, total, all, scanning);
-        ui.separator();
-
-        if all == 0 {
-            ui.add_space(12.0);
-            ui.label(
-                RichText::new(if scanning {
-                    "Indexing the kit — models will appear as they are found."
-                } else {
-                    "No render model tags in this workspace."
-                })
-                .color(subtle_dark()),
-            );
-            return;
-        }
-        if total == 0 {
-            ui.add_space(12.0);
-            ui.label(
-                RichText::new(format!(
-                    "No model matches that search. {all} in this workspace."
-                ))
-                .color(subtle_dark()),
-            );
-            return;
-        }
-
-        self.draw_model_grid(ui, ctx, kit_index, cell, total);
+    fn library(kit: &Kit) -> &ThumbnailLibrary<Self> {
+        &kit.model_browser
     }
 
-    fn draw_model_library_toolbar(
-        &mut self,
-        ui: &mut Ui,
-        kit_index: usize,
-        shown: usize,
-        total: usize,
-        scanning: bool,
-    ) {
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Search").color(subtle_dark()));
-            let browser = &mut self.kits[kit_index].model_browser;
-            ui.add(
-                egui::TextEdit::singleline(&mut browser.filter)
-                    .hint_text(placeholder_text("warthog | ghost, ^objects, _lod$"))
-                    .desired_width(240.0),
-            )
-            .on_hover_text(
-                "Space is AND, | is OR, ^foo and foo$ anchor to the start and end of the name — \
-                 the same search the tag browser uses.",
-            );
-            if ui.button("Clear").clicked() {
-                browser.filter.clear();
-            }
-
-            ui.separator();
-            ui.label(RichText::new("Size").color(subtle_dark()));
-            let mut cell = browser.cell_size();
-            if ui
-                .add(
-                    egui::Slider::new(&mut cell, MIN_CELL..=MAX_CELL)
-                        .show_value(false)
-                        .clamping(egui::SliderClamping::Always),
-                )
-                .changed()
-            {
-                browser.cell_size = cell;
-            }
-            if ui.button("Reset").clicked() {
-                browser.cell_size = DEFAULT_CELL;
-            }
-
-            ui.separator();
-            let count = if shown == total {
-                format!("{total} models")
-            } else {
-                format!("{shown} of {total} models")
-            };
-            ui.label(RichText::new(count).color(subtle_dark()));
-            if scanning {
-                ui.spinner();
-                ui.label(RichText::new("indexing…").color(subtle_dark()));
-            }
-        });
+    fn library_mut(kit: &mut Kit) -> &mut ThumbnailLibrary<Self> {
+        &mut kit.model_browser
     }
 
-    fn draw_model_grid(
-        &mut self,
-        ui: &mut Ui,
-        ctx: &egui::Context,
-        kit_index: usize,
-        cell: f32,
-        total: usize,
-    ) {
-        let row_height = cell + CELL_CAPTION + CELL_GAP;
-        // Reserve the scrollbar before dividing — see `draw_bitmap_grid`, whose
-        // arithmetic (and its two off-by-a-gap traps) this shares verbatim.
-        let usable = (ui.available_width() - ui.spacing().scroll.allocated_width()).max(cell);
-        let columns = grid_columns(usable, cell);
-        let rows = total.div_ceil(columns);
-
-        let mut action: Option<CellAction> = None;
-        let mut wanted: Vec<String> = Vec::new();
-        egui::ScrollArea::vertical()
-            .id_salt(("model_library", kit_index))
-            .auto_shrink([false, false])
-            .show_rows(ui, row_height, rows, |ui, row_range| {
-                // The gap is the only spacing in play; egui's default
-                // `item_spacing` on top of it would drift the grid out of step
-                // with its own scrollbar.
-                ui.spacing_mut().item_spacing = Vec2::new(CELL_GAP, 0.0);
-                for row in row_range {
-                    ui.horizontal(|ui| {
-                        for column in 0..columns {
-                            let Some(index) = row
-                                .checked_mul(columns)
-                                .and_then(|start| start.checked_add(column))
-                                .filter(|index| *index < total)
-                            else {
-                                break;
-                            };
-                            if let Some(requested) =
-                                self.draw_model_cell(ui, kit_index, index, cell, &mut wanted)
-                            {
-                                action = Some(requested);
-                            }
-                        }
-                    });
-                    ui.add_space(CELL_GAP);
-                }
-            });
-
-        self.queue_model_thumbnails(kit_index, wanted, cell, ctx);
-        // Parked rather than opened here, for the reason on the state fields.
-        match action {
-            Some(CellAction::Open(key)) => {
-                self.kits[kit_index].model_browser.pending_open = Some(key)
-            }
-            Some(CellAction::OpenRaw(key)) => {
-                self.kits[kit_index].model_browser.pending_open_raw = Some(key)
-            }
-            None => {}
-        }
+    fn lists(entry: &TagEntry) -> bool {
+        is_render_model_tag(entry)
     }
 
-    /// One grid cell, and whatever the user asked it for.
-    fn draw_model_cell(
-        &mut self,
-        ui: &mut Ui,
-        kit_index: usize,
-        index: usize,
-        cell: f32,
-        wanted: &mut Vec<String>,
-    ) -> Option<CellAction> {
-        let browser = &mut self.kits[kit_index].model_browser;
-        let entry_index = *browser.matches.get(index)?;
-        let entry = browser.entries.get(entry_index)?;
-        let (key, display_path) = (entry.key.clone(), entry.display_path.clone());
-
-        let texture = match browser.thumbnails.get(&key) {
-            Some(texture) => texture,
-            None => {
-                if !browser.pending.contains(&key) {
-                    wanted.push(key.clone());
-                }
-                None
-            }
-        };
-
-        let (group_tag, reference_input, rel_path) = (
-            entry.group_tag,
-            entry_reference_input(entry),
-            entry_rel_path(entry),
-        );
-        let is_gbxmodel = group_tag == u32::from_be_bytes(*b"mod2");
-
-        let size = Vec2::new(cell, cell + CELL_CAPTION);
-        // `click_and_drag`, so a cell is both a target to open and a source to
-        // drag: the payload is the browser row's own `DraggedTagRef`, which
-        // reference cells already accept.
-        let (rect, response) = ui.allocate_exact_size(size, Sense::click_and_drag());
-        response.dnd_set_drag_payload(DraggedTagRef {
-            group_tag,
-            input: reference_input,
-            rel_path,
-            file_path: entry_loose_file(entry),
-        });
-        let image_rect = egui::Rect::from_min_size(rect.min, Vec2::splat(cell));
-        ui.painter()
-            .rect_filled(image_rect, 0.0, foundation_input());
-        if response.hovered() {
-            ui.painter()
-                .rect_stroke(image_rect, 0.0, Stroke::new(1.0, foundation_blue()));
+    fn caption(entry: &TagEntry) -> &'static str {
+        if is_gbxmodel(entry) {
+            "Gbxmodel"
         } else {
-            ui.painter()
-                .rect_stroke(image_rect, 0.0, Stroke::new(1.0, foundation_input_edge()));
-        }
-
-        match texture {
-            Some(texture) => {
-                let drawn = fit_within(texture.size_vec2(), cell - 2.0);
-                let at = egui::Rect::from_center_size(image_rect.center(), drawn);
-                egui::Image::new(&texture).paint_at(ui, at);
-            }
-            None => {
-                crate::app::ui::paint_loading_rings(ui, image_rect);
-            }
-        }
-
-        let name = tag_leaf_name(&display_path);
-        ui.painter().text(
-            egui::Pos2::new(rect.center().x, image_rect.bottom() + 8.0),
-            Align2::CENTER_CENTER,
-            truncate_for_cell(&name, cell),
-            FontId::proportional(11.5),
-            text_dark(),
-        );
-        ui.painter().text(
-            egui::Pos2::new(rect.center().x, image_rect.bottom() + 21.0),
-            Align2::CENTER_CENTER,
-            if is_gbxmodel {
-                "Gbxmodel"
-            } else {
-                "Render Model"
-            },
-            FontId::proportional(10.0),
-            subtle_dark(),
-        );
-
-        // The name follows the cursor while dragging, as the browser rows do.
-        if response.dragged()
-            && let Some(pointer) = ui.ctx().pointer_interact_pos()
-        {
-            egui::Area::new(ui.make_persistent_id(("model_library_drag_preview", &key)))
-                .order(egui::Order::Tooltip)
-                // Never in the hit-test: a fast drag can put the pointer
-                // inside the stale preview, which would block the drop target.
-                .interactable(false)
-                .fixed_pos(pointer + Vec2::new(12.0, 12.0))
-                .show(ui.ctx(), |ui| {
-                    ui.label(RichText::new(&name).color(text_dark()));
-                });
-        }
-
-        // Double-click, not click, for the same reason as the Bitmap Library.
-        let mut action = response
-            .double_clicked()
-            .then(|| CellAction::Open(key.clone()));
-
-        response.context_menu(|ui| {
-            style_tag_context_menu(ui);
-            if context_menu_button(ui, "Open render model tag").clicked() {
-                action = Some(CellAction::OpenRaw(key.clone()));
-                ui.close_menu();
-            }
-        });
-
-        if !response.context_menu_opened() {
-            let opens = if is_gbxmodel {
-                // Halo CE has no .model wrapper, so the double-click opens the
-                // gbxmodel itself.
-                "Double-click to open"
-            } else {
-                "Double-click to open the model that owns it"
-            };
-            // Not `on_hover_text`: an egui tooltip would block the drag this
-            // cell offers (`hover_tooltip_beside_pointer`).
-            hover_tooltip_beside_pointer(
-                ui,
-                &response,
-                &format!(
-                    "{display_path}\n\n{opens}, drag onto a model reference, \
-                     or right-click to open the render model tag itself"
-                ),
-            );
-        }
-        action
-    }
-
-    /// Snapshot the kit's render models and recompute the filter, both only
-    /// when something they depend on has actually changed.
-    fn refresh_model_library(&mut self, kit_index: usize, ctx: &egui::Context) {
-        let generation = self.kits[kit_index].generation;
-        let stale = self.kits[kit_index].model_browser.entries_for != Some(generation);
-        if stale {
-            let entries: Vec<TagEntry> = self.kits[kit_index]
-                .source
-                .as_ref()
-                .map(|source| source.full_entry_set())
-                .unwrap_or_default()
-                .iter()
-                .filter(|entry| is_render_model_tag(entry))
-                .cloned()
-                .collect();
-            let browser = &mut self.kits[kit_index].model_browser;
-            browser.entries = entries;
-            browser.entries_for = Some(generation);
-            browser.matched_for = None;
-            browser.thumbnails.clear();
-            browser.requested_scan = false;
-        }
-
-        // A lazy loose kit only holds the folders the browser has expanded
-        // until the full scan runs — ask for it once, as the Bitmap Library
-        // does.
-        let needs_scan = self.kits[kit_index]
-            .source
-            .as_ref()
-            .is_some_and(|source| source.all_entries.is_empty())
-            && !self.kits[kit_index].scanning_entries
-            && !self.kits[kit_index].model_browser.requested_scan;
-        if needs_scan {
-            self.kits[kit_index].model_browser.requested_scan = true;
-            self.begin_scan_all_entries(ctx.clone());
-        }
-
-        let browser = &mut self.kits[kit_index].model_browser;
-        if browser.matched_for.as_deref() != Some(browser.filter.as_str()) {
-            let filter = browser.filter.trim().to_owned();
-            browser.matches = browser
-                .entries
-                .iter()
-                .enumerate()
-                .filter(|(_, entry)| filter.is_empty() || entry_matches(entry, &filter))
-                .map(|(index, _)| index)
-                .collect();
-            browser.matched_for = Some(browser.filter.clone());
+            "Render Model"
         }
     }
 
-    /// Start rasterize jobs for the visible cells that have none, up to the
-    /// in-flight bound.
-    fn queue_model_thumbnails(
-        &mut self,
-        kit_index: usize,
-        wanted: Vec<String>,
-        cell: f32,
-        ctx: &egui::Context,
-    ) {
-        if wanted.is_empty() {
-            return;
-        }
-        let Some(source) = self.kits[kit_index]
-            .source
-            .as_ref()
-            .map(|source| source.source.clone())
-        else {
-            return;
-        };
-        let stamp = KitStamp {
-            kit: self.kits[kit_index].id,
-            generation: self.kits[kit_index].generation,
-        };
-        // Twice the cell's point size, for the slider and high-DPI displays.
-        let max_edge = ((cell * 2.0).round() as u32).max(MIN_CELL as u32);
-
-        for key in wanted {
-            if self.kits[kit_index].model_browser.pending.len() >= MAX_DECODES_IN_FLIGHT {
-                break;
-            }
-            if self.kits[kit_index].model_browser.pending.contains(&key)
-                || self.kits[kit_index].model_browser.thumbnails.contains(&key)
-            {
-                continue;
-            }
-            let Some(entry) = self.kits[kit_index]
-                .model_browser
-                .entries
-                .iter()
-                .find(|entry| entry.key == key)
-                .cloned()
-            else {
-                continue;
-            };
-            self.kits[kit_index]
-                .model_browser
-                .pending
-                .insert(key.clone());
-
-            let (tx, ctx, source) = (self.tx.clone(), ctx.clone(), source.clone());
-            thread::spawn(move || {
-                // `catch_unwind` because some tags panic the geometry parser:
-                // a panicking thread would never send its message, `pending`
-                // would never clear, and one of the four decode slots would be
-                // lost for the kit's lifetime.
-                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    crate::source::read_entry(&source, &entry)
-                        .map_err(|error| error.to_string())
-                        .and_then(|tag| build_render_preview(&tag))
-                        .and_then(|preview| rasterize_model_thumbnail(&preview, max_edge))
-                }))
-                .unwrap_or_else(|_| Err("render model crashed while parsing".to_owned()));
-                let _ = tx.send(WorkerMessage::ModelThumbnailRendered { stamp, key, result });
-                ctx.request_repaint();
-            });
+    fn hover_hint(entry: &TagEntry) -> &'static str {
+        if is_gbxmodel(entry) {
+            // Halo CE has no .model wrapper, so the double-click opens the
+            // gbxmodel itself.
+            "Double-click to open, drag onto a model reference, \
+             or right-click to open the render model tag itself"
+        } else {
+            "Double-click to open the model that owns it, drag onto a model reference, \
+             or right-click to open the render model tag itself"
         }
     }
 
-    pub(super) fn handle_model_thumbnail_rendered(
-        &mut self,
+    fn render(
+        source: &TagSource,
+        entry: &TagEntry,
+        max_edge: u32,
+    ) -> Result<ThumbnailImage, String> {
+        crate::source::read_entry(source, entry)
+            .map_err(|error| error.to_string())
+            .and_then(|tag| build_render_preview(&tag))
+            .and_then(|preview| rasterize_model_thumbnail(&preview, max_edge))
+    }
+
+    fn message(
         stamp: KitStamp,
         key: String,
         result: Result<ThumbnailImage, String>,
-        ctx: &egui::Context,
-    ) -> bool {
-        let Some(kit_index) = self.resolve_stamp(stamp) else {
-            // The kit closed or was reloaded while this rendered.
-            return true;
-        };
-        let browser = &mut self.kits[kit_index].model_browser;
-        browser.pending.remove(&key);
-        // A failure is cached as `None` rather than dropped, so an unparseable
-        // model is not re-rasterized every frame it stays on screen.
-        let texture = match result {
-            Ok(image) => Some(ctx.load_texture(
-                format!("model_thumb:{key}"),
-                egui::ColorImage::from_rgba_unmultiplied([image.width, image.height], &image.rgba),
-                egui::TextureOptions::LINEAR,
-            )),
-            Err(_) => None,
-        };
-        browser.thumbnails.insert(key, texture);
-        false
+    ) -> WorkerMessage {
+        WorkerMessage::ModelThumbnailRendered { stamp, key, result }
     }
+}
+
+fn is_gbxmodel(entry: &TagEntry) -> bool {
+    entry.group_tag == u32::from_be_bytes(*b"mod2")
 }
 
 #[cfg(test)]
 #[path = "tests/model_browser.rs"]
 mod tests;
+
+#[cfg(test)]
+mod library_scan_tests {
+    use super::*;
+
+    /// A library asks for its own kit's scan, not the focused kit's.
+    #[test]
+    fn a_library_scans_its_own_kit_not_the_focused_one() {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-library-scan-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&root).unwrap();
+        let mut app = Baboon::for_test();
+        let second = KitId(app.kits[0].id.0 + 1);
+        app.kits.push(Kit::empty(second, TagNameIndex::default()));
+        app.active = 1;
+        app.install_loaded_source(LoadedSourceData {
+            label: "library kit".to_owned(),
+            source: TagSource::LooseFolder {
+                root: root.clone(),
+                game: None,
+                definitions_root: PathBuf::new(),
+            },
+            names: TagNameIndex::default(),
+            game: None,
+            entries: Vec::new(),
+            tree: TagTree::default(),
+            group_tree: TagTree::default(),
+            all_entries: Vec::new(),
+            reverse_dependencies: None,
+            initial_tag: None,
+            key_hints: Default::default(),
+            complete_scan: false,
+        });
+        app.active = 0;
+
+        app.refresh_thumbnail_library::<Models>(1, &egui::Context::default());
+
+        std::fs::remove_dir_all(&root).unwrap();
+        assert!(app.kits[1].scanning_entries, "the library's kit is scanned");
+        assert!(!app.kits[0].scanning_entries, "the focused kit is not");
+    }
+}

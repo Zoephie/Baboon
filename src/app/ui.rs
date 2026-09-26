@@ -7,6 +7,7 @@ use super::*;
 mod blam;
 mod browser_panel;
 mod dialogs;
+pub(in crate::app) use dialogs::DiffNode;
 mod find;
 mod first_run;
 mod git_review;
@@ -84,7 +85,7 @@ fn pane_header_input_stroke(ui: &Ui, hovered: bool, focused: bool) -> Stroke {
     } else if hovered {
         ui.visuals().widgets.hovered.bg_stroke
     } else {
-        Stroke::new(1.0, foundation_input_edge())
+        Stroke::new(1.0_f32, foundation_input_edge())
     }
 }
 
@@ -564,7 +565,8 @@ fn draw_game_banner_header(
     let texture = app.workspace_banner_texture(ui.ctx(), game, profile_id);
     let title = profile_id
         .and_then(|id| {
-            app.custom_editing_kit_profiles
+            app.prefs
+                .custom_editing_kit_profiles
                 .iter()
                 .find(|profile| profile.id == id)
                 .map(|profile| profile.name.clone())
@@ -576,7 +578,7 @@ fn draw_game_banner_header(
                 game_platform_label(game)
             )
         });
-    let read_only = app.custom_editing_kit_profiles.iter().any(|profile| {
+    let read_only = app.prefs.custom_editing_kit_profiles.iter().any(|profile| {
         profile.read_only
             && profile.game != "haloce_evolved"
             && (profile_id == Some(profile.id.as_str())
@@ -734,6 +736,35 @@ fn explorer_entry_row(ui: &mut Ui, entry: &TagEntry) -> bool {
     .clicked()
 }
 
+/// `probe`'s answer, re-asked at most once a second.
+///
+/// For file-system questions the UI asks every frame — is a tool there, does
+/// an output exist. Each is a stat, and on a slow or network drive a stat per
+/// frame is a stall per frame. A file created or deleted outside Baboon shows
+/// up within the second. Keyed by `key` in egui's memory.
+pub(in crate::app) fn recheck_cached<T: Clone + Send + Sync + 'static>(
+    ctx: &egui::Context,
+    key: impl std::hash::Hash,
+    probe: impl FnOnce() -> T,
+) -> T {
+    const RECHECK_SECONDS: f64 = 1.0;
+    let key = egui::Id::new(("recheck_cached", key));
+    let now = ctx.input(|input| input.time);
+    if let Some((value, checked_at)) = ctx.data(|data| data.get_temp::<(T, f64)>(key))
+        && (0.0..RECHECK_SECONDS).contains(&(now - checked_at))
+    {
+        return value;
+    }
+    let value = probe();
+    ctx.data_mut(|data| data.insert_temp(key, (value.clone(), now)));
+    value
+}
+
+/// Whether `path` is a file, re-checked at most once a second.
+pub(in crate::app) fn is_file_cached(ctx: &egui::Context, path: &std::path::Path) -> bool {
+    recheck_cached(ctx, ("is_file", path), || path.is_file())
+}
+
 /// Blend `base` toward `accent` by `t` (0..1). Used for the unsaved-tab tint.
 fn tint_toward(base: Color32, accent: Color32, t: f32) -> Color32 {
     let lerp = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * t).round() as u8;
@@ -811,7 +842,7 @@ impl Baboon {
 
             let tag_test_ready = self
                 .kit_tool_path(self.tag_test_executable())
-                .is_some_and(|path| path.is_file());
+                .is_some_and(|path| is_file_cached(ui.ctx(), &path));
             if launcher_button(ui, self.tag_test_icon.as_ref(), "T", tag_test_ready)
                 .on_hover_text("Launch tag_test without an auto-start scenario")
                 .clicked()
@@ -821,7 +852,7 @@ impl Baboon {
 
             let sapien_ready = self
                 .kit_tool_path("sapien.exe")
-                .is_some_and(|path| path.is_file());
+                .is_some_and(|path| is_file_cached(ui.ctx(), &path));
             if launcher_button(ui, self.sapien_icon.as_ref(), "S", sapien_ready)
                 .on_hover_text("Launch Sapien without an auto-start scenario")
                 .clicked()
@@ -953,6 +984,12 @@ impl Baboon {
             if let Some(keyword) = remove {
                 self.kits[kit_index].keywords.remove(tag_key, &keyword);
             }
+            // The draft is this pane's own. It used to be one field on the app,
+            // so text typed into one pane's box showed in every other pane.
+            let draft_id = ui.make_persistent_id(("keyword_input", tag_key));
+            let mut draft = ui
+                .data_mut(|data| data.get_temp::<String>(draft_id))
+                .unwrap_or_default();
             let keyword_field = Frame::none()
                 .fill(foundation_input())
                 .rounding(egui::Rounding::same(BUTTON_HEIGHT / 2.0))
@@ -963,7 +1000,7 @@ impl Baboon {
                     ui.set_height(20.0);
                     ui.horizontal(|ui| {
                         let resp = ui.add(
-                            egui::TextEdit::singleline(&mut self.keyword_input)
+                            egui::TextEdit::singleline(&mut draft)
                                 .hint_text(placeholder_text("add keyword"))
                                 .desired_width(120.0)
                                 .frame(false),
@@ -999,12 +1036,11 @@ impl Baboon {
                 ),
             );
             let submitted = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            if (add_clicked || submitted) && !self.keyword_input.trim().is_empty() {
-                self.kits[kit_index]
-                    .keywords
-                    .add(tag_key, &self.keyword_input);
-                self.keyword_input.clear();
+            if (add_clicked || submitted) && !draft.trim().is_empty() {
+                self.kits[kit_index].keywords.add(tag_key, &draft);
+                draft.clear();
             }
+            ui.data_mut(|data| data.insert_temp(draft_id, draft));
         });
     }
 }
@@ -1089,10 +1125,62 @@ impl eframe::App for Baboon {
         // would ever put those back.
         self.sweep_container_write_leases(ctx);
         self.maybe_autosave_campaign_projects(ctx);
+        // Every kit, not only one whose Chimp workspace is on screen: a
+        // checkpoint waiting on a workspace the user switched away from would
+        // otherwise wait until they came back.
+        for kit_index in 0..self.kits.len() {
+            self.run_due_chimp_checkpoints(kit_index, ctx);
+        }
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        // A quit that never asks the window to close (macOS Cmd+Q) skips the
+        // close request, which is where waiting checkpoints are otherwise flushed.
+        self.flush_all_chimp_checkpoints();
+        // The per-frame prefs write is throttled; whatever changed in the last
+        // second would otherwise be lost.
+        self.persist_prefs_if_changed();
         self.window_state.persist_now();
         self.persist_session_on_exit();
+    }
+}
+
+#[cfg(test)]
+mod keyword_draft_tests {
+    use super::*;
+
+    /// Two panes showing the same tag keep their own keyword drafts. The draft
+    /// used to be one field on the app, shared by every pane in every kit.
+    #[test]
+    fn each_pane_keeps_its_own_keyword_draft() {
+        let ctx = egui::Context::default();
+        ctx.set_fonts(crate::app::foundation_fonts());
+        let mut app = Baboon::for_test();
+        let mut draft_ids = Vec::new();
+        let frame = |app: &mut Baboon, draft_ids: &mut Vec<egui::Id>| {
+            let _ = ctx.run(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    draft_ids.clear();
+                    for pane in ["pane a", "pane b"] {
+                        ui.push_id(pane, |ui| {
+                            app.draw_keyword_bar(ui, 0, "file:crate.model");
+                            draft_ids
+                                .push(ui.make_persistent_id(("keyword_input", "file:crate.model")));
+                        });
+                    }
+                });
+            });
+        };
+
+        frame(&mut app, &mut draft_ids);
+        ctx.data_mut(|data| data.insert_temp(draft_ids[0], "rocket".to_owned()));
+        frame(&mut app, &mut draft_ids);
+
+        let draft = |id: egui::Id| {
+            ctx.data_mut(|data| data.get_temp::<String>(id))
+                .unwrap_or_default()
+        };
+        assert_eq!(draft(draft_ids[0]), "rocket");
+        assert_eq!(draft(draft_ids[1]), "", "the other pane's box is untouched");
     }
 }

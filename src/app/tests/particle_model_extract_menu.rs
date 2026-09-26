@@ -12,7 +12,8 @@
 //! What is asserted here is the action half, each test opening by
 //! re-checking its own gate so the pair stays visible in one place.
 //!
-//! Skips silently when the corresponding tag set is absent.
+//! Skips, saying so, when the tag set is absent: set `BLAM_TEST_HREK` and
+//! `BLAM_TEST_H2EK` (see `crate::test_kits`).
 
 use std::path::{Path, PathBuf};
 
@@ -20,20 +21,14 @@ use crate::app::browser::supports_tag_extract_menu;
 use crate::app::export::extract_geometry_for_entry;
 use crate::source::{TagEntry, TagEntryLocation, TagSource};
 
-/// Root of an extracted MCC tag set, via `BLAM_TEST_<KIT>_TAGS` or the
-/// conventional local layout.
-fn kit_tags(kit: &str) -> Option<PathBuf> {
-    let var = format!("BLAM_TEST_{}_TAGS", kit.to_uppercase());
-    if let Ok(p) = std::env::var(&var) {
-        let p = PathBuf::from(p);
-        return p.is_dir().then_some(p);
+/// The tag `rel` under a kit root, or `None` (saying why) when it is absent.
+fn kit_tag(root: PathBuf, rel: &str) -> Option<PathBuf> {
+    if root.join(rel).is_file() {
+        Some(root)
+    } else {
+        eprintln!("skipping: {rel} not present under {}", root.display());
+        None
     }
-    let home = std::env::var("HOME").ok()?;
-    let p = PathBuf::from(home)
-        .join("Halo")
-        .join(format!("{kit}_mcc"))
-        .join("tags");
-    p.is_dir().then_some(p)
 }
 
 fn loose_source(root: &Path, game: &str) -> TagSource {
@@ -63,13 +58,10 @@ fn extracting_a_gen3_particle_model_writes_a_resolvable_jmi() {
         supports_tag_extract_menu(u32::from_be_bytes(*b"pmdf")),
         "the menu item that reaches this action is not drawn",
     );
-    let Some(root) = kit_tags("haloreach") else {
+    let rel = "fx/particles/models/debris/generic_shards/generic_shards.particle_model";
+    let Some(root) = kit_tag(crate::test_kits::hrek_tags(), rel) else {
         return;
     };
-    let rel = "fx/particles/models/debris/generic_shards/generic_shards.particle_model";
-    if !root.join(rel).is_file() {
-        return;
-    }
     let out = std::env::temp_dir().join("baboon_pm_extract_gen3");
     let _ = std::fs::remove_dir_all(&out);
     std::fs::create_dir_all(&out).expect("create output dir");
@@ -133,13 +125,10 @@ fn extracting_a_halo2_particle_model_keeps_its_object_names() {
         supports_tag_extract_menu(u32::from_be_bytes(*b"PRTM")),
         "the menu item that reaches this action is not drawn",
     );
-    let Some(root) = kit_tags("halo2") else {
+    let rel = "effects/particle_models/urban_debris/urban_debris.particle_model";
+    let Some(root) = kit_tag(crate::test_kits::h2ek_tags(), rel) else {
         return;
     };
-    let rel = "effects/particle_models/urban_debris/urban_debris.particle_model";
-    if !root.join(rel).is_file() {
-        return;
-    }
     let out = std::env::temp_dir().join("baboon_pm_extract_h2");
     let _ = std::fs::remove_dir_all(&out);
     std::fs::create_dir_all(&out).expect("create output dir");

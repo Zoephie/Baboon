@@ -11,7 +11,6 @@ use super::duplicate::{
     backup_paths_text, container_duplicate_index_key, container_index_for_utoc,
     create_duplicate_backup, validate_leaf_characters,
 };
-use std::thread;
 
 /// Where a rename is going, in every form the write and the browser need.
 struct RenameDestination {
@@ -297,6 +296,7 @@ pub(in crate::app) fn rekey_tag_in_kit(kit: &mut Kit, old: &str, new: &str) {
     // dropping them costs one re-resolve and cannot be wrong.
     kit.rmdf_cache.clear();
     kit.rmop_cache.clear();
+    kit.h2_templates = H2TemplateCache::default();
 
     // Forces `modified_tags` to be rebuilt: it maps keys to entries, and the
     // signature is what decides whether that is worth doing again.
@@ -467,16 +467,11 @@ pub(in crate::app) fn apply_container_rename_source_state(
             request.new_ubulk_path.to_owned(),
         );
 
-        // Both removes have to come first, because `ContainerPackageIndex`
-        // is first-insert-wins: an insert over a row that is already there does
-        // nothing at all. The old package's row is now a tombstone, and a row
-        // already sitting at the destination is stale by construction — the
-        // chunks the write just placed there are the newest thing that has ever
-        // been at that package path in this container. Neither may survive an
-        // insert that silently declines to happen.
+        // This container no longer provides the old package; what it provides
+        // at the new one replaces anything it had there. Other containers'
+        // copies of either are untouched.
         let packages = Arc::make_mut(packages);
-        packages.remove(request.old_package);
-        packages.remove(request.new_package);
+        packages.remove(request.old_package, request.container);
         packages.insert(
             request.new_package.to_ascii_lowercase(),
             request.container,
@@ -490,24 +485,12 @@ pub(in crate::app) fn apply_container_rename_source_state(
         }
     }
 
-    source.entries.retain(|existing| existing.key != old_key);
-    source
-        .all_entries
-        .retain(|existing| existing.key != old_key);
-    // Sorted rather than pushed, for the same reason a duplicate is: the mount
-    // orders by `natural_key` and the browser draws a folder in entry-vector
-    // order, so a pushed entry lands at the bottom of its new folder instead of
-    // in the place the user will look for it.
-    crate::source::insert_entry_sorted(&mut source.entries, entry.clone());
-    if !source.all_entries.is_empty() {
-        crate::source::insert_entry_sorted(&mut source.all_entries, entry.clone());
-    }
-    crate::source::rebuild_folder_tree(source, pending_folders);
-    source.group_tree = crate::source::build_group_tree(if source.all_entries.is_empty() {
-        &source.entries
-    } else {
-        &source.all_entries
-    });
+    // Sorted rather than pushed (upsert_entry keeps a container's list in
+    // `natural_key` order), for the same reason a duplicate is: a pushed entry
+    // would land at the bottom of its new folder instead of where the user
+    // will look for it.
+    source.remove_entry(old_key, pending_folders);
+    source.upsert_entry(entry.clone(), pending_folders);
     // Dropped whole rather than patched. The index is keyed by tag key on the
     // referring side *and* on the referred-to side, so a rename moves rows this
     // has no way to enumerate — and a half-patched reference graph gives wrong
@@ -660,16 +643,21 @@ impl Baboon {
             is_mod,
             tag_bytes,
         };
-        let tx = self.tx.clone();
-        thread::spawn(move || {
-            let result = run_container_rename(input);
-            let _ = tx.send(WorkerMessage::ContainerRenameFinished {
+        // Through spawn_worker so the lease always comes back, as for Duplicate.
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || WorkerMessage::ContainerRenameFinished {
                 stamp,
                 lease: lease_id,
-                result,
-            });
-            ctx.request_repaint();
-        });
+                result: run_container_rename(input),
+            },
+            move |error| WorkerMessage::ContainerRenameFinished {
+                stamp,
+                lease: lease_id,
+                result: Err(error),
+            },
+        );
     }
 
     pub(in crate::app) fn handle_container_rename_finished(

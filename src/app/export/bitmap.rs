@@ -21,35 +21,20 @@ pub(in crate::app) fn extract_bitmap_entries(
     output: &Path,
 ) -> anyhow::Result<String> {
     fs::create_dir_all(output)?;
-    let mut total_images = 0usize;
-    let mut total_tags = 0usize;
-    let mut failures = Vec::new();
-    for entry in entries.iter().filter(|entry| is_bitmap_tag(entry)) {
-        let entry_output = output.join(tag_display_parent(entry));
-        match write_bitmap_images(source, entry, &entry_output) {
-            Ok(count) => {
-                total_images += count;
-                total_tags += 1;
-            }
-            Err(error) => failures.push(format!("{}: {error}", entry.display_path)),
-        }
-    }
-
-    if total_images == 0 && !failures.is_empty() {
-        anyhow::bail!("failed to extract bitmap tags: {}", failures.join("; "));
-    }
-    if total_images == 0 {
-        anyhow::bail!("no bitmap tags found");
-    }
-
-    let mut message = format!(
-        "Extracted {total_images} image(s) from {total_tags} bitmap tag(s) to {}",
-        output.display()
-    );
-    if !failures.is_empty() {
-        message.push_str(&format!("; {} failed", failures.len()));
-    }
-    Ok(message)
+    export_each(
+        entries.iter().filter(|entry| is_bitmap_tag(entry)),
+        |entry| write_bitmap_images(source, entry, &output.join(tag_display_parent(entry))),
+    )
+    .finish(
+        "no bitmap tags found",
+        "failed to extract bitmap tags",
+        |images, tags| {
+            format!(
+                "Extracted {images} image(s) from {tags} bitmap tag(s) to {}",
+                output.display()
+            )
+        },
+    )
 }
 
 pub(in crate::app) fn write_bitmap_images(
