@@ -1037,6 +1037,12 @@ impl Baboon {
                 WorkerMessage::ModelThumbnailRendered { stamp, key, result } => {
                     self.handle_model_thumbnail_rendered(stamp, key, result, ctx)
                 }
+                WorkerMessage::ModelPreviewLoaded {
+                    stamp,
+                    key,
+                    request_id,
+                    result,
+                } => self.handle_model_preview_loaded(stamp, key, request_id, result),
                 WorkerMessage::ModelOverlaysBuilt {
                     stamp,
                     key,

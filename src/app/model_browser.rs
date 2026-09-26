@@ -510,13 +510,7 @@ impl Baboon {
                 egui::Image::new(&texture).paint_at(ui, at);
             }
             None => {
-                ui.painter().text(
-                    image_rect.center(),
-                    Align2::CENTER_CENTER,
-                    "…",
-                    FontId::proportional(14.0),
-                    subtle_dark(),
-                );
+                crate::app::ui::paint_loading_rings(ui, image_rect);
             }
         }
 
