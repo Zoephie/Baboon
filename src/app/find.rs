@@ -753,7 +753,11 @@ impl Baboon {
             return;
         }
         if let Some(entry) = self.entry_for_key(&hit.tag_key) {
-            if is_previewable_geometry_group(entry.group_tag, self.names()) {
+            let source_game = self.kits[self.active]
+                .source
+                .as_ref()
+                .and_then(|source| source.game.as_deref());
+            if is_previewable_geometry_group_for_game(entry.group_tag, self.names(), source_game) {
                 self.kits[self.active]
                     .model_previews
                     .entry(hit.tag_key.clone())

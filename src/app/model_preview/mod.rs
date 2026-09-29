@@ -373,7 +373,7 @@ pub(super) fn draw_model_preview_panel(
     model_preview_size: &mut f32,
     edit: &mut FieldEditContext<'_>,
 ) {
-    let is_model = is_previewable_geometry_group(entry.group_tag, names);
+    let is_model = is_previewable_geometry_group_for_game(entry.group_tag, names, source_game);
     if !is_model {
         return;
     }
@@ -653,6 +653,7 @@ pub(super) fn draw_model_preview_panel(
                                 model_preview_size,
                                 supports_textures,
                                 is_campaign_evolved,
+                                source_game,
                                 !data.preview.nodes.is_empty(),
                             ),
                             ModelPreviewSectionPart::Body => {
@@ -721,6 +722,7 @@ pub(super) fn draw_model_preview_panel(
                     model_preview_size,
                     supports_textures,
                     is_campaign_evolved,
+                    source_game,
                     !data.preview.nodes.is_empty(),
                 ),
                 ModelPreviewSectionPart::Body => {
@@ -1059,6 +1061,7 @@ fn draw_model_view_settings_menu(
     model_preview_size: &mut f32,
     supports_textures: bool,
     is_campaign_evolved: bool,
+    source_game: Option<&str>,
     has_armature: bool,
 ) {
     preview_header_menu(
@@ -1095,7 +1098,10 @@ fn draw_model_view_settings_menu(
             }
             ui.separator();
 
-            if tag.header.group_tag.to_be_bytes() == *b"hlmt" && !is_campaign_evolved {
+            if (tag.header.group_tag.to_be_bytes() == *b"hlmt" && !is_campaign_evolved)
+                || (source_game == Some("haloce_mcc")
+                    && is_object_family_group(tag.header.group_tag))
+            {
                 model_view_icon_checkbox(
                     ui,
                     &mut state.show_render,
@@ -1108,12 +1114,14 @@ fn draw_model_view_settings_menu(
                     ModelViewCheckboxIcon::Tag(*b"coll"),
                     "Collision Model",
                 );
-                model_view_icon_checkbox(
-                    ui,
-                    &mut state.show_physics,
-                    ModelViewCheckboxIcon::Tag(*b"phmo"),
-                    "Physics Model",
-                );
+                if tag.header.group_tag.to_be_bytes() == *b"hlmt" {
+                    model_view_icon_checkbox(
+                        ui,
+                        &mut state.show_physics,
+                        ModelViewCheckboxIcon::Tag(*b"phmo"),
+                        "Physics Model",
+                    );
+                }
                 if state.overlays_pending && (state.show_collision || state.show_physics) {
                     ui.spinner();
                 }

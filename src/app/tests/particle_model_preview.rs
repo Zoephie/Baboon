@@ -21,7 +21,9 @@ use std::path::PathBuf;
 
 use blam_tags::TagFile;
 
-use crate::app::editor::{is_model_group, is_previewable_geometry_group};
+use crate::app::editor::{
+    is_model_group, is_previewable_geometry_group, is_previewable_geometry_group_for_game,
+};
 use crate::app::model_preview::RenderModelPreview;
 use crate::app::model_preview::loading::build_particle_model_preview;
 
@@ -138,6 +140,25 @@ fn render_model_is_previewable() {
         is_previewable_geometry_group(tag, &names),
         "`mode` must open the Model Preview tab",
     );
+}
+
+#[test]
+fn object_family_preview_is_halo_ce_only() {
+    let names = names();
+    for group in [b"bipd", b"vehi", b"weap", b"eqip", b"scen"] {
+        let tag = u32::from_be_bytes(*group);
+        assert!(is_previewable_geometry_group_for_game(
+            tag,
+            &names,
+            Some("haloce_mcc")
+        ));
+        assert!(!is_previewable_geometry_group_for_game(
+            tag,
+            &names,
+            Some("halo3_mcc")
+        ));
+        assert!(!is_previewable_geometry_group_for_game(tag, &names, None));
+    }
 }
 
 /// A multi-object gen3 tag: one region per JMI object, batches wired to

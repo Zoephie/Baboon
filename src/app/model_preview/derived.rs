@@ -161,7 +161,16 @@ fn append_collision_jms(
     let mut cells: Vec<(String, String, Vec<RenderModelPreviewVertex>)> = Vec::new();
 
     for triangle in &jms.triangles {
-        let (region_name, permutation_name) = if !jms.regions.is_empty() {
+        let label = jms
+            .materials
+            .get(triangle.material.max(0) as usize)
+            .map(|material| MaterialLabel::parse(&material.material_name));
+        let (region_name, permutation_name) = if let Some(label) = label
+            .as_ref()
+            .filter(|label| label.region != "default" || label.permutation != "default")
+        {
+            (label.region.clone(), label.permutation.clone())
+        } else if !jms.regions.is_empty() {
             (
                 jms.regions
                     .get(triangle.region.max(0) as usize)
@@ -170,11 +179,7 @@ fn append_collision_jms(
                 "default".to_owned(),
             )
         } else {
-            let label = jms
-                .materials
-                .get(triangle.material.max(0) as usize)
-                .map(|material| MaterialLabel::parse(&material.material_name))
-                .unwrap_or_else(|| MaterialLabel::parse("default default"));
+            let label = label.unwrap_or_else(|| MaterialLabel::parse("default default"));
             (label.region, label.permutation)
         };
         let corners = triangle.v.map(|index| jms.vertices.get(index as usize));
@@ -1492,6 +1497,29 @@ pub(super) fn hlmt_collision_overlay(
     build_collision_preview(&collision, skeleton.as_ref().map(|s| s.nodes())).ok()
 }
 
+/// Halo CE's object tag is its model wrapper. Resolve the gbxmodel bind pose
+/// with CE's corrected quaternion convention and use it to place the direct
+/// collision-model reference.
+pub(super) fn halo1_object_collision_overlay(
+    object_tag: &TagFile,
+    source: &TagSource,
+) -> Option<RenderModelPreview> {
+    let root = object_tag.root();
+    let model_reference = tag_ref_path(&root, "model")?;
+    let collision_reference = tag_ref_path(&root, "collision model")?;
+    let render =
+        load_referenced_tag_from_source(source, &model_reference, "gbxmodel", b"mod2").ok()?;
+    let collision = load_referenced_tag_from_source(
+        source,
+        &collision_reference,
+        "model_collision_geometry",
+        b"coll",
+    )
+    .ok()?;
+    let nodes = render_model_skeleton(&render).ok()?;
+    build_collision_preview(&collision, Some(&nodes)).ok()
+}
+
 /// The `.model`'s physics layer, likewise. Reads both spellings the H2-era
 /// definitions used (`physics_model` and `physics model`); the legacy H2
 /// `physics` (`phys`) reference is deliberately not resolved — it is not a
@@ -1540,7 +1568,9 @@ impl Baboon {
         let Some(entry) = kit.entry_for_key(key).cloned() else {
             return;
         };
-        if entry.group_tag != u32::from_be_bytes(*b"hlmt") {
+        if entry.group_tag != u32::from_be_bytes(*b"hlmt")
+            && !is_object_family_group(entry.group_tag)
+        {
             return;
         }
         let Some(source) = kit.source.as_ref().map(|source| source.source.clone()) else {
@@ -1561,6 +1591,11 @@ impl Baboon {
             // sticks and the overlays never arrive.
             let overlays = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let model = crate::source::read_entry(&source, &entry).ok()?;
+                if blam_tags::game::Game::of(&model) == blam_tags::game::Game::Halo1
+                    && is_object_family_group(model.header.group_tag)
+                {
+                    return Some((halo1_object_collision_overlay(&model, &source), None));
+                }
                 // Classic models only: a Campaign Evolved hlmt previews
                 // through Unreal geometry and hides the overlay toggles.
                 model.root().read_tag_ref_with_group("render model")?;

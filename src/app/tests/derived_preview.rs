@@ -102,6 +102,10 @@ fn collision_cells_keep_variant_names_and_remap_bones_by_name() {
     ];
     let jms = JmsFile {
         nodes: vec![collision_node],
+        // CE JMS keeps its region table for file output as well as carrying
+        // the permutation/region cell in the material label. The cell label
+        // must win or every triangle becomes the first region + `default`.
+        regions: vec!["wrong fallback".to_owned()],
         materials: vec![JmsMaterial {
             name: "metal".to_owned(),
             material_name: "(1) major armor".to_owned(),
