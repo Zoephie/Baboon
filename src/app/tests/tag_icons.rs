@@ -19,6 +19,11 @@ fn tag_icon_lookup_uses_expected_group_mappings() {
     assert!(get_icon_svg("matg").contains("<svg"));
     assert!(get_icon_svg("styl").contains("<svg"));
     assert!(get_icon_svg("unknown").contains("<svg"));
+    assert_eq!(
+        get_icon_svg("mod2"),
+        get_icon_svg("mode"),
+        "gbxmodel should use the render_model icon"
+    );
 }
 
 #[test]
