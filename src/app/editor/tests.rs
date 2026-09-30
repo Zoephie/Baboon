@@ -44,6 +44,40 @@ mod tests {
         assert!(!is_default_pitch_range("pitch range x"));
     }
 
+    #[test]
+    fn fmod_language_picker_lists_the_catalog_and_disables_missing_banks() {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-fmod-language-picker-{}",
+            std::process::id()
+        ));
+        let tags = root.join("tags");
+        let banks = root.join("fmod/pc");
+        std::fs::create_dir_all(&tags).unwrap();
+        std::fs::create_dir_all(&banks).unwrap();
+        std::fs::write(banks.join("english.fsb"), []).unwrap();
+        std::fs::write(banks.join("french.fsb"), []).unwrap();
+
+        let mut sinks = EditSinks::default();
+        let mut edit = FieldEditContext::read_only(&mut sinks, "test", "test");
+        edit.game = Some("halo3_mcc");
+        edit.tags_root = Some(&tags);
+        let choices = language_choices(&edit, None);
+
+        assert_eq!(choices.len(), FMOD_LANGUAGES.len());
+        assert_eq!(choices.iter().filter(|choice| choice.available).count(), 2);
+        assert!(choices.iter().all(|choice| choice.label != "default"));
+        let japanese = choices
+            .iter()
+            .find(|choice| choice.label == "Japanese")
+            .unwrap();
+        assert!(!japanese.available);
+        assert!(japanese
+            .unavailable_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("japanese.fsb")));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
     /// Campaign Evolved extraction end-to-end (skip-if-absent): resolve a
     /// sound tag's Wwise media exactly as the player does, run it through
     /// `AudioState::run_extract`, and validate the WAV that lands on disk.
@@ -288,7 +322,9 @@ mod tests {
             eprintln!("skip: no tags at {}", tags_root.display());
             return;
         }
-        let banks = SoundBanks::open_pc(tags_root).expect("open FMOD banks");
+        let language = std::env::var("SND_LANGUAGE").ok();
+        let banks = SoundBanks::open_pc_language(tags_root, language.as_deref())
+            .expect("open FMOD banks");
 
         // Recursively collect every .sound tag.
         let mut sound_tags = Vec::new();
@@ -306,7 +342,10 @@ mod tests {
                 }
             }
         }
-        eprintln!("scanning {} .sound tags under {}", sound_tags.len(), root);
+        eprintln!(
+            "scanning {} .sound tags under {} for {:?}",
+            sound_tags.len(), root, language
+        );
 
         let (mut perms, mut by_id, mut by_name, mut id_miss_name_hit, mut absent, mut no_pr) =
             (0usize, 0usize, 0usize, 0usize, 0usize, 0usize);
@@ -829,7 +868,7 @@ mod tests {
             return;
         }
         let tag = blam_tags::TagFile::read(&tag_path).expect("read sound tag");
-        let rows = sound_permutation_rows(&tag, None);
+        let rows = sound_permutation_rows_for_game(&tag, None, Some("halo3_mcc"));
         assert!(!rows.is_empty());
         let dir = std::env::temp_dir().join("baboon_bank_extract");
         let _ = std::fs::remove_dir_all(&dir);
@@ -1170,12 +1209,227 @@ mod tests {
             &tags_root.join("sound/visual_fx/ambient_vehicle_destroyed_large.sound"),
         )
         .expect("read sfx sound tag");
-        let rows = sound_permutation_rows(&tag, None);
+        let rows = sound_permutation_rows_for_game(&tag, None, Some("halo3_mcc"));
         let resolved = rows
             .iter()
             .filter(|r| banks.resolve(&r.name).is_some())
             .count();
         assert!(resolved > 0, "no permutations resolved in french+sfx banks");
+    }
+
+    /// Exercise the same row classification, ID construction, queued action,
+    /// bank resolution, and async decode used by the sound-player button.
+    #[test]
+    #[ignore]
+    fn h3_sound_player_action_reaches_playback() {
+        let tags_root = crate::test_kits::h3ek_tags();
+        let path = tags_root.join("sound/visual_fx/ambient_vehicle_destroyed_large.sound");
+        if !path.exists() {
+            eprintln!("skip: set BLAM_TEST_H3EK");
+            return;
+        }
+        let tag = TagFile::read(&path).expect("read H3 sound tag");
+        let rows = sound_permutation_rows_for_game(&tag, None, Some("halo3_mcc"));
+        assert!(!rows.is_empty(), "sound tag has no permutations");
+        assert!(
+            rows.iter().all(|row| matches!(row.kind, RowKind::Bank)),
+            "H3 permutations must be bank-backed"
+        );
+        let rel = sound_tag_rel(&path, &tags_root).expect("tag-relative path");
+        let source = RowSource {
+            h2: None,
+            language: None,
+            sound_rel: Some(&rel),
+            multi_pr: rows_span_multiple_pitch_ranges(&rows),
+        };
+        let play = row_play_action(&tag, &rows[0], source, Some(&tags_root))
+            .expect("play action for H3 row");
+        let super::audio::SoundAction::Play { id, key, .. } = &play else {
+            panic!("H3 row did not create an FMOD play action");
+        };
+        let banks = blam_tags::audio::SoundBanks::open_pc(&tags_root).expect("open H3 banks");
+        let (bank_index, sub_index) = id
+            .and_then(|id| banks.resolve_by_id(id))
+            .or_else(|| banks.resolve(key))
+            .expect("resolve H3 player row");
+        let bank = banks.bank(bank_index);
+        let sub = &bank.subsounds[sub_index];
+        let data = bank.read_subsound_data(sub_index).expect("read H3 subsound");
+        let pcm = blam_tags::audio::decode_subsound(
+            &data,
+            sub.channels,
+            sub.frequency,
+            sub.setup_hash,
+        )
+        .expect("decode H3 player row");
+        let peak = pcm
+            .samples
+            .iter()
+            .map(|sample| sample.unsigned_abs())
+            .max()
+            .unwrap_or(0);
+        assert!(peak > 64, "resolved H3 player row decoded to silence");
+        let duration = pcm.duration_secs();
+        let mut audio = super::audio::AudioState::default();
+        audio.pending.push_back(play);
+        audio.process(None, &egui::Context::default());
+        audio.wait_for_audio_jobs();
+        assert!(
+            audio.status.as_deref().is_some_and(|status| status.starts_with('\u{25B6}')),
+            "normal player path did not reach playback: {:?}",
+            audio.status
+        );
+        // Keep the ignored manual/integration test's output stream alive long
+        // enough for the device to render the queued voice.
+        std::thread::sleep(std::time::Duration::from_secs_f32(
+            duration.clamp(0.25, 10.0) + 0.5,
+        ));
+    }
+
+    #[test]
+    #[ignore]
+    fn h3_extraction_writes_non_silent_pcm() {
+        let tags_root = crate::test_kits::h3ek_tags();
+        let path = tags_root.join("sound/dialog/combat/brute1/23_idle/peeing.sound");
+        if !path.exists() {
+            eprintln!("skip: set BLAM_TEST_H3EK");
+            return;
+        }
+        let tag = TagFile::read(&path).expect("read H3 sound tag");
+        let rows = sound_permutation_rows_for_game(&tag, None, Some("halo3_mcc"));
+        let sound_rel = sound_tag_rel(&path, &tags_root).unwrap();
+        let out = std::env::temp_dir().join(format!(
+            "baboon-h3-extract-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&out);
+        let source = RowSource {
+            h2: None,
+            language: None,
+            sound_rel: Some(&sound_rel),
+            multi_pr: rows_span_multiple_pitch_ranges(&rows),
+        };
+        let items = build_extract_items(&tag, &rows, source, &out, false);
+        let mut audio = super::audio::AudioState::default();
+        audio.run_extract(
+            ExtractRequest {
+                items,
+                tags_root: Some(tags_root),
+                label: "H3 non-silent regression".to_owned(),
+            },
+            &egui::Context::default(),
+        );
+        audio.wait_for_audio_jobs();
+        for wav in walkdir(&out) {
+            let bytes = std::fs::read(&wav).unwrap();
+            assert!(bytes.len() > 44, "empty WAV: {}", wav.display());
+            assert!(
+                bytes[44..].chunks_exact(2).any(|sample| sample != [0, 0]),
+                "silent WAV: {} ({:?})",
+                wav.display(),
+                audio.status
+            );
+        }
+        let _ = std::fs::remove_dir_all(out);
+    }
+
+    #[test]
+    #[ignore]
+    fn h3_all_language_extraction_reads_the_explicit_english_bank() {
+        use crate::app::sound_extract::ExtractSource;
+
+        let tags_root = crate::test_kits::h3ek_tags();
+        let path = tags_root.join("sound/dialog/combat/brute1/23_idle/peeing.sound");
+        if !path.exists() {
+            eprintln!("skip: set BLAM_TEST_H3EK");
+            return;
+        }
+        let tag = TagFile::read(&path).expect("read H3 sound tag");
+        let shared_banks = blam_tags::audio::SoundBanks::open_pc_language(
+            &tags_root,
+            Some("__baboon_shared_bank_only__"),
+        )
+        .expect("open shared H3 FMOD bank");
+        let mut items = browser_sound_extract_items(
+            &tag,
+            &path,
+            &tags_root,
+            Some("halo3_mcc"),
+            None,
+            true,
+            Some(&shared_banks),
+        );
+        assert!(items.iter().any(|item| matches!(
+            &item.source,
+            ExtractSource::Bank { language: Some(language), .. }
+                if language.eq_ignore_ascii_case("english")
+        )));
+        assert!(!items.iter().any(|item| matches!(
+            item.source,
+            ExtractSource::Bank { language: None, .. }
+        )));
+        let mut item_languages = items
+            .iter()
+            .filter_map(|item| match &item.source {
+                ExtractSource::Bank { language, .. } => language.clone(),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        item_languages.sort();
+        item_languages.dedup();
+        assert_eq!(
+            item_languages,
+            blam_tags::audio::SoundBanks::available_languages(&tags_root),
+            "all-languages extraction must follow installed .fsb files"
+        );
+
+        let sfx_path = tags_root.join("sound/visual_fx/ambient_vehicle_destroyed_large.sound");
+        let sfx_tag = TagFile::read(&sfx_path).expect("read shared H3 sound tag");
+        let sfx_items = browser_sound_extract_items(
+            &sfx_tag,
+            &sfx_path,
+            &tags_root,
+            Some("halo3_mcc"),
+            Some("french"),
+            true,
+            Some(&shared_banks),
+        );
+        assert!(!sfx_items.is_empty());
+        assert!(sfx_items.iter().all(|item| matches!(
+            item.source,
+            ExtractSource::Bank { language: None, .. }
+        )));
+        assert!(sfx_items.iter().all(|item| item.out_path.starts_with(
+            tags_root.parent().unwrap().join("data")
+        )));
+
+        let out = std::env::temp_dir().join(format!(
+            "baboon-h3-all-languages-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&out);
+        for (index, item) in items.iter_mut().enumerate() {
+            item.out_path = out.join(format!("{index}.wav"));
+        }
+        let total = items.len();
+        let mut audio = super::audio::AudioState::default();
+        audio.run_extract(
+            ExtractRequest {
+                items,
+                tags_root: Some(tags_root),
+                label: "H3 all-languages regression".to_owned(),
+            },
+            &egui::Context::default(),
+        );
+        audio.wait_for_audio_jobs();
+        assert_eq!(walkdir(&out).len(), total, "{:?}", audio.status);
+        assert!(
+            audio.status.as_deref().is_some_and(|status| status
+                .starts_with(&format!("extracted {total}/{total}"))),
+            "{:?}",
+            audio.status
+        );
+        let _ = std::fs::remove_dir_all(out);
     }
 
     /// Recursively collect files under `dir` (small test helper).

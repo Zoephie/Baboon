@@ -504,6 +504,17 @@ A **play button per permutation** (or per event for Halo 4), a **Stop** control,
 and a status line showing the current clip and its duration. Decoded audio is
 cached, and the banks / packages are opened lazily on first play.
 
+Audio does not need to be opened in the tag editor before extraction. Right-click
+a `.sound` tag and use **Extract → Extract sounds (English)** (or the last
+selected language) or **Extract → Extract sounds (All Languages)**. A revealed
+browser folder offers the corresponding **Extract loaded sounds** commands,
+including a count. Use **Load entire folder for extractable files** at the top of that
+submenu to discover unopened bitmap, sound, shader-source, and HLSL include tags
+both directly in that folder and in all of its subfolders; large scans report progress
+in the status bar. Loose editing kits write to
+the same reimport-ready `data\<tag path>\` / `data_<language>\<tag path>\`
+layout as the open-tag controls; container-backed sounds ask for a destination.
+
 ### Cross-game tag overviews
 
 Curated summary panels for tags that are otherwise tedious as raw field dumps,

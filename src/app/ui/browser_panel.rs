@@ -133,6 +133,14 @@ impl Baboon {
             .source
             .as_ref()
             .and_then(|source| source.game.clone());
+        let sound_language = self.audio.language.clone();
+        let sound_tags_root = self.kits[kit_index].source.as_ref().and_then(|source| {
+            if let TagSource::LooseFolder { root, .. } = &source.source {
+                Some(root.clone())
+            } else {
+                None
+            }
+        });
         let scenario_launch = self.kits[kit_index]
             .source
             .as_ref()
@@ -163,6 +171,14 @@ impl Baboon {
                 set_browser_modified_tags(ui, modified_tags);
                 set_browser_favorite_folders(ui, is_loose.then_some(pane_favorite_folders));
                 set_browser_deletable_keys(ui, deletable_keys);
+                set_browser_sound_language(ui, game.as_deref(), sound_language.as_deref());
+                set_browser_sound_available_languages(
+                    ui,
+                    game.as_deref(),
+                    sound_tags_root.as_deref(),
+                );
+                set_browser_entries_scanning(ui, scanning);
+                set_browser_loose_source(ui, is_loose);
                 set_browser_game(ui, game);
                 set_browser_scenario_launch(ui, scenario_launch);
                 set_browser_is_folder_pane(ui, true);
@@ -452,6 +468,34 @@ impl Baboon {
                 .source
                 .as_ref()
                 .and_then(|source| source.game.clone()),
+        );
+        set_browser_sound_language(
+            ui,
+            self.kits[kit_index]
+                .source
+                .as_ref()
+                .and_then(|source| source.game.as_deref()),
+            self.audio.language.as_deref(),
+        );
+        let browser_game = self.kits[kit_index]
+            .source
+            .as_ref()
+            .and_then(|source| source.game.as_deref());
+        let browser_tags_root = self.kits[kit_index].source.as_ref().and_then(|source| {
+            if let TagSource::LooseFolder { root, .. } = &source.source {
+                Some(root.as_path())
+            } else {
+                None
+            }
+        });
+        set_browser_sound_available_languages(ui, browser_game, browser_tags_root);
+        set_browser_entries_scanning(ui, self.kits[kit_index].scanning_entries);
+        set_browser_loose_source(
+            ui,
+            self.kits[kit_index]
+                .source
+                .as_ref()
+                .is_some_and(|source| matches!(source.source, TagSource::LooseFolder { .. })),
         );
         set_browser_scenario_launch(
             ui,
@@ -987,6 +1031,7 @@ fn draw_folder_header_common_actions(
                     &pane.tree,
                     entries,
                     extract_label,
+                    pane.rel_path.clone(),
                     is_container,
                     is_loose,
                     true,

@@ -104,6 +104,10 @@ pub(super) enum SoundAction {
         id: Option<u32>,
         key: String,
         label: String,
+        /// The editing-kit tags root that owns the tag which queued playback.
+        /// This must travel with the action: the globally active kit can change
+        /// while a pane from another kit remains open.
+        tags_root: Option<PathBuf>,
     },
     /// Play encoded audio stored *inline* in the tag (classic Halo CE/H2).
     /// `chunk_offsets` are H2 per-chunk byte offsets into `bytes` (each chunk is
@@ -118,7 +122,11 @@ pub(super) enum SoundAction {
     },
     /// Play a Wwise event by name (Halo 4). The audio lives in
     /// `<game>/sound/pc/*.pck`; the tag only carries the event name.
-    PlayEvent { event_name: String, label: String },
+    PlayEvent {
+        event_name: String,
+        label: String,
+        tags_root: Option<PathBuf>,
+    },
     /// Play one Campaign Evolved Wwise media file. Unlike Halo 4 the tag names
     /// no event, so the media is resolved up front by walking package imports
     /// (see [`crate::source::ce_audio`]) and the already-resolved entry is
@@ -219,6 +227,10 @@ pub(super) struct AudioState {
     engine: Option<Engine>,
     engine_tried: bool,
     banks: Option<Arc<SoundBanks>>,
+    /// Why the current FMOD bank set could not be opened. This is retained
+    /// with the negative cache so the player can report the actual path or
+    /// format problem on every attempt.
+    banks_error: Option<String>,
     /// Bumped whenever `banks` is reopened, so a decode that finishes for the
     /// old banks is not cached under indices into the new ones.
     banks_generation: u64,
@@ -259,7 +271,7 @@ pub(super) struct AudioState {
     /// `pub(super)` for a field-disjoint borrow at `FieldEditContext` build sites.
     pub(super) language: Option<String>,
     /// Set by the sound-player UI; drained by [`AudioState::process`].
-    pub(super) pending: Option<SoundAction>,
+    pub(super) pending: VecDeque<SoundAction>,
     /// Last user-facing status line (bank/resolve/playback result).
     pub(super) status: Option<String>,
     /// Decodes and extraction batches running on workers report back here.
@@ -398,9 +410,55 @@ fn decode_bank_subsound(
 
 /// What an extraction batch reads from, captured on the UI thread.
 struct ExtractSources {
-    banks: Option<Arc<SoundBanks>>,
-    wwise: Option<Arc<WwiseBanks>>,
+    tags_root: Option<PathBuf>,
     ce_media: Arc<Mutex<crate::source::ce_audio::CeMediaStore>>,
+}
+
+/// Open every FMOD bank set a request needs and prove that each requested
+/// permutation resolves before extraction creates any output. This is run once
+/// at the UI boundary for immediate feedback and again on the worker to guard
+/// against the banks being moved between the click and the write.
+fn preflight_fmod_banks(
+    request: &ExtractRequest,
+    tags_root: Option<&Path>,
+) -> Result<HashMap<Option<String>, SoundBanks>, String> {
+    let mut banks_by_language = HashMap::new();
+    for item in &request.items {
+        let ExtractSource::Bank { language, .. } = &item.source else {
+            continue;
+        };
+        if banks_by_language.contains_key(language) {
+            continue;
+        }
+        let Some(tags_root) = tags_root else {
+            return Err("no editing-kit tags root is available for the FMOD banks".to_owned());
+        };
+        let banks =
+            SoundBanks::open_pc_language(tags_root, language.as_deref()).map_err(|error| {
+                let qualifier = language
+                    .as_deref()
+                    .map(|language| format!(" for {language}"))
+                    .unwrap_or_default();
+                format!("FMOD banks{qualifier} are unavailable: {error}")
+            })?;
+        banks_by_language.insert(language.clone(), banks);
+    }
+    for item in &request.items {
+        let ExtractSource::Bank { id, key, language } = &item.source else {
+            continue;
+        };
+        let Some(banks) = banks_by_language.get(language) else {
+            return Err("the required FMOD bank was not opened".to_owned());
+        };
+        if resolve_bank(banks, *id, key).is_none() {
+            let language = language.as_deref().unwrap_or("default");
+            return Err(format!(
+                "'{key}' was not found in the {language} FMOD banks (output: {})",
+                item.out_path.display()
+            ));
+        }
+    }
+    Ok(banks_by_language)
 }
 
 /// Decode and write every item in a batch. Runs on a worker; returns the
@@ -413,6 +471,15 @@ fn extract_batch(request: ExtractRequest, sources: &ExtractSources) -> String {
         write_wav_pcm16(path, &pcm.samples, pcm.channels, pcm.sample_rate)
             .map_err(|e| e.to_string())
     };
+    // A bulk request may span several localized bank sets. Validate every FMOD
+    // dependency before writing the first output, so a missing/wrong H3-family
+    // bank cancels atomically instead of leaving a partial export behind.
+    let fmod_by_language = match preflight_fmod_banks(&request, sources.tags_root.as_deref()) {
+        Ok(banks) => banks,
+        Err(error) => return format!("Extraction cancelled — {error}"),
+    };
+
+    let mut wwise_by_language: HashMap<Option<String>, Option<WwiseBanks>> = HashMap::new();
     for item in request.items {
         let result: Result<(), String> = match item.source {
             ExtractSource::Raw(bytes) => {
@@ -429,24 +496,42 @@ fn extract_batch(request: ExtractRequest, sources: &ExtractSources) -> String {
                 chunk_offsets,
             } => decode_inline_chunked(codec, &bytes, &chunk_offsets, channels, sample_rate)
                 .and_then(|pcm| write(&item.out_path, &pcm)),
-            ExtractSource::Bank { id, key } => match sources.banks.as_deref() {
-                None => Err("no FMOD bank".to_owned()),
-                Some(banks) => match resolve_bank(banks, id, &key) {
+            ExtractSource::Bank { id, key, language } => {
+                let banks = fmod_by_language
+                    .get(&language)
+                    .expect("FMOD extraction dependencies were preflighted");
+                match resolve_bank(banks, id, &key) {
                     None => Err(format!("'{key}' not in bank")),
                     Some((bank, sub)) => decode_bank_subsound(banks, bank, sub)
                         .and_then(|pcm| write(&item.out_path, &pcm)),
-                },
-            },
+                }
+            }
             ExtractSource::CeMedia { paks_root, media } => {
                 decode_ce_media(&sources.ce_media, &paks_root, &media)
                     .and_then(|pcm| write(&item.out_path, &pcm))
             }
-            ExtractSource::Event { name } => match sources.wwise.as_deref() {
-                Some(banks) => banks
-                    .resolve(&name)
-                    .and_then(|pcm| write(&item.out_path, &pcm)),
-                None => Err("play the event first to load Wwise banks".to_owned()),
-            },
+            ExtractSource::Event { name, language } => {
+                let banks = wwise_by_language
+                    .entry(language.clone())
+                    .or_insert_with(|| {
+                        sources.tags_root.as_deref().and_then(|root| {
+                            WwiseBanks::open_pc_language(root, language.as_deref()).ok()
+                        })
+                    })
+                    .as_ref();
+                match banks {
+                    Some(banks) => banks
+                        .resolve(&name)
+                        .and_then(|pcm| write(&item.out_path, &pcm)),
+                    None => Err(format!(
+                        "no Wwise bank{}",
+                        language
+                            .as_deref()
+                            .map(|language| format!(" for {language}"))
+                            .unwrap_or_default()
+                    )),
+                }
+            }
         };
         match result {
             Ok(()) => ok += 1,
@@ -476,19 +561,32 @@ fn resolve_bank(banks: &SoundBanks, id: Option<u32>, key: &str) -> Option<(usize
 impl AudioState {
     /// Lazily open the FMOD banks under `<game>/fmod/pc/` for this source +
     /// selected language, re-opening when either changes.
-    fn ensure_banks(&mut self, tags_root: &Path) -> Option<&SoundBanks> {
+    fn ensure_banks(&mut self, tags_root: &Path) -> Result<&SoundBanks, String> {
         let lang = self.language.clone();
-        if self.banks_root.as_deref() != Some(tags_root) || self.banks_lang.as_ref() != Some(&lang)
+        if self.banks.is_none()
+            || self.banks_root.as_deref() != Some(tags_root)
+            || self.banks_lang.as_ref() != Some(&lang)
         {
-            self.banks = SoundBanks::open_pc_language(tags_root, lang.as_deref())
-                .ok()
-                .map(Arc::new);
+            match SoundBanks::open_pc_language(tags_root, lang.as_deref()) {
+                Ok(banks) => {
+                    self.banks = Some(Arc::new(banks));
+                    self.banks_error = None;
+                }
+                Err(error) => {
+                    self.banks = None;
+                    self.banks_error = Some(error);
+                }
+            }
             self.banks_root = Some(tags_root.to_path_buf());
             self.banks_lang = Some(lang);
             self.banks_generation += 1;
             self.cache.clear();
         }
-        self.banks.as_deref()
+        self.banks.as_deref().ok_or_else(|| {
+            self.banks_error
+                .clone()
+                .unwrap_or_else(|| "the FMOD banks could not be opened".to_owned())
+        })
     }
 
     /// Start a decode on a worker. Whatever finishes is cached under `cache`
@@ -590,16 +688,12 @@ impl AudioState {
     /// audition decoders and banks) and write it to disk. Dialogue tags carry
     /// dozens of permutations, which is too long to hold a frame for.
     pub(super) fn run_extract(&mut self, request: ExtractRequest, ctx: &egui::Context) {
-        let has_bank_items = request
-            .items
-            .iter()
-            .any(|item| matches!(item.source, ExtractSource::Bank { .. }));
-        if has_bank_items && let Some(tags_root) = request.tags_root.as_deref() {
-            self.ensure_banks(tags_root);
+        if let Err(error) = preflight_fmod_banks(&request, request.tags_root.as_deref()) {
+            self.status = Some(format!("Extraction cancelled — {error}"));
+            return;
         }
         let sources = ExtractSources {
-            banks: self.banks.clone(),
-            wwise: self.wwise.clone(),
+            tags_root: request.tags_root.clone(),
             ce_media: self.ce_media.clone(),
         };
         self.status = Some(format!("extracting {}\u{2026}", request.label));
@@ -715,10 +809,10 @@ impl AudioState {
         self.drain_jobs();
         // Pick up a finished background Wwise load (and play any deferred event).
         self.poll_wwise_load(ctx);
-        let Some(action) = self.pending.take() else {
+        let Some(action) = self.pending.pop_front() else {
             return;
         };
-        let (id, key, label) = match action {
+        let (id, key, label, action_root) = match action {
             SoundAction::SetVolume(v) => {
                 let v = v.clamp(0.0, 1.0);
                 self.volume = Volume(v);
@@ -764,7 +858,12 @@ impl AudioState {
                 });
                 return;
             }
-            SoundAction::PlayEvent { event_name, label } => {
+            SoundAction::PlayEvent {
+                event_name,
+                label,
+                tags_root: action_root,
+            } => {
+                let tags_root = action_root.as_deref().or(tags_root);
                 let Some(tags_root) = tags_root else {
                     self.status = Some("no source loaded".to_owned());
                     return;
@@ -794,21 +893,35 @@ impl AudioState {
                 });
                 return;
             }
-            SoundAction::Play { id, key, label } => (id, key, label),
+            SoundAction::Play {
+                id,
+                key,
+                label,
+                tags_root,
+            } => (id, key, label, tags_root),
         };
         self.wwise_deferred = None; // FMOD playback supersedes a pending event
 
+        let tags_root = action_root.as_deref().or(tags_root);
         let Some(tags_root) = tags_root else {
             self.status = Some("no source loaded".to_owned());
             return;
         };
 
-        let Some(banks) = self.ensure_banks(tags_root) else {
-            self.status = Some("no FMOD bank under <game>/fmod/pc".to_owned());
-            return;
+        let banks = match self.ensure_banks(tags_root) {
+            Ok(banks) => banks,
+            Err(error) => {
+                self.status = Some(format!(
+                    "FMOD audio unavailable: {error}. Add the appropriate .fsb banks under the editing kit's fmod\\pc folder."
+                ));
+                return;
+            }
         };
         let Some((bank, sub)) = resolve_bank(banks, id, &key) else {
-            self.status = Some(format!("'{label}' not found in FMOD bank"));
+            let language = self.language.as_deref().unwrap_or("the default language");
+            self.status = Some(format!(
+                "FMOD audio unavailable: '{label}' was not found in the opened banks for {language}. The matching language bank or .fsb.info may be missing from the editing kit's fmod\\pc folder."
+            ));
             return;
         };
         if let Some(pcm) = self.cache.get(&(bank, sub)) {
@@ -889,36 +1002,209 @@ mod tests {
             ..Default::default()
         };
         audio.jobs.running = 1;
-        let key = || PcmKey::Bank {
+        let key = || PcmKey::Event {
             generation: 0,
-            bank: 0,
-            sub: 4,
+            name: "rifle_fire".to_owned(),
         };
         audio.apply_job(decoded(1, Some(key())));
         assert_eq!(audio.status, None, "request 1 is stale: not played");
-        assert!(audio.cache.get(&(0, 4)).is_some(), "but cached");
+        assert!(
+            audio.event_cache.get(&"rifle_fire".to_owned()).is_some(),
+            "but cached"
+        );
 
         audio.apply_job(decoded(2, None));
         assert_eq!(audio.status.as_deref(), Some("no audio output device"));
         assert_eq!(audio.jobs.running, 0);
     }
 
-    /// Bank indices mean nothing once the banks reopen (a language change).
+    /// Event names must not be cached against a replacement Wwise bank set.
     #[test]
-    fn a_decode_for_reopened_banks_is_not_cached() {
+    fn a_decode_for_reopened_wwise_banks_is_not_cached() {
         let mut audio = AudioState {
             engine_tried: true,
-            banks_generation: 3,
+            wwise_generation: 3,
             ..Default::default()
         };
         audio.apply_job(decoded(
             0,
-            Some(PcmKey::Bank {
+            Some(PcmKey::Event {
                 generation: 2,
-                bank: 0,
-                sub: 4,
+                name: "rifle_fire".to_owned(),
             }),
         ));
-        assert!(audio.cache.get(&(0, 4)).is_none());
+        assert!(audio.event_cache.get(&"rifle_fire".to_owned()).is_none());
+    }
+
+    fn missing_bank_fixture(name: &str) -> (PathBuf, ExtractRequest, PathBuf) {
+        let root = std::env::temp_dir().join(format!(
+            "baboon-{name}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let tags = root.join("tags");
+        std::fs::create_dir_all(&tags).unwrap();
+        let output = root.join("data/sound/test.wav");
+        let request = ExtractRequest {
+            items: vec![super::super::sound_extract::ExtractItem {
+                out_path: output.clone(),
+                source: ExtractSource::Bank {
+                    id: Some(123),
+                    key: "test".to_owned(),
+                    language: None,
+                },
+            }],
+            tags_root: Some(tags),
+            label: "test sound".to_owned(),
+        };
+        (root, request, output)
+    }
+
+    #[test]
+    fn extraction_without_fmod_banks_is_cancelled_before_writing() {
+        let (root, request, output) = missing_bank_fixture("missing-extract-bank");
+        let mut audio = AudioState::default();
+
+        audio.run_extract(request, &egui::Context::default());
+
+        assert!(
+            audio
+                .status
+                .as_deref()
+                .is_some_and(|status| status.starts_with("Extraction cancelled — FMOD banks"))
+        );
+        assert!(!output.exists());
+        assert_eq!(
+            audio.jobs.running, 0,
+            "a cancelled extraction starts no worker"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn player_reports_the_missing_fmod_bank_location() {
+        let (root, request, _) = missing_bank_fixture("missing-player-bank");
+        let tags = request.tags_root.unwrap();
+        let mut audio = AudioState {
+            pending: VecDeque::from([SoundAction::Play {
+                id: Some(123),
+                key: "test".to_owned(),
+                label: "test".to_owned(),
+                tags_root: None,
+            }]),
+            ..Default::default()
+        };
+
+        audio.process(Some(&tags), &egui::Context::default());
+
+        let status = audio.status.as_deref().expect("visible player error");
+        assert!(status.starts_with("FMOD audio unavailable:"));
+        let expected = root.join("fmod").join("pc").display().to_string();
+        assert!(
+            status.contains(&expected),
+            "{status:?} did not contain {expected:?}"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn player_uses_the_tags_own_kit_instead_of_the_active_kit() {
+        let (root, request, _) = missing_bank_fixture("player-owning-kit");
+        let owning_tags = request.tags_root.unwrap();
+        let other_tags = root.join("other-kit/tags");
+        std::fs::create_dir_all(&other_tags).unwrap();
+        let mut audio = AudioState {
+            pending: VecDeque::from([SoundAction::Play {
+                id: Some(123),
+                key: "test".to_owned(),
+                label: "test".to_owned(),
+                tags_root: Some(owning_tags),
+            }]),
+            ..Default::default()
+        };
+
+        audio.process(Some(&other_tags), &egui::Context::default());
+
+        let status = audio.status.as_deref().expect("visible player error");
+        let expected = root.join("fmod").join("pc").display().to_string();
+        let wrong = root
+            .join("other-kit")
+            .join("fmod")
+            .join("pc")
+            .display()
+            .to_string();
+        assert!(
+            status.contains(&expected),
+            "{status:?} did not contain {expected:?}"
+        );
+        assert!(
+            !status.contains(&wrong),
+            "player used the active kit: {status:?}"
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn language_fallback_does_not_overwrite_the_play_request() {
+        let (root, request, _) = missing_bank_fixture("language-then-play");
+        let tags = request.tags_root.unwrap();
+        let play = SoundAction::Play {
+            id: Some(123),
+            key: "test".to_owned(),
+            label: "test".to_owned(),
+            tags_root: Some(tags.clone()),
+        };
+        let mut audio = AudioState {
+            language: Some("language-from-another-kit".to_owned()),
+            pending: VecDeque::from([SoundAction::SetLanguage(None), play]),
+            ..Default::default()
+        };
+
+        audio.process(Some(&tags), &egui::Context::default());
+        assert_eq!(audio.language, None);
+        assert_eq!(audio.pending.len(), 1, "Play was lost behind SetLanguage");
+
+        audio.process(Some(&tags), &egui::Context::default());
+        assert!(
+            audio
+                .status
+                .as_deref()
+                .is_some_and(|status| status.starts_with("FMOD audio unavailable:")),
+            "the preserved Play action was not processed: {:?}",
+            audio.status
+        );
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn player_retries_a_failed_fmod_open_without_a_restart() {
+        let (root, request, _) = missing_bank_fixture("retry-player-bank");
+        let tags = request.tags_root.unwrap();
+        let play = || SoundAction::Play {
+            id: Some(123),
+            key: "test".to_owned(),
+            label: "test".to_owned(),
+            tags_root: None,
+        };
+        let mut audio = AudioState {
+            pending: VecDeque::from([play()]),
+            ..Default::default()
+        };
+        audio.process(Some(&tags), &egui::Context::default());
+        let first = audio.status.clone().expect("first bank error");
+
+        let bank_dir = root.join("fmod").join("pc");
+        std::fs::create_dir_all(&bank_dir).unwrap();
+        std::fs::write(bank_dir.join("sfx.fsb"), b"new but invalid").unwrap();
+        audio.pending.push_back(play());
+        audio.process(Some(&tags), &egui::Context::default());
+        let second = audio.status.clone().expect("retried bank error");
+
+        assert_ne!(first, second, "the original missing-bank result was cached");
+        assert!(second.contains("read header"), "{second}");
+        let _ = std::fs::remove_dir_all(root);
     }
 }

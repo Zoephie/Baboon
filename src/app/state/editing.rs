@@ -453,7 +453,8 @@ pub(in crate::app) struct FieldEditContext<'a> {
     pub(in crate::app) open_request: &'a mut Option<OpenTagRequest>,
     /// Set when the user clicks a Play/Stop control in the sound-player panel;
     /// the app drains it after rendering to drive FMOD bank playback.
-    pub(in crate::app) sound_play_request: &'a mut Option<super::audio::SoundAction>,
+    pub(in crate::app) sound_play_request:
+        &'a mut std::collections::VecDeque<super::audio::SoundAction>,
     /// Last sound-player status line (bank/resolve/playback result), for display.
     pub(in crate::app) sound_status: Option<&'a str>,
     /// Current playback volume (linear, 0.0..=1.0), for the sound-player slider.
@@ -531,7 +532,7 @@ pub(in crate::app) struct EditSinks {
     block_ops: Vec<BlockOp>,
     block_confirm: Option<BlockConfirm>,
     open_request: Option<OpenTagRequest>,
-    sound_play_request: Option<super::audio::SoundAction>,
+    sound_play_request: std::collections::VecDeque<super::audio::SoundAction>,
     sound_extract_request: Option<super::sound_extract::ExtractRequest>,
     ce_sound_ref_request: Option<CeSoundRefRequest>,
     tool_import: Option<ToolImportRequest>,

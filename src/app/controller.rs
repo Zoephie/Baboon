@@ -720,6 +720,116 @@ pub(in crate::app) fn wrapper_origin_for(
     }
 }
 
+fn extraction_scope_key(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('\\', "/")
+        .trim_matches('/')
+        .to_ascii_lowercase()
+}
+
+fn scope_contains(parent: &str, child: &str) -> bool {
+    parent.is_empty()
+        || child == parent
+        || child
+            .strip_prefix(parent)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
+fn mark_tree_loaded(tree: &mut TagTree) {
+    fn mark(node: &mut TagTreeNode) {
+        node.children_loaded = true;
+        node.entries_loaded = true;
+        for child in &mut node.children {
+            mark(child);
+        }
+    }
+    for node in &mut tree.children {
+        mark(node);
+    }
+}
+
+fn find_tree_node_mut<'a>(
+    nodes: &'a mut [TagTreeNode],
+    wanted: &str,
+) -> Option<&'a mut TagTreeNode> {
+    for node in nodes {
+        if extraction_scope_key(&node.rel_path) == wanted {
+            return Some(node);
+        }
+        if let Some(found) = find_tree_node_mut(&mut node.children, wanted) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Replace the overlap between a browser tree rooted at `tree_root` and one
+/// recursively loaded extraction scope. Entry indices continue to address the
+/// shared lazy `entries` vector.
+fn replace_loaded_tree_scope(
+    tree: &mut TagTree,
+    tree_root: &Path,
+    loaded_scope: &Path,
+    entries: &[TagEntry],
+) {
+    let root_key = extraction_scope_key(tree_root);
+    let scope_key = extraction_scope_key(loaded_scope);
+    if scope_contains(&scope_key, &root_key) {
+        *tree = crate::source::build_tree_beneath(entries, tree_root);
+        mark_tree_loaded(tree);
+    } else if scope_contains(&root_key, &scope_key) {
+        let mut replacement = crate::source::build_tree_beneath(entries, loaded_scope);
+        mark_tree_loaded(&mut replacement);
+        if let Some(node) = find_tree_node_mut(&mut tree.children, &scope_key) {
+            node.children = replacement.children;
+            node.entries = replacement.entries;
+            node.children_loaded = true;
+            node.entries_loaded = true;
+        }
+    }
+}
+
+#[cfg(test)]
+mod folder_extractable_tree_tests {
+    use super::*;
+
+    fn sound(path: &str) -> TagEntry {
+        TagEntry {
+            key: path.to_owned(),
+            display_path: format!("{path}.sound"),
+            group_tag: u32::from_be_bytes(*b"snd!"),
+            group_name: Some("sound".to_owned()),
+            location: TagEntryLocation::LooseFile(PathBuf::from(format!(
+                "C:/kit/tags/{path}.sound"
+            ))),
+        }
+    }
+
+    #[test]
+    fn loading_an_extraction_scope_materializes_its_nested_tags() {
+        let entries = vec![sound("sound/a"), sound("sound/sub/b")];
+        let mut tree = TagTree {
+            children: vec![TagTreeNode {
+                label: "sound".to_owned(),
+                rel_path: PathBuf::from("sound"),
+                children_loaded: true,
+                entries_loaded: true,
+                ..Default::default()
+            }],
+            entries: Vec::new(),
+        };
+
+        replace_loaded_tree_scope(&mut tree, Path::new(""), Path::new("sound"), &entries);
+
+        let sound_node = &tree.children[0];
+        assert!(sound_node.children_loaded && sound_node.entries_loaded);
+        assert_eq!(
+            crate::app::browser::collect_sound_keys(sound_node, &entries),
+            vec!["sound/a".to_owned(), "sound/sub/b".to_owned()]
+        );
+    }
+}
+
 impl Baboon {
     /// Resolve (and cache) the Wwise media a Campaign Evolved `sound` tag binds
     /// to. Returns `None` for every other game and source kind.
@@ -873,11 +983,13 @@ impl Baboon {
             let Some(first) = media.into_iter().next() else {
                 return;
             };
-            self.audio.pending = Some(crate::app::audio::SoundAction::PlayCeMedia {
-                paks_root,
-                label: format!("{} \u{00B7} {}", request.label, first.display_name()),
-                media: Box::new(first),
-            });
+            self.audio
+                .pending
+                .push_back(crate::app::audio::SoundAction::PlayCeMedia {
+                    paks_root,
+                    label: format!("{} \u{00B7} {}", request.label, first.display_name()),
+                    media: Box::new(first),
+                });
             return;
         }
         let Some(base) = rfd::FileDialog::new()
@@ -1163,6 +1275,12 @@ impl Baboon {
                 WorkerMessage::AllEntriesScanned { stamp, result } => {
                     self.handle_all_entries_scanned(stamp, result, ctx)
                 }
+                WorkerMessage::FolderExtractablesLoaded {
+                    stamp,
+                    rel_path,
+                    label,
+                    result,
+                } => self.handle_folder_extractables_loaded(stamp, rel_path, label, result),
                 WorkerMessage::EntryIndexScanProgress {
                     stamp,
                     processed,
@@ -2629,6 +2747,131 @@ impl Baboon {
         );
     }
 
+    /// Recursively materialize one loose browser folder for the bulk extract
+    /// menu. A completed global index can satisfy this immediately; otherwise
+    /// the same progress-reporting scanner used by indexing runs on a worker.
+    pub(super) fn begin_load_folder_extractables(
+        &mut self,
+        rel_path: PathBuf,
+        label: String,
+        ctx: egui::Context,
+    ) {
+        let kit_index = self.active;
+        if self.kits[kit_index].scanning_entries {
+            self.status = "A folder scan is already running".to_owned();
+            return;
+        }
+        let Some(source) = self.kits[kit_index].source.as_ref() else {
+            return;
+        };
+        let TagSource::LooseFolder { root, .. } = &source.source else {
+            return;
+        };
+
+        if source.complete_scan {
+            let entries = source
+                .all_entries
+                .iter()
+                .filter(|entry| crate::source::entry_is_beneath_folder(entry, &rel_path))
+                .cloned()
+                .collect();
+            self.install_folder_extractables(kit_index, &rel_path, entries);
+            self.status = format!("Loaded the entire {label} folder for extraction");
+            return;
+        }
+
+        let root = root.clone();
+        let names = source.names.clone();
+        let tx = self.tx.clone();
+        let kit = &mut self.kits[kit_index];
+        kit.generation = kit.generation.wrapping_add(1);
+        let stamp = KitStamp {
+            kit: kit.id,
+            generation: kit.generation,
+        };
+        let progress_label = format!("Loading the entire {label} folder for extraction...");
+        kit.scanning_entries = true;
+        kit.index_jobs.entry_progress = Some(EntryIndexProgressState {
+            label: progress_label.clone(),
+            processed: 0,
+            total: 0,
+            matched: 0,
+        });
+        self.status = progress_label;
+        let progress_ctx = ctx.clone();
+        let worker_path = rel_path.clone();
+        let worker_label = label.clone();
+        spawn_worker(
+            &self.tx,
+            &ctx,
+            move || {
+                let result = scan_folder_subtree_entries_with_progress(
+                    &root,
+                    &worker_path,
+                    &names,
+                    move |progress| {
+                        let _ = tx.send(WorkerMessage::EntryIndexScanProgress {
+                            stamp,
+                            processed: progress.processed,
+                            total: progress.total,
+                            matched: progress.matched,
+                        });
+                        progress_ctx.request_repaint();
+                    },
+                )
+                .map_err(|error| error.to_string());
+                WorkerMessage::FolderExtractablesLoaded {
+                    stamp,
+                    rel_path: worker_path,
+                    label: worker_label,
+                    result,
+                }
+            },
+            move |error| WorkerMessage::FolderExtractablesLoaded {
+                stamp,
+                rel_path,
+                label,
+                result: Err(error),
+            },
+        );
+    }
+
+    /// Merge a recursively-scanned scope into the lazy entry list and replace
+    /// that scope in every browser tree whose root overlaps it.
+    pub(super) fn install_folder_extractables(
+        &mut self,
+        kit_index: usize,
+        rel_path: &Path,
+        scanned: Vec<TagEntry>,
+    ) {
+        let kit = &mut self.kits[kit_index];
+        let Some(source) = kit.source.as_mut() else {
+            return;
+        };
+        let mut known: HashSet<String> = source
+            .entries
+            .iter()
+            .map(|entry| entry.key.clone())
+            .collect();
+        source.entries.extend(
+            scanned
+                .into_iter()
+                .filter(|entry| known.insert(entry.key.clone())),
+        );
+        replace_loaded_tree_scope(&mut source.tree, Path::new(""), rel_path, &source.entries);
+        source.group_tree = crate::source::build_group_tree(&source.entries);
+        let new_generation = kit.generation.wrapping_add(1);
+        for pane in kit.folder_browsers.values_mut() {
+            replace_loaded_tree_scope(&mut pane.tree, &pane.rel_path, rel_path, &source.entries);
+            // Keep the materialized tree installed above. Marking it stale
+            // caused the next frame to replace it with a direct-only lazy tree.
+            pane.cached_generation = new_generation;
+            pane.group_tree_for = None;
+            pane.filter_cache = FilterCache::default();
+        }
+        kit.generation = new_generation;
+    }
+
     /// Starts source work off the UI thread and reports completion through `WorkerMessage`.
     /// Captured source identity prevents stale results from replacing newer state.
     pub(super) fn maybe_refresh_entry_index(&mut self, ctx: egui::Context) {
@@ -3933,6 +4176,13 @@ impl Baboon {
             BrowserAction::ExtractRaw(key) => self.begin_extract_raw(key, ctx),
             BrowserAction::ExtractBitmap(key) => self.begin_extract_bitmap(key, ctx),
             BrowserAction::ExtractBitmapFolder(keys) => self.begin_extract_bitmap_folder(keys, ctx),
+            BrowserAction::ExtractSound {
+                keys,
+                all_languages,
+            } => self.begin_extract_sounds(keys, all_languages),
+            BrowserAction::LoadFolderExtractables { rel_path, label } => {
+                self.begin_load_folder_extractables(rel_path, label, ctx)
+            }
             BrowserAction::ExtractGeometry(key) => self.begin_extract_geometry(key, ctx),
             BrowserAction::ExtractImportInfo(key) => self.begin_extract_import_info(key, ctx),
             BrowserAction::ExtractAnimation(key) => self.begin_extract_animation(key, ctx),
@@ -4485,6 +4735,150 @@ impl Baboon {
             let _ = tx.send(WorkerMessage::ExportFinished(result));
             ctx.request_repaint();
         });
+    }
+
+    /// Extract one or more browser-selected `.sound` tags without opening
+    /// them. Loose kits retain the sound pane's automatic `data[_lang]` layout;
+    /// container sounds have no editing-kit data root and therefore retain
+    /// their existing folder picker behavior.
+    pub(super) fn begin_extract_sounds(&mut self, keys: Vec<String>, all_languages: bool) {
+        let entries: Vec<TagEntry> = keys
+            .iter()
+            .filter_map(|key| self.entry_for_key(key).cloned())
+            .filter(|entry| crate::app::editor::is_sound_group(entry.group_tag))
+            .collect();
+        if entries.is_empty() {
+            self.status = "No loaded sound tags found".to_owned();
+            return;
+        }
+
+        let source_kind = self.source().map(|source| source.source.clone());
+        match source_kind {
+            Some(TagSource::LooseFolder { root, .. }) => {
+                let game = self.source().and_then(|source| source.game.clone());
+                let selected_language = self.audio.language.clone();
+                let shared_fmod_banks = matches!(
+                    game.as_deref(),
+                    Some("halo3_mcc") | Some("halo3odst_mcc") | Some("haloreach_mcc")
+                )
+                .then(|| {
+                    blam_tags::audio::SoundBanks::open_pc_language(
+                        &root,
+                        Some("__baboon_shared_bank_only__"),
+                    )
+                    .ok()
+                })
+                .flatten();
+                let mut items = Vec::new();
+                let mut read_errors = 0usize;
+                for entry in &entries {
+                    let abs = match &entry.location {
+                        TagEntryLocation::LooseFile(path) => path.clone(),
+                        _ => continue,
+                    };
+                    match crate::source::read_entry(
+                        self.source()
+                            .map(|source| &source.source)
+                            .expect("source exists"),
+                        entry,
+                    ) {
+                        Ok(tag) => items.extend(crate::app::editor::browser_sound_extract_items(
+                            &tag,
+                            &abs,
+                            &root,
+                            game.as_deref(),
+                            selected_language.as_deref(),
+                            all_languages,
+                            shared_fmod_banks.as_ref(),
+                        )),
+                        Err(_) => read_errors += 1,
+                    }
+                }
+                if items.is_empty() {
+                    self.status = if read_errors > 0 {
+                        format!("Could not read {read_errors} sound tag(s)")
+                    } else {
+                        "The selected sound tags contain no extractable audio".to_owned()
+                    };
+                    return;
+                }
+                let count = entries.len();
+                self.pending_sound_extract = Some(crate::app::sound_extract::ExtractRequest {
+                    items,
+                    tags_root: Some(root),
+                    label: if all_languages {
+                        format!("{count} sound tag(s), all available languages")
+                    } else {
+                        format!("{count} sound tag(s)")
+                    },
+                });
+            }
+            Some(TagSource::IoStoreContainerSet { root, .. }) => {
+                let Some(base) = rfd::FileDialog::new()
+                    .set_title(if all_languages {
+                        "Extract Sound Tags (All Available Languages)"
+                    } else {
+                        "Extract Sound Tags"
+                    })
+                    .pick_folder()
+                else {
+                    return;
+                };
+                let multiple = entries.len() > 1;
+                let selected_language = self.audio.language.clone();
+                let mut items = Vec::new();
+                for entry in &entries {
+                    let Some(binding) = self.ce_sound_binding(self.active, &entry.key, entry)
+                    else {
+                        continue;
+                    };
+                    let languages = if all_languages {
+                        binding.languages()
+                    } else {
+                        vec![binding.language_to_show(selected_language.as_deref())]
+                    };
+                    let tag_base = if multiple {
+                        base.join(std::path::Path::new(&entry.display_path).with_extension(""))
+                    } else {
+                        base.clone()
+                    };
+                    for language in languages {
+                        let language_base = if all_languages {
+                            tag_base.join(crate::app::sound_extract::sanitize_component(&language))
+                        } else {
+                            tag_base.clone()
+                        };
+                        items.extend(binding.media_for_language(&language).into_iter().map(
+                            |media| crate::app::sound_extract::ExtractItem {
+                                out_path: language_base.join(format!(
+                                    "{}.wav",
+                                    crate::app::sound_extract::sanitize_component(
+                                        &media.display_name()
+                                    )
+                                )),
+                                source: crate::app::sound_extract::ExtractSource::CeMedia {
+                                    paks_root: root.clone(),
+                                    media: Box::new(media.clone()),
+                                },
+                            },
+                        ));
+                    }
+                }
+                if items.is_empty() {
+                    self.status = "The selected sound tags have no audio bound".to_owned();
+                    return;
+                }
+                self.pending_sound_extract = Some(crate::app::sound_extract::ExtractRequest {
+                    items,
+                    tags_root: None,
+                    label: format!("{} sound tag(s)", entries.len()),
+                });
+            }
+            _ => {
+                self.status =
+                    "Sound extraction requires an editing-kit or container source".to_owned();
+            }
+        }
     }
 
     /// Asks where to put every shipped tag in the mounted containers, then

@@ -510,6 +510,44 @@ fn tag_extract_menu_button(
             action = Some(BrowserAction::ExtractBitmap(entry.key.clone()));
             ui.close_menu();
         }
+        if crate::app::editor::is_sound_group(entry.group_tag) {
+            let language = browser_sound_language(ui);
+            let localized = sound_key_may_have_languages(&entry.key);
+            let extract_label = if localized {
+                format!("Extract sounds ({language})")
+            } else {
+                "Extract sounds".to_owned()
+            };
+            if context_menu_button(ui, &extract_label).clicked() {
+                action = Some(BrowserAction::ExtractSound {
+                    keys: vec![entry.key.clone()],
+                    all_languages: false,
+                });
+                ui.close_menu();
+            }
+            if localized {
+                let available = browser_sound_available_languages(ui);
+                let suffix = available.map_or_else(String::new, |count| format!(" ×{count}"));
+                let response = ui
+                    .add_enabled_ui(available != Some(0), |ui| {
+                        context_menu_button(
+                            ui,
+                            &format!("Extract sounds (All Available Languages){suffix}"),
+                        )
+                    })
+                    .inner
+                    .on_disabled_hover_text(
+                        "No localized sound banks are installed; shared SFX can still be extracted",
+                    );
+                if response.clicked() {
+                    action = Some(BrowserAction::ExtractSound {
+                        keys: vec![entry.key.clone()],
+                        all_languages: true,
+                    });
+                    ui.close_menu();
+                }
+            }
+        }
         if is_material_shader_group(entry.group_tag)
             && context_menu_button(ui, "Extract source shaders...").clicked()
         {
@@ -1481,6 +1519,14 @@ fn paths_match_case_insensitive(a: &Path, b: &Path) -> bool {
         .eq_ignore_ascii_case(&b.to_string_lossy().replace('\\', "/"))
 }
 
+/// Browser-only presentation hint. The extractor verifies this precisely by
+/// resolving permutations against `sfx.fsb`; the conventional dialogue tree
+/// lets menus avoid offering redundant language actions before a tag is read.
+fn sound_key_may_have_languages(key: &str) -> bool {
+    let normalized = key.replace('\\', "/").to_ascii_lowercase();
+    normalized.contains("sound/dialog/")
+}
+
 /// Collect the folder-wide export commands beneath one row. Keeping this
 /// shared between the lazy loose-folder tree and fully indexed sources makes
 /// their menus differ only in whether they say "loaded" and whether raw
@@ -1492,17 +1538,32 @@ fn folder_extract_menu_button(
     include_container_tags: bool,
     loaded_labels: bool,
 ) -> Option<BrowserAction> {
-    let container_keys = include_container_tags
-        .then(|| collect_container_tag_keys(node, entries))
-        .unwrap_or_default();
-    let bitmap_keys = collect_bitmap_keys(node, entries);
-    let material_shader_keys = collect_material_shader_keys(node, entries);
-    let hlsl_include_keys = collect_hlsl_include_keys(node, entries);
+    let (container_keys, bitmap_keys, sound_keys, material_shader_keys, hlsl_include_keys) =
+        if browser_loose_source(ui) {
+            // A loose source has one canonical loaded-entry list shared by the
+            // sidebar, favorites, and every folder pane. Filter that list by
+            // path instead of trusting whichever lazy tree happens to be
+            // drawing this menu, otherwise the same folder reports different
+            // counts in different views.
+            collect_loaded_extractable_keys(entries, &node.rel_path, include_container_tags)
+        } else {
+            (
+                include_container_tags
+                    .then(|| collect_container_tag_keys(node, entries))
+                    .unwrap_or_default(),
+                collect_bitmap_keys(node, entries),
+                collect_sound_keys(node, entries),
+                collect_material_shader_keys(node, entries),
+                collect_hlsl_include_keys(node, entries),
+            )
+        };
     folder_extract_menu_from_keys(
         ui,
         folder_display_path(node),
+        node.rel_path.clone(),
         container_keys,
         bitmap_keys,
+        sound_keys,
         material_shader_keys,
         hlsl_include_keys,
         loaded_labels,
@@ -1519,46 +1580,68 @@ pub(in crate::app) fn folder_tree_extract_menu_button(
     tree: &TagTree,
     entries: &[TagEntry],
     label: String,
+    rel_path: PathBuf,
     include_container_tags: bool,
     loaded_labels: bool,
     open_left: bool,
 ) -> Option<BrowserAction> {
-    let mut container_keys = Vec::new();
-    let mut bitmap_keys = Vec::new();
-    let mut material_shader_keys = Vec::new();
-    let mut hlsl_include_keys = Vec::new();
+    let (container_keys, bitmap_keys, sound_keys, material_shader_keys, hlsl_include_keys) =
+        if browser_loose_source(ui) {
+            collect_loaded_extractable_keys(entries, &rel_path, include_container_tags)
+        } else {
+            let mut container_keys = Vec::new();
+            let mut bitmap_keys = Vec::new();
+            let mut sound_keys = Vec::new();
+            let mut material_shader_keys = Vec::new();
+            let mut hlsl_include_keys = Vec::new();
 
-    for &entry_index in &tree.entries {
-        let Some(entry) = entries.get(entry_index) else {
-            continue;
+            for &entry_index in &tree.entries {
+                let Some(entry) = entries.get(entry_index) else {
+                    continue;
+                };
+                if include_container_tags
+                    && matches!(entry.location, TagEntryLocation::Container { .. })
+                {
+                    container_keys.push(entry.key.clone());
+                }
+                if is_bitmap_tag(entry) {
+                    bitmap_keys.push(entry.key.clone());
+                }
+                if crate::app::editor::is_sound_group(entry.group_tag) {
+                    sound_keys.push(entry.key.clone());
+                }
+                if is_material_shader_browser_tag(entry) {
+                    material_shader_keys.push(entry.key.clone());
+                }
+                if is_hlsl_include_tag(entry) {
+                    hlsl_include_keys.push(entry.key.clone());
+                }
+            }
+            for child in &tree.children {
+                if include_container_tags {
+                    collect_container_tag_keys_into(child, entries, &mut container_keys);
+                }
+                collect_bitmap_keys_into(child, entries, &mut bitmap_keys);
+                collect_sound_keys_into(child, entries, &mut sound_keys);
+                collect_material_shader_keys_into(child, entries, &mut material_shader_keys);
+                collect_hlsl_include_keys_into(child, entries, &mut hlsl_include_keys);
+            }
+            (
+                container_keys,
+                bitmap_keys,
+                sound_keys,
+                material_shader_keys,
+                hlsl_include_keys,
+            )
         };
-        if include_container_tags && matches!(entry.location, TagEntryLocation::Container { .. }) {
-            container_keys.push(entry.key.clone());
-        }
-        if is_bitmap_tag(entry) {
-            bitmap_keys.push(entry.key.clone());
-        }
-        if is_material_shader_browser_tag(entry) {
-            material_shader_keys.push(entry.key.clone());
-        }
-        if is_hlsl_include_tag(entry) {
-            hlsl_include_keys.push(entry.key.clone());
-        }
-    }
-    for child in &tree.children {
-        if include_container_tags {
-            collect_container_tag_keys_into(child, entries, &mut container_keys);
-        }
-        collect_bitmap_keys_into(child, entries, &mut bitmap_keys);
-        collect_material_shader_keys_into(child, entries, &mut material_shader_keys);
-        collect_hlsl_include_keys_into(child, entries, &mut hlsl_include_keys);
-    }
 
     folder_extract_menu_from_keys(
         ui,
         label,
+        rel_path,
         container_keys,
         bitmap_keys,
+        sound_keys,
         material_shader_keys,
         hlsl_include_keys,
         loaded_labels,
@@ -1567,11 +1650,62 @@ pub(in crate::app) fn folder_tree_extract_menu_button(
     )
 }
 
+type ExtractableKeys = (
+    Vec<String>,
+    Vec<String>,
+    Vec<String>,
+    Vec<String>,
+    Vec<String>,
+);
+
+/// Collect loaded extractables from the source-wide loose entry list. The path
+/// test includes files directly inside `folder` as well as every descendant.
+fn collect_loaded_extractable_keys(
+    entries: &[TagEntry],
+    folder: &Path,
+    include_container_tags: bool,
+) -> ExtractableKeys {
+    let mut container_keys = Vec::new();
+    let mut bitmap_keys = Vec::new();
+    let mut sound_keys = Vec::new();
+    let mut material_shader_keys = Vec::new();
+    let mut hlsl_include_keys = Vec::new();
+    for entry in entries
+        .iter()
+        .filter(|entry| crate::source::entry_is_beneath_folder(entry, folder))
+    {
+        if include_container_tags && matches!(entry.location, TagEntryLocation::Container { .. }) {
+            container_keys.push(entry.key.clone());
+        }
+        if is_bitmap_tag(entry) {
+            bitmap_keys.push(entry.key.clone());
+        }
+        if crate::app::editor::is_sound_group(entry.group_tag) {
+            sound_keys.push(entry.key.clone());
+        }
+        if is_material_shader_browser_tag(entry) {
+            material_shader_keys.push(entry.key.clone());
+        }
+        if is_hlsl_include_tag(entry) {
+            hlsl_include_keys.push(entry.key.clone());
+        }
+    }
+    (
+        container_keys,
+        bitmap_keys,
+        sound_keys,
+        material_shader_keys,
+        hlsl_include_keys,
+    )
+}
+
 fn folder_extract_menu_from_keys(
     ui: &mut Ui,
     label: String,
+    rel_path: PathBuf,
     container_keys: Vec<String>,
     bitmap_keys: Vec<String>,
+    sound_keys: Vec<String>,
     material_shader_keys: Vec<String>,
     hlsl_include_keys: Vec<String>,
     loaded_labels: bool,
@@ -1580,6 +1714,7 @@ fn folder_extract_menu_from_keys(
 ) -> Option<BrowserAction> {
     let has_extractable = !container_keys.is_empty()
         || !bitmap_keys.is_empty()
+        || !sound_keys.is_empty()
         || !material_shader_keys.is_empty()
         || !hlsl_include_keys.is_empty();
 
@@ -1587,6 +1722,26 @@ fn folder_extract_menu_from_keys(
         let contents = |ui: &mut Ui| {
             style_tag_context_menu(ui);
             let mut action = None;
+            if browser_loose_source(ui) {
+                let response = ui
+                    .add_enabled_ui(!browser_entries_scanning(ui), |ui| {
+                        context_menu_button(ui, "Load entire folder for extractable files")
+                    })
+                    .inner
+                    .on_hover_text(if browser_entries_scanning(ui) {
+                        "A folder scan is already running"
+                    } else {
+                        "Load extractable tags directly in this folder and in every subfolder"
+                    });
+                if response.clicked() {
+                    action = Some(BrowserAction::LoadFolderExtractables {
+                        rel_path: rel_path.clone(),
+                        label: label.clone(),
+                    });
+                    ui.close_menu();
+                }
+                context_menu_separator(ui);
+            }
             if include_container_tags {
                 let count = container_keys.len();
                 let response = ui
@@ -1620,6 +1775,76 @@ fn folder_extract_menu_from_keys(
             if bitmap_response.clicked() {
                 action = Some(BrowserAction::ExtractBitmapFolder(bitmap_keys));
                 ui.close_menu();
+            }
+
+            let sound_count = sound_keys.len();
+            let language = browser_sound_language(ui);
+            let has_localized_sounds = sound_keys
+                .iter()
+                .any(|key| sound_key_may_have_languages(key));
+            let has_shared_sounds = sound_keys
+                .iter()
+                .any(|key| !sound_key_may_have_languages(key));
+            let selected_label = if has_localized_sounds {
+                format!("Extract loaded sounds ({language}) ({sound_count})")
+            } else {
+                format!("Extract loaded sounds ({sound_count})")
+            };
+            let sound_response = ui
+                .add_enabled_ui(sound_count > 0, |ui| {
+                    context_menu_button(ui, &selected_label)
+                })
+                .inner
+                .on_hover_text(format!(
+                    "Extract {} from {sound_count} loaded sound tag(s){}",
+                    if has_localized_sounds {
+                        format!("the last-selected language ({language})")
+                    } else {
+                        "shared audio".to_owned()
+                    },
+                    if has_localized_sounds && has_shared_sounds {
+                        "; shared SFX are extracted once"
+                    } else {
+                        ""
+                    }
+                ));
+            if sound_response.clicked() {
+                action = Some(BrowserAction::ExtractSound {
+                    keys: sound_keys.clone(),
+                    all_languages: false,
+                });
+                ui.close_menu();
+            }
+            let available_languages = browser_sound_available_languages(ui);
+            let language_suffix = available_languages
+                .map_or_else(String::new, |count| format!(" ×{count}"));
+            // A loaded SFX-only folder has no meaningful language fan-out, so
+            // keep just the single extract action. Empty folders retain the
+            // disabled row, consistent with the other zero-count extractors.
+            if sound_count == 0 || has_localized_sounds {
+                let all_sound_response = ui
+                    .add_enabled_ui(
+                        sound_count > 0 && available_languages != Some(0),
+                        |ui| {
+                            context_menu_button(
+                                ui,
+                                &format!(
+                                    "Extract loaded sounds (All Available Languages) ({sound_count}){language_suffix}"
+                                ),
+                            )
+                        },
+                    )
+                    .inner
+                    .on_hover_text(
+                        "Extract every installed language from localized tags; shared SFX are extracted once",
+                    );
+                if all_sound_response.clicked() {
+                    action = Some(BrowserAction::ExtractSound {
+                        keys: sound_keys,
+                        all_languages: true,
+                    });
+                    ui.close_menu();
+                }
             }
 
             let shader_count = material_shader_keys.len();
@@ -2307,6 +2532,29 @@ pub(in crate::app) fn collect_bitmap_keys_into(
     }
     for child in &node.children {
         collect_bitmap_keys_into(child, entries, keys);
+    }
+}
+
+pub(in crate::app) fn collect_sound_keys(node: &TagTreeNode, entries: &[TagEntry]) -> Vec<String> {
+    let mut keys = Vec::new();
+    collect_sound_keys_into(node, entries, &mut keys);
+    keys
+}
+
+pub(in crate::app) fn collect_sound_keys_into(
+    node: &TagTreeNode,
+    entries: &[TagEntry],
+    keys: &mut Vec<String>,
+) {
+    for &entry_index in &node.entries {
+        if let Some(entry) = entries.get(entry_index)
+            && crate::app::editor::is_sound_group(entry.group_tag)
+        {
+            keys.push(entry.key.clone());
+        }
+    }
+    for child in &node.children {
+        collect_sound_keys_into(child, entries, keys);
     }
 }
 
@@ -3112,6 +3360,37 @@ mod tests {
         }
     }
 
+    #[test]
+    fn loaded_extractables_include_direct_files_and_descendants_only() {
+        let loose_entry = |path: &str, group_tag: u32| TagEntry {
+            key: path.to_owned(),
+            display_path: path.to_owned(),
+            group_tag,
+            group_name: None,
+            location: TagEntryLocation::LooseFile(PathBuf::from(path)),
+        };
+        let entries = vec![
+            loose_entry("sound/direct.sound", u32::from_be_bytes(*b"snd!")),
+            loose_entry(
+                "sound/characters/nested.sound",
+                u32::from_be_bytes(*b"snd!"),
+            ),
+            loose_entry("sound/direct.bitmap", u32::from_be_bytes(*b"bitm")),
+            loose_entry("other/unrelated.sound", u32::from_be_bytes(*b"snd!")),
+        ];
+
+        let (_, bitmaps, sounds, shaders, includes) =
+            collect_loaded_extractable_keys(&entries, Path::new("sound"), false);
+
+        assert_eq!(bitmaps, vec!["sound/direct.bitmap"]);
+        assert_eq!(
+            sounds,
+            vec!["sound/direct.sound", "sound/characters/nested.sound"]
+        );
+        assert!(shaders.is_empty());
+        assert!(includes.is_empty());
+    }
+
     /// Only a hovered bitmap row asks for its preview thumbnail. Every bitmap
     /// row laid out used to, so expanding a folder read and decoded all of its
     /// bitmaps in the background, and repainted until they were done.
@@ -3759,6 +4038,53 @@ mod tests {
             "a subfolder's tags were not counted"
         );
     }
+
+    #[test]
+    fn sound_tags_are_extractable_and_collected_recursively() {
+        let sound = |key: &str| TagEntry {
+            key: key.to_owned(),
+            display_path: format!("{key}.sound"),
+            group_tag: u32::from_be_bytes(*b"snd!"),
+            group_name: Some("sound".to_owned()),
+            location: TagEntryLocation::LooseFile(PathBuf::from(format!(
+                "C:/kit/tags/{key}.sound"
+            ))),
+        };
+        let entries = vec![
+            sound("sound/a"),
+            entry(TagEntryLocation::LooseFile(PathBuf::from(
+                "C:/kit/tags/objects/not_sound.model",
+            ))),
+            sound("sound/sub/b"),
+        ];
+        let node = |rel: &str, indices: Vec<usize>| crate::source::TagTreeNode {
+            label: rel.rsplit('/').next().unwrap_or(rel).to_owned(),
+            rel_path: PathBuf::from(rel),
+            children: Vec::new(),
+            children_loaded: true,
+            entries: indices,
+            entries_loaded: true,
+            pending: false,
+        };
+        let mut root = node("sound", vec![0, 1]);
+        root.children.push(node("sound/sub", vec![2]));
+
+        assert!(supports_tag_extract_menu(u32::from_be_bytes(*b"snd!")));
+        assert_eq!(
+            collect_sound_keys(&root, &entries),
+            vec!["sound/a".to_owned(), "sound/sub/b".to_owned()]
+        );
+    }
+
+    #[test]
+    fn sound_menu_distinguishes_dialogue_from_shared_sfx_paths() {
+        assert!(sound_key_may_have_languages(
+            r"file:C:\kit\tags\sound\dialog\combat\brute.sound"
+        ));
+        assert!(!sound_key_may_have_languages(
+            r"file:C:\kit\tags\sound\visual_fx\explosion.sound"
+        ));
+    }
 }
 
 pub(in crate::app) fn folder_chevron_icon(ui: &mut Ui, openness: f32, response: &egui::Response) {
@@ -3925,6 +4251,7 @@ pub(in crate::app) fn supports_tag_extract_menu(group_tag: u32) -> bool {
         || supports_animation_extraction(group_tag)
         || supports_tag_import_info_extraction(group_tag)
         || is_bitmap_group(group_tag)
+        || crate::app::editor::is_sound_group(group_tag)
         || is_material_shader_group(group_tag)
         || is_hlsl_include_group(group_tag)
 }

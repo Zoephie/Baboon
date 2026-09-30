@@ -267,7 +267,8 @@
                 "Use per-permutation or per-event play controls, Stop, volume, language selection, and status readouts.",
                 "Decoded audio and external banks or packages are cached lazily.",
                 "Dialogue and sound_looping tags expose play and extraction controls for referenced sounds.",
-                "Extract one sound or all sounds to WAV under the data folder structure that tool expects; Halo CE can also extract original Ogg streams."
+                "Extract one sound or all sounds to WAV under the data folder structure that tool expects; Halo CE can also extract original Ogg streams.",
+                "Right-click a sound tag, or a revealed browser folder containing loaded sound tags, to extract the last-selected language or all available languages without opening each tag. Folder extraction menus can recursively load unopened subfolders first and report scan progress in the status bar."
               ]
             }
           ]

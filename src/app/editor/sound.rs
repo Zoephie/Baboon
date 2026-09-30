@@ -340,24 +340,48 @@ const H2_LANGUAGES: [&str; 9] = [
     "portuguese",
 ];
 
+/// Halo 3-family language catalog from the engine's sound schema. The first
+/// value is the FMOD bank stem; the second is the user-facing name.
+pub(super) const FMOD_LANGUAGES: [(&str, &str); 12] = [
+    ("english", "English"),
+    ("japanese", "Japanese"),
+    ("german", "German"),
+    ("french", "French"),
+    ("spanish", "Spanish"),
+    ("mexican", "Mexican Spanish"),
+    ("italian", "Italian"),
+    ("korean", "Korean"),
+    ("chinese-traditional", "Chinese (Traditional)"),
+    ("chinese-simplified", "Chinese (Simplified)"),
+    ("portuguese", "Portuguese"),
+    ("polish", "Polish"),
+];
+
 /// A language the picker offers: the value kept in the shared audio state
 /// (`None` = the source's default) and its label.
 pub(super) struct LanguageChoice {
-    value: Option<String>,
-    label: String,
+    pub(super) value: Option<String>,
+    pub(super) label: String,
+    pub(super) available: bool,
+    pub(super) unavailable_reason: Option<String>,
 }
 
 /// Localized languages available for the current source. Halo 2 carries its
 /// languages in the tag (`h2`), English being the default; Wwise `.pck`
 /// subdirs for H4/H2A and FMOD `.fsb` banks for the rest, behind a separate
 /// "default". Empty ⇒ single-language.
-fn language_choices(edit: &FieldEditContext<'_>, h2: Option<&H2Sound>) -> Vec<LanguageChoice> {
+pub(super) fn language_choices(
+    edit: &FieldEditContext<'_>,
+    h2: Option<&H2Sound>,
+) -> Vec<LanguageChoice> {
     let h2_choices = |languages: &mut dyn Iterator<Item = &str>| -> Vec<LanguageChoice> {
         languages
             .map(|language| LanguageChoice {
                 value: (!language.eq_ignore_ascii_case(H2_DEFAULT_LANGUAGE))
                     .then(|| language.to_owned()),
                 label: language_label(language),
+                available: true,
+                unavailable_reason: None,
             })
             .collect()
     };
@@ -371,19 +395,16 @@ fn language_choices(edit: &FieldEditContext<'_>, h2: Option<&H2Sound>) -> Vec<La
     if edit.game == Some("halo2_mcc") && edit.ce_sound.is_none() {
         return h2_choices(&mut H2_LANGUAGES.iter().copied());
     }
-    let with_default = |languages: Vec<String>| -> Vec<LanguageChoice> {
-        if languages.is_empty() {
-            return Vec::new();
-        }
-        std::iter::once(LanguageChoice {
-            value: None,
-            label: "default".to_owned(),
-        })
-        .chain(languages.into_iter().map(|language| LanguageChoice {
+    let available_choices = |languages: Vec<String>| -> Vec<LanguageChoice> {
+        languages
+            .into_iter()
+            .map(|language| LanguageChoice {
             label: language.clone(),
             value: Some(language),
-        }))
-        .collect()
+            available: true,
+            unavailable_reason: None,
+        })
+            .collect()
     };
     // Campaign Evolved has no `tags_root` (its tags live in containers) and its
     // languages aren't discoverable from a bank directory — they're named by
@@ -396,17 +417,43 @@ fn language_choices(edit: &FieldEditContext<'_>, h2: Option<&H2Sound>) -> Vec<La
             .filter(|l| !l.eq_ignore_ascii_case("SFX"))
             .collect();
         if !langs.is_empty() {
-            return with_default(langs);
+            return available_choices(langs);
         }
     }
     let Some(root) = edit.tags_root else {
         return Vec::new();
     };
-    with_default(match edit.game {
+    if matches!(
+        edit.game,
+        Some("halo3_mcc") | Some("halo3odst_mcc") | Some("haloreach_mcc")
+    ) {
+        let installed = blam_tags::audio::SoundBanks::available_languages(root);
+        let bank_dir = root.parent().unwrap_or(root).join("fmod").join("pc");
+        return FMOD_LANGUAGES
+            .iter()
+            .map(|(bank, label)| {
+                let installed_name = installed
+                    .iter()
+                    .find(|candidate| candidate.eq_ignore_ascii_case(bank));
+                let available = installed_name.is_some();
+                LanguageChoice {
+                    value: Some(installed_name.map_or_else(|| (*bank).to_owned(), Clone::clone)),
+                    label: (*label).to_owned(),
+                    available,
+                    unavailable_reason: (!available).then(|| {
+                        format!(
+                            "Unavailable — {} is not installed",
+                            bank_dir.join(format!("{bank}.fsb")).display()
+                        )
+                    }),
+                }
+            })
+            .collect();
+    }
+    available_choices(match edit.game {
         Some("halo4_mcc") | Some("halo2amp_mcc") => {
             blam_tags::audio::WwiseBanks::available_languages(root)
         }
-
         _ => blam_tags::audio::SoundBanks::available_languages(root),
     })
 }
@@ -414,14 +461,34 @@ fn language_choices(edit: &FieldEditContext<'_>, h2: Option<&H2Sound>) -> Vec<La
 /// Shared transport row for every sound-player variant: Stop, a volume slider, a
 /// language selector (when the source is localized), and the status line. All
 /// changes queue a [`super::audio::SoundAction`] the app drains after rendering.
-fn draw_sound_transport(ui: &mut Ui, edit: &mut FieldEditContext<'_>, languages: &[LanguageChoice]) {
+fn draw_sound_transport(
+    ui: &mut Ui,
+    edit: &mut FieldEditContext<'_>,
+    languages: &[LanguageChoice],
+) {
+    let error_status = edit.sound_status.filter(|status| {
+        status.starts_with("FMOD audio unavailable:")
+            || status.starts_with("decode failed:")
+            || status.starts_with("resolve failed:")
+            || status.starts_with("Extraction cancelled")
+            || *status == "no audio output device"
+    });
+    let missing_fmod_languages = matches!(
+        edit.game,
+        Some("halo3_mcc") | Some("halo3odst_mcc") | Some("haloreach_mcc")
+    )
+    .then(|| edit.tags_root)
+    .flatten()
+    .filter(|root| blam_tags::audio::SoundBanks::available_languages(root).is_empty())
+    .map(|root| root.parent().unwrap_or(root).join("fmod").join("pc"));
     ui.horizontal(|ui| {
         if ui
             .button(RichText::new("\u{25A0} Stop"))
             .on_hover_text("Stop playback")
             .clicked()
         {
-            *edit.sound_play_request = Some(super::audio::SoundAction::Stop);
+            edit.sound_play_request
+                .push_back(super::audio::SoundAction::Stop);
         }
         let mut volume = edit.sound_volume;
         ui.spacing_mut().slider_width = 90.0;
@@ -434,7 +501,8 @@ fn draw_sound_transport(ui: &mut Ui, edit: &mut FieldEditContext<'_>, languages:
             .on_hover_text("Playback volume")
             .changed()
         {
-            *edit.sound_play_request = Some(super::audio::SoundAction::SetVolume(volume));
+            edit.sound_play_request
+                .push_back(super::audio::SoundAction::SetVolume(volume));
         }
         // Language selector — picks which localized audio plays and is
         // extracted (to `data_<lang>\`). A language this source lacks shows as
@@ -444,13 +512,18 @@ fn draw_sound_transport(ui: &mut Ui, edit: &mut FieldEditContext<'_>, languages:
             let shown = languages
                 .iter()
                 .find(|choice| {
-                    choice.value.as_deref().map(str::to_ascii_lowercase)
+                    choice.available
+                        && choice.value.as_deref().map(str::to_ascii_lowercase)
                         == current.as_deref().map(str::to_ascii_lowercase)
                 })
-                .or_else(|| languages.iter().find(|choice| choice.value.is_none()))
+                .or_else(|| languages.iter().find(|choice| choice.available))
                 .or(languages.first());
             let mut selected = shown.and_then(|choice| choice.value.clone());
-            let before = selected.clone();
+            // The selection is shared between editing kits. Commit the visual
+            // fallback too: otherwise a language chosen in H2 but absent from
+            // H3 continues opening that missing bank while the combo says
+            // "default".
+            let before = current;
             egui::ComboBox::from_id_salt("sound_language")
                 .selected_text(format!(
                     "\u{1F310} {}",
@@ -458,22 +531,47 @@ fn draw_sound_transport(ui: &mut Ui, edit: &mut FieldEditContext<'_>, languages:
                 ))
                 .show_ui(ui, |ui| {
                     for choice in languages {
-                        ui.selectable_value(&mut selected, choice.value.clone(), &choice.label);
+                        let response = ui
+                            .add_enabled_ui(choice.available, |ui| {
+                                ui.selectable_value(
+                                    &mut selected,
+                                    choice.value.clone(),
+                                    &choice.label,
+                                )
+                            })
+                            .inner;
+                        if let Some(reason) = &choice.unavailable_reason {
+                            response.on_hover_text(reason);
+                        }
                     }
                 })
                 .response
                 .on_hover_text(format!(
-                    "Language to play and extract ({} available)",
+                    "Language to play and extract ({} of {} available)",
+                    languages.iter().filter(|choice| choice.available).count(),
                     languages.len()
                 ));
             if selected != before {
-                *edit.sound_play_request = Some(super::audio::SoundAction::SetLanguage(selected));
+                edit.sound_play_request
+                    .push_back(super::audio::SoundAction::SetLanguage(selected));
             }
         }
-        if let Some(status) = edit.sound_status {
+        if let Some(status) = edit.sound_status.filter(|_| error_status.is_none()) {
             ui.label(RichText::new(status).color(subtle_dark()));
         }
     });
+    if let Some(error) = error_status {
+        ui.colored_label(ui.visuals().error_fg_color, format!("⚠ {error}"));
+    }
+    if let Some(path) = missing_fmod_languages {
+        ui.colored_label(
+            ui.visuals().warn_fg_color,
+            format!(
+                "⚠ No localized FMOD language bank is installed in {}. Effects in sfx.fsb can still play, but dialogue requires english.fsb and its matching .fsb.info.",
+                path.display()
+            ),
+        );
+    }
 }
 
 /// The block index a Halo 2 permutation keeps into `language permutation info`
@@ -493,7 +591,24 @@ fn permutation_lpi_index(perm: &TagStruct) -> Option<usize> {
 /// permutation with its name and audio source, classified identically for the
 /// player and the extractor. Capped so a pathological tag can't stall the UI.
 /// `h2` is the tag's [`H2Sound`], when it is one.
+#[cfg(test)]
 pub(super) fn sound_permutation_rows(tag: &TagFile, h2: Option<&H2Sound>) -> Vec<SoundPermRow> {
+    sound_permutation_rows_for_game(tag, h2, None)
+}
+
+/// Game-aware row classification. H3-family tags carry allocated, zero-filled
+/// `samples` placeholders even though their real audio lives in FMOD banks;
+/// buffer length alone therefore cannot distinguish them from CE/H2 inline
+/// audio.
+pub(super) fn sound_permutation_rows_for_game(
+    tag: &TagFile,
+    h2: Option<&H2Sound>,
+    game: Option<&str>,
+) -> Vec<SoundPermRow> {
+    let bank_backed = matches!(
+        game,
+        Some("halo3_mcc") | Some("halo3odst_mcc") | Some("haloreach_mcc")
+    );
     let root = tag.root();
     let Some(pitch_ranges) = find_block_field(&root, "pitch range") else {
         return Vec::new();
@@ -529,7 +644,9 @@ pub(super) fn sound_permutation_rows(tag: &TagFile, h2: Option<&H2Sound>) -> Vec
                 .and_then(|full| perm.field(full))
                 .and_then(|field| field.as_data())
                 .map_or(0, <[u8]>::len);
-            let kind = if inline_bytes > 0 {
+            let kind = if bank_backed {
+                RowKind::Bank
+            } else if inline_bytes > 0 {
                 let (codec, channels, sample_rate) = permutation_inline_params(&root, &perm);
                 RowKind::InlinePermutation {
                     codec,
@@ -561,10 +678,22 @@ pub(super) fn sound_permutation_rows(tag: &TagFile, h2: Option<&H2Sound>) -> Vec
     rows
 }
 
+/// Halo 3-family tags can expose fields that resemble Halo 2's inline
+/// localization table. Only interpret that layout for an actual Halo 2 source;
+/// otherwise theoretical tag languages leak into FMOD bank extraction.
+fn h2_sound_for_game(tag: &TagFile, game: Option<&str>) -> Option<H2Sound> {
+    matches!(game, Some("halo2_mcc"))
+        .then(|| H2Sound::read(tag))
+        .flatten()
+}
+
 /// A `.sound` tag's `<tags root>`-relative path without extension (e.g.
 /// `.../tags/sound/dialog/.../ambush.sound` → `sound\dialog\...\ambush`), for
 /// building the FMOD subsound id. Backslash-normalized; the hash lowercases.
-fn sound_tag_rel(abs: &std::path::Path, tags_root: &std::path::Path) -> Option<String> {
+pub(super) fn sound_tag_rel(
+    abs: &std::path::Path,
+    tags_root: &std::path::Path,
+) -> Option<String> {
     let rel = abs.strip_prefix(tags_root).ok()?;
     Some(rel.with_extension("").to_string_lossy().replace('/', "\\"))
 }
@@ -583,6 +712,56 @@ fn row_bank_id(sound_rel: Option<&str>, multi_pr: bool, row: &SoundPermRow) -> O
     ))
 }
 
+fn is_fmod_language_game(game: Option<&str>) -> bool {
+    matches!(
+        game,
+        Some("halo3_mcc") | Some("halo3odst_mcc") | Some("haloreach_mcc")
+    )
+}
+
+fn sound_path_may_have_languages(path: &str) -> bool {
+    let normalized = path.replace('\\', "/").to_ascii_lowercase();
+    normalized.contains("sound/dialog/")
+}
+
+/// True when every bank-backed permutation resolves from the shared
+/// `sfx.fsb` alone. Passing a deliberately absent language opens only that
+/// shared bank, avoiding path/class-name guesses about whether a tag is
+/// localized.
+fn rows_use_only_shared_fmod_bank(
+    rows: &[SoundPermRow],
+    sound_rel: Option<&str>,
+    banks: &blam_tags::audio::SoundBanks,
+) -> bool {
+    let multi_pr = rows_span_multiple_pitch_ranges(rows);
+    let mut found = false;
+    rows.iter()
+        .filter(|row| matches!(row.kind, RowKind::Bank))
+        .all(|row| {
+            found = true;
+            let id = row_bank_id(sound_rel, multi_pr, row);
+            resolve_sound_bank(banks, id, &row.name).is_some_and(|(bank, _)| {
+                banks.bank_paths()[bank]
+                    .file_name()
+                    .is_some_and(|name| {
+                        name.to_string_lossy().eq_ignore_ascii_case("sfx.fsb")
+                    })
+            })
+        })
+        && found
+}
+
+fn resolve_sound_bank(
+    banks: &blam_tags::audio::SoundBanks,
+    id: Option<u32>,
+    key: &str,
+) -> Option<(usize, usize)> {
+    match id {
+        Some(id) => banks.resolve_by_id(id),
+        None => banks.resolve(key),
+    }
+}
+
 /// What a row plays and extracts from: the Halo 2 language entries and the
 /// chosen language, and the FMOD subsound id inputs (see [`row_bank_id`]).
 #[derive(Clone, Copy)]
@@ -596,10 +775,11 @@ pub(super) struct RowSource<'a> {
 
 /// The play action for a permutation row (bank subsound / the permutation's own
 /// samples / a Halo 2 language entry). `None` if the audio can't be read.
-fn row_play_action(
+pub(super) fn row_play_action(
     tag: &TagFile,
     row: &SoundPermRow,
     source: RowSource<'_>,
+    tags_root: Option<&std::path::Path>,
 ) -> Option<super::audio::SoundAction> {
     use super::audio::SoundAction;
     match &row.kind {
@@ -607,6 +787,7 @@ fn row_play_action(
             id: row_bank_id(source.sound_rel, source.multi_pr, row),
             key: row.name.clone(),
             label: row.name.clone(),
+            tags_root: tags_root.map(std::path::Path::to_path_buf),
         }),
         RowKind::InlinePermutation {
             codec,
@@ -663,6 +844,7 @@ fn row_extract_source(
         RowKind::Bank => Some(ExtractSource::Bank {
             id: row_bank_id(source.sound_rel, source.multi_pr, row),
             key: row.name.clone(),
+            language: source.language.map(str::to_owned),
         }),
         RowKind::InlinePermutation {
             codec,
@@ -751,7 +933,7 @@ pub(super) fn is_default_pitch_range(name: &str) -> bool {
 }
 
 /// Whether the tag has more than one distinct pitch range (drives subfoldering).
-fn rows_span_multiple_pitch_ranges(rows: &[SoundPermRow]) -> bool {
+pub(super) fn rows_span_multiple_pitch_ranges(rows: &[SoundPermRow]) -> bool {
     let mut names: Vec<&str> = rows.iter().map(|row| row.pitch_range.as_str()).collect();
     names.sort_unstable();
     names.dedup();
@@ -794,6 +976,103 @@ pub(super) fn build_extract_items(
             })
         })
         .collect()
+}
+
+/// Build the same reimport-layout extraction an open sound pane would queue,
+/// but from a browser entry. This is deliberately UI-free so tag and folder
+/// context menus do not have to open documents just to export their audio.
+pub(in crate::app) fn browser_sound_extract_items(
+    tag: &TagFile,
+    abs_tag_path: &std::path::Path,
+    tags_root: &std::path::Path,
+    game: Option<&str>,
+    selected_language: Option<&str>,
+    all_languages: bool,
+    shared_fmod_banks: Option<&blam_tags::audio::SoundBanks>,
+) -> Vec<ExtractItem> {
+    let h2 = h2_sound_for_game(tag, game);
+    let sound_rel = sound_tag_rel(abs_tag_path, tags_root);
+    let events = h4_event_names(tag);
+    let rows = sound_permutation_rows_for_game(tag, h2.as_ref(), game);
+    let shared_fmod_audio = is_fmod_language_game(game)
+        && shared_fmod_banks.is_some_and(|banks| {
+            rows_use_only_shared_fmod_bank(&rows, sound_rel.as_deref(), banks)
+        });
+    let languages: Vec<Option<String>> = if all_languages {
+        if shared_fmod_audio {
+            vec![None]
+        } else if let Some(h2) = h2.as_ref() {
+            if h2.languages.is_empty() {
+                vec![None]
+            } else {
+                h2.languages.iter().cloned().map(Some).collect()
+            }
+        } else if matches!(game, Some("haloce_mcc") | Some("halo2_mcc")) {
+            // Classic inline tags without H2's language table have exactly one
+            // stream; repeating it into every bank language would fabricate
+            // localizations that do not exist.
+            vec![None]
+        } else {
+            let mut external = match game {
+                Some("halo4_mcc") | Some("halo2amp_mcc") => {
+                    blam_tags::audio::WwiseBanks::available_languages(tags_root)
+                }
+                _ => blam_tags::audio::SoundBanks::available_languages(tags_root),
+            };
+            // Bank selection and output layout are separate concerns: the
+            // English audio must be read from the explicit English bank, even
+            // though it is written under `data\` rather than `data_english\`.
+            // Kits without a localized bank set still use the base FMOD banks.
+            let default = external
+                .iter()
+                .position(|language| is_default_external_language(language))
+                .map(|index| Some(external.remove(index)))
+                .unwrap_or(None);
+            std::iter::once(default)
+                .chain(external.into_iter().map(Some))
+                .collect()
+        }
+    } else {
+        vec![(!shared_fmod_audio)
+            .then(|| selected_language.map(str::to_owned))
+            .flatten()]
+    };
+
+    let mut items = Vec::new();
+    for language in languages {
+        let data_language = if h2.is_some() {
+            language.as_deref().and_then(h2_data_language)
+        } else {
+            language
+                .as_deref()
+                .filter(|language| !is_default_external_language(language))
+        };
+        let Some(base) = reimport_base_dir_lang(tags_root, abs_tag_path, data_language) else {
+            continue;
+        };
+        if !events.is_empty() {
+            items.extend(events.iter().map(|(_, name)| ExtractItem {
+                out_path: base.join(format!("{}.wav", sanitize_component(name))),
+                source: ExtractSource::Event {
+                    name: name.clone(),
+                    language: language.clone(),
+                },
+            }));
+            continue;
+        }
+        let source = RowSource {
+            h2: h2.as_ref(),
+            language: language.as_deref(),
+            sound_rel: sound_rel.as_deref(),
+            multi_pr: rows_span_multiple_pitch_ranges(&rows),
+        };
+        items.extend(build_extract_items(tag, &rows, source, &base, false));
+    }
+    items
+}
+
+fn is_default_external_language(language: &str) -> bool {
+    language.eq_ignore_ascii_case("english") || language.eq_ignore_ascii_case("english(us)")
 }
 
 /// The `data\` root name a Halo 2 language extracts under: English is the
@@ -847,16 +1126,16 @@ fn draw_wwise_event_player(
                         .on_hover_text("Play this Wwise event from the sound banks")
                         .clicked()
                     {
-                        *edit.sound_play_request = Some(super::audio::SoundAction::PlayEvent {
-                            event_name: name.clone(),
-                            label: name.clone(),
-                        });
+                        edit.sound_play_request
+                            .push_back(super::audio::SoundAction::PlayEvent {
+                                event_name: name.clone(),
+                                label: name.clone(),
+                                tags_root: edit.tags_root.map(std::path::Path::to_path_buf),
+                            });
                     }
                     if ui
                         .small_button("\u{2B07}")
-                        .on_hover_text(
-                            "Extract this event to WAV (play it once first to load the banks)",
-                        )
+                        .on_hover_text("Extract this event to WAV")
                         .clicked()
                     {
                         if let Some(path) = rfd::FileDialog::new()
@@ -867,7 +1146,10 @@ fn draw_wwise_event_player(
                             *edit.sound_extract_request = Some(ExtractRequest {
                                 items: vec![ExtractItem {
                                     out_path: path,
-                                    source: ExtractSource::Event { name: name.clone() },
+                                    source: ExtractSource::Event {
+                                        name: name.clone(),
+                                        language: edit.sound_language.map(str::to_owned),
+                                    },
                                 }],
                                 tags_root: edit.tags_root.map(std::path::Path::to_path_buf),
                                 label: name.clone(),
@@ -1003,12 +1285,13 @@ fn draw_ce_wwise_player(
                     {
                         match edit.ce_paks_root {
                             Some(root) => {
-                                *edit.sound_play_request =
-                                    Some(super::audio::SoundAction::PlayCeMedia {
+                                edit.sound_play_request.push_back(
+                                    super::audio::SoundAction::PlayCeMedia {
                                         paks_root: root.to_path_buf(),
                                         media: Box::new((*m).clone()),
                                         label: m.display_name(),
-                                    });
+                                    },
+                                );
                             }
                             // Shouldn't happen for a container source, but a
                             // click that does nothing at all is worse than one
@@ -1091,7 +1374,8 @@ fn row_duration(row: &SoundPermRow, source: RowSource<'_>) -> (Option<f64>, bool
             false,
         ),
         RowKind::InlineH2 { lpi } => {
-            let Some((entry, fallback)) = source.h2.and_then(|h2| h2.entry_for(*lpi, source.language))
+            let Some((entry, fallback)) =
+                source.h2.and_then(|h2| h2.entry_for(*lpi, source.language))
             else {
                 return (None, false);
             };
@@ -1154,7 +1438,12 @@ fn row_details(row: &SoundPermRow, h2: Option<&H2Sound>) -> String {
 
 /// The class · codec · channels · rate line under the transport, describing
 /// what the chosen language actually plays.
-fn draw_sound_format_line(ui: &mut Ui, tag: &TagFile, rows: &[SoundPermRow], source: RowSource<'_>) {
+fn draw_sound_format_line(
+    ui: &mut Ui,
+    tag: &TagFile,
+    rows: &[SoundPermRow],
+    source: RowSource<'_>,
+) {
     let (class, compression) = sound_class_and_compression(tag);
     ui.horizontal_wrapped(|ui| {
         let dot = |ui: &mut Ui| {
@@ -1240,12 +1529,11 @@ pub(in crate::app) fn draw_sound_player(
         draw_wwise_event_player(ui, &events, edit);
         return;
     }
-    let h2 = H2Sound::read(tag);
-    let rows = sound_permutation_rows(tag, h2.as_ref());
+    let h2 = h2_sound_for_game(tag, edit.game);
+    let rows = sound_permutation_rows_for_game(tag, h2.as_ref(), edit.game);
     if rows.is_empty() {
         return;
     }
-    let languages = language_choices(edit, h2.as_ref());
     // A Halo 2 tag plays the chosen language when it has it, else English;
     // the shared choice may be another game's language this tag never had.
     let chosen = edit.sound_language.map(str::to_owned);
@@ -1254,7 +1542,7 @@ pub(in crate::app) fn draw_sound_player(
         .zip(chosen.as_deref())
         .filter(|(h2, language)| !h2.has_language(language))
         .map(|(_, language)| language.to_owned());
-    let language = if missing_language.is_some() {
+    let mut language = if missing_language.is_some() {
         None
     } else {
         chosen.as_deref()
@@ -1281,6 +1569,18 @@ pub(in crate::app) fn draw_sound_player(
         .as_deref()
         .zip(edit.tags_root)
         .and_then(|(abs, root)| sound_tag_rel(abs, root));
+    let shared_fmod_audio = is_fmod_language_game(edit.game)
+        && sound_rel
+            .as_deref()
+            .is_some_and(|path| !sound_path_may_have_languages(path));
+    if shared_fmod_audio {
+        language = None;
+    }
+    let languages = if shared_fmod_audio {
+        Vec::new()
+    } else {
+        language_choices(edit, h2.as_ref())
+    };
     let multi_pr = rows_span_multiple_pitch_ranges(&rows);
     let source = RowSource {
         h2: h2.as_ref(),
@@ -1290,9 +1590,12 @@ pub(in crate::app) fn draw_sound_player(
     };
     // A lone `|default|` pitch range is just the container; name ranges only
     // when there's more than one, or the one there is was named.
-    let show_pitch_ranges =
-        multi_pr || rows.first().is_some_and(|row| !is_default_pitch_range(&row.pitch_range));
-    let localized = h2.as_ref().is_some_and(|h2| h2.languages.len() > 1);
+    let show_pitch_ranges = multi_pr
+        || rows
+            .first()
+            .is_some_and(|row| !is_default_pitch_range(&row.pitch_range));
+    let localized = h2.as_ref().is_some_and(|h2| h2.languages.len() > 1)
+        || (is_fmod_language_game(edit.game) && !shared_fmod_audio);
     let language_name = language_label(language.unwrap_or(H2_DEFAULT_LANGUAGE));
 
     egui::CollapsingHeader::new(
@@ -1325,7 +1628,9 @@ pub(in crate::app) fn draw_sound_player(
             if h2.is_some() {
                 language.and_then(h2_data_language).map(str::to_owned)
             } else {
-                language.map(str::to_owned)
+                language
+                    .filter(|language| !is_default_external_language(language))
+                    .map(str::to_owned)
             }
         };
         let base_for = |language: Option<&str>| {
@@ -1336,7 +1641,9 @@ pub(in crate::app) fn draw_sound_player(
                     reimport_base_dir_lang(root, tag_path, data_language(language).as_deref())
                 })
         };
-        let extract_base = base_for(if h2.is_some() {
+        let extract_base = base_for(if shared_fmod_audio {
+            None
+        } else if h2.is_some() {
             language
         } else {
             edit.sound_language
@@ -1483,7 +1790,11 @@ pub(in crate::app) fn draw_sound_player(
                                 _ => "Play this permutation".to_owned(),
                             };
                             if ui.small_button("\u{25B6}").on_hover_text(play_hover).clicked() {
-                                *edit.sound_play_request = row_play_action(tag, row, source);
+                                if let Some(action) =
+                                    row_play_action(tag, row, source, edit.tags_root)
+                                {
+                                    edit.sound_play_request.push_back(action);
+                                }
                             }
                             if ui
                                 .small_button("\u{2B07}")
@@ -1661,18 +1972,21 @@ fn language_for<'a>(h2: Option<&H2Sound>, language: Option<&'a str>) -> Option<&
 /// referenced tag's rel path, used to compute the FMOD subsound id.
 fn referenced_sound_play_action(
     tag: &TagFile,
+    game: Option<&str>,
     sound_rel: Option<&str>,
     language: Option<&str>,
+    tags_root: Option<&std::path::Path>,
 ) -> Option<super::audio::SoundAction> {
     if let Some((_, name)) = h4_event_names(tag).into_iter().next() {
         return Some(super::audio::SoundAction::PlayEvent {
             event_name: name.clone(),
             label: name,
+            tags_root: tags_root.map(std::path::Path::to_path_buf),
         });
     }
 
-    let h2 = H2Sound::read(tag);
-    let rows = sound_permutation_rows(tag, h2.as_ref());
+    let h2 = h2_sound_for_game(tag, game);
+    let rows = sound_permutation_rows_for_game(tag, h2.as_ref(), game);
     let source = RowSource {
         h2: h2.as_ref(),
         language: language_for(h2.as_ref(), language),
@@ -1680,7 +1994,7 @@ fn referenced_sound_play_action(
         multi_pr: rows_span_multiple_pitch_ranges(&rows),
     };
     rows.first()
-        .and_then(|row| row_play_action(tag, row, source))
+        .and_then(|row| row_play_action(tag, row, source, tags_root))
 }
 
 /// Extract items for a whole (referenced) sound tag under `base` — Wwise events
@@ -1688,6 +2002,7 @@ fn referenced_sound_play_action(
 /// `sound_rel` is the referenced tag's rel path (for the FMOD subsound id).
 fn referenced_sound_extract_items(
     tag: &TagFile,
+    game: Option<&str>,
     base: &std::path::Path,
     sound_rel: Option<&str>,
     language: Option<&str>,
@@ -1698,12 +2013,15 @@ fn referenced_sound_extract_items(
             .iter()
             .map(|(_, name)| ExtractItem {
                 out_path: base.join(format!("{}.wav", sanitize_component(name))),
-                source: ExtractSource::Event { name: name.clone() },
+                source: ExtractSource::Event {
+                    name: name.clone(),
+                    language: language.map(str::to_owned),
+                },
             })
             .collect();
     }
-    let h2 = H2Sound::read(tag);
-    let rows = sound_permutation_rows(tag, h2.as_ref());
+    let h2 = h2_sound_for_game(tag, game);
+    let rows = sound_permutation_rows_for_game(tag, h2.as_ref(), game);
     let source = RowSource {
         h2: h2.as_ref(),
         language: language_for(h2.as_ref(), language),
@@ -1739,8 +2057,8 @@ impl ReferencedSoundClick {
         if self.open.is_some() {
             *edit.open_request = self.open;
         }
-        if self.play.is_some() {
-            *edit.sound_play_request = self.play;
+        if let Some(play) = self.play {
+            edit.sound_play_request.push_back(play);
         }
         if self.extract.is_some() {
             *edit.sound_extract_request = self.extract;
@@ -1793,8 +2111,13 @@ fn draw_referenced_sound_cell(
                     } else if let Some((sound, _)) =
                         load_referenced_sound(game, tags_root, definitions_root, path, *group)
                     {
-                        click.play =
-                            referenced_sound_play_action(&sound, Some(path.as_str()), language);
+                        click.play = referenced_sound_play_action(
+                            &sound,
+                            game,
+                            Some(path.as_str()),
+                            language,
+                            tags_root,
+                        );
                     }
                 }
                 // Deliberately a second `if`: chaining these would skip drawing
@@ -1821,8 +2144,13 @@ fn draw_referenced_sound_cell(
                         && let Some(base) =
                             tags_root.and_then(|root| reimport_base_dir_lang(root, &abs, language))
                     {
-                        let items =
-                            referenced_sound_extract_items(&sound, &base, Some(path.as_str()), language);
+                        let items = referenced_sound_extract_items(
+                            &sound,
+                            game,
+                            &base,
+                            Some(path.as_str()),
+                            language,
+                        );
                         click.extract = Some(ExtractRequest {
                             items,
                             tags_root: tags_root.map(std::path::Path::to_path_buf),

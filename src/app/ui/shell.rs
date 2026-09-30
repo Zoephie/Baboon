@@ -1288,12 +1288,20 @@ impl Baboon {
         // Drain queued sound-player actions: resolve the permutation against the
         // FMOD banks, decode (cached), and play/stop. Runs every frame so voices
         // are reaped even when idle; the tags root is only cloned when acting.
-        let sound_root = if self.audio.pending.is_some() {
+        let sound_root = if !self.audio.pending.is_empty() {
             self.source_tags_root().map(std::path::Path::to_path_buf)
         } else {
             None
         };
         self.audio.process(sound_root.as_deref(), ctx);
+        // A single interaction can queue a transport update before playback
+        // (most notably H3's language fallback followed by Play). Draining only
+        // one item left Play waiting for a repaint that might never arrive,
+        // making the click silently do nothing. Preserve queue order, but
+        // settle the whole interaction in this frame.
+        while !self.audio.pending.is_empty() {
+            self.audio.process(sound_root.as_deref(), ctx);
+        }
         // Drain a queued sound extraction (decode + write files off the render
         // hot loop) and a reimport hand-off (opens the tool runner pre-filled).
         if let Some(request) = self.pending_sound_extract.take() {

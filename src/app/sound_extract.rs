@@ -43,9 +43,16 @@ pub(super) enum ExtractSource {
     /// Resolve an FMOD bank subsound (H3/ODST/Reach), decode, write WAV.
     /// `id` is the engine's `fmod bank subsound id hash` (preferred); `key` is
     /// the permutation leaf name (legacy fallback). See `AudioState::bank_pcm`.
-    Bank { id: Option<u32>, key: String },
-    /// Resolve a Wwise event by name (H4), decode, write WAV.
-    Event { name: String },
+    Bank {
+        id: Option<u32>,
+        key: String,
+        language: Option<String>,
+    },
+    /// Resolve a Wwise event by name and language (H4), decode, write WAV.
+    Event {
+        name: String,
+        language: Option<String>,
+    },
     /// Decode one already-resolved Campaign Evolved Wwise media file, write
     /// WAV. Unlike [`ExtractSource::Event`] this needs no prior play: CE's
     /// media is addressed directly in the legacy `.pak` set rooted at

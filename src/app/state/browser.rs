@@ -59,6 +59,19 @@ pub(in crate::app) enum BrowserAction {
     ExtractRaw(String),
     ExtractBitmap(String),
     ExtractBitmapFolder(Vec<String>),
+    /// Extract the audio represented by one or more `.sound` tags without
+    /// opening them. `all_languages = false` uses the shared audio language;
+    /// true exports every language available to each tag/source.
+    ExtractSound {
+        keys: Vec<String>,
+        all_languages: bool,
+    },
+    /// Recursively discover a loose folder's tags so its bulk-extraction
+    /// counts and actions cover unopened subfolders as well.
+    LoadFolderExtractables {
+        rel_path: PathBuf,
+        label: String,
+    },
     ExtractGeometry(String),
     ExtractImportInfo(String),
     ExtractAnimation(String),
